@@ -15,7 +15,14 @@ import {
   renderIssueBody,
   renderSummary,
   selectQualifyingRuns,
+  parseDeployRunName,
+  mayHaveRunHarness,
+  observe,
+  JOB_LOOKUP_BUDGET,
 } from './guard-freshness.mjs'
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 
 const NOW = Date.parse('2026-08-30T12:00:00Z')
 const agoDays = (d) => new Date(NOW - d * DAY_MS).toISOString()
@@ -577,4 +584,170 @@ test('the issue title is a constant the reporter can find again', () => {
   // second one on every push.
   assert.equal(typeof ISSUE_TITLE, 'string')
   assert.ok(ISSUE_TITLE.length > 0)
+})
+
+
+// ---------------------------------------------------------------------------
+// #3340 — the post-deploy guard read too little history to see its own budget.
+// It took the newest 50 `deployment_status` runs and spent 12 job lookups on
+// rows that could never count (Vercel `Preview` and `in_progress` statuses),
+// so it reported `never-succeeded` while a green harness run sat inside four
+// days (2026-09-25: 20:45Z dry run, success at 11:31:58Z).
+// ---------------------------------------------------------------------------
+
+const DEV_TITLE = (sha, state = 'success') => `post-deploy ${sha} → ${RAILWAY_DEV_ENVIRONMENT} (${state})`
+const PREVIEW_TITLE = (sha) => `post-deploy ${sha} → Preview (success)`
+
+test('qa-dev.yml names its deployment_status runs in the shape parseDeployRunName reads', () => {
+  // The filter below trusts the run name; this pins the workflow to it.
+  assert.match(QA_DEV_YML_SOURCE(), /run-name:.*format\('post-deploy \{0\} → \{1\} \(\{2\}\)', github\.event\.deployment\.sha, github\.event\.deployment\.environment, github\.event\.deployment_status\.state\)/)
+  assert.deepEqual(parseDeployRunName(DEV_TITLE(DEPLOYED_SHA)), { sha: DEPLOYED_SHA, environment: RAILWAY_DEV_ENVIRONMENT, state: 'success' })
+  assert.equal(parseDeployRunName('QA — money-flow (dev)'), null)
+})
+
+test('a Preview or in_progress run name can never have run the harness; unparseable titles still go to the job list', () => {
+  assert.equal(mayHaveRunHarness({ displayTitle: PREVIEW_TITLE(DEPLOYED_SHA) }, QA), false)
+  assert.equal(mayHaveRunHarness({ displayTitle: DEV_TITLE(DEPLOYED_SHA, 'in_progress') }, QA), false)
+  assert.equal(mayHaveRunHarness({ displayTitle: DEV_TITLE(DEPLOYED_SHA) }, QA), true)
+  assert.equal(mayHaveRunHarness({ displayTitle: 'something else' }, QA), true)
+  assert.equal(mayHaveRunHarness({}, QA), true)
+  // A guard without provenance is never filtered by title.
+  assert.equal(mayHaveRunHarness({ displayTitle: PREVIEW_TITLE(DEPLOYED_SHA) }, GUARD), true)
+})
+
+test('filtered rows never reach the job reader, and a run-level failure costs no lookup', () => {
+  const calls = []
+  const reader = (id) => { calls.push(id); return JOBS_HARNESS_RAN[1] }
+  const runs = [
+    qaRun({ databaseId: 11, displayTitle: PREVIEW_TITLE(DEPLOYED_SHA) }),
+    qaRun({ databaseId: 12, displayTitle: DEV_TITLE(DEPLOYED_SHA, 'in_progress') }),
+    qaRun({ databaseId: 13, displayTitle: DEV_TITLE(DEPLOYED_SHA), conclusion: 'failure' }),
+    qaRun({ databaseId: 14, displayTitle: DEV_TITLE(DEPLOYED_SHA) }),
+  ]
+  const out = selectQualifyingRuns(runs, QA, RAILWAY_INDEX, reader)
+  assert.deepEqual(calls, [14])
+  assert.deepEqual(out.map((r) => [r.databaseId, r.conclusion]), [[13, 'failure'], [14, 'success']])
+})
+
+// A stub `gh` for observe(): paginated workflow runs (already --jq projected),
+// the deployment index, and the per-SHA money-flow check runs. Every call is
+// recorded. `jobs(id)` is the money-flow job list of run `id`.
+function fakeGh({ pages, jobs }) {
+  const calls = []
+  const all = pages.flat()
+  const gh = (args) => {
+    calls.push(args.join(' '))
+    if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) {
+      return JSON.stringify([...new Set(all.map((r) => r.head_sha))].map((sha) => ({ sha, creator: { login: RAILWAY_DEPLOY_CREATOR } })))
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/check-runs'))) {
+      const sha = args.find((a) => a.includes('/check-runs')).split('/commits/')[1].split('/')[0]
+      const checks = all.filter((r) => r.head_sha === sha).flatMap((r) =>
+        (jobs(r.id) ?? []).filter((j) => j.name === MONEY_FLOW_JOB).map((j) => ({
+          name: j.name, conclusion: j.conclusion,
+          details_url: `https://github.com/o/r/actions/runs/${r.id}/job/${r.id * 10}`,
+        })))
+      return JSON.stringify(checks)
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      return JSON.stringify(pages[page - 1] ?? []) // what the --jq projection prints
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`)
+  }
+  return { gh, calls }
+}
+const shaN = (n) => n.toString(16).padStart(40, 'c')
+const rest = (id, title, createdAt, conclusion = 'success', sha = DEPLOYED_SHA) => ({
+  id, conclusion, status: 'completed', event: 'deployment_status', head_branch: 'dev',
+  head_sha: sha, created_at: createdAt, updated_at: createdAt, display_title: title,
+})
+const OBS_NOW = Date.parse('2026-09-25T20:45:00Z')
+const at = (hoursAgo) => new Date(OBS_NOW - hoursAgo * 3600e3).toISOString()
+const checkRunCalls = (calls) => calls.filter((c) => c.includes('/check-runs')).length
+
+test('observe(): a green harness run behind a page of Preview and in_progress rows is found (the 2026-09-25 false alarm)', () => {
+  const page1 = []
+  for (let i = 0; i < 60; i++) page1.push(rest(1000 + i, PREVIEW_TITLE(shaN(1000 + i)), at(0.1 + i * 0.05), 'success', shaN(1000 + i)))
+  for (let i = 0; i < 40; i++) page1.push(rest(2000 + i, DEV_TITLE(shaN(2000 + i), 'in_progress'), at(3.1 + i * 0.05), 'success', shaN(2000 + i)))
+  const page2 = [rest(3000, DEV_TITLE(shaN(3000)), at(9.2), 'success', shaN(3000))]
+  const { gh, calls } = fakeGh({ pages: [page1, page2], jobs: () => JOBS_HARNESS_RAN[1] })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(seen.lastSuccessAt, at(9.2))
+  assert.equal(seen.searchComplete, true)
+  assert.equal(checkRunCalls(calls), 1, 'only the one candidate SHA is looked up')
+  assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).healthy, true)
+})
+
+test('observe(): a long red stretch does not exhaust the lookup budget before an older green', () => {
+  const page1 = []
+  for (let i = 0; i < 40; i++) page1.push(rest(4000 + i, DEV_TITLE(shaN(4000 + i)), at(0.2 + i * 0.1), 'failure', shaN(4000 + i)))
+  page1.push(rest(5000, DEV_TITLE(shaN(5000)), at(9.2), 'success', shaN(5000)))
+  const { gh, calls } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_RAN[1] })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(seen.lastSuccessAt, at(9.2))
+  assert.equal(checkRunCalls(calls), 1)
+})
+
+test('observe(): superseded re-stated runs at one SHA cost ONE lookup, not one each', () => {
+  // Railway re-states `success`; the gate skips all but the live run. Many
+  // runs at one SHA are answered by one check-runs call.
+  const page1 = []
+  for (let i = 0; i < 30; i++) page1.push(rest(9000 + i, DEV_TITLE(DEPLOYED_SHA), at(0.2 + i * 0.1)))
+  const { gh, calls } = fakeGh({ pages: [page1], jobs: (id) => (id === 9029 ? JOBS_HARNESS_RAN[1] : JOBS_GATE_REFUSED[1]) })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(seen.lastSuccessAt, at(0.2 + 29 * 0.1))
+  assert.equal(checkRunCalls(calls), 1)
+})
+
+test('observe(): when the lookup budget runs out first, the finding says unconfirmed — never "never-succeeded"', () => {
+  const page1 = []
+  // More gate-refused candidate SHAs than the budget, then a real green.
+  for (let i = 0; i < JOB_LOOKUP_BUDGET + 5; i++) page1.push(rest(6000 + i, DEV_TITLE(shaN(6000 + i)), at(0.2 + i * 0.1), 'success', shaN(6000 + i)))
+  page1.push(rest(7000, DEV_TITLE(shaN(7000)), at(20), 'success', shaN(7000)))
+  const { gh } = fakeGh({ pages: [page1], jobs: (id) => (id === 7000 ? JOBS_HARNESS_RAN[1] : JOBS_GATE_REFUSED[1]) })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(seen.lastSuccessAt, null)
+  assert.equal(seen.searchComplete, false)
+  const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
+  assert.equal(result.findings[0].kind, 'unconfirmed')
+  assert.doesNotMatch(result.findings[0].detail, /never completed successfully/)
+})
+
+test('observe(): a complete search with no green still reads never-succeeded (the alarm is not weakened)', () => {
+  const page1 = [rest(8000, DEV_TITLE(DEPLOYED_SHA), at(1), 'failure'), rest(8001, DEV_TITLE(DEPLOYED_SHA), at(2), 'failure')]
+  const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1] })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(seen.searchComplete, true)
+  assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0].kind, 'never-succeeded')
+})
+
+test('CLI: an alarm with no open issue REOPENS the newest closed one with the same title instead of filing a new one', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'guard-freshness-cli-'))
+  const log = path.join(dir, 'calls.log')
+  const stub = path.join(dir, 'gh')
+  writeFileSync(stub, [
+    '#!/usr/bin/env node',
+    "const fs = require('fs'); const a = process.argv.slice(2);",
+    `fs.appendFileSync(${JSON.stringify(log)}, a.join(' ') + '\\n');`,
+    "const s = a.join(' ');",
+    "if (s.includes('/deployments')) { console.log('[]'); process.exit(0) }",
+    "if (s.includes('/runs')) { console.log('[]'); process.exit(0) }",
+    "if (a[0] === 'issue' && a[1] === 'list' && s.includes('--state open')) { console.log('[]'); process.exit(0) }",
+    `if (a[0] === 'issue' && a[1] === 'list' && s.includes('--state closed')) { console.log(JSON.stringify([{ number: 77, title: ${JSON.stringify(ISSUE_TITLE)} }])); process.exit(0) }`,
+    "process.exit(0)",
+  ].join('\n'))
+  chmodSync(stub, 0o755)
+  try {
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts/ci/guard-freshness.mjs')], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_REPOSITORY: 'o/r', GUARD_FRESHNESS_DRY_RUN: '' },
+      encoding: 'utf8',
+    })
+    const calls = readFileSync(log, 'utf8')
+    assert.match(calls, /^issue reopen 77$/m)
+    assert.match(calls, /^issue comment 77 /m)
+    assert.doesNotMatch(calls, /^issue create /m)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

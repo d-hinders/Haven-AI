@@ -109,9 +109,11 @@ export const RAILWAY_DEPLOY_CREATOR = 'railway-app[bot]'
  * The word "scheduled" was dropped in #2268: the registry now also covers a
  * trigger fired from outside the repository, and a title that describes only
  * half of what the body can report is the same kind of quietly-wrong
- * documentation this reporter exists to catch. Safe to retitle here because the
- * upsert only ever looks at OPEN issues and none was open; #2226 (the previous
- * title) had already been closed healthy.
+ * documentation this reporter exists to catch. Safe to retitle then because the
+ * upsert only looked at OPEN issues and none was open; #2226 (the previous
+ * title) had already been closed healthy. Since #3340 an alarm with no open
+ * issue REOPENS the newest closed one with this exact title, so a retitle now
+ * also starts a fresh thread — which is the point of retitling.
  */
 export const ISSUE_TITLE = '🩺 A CI guard has stopped proving its guarantee'
 
@@ -262,6 +264,35 @@ export const SCHEDULED_GUARDS = [
 ]
 
 /**
+ * qa-dev.yml's run name for a `deployment_status` run (`run-name:`, line 85):
+ * `post-deploy <sha> → <environment> (<status state>)`. Parsed, or null when the
+ * title is anything else. `guard-freshness.test.mjs` pins the workflow's
+ * `run-name` to this shape, so the two cannot drift apart silently.
+ */
+export function parseDeployRunName(title) {
+  const m = /^post-deploy ([0-9a-f]{7,40}) → (.+) \(([a-z_]+)\)$/.exec(String(title ?? ''))
+  return m ? { sha: m[1], environment: m[2], state: m[3] } : null
+}
+
+/**
+ * Could this run have run the harness at all? (#3340) qa-dev.yml's gate skips
+ * the money-flow job unconditionally unless the deployment status is `success`
+ * AND the environment is the dev backend, and its run name says both. So a
+ * title naming another environment (Vercel's `Preview`) or another state
+ * (`in_progress`) is a run that certainly did nothing — dropping it BEFORE the
+ * job lookup keeps the bounded lookup budget for runs that can change the
+ * answer. It only ever removes runs that could not have counted, so it can make
+ * the guard stricter, never greener. An unparseable title is kept: the job list
+ * decides, as before.
+ */
+export function mayHaveRunHarness(run, guard) {
+  if (!guard?.provenance) return true
+  const t = parseDeployRunName(run?.displayTitle)
+  if (!t) return true
+  return t.environment === guard.provenance.environment && t.state === 'success'
+}
+
+/**
  * The runs that count as this guard having run, newest timestamp first.
  *
  * Pure and exported so the event/branch scoping is a test rather than a line
@@ -288,6 +319,14 @@ export function selectQualifyingRuns(runs, guard, deploymentCreatorsBySha, jobsF
       const sha = typeof r?.headSha === 'string' ? r.headSha : ''
       const creator = deploymentCreatorsBySha?.[sha]
       if (!sha || creator !== provenance.creator) continue
+    }
+    if (!mayHaveRunHarness(r, guard)) continue
+    if (requiredJob && r?.conclusion === 'failure') {
+      // A run-level `failure` is never a harness success, whichever job failed
+      // (#3340): count it as a run without spending a job lookup on it, so a
+      // stretch of red runs cannot exhaust the budget before an older green.
+      out.push({ ...r })
+      continue
     }
     if (requiredJob) {
       // The run's verdict is the job's. Unreadable job list, no thunk, a
@@ -364,6 +403,22 @@ export function evaluate({ guards = SCHEDULED_GUARDS, observations = {}, now = D
         detail:
           `.github/workflows/${guard.workflow} no longer declares the trigger this guard ` +
           `watches (${guard.requiredTrigger}). It cannot fire, however green its history looks.`,
+      })
+      continue
+    }
+
+    if (!seen.lastSuccessAt && seen.searchComplete === false) {
+      // #3340: the observation stopped before it reached the end of the budget
+      // window (page cap or job-lookup budget), so "never" would be a claim the
+      // evidence does not support. Still a finding — "could not confirm" is not
+      // "fine" — but one that says what it actually knows.
+      findings.push({
+        guard,
+        kind: 'unconfirmed',
+        detail:
+          `No successful run was found among the ${seen.examined ?? 'examined'} runs read ` +
+          `(the search stopped at its API budget before reaching ${guard.maxAgeDays} days back). ` +
+          'A success may exist further back; this is not evidence that it never succeeded.',
       })
       continue
     }
@@ -452,7 +507,10 @@ export function renderSummary({ healthy, findings }, observations = {}, guards =
 // CLI wrapper. All IO here.
 // ---------------------------------------------------------------------------
 
-const gh = (args) => execFileSync('gh', args, { encoding: 'utf8' })
+// A 100-run page of the REST API is several MB before projection; the run
+// page below projects with --jq, and the buffer is raised as a margin (#3340:
+// the first live run of the paged reader died on ENOBUFS at the 1 MB default).
+const defaultGh = (args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
 
 /**
  * `{ [fullSha]: creatorLogin }` for the newest 100 Deployments to one
@@ -465,7 +523,7 @@ const gh = (args) => execFileSync('gh', args, { encoding: 'utf8' })
  * into `unobserved`, a finding, rather than an empty index that reads as
  * "nothing Railway deployed".
  */
-function readDeploymentIndex({ environment, creator }) {
+function readDeploymentIndex({ environment, creator }, gh = defaultGh) {
   // `GITHUB_REPOSITORY` is set inside Actions; the `{owner}/{repo}` placeholders
   // are gh's own resolution from the git remote when run by hand.
   const repo = process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
@@ -486,26 +544,90 @@ function readDeploymentIndex({ environment, creator }) {
 }
 
 /**
- * How many runs' job lists one evaluation may fetch (one `gh run view` each).
- * Only runs that already passed the event and provenance filters reach the
- * reader, i.e. the two-to-four `deployment_status` rows a real deploy leaves
- * behind; 12 spans several deploys, and a run past the budget is refused
- * (null → not counted), which errs toward `stale`, never toward `fresh`.
+ * How many SHAs' money-flow check runs one evaluation may fetch (#3340). One
+ * `commits/<sha>/check-runs?check_name=<job>` call answers the job's conclusion
+ * for EVERY run at that SHA (the run id is in each check run's `details_url`),
+ * so the budget counts deploys, not runs. Counting runs failed on 2026-09-25/26:
+ * Railway re-states `success` for a superseded deployment, the gate skips those
+ * runs, and 24 per-run lookups were spent on them before reaching a green run
+ * at 11:31Z (measured with the live dry run). Only runs that passed the event,
+ * provenance and run-name filters, and are not a run-level `failure`, reach the
+ * reader, newest first, and paging stops at the first success. A run past the
+ * budget is refused (null → not counted), and the observation then says the
+ * search was cut short: `unconfirmed`, never `fresh`.
  */
-const JOB_LOOKUP_BUDGET = 12
+export const JOB_LOOKUP_BUDGET = 24
 
-function boundedJobsReader(budget) {
+/** At most this many 100-run pages per counted event per evaluation (#3340). */
+export const RUN_PAGE_CAP = 8
+
+function boundedCheckRunReader(budget, jobName, shaOfRun, gh = defaultGh) {
+  const repo = process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
+  const bySha = new Map() // sha → Map(runId → [{ name, conclusion }])
   let left = budget
-  return (databaseId) => {
-    if (left <= 0 || databaseId === undefined || databaseId === null) return null
-    left -= 1
-    const parsed = JSON.parse(gh(['run', 'view', String(databaseId), '--json', 'jobs']))
-    return Array.isArray(parsed?.jobs) ? parsed.jobs : null
+  const read = (databaseId) => {
+    const sha = shaOfRun.get(databaseId)
+    if (!sha) return null
+    if (!bySha.has(sha)) {
+      if (left <= 0) {
+        read.exhausted = true
+        return null
+      }
+      left -= 1
+      const checks = JSON.parse(gh([
+        'api', '-X', 'GET', `repos/${repo}/commits/${sha}/check-runs`,
+        '-f', `check_name=${jobName}`, '-F', 'per_page=100',
+        '--jq', '[.check_runs[] | {name, conclusion, details_url}]',
+      ]))
+      const runs = new Map()
+      for (const c of Array.isArray(checks) ? checks : []) {
+        const m = /\/actions\/runs\/(\d+)\//.exec(String(c?.details_url ?? ''))
+        if (m) runs.set(Number(m[1]), [{ name: c.name, conclusion: c.conclusion }])
+      }
+      bySha.set(sha, runs)
+    }
+    return bySha.get(sha).get(Number(databaseId)) ?? null
   }
+  read.exhausted = false
+  return read
 }
 
-function observe(guard) {
-  const workflowPath = path.join(ROOT, '.github', 'workflows', guard.workflow)
+/** One page of a workflow's runs for one event, newest first, in `gh run list`'s field names. */
+function readRunPage(guard, event, page, gh) {
+  const repo = process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
+  const parsed = JSON.parse(gh([
+    'api', '-X', 'GET', `repos/${repo}/actions/workflows/${guard.workflow}/runs`,
+    '-f', `event=${event}`, '-F', 'per_page=100', '-F', `page=${page}`,
+    '--jq', '[.workflow_runs[] | {id, conclusion, status, event, head_branch, head_sha, created_at, updated_at, display_title}]',
+  ]))
+  const runs = Array.isArray(parsed) ? parsed : []
+  return runs.map((r) => ({
+    databaseId: r.id,
+    conclusion: r.conclusion,
+    status: r.status,
+    event: r.event,
+    headBranch: r.head_branch,
+    headSha: r.head_sha,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    displayTitle: r.display_title,
+  }))
+}
+
+/**
+ * Everything `evaluate` needs about one guard, read from disk and the API.
+ * Exported with an injectable `gh` runner so the IO half is testable (#3340):
+ * the pure half already answered correctly while this wrapper looked at the
+ * newest 50 runs and spent its 12 job lookups on runs that could never count.
+ *
+ * Runs are read a page at a time, newest first, per counted event, and paging
+ * stops once a qualifying success is found, the page reaches past the guard's
+ * `maxAgeDays`, the pages run out, or `RUN_PAGE_CAP` is hit — so the common
+ * healthy case costs one page. `searchComplete` is false when the page cap or
+ * the job-lookup budget stopped the search before the window was covered.
+ */
+export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT } = {}) {
+  const workflowPath = path.join(root, '.github', 'workflows', guard.workflow)
   const fileExists = existsSync(workflowPath)
   if (!fileExists) return { fileExists: false, triggerPresent: false, lastSuccessAt: null, lastRunAt: null }
 
@@ -514,44 +636,62 @@ function observe(guard) {
     : true
 
   try {
-    // One query PER counted event, rather than one shared window filtered
+    // One stream PER counted event, rather than one shared window filtered
     // afterwards. `qa-dev.yml` is dispatched manually dozens of times a week, so
-    // a single `--limit 100` window can contain zero of the event we care about
-    // while the trigger is perfectly healthy — the busier the workflow, the
-    // blinder the check, which is backwards.
+    // a single window can contain zero of the event we care about while the
+    // trigger is perfectly healthy — the busier the workflow, the blinder the
+    // check, which is backwards.
+    const nowMs = typeof now === 'number' ? now : new Date(now).getTime()
+    const horizon = new Date(nowMs - guard.maxAgeDays * DAY_MS).toISOString()
+    const index = guard.provenance ? readDeploymentIndex(guard.provenance, gh) : undefined
+    const shaOfRun = new Map()
+    const jobsFor = guard.requiredJob
+      ? boundedCheckRunReader(JOB_LOOKUP_BUDGET, guard.requiredJob, shaOfRun, gh)
+      : undefined
     const runs = []
+    let searchComplete = true
+    let qualifying = []
     for (const event of guard.countedEvents) {
-      runs.push(...JSON.parse(gh([
-        'run', 'list',
-        '--workflow', guard.workflow,
-        '--event', event,
-        '--limit', '50',
-        '--json', 'databaseId,conclusion,status,event,headBranch,headSha,createdAt,updatedAt',
-      ])))
+      for (let page = 1; ; page += 1) {
+        if (page > RUN_PAGE_CAP) {
+          searchComplete = false
+          break
+        }
+        const batch = readRunPage(guard, event, page, gh)
+        for (const r of batch) shaOfRun.set(r.databaseId, r.headSha)
+        runs.push(...batch)
+        const oldest = batch.map((r) => r.createdAt).filter(Boolean).sort()[0]
+        // Newest first, so the bounded job-list reader spends its budget on the
+        // runs that can actually change the answer.
+        qualifying = selectQualifyingRuns(
+          runs.slice().sort((x, y) => String(y?.updatedAt || y?.createdAt || '').localeCompare(String(x?.updatedAt || x?.createdAt || ''))),
+          guard,
+          index,
+          jobsFor,
+        )
+        if (qualifying.some((r) => r.conclusion === 'success')) break
+        if (batch.length < 100 || !oldest || oldest < horizon) break
+      }
     }
-    const index = guard.provenance ? readDeploymentIndex(guard.provenance) : undefined
-    const qualifying = selectQualifyingRuns(
-      // Newest first, so the bounded job-list reader below spends its budget
-      // on the runs that can actually change the answer.
-      runs.slice().sort((a, b) => String(b?.updatedAt || b?.createdAt || '').localeCompare(String(a?.updatedAt || a?.createdAt || ''))),
-      guard,
-      index,
-      guard.requiredJob ? boundedJobsReader(JOB_LOOKUP_BUDGET) : undefined,
-    )
+    if (jobsFor?.exhausted && !qualifying.some((r) => r.conclusion === 'success')) searchComplete = false
     const success = qualifying.filter((r) => r.conclusion === 'success')
     return {
       fileExists: true,
       triggerPresent,
       lastSuccessAt: newestTimestamp(success),
       lastRunAt: newestTimestamp(qualifying),
+      searchComplete,
+      examined: runs.length,
     }
   } catch (err) {
-    console.error(`gh run list failed for ${guard.workflow}: ${err.message}`)
+    console.error(`run list failed for ${guard.workflow}: ${err.message}`)
     return undefined // -> 'unobserved', which is a finding, not a pass
   }
 }
 
+
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  const gh = defaultGh
   const observations = {}
   for (const guard of SCHEDULED_GUARDS) {
     const seen = observe(guard)
@@ -632,8 +772,32 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
     tryGh(['issue', 'edit', String(existing.number), '--body', body], `update #${existing.number}`)
     console.log(`Updated #${existing.number}.`)
   } else {
-    tryGh(['issue', 'create', '--title', ISSUE_TITLE, '--label', 'ci-health',
-           '--label', 'code-quality', '--body', body], 'file the staleness issue')
+    // #3340: a flap closes the issue on recovery and used to file a NEW one on
+    // the next alarm (five in 28 hours on 2026-09-24/25). Reopen the most recent
+    // closed issue with the same title instead, as qa-failure-issue.mjs does, so
+    // one guard's history stays in one thread.
+    const closedListed = tryGh(
+      ['issue', 'list', '--label', 'ci-health', '--state', 'closed', '--limit', '20',
+       '--json', 'number,title'],
+      'list closed ci-health issues',
+    )
+    let closed
+    try {
+      closed = closedListed ? JSON.parse(closedListed).find((i) => i.title === ISSUE_TITLE) : undefined
+    } catch (err) {
+      console.error(`::warning::guard-freshness could not parse the closed issue list: ${err.message}`)
+    }
+    if (closed) {
+      tryGh(['issue', 'reopen', String(closed.number)], `reopen #${closed.number}`)
+      tryGh(['issue', 'edit', String(closed.number), '--body', body], `update #${closed.number}`)
+      tryGh(['issue', 'comment', String(closed.number), '--body',
+             `Reopened: a guard stopped proving its guarantee again.${runUrl ? ` Run: ${runUrl}` : ''}`],
+            `comment on #${closed.number}`)
+      console.log(`Reopened #${closed.number}.`)
+    } else {
+      tryGh(['issue', 'create', '--title', ISSUE_TITLE, '--label', 'ci-health',
+             '--label', 'code-quality', '--body', body], 'file the staleness issue')
+    }
   }
   // The reporter itself stays GREEN: the issue is the signal, and a permanently
   // red push-triggered check on `dev` would be noise on work that did not cause

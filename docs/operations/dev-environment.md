@@ -5,6 +5,7 @@ contract: true
 covers:
   - .github/workflows/dev-gate.yml
   - .github/workflows/qa-dev.yml
+  - scripts/ci/qa-freshness.mjs
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts

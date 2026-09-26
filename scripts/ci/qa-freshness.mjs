@@ -603,9 +603,9 @@ export const MONEY_FLOW_JOB = 'money-flow'
  * How far back the green-run query reaches, as a multiple of
  * QA_FRESHNESS_HOURS (#3361). The query used to take the newest 30 run-level
  * successes. Most qa-dev runs are #2273's gate-skipped deployment_status runs,
- * which still conclude `success` at run level: in the newest 1000 runs up to
- * 2026-09-26, 874 of 959 run-level successes had `money-flow: skipped`
- * (#3361's issue review). A real green inside the freshness window could
+ * which still conclude `success` at run level: of the 959 run-level successes
+ * among the newest 1000 qa-dev runs at 2026-09-26T11:10Z, 80 had
+ * `money-flow: success` (#3361 doc review, via the jobs API). A real green inside the freshness window could
  * therefore fall out of the 30, as it did on dev-gate run 36161561881. The
  * query now takes every run-level success created within TWICE the freshness
  * window. It reaches twice as far so that a green just past the window is
@@ -617,9 +617,14 @@ export const GREEN_RUN_WINDOW_FACTOR = 2
 
 /**
  * `gh run list` paginates up to this many rows, and the runs API caps a
- * filtered query at 1000 results. Twice a 30 h window held about 250 run-level
- * successes in September 2026, so the cap is not near. `findGreenRun` reports
- * a result that reaches it as possibly truncated.
+ * filtered query at 1000 results. Twice a 30 h window held 180–469 run-level
+ * successes between 2026-09-20 and 2026-09-26: 180–465 counted in #3361's doc
+ * review from `gh run list --workflow qa-dev.yml --status success --created
+ * ">=2026-09-01" --limit 1000`, and 469 fetched by findGreenRun itself for
+ * the 60 h ending 2026-09-26T11:21Z. So the cap is about 2× away at the default; raising
+ * QA_FRESHNESS_HOURS toward ~100 h would approach it. `findGreenRun` reports a
+ * result that reaches it as possibly truncated, and truncation only drops the
+ * OLDEST rows.
  */
 export const GREEN_RUN_LIMIT = 1000
 

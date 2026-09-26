@@ -85,8 +85,10 @@ function periodLabel(seconds: number): string {
  * moved since this row was granted, the merchant lost its verified payTo or
  * its ERC-7710 offers, or the merchant no longer exists. Classification is
  * shared with `FundMerchantModal` (`@/lib/merchantBudgetRefusal`); only the
- * wording differs — an EDIT has no "reload and retry", its way out is always
- * "stop this budget, then fund the merchant again". Returns `null` for every
+ * wording differs — an EDIT has no "reload and retry", and the way out is
+ * named per refusal (stop and fund again; stop and fund again once the
+ * merchant confirms an address; check the merchant's page; or use Stop on
+ * the budget). Returns `null` for every
  * OTHER refusal (a revoked agent, an in-flight re-key, an unavailable
  * account, an off-rail chain, or anything unrecognised) — those keep
  * surfacing the backend's own sentence, unchanged from before this fix.
@@ -105,7 +107,10 @@ function editMerchantRefusalCopy(detail: string | undefined, merchantName: strin
       // accept it keep using this budget. The fallback only applies "if it
       // has one", the same accurate wording `MerchantBudgetsList`'s own
       // helper uses.
-      return `Not every offer from ${merchantName} accepts this kind of budget now, so it can't be changed here. Until you stop it, any offer that still accepts it keeps using this budget; the rest use the agent's open budget, if it has one.`
+      // The build checks ERC-7710 BEFORE comparing addresses, so this refusal
+      // can also mean the merchant moved to a new address — say only what is
+      // true in both cases, and point at the page that tells them apart.
+      return `Not every offer from ${merchantName} accepts this kind of budget now, so it can't be changed here. This budget keeps paying only the address it was set up with — ${merchantName}'s page shows whether that is still where it is paid.`
     case 'merchant_not_found':
       return `${merchantName} could not be found, so this budget can't be changed here. Close this and use Stop on the budget.`
     default:

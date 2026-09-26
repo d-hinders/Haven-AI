@@ -207,9 +207,9 @@ describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
     ],
     [
       'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget',
-      /Not every offer from Ampersend Demo API accepts this kind of budget now, so it can't be changed here.*Until you stop it.*open budget, if it has one/,
+      /Not every offer from Ampersend Demo API accepts this kind of budget now, so it can't be changed here\. This budget keeps paying only the address it was set up with — Ampersend Demo API's page shows whether that is still where it is paid\./,
     ],
-    ['Merchant not found', /Ampersend Demo API could not be found, so this budget can't be changed here/],
+    ['Merchant not found', /Ampersend Demo API could not be found, so this budget can't be changed here\. Close this and use Stop on the budget\./],
   ])('maps the merchant-stale refusal ("%s") to plain copy with a way out, and offers only Close', async (detail, expected) => {
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'refused', detail })
     renderModal({ budget: merchantLockedBudget() })

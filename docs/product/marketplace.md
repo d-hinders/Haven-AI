@@ -212,10 +212,13 @@ for the modal's own shape.
   `stale` row's way out is **Stop**, then fund the merchant again from its
   page, which derives a fresh recipient; an `unverified` row's is the same
   **Stop**, then fund again, but only once the merchant confirms an address —
-  there is nothing to fund yet; a `not_erc7710` row has no prescribed step —
-  until it is stopped, any offer that still accepts this kind of budget keeps
-  using it and the rest use the agent's open budget, if it has one, and there
-  is no "fund again" step because the payTo itself never moved. An ordinary
+  there is nothing to fund yet. A `not_erc7710` refusal names no single step:
+  the build checks ERC-7710 before it compares addresses, so the same refusal
+  also comes back when the merchant has BOTH moved to a new address and lost
+  ERC-7710 on an offer. The modal therefore says only what holds in both
+  cases — the budget keeps paying only the address it was set up with — and
+  points at the merchant page, whose row status (`merchantPinStatus` checks
+  the address first) tells "Old address" apart from "Not every offer". An ordinary
   (non-merchant-locked) budget is unaffected: its recipient stays editable
   exactly as before.
 - **`GET /merchants/{slug}/budgets`** is dashboard-session only (an agent key

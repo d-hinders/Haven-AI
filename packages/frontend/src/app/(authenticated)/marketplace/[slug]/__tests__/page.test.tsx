@@ -312,7 +312,7 @@ describe('MerchantPage', () => {
     render(<MerchantPage />)
     expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
     expect(screen.queryByText(/Connect an agent/)).toBeNull()
-    expect(screen.getByText(/Haven could not load your agents/)).toBeDefined()
+    expect(screen.getByText(/Haven could not load your agents just now, so funding is unavailable\. Reload the page to try again\./)).toBeDefined()
   })
 
   // Design review round 3, finding C: several pinnable chains must each be

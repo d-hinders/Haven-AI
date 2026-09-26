@@ -222,6 +222,17 @@ describe('probeCatalogEntry', () => {
       expect((await probeWith([option(undefined), option(A)])).payTo).toBeUndefined()
     })
 
+    it('agrees only across options on the recorded network (the first option\'s)', async () => {
+      // A Base + Solana merchant: the Solana option's base58 payTo is not a
+      // disagreement about where it is paid on Base.
+      const solana = { scheme: 'exact', network: 'solana:mainnet', amount: '1000', payTo: 'So1anaPayToBase58xxxxxxxxxxxxxxxxxxxxxxxx' }
+      expect((await probeWith([option(A), solana])).payTo).toBe(A.toLowerCase())
+      // A different EVM chain's different address is not a disagreement either…
+      expect((await probeWith([option(A), { ...option(B), network: 'eip155:8453' }])).payTo).toBe(A.toLowerCase())
+      // …but two addresses on the recorded network still are.
+      expect((await probeWith([option(A), { ...option(B), network: 'eip155:8453' }, option(B)])).payTo).toBeUndefined()
+    })
+
     it('records none for a malformed address', async () => {
       expect((await probeWith([option('0x1234')])).payTo).toBeUndefined()
       expect((await probeWith([option(A + '00')])).payTo).toBeUndefined()

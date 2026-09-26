@@ -108,6 +108,8 @@ export const MERCHANT_PAY_TO_UNVERIFIED_REFUSAL =
   'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet'
 export const MERCHANT_NOT_ERC7710_REFUSAL =
   'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget'
+export const MERCHANT_PAY_TO_IS_AGENT_REFUSAL =
+  "Merchant's payTo is one of this agent's own addresses; a merchant-locked budget cannot be issued to it"
 export const MERCHANT_PAY_TO_CHANGED_REFUSAL =
   "recipient_address does not match the merchant's current verified payTo; reload the merchant page"
 
@@ -323,7 +325,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     // ERC-7710, is a 409: the page does not render the action then, so a
     // request that gets here is racing a probe or hand-built.
     let merchantId: string | null = null
-    if (merchant_slug !== undefined) {
+    if (merchant_slug != null) {
       const merchant = await getMerchantBySlug(merchant_slug, [agent.chain_id])
       if (!merchant || merchant.listing_status !== 'live') {
         return reply.code(404).send({ error: 'Merchant not found' })
@@ -337,6 +339,16 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       }
       if (recipient_address != null && recipient_address.toLowerCase() !== target.pay_to) {
         return reply.code(409).send({ error: MERCHANT_PAY_TO_CHANGED_REFUSAL })
+      }
+      // A merchant's payTo is the MERCHANT's word, not the owner's. One that
+      // names this agent's own delegate EOA or treasury would pin the grant
+      // to an address the agent itself pays onward from — the EIP-3009
+      // funding leg selects a grant pinned to the delegate EOA, so the
+      // "merchant-locked" budget would fund payments to ANY merchant. The
+      // derived delegate account is checked below, once it is known.
+      const own = [agent.delegate_address, agent.treasury_address].map((a) => a.toLowerCase())
+      if (own.includes(target.pay_to)) {
+        return reply.code(409).send({ error: MERCHANT_PAY_TO_IS_AGENT_REFUSAL })
       }
       recipient_address = target.pay_to
       merchantId = merchant.id
@@ -365,13 +377,16 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     } catch (err) {
       return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(err) })
     }
+    if (merchantId !== null && recipient_address?.toLowerCase() === delegateAccountAddress.toLowerCase()) {
+      return reply.code(409).send({ error: MERCHANT_PAY_TO_IS_AGENT_REFUSAL })
+    }
 
     // ── Reuse an identical still-pending build (#2539), under the slot lock (#2613) ──
     // The dashboard form calls build again on its own (re-render, retry),
     // and the #2539 CLI points its --wait poller at a SPECIFIC hash: a
     // second build minting a fresh version would strand that hash pending
-    // forever. An identical (agent, token, recipient, budget, period) slot
-    // with a still-pending, unexpired row therefore returns THAT row — same
+    // forever. An identical (agent, token, recipient, budget, period, merchant)
+    // slot with a still-pending, unexpired row therefore returns THAT row — same
     // hash, same version, 201 shape unchanged — and inserts nothing.
     //
     // #2613: the read, the version counter and the insert run inside ONE

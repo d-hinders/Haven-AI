@@ -406,7 +406,7 @@ describeDb('merchants routes (#3078)', () => {
   async function insertMerchantBudget(
     agentId: string,
     merchantId: string,
-    opts: { recipient?: string; status?: string; remaining?: string; chainId?: number } = {},
+    opts: { recipient?: string; status?: string; remaining?: string; chainId?: number; expiresAt?: number } = {},
   ): Promise<void> {
     hashSeq += 1
     await db.query(
@@ -414,7 +414,7 @@ describeDb('merchants routes (#3078)', () => {
          (agent_id, chain_id, delegation_hash, delegation_json, version, token_address, recipient_address,
           status, budget_atomic, period_seconds, start_date, expires_at, merchant_id)
        VALUES ($1, $2, $3, $4, 1, '0x036cbd53842c5426634e7929541ec2318f3dcf7e', $5,
-               $6, '5000000', 86400, 0, 1900000000, $7)`,
+               $6, '5000000', 86400, 0, $8, $7)`,
       [
         agentId,
         opts.chainId ?? 84532,
@@ -423,6 +423,7 @@ describeDb('merchants routes (#3078)', () => {
         opts.recipient ?? PAY_TO,
         opts.status ?? 'active',
         merchantId,
+        opts.expiresAt ?? 1900000000,
       ],
     )
   }
@@ -500,10 +501,35 @@ describeDb('merchants routes (#3078)', () => {
     const after = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
     expect((after.json().budgets as Array<{ pin_status: string }>).map((b) => b.pin_status)).toEqual(['unverified', 'unverified'])
 
+    // Same payTo, but the merchant dropped ERC-7710: the pin is right and
+    // the budget still cannot pay it (pinned budgets are ERC-7710-only).
+    await setPayTo('sepolia.example', PAY_TO, 'eip3009')
+    const noErc7710 = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
+    expect(noErc7710.json().budgets.find((b: { recipient_address: string }) => b.recipient_address === PAY_TO).pin_status)
+      .toBe('not_erc7710')
+
+    // An expired budget is not listed — payment selection will not use it.
+    await insertMerchantBudget(agentId, sepoliaId, { remaining: '1', expiresAt: 1_000_000 })
+    const withExpired = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
+    expect(withExpired.json().budgets).toHaveLength(2)
+
     // A revoked agent's budgets are not listed.
     await db.query(`UPDATE agents SET status = 'revoked' WHERE id = $1`, [agentId])
     const revoked = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
     expect(revoked.json().budgets).toEqual([])
+  })
+
+  it("GET /merchants/:slug/budgets judges a budget on a chain the marketplace does not list against THAT chain's payTo (#3331 review F6)", async () => {
+    // The page is served (both-chains has an 84532 offer), but the budget
+    // sits on 8453, which this deployment does not list. Its pin must still be
+    // read against the 8453 payTo, not reported unverified for want of one.
+    setConfig({ marketplaceChainIds: [84532], deployChainIds: [] })
+    await setPayTo('both.example', PAY_TO)
+    const { userId, agentId } = await seedAgent(8453)
+    await insertMerchantBudget(agentId, await merchantIdOf('both-chains'), { chainId: 8453 })
+    const res = await app.inject({ method: 'GET', url: '/merchants/both-chains/budgets', headers: userHeaders(userId) })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().budgets).toEqual([expect.objectContaining({ chain_id: 8453, pin_status: 'current' })])
   })
 
   it('GET /merchants/:slug/budgets is a dashboard read: 401 without a credential, 403 to an agent, 404 for an unknown merchant or a prospect (#3331)', async () => {

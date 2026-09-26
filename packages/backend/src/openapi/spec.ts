@@ -2081,7 +2081,7 @@ export const openapiSpec = {
         operationId: 'buildAgentDelegation',
         summary: 'Grant step 1: build an unsigned budget delegation for the owner to sign.',
         description:
-          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.',
+          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period, merchant) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -2105,7 +2105,7 @@ export const openapiSpec = {
                     // `pattern` constrains strings only, so it still applies
                     // to a real address and ignores null.
                     type: ['string', 'null'],
-                    description: 'Optional recipient pin. Omit (or null) for an open budget.',
+                    description: "Optional recipient pin. Omit (or null) for an open budget — unless merchant_slug is set, in which case the server pins it to the merchant's verified payTo.",
                   },
                   budget_atomic: {
                     type: 'string',
@@ -2117,7 +2117,7 @@ export const openapiSpec = {
                   merchant_slug: {
                     type: 'string',
                     pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
-                    description: "A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there or not every offer there advertises ERC-7710.",
+                    description: "A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury).",
                   },
                 },
               },
@@ -2162,7 +2162,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, recipient_address differs from the current payTo).' },
+          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent\u2019s own addresses, recipient_address differs from the current payTo).' },
           '502': errorResponse,
         },
       },
@@ -7425,7 +7425,7 @@ export const openapiSpec = {
         operationId: 'listMerchantBudgets',
         summary: "The dashboard user's merchant-locked budgets for one merchant.",
         description:
-          "Every ACTIVE budget delegation the user issued for this merchant (#3331) on an agent that is not revoked, with what is left this period — read from the ERC20PeriodTransferEnforcer's storage, the same read GET /allowances makes (remaining_is_from_chain false = that read failed and remaining_atomic is the full budget) — and the pin against the merchant's current verified payTo. Dashboard session only: an agent key gets 403. 404 for an unknown or non-live merchant.",
+          "Every ACTIVE, unexpired budget delegation the user issued for this merchant (#3331) on an agent that is not revoked, with what is left this period — read from the ERC20PeriodTransferEnforcer's storage, the same read GET /allowances makes (remaining_is_from_chain false = that read failed and remaining_atomic is the full budget) — and the pin against the merchant's current verified payTo. Dashboard session only: an agent key gets 403. 404 for an unknown or non-live merchant.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'slug', in: 'path', required: true, schema: { type: 'string', pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' } },
@@ -7462,8 +7462,8 @@ export const openapiSpec = {
                           remaining_is_from_chain: { type: 'boolean' },
                           pin_status: {
                             type: 'string',
-                            enum: ['current', 'stale', 'unverified'],
-                            description: '`stale`: the merchant now names a different payTo (a rotation) — this budget pays only the old address, and payments to the new one use the open budget. `unverified`: the merchant names no single payTo on that chain now.',
+                            enum: ['current', 'stale', 'unverified', 'not_erc7710'],
+                            description: '`stale`: the merchant now names a different payTo (a rotation) — this budget pays only the old address, and payments to the new one use the open budget, if the agent has one. `unverified`: the merchant names no single payTo on that chain now (including a `shared` one). `not_erc7710`: the payTo still matches but not every offer there advertises ERC-7710, and a pinned budget pays only through ERC-7710.',
                           },
                         },
                       },
@@ -7654,8 +7654,8 @@ export const openapiSpec = {
           },
           pay_to_status: {
             type: 'string',
-            enum: ['verified', 'conflicting', 'unstated'],
-            description: '`conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). Only `verified` can be pinned to.',
+            enum: ['verified', 'conflicting', 'unstated', 'shared'],
+            description: '`conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant\u2019s active, verified offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.',
           },
           erc7710: {
             type: 'boolean',

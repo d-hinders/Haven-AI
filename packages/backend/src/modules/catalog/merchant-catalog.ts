@@ -110,7 +110,7 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
 
 /**
  * The one `payTo` a challenge names, lowercased (#3331). Every `accepts[]`
- * option must name a well-formed address and they must all be the same one:
+ * option on the recorded network must name a well-formed address and they must all be the same one:
  * a merchant-locked budget pins `transfer(to)` to this address, so a
  * challenge that names two (or one option that names none) has not told us
  * where "this merchant" is paid, and the answer is none rather than the
@@ -119,8 +119,14 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
 function collectPayTo(payload: unknown): string | undefined {
   const accepts = (payload as { accepts?: unknown[] })?.accepts
   if (!Array.isArray(accepts) || accepts.length === 0) return undefined
+  // Only the options on the network this row records (accepts[0]'s, the one
+  // the price is read from): a Base + Solana merchant names a base58 payTo on
+  // the other option, and a merchant may be paid at different addresses on
+  // different chains. Neither says anything about where it is paid HERE.
+  const network = (accepts[0] as X402Accept | null)?.network
   let payTo: string | undefined
   for (const entry of accepts) {
+    if ((entry as X402Accept | null)?.network !== network) continue
     const candidate = (entry as X402Accept | null)?.payTo
     if (typeof candidate !== 'string' || !EVM_ADDRESS.test(candidate)) return undefined
     const lowered = candidate.toLowerCase()

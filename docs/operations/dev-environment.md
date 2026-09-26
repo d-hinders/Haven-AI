@@ -4,6 +4,8 @@ status: current
 contract: true
 covers:
   - scripts/ci/rpc-conformance.mjs
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/infra/repositories/merchants.ts
   - .github/workflows/dev-gate.yml
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
@@ -297,9 +299,9 @@ Isolation rules that are non-negotiable for a payments product:
   ERC-7710, so the dev demo-merchant, which advertises EIP-3009 only until its
   ERC-7710 rail is enabled ([below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant)),
   reports `erc7710: false` and the build refuses a merchant-locked budget for
-  it. The payTo itself arrives with the first catalog refresh after migration
-  096 deploys (the backend runs one at boot, then hourly); until then every
-  offer reads `unstated`.
+  it. The payTo itself arrives with the next catalog refresh after migration
+  096 deploys (see `docs/product/marketplace.md`); until then every offer
+  reads `unstated`.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A

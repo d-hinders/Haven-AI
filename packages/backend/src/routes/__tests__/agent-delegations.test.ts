@@ -411,12 +411,37 @@ describe('delegation lifecycle API (#828)', () => {
 
       it('404s an unknown merchant and a prospect', async () => {
         mockDb({})
-        mockMerchantBySlug.mockResolvedValueOnce(null)
+        mockMerchantBySlug.mockImplementation(async (slug: string) =>
+          slug === 'nobody' ? null : { ...liveMerchant, listing_status: 'coming_soon' },
+        )
         expect((await build({ ...base, merchant_slug: 'nobody' })).statusCode).toBe(404)
-        mockMerchantBySlug.mockResolvedValueOnce({ ...liveMerchant, listing_status: 'coming_soon' })
         expect((await build({ ...base, merchant_slug: 'demo-store' })).statusCode).toBe(404)
         expect(mockFundingTargets).not.toHaveBeenCalled()
         expect(insertCall()).toBeUndefined()
+      })
+
+      // Review F1: a payTo is the merchant's word. One naming the agent's own
+      // delegate EOA would pin the grant to the EIP-3009 funding leg's
+      // recipient — the bridge would then fund payments to ANY merchant.
+      it.each([
+        ['delegate key (EOA)', DELEGATE_KEY],
+        ['treasury', TREASURY],
+        ['derived delegate account', DELEGATE_ACCOUNT],
+      ])("refuses a payTo that is the agent's own %s, storing nothing", async (_label, own) => {
+        mockDb({})
+        mockFundingTargets.mockResolvedValue([target({ pay_to: own.toLowerCase() })])
+        const res = await build({ ...base, merchant_slug: 'demo-store' })
+        expect(res.statusCode).toBe(409)
+        expect(res.json().error).toMatch(/own addresses/)
+        expect(insertCall()).toBeUndefined()
+      })
+
+      it('treats merchant_slug: null as absent — a plain build, no lookup', async () => {
+        mockDb({})
+        const res = await build({ ...base, merchant_slug: null })
+        expect(res.statusCode).toBe(201)
+        expect(mockMerchantBySlug).not.toHaveBeenCalled()
+        expect(insertCall()![1][11]).toBeNull()
       })
 
       it('CHARACTERIZATION: a build without merchant_slug never looks a merchant up and stores no merchant', async () => {

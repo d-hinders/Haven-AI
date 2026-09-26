@@ -64,7 +64,7 @@ export async function listActiveDelegations(
  * and then polls `GET /agents/:id/delegations` for THAT hash to go active,
  * which never converges if a second build bumped the version.
  *
- * So the same `(agent, token, recipient|open, budget, period)` slot with a
+ * So the same `(agent, token, recipient|open, budget, period, merchant)` slot with a
  * still-pending, unexpired row now RETURNS that row instead of building a
  * competitor to it: same hash, same version, 201 shape unchanged. The
  * parameters must match exactly — budget included, so "raise my budget" builds
@@ -451,8 +451,8 @@ export async function revokeDelegationsByHashes(
 }
 
 /**
- * The owner's ACTIVE merchant-locked budgets for one merchant (#3331), with
- * the agent's name — the merchant page's "remaining this period" list. Only
+ * The owner's ACTIVE, unexpired merchant-locked budgets for one merchant
+ * (#3331), with the agent's name — the merchant page's "remaining this period" list. Only
  * agents that are not revoked; `delegation_json` stays out of the row for
  * the reason `listDelegationJsonByIds` gives, and the caller asks for it
  * explicitly when it reads the enforcer.
@@ -466,6 +466,7 @@ export const LIST_ACTIVE_MERCHANT_BUDGETS_FOR_USER_SQL = `SELECT d.id, d.agent_i
        AND a.status <> 'revoked'
        AND d.merchant_id = $2
        AND d.status = 'active'
+       AND d.expires_at > EXTRACT(EPOCH FROM now())
      ORDER BY a.name ASC, d.created_at ASC`
 
 export interface MerchantBudgetRow {

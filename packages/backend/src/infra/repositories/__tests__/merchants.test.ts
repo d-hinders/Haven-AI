@@ -124,7 +124,7 @@ describe('resolveFundingTarget (#3331)', () => {
   const A = '0x' + 'aa'.repeat(20)
   const B = '0x' + 'bb'.repeat(20)
   const row = (o: Partial<Parameters<typeof resolveFundingTarget>[0]>) => ({
-    network: 'eip155:84532', pay_tos: [A], any_unstated: false, all_erc7710: true, ...o,
+    network: 'eip155:84532', pay_tos: [A], any_unstated: false, all_erc7710: true, shared: false, ...o,
   })
 
   it('is verified only when every offer names the same one payTo', () => {
@@ -140,6 +140,10 @@ describe('resolveFundingTarget (#3331)', () => {
     expect(resolveFundingTarget(row({ pay_tos: [A, B], any_unstated: true }))).toMatchObject({ pay_to_status: 'unstated' })
     expect(resolveFundingTarget(row({ pay_tos: null, any_unstated: true }))).toMatchObject({ pay_to: null, pay_to_status: 'unstated' })
     expect(resolveFundingTarget(row({ pay_tos: [] }))).toMatchObject({ pay_to: null, pay_to_status: 'unstated' })
+  })
+
+  it('withholds an address another merchant is also paid at', () => {
+    expect(resolveFundingTarget(row({ shared: true }))).toMatchObject({ pay_to: null, pay_to_status: 'shared' })
   })
 
   it('carries erc7710 through and skips a non-EVM network', () => {
@@ -204,6 +208,20 @@ describeDb('listMerchantFundingTargets (#3331)', () => {
     await insertOffer(m.id, 'https://lookalike.example/a', { network: 'eip155:84532', payTo: A, methods: 'erc7710x' })
     const [target] = await listMerchantFundingTargets(m.id, null)
     expect(target.erc7710).toBe(false)
+  })
+
+  it('reports a payTo another merchant is paid at on the same network as shared — and only on that network', async () => {
+    const m = await findOrCreateMerchantByHost('platform-a.example', { name: 'Platform A' })
+    const other = await findOrCreateMerchantByHost('platform-b.example', { name: 'Platform B' })
+    await insertOffer(m.id, 'https://platform-a.example/x', { network: 'eip155:84532', payTo: A, methods: 'erc7710' })
+    await insertOffer(m.id, 'https://platform-a.example/y', { network: 'eip155:8453', payTo: A, methods: 'erc7710' })
+    await insertOffer(other.id, 'https://platform-b.example/x', { network: 'eip155:84532', payTo: A, methods: 'erc7710' })
+    // Not evidence: the other merchant's degraded row on Base.
+    await insertOffer(other.id, 'https://platform-b.example/y', { network: 'eip155:8453', payTo: A, status: 'degraded' })
+    expect(await listMerchantFundingTargets(m.id, null)).toEqual([
+      { network: 'eip155:8453', chain_id: 8453, pay_to: A, pay_to_status: 'verified', erc7710: true },
+      { network: 'eip155:84532', chain_id: 84532, pay_to: null, pay_to_status: 'shared', erc7710: true },
+    ])
   })
 
   it('is empty for a merchant with no qualifying offer', async () => {

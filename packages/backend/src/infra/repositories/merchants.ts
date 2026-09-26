@@ -359,8 +359,9 @@ export async function findOrCreateMerchantByHost(
  * verified x402 offer of the merchant on that network names the SAME payTo.
  * `conflicting` (two offers name different addresses) and `unstated` (some
  * offer names none — not yet probed since migration 096, or its challenge
- * carries none) both mean "we do not know where this merchant is paid", and
- * the dashboard does not offer the action. `erc7710` is true when every one
+ * carries none) both mean "we do not know where this merchant is paid";
+ * `shared` (another merchant's offer names the same address on that network)
+ * means a pin would not be to THIS merchant alone. None of them is offered. `erc7710` is true when every one
  * of those offers advertises the ERC-7710 transfer method — the rail a pinned
  * budget pays through; an EIP-3009-only offer is paid from the open budget.
  */
@@ -368,7 +369,7 @@ export interface MerchantFundingTarget {
   network: string
   chain_id: number
   pay_to: string | null
-  pay_to_status: 'verified' | 'conflicting' | 'unstated'
+  pay_to_status: 'verified' | 'conflicting' | 'unstated' | 'shared'
   erc7710: boolean
 }
 
@@ -377,6 +378,8 @@ export interface MerchantFundingAggregateRow {
   pay_tos: string[] | null
   any_unstated: boolean
   all_erc7710: boolean
+  /** Another merchant's active, verified x402 offer on the network names one of these payTos. */
+  shared: boolean
 }
 
 /**
@@ -386,18 +389,31 @@ export interface MerchantFundingAggregateRow {
  * only x402 rows, the rail whose challenge names a payTo.
  */
 const MERCHANT_FUNDING_AGGREGATES_SQL = `
-  SELECT network,
-         array_agg(DISTINCT pay_to) FILTER (WHERE pay_to IS NOT NULL) AS pay_tos,
-         bool_or(pay_to IS NULL) AS any_unstated,
-         bool_and('erc7710' = ANY(string_to_array(COALESCE(asset_transfer_methods, ''), ','))) AS all_erc7710
-  FROM merchant_catalog
-  WHERE merchant_id = $1
-    AND rail = 'x402'
-    AND status = 'active'
-    AND verified_at IS NOT NULL
-    AND network IS NOT NULL
-    AND ($2::text[] IS NULL OR network = ANY($2::text[]))
-  GROUP BY network
+  WITH mine AS (
+    SELECT network,
+           array_agg(DISTINCT pay_to) FILTER (WHERE pay_to IS NOT NULL) AS pay_tos,
+           bool_or(pay_to IS NULL) AS any_unstated,
+           bool_and('erc7710' = ANY(string_to_array(COALESCE(asset_transfer_methods, ''), ','))) AS all_erc7710
+    FROM merchant_catalog
+    WHERE merchant_id = $1
+      AND rail = 'x402'
+      AND status = 'active'
+      AND verified_at IS NOT NULL
+      AND network IS NOT NULL
+      AND ($2::text[] IS NULL OR network = ANY($2::text[]))
+    GROUP BY network
+  )
+  SELECT mine.*,
+         EXISTS (
+           SELECT 1 FROM merchant_catalog o
+           WHERE o.merchant_id <> $1
+             AND o.network = mine.network
+             AND o.rail = 'x402'
+             AND o.status = 'active'
+             AND o.verified_at IS NOT NULL
+             AND o.pay_to = ANY(mine.pay_tos)
+         ) AS shared
+  FROM mine
   ORDER BY network`
 
 const EIP155_NETWORK = /^eip155:([0-9]+)$/
@@ -407,8 +423,18 @@ export function resolveFundingTarget(row: MerchantFundingAggregateRow): Merchant
   const match = EIP155_NETWORK.exec(row.network)
   if (!match) return null
   const payTos = row.pay_tos ?? []
+  // `shared`: another merchant is paid at the same address on this network
+  // (an aggregator or platform payout address). A pin there is not "this
+  // merchant" — it would pay the other one too, and the two merchants'
+  // budgets would replace each other in one (agent, token, recipient) slot.
   const status: MerchantFundingTarget['pay_to_status'] =
-    row.any_unstated || payTos.length === 0 ? 'unstated' : payTos.length > 1 ? 'conflicting' : 'verified'
+    row.any_unstated || payTos.length === 0
+      ? 'unstated'
+      : payTos.length > 1
+        ? 'conflicting'
+        : row.shared
+          ? 'shared'
+          : 'verified'
   return {
     network: row.network,
     chain_id: Number(match[1]),

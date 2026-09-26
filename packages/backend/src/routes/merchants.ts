@@ -65,16 +65,20 @@ export function serializeMerchant(row: MerchantListingRow) {
  * payTo on its chain (#3331): `current` when they agree, `stale` when the
  * merchant now names a different address (a rotation — payments to the new
  * address fall to the agent's open budget, the pinned one pays only the old
- * address), `unverified` when the merchant names no single payTo there now.
+ * address), `unverified` when the merchant names no single payTo there now,
+ * `not_erc7710` when the payTo still matches but not every offer there
+ * advertises ERC-7710 any more — a pinned budget pays only through ERC-7710,
+ * so it cannot pay this merchant until it does.
  */
-export type MerchantPinStatus = 'current' | 'stale' | 'unverified'
+export type MerchantPinStatus = 'current' | 'stale' | 'unverified' | 'not_erc7710'
 
 export function merchantPinStatus(
   recipientAddress: string,
   target: MerchantFundingTarget | undefined,
 ): MerchantPinStatus {
   if (!target || target.pay_to === null) return 'unverified'
-  return target.pay_to === recipientAddress.toLowerCase() ? 'current' : 'stale'
+  if (target.pay_to !== recipientAddress.toLowerCase()) return 'stale'
+  return target.erc7710 ? 'current' : 'not_erc7710'
 }
 
 /** A slug as the URL carries it; anything else is a 404 before the DB. */

@@ -13,7 +13,7 @@
  * the exact encoding the #884 spike proved on-chain. Haven signs nothing.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Address } from 'viem'
 import { api } from '@/lib/api'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
@@ -136,13 +136,19 @@ export interface GrantInput {
  * caller that flattens it into the generic failure strands the user on a
  * screen that repeats a refusal without ever saying what to do instead.
  *
- * `refused` (#3331) is the merchant-locked build's own named 409s (no
- * verified payTo, not every offer ERC-7710, the payTo is one of the agent's
- * own addresses, a sent recipient disagrees with the payTo) — additive:
- * every existing caller that does not name it keeps folding it into its
- * generic failure copy, exactly as it already does for `too_many`. `detail`
- * is the backend's own sentence, the same shape `editBudget`'s `refused`
- * already carries.
+ * `refused` is any NAMED build refusal the backend answers with a sentence —
+ * not only the merchant-locked build's four 409s (#3331: no verified payTo,
+ * not every offer ERC-7710, the payTo is one of the agent's own addresses, a
+ * sent recipient disagrees with the payTo), but also the ordinary grant
+ * refusals `POST /delegations/build` can answer for ANY caller (a revoked
+ * agent, an account off the delegation rail, a chain the rail is not enabled
+ * on, an in-flight re-key). `detail` is the backend's own sentence, the same
+ * shape `editBudget`'s `refused` already carries — a caller decides how much
+ * of it to show; `FundMerchantModal` maps the named ones to plain copy and
+ * falls back to a generic sentence for anything it does not recognise
+ * (`refusalCopy` in `components/marketplace/FundMerchantModal.tsx`).
+ * Additive: every existing caller that does not name it keeps folding it into
+ * its generic failure copy, exactly as it already does for `too_many`.
  */
 export type BudgetResult =
   | { ok: true }
@@ -198,6 +204,16 @@ export function useDelegationBudget(
   const [signersError, setSignersError] = useState(false)
   const [budgetsError, setBudgetsError] = useState(false)
   const [busy, setBusy] = useState(false)
+  // #3331 review finding F4: a caller can switch WHICH agent/chain this same
+  // mounted hook instance is scoped to (`FundMerchantModal`'s agent picker) —
+  // a monotonic counter per read, bumped every time `reload`/`reloadSigners`
+  // actually runs, so a response for a PREVIOUS agentId/chainId that resolves
+  // after a newer request started is discarded rather than overwriting fresh
+  // state with stale data. Two independent counters: a budgets read and a
+  // signer-set read can be in flight on different schedules (polling reloads
+  // only the former).
+  const budgetsGeneration = useRef(0)
+  const signersGeneration = useRef(0)
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
@@ -220,12 +236,15 @@ export function useDelegationBudget(
   const reload = useCallback(
     async (silent = false) => {
       if (!enabled) return
+      const mine = ++budgetsGeneration.current
       try {
         const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
+        if (mine !== budgetsGeneration.current) return // a newer read has since started (F4)
         // `?? []` — an absent key must degrade, not crash the route (#3093).
         setBudgets(res.delegations ?? [])
         setBudgetsError(false)
       } catch {
+        if (mine !== budgetsGeneration.current) return
         if (silent) return
         setBudgets(null)
         setBudgetsError(true)
@@ -240,13 +259,16 @@ export function useDelegationBudget(
   // at a permanent null.
   const reloadSigners = useCallback(async () => {
     if (!enabled) return
+    const mine = ++signersGeneration.current
     try {
       const res = await api.get<AccountSigners>(`/agents/${agentId}/account-signers`)
+      if (mine !== signersGeneration.current) return // a newer read has since started (F4)
       // `passkeys ?? []` — `pickSigningPath` reads `.length` during render;
       // an answer without the array must degrade, not crash the route (#3093).
       setSigners({ ...res, passkeys: res.passkeys ?? [] })
       setSignersError(false)
     } catch {
+      if (mine !== signersGeneration.current) return
       setSigners(null)
       setSignersError(true)
     }
@@ -264,6 +286,24 @@ export function useDelegationBudget(
     void reload()
     void reloadSigners()
   }, [enabled, reload, reloadSigners])
+
+  // #3331 review finding F4: reset IMMEDIATELY when the scope changes —
+  // `agentId` or `chainId` — while the hook stays enabled (a caller that
+  // switches agent mid-flow inside one mounted hook, e.g. `FundMerchantModal`'s
+  // agent picker). Without this, the previous agent's budgets/signer set (and
+  // therefore `ready`/`signingPath`) remain readable — and actionable — for
+  // the whole round trip of the new read, which is exactly the "signs with
+  // the wrong agent's data" risk on a money path. `reload`/`reloadSigners`
+  // above already refetch on this same change (their identity depends on
+  // `agentId`); this only clears what a render can see in between.
+  useEffect(() => {
+    if (!enabled) return
+    setBudgets(null)
+    setBudgetsError(false)
+    setSigners(null)
+    setSignersError(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately NOT `enabled`: the effect above already resets on enable/disable; this one is scoped to the identity the hook reads.
+  }, [agentId, chainId])
 
   // #2732 visible-only polling — budgets only. The signer set is a DEVICE
   // fact, not payment state; polling it every 10s would churn the signing
@@ -366,6 +406,12 @@ export function useDelegationBudget(
             recipient_address: input.recipientAddress ?? null,
             budget_atomic: input.budgetAtomic,
             period_seconds: input.periodSeconds,
+            // #3331 review finding F3: a merchant-locked budget's edit-in-place
+            // must keep naming the merchant — omitting this silently turned the
+            // replacement into a plain pinned budget (the label lost, the row
+            // dropped out of the merchant page) the moment `EditBudgetModal`
+            // wired an `input.merchantSlug` through.
+            ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
             ...(opts.expiresAt !== undefined ? { expires_at: opts.expiresAt } : {}),
           })
         } catch (err) {

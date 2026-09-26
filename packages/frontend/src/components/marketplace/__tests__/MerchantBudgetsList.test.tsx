@@ -29,11 +29,20 @@ describe('MerchantBudgetsList (#3331)', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders the remaining/total figure in the token the row is denominated in', () => {
+  it('renders the remaining/total figure in the token the row is denominated in, with the agent name linking to its page', () => {
     render(<MerchantBudgetsList budgets={[row()]} />)
-    expect(screen.getByText('Research Agent')).toBeDefined()
+    const agentLink = screen.getByRole('link', { name: 'Research Agent' })
+    expect(agentLink.getAttribute('href')).toBe('/agents/agent-1')
     expect(screen.getByText('9 USDC left of 10 USDC this period')).toBeDefined()
     expect(screen.getByText('Current')).toBeDefined()
+  })
+
+  // #3331 review finding F8: an unknown token must not silently read as
+  // 18-decimal "tokens" — that is a WRONG figure, not just an unlabelled one.
+  it('shows the raw atomic amounts and says "unknown token" instead of guessing 18 decimals', () => {
+    render(<MerchantBudgetsList budgets={[row({ token_address: '0x' + 'ee'.repeat(20) })]} />)
+    expect(screen.getByText('9000000 left of 10000000 this period (unknown token)')).toBeDefined()
+    expect(screen.queryByText(/tokens this period/)).toBeNull()
   })
 
   it('shows the #1319 provenance note only when remaining_is_from_chain is false', () => {
@@ -44,10 +53,10 @@ describe('MerchantBudgetsList (#3331)', () => {
   })
 
   it.each([
-    ['stale', 'Stale', /pays only the old one/],
-    ['unverified', 'Unverified', /no longer confirm one payment address/],
-    ['not_erc7710', 'Unsupported now', /no longer accepts this budget/],
-  ] as const)('pin_status %s renders its own label and explanation', (status, label, helperText) => {
+    ['stale', 'Old address', /uses a new address/],
+    ['unverified', 'Address unconfirmed', /cannot confirm it is still the merchant's/],
+    ['not_erc7710', "Can't pay now", /cannot pay this merchant here any more/],
+  ] as const)('pin_status %s renders its own plain label and one outcome sentence', (status, label, helperText) => {
     render(<MerchantBudgetsList budgets={[row({ pin_status: status })]} />)
     expect(screen.getByText(label)).toBeDefined()
     expect(screen.getByText(helperText)).toBeDefined()
@@ -56,7 +65,7 @@ describe('MerchantBudgetsList (#3331)', () => {
   it('current carries no helper explanation', () => {
     render(<MerchantBudgetsList budgets={[row({ pin_status: 'current' })]} />)
     expect(screen.getByText('Current')).toBeDefined()
-    expect(screen.queryByText(/pays only the old one|no longer confirm|no longer accepts/)).toBeNull()
+    expect(screen.queryByText(/uses a new address|cannot confirm|cannot pay this merchant/)).toBeNull()
   })
 
   it('one row per agent, keyed by delegation hash', () => {

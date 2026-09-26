@@ -8,6 +8,7 @@
  * yet" absence `DelegationBudgetCard` uses for a fresh agent.
  */
 
+import Link from 'next/link'
 import { formatUnits } from 'viem'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { truncateAddress } from '@/components/haven'
@@ -15,42 +16,38 @@ import { chainName } from '@/lib/marketplace'
 import { getChainConfig } from '@/lib/chains'
 import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
 
+/**
+ * #3331 review finding design-7: plain labels, and ONE outcome sentence each
+ * that says who pays now / what happens — never "pinning", "recipient" or
+ * jargon about the mechanism.
+ */
 const PIN_STATUS_COPY: Record<MerchantBudget['pin_status'], { label: string; tone: StatusTone; helper: string }> = {
   current: { label: 'Current', tone: 'success', helper: '' },
   stale: {
-    label: 'Stale',
+    label: 'Old address',
     tone: 'warning',
-    helper: 'This merchant now pays to a different address. This budget still pays only the old one.',
+    helper:
+      "This merchant now uses a new address. Payments there come from the agent's open budget, if it has one — this budget still only pays the old address.",
   },
   unverified: {
-    label: 'Unverified',
+    label: 'Address unconfirmed',
     tone: 'warning',
-    helper: 'Haven can no longer confirm one payment address for this merchant here.',
+    helper: "This budget still pays the address it was set up with, but Haven cannot confirm it is still the merchant's.",
   },
   not_erc7710: {
-    label: 'Unsupported now',
+    label: "Can't pay now",
     tone: 'warning',
-    helper: 'This merchant no longer accepts this budget’s payment method here.',
+    helper: 'This budget cannot pay this merchant here any more.',
   },
 }
 
-function tokenSymbol(chainId: number, tokenAddress: string): string {
+function resolveToken(chainId: number, tokenAddress: string): { symbol: string; decimals: number } | null {
   try {
     const cfg = getChainConfig(chainId)
     const token = Object.values(cfg.tokens).find((t) => t.address?.toLowerCase() === tokenAddress.toLowerCase())
-    return token?.symbol ?? 'tokens'
+    return token ? { symbol: token.symbol, decimals: token.decimals } : null
   } catch {
-    return 'tokens'
-  }
-}
-
-function tokenDecimals(chainId: number, tokenAddress: string): number {
-  try {
-    const cfg = getChainConfig(chainId)
-    const token = Object.values(cfg.tokens).find((t) => t.address?.toLowerCase() === tokenAddress.toLowerCase())
-    return token?.decimals ?? 18
-  } catch {
-    return 18
+    return null
   }
 }
 
@@ -62,10 +59,10 @@ export function MerchantBudgetsList({ budgets }: { budgets: MerchantBudget[] }) 
       <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Agent budgets for this merchant</h2>
       <ul className="space-y-2" data-testid="merchant-budgets-list">
         {budgets.map((b) => {
-          const decimals = tokenDecimals(b.chain_id, b.token_address)
-          const symbol = tokenSymbol(b.chain_id, b.token_address)
-          const remaining = formatUnits(BigInt(b.remaining_atomic), decimals)
-          const total = formatUnits(BigInt(b.budget_atomic), decimals)
+          // #3331 review finding F8: an unknown token must not silently read
+          // as 18-decimal "tokens" — that renders a WRONG figure, not just an
+          // unlabelled one. Show the raw atomic amounts and say so instead.
+          const resolved = resolveToken(b.chain_id, b.token_address)
           const status = PIN_STATUS_COPY[b.pin_status]
           return (
             <li
@@ -74,11 +71,19 @@ export function MerchantBudgetsList({ budgets }: { budgets: MerchantBudget[] }) 
               className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-medium text-[var(--v2-ink)]">{b.agent_name}</p>
+                {/* #3331 review finding design-7: the agent name links to its page. */}
+                <Link
+                  href={`/agents/${b.agent_id}`}
+                  className="text-sm font-medium text-[var(--v2-brand)] hover:underline"
+                >
+                  {b.agent_name}
+                </Link>
                 <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
               </div>
-              <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
-                {remaining} {symbol} left of {total} {symbol} this period
+              <p className="v2-tabular mt-1 text-sm text-[var(--v2-ink-2)]">
+                {resolved
+                  ? `${formatUnits(BigInt(b.remaining_atomic), resolved.decimals)} ${resolved.symbol} left of ${formatUnits(BigInt(b.budget_atomic), resolved.decimals)} ${resolved.symbol} this period`
+                  : `${b.remaining_atomic} left of ${b.budget_atomic} this period (unknown token)`}
               </p>
               <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
                 {chainName(b.chain_id)} · to {truncateAddress(b.recipient_address)}

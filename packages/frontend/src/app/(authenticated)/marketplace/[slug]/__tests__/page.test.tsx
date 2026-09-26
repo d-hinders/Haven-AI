@@ -28,6 +28,29 @@ vi.mock('next/navigation', () => ({
 
 import MerchantPage from '../page'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
+import type { Agent } from '@/hooks/useAgents'
+
+// #3331 review finding F6: the action needs at least one ELIGIBLE agent, not
+// just a qualifying chain — this fixture is the one Agent shape that
+// `eligibleFundingAgents` accepts for `verifiedErc7710Funding` below (chain
+// 84532, active, not archived).
+const eligibleAgent: Agent = {
+  id: 'agent-1',
+  name: 'Research Agent',
+  description: null,
+  delegate_address: '0x' + 'de'.repeat(20),
+  account_id: 'acc-1',
+  account_address: '0x' + 'aa'.repeat(20),
+  account_name: 'Haven wallet',
+  account_chain_id: 84532,
+  account_type: 'delegator_hybrid',
+  api_key_prefix: 'hv_abc',
+  status: 'active',
+  created_at: new Date().toISOString(),
+  allowances: [],
+  labels: [],
+  organization_id: null,
+} as Agent
 
 const merchant: Merchant = {
   id: 'm-1',
@@ -228,7 +251,8 @@ describe('MerchantPage', () => {
     { network: 'eip155:84532', chain_id: 84532, pay_to: null, pay_to_status: 'unstated', erc7710: false },
   ]
 
-  it('renders the action when a listed chain has a verified, ERC-7710 payTo', () => {
+  it('renders the action when a listed chain has a verified, ERC-7710 payTo AND the owner has an eligible agent', () => {
+    mockUseAgents.mockReturnValue({ agents: [eligibleAgent] })
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer()],
@@ -240,6 +264,26 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.getByRole('button', { name: 'Fund this merchant' })).toBeDefined()
+  })
+
+  // #3331 review finding F6: the chain qualifies but NONE of the owner's own
+  // agents do — the action must not show a Review that can only ever land on
+  // "no eligible agent", and the open-budget note (a DIFFERENT case: a
+  // verified payTo that is not ERC-7710) must not show here either.
+  it('withholds the action when a chain qualifies but the owner has no eligible agent, without the open-budget note', () => {
+    mockUseAgents.mockReturnValue({ agents: [] })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
   })
 
   it('withholds the action, with open-budget copy, when the only verified payTo is not ERC-7710', () => {
@@ -320,7 +364,7 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.getByText('Research Agent')).toBeDefined()
-    expect(screen.getByText('Stale')).toBeDefined()
+    expect(screen.getByText('Old address')).toBeDefined()
     expect(screen.getByText(/could not confirm the live figure/)).toBeDefined()
   })
 

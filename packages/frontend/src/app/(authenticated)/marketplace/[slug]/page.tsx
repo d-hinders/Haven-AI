@@ -42,7 +42,11 @@ export default function MerchantPage() {
   const [submitOpen, setSubmitOpen] = useState(false)
   const [fundOpen, setFundOpen] = useState(false)
   const comingSoonForBudgets = merchant?.listing_status === 'coming_soon'
-  const { budgets: merchantBudgets, refetch: refetchMerchantBudgets } = useMerchantBudgets(slug, {
+  const {
+    budgets: merchantBudgets,
+    error: merchantBudgetsError,
+    refetch: refetchMerchantBudgets,
+  } = useMerchantBudgets(slug, {
     enabled: !comingSoonForBudgets,
   })
 
@@ -113,10 +117,15 @@ export default function MerchantPage() {
   // verified payTo but not every offer is ERC-7710, the action is withheld
   // and the page says why — payments there use the agent's open budget
   // instead, and that budget must stay open (`docs/product/marketplace.md`).
+  // #3331 review finding F6: withheld ALSO when the merchant qualifies but
+  // none of the owner's OWN agents do — a disabled Review behind a modal that
+  // can only ever show "no eligible agent" is worse than not showing the
+  // entry point at all.
   const verifiedFunding = funding.filter((f) => f.pay_to_status === 'verified')
   const pinnableFunding = verifiedFunding.filter((f) => f.erc7710)
-  const showFundAction = !comingSoon && pinnableFunding.length > 0
-  const showOpenBudgetNote = !comingSoon && !showFundAction && verifiedFunding.length > 0
+  const hasEligibleAgent = eligibleFundingAgents(agents, funding).length > 0
+  const showFundAction = !comingSoon && pinnableFunding.length > 0 && hasEligibleAgent
+  const showOpenBudgetNote = !comingSoon && pinnableFunding.length === 0 && verifiedFunding.length > 0
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
@@ -152,13 +161,28 @@ export default function MerchantPage() {
               </p>
             </div>
           ) : showOpenBudgetNote ? (
-            <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-              Payments to {merchant.name} use an agent's open budget, not a merchant-only one — keep that budget
-              open on the agent's page rather than pinning it to a recipient.
-            </p>
+            // #3331 review finding design-12: plain wording, no "pinning it to
+            // a recipient", and its own small heading rather than a bare line.
+            <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+              <p className="text-xs font-medium text-[var(--v2-ink-3)]">How this merchant is paid</p>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Payments to {merchant.name} use an agent's open budget, not a merchant-only one — keep that budget
+                open on the agent's page.
+              </p>
+            </div>
           ) : null}
 
-          {merchantBudgets && merchantBudgets.length > 0 ? (
+          {merchantBudgetsError ? (
+            // #3331 review finding design-8: `useMerchantBudgets().error` was
+            // read by nothing — a failed read looked identical to "no
+            // merchant-locked budgets exist" instead of a retryable failure.
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2">
+              <p className="text-xs text-[var(--v2-ink-2)]">Haven could not load this merchant's budgets.</p>
+              <Button size="sm" variant="ghost" onClick={() => void refetchMerchantBudgets()}>
+                Try again
+              </Button>
+            </div>
+          ) : merchantBudgets && merchantBudgets.length > 0 ? (
             <MerchantBudgetsList budgets={merchantBudgets} />
           ) : null}
 

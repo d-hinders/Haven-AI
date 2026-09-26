@@ -143,6 +143,46 @@ describe('EditBudgetModal (#3166) — review', () => {
   })
 })
 
+describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
+  function merchantLockedBudget(overrides: Record<string, unknown> = {}) {
+    return budget({
+      recipient_address: RECIPIENT,
+      merchant_id: 'm-1',
+      merchant_slug: 'ampersend-demo-api',
+      merchant_name: 'Ampersend Demo API',
+      ...overrides,
+    })
+  }
+
+  it('shows the recipient read-only, naming the merchant, and never renders an editable Recipient field', () => {
+    renderModal({ budget: merchantLockedBudget() })
+    expect(screen.getByText(/Pays Ampersend Demo API only/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Recipient')).toBeNull()
+  })
+
+  it('the build body carries merchant_slug and the STORED recipient, never a retargeted or blank one', async () => {
+    renderModal({ budget: merchantLockedBudget() })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
+    expect(mockEditBudget.mock.calls[0][1]).toMatchObject({
+      recipientAddress: RECIPIENT,
+      merchantSlug: 'ampersend-demo-api',
+    })
+  })
+
+  it('an ordinary (non-merchant-locked) budget is completely unaffected — no merchantSlug, recipient stays editable', async () => {
+    renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
+    expect(screen.getByLabelText('Recipient')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
+    expect(mockEditBudget.mock.calls[0][1]).not.toHaveProperty('merchantSlug')
+  })
+})
+
 describe('EditBudgetModal (#3166) — outcomes', () => {
   it('a CANCELLED signature reopens the review — nothing changed, no error', async () => {
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'cancelled' })

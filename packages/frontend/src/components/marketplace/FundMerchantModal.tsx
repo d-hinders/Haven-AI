@@ -8,8 +8,12 @@
  * verified payTo: pick an agent, an amount and a period, review, then ONE
  * passkey (or owner) signature — the SAME build → sign → activate composition
  * `useDelegationBudget`'s `grant()` already runs for an open budget, extended
- * with `merchantSlug` so the server derives the recipient itself. Nothing here
- * forks that signing logic.
+ * with `merchantSlug`. The recipient the owner is shown IS the recipient sent
+ * (#3331 review finding F1, WYSIWYS): the server still derives the merchant's
+ * recipient itself and refuses (409) if a sent one disagrees — that refusal
+ * is what catches the payTo rotating between page load and Sign — but the
+ * build never sends a blind `null` for a surface that has a specific address
+ * to show. Nothing here forks the signing logic itself.
  *
  * Copy follows the budget-review recipe (`screen-recipes.md`) and
  * `EditBudgetModal`'s established shape (`components/EditBudgetModal.tsx`):
@@ -19,10 +23,11 @@
  */
 
 import { Check, X } from 'lucide-react'
+import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
-import { useDelegationBudget, type BudgetResult, type GrantInput } from '@/hooks/useDelegationBudget'
+import { useDelegationBudget, type BudgetResult, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
 import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import { getChainConfig } from '@/lib/chains'
@@ -52,6 +57,9 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
 function periodLabel(seconds: number): string {
   return PERIODS.find((p) => p.seconds === seconds)?.label ?? `every ${seconds}s`
 }
+
+/** A plain, no-exponent, non-negative decimal — `1e3` or `-5` are refused with a message, never silently. */
+const PLAIN_DECIMAL_RE = /^\d+(\.\d+)?$/
 
 /**
  * Agents this action can offer (#3331 acceptance): delegation-rail agents
@@ -100,14 +108,23 @@ export function merchantTokenOptions(chainId: number, offers: CatalogEntry[]): T
   return options
 }
 
-/** Friendly copy for the merchant-locked build's named 409s (#3331). */
+/**
+ * Friendly copy for the build step's named refusals (#3331 review finding
+ * F9): the four merchant-locked 409s, PLUS the ordinary grant refusals
+ * `POST /delegations/build` can answer for any caller (a revoked agent, an
+ * account off the delegation rail, a chain the rail is not enabled on, an
+ * in-flight re-key) — everything else, including a raw/unrecognised message,
+ * falls to one generic sentence rather than surfacing backend prose verbatim.
+ * The caller always appends "Nothing changed." once, so this never repeats it.
+ */
 function refusalCopy(detail: string | undefined, merchantName: string): string {
   const d = detail ?? ''
   if (/no verified payTo/i.test(d)) {
     return `${merchantName} does not have a confirmed payment address on this network yet. Reload the page and try again shortly.`
   }
   if (/does not accept ERC-7710/i.test(d) || /not.*erc-7710/i.test(d)) {
-    return `${merchantName}'s payments here now go through its open budget instead — a merchant-locked budget is no longer offered.`
+    // #3331 review finding F7: the agent's open budget, not the merchant's.
+    return `${merchantName}'s payments here now go through the agent's open budget instead — a merchant-locked budget is no longer offered.`
   }
   if (/agent's own addresses/i.test(d)) {
     return `${merchantName}'s payment address is this agent's own wallet — Haven cannot pin a budget to it.`
@@ -115,7 +132,44 @@ function refusalCopy(detail: string | undefined, merchantName: string): string {
   if (/does not match the merchant's current verified payTo/i.test(d)) {
     return `${merchantName}'s payment address changed. Reload the page to see the current one.`
   }
-  return d || `Haven could not set up this budget.`
+  if (/revoked agents cannot receive/i.test(d)) {
+    return 'This agent was revoked and cannot receive a new budget.'
+  }
+  if (/key rotation is in flight/i.test(d)) {
+    return "A key change for this agent's Haven wallet is already in progress. Finish or cancel it, then try again."
+  }
+  if (/account or re-key is unavailable/i.test(d)) {
+    return "This agent's Haven wallet is temporarily unavailable. Try again shortly."
+  }
+  if (/not on the delegation rail/i.test(d) || /delegation rail not enabled/i.test(d) || /no delegate key or treasury/i.test(d)) {
+    return "This agent cannot receive this kind of budget on its current network."
+  }
+  return `Haven could not set up this budget.`
+}
+
+/**
+ * The active budget (#3331 review finding F8) a new grant to `payTo`/`token`
+ * would replace — ONE (agent, token, recipient) slot per the lifecycle API,
+ * regardless of whose merchant label (if any) currently occupies it. A row
+ * locked to a DIFFERENT merchant in the same slot matched neither of the two
+ * predicates this used to be split into; it is replaced exactly the same as
+ * a plain budget or one already locked to THIS merchant, so it must warn too
+ * — the copy just names whichever merchant (or none) it is about to retire.
+ */
+function findReplacedBudget(
+  budgets: DelegationBudget[] | null,
+  payTo: string | null,
+  token: TokenOption | null,
+): DelegationBudget | null {
+  if (!payTo || !token) return null
+  return (
+    (budgets ?? []).find(
+      (b) =>
+        b.status === 'active' &&
+        (b.recipient_address ?? '').toLowerCase() === payTo.toLowerCase() &&
+        b.token_address.toLowerCase() === token.address.toLowerCase(),
+    ) ?? null
+  )
 }
 
 interface Props {
@@ -151,6 +205,19 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only on open
   }, [open])
 
+  // #3331 review finding F11 (a11y): move focus to the current step's region
+  // on a STEP CHANGE, never on the initial render (the focus trap already
+  // places initial focus on open). A wizard whose next screen renders with no
+  // focus move is silent to a screen-reader user.
+  const stepRegionRef = useRef<HTMLDivElement>(null)
+  const previousStepRef = useRef<Step>(step)
+  useEffect(() => {
+    if (previousStepRef.current !== step) {
+      stepRegionRef.current?.focus()
+    }
+    previousStepRef.current = step
+  }, [step])
+
   const selectedAgent = eligibleAgents.find((a) => a.id === agentId) ?? null
   const chainId = selectedAgent?.account_chain_id ?? null
   const fundingTarget = chainId != null ? funding.find((f) => f.chain_id === chainId) ?? null : null
@@ -177,56 +244,72 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
 
   // The selected agent's own delegation-rail budgets — read only once an
   // agent is chosen, so the "replaces" warning (#3331 acceptance) can compare
-  // against its ACTIVE rows. Also what signs the grant.
-  const { budgets, grant, busy, ready } = useDelegationBudget(selectedAgent?.id ?? '', chainId ?? 0, {
-    enabled: open && !!selectedAgent,
-  })
+  // against its ACTIVE rows. Also what signs the grant. #3331 review finding
+  // F4: this hook resets its own state the instant `selectedAgent?.id`/
+  // `chainId` change (agent picker inside one mounted instance), so `budgets`
+  // and `ready` below are never the PREVIOUS agent's while the new read is in
+  // flight — they read `null`/`false` instead.
+  const { budgets, budgetsError, reload, grant, busy, ready } = useDelegationBudget(
+    selectedAgent?.id ?? '',
+    chainId ?? 0,
+    { enabled: open && !!selectedAgent },
+  )
 
-  const replacesPlainBudget = useMemo(() => {
-    if (!payTo || !token) return false
-    return (budgets ?? []).some(
-      (b) =>
-        b.status === 'active' &&
-        !b.merchant_id &&
-        (b.recipient_address ?? '').toLowerCase() === payTo.toLowerCase() &&
-        b.token_address.toLowerCase() === token.address.toLowerCase(),
-    )
-  }, [budgets, payTo, token])
+  // #3331 review finding F4: the selected agent's current budgets must be
+  // KNOWN before Review is offered — `budgets === null` covers both "still
+  // loading" and "the read failed" (the hook collapses both, like
+  // `DelegationBudgetCard` already does), so a replace warning is never
+  // computed from data that might not be this agent's.
+  const budgetsKnown = budgets !== null
 
-  // Replacement is per (agent, token, recipient) slot, not per merchant: a
-  // budget for this merchant in another token, or one still pinned to a
-  // rotated-away payTo (`stale`), sits in a different slot and survives.
-  const replacesMerchantBudget = useMemo(() => {
-    if (!payTo || !token) return false
-    return (budgets ?? []).some(
-      (b) =>
-        b.status === 'active' &&
-        b.merchant_id === merchant.id &&
-        (b.recipient_address ?? '').toLowerCase() === payTo.toLowerCase() &&
-        b.token_address.toLowerCase() === token.address.toLowerCase(),
-    )
-  }, [budgets, merchant.id, payTo, token])
+  const replacedBudget = useMemo(() => findReplacedBudget(budgets, payTo, token), [budgets, payTo, token])
 
-  const amountValid = amount.trim() !== '' && Number(amount) > 0
+  const amountTrimmed = amount.trim()
 
-  const input = useMemo<GrantInput | null>(() => {
-    if (!token || !selectedAgent || !amountValid) return null
-    let budgetAtomic: string
+  // #3331 review finding F5: reject a malformed amount with a MESSAGE rather
+  // than silently disabling Review — scientific notation (`1e3`), letters, or
+  // more fraction digits than the token supports all read as "nothing typed"
+  // otherwise, which looks like a stuck button rather than an invalid value.
+  const amountFormatError = useMemo(() => {
+    if (amountTrimmed === '') return null
+    if (!PLAIN_DECIMAL_RE.test(amountTrimmed)) {
+      return 'Enter a plain number, like 5 or 5.25 — no letters or scientific notation.'
+    }
+    if (token) {
+      const fractionDigits = amountTrimmed.includes('.') ? amountTrimmed.split('.')[1]!.length : 0
+      if (fractionDigits > token.decimals) {
+        return `${token.symbol} supports up to ${token.decimals} decimal place${token.decimals === 1 ? '' : 's'}.`
+      }
+    }
+    return null
+  }, [amountTrimmed, token])
+
+  const amountAtomic = useMemo(() => {
+    if (!token || amountFormatError || amountTrimmed === '') return null
     try {
-      budgetAtomic = parseUnits(amount, token.decimals).toString()
+      const v = parseUnits(amountTrimmed, token.decimals)
+      return v > 0n ? v : null
     } catch {
       return null
     }
+  }, [amountTrimmed, amountFormatError, token])
+
+  const amountValid = amountAtomic !== null
+
+  const input = useMemo<GrantInput | null>(() => {
+    if (!token || !selectedAgent || !payTo || amountAtomic === null || !budgetsKnown) return null
     return {
       tokenAddress: token.address as Address,
-      // The server derives the recipient from the merchant's verified payTo —
-      // never sent here (a sent one that disagreed would be a 409).
-      recipientAddress: null,
-      budgetAtomic,
+      // #3331 review finding F1 (WYSIWYS): the DISPLAYED payTo is sent, not a
+      // blind null — a payTo that rotated between page load and Sign now
+      // fails the server's own comparison (409, "payment address changed")
+      // instead of silently landing wherever the server resolves to.
+      recipientAddress: payTo as Address,
+      budgetAtomic: amountAtomic.toString(),
       periodSeconds: period,
       merchantSlug: merchant.slug,
     }
-  }, [amount, amountValid, merchant.slug, period, selectedAgent, token])
+  }, [amountAtomic, budgetsKnown, merchant.slug, payTo, period, selectedAgent, token])
 
   const handleClose = useCallback(() => {
     if (busy) return
@@ -259,13 +342,15 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Fund this merchant"
+        aria-labelledby="fund-merchant-title"
         data-testid="fund-merchant-modal"
         className="relative max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
       >
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
           <div>
-            <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Fund {merchant.name}</h2>
+            <h2 id="fund-merchant-title" className="text-lg font-semibold text-[var(--v2-ink)]">
+              Fund {merchant.name}
+            </h2>
             <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
               Give an agent a budget that pays only {merchant.name}. Nothing changes until you sign.
             </p>
@@ -282,101 +367,128 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
         </div>
 
         <div className="p-6">
-          {step === 'select' && (
-            <div className="space-y-5">
-              {eligibleAgents.length === 0 ? (
-                <p className="text-sm text-[var(--v2-ink-2)]">
-                  No connected agent can be pinned to {merchant.name} yet — connect an agent on a network
-                  {merchant.name} accepts, or check the merchant's networks above.
+          {step === 'select' &&
+            (eligibleAgents.length === 0 ? (
+              <div ref={stepRegionRef} tabIndex={-1} className="space-y-5 outline-none">
+                <p className="text-sm text-[var(--v2-ink-2)]">None of your agents can be pinned to {merchant.name} yet.</p>
+                <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
+                  <Link href="/agents" className="font-medium text-[var(--v2-brand)] hover:underline">
+                    Connect or set up an agent
+                  </Link>{' '}
+                  on a network {merchant.name} accepts, then come back here.
                 </p>
-              ) : (
-                <>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-[var(--v2-ink-3)]" htmlFor="fund-merchant-agent">
-                      Agent
-                    </label>
-                    <Select
-                      id="fund-merchant-agent"
-                      value={agentId}
-                      onChange={(e) => setAgentId(e.target.value)}
-                      aria-label="Agent"
-                    >
-                      {eligibleAgents.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
+                <Button variant="ghost" onClick={handleClose} className="w-full">
+                  Close
+                </Button>
+              </div>
+            ) : (
+              <div ref={stepRegionRef} tabIndex={-1} className="space-y-5 outline-none">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-[var(--v2-ink-3)]" htmlFor="fund-merchant-agent">
+                    Agent
+                  </label>
+                  <Select
+                    id="fund-merchant-agent"
+                    value={agentId}
+                    onChange={(e) => setAgentId(e.target.value)}
+                    aria-label="Agent"
+                  >
+                    {eligibleAgents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
 
-                  {tokenOptions.length === 0 ? (
-                    <p className="text-sm text-[var(--v2-ink-2)]">
-                      {merchant.name} does not sell in a token Haven can budget on this agent's network.
-                    </p>
-                  ) : (
-                    <>
-                      <div className="flex flex-col gap-2 sm:flex-row">
+                {tokenOptions.length === 0 ? (
+                  <p className="text-sm text-[var(--v2-ink-2)]">
+                    {merchant.name} does not sell in a token Haven can budget on this agent's network.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="sm:w-32">
+                        <label className="mb-1 block text-xs font-medium text-[var(--v2-ink-3)]" htmlFor="fund-merchant-amount">
+                          Amount
+                        </label>
                         <Input
+                          id="fund-merchant-amount"
                           value={amount}
                           onChange={(e) => setAmount(e.target.value)}
                           placeholder="Amount"
-                          className="sm:w-32"
+                          inputMode="decimal"
                           aria-label="Budget amount"
+                          invalid={!!amountFormatError}
                         />
-                        {tokenOptions.length > 1 ? (
-                          <Select
-                            value={tokenAddress}
-                            onChange={(e) => setTokenAddress(e.target.value)}
-                            aria-label="Token"
-                            className="sm:w-28"
-                          >
-                            {tokenOptions.map((t) => (
-                              <option key={t.address} value={t.address}>
-                                {t.symbol}
-                              </option>
-                            ))}
-                          </Select>
-                        ) : (
-                          <span className="self-center text-sm text-[var(--v2-ink-muted)]">{token?.symbol}</span>
-                        )}
+                      </div>
+                      {tokenOptions.length > 1 ? (
                         <Select
-                          value={String(period)}
-                          onChange={(e) => setPeriod(Number(e.target.value))}
-                          aria-label="Period"
-                          className="sm:w-36"
+                          value={tokenAddress}
+                          onChange={(e) => setTokenAddress(e.target.value)}
+                          aria-label="Token"
+                          className="sm:w-28 sm:self-end"
                         >
-                          {PERIODS.map((p) => (
-                            <option key={p.seconds} value={p.seconds}>
-                              {p.label}
+                          {tokenOptions.map((t) => (
+                            <option key={t.address} value={t.address}>
+                              {t.symbol}
                             </option>
                           ))}
                         </Select>
-                      </div>
-                      <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                        Pays only {merchant.name}
-                        {payTo ? ` (${truncateAddress(payTo)})` : ''} — this budget is preferred for that merchant.
-                        The agent's open budget, if it has one, still covers everything else.
-                      </p>
-                      {!amountValid && (
-                        <p className="text-xs text-[var(--v2-ink-3)]">Enter an amount above zero to continue.</p>
+                      ) : (
+                        <span className="self-end pb-2 text-sm text-[var(--v2-ink-muted)] sm:pb-0 sm:self-end">
+                          {token?.symbol}
+                        </span>
                       )}
-                    </>
-                  )}
-                </>
-              )}
-              <div className="flex gap-3">
-                <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
-                  Cancel
-                </Button>
-                <Button onClick={() => setStep('review')} disabled={!input} className="flex-1">
-                  Review
-                </Button>
+                      <Select
+                        value={String(period)}
+                        onChange={(e) => setPeriod(Number(e.target.value))}
+                        aria-label="Period"
+                        className="sm:w-36 sm:self-end"
+                      >
+                        {PERIODS.map((p) => (
+                          <option key={p.seconds} value={p.seconds}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                      Pays only {merchant.name}
+                      {payTo ? ` (${truncateAddress(payTo)})` : ''}.
+                    </p>
+                    {amountFormatError ? (
+                      <p className="text-xs text-[var(--v2-danger)]">{amountFormatError}</p>
+                    ) : !amountValid ? (
+                      <p className="text-xs text-[var(--v2-ink-3)]">Enter an amount above zero to continue.</p>
+                    ) : null}
+                    {budgetsError ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2">
+                        <p className="text-xs text-[var(--v2-ink-2)]">
+                          Haven could not check this agent's existing budgets.
+                        </p>
+                        <Button size="sm" variant="ghost" onClick={() => void reload()}>
+                          Try again
+                        </Button>
+                      </div>
+                    ) : !budgetsKnown ? (
+                      <p className="text-xs text-[var(--v2-ink-3)]">Checking this agent's current budgets…</p>
+                    ) : null}
+                  </>
+                )}
+                <div className="flex gap-3">
+                  <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
+                    Cancel
+                  </Button>
+                  <Button onClick={() => setStep('review')} disabled={!input} className="flex-1">
+                    Review
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            ))}
 
           {step === 'review' && input && selectedAgent && token && (
-            <div className="space-y-5">
+            <div ref={stepRegionRef} tabIndex={-1} className="space-y-5 outline-none">
               <div className="space-y-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
                 <div>
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Agent</p>
@@ -384,8 +496,11 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                 </div>
                 <div>
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Budget</p>
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">
-                    {amount} {token.symbol} {periodLabel(period)}
+                  {/* #3331 review finding F5: the SIGNED amount, not the typed
+                      string — the same `formatUnits(atomic)` read
+                      `EditBudgetModal.tsx` shows in its own review step. */}
+                  <p className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
+                    {formatUnits(amountAtomic ?? 0n, token.decimals)} {token.symbol} {periodLabel(period)}
                   </p>
                 </div>
                 <div>
@@ -394,22 +509,32 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                     {merchant.name} only{payTo ? ` · ${truncateAddress(payTo)}` : ''}
                   </p>
                 </div>
+                {/* #3331 review finding F2: no fallback while this budget is
+                    active — every payment to this merchant in this token
+                    draws on it alone, and once it is exhausted those
+                    payments are refused until the next period. Stated once,
+                    here on the review step (the select step keeps only the
+                    short "pays only" line). */}
                 <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                  This budget is preferred for payments to {merchant.name}; the agent's open budget still covers
-                  everything else. Payments above it are refused on-chain — they are not held for approval.
+                  Payments to {merchant.name} use this budget. Once it runs out, payments to {merchant.name} are
+                  refused until the next period — they do not fall back to this agent's open budget, even if it has
+                  one. Payments above the budget are refused on-chain; they are not held for approval.
                 </p>
               </div>
 
-              {(replacesPlainBudget || replacesMerchantBudget) && (
+              {replacedBudget && (
                 <div className="space-y-1 rounded-xl border border-warning/30 bg-[var(--v2-warning-soft)] p-4 text-xs leading-relaxed text-[var(--v2-ink)]">
                   <p className="font-medium">
-                    {replacesMerchantBudget
+                    {replacedBudget.merchant_id === merchant.id
                       ? `This replaces this agent's current budget for ${merchant.name}.`
-                      : `This replaces this agent's current budget to the same address.`}
+                      : replacedBudget.merchant_id
+                        ? `This replaces this agent's current budget for ${replacedBudget.merchant_name ?? 'another merchant'}.`
+                        : `This replaces this agent's current budget to the same address.`}
                   </p>
-                  <p>
-                    {selectedAgent.name} already has an active budget in the same slot — signing below activates the
-                    new one in its place.
+                  <p className="v2-tabular">
+                    {formatUnits(BigInt(replacedBudget.budget_atomic), token.decimals)} {token.symbol}{' '}
+                    {periodLabel(replacedBudget.period_seconds)} — signing below activates the new budget in its
+                    place.
                   </p>
                 </div>
               )}
@@ -431,17 +556,19 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
           )}
 
           {step === 'working' && (
-            <div className="space-y-4 py-8 text-center">
+            <div ref={stepRegionRef} tabIndex={-1} role="status" aria-live="polite" className="space-y-4 py-8 text-center outline-none">
               <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[var(--v2-brand)] border-t-transparent" />
               <p className="text-sm font-medium text-[var(--v2-ink)]">Waiting for your signature…</p>
               <p className="mx-auto max-w-xs text-xs text-[var(--v2-ink-3)]">
-                Approve with Face ID, Touch ID, or your device passkey. The budget is set only after you sign.
+                {/* #3331 review finding design-9: never assume a passkey — the
+                    same copy `EditBudgetModal.tsx` uses for its own waiting step. */}
+                Approve in your wallet or with your passkey. The budget is set only after you sign.
               </p>
             </div>
           )}
 
           {step === 'done' && (
-            <div className="space-y-5">
+            <div ref={stepRegionRef} tabIndex={-1} className="space-y-5 outline-none">
               <div className="py-4 text-center">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
                   <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
@@ -458,26 +585,23 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
           )}
 
           {step === 'error' && outcome && !outcome.ok && (
-            <div className="space-y-5">
+            <div ref={stepRegionRef} tabIndex={-1} role="alert" className="space-y-5 outline-none">
               <div className="space-y-3 py-2 text-center">
                 <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-danger-soft)]">
                   <Icon icon={X} className="h-5 w-5 text-[var(--v2-danger)]" />
                 </div>
-                {outcome.reason === 'refused' ? (
-                  <>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">The budget could not be set</p>
-                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      {refusalCopy(outcome.detail, merchant.name)}
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">Budget could not be set</p>
-                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      Nothing changed. Try again.
-                    </p>
-                  </>
-                )}
+                {/* #3331 review finding F9: ONE heading for every failure shape
+                    — "the budget could not be set" — followed by named copy
+                    for a recognised refusal or a generic sentence otherwise,
+                    always closing with "Nothing changed." */}
+                <p className="text-sm font-medium text-[var(--v2-ink)]">The budget could not be set</p>
+                <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                  {`${
+                    outcome.reason === 'refused'
+                      ? refusalCopy(outcome.detail, merchant.name)
+                      : 'Haven could not set up this budget.'
+                  } Nothing changed.`}
+                </p>
               </div>
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={handleClose} className="flex-1">
@@ -494,4 +618,3 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
     </div>
   )
 }
-

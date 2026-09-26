@@ -5,15 +5,19 @@ import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
 
-const { mockGrant, mockReady, mockBudgets } = vi.hoisted(() => ({
+const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload } = vi.hoisted(() => ({
   mockGrant: vi.fn(),
   mockReady: vi.fn(() => true),
   mockBudgets: vi.fn((): unknown[] | null => []),
+  mockBudgetsError: vi.fn(() => false),
+  mockReload: vi.fn(),
 }))
 
 vi.mock('@/hooks/useDelegationBudget', () => ({
   useDelegationBudget: () => ({
     budgets: mockBudgets(),
+    budgetsError: mockBudgetsError(),
+    reload: mockReload,
     grant: mockGrant,
     busy: false,
     ready: mockReady(),
@@ -127,6 +131,9 @@ beforeEach(() => {
   mockReady.mockReturnValue(true)
   mockBudgets.mockReset()
   mockBudgets.mockReturnValue([])
+  mockBudgetsError.mockReset()
+  mockBudgetsError.mockReturnValue(false)
+  mockReload.mockReset()
   PROPS.onClose = vi.fn()
 })
 
@@ -164,6 +171,14 @@ describe('eligibleFundingAgents (#3331)', () => {
     expect(eligibleFundingAgents([agent({ status: 'revoked' })], funding)).toHaveLength(0)
     expect(eligibleFundingAgents([agent({ account_chain_id: null })], funding)).toHaveLength(0)
   })
+
+  // #3331 review finding F8: this mutation (dropping `|| agent.archived_at`)
+  // survived — an archived-but-not-`revoked` agent must still be excluded.
+  it('excludes an archived agent even when its status is not revoked', () => {
+    expect(
+      eligibleFundingAgents([agent({ status: 'active', archived_at: '2026-01-01T00:00:00.000Z' })], funding),
+    ).toHaveLength(0)
+  })
 })
 
 describe('merchantTokenOptions (#3331)', () => {
@@ -187,10 +202,23 @@ describe('FundMerchantModal (#3331)', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('shows a no-eligible-agent message when none of the agents qualify', () => {
-    render(<FundMerchantModal {...PROPS} agents={[agent({ account_chain_id: 8453 })]} />)
-    expect(screen.getByText(/No connected agent can be pinned/)).toBeDefined()
+  it('shows a no-eligible-agent message when none of the agents qualify, with a way out and no dead Review button', () => {
+    const { container } = render(<FundMerchantModal {...PROPS} agents={[agent({ account_chain_id: 8453 })]} />)
+    expect(screen.getByText(/None of your agents can be pinned to Ampersend Demo API yet/)).toBeDefined()
     expect(screen.queryByLabelText('Agent')).toBeNull()
+    // #3331 review finding F6/design-3: a link to connect/set up an agent,
+    // and only a Close button — never a disabled Review with nothing to review.
+    expect(screen.getByRole('link', { name: 'Connect or set up an agent' }).getAttribute('href')).toBe('/agents')
+    // The header's icon-only close button ALSO carries the accessible name
+    // "Close" (its `aria-label`) — this asserts the visible footer button by
+    // its text node, not the (also-present) header one.
+    expect(screen.getByText('Close').closest('button')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
+    // #3331 review-caught bug: an expression immediately after a LINE BREAK in
+    // JSX text collapses to no space at all ("networkAmpersend Demo API…") —
+    // pin the properly spaced sentence, read off the full rendered text, so a
+    // regression shows as a text miss rather than a passing squashed string.
+    expect(container.textContent).toContain('on a network Ampersend Demo API accepts, then come back here.')
   })
 
   it('lists only eligible agents in the picker', () => {
@@ -237,6 +265,56 @@ describe('FundMerchantModal (#3331)', () => {
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
+  // #3331 review finding F8: this mutation (dropping the TOKEN match from the
+  // replace predicate) survived — an active row at the same recipient but a
+  // DIFFERENT token is a different slot and must not warn.
+  it('review step: no warning for a budget at the same recipient but a DIFFERENT token', async () => {
+    mockBudgets.mockReturnValue([
+      budget({ merchant_id: null, recipient_address: PAY_TO, token_address: '0x' + '77'.repeat(20) }),
+    ])
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.queryByText(/replaces/)).toBeNull()
+  })
+
+  // #3331 review finding F8: this mutation (dropping the `status === 'active'`
+  // check) survived — a REVOKED row in the same (token, recipient) slot is
+  // not live and must not warn either.
+  it('review step: no warning for a revoked (inactive) budget in the same slot', async () => {
+    mockBudgets.mockReturnValue([
+      budget({ merchant_id: null, recipient_address: PAY_TO, token_address: USDC_SEPOLIA, status: 'revoked' }),
+    ])
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign budget' })).toBeDefined())
+    expect(screen.queryByText(/replaces/)).toBeNull()
+  })
+
+  // #3331 review finding F8: the replace-predicate gap — an active row in the
+  // SAME (token, recipient) slot but locked to a DIFFERENT merchant used to
+  // match neither the "plain" nor the "this merchant" predicate. It IS in the
+  // same slot (one address, one slot — docs/product/marketplace.md) and IS
+  // replaced; the copy just names the other merchant.
+  it("review step: warns and names the OTHER merchant when the slot is locked to a different merchant", async () => {
+    mockBudgets.mockReturnValue([
+      budget({
+        merchant_id: 'merchant-2',
+        merchant_name: 'Other Merchant',
+        recipient_address: PAY_TO,
+        token_address: USDC_SEPOLIA,
+      }),
+    ])
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() =>
+      expect(screen.getByText(/replaces this agent's current budget for Other Merchant/)).toBeDefined(),
+    )
+  })
+
   it('review step: no warning with no conflicting active budget', async () => {
     mockBudgets.mockReturnValue([])
     render(<FundMerchantModal {...PROPS} />)
@@ -246,7 +324,48 @@ describe('FundMerchantModal (#3331)', () => {
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
-  it('signs via grant() with merchantSlug, and reports success', async () => {
+  it('review step: states there is no fallback while this budget is active (#3331 F2)', async () => {
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Once it runs out, payments to Ampersend Demo API are refused until the next period/),
+      ).toBeDefined(),
+    )
+    expect(screen.queryByText(/preferred/)).toBeNull()
+  })
+
+  it('review step: renders the SIGNED amount (formatUnits of the atomic value), not the typed string (#3331 F5)', async () => {
+    render(<FundMerchantModal {...PROPS} />)
+    // Trailing zero the typed string carries but the atomic round-trip drops.
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5.10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => expect(screen.getByText(/5\.1 USDC per month/)).toBeDefined())
+    expect(screen.queryByText(/5\.10 USDC/)).toBeNull()
+  })
+
+  it('rejects scientific notation with a message instead of silently disabling Review (#3331 F5)', () => {
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '1e3' } })
+    expect(screen.getByText(/Enter a plain number/)).toBeDefined()
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('rejects more fraction digits than the token supports, by name (#3331 F5)', () => {
+    render(<FundMerchantModal {...PROPS} />)
+    // USDC_SEPOLIA has 6 decimals.
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '1.1234567' } })
+    expect(screen.getByText(/USDC supports up to 6 decimal places/)).toBeDefined()
+  })
+
+  it('rejects a zero amount', () => {
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '0' } })
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('signs via grant() with merchantSlug AND the displayed payTo as recipientAddress (#3331 F1, WYSIWYS)', async () => {
     const onGranted = vi.fn()
     render(<FundMerchantModal {...PROPS} onGranted={onGranted} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
@@ -257,13 +376,24 @@ describe('FundMerchantModal (#3331)', () => {
     expect(mockGrant).toHaveBeenCalledWith(
       expect.objectContaining({
         tokenAddress: USDC_SEPOLIA,
-        recipientAddress: null,
+        recipientAddress: PAY_TO,
         budgetAtomic: '5000000',
         periodSeconds: 2_592_000,
         merchantSlug: 'ampersend-demo-api',
       }),
     )
     expect(onGranted).toHaveBeenCalled()
+  })
+
+  it('Review stays disabled while this agent\'s existing budgets are still unknown, and a retry surfaces on failure (#3331 F4)', () => {
+    mockBudgets.mockReturnValue(null)
+    mockBudgetsError.mockReturnValue(true)
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/Haven could not check this agent's existing budgets/)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(mockReload).toHaveBeenCalled()
   })
 
   // ── error mapping of the 409s (#3331) ──────────────────────────────────
@@ -284,9 +414,19 @@ describe('FundMerchantModal (#3331)', () => {
       "recipient_address does not match the merchant's current verified payTo; reload the merchant page",
       /payment address changed/,
     ],
+    // #3331 review finding F9: the build refusals that are NOT specific to the
+    // merchant-locked path (any grant caller can hit these) get their own
+    // plain sentence too, rather than the backend's raw message.
+    ['Revoked agents cannot receive new budget delegations', /was revoked and cannot receive/],
+    [
+      'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget',
+      /key change.*already in progress/,
+    ],
+    ['Agent cannot receive a budget while its account or re-key is unavailable', /temporarily unavailable/],
+    ['Delegation rail not enabled on chain 8453', /cannot receive this kind of budget/],
   ]
 
-  it.each(CASES)('maps the %s refusal to its own copy', async (detail, expected) => {
+  it.each(CASES)('maps the %s refusal to its own copy, always closing with "Nothing changed."', async (detail, expected) => {
     mockGrant.mockResolvedValue({ ok: false, reason: 'refused', detail })
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
@@ -295,6 +435,31 @@ describe('FundMerchantModal (#3331)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
     await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
     expect(screen.getByText(expected)).toBeDefined()
+    expect(screen.getByText(/Nothing changed\.$/)).toBeDefined()
+    // Never the backend's raw sentence verbatim.
+    expect(screen.queryByText(detail)).toBeNull()
+  })
+
+  it('an unrecognised refusal detail falls back to the generic sentence, never raw backend prose (#3331 F9)', async () => {
+    mockGrant.mockResolvedValue({ ok: false, reason: 'refused', detail: 'some future backend refusal text' })
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => expect(screen.getByText(/Haven could not set up this budget\./)).toBeDefined())
+    expect(screen.queryByText('some future backend refusal text')).toBeNull()
+  })
+
+  it('a bare "failed" outcome uses the SAME heading and the same generic sentence + "Nothing changed." (#3331 F9)', async () => {
+    mockGrant.mockResolvedValue({ ok: false, reason: 'failed' })
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
+    expect(screen.getByText(/Haven could not set up this budget\. Nothing changed\./)).toBeDefined()
   })
 
   it('a cancelled signature returns to review, not an error state', async () => {
@@ -326,15 +491,15 @@ describe('FundMerchantModal (#3331)', () => {
 describe('contract: the merchant-locked build body matches the OpenAPI spec (#3331)', () => {
   type BuildAgentDelegationBody = ApiOperations['buildAgentDelegation']['requestBody']['content']['application/json']
 
-  it('a merchant-locked build body satisfies the generated request schema', () => {
+  it('a merchant-locked build body satisfies the generated request schema, with the displayed payTo as recipient_address (#3331 F1)', () => {
     const body = {
       token_address: USDC_SEPOLIA,
-      recipient_address: null,
+      recipient_address: PAY_TO,
       budget_atomic: '5000000',
       period_seconds: 2_592_000,
       merchant_slug: merchant.slug,
     } satisfies BuildAgentDelegationBody
     expect(body.merchant_slug).toBe('ampersend-demo-api')
-    expect(body.recipient_address).toBeNull()
+    expect(body.recipient_address).toBe(PAY_TO)
   })
 })

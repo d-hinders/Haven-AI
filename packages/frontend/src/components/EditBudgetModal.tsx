@@ -96,6 +96,14 @@ export default function EditBudgetModal({
     [budget.token_address, tokens],
   )
 
+  // #3331 review finding F3: a merchant-locked budget's Edit must not be able
+  // to silently turn it into a plain pinned budget by letting the recipient
+  // be retargeted or cleared — that drops the merchant label and the row out
+  // of `GET /merchants/{slug}/budgets` the moment it activates. The recipient
+  // is read-only here and the build carries `merchant_slug` so the server
+  // keeps pinning it to the SAME merchant.
+  const isMerchantLocked = !!budget.merchant_slug
+
   const [step, setStep] = useState<Step>('form')
   const [amount, setAmount] = useState('')
   const [period, setPeriod] = useState(budget.period_seconds)
@@ -128,7 +136,9 @@ export default function EditBudgetModal({
     return list
   }, [period])
 
-  const recipientValid = recipient.trim() === '' || isAddress(recipient.trim())
+  // A merchant-locked budget's recipient is never user-editable (F3) — it is
+  // always valid because it is never touched here.
+  const recipientValid = isMerchantLocked || recipient.trim() === '' || isAddress(recipient.trim())
   const amountValid = amount.trim() !== '' && Number(amount) > 0
 
   // The new delegation's input. Null while incomplete, which disables Review.
@@ -142,11 +152,19 @@ export default function EditBudgetModal({
     }
     return {
       tokenAddress: token.address as Address,
-      recipientAddress: recipient.trim() ? (recipient.trim() as Address) : null,
+      recipientAddress: isMerchantLocked
+        ? ((budget.recipient_address as Address | null) ?? null)
+        : recipient.trim()
+          ? (recipient.trim() as Address)
+          : null,
       budgetAtomic,
       periodSeconds: period,
+      // #3331 review finding F3: keep naming the merchant on the replacement
+      // grant — omitting this is what silently downgraded a merchant-locked
+      // budget to a plain pinned one.
+      ...(isMerchantLocked && budget.merchant_slug ? { merchantSlug: budget.merchant_slug } : {}),
     }
-  }, [amount, amountValid, period, recipient, recipientValid, token])
+  }, [amount, amountValid, budget.merchant_slug, budget.recipient_address, isMerchantLocked, period, recipient, recipientValid, token])
 
   // The change the owner is about to sign, at human precision. Both sides are
   // formatted through viem so a decimal comparison never compares strings.
@@ -290,14 +308,24 @@ export default function EditBudgetModal({
                   ))}
                 </Select>
               </div>
-              <Input
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                placeholder="Recipient address"
-                helperText="Optional — leave blank for any recipient."
-                className="font-mono"
-                aria-label="Recipient"
-              />
+              {isMerchantLocked ? (
+                // #3331 review finding F3: read-only — never a retarget or a
+                // clear-to-open for a budget that pays exactly one merchant.
+                <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2">
+                  <p className="text-xs text-[var(--v2-ink-2)]">
+                    Pays {budget.merchant_name ?? 'this merchant'} only. The recipient cannot be changed here.
+                  </p>
+                </div>
+              ) : (
+                <Input
+                  value={recipient}
+                  onChange={(e) => setRecipient(e.target.value)}
+                  placeholder="Recipient address"
+                  helperText="Optional — leave blank for any recipient."
+                  className="font-mono"
+                  aria-label="Recipient"
+                />
+              )}
               {!recipientValid ? (
                 <p className="text-xs text-[var(--v2-danger)]">
                   Recipient must be a valid wallet address, or blank for any recipient.

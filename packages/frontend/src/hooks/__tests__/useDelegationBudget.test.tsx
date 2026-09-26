@@ -104,7 +104,45 @@ describe('useDelegationBudget passkey dispatch (#887)', () => {
     expect(activate[1].signature).toBe('0x' + 'ab'.repeat(200))
   })
 
-  it('grant with merchantSlug (#3331): the build body carries merchant_slug and a null recipient, never a sent one', async () => {
+  // #3331 review finding F1 (WYSIWYS): `FundMerchantModal` sends the
+  // DISPLAYED payTo alongside `merchantSlug` — the hook is a plain
+  // PASSTHROUGH for whatever `recipientAddress` its caller supplies (or
+  // omits) and must never rewrite it either way.
+  it('grant with merchantSlug AND an explicit recipientAddress (#3331 F1): the hook forwards BOTH verbatim, never forcing null', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({ delegation_hash: '0xhash', version: 1, signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message } })
+      }
+      return Promise.resolve({ activated: true })
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const PAY_TO = ('0x' + 'f0'.repeat(20)) as never
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant({
+        tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+        recipientAddress: PAY_TO,
+        budgetAtomic: '1000',
+        periodSeconds: 86400,
+        merchantSlug: 'ampersend-demo-api',
+      })
+      expect(res.ok).toBe(true)
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    expect(build[1]).toEqual({
+      token_address: ('0x' + 'cc'.repeat(20)) as never,
+      recipient_address: PAY_TO,
+      budget_atomic: '1000',
+      period_seconds: 86400,
+      merchant_slug: 'ampersend-demo-api',
+    })
+  })
+
+  it('grant with merchantSlug but NO recipientAddress (a caller that omits it): the build body still carries merchant_slug, recipient stays null', async () => {
     mockApi(PASSKEY_SIGNERS)
     const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
     mockPost.mockImplementation((url: string) => {
@@ -133,6 +171,41 @@ describe('useDelegationBudget passkey dispatch (#887)', () => {
       budget_atomic: '1000',
       period_seconds: 86400,
       merchant_slug: 'ampersend-demo-api',
+    })
+  })
+
+  // #3331 review finding F8: this mutation (forcing `recipient_address: null`
+  // for EVERY `grant()` call) survived — pin the full build body for an
+  // ORDINARY pinned grant (no merchantSlug at all) with a real recipient.
+  it('grant for an ordinary pinned budget (no merchantSlug): the build body carries the real recipient, not a forced null', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({ delegation_hash: '0xhash', version: 1, signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message } })
+      }
+      return Promise.resolve({ activated: true })
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const RECIPIENT = ('0x' + 'ee'.repeat(20)) as never
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant({
+        tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+        recipientAddress: RECIPIENT,
+        budgetAtomic: '1000',
+        periodSeconds: 86400,
+      })
+      expect(res.ok).toBe(true)
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    expect(build[1]).toEqual({
+      token_address: ('0x' + 'cc'.repeat(20)) as never,
+      recipient_address: RECIPIENT,
+      budget_atomic: '1000',
+      period_seconds: 86400,
     })
   })
 
@@ -741,6 +814,60 @@ describe('editBudget — REPLACE composition (#3166)', () => {
     })
     const urls = mockPost.mock.calls.map((c) => String(c[0]))
     expect(urls.some((u) => u.includes('/revoke-all'))).toBe(false)
+  })
+})
+
+describe('useDelegationBudget agent switch (#3331 review finding F4)', () => {
+  // `FundMerchantModal`'s agent picker switches WHICH agent this same mounted
+  // hook instance is scoped to — a caller that used the previous agent's
+  // budgets/signer set for even the brief window before the new read resolved
+  // could sign against the wrong agent's data.
+  it('resets budgets/ready immediately on an agent switch, and a LATE response for the previous agent is discarded', async () => {
+    const pendingDelegations: Record<string, { resolve: (v: unknown) => void }> = {}
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      return new Promise((resolve) => {
+        pendingDelegations[url] = { resolve }
+      })
+    })
+
+    const { result, rerender } = renderHook(({ agentId }) => useDelegationBudget(agentId, 84532), {
+      initialProps: { agentId: 'agent-1' },
+    })
+    await waitFor(() => expect(pendingDelegations['/agents/agent-1/delegations']).toBeDefined())
+    await waitFor(() => expect(result.current.ready).toBe(true)) // the signer set resolved
+
+    // Switch BEFORE agent-1's budgets read resolves.
+    rerender({ agentId: 'agent-2' })
+
+    // Reset is IMMEDIATE — a render in between must never show agent-1's data
+    // (there is none yet here, but `ready` must also drop: agent-2's signer
+    // set has not been re-confirmed yet).
+    expect(result.current.budgets).toBeNull()
+    expect(result.current.ready).toBe(false)
+    await waitFor(() => expect(pendingDelegations['/agents/agent-2/delegations']).toBeDefined())
+
+    // The STALE agent-1 answer resolves late — it must be discarded, not
+    // rendered as if it were agent-2's.
+    await act(async () => {
+      pendingDelegations['/agents/agent-1/delegations']!.resolve({
+        delegations: [{ id: 'agent1-budget', status: 'active', budget_atomic: '1', token_address: '0xa', recipient_address: null, delegation_hash: '0x1', version: 1, period_seconds: 86400, expires_at: 9_999_999_999 }],
+      })
+      await Promise.resolve()
+    })
+    expect(result.current.budgets).toBeNull()
+
+    // agent-2's own answer lands and IS rendered.
+    await act(async () => {
+      pendingDelegations['/agents/agent-2/delegations']!.resolve({
+        delegations: [{ id: 'agent2-budget', status: 'active', budget_atomic: '2', token_address: '0xb', recipient_address: null, delegation_hash: '0x2', version: 1, period_seconds: 86400, expires_at: 9_999_999_999 }],
+      })
+      await Promise.resolve()
+    })
+    expect(result.current.budgets).toEqual([
+      { id: 'agent2-budget', status: 'active', budget_atomic: '2', token_address: '0xb', recipient_address: null, delegation_hash: '0x2', version: 1, period_seconds: 86400, expires_at: 9_999_999_999 },
+    ])
+    await waitFor(() => expect(result.current.ready).toBe(true))
   })
 })
 

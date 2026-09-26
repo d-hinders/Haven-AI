@@ -2277,6 +2277,18 @@ test('client release data — the Update required marker sets action_required an
   const second = note(`- **Docs tidy.** Words.\n- ${ACTION_REQUIRED_MARKER} **Signer refuses v2.** Update it.`)
   assert.equal(second.summary, 'Signer refuses v2. Update it. (+1 more in the changelog)')
 
+  // A near-miss is REFUSED, never read as "no update needed".
+  for (const miss of ['- **Update required — new signer.** Old ones stop.', '- **update required** x.', '- Update required for the signer.']) {
+    assert.throws(() => note(miss), /not as the marker/, miss)
+  }
+  assert.throws(
+    () => clientReleasesFrom(Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, '## 0.6.0 — 2026-10-01\n\n- update required.\n']))),
+    /packages\/sdk\/CHANGELOG\.md 0\.6\.0: /,
+    'the refusal names the file and the release',
+  )
+  // A marker mid-bullet leaves no stray punctuation.
+  assert.equal(note(`- **Signer v2.** ${ACTION_REQUIRED_MARKER}: old versions stop.`).summary, 'Signer v2. old versions stop.')
+
   // Prose QUOTING the marker in a code span is not the marker.
   assert.equal(note('- Explains the `**Update required**` marker.').action_required, false)
 
@@ -2291,7 +2303,7 @@ test('client release data — an empty release says so; a release with prose but
   assert.equal(empty.summary, 'No changes to this package in this release.')
   assert.equal(empty.action_required, false)
   assert.equal(note('Renamed the client (#7). Old names are gone.\n\n| old | new |\n|---|---|').summary, 'Renamed the client. Old names are gone.')
-  assert.equal(note('| old | new |\n|---|---|\n\n### Compatibility note\n').summary, 'Compatibility note')
+  assert.equal(note('### Changed\n').summary, 'No changes to this package in this release.', 'a bare heading is not a change')
 })
 
 test('client release data — summaries are whole sentences, public text, never cut mid-clause (#3305)', () => {
@@ -2302,14 +2314,23 @@ test('client release data — summaries are whole sentences, public text, never 
   )
   assert.equal(publicText('#3128: listReceiptsPage pages, which left #3120\'s record resolution open'), 'listReceiptsPage pages, which left record resolution open')
   assert.equal(publicText('BREAKING (x402 arm): signs less (#3281, epic #3284).'), 'Breaking change (x402 arm): signs less.')
+  // A reference before punctuation or at the end is removed too.
+  assert.equal(publicText('Fixed the thing in #3303. Fixed #3304, and more. See #3305'), 'Fixed the thing in. Fixed, and more. See')
+  // An abbreviation's full stop does not end a sentence.
+  assert.deepEqual(bulletSentences('Adds helpers, e.g. foo and bar. Second.'), ['Adds helpers, e.g. foo and bar.', 'Second.'])
+  // A lead is served as written: identifiers and flags are not re-cased or stripped.
+  assert.equal(noteFromSection(releasedSections('## 0.6.0 — 2026-10-01\n\n- --doctor needs no flag.\n')[0]).summary, '--doctor needs no flag.')
 
   // A next sentence that would overflow is dropped whole, never cut.
   const long = 'x'.repeat(MAX_SUMMARY_CHARS)
   const n = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- **Short head.** ${long}.\n`)[0])
   assert.equal(n.summary, 'Short head.')
-  // A headline longer than the limit is served whole.
+  // A headline longer than the limit is served whole when it has no clause boundary…
   const h = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- **${long}.** Next.\n`)[0])
   assert.equal(h.summary, `${long}.`)
+  // …and shortened at the last `;` outside parentheses that fits when it has one.
+  const clauses = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- First clause (a; b); second clause; ${long}.\n`)[0])
+  assert.equal(clauses.summary, 'First clause (a; b); second clause.')
 })
 
 test(`client release data — at most ${MAX_NOTES_PER_PACKAGE} notes per package, newest first (#3305)`, () => {

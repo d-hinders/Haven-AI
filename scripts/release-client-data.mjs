@@ -131,7 +131,7 @@ export function publicText(text) {
   return out
     .replace(/^#\d+:\s*/, '')
     .replace(/,?\s*\bepic #\d+/g, '')
-    .replace(/(^|\s)#\d+(?:'s)?(?=\s)/g, '$1')
+    .replace(/(^|\s)#\d+(?:'s)?(?=[\s.,;:!?)]|$)/g, '$1')
     .replace(/\bBREAKING\b/g, 'Breaking change')
     .replace(/\s+([.,;:])/g, '$1')
     .replace(/\s+/g, ' ')
@@ -155,11 +155,48 @@ export function bulletSentences(bullet) {
     if (head.length > 0) sentences.push(/[.!?]$/.test(head) ? head : `${head}.`)
     rest = trimmed.slice(bold[0].length)
   }
-  for (const s of publicText(rest).split(/(?<=[.!?])\s+/)) {
-    if (s.length > 0) sentences.push(s)
+  for (const s of splitSentences(publicText(rest))) {
+    const clean = s.replace(/^(?:[\s.,;:]|—\s)+/, '')
+    if (clean.length > 0) sentences.push(clean)
   }
   return sentences
 }
+
+/** Abbreviations whose full stop does not end a sentence. */
+const ABBREVIATION = /\b(?:e\.g|i\.e|vs|etc|cf)\.$/i
+
+function splitSentences(text) {
+  const out = []
+  let current = ''
+  for (const piece of text.split(/(?<=[.!?])\s+/)) {
+    current = current ? `${current} ${piece}` : piece
+    if (!ABBREVIATION.test(current)) {
+      out.push(current)
+      current = ''
+    }
+  }
+  if (current) out.push(current)
+  return out
+}
+
+/**
+ * A sentence longer than {@link MAX_SUMMARY_CHARS}, shortened at a CLAUSE
+ * boundary — a `;` outside parentheses — never mid-clause. One with no such
+ * boundary is served whole.
+ */
+function fitSentence(sentence) {
+  if (sentence.length <= MAX_SUMMARY_CHARS) return sentence
+  let depth = 0
+  let lastFit = -1
+  for (let i = 0; i < sentence.length && i < MAX_SUMMARY_CHARS; i++) {
+    const c = sentence[i]
+    if (c === '(') depth++
+    else if (c === ')') depth = Math.max(0, depth - 1)
+    else if (c === ';' && depth === 0) lastFit = i
+  }
+  return lastFit > 0 ? `${sentence.slice(0, lastFit)}.` : sentence
+}
+
 
 /**
  * The marker as it must appear: a bold span, optionally ending in `.` or `:`.
@@ -177,6 +214,18 @@ export function carriesActionRequired(text) {
   return ACTION_REQUIRED_SPAN.test(withoutCodeSpans(text))
 }
 
+/**
+ * "update required" written any other way — lowercase, not bold, bold with more
+ * words inside. The author meant must-update and the flag would silently say
+ * the opposite, so the generator REFUSES rather than guess (#3305 review).
+ */
+function nearMissMarker(text) {
+  const outside = withoutCodeSpans(text)
+  const all = outside.match(/update required/gi) ?? []
+  const exact = outside.match(new RegExp(ACTION_REQUIRED_SPAN.source, 'g')) ?? []
+  return all.length > exact.length
+}
+
 /** A bullet with a leading marker span removed, so its real headline leads. */
 function withoutLeadingMarker(bullet) {
   return bullet.trim().replace(new RegExp(`^${ACTION_REQUIRED_SPAN.source}\\s*`), '')
@@ -184,21 +233,27 @@ function withoutLeadingMarker(bullet) {
 
 /**
  * The text a section's note is built from when it has no top-level bullet:
- * its first prose paragraph, else its first `###` heading. A section with
- * content is never announced as having none.
+ * its first prose paragraph. A section with content is never announced as
+ * having none.
  */
 function proseLead(body) {
   const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p.length > 0)
   const prose = paragraphs.find((p) => !/^(#|\||```|>)/.test(p))
   if (prose !== undefined) return prose.split('\n').map((l) => l.trim()).join(' ')
-  const heading = /^#{3,}\s+(.+)$/m.exec(body)
-  return heading ? heading[1] : null
+  return null
 }
 
 /** One release note from one released section. */
 export function noteFromSection({ version, date, body }) {
   // The marker counts anywhere in the section — a nested bullet or a
   // continuation paragraph included — so where it sits never hides it.
+  if (nearMissMarker(body)) {
+    throw new Error(
+      `${version}: "update required" appears but not as the marker ${ACTION_REQUIRED_MARKER} ` +
+        '(exactly that bold span, optionally ending in "." or ":"). Write the marker exactly, ' +
+        'or quote it in a code span if the text only mentions it.',
+    )
+  }
   const actionRequired = carriesActionRequired(body)
   const bullets = topLevelBullets(body).filter((b) => bulletSentences(withoutLeadingMarker(b)).length > 0)
   let lead
@@ -211,7 +266,8 @@ export function noteFromSection({ version, date, body }) {
   if (lead === null || bulletSentences(lead).length === 0) {
     return { version, date, summary: 'No changes to this package in this release.', action_required: actionRequired }
   }
-  const [headline, next] = bulletSentences(lead)
+  const [rawHeadline, next] = bulletSentences(lead)
+  const headline = fitSentence(rawHeadline)
   let summary = headline
   if (next !== undefined && `${headline} ${next}`.length <= MAX_SUMMARY_CHARS) summary = `${headline} ${next}`
   if (bullets.length > 1) summary += ` (+${bullets.length - 1} more in the changelog)`
@@ -229,7 +285,13 @@ export function clientReleasesFrom(changelogs) {
   for (const name of CHANGELOG_PACKAGES) {
     const source = changelogs[name]
     if (typeof source !== 'string') throw new Error(`packages/${name}/CHANGELOG.md was not provided`)
-    const notes = releasedSections(source).slice(0, MAX_NOTES_PER_PACKAGE).map(noteFromSection)
+    const notes = releasedSections(source).slice(0, MAX_NOTES_PER_PACKAGE).map((section) => {
+      try {
+        return noteFromSection(section)
+      } catch (err) {
+        throw new Error(`packages/${name}/CHANGELOG.md ${err.message}`)
+      }
+    })
     if (notes.length === 0) throw new Error(`packages/${name}/CHANGELOG.md has no "## <version> — <date>" section`)
     out[`@haven_ai/${name}`] = { released_version: notes[0].version, notes }
   }

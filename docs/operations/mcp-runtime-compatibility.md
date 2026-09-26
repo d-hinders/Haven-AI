@@ -24,6 +24,7 @@ covers:
   - packages/sdk/src/edge.ts
   - packages/sdk/src/client-identity.ts
   - packages/core/src/client-compat.ts
+  - packages/core/src/client-releases.ts
   - packages/backend/src/middleware/client-compat.ts
   - packages/sdk/src/haven-api-transport.ts
   - packages/cli/src/api.ts
@@ -218,6 +219,18 @@ last-verified: "2026-09-25"
 > needs an agent key (`Authorization: Bearer`, `http.ts`) — the handshake is
 > authenticated, unlike the two `npm view` reads. Nothing else in this document
 > was re-verified in this pass.
+>
+> **Recent re-verification (#3304):** no tool, argument, schema, description
+> or consent input changes on either runtime. Two agent-facing things move.
+> First, the agent runbook (`HAVEN_AGENT_RUNBOOK_MD` in
+> `packages/sdk/src/agent-guidance.ts`, served as `/for-agents.md` and bundled
+> into `haven guide`) gains a short "If something breaks" section pointing at
+> `client_update` and `/releases`. That is text, not a contract: nothing parses
+> it. Second, the backend's `client_update` hint now carries a non-null
+> `notes_url`. The SDK's `readClientUpdate` already passes a string through, and
+> the field was always in the schema, so a client from #3303 on reads it without
+> a change. The version-skew and consent-hash contracts do not move. Nothing
+> else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3306):** each `haven_list_receipts` row on BOTH
 > runtimes LOSES four keys — `rail`, `proofStatus`, `resourceUrl`,
@@ -2487,7 +2500,18 @@ owner sets one the only observable change is the header itself.
   help.
 - A hint on a successful sign-context read rides on the signing result.
 - The update command is built from the **deployment's** connector channel, not a
-  client's build-time one.
+  client's build-time one. Since #3304 the command itself comes from
+  `upgradeCommandFor` in `packages/core/src/client-releases.ts`, the same
+  function the public release documents use.
+- **Since #3304 the hint's `notes_url` is set**, to the dashboard's public
+  `/releases` page, resolved against the backend's configured frontend URL and
+  never against a request header. The same per-package data is served as
+  `client_releases` in `GET /discovery` and in each `packages` entry of
+  `/.well-known/haven.json`: the version released in source, the thresholds
+  from `CLIENT_COMPAT`, the update command, and short notes. A test mutates
+  `CLIENT_COMPAT` itself to prove both documents follow the table the backend
+  enforces. `notes_url` stays typed nullable, so a client built before this
+  keeps parsing it.
 
 **This does not reopen the 2026-08-07 decision above.** That decision ("a
 mismatch warns, it does not block") is about the x402 expected-context version a

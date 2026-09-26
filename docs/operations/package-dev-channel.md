@@ -222,6 +222,16 @@ and the `release` skill.
 > nothing about that. `last-verified` deliberately NOT bumped — it already
 > reads 2026-09-24 from an earlier change, and this note re-reads only
 > `CONNECTOR_VERSION` and the channel constant's value.
+>
+> **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
+> is in this doc's `covers:`. The only edit there is a comment: the sentence
+> saying the public release documents "will read" the table became "read", now
+> that `client-releases.ts` does. The snapshot exemption this doc states
+> (`isSnapshotVersion`, a `0.0.0-dev.*` client never hinted or refused) is
+> unchanged: `evaluateClient` and `isSnapshotVersion` have no diff. The new
+> release documents publish `released_version` per package; a snapshot is not a
+> release, so nothing a `--snapshot` run writes appears in them. `last-verified`
+> is not bumped.
 
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which

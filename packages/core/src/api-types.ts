@@ -3010,6 +3010,7 @@ export type components = {
             required: boolean;
             /** @example npx -y @haven_ai/connect@alpha */
             upgrade_command: string;
+            /** @description #3304: the public release notes page. Nullable for clients built before it existed. */
             notes_url: string | null;
         };
         /** @description A hybrid account's signer set — the exact configuration the account address was derived from. Public key material plus per-credential enrollment time (#1679); nothing secret. */
@@ -3274,6 +3275,38 @@ export type components = {
                 deployable: number[];
                 supported: number[];
             };
+            /** @description #3304: per published client, the version released in source (not a claim about npm's `latest` dist-tag — npm publishes later, on promotion), the thresholds this deployment enforces (the same table the `client_outdated` refusal reads), the update command on this deployment's channel, and short notes. `release_notes_url` is the human-readable page on the dashboard origin. */
+            client_releases: {
+                /** Format: uri */
+                release_notes_url: string;
+                packages: {
+                    "@haven_ai/sdk": components["schemas"]["PackageReleaseCompat"];
+                    "@haven_ai/signer": components["schemas"]["PackageReleaseCompat"];
+                    "@haven_ai/mcp": components["schemas"]["PackageReleaseCompat"];
+                    "@haven_ai/connect": components["schemas"]["PackageReleaseCompat"];
+                    "@haven_ai/cli": components["schemas"]["PackageReleaseCompat"];
+                };
+            };
+        };
+        /** @description #3304: one published client in `DiscoveryDocument.client_releases`. */
+        PackageReleaseCompat: {
+            /** @description The newest version released in source. Not npm's `latest` dist-tag. */
+            released_version: string;
+            /** @description Below this, responses carry a non-blocking `client_update` hint. Null = no hint. */
+            recommended_version: string | null;
+            /** @description Below this, the package's refusal points answer `client_outdated`. Null = never refused. */
+            min_version: string | null;
+            /** @example npx -y @haven_ai/connect@alpha */
+            upgrade_command: string | null;
+            /** @description Newest first. What changed, for deciding whether to update — not the full CHANGELOG. */
+            notes: {
+                version: string;
+                /** Format: date */
+                date: string;
+                summary: string;
+                /** @description True when a client must update to keep paying. Not the same as a breaking change. */
+                action_required: boolean;
+            }[];
         };
         DeviceAuthorizationStart: {
             /** @description The client's bearer credential for polling. Stored hashed. */

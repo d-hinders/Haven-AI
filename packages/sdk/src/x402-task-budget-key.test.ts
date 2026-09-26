@@ -2,11 +2,12 @@
  * #3329 — `/x402` request bodies are camelCase (`X402AuthorizeRequest`
  * declares `taskBudgetId`, `additionalProperties: false`), unlike
  * `POST /payments`, which is snake_case (`task_budget_id`). The SDK's
- * eip3009 dispatch sent `task_budget_id` on `/x402` too, so
- * `haven_pay_x402_quote` / `haven_pay_x402` with a task budget got refused
- * with a 400 from the request-validation plugin. These tests pin the wire
- * key on both eip3009 producers directly, without exercising the full
- * funding/signing round trip.
+ * eip3009 dispatch sent `task_budget_id` on `/x402` too, which the
+ * request-validation plugin refuses with a 400 (`haven_pay_x402` reached it
+ * through `fetch()`; `haven_pay_x402_quote` never sent any task-budget key
+ * until #3378, because `payX402Quote` dropped the option — pinned in
+ * `funding-leg-pin.test.ts`). These tests pin the wire key on both eip3009
+ * producers directly, without exercising the full funding/signing round trip.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'

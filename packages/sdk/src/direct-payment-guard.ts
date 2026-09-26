@@ -16,7 +16,8 @@
  * `haven_sign` (which wraps the refusal in its own structured error with a
  * next step) and `HavenClient.signForData` (the SDK's own in-process signing,
  * where a compromised Haven API would otherwise be enough to get an
- * account-capturing UserOp signed).
+ * account-capturing UserOp signed). Both also run the funding-leg recipient
+ * pin, `assertFundingLegPaysDelegate`, on an x402 funding leg (#3281, #3375).
  */
 import { decodeFunctionData, encodeFunctionData, encodePacked, type Address, type Hex } from 'viem'
 import { HavenSigningError } from './types.js'
@@ -240,11 +241,13 @@ const ERC20_TRANSFER_ABI = [
  * payTo = the delegate EOA, amountRaw)`), so the single execution must be
  * exactly `encodePacked(asset, 0, transfer(delegateAddress, amount))`.
  *
- * `delegateAddress` is the signer's OWN key address — local, not from Haven —
- * so even a compromised binding key can at most move budget into the agent's
- * own EOA (the hot-delegate residual the sweep returns), never to an attacker.
- * `asset` and `amount` come from the Haven-signed expected context and keep
- * the leg consistent with what Haven declared.
+ * `delegateAddress` is the signing key's OWN address — local, not from Haven —
+ * so even a compromised Haven can at most move budget into the agent's own
+ * EOA (the hot-delegate residual the sweep returns), never to an attacker.
+ * `asset` and `amount` keep the leg consistent with what is being paid. Two
+ * callers, two sources: the signer's x402 arm (#3281) passes the Haven-signed
+ * expected context's; `HavenClient.signForData` (#3375) passes the 402 option
+ * the SDK is paying, never the `/x402` response.
  *
  * Call ONLY after `assertBoundDirectPaymentUserOp` has passed on the same
  * typed data (it proves the `execute` → `redeemDelegations` shape this reads).

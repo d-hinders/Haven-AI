@@ -495,6 +495,11 @@ test('the post-deploy restart instruction sends the reader to the Deployments AP
   assert.match(body, /repos\/d-hinders\/Haven-AI\/deployments/)
   assert.match(body, /--event deployment_status/)
   assert.ok(body.includes(RAILWAY_DEV_ENVIRONMENT))
+  // #3368: a gate-refused run is run-level `success`; only its money-flow job
+  // says `skipped`. The old text told operators to expect run-level `skipped`.
+  assert.match(body, /--json jobs/)
+  assert.match(body, /money-flow/)
+  assert.doesNotMatch(body, /all `skipped`/)
 })
 
 // ---------------------------------------------------------------------------

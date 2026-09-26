@@ -746,6 +746,15 @@ project owner — collaborators have Viewer access, not env-var write access.
 > every statement above still holds. The `qa-dev.yml` edit is a comment. Nothing
 > else in this file's coverage was touched; this note is the only edit.
 
+> **Re-verified #3368 (2026-09-26):** `qa-freshness.mjs` drops the #1044
+> step-level completeness warning, which could not fire: the Coverage
+> completeness step fails the `money-flow` job, which the gate already
+> refuses. It also reports a search cut short by its lookup budget, and an
+> unusable `QA_FRESHNESS_HOURS`, as their own refusals. The `qa-dev.yml` edits
+> are comments. The statements above — a skipped leg fails the run, the gate
+> selects by SHA ancestry and the `money-flow` job — still hold. Nothing else
+> in this file's coverage was touched; this note is the only edit.
+
 > **Re-verified #3337 (2026-09-26):** `qa-dev.yml`'s failure step now passes
 > the money-flow attempt logs to `scripts/ci/qa-failure-issue.mjs`, which
 > records a failure class and signature in the standing `qa-failure` issue, and

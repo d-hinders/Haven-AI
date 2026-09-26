@@ -17,7 +17,11 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
-- **Task budgets: three new tools (#3329).** `haven_open_task_budget` and `haven_close_task_budget` reserve and end a short-lived, self-delegated child of the agent's own budget delegation, scoped to one task; `haven_submit` is new on this runtime and relays the local signer's signature for a task budget by `task_budget_id` only — a `payment_id` is refused here, because this runtime signs and submits a payment inline and has no relay step for it. `task_budget_id` is an optional argument on `haven_send`, `haven_pay_x402_quote` and `haven_pay_x402`. The tool set grew by three, so the consent hash changes and every operator is asked to consent once more on the next launch.
+- **Task budgets: three new tools (#3329).** `haven_open_task_budget` and `haven_close_task_budget` reserve and end a short-lived, self-delegated child of the agent's own budget delegation, scoped to one task; `haven_submit` is new on this runtime and relays the local signer's signature for a task budget by `task_budget_id` only — a `payment_id` is refused here, because this runtime signs and submits a payment inline and has no relay step for it. `task_budget_id` is an optional argument on `haven_send`, `haven_pay_x402_quote` and `haven_pay_x402` (`haven_pay_x402_quote` dropped it on the `dev` channel until #3378). A task budget pinned to a recipient is checked against where each payment first goes, and the x402 tools here first fund the agent's own wallet, so a merchant-pinned task budget is declined on them — `haven_open_task_budget`'s description says so. The tool set grew by three, so the consent hash changes and every operator is asked to consent once more on the next launch.
+
+### Changed
+
+- **Behaviour change, via `@haven_ai/sdk` (#3375, epic #3284):** `haven_pay_x402`, `haven_pay_x402_quote` and `haven_pay_mcp_tool` now refuse, before anything is signed or submitted, an x402 funding leg that does not pay the quoted amount of the quoted token into this key's own delegate wallet. The backend already builds exactly that shape, so no live payment changes; the check closes a redirect a compromised Haven API could otherwise serve under an open budget. No tool, argument, schema or description changes, so the consent hash does not move. Update to get the check.
 
 ### Removed
 

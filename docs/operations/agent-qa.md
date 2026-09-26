@@ -766,9 +766,10 @@ it is not just "a run happened recently":
   it merges — so a green run on any branch exercised different code. Clearing
   it is an explicit human decision: `qa-override` **with a comment stating what
   you verified**. A hotfix touching no money-path file passes.
-- everything unanswerable fails **closed**: no run, unparseable timestamp,
-  uncomputable diff, unknown source branch, or a `QA_FRESHNESS_HOURS` that is
-  not a positive number.
+- everything unanswerable fails **closed**: no run, a search cut short by the
+  job-lookup budget (reported as such, `search_cut_short`, #3368), unparseable
+  timestamp, uncomputable diff, unknown source branch, or a `QA_FRESHNESS_HOURS`
+  that is not a usable positive number of hours (the raw value is echoed).
 
 **The one exemption, and exactly how narrow it is**
 ([#2164](https://github.com/d-hinders/Haven-AI/issues/2164)). A money-path file

@@ -265,10 +265,13 @@ export const SCHEDULED_GUARDS = [
       'must list recent `railway-app[bot]` deployments; if it does not, the Railway GitHub ' +
       'integration for the `Haven AI` project is what broke. (2) The environment is still ' +
       'named exactly `Haven AI / dev` (`RAILWAY_DEV_ENVIRONMENT` here and in qa-dev.yml\'s gate ' +
-      'job) — a rename on the Railway side skips every run. (3) `gh run list --workflow qa-dev.yml ' +
-      '--event deployment_status --limit 10` shows runs arriving: none at all means the trigger ' +
-      'is not firing (default-branch workflow file, event disabled); runs that are all `skipped` ' +
-      'mean the gate job is refusing them — read its log line. See ' +
+      'job) — a rename on the Railway side makes the gate job skip the harness on every run. ' +
+      '(3) `gh run list --workflow qa-dev.yml --event deployment_status --limit 10` shows runs ' +
+      'arriving: none at all means the trigger is not firing (default-branch workflow file, ' +
+      'event disabled). A run the gate refused still concludes `success` at run level (#3368); ' +
+      'read its `money-flow` job instead — `gh run view <id> --json jobs --jq ' +
+      '\'.jobs[] | select(.name=="money-flow") | .conclusion\'` prints `skipped` when the gate ' +
+      'job refused it, and the gate job\'s log line says why. See ' +
       'docs/operations/agent-qa.md → "Post-deploy trigger (deployment_status)".',
   },
 ]

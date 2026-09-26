@@ -227,6 +227,17 @@ the epic when its last sub-issue lands on `dev`.
 > one whose age is judged. Nothing here was made stale. `last-verified` not bumped,
 > for the reason in the notes above.
 
+> **Re-verification (#3368, 2026-09-26):** coupled through
+> `scripts/ci/qa-freshness.mjs`, which loses a dead branch (the #1044
+> step-level completeness warning, which could never fire while the Coverage
+> completeness step fails its job) and gains precise refusals: a search cut
+> short by the lookup budget is reported as such instead of "no run found",
+> and an unusable `QA_FRESHNESS_HOURS` echoes the raw value. What
+> `qa-freshness` requires — a green money-flow QA run covering the promoted
+> money-path code, bypass `qa-override` — is unchanged, and every changed
+> path still refuses. Nothing here was made stale. `last-verified` not bumped,
+> for the reason in the notes above.
+
 > **Re-verification (#3337, 2026-09-26):** coupled through
 > `.github/workflows/dev-gate.yml`, where only a comment changes: the
 > `qa-override` escape hatch is no longer described as a quarantine for "a

@@ -1,17 +1,15 @@
 /**
  * #3329 — task budgets on the local MCP surface: haven_open_task_budget,
- * haven_close_task_budget, haven_submit, and the task_budget_id pass-through
- * on haven_send / haven_pay_x402_quote / haven_pay_x402.
+ * haven_close_task_budget, haven_submit, and the task_budget_id hand-off on
+ * haven_send / haven_pay_x402_quote / haven_pay_x402.
  *
- * The SDK client methods this slice calls (`openTaskBudget`, `closeTaskBudget`,
- * `submitTaskBudget`, plus `taskBudgetId` on `pay`/`payX402Quote`/`fetch`) are
- * being added concurrently by another worker and are not yet built into
- * `@haven_ai/sdk`'s dist output — verified: `packages/sdk/src/client.ts` has no
- * `openTaskBudget`/`closeTaskBudget`/`submitTaskBudget` as of this slice, and
- * the DTS build currently fails on an unrelated in-progress file
- * (`task-budget-guards.ts`). So this file stubs `HavenClient` directly, the
- * same pattern `spelling-window.test.ts` uses for its `pay` stub, rather than
- * driving a real client against a mocked HTTP transport.
+ * These tests stub `HavenClient` (the pattern `spelling-window.test.ts` uses),
+ * so each proves only the TOOL-TO-SDK hand-off: that the handler passes the
+ * option to the SDK method. Whether the SDK then puts it on the wire is pinned
+ * against a real client with mocked HTTP elsewhere — for haven_pay_x402_quote
+ * in `tools.test.ts` (#3378: the SDK's `payX402Quote` dropped it while this
+ * stub test passed), and in the SDK's own `funding-leg-pin.test.ts` and
+ * `x402-task-budget-key.test.ts`.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { HavenClient } from '@haven_ai/sdk'
@@ -216,7 +214,7 @@ describe('haven_submit (#3329)', () => {
 })
 
 describe('task_budget_id pass-through on payment tools (#3329)', () => {
-  it('haven_send forwards task_budget_id as taskBudgetId to haven.pay', async () => {
+  it('haven_send hands task_budget_id to haven.pay as taskBudgetId (hand-off only)', async () => {
     const { haven, calls } = stubHaven()
     await createToolHandlers(haven).haven_send({
       asset: 'USDC',
@@ -233,7 +231,7 @@ describe('task_budget_id pass-through on payment tools (#3329)', () => {
     expect(calls.pay[0]).not.toHaveProperty('taskBudgetId')
   })
 
-  it('haven_pay_x402_quote forwards task_budget_id as taskBudgetId', async () => {
+  it('haven_pay_x402_quote hands task_budget_id to the SDK as taskBudgetId (hand-off only; wire: tools.test.ts)', async () => {
     const { haven, calls } = stubHaven()
     await createToolHandlers(haven).haven_pay_x402_quote({
       quote: { paymentRequired: {} },
@@ -242,7 +240,7 @@ describe('task_budget_id pass-through on payment tools (#3329)', () => {
     expect(calls.payX402Quote[1]).toMatchObject({ taskBudgetId: 'tb_1' })
   })
 
-  it('haven_pay_x402 forwards task_budget_id as taskBudgetId', async () => {
+  it('haven_pay_x402 hands task_budget_id to the SDK as taskBudgetId (hand-off only)', async () => {
     const { haven, calls } = stubHaven()
     await createToolHandlers(haven).haven_pay_x402({
       url: 'https://merchant.example/paid',

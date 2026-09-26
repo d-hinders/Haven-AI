@@ -39,7 +39,7 @@ export interface CatalogRow {
   asset_transfer_methods: string | null
   /**
    * The lowercased `payTo` the entry's x402 challenge names, when every
-   * `accepts[]` option names the same well-formed one (#3331, migration 096).
+   * `accepts[]` option names the same well-formed one (#3331, migration 097).
    * NULL for MPP rows, before the first successful probe, and when the
    * challenge names none or disagrees with itself.
    */

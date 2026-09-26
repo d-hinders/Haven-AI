@@ -10,7 +10,7 @@ import {
 } from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from '../domain/chains.js'
-import { secondaryRpcUrl } from './chain/rpc-transport.js'
+import { secondaryRpcUrl, secretSegments } from './chain/rpc-transport.js'
 
 const providers = new Map<number, JsonRpcProvider>()
 const relayers = new Map<number, Wallet>()
@@ -133,16 +133,14 @@ export function getProvider(chainId: number): JsonRpcProvider {
 
 /**
  * The key-like pieces of an endpoint URL — path segments and query values of
- * 12+ characters — mirrors `outbound-queue.ts`'s `secretSegments` (#2769):
- * a provider that echoes its key WITHOUT the URL (say `dkey=<key>` in a
- * JSON-RPC message) is still scrubbed. Kept as its own copy rather than an
- * import: `outbound-queue.ts` already depends on this file (`getRelayer`,
- * `getFallbackBroadcastProvider`), and this file must stay the free-standing
- * base of the provider graph.
+ * 12+ characters — now the shared `secretSegments` from `chain/rpc-transport.ts`
+ * (#3371 converged the third copy; #2769 wrote the first two). The alias keeps
+ * the call sites below unchanged. It can live in `rpc-transport.ts` because that
+ * file is BELOW this one in the provider graph (this file already imports
+ * `secondaryRpcUrl` from it); `outbound-queue.ts` reaches it through this file,
+ * which must stay its free-standing base.
  */
-function keySegments(url: string): string[] {
-  return url.split(/[/?&=#]/).filter((part) => part.length >= 12 && !part.includes(':'))
-}
+const keySegments = secretSegments
 
 /**
  * Scrub an RPC URL — and so any embedded provider API key — out of an ethers

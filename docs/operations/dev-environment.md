@@ -300,7 +300,7 @@ Isolation rules that are non-negotiable for a payments product:
   ERC-7710 rail is enabled ([below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant)),
   reports `erc7710: false` and the build refuses a merchant-locked budget for
   it. The payTo itself arrives with the next catalog refresh after migration
-  096 deploys (see `docs/product/marketplace.md`); until then every offer
+  097 deploys (see `docs/product/marketplace.md`); until then every offer
   reads `unstated`.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
@@ -756,6 +756,19 @@ project owner — collaborators have Viewer access, not env-var write access.
 > run and its `money-flow` job still conclude `success`, so the promotion
 > freshness gate described above selects the same runs as before. Nothing else
 > in this file's coverage was touched; this note is the only edit.
+
+> **Re-verified #3342 (2026-09-26):** `index.ts`'s `anchor-repair` phase — the
+> one #3294 added inside the existing leader-gated passport sweep — now also
+> emits a warn-level per-row report when the repair left rows unanswered
+> (`agent_id`, `outcome`, `reason`); the repair result itself gained a
+> `healthy` count and the per-row array. No phase is added, moved, or reordered
+> (the report is ten lines inside the existing `anchor-repair` phase), no route
+> file is added or moved, `enforcedModules` is untouched, and the
+> shadow/enforce semantics this document describes are unchanged. The repair
+> sweep now excludes rows durably confirmed against their anchor receipt
+> (migration 096's `uid_repair_confirmed_at` marker), which only shrinks what
+> the phase re-reads. Nothing else in this file's coverage was touched; this
+> note is the only edit.
 
 > **Re-verified #3361 (2026-09-26):** the promotion freshness gate described
 > above now reads every run-level qa-dev success created within twice

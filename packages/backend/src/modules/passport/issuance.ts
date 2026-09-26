@@ -393,41 +393,88 @@ export async function retryPendingPassports(
  * choice belongs to the issue's owner (open question 2), and this one is the
  * strictly weaker commitment: it is idempotent (the CAS in
  * `repairAnchoredUid` only ever writes a receipt-derived UID over a mismatched
- * one), paced (a `limit`ed batch per tick, revisiting a row at most hourly via
- * the `updated_at` guard — so a repair-triggered revoke burst shares the one
- * relayer lane through the revocation sweep's ordinary backoff, never a
- * stampede), and needs no operator to remember to run anything. If the owner
- * later wants an explicit one-shot job, it wraps the same
- * `repairAnchorUidFromReceipt` call.
+ * one, and both it and `confirmAnchorUid` stamp the durable
+ * `uid_repair_confirmed_at` marker, migration 096), paced (a `limit`ed batch
+ * per tick — so a repair-triggered revoke burst shares the one relayer lane
+ * through the revocation sweep's ordinary backoff, never a stampede), and
+ * needs no operator to remember to run anything. If the owner later wants an
+ * explicit one-shot job, it wraps the same `repairAnchorUidFromReceipt` call.
  *
- * Rows that cannot be repaired are LEFT UNCHANGED and counted in the result so
- * the caller can log them: no tx hash, an unreadable receipt, a receipt with
- * no proven `Attested` log, a row that moved mid-repair. None of those is ever
- * guessed at (#3294 criterion 3) — and none is silently dropped either, since
- * the selector hands the row back on a later tick.
+ * #3342 accounting — three counts, never folded into one another:
+ *
+ * - `repaired` — a phantom UID was replaced by the receipt's;
+ * - `healthy` — the stored UID already matched the receipt (confirmed, and
+ *   now marked out of the queue); previously these were counted
+ *   `unrepairable`, which read as 10 failures a tick on an all-healthy batch;
+ * - `unrepairable` — the row could not be answered this pass: no tx hash, an
+ *   unreadable receipt, no proven `Attested` log, a log the proven-ours
+ *   invariant refused, or a row that moved mid-repair.
+ *
+ * Every row is REPORTED, not just counted: `rows` carries `agent_id`,
+ * `outcome` and the reason for each, and the caller logs them — a row left
+ * unrepaired is never silently dropped, and the selector hands it back on a
+ * later tick.
  *
  * **Each row is isolated**, exactly like `retryPendingPassports`: one bad row
- * or transient pool error must not stop the batch.
+ * or transient pool error must not stop the batch. A repair that THROWS (a
+ * UID collision on the unique `agent_passports_uid_idx`, a pool error) is
+ * deferred — `updated_at` is bumped so the row cannot head the oldest-first
+ * batch again on the very next tick (#3342) — and re-attempted after the
+ * same hour every due row waits, keeping the poison row visible in the
+ * per-row report instead of starving the queue behind it.
  */
 export async function repairAnchoredUids(
   limit = 10,
-): Promise<{ attempted: number; repaired: number; unrepairable: number }> {
+): Promise<{
+  attempted: number
+  repaired: number
+  healthy: number
+  unrepairable: number
+  rows: Array<{ agent_id: string; outcome: 'repaired' | 'confirmed' | 'unrepairable' | 'deferred'; reason: string }>
+}> {
   const rows = await repo.listAnchorRepairsDue(limit)
   let repaired = 0
+  let healthy = 0
   let unrepairable = 0
+  const reported: Array<{
+    agent_id: string
+    outcome: 'repaired' | 'confirmed' | 'unrepairable' | 'deferred'
+    reason: string
+  }> = []
   for (const row of rows) {
     try {
       const result = await repairAnchorUidFromReceipt(row.chain_id, row.agent_id, {
         attestation_uid: row.attestation_uid,
         tx_hash: row.tx_hash,
       })
-      if (result.repaired) repaired++
-      else unrepairable++
-    } catch {
-      // The row's updated_at was not bumped, so it is first in line again on
-      // the next tick — and the rows behind it still get their turn now.
+      if (result.repaired) {
+        repaired++
+        reported.push({ agent_id: row.agent_id, outcome: 'repaired', reason: result.reason })
+      } else if (result.outcome === 'confirmed') {
+        healthy++
+        reported.push({ agent_id: row.agent_id, outcome: 'confirmed', reason: result.reason })
+      } else {
+        unrepairable++
+        reported.push({ agent_id: row.agent_id, outcome: 'unrepairable', reason: result.reason })
+      }
+    } catch (err) {
+      // A thrown repair (UID collision, transient pool error) must not head
+      // the queue on every tick: bump `updated_at` so the row waits out the
+      // same hour as every other due row before it is retried (#3342). If
+      // even this bump fails the database itself is down — the next tick
+      // re-reads the same row then, which a dead tick cannot make worse.
+      try {
+        await repo.deferAnchorRepair(row.agent_id)
+      } catch {
+        /* the next tick re-reads the row — never mask the original failure */
+      }
       unrepairable++
+      reported.push({
+        agent_id: row.agent_id,
+        outcome: 'deferred',
+        reason: `repair threw: ${err instanceof Error ? err.message : String(err)}`,
+      })
     }
   }
-  return { attempted: rows.length, repaired, unrepairable }
+  return { attempted: rows.length, repaired, healthy, unrepairable, rows: reported }
 }

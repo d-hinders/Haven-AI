@@ -4,7 +4,7 @@ status: current
 covers:
   - packages/backend/src/db/migrations/088_merchants.ts
   - packages/backend/src/db/migrations/089_marketplace_prospects.ts
-  - packages/backend/src/db/migrations/096_merchant_pay_to.ts
+  - packages/backend/src/db/migrations/097_merchant_pay_to.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/infra/repositories/delegation-budgets.ts

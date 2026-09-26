@@ -3,9 +3,9 @@ import { SiteHeader } from '@/components/marketing/SiteHeader'
 import { SiteFooter } from '@/components/marketing/SiteFooter'
 import { Section } from '@/components/marketing/Section'
 import { Card } from '@/components/ui/Card'
-import { CodeBlock } from '@/components/ui/CodeBlock'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { buildManifest, type ManifestPackageEntry } from '@/lib/capability-manifest'
+import { UpdateCommand } from './UpdateCommand'
 
 /**
  * `/releases` — "what changed, and do I need to update?" (#3304, epic #3302).
@@ -30,22 +30,25 @@ export const metadata: Metadata = {
 // the local MCP runtime), then the packages people install directly.
 const ORDER = ['connect', 'signer', 'mcp', 'cli', 'sdk'] as const
 
+// The signer and the local MCP runtime have no update command of their own:
+// the connector installs both, so theirs is the connector's. Said on the card,
+// or three identical commands read as a mistake.
+const INSTALLED_BY_CONNECTOR: ReadonlySet<string> = new Set(['@haven_ai/signer', '@haven_ai/mcp'])
+
 function Thresholds({ entry }: { entry: ManifestPackageEntry }) {
-  const minimum = entry.min_version ?? 'Not set'
-  const recommended = entry.recommended_version ?? 'Not set'
   return (
-    <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[13px]">
-      <div>
-        <dt className="text-[var(--v2-ink-3)]">Released</dt>
-        <dd className="font-mono text-[var(--v2-ink)]">{entry.released_version}</dd>
-      </div>
+    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[13px]">
       <div>
         <dt className="text-[var(--v2-ink-3)]">Minimum accepted</dt>
-        <dd className="font-mono text-[var(--v2-ink)]">{minimum}</dd>
+        <dd className="text-[var(--v2-ink)]">
+          {entry.min_version ? <span className="font-mono">{entry.min_version}</span> : 'None — every version accepted'}
+        </dd>
       </div>
       <div>
         <dt className="text-[var(--v2-ink-3)]">Recommended</dt>
-        <dd className="font-mono text-[var(--v2-ink)]">{recommended}</dd>
+        <dd className="text-[var(--v2-ink)]">
+          {entry.recommended_version ? <span className="font-mono">{entry.recommended_version}</span> : 'None'}
+        </dd>
       </div>
     </dl>
   )
@@ -62,13 +65,13 @@ function PackageCard({ entry }: { entry: ManifestPackageEntry }) {
       <div className="px-5 py-4 space-y-4">
         <Thresholds entry={entry} />
         {entry.upgrade_command ? (
-          <CodeBlock>{entry.upgrade_command}</CodeBlock>
-        ) : (
-          <p className="text-[13px] text-[var(--v2-ink-2)]">
-            The update command depends on this deployment&apos;s release channel, which could not be read
-            just now. Your setup instructions name it, or reload this page.
-          </p>
-        )}
+          <div className="space-y-2">
+            {INSTALLED_BY_CONNECTOR.has(entry.name) ? (
+              <p className="text-[13px] text-[var(--v2-ink-2)]">Installed by the connector — this re-runs it.</p>
+            ) : null}
+            <UpdateCommand command={entry.upgrade_command} />
+          </div>
+        ) : null}
       </div>
       {/*
         Not `Row`: its subtitle is a one-line truncating slot, and the summary
@@ -128,6 +131,16 @@ export default async function ReleasesPage() {
         }
         className="pt-0 md:pt-0"
       >
+        {/*
+          One note, not one per card: the cause (the backend was unreachable)
+          is page-wide, and repeating it buried the notes (#3304 design review).
+        */}
+        {entries.some((entry) => entry.upgrade_command === null) ? (
+          <p className="mb-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+            Update commands depend on this deployment&apos;s release channel, which could not be read just now.
+            Your setup instructions name it, or reload this page.
+          </p>
+        ) : null}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {entries.map((entry) => (
             <PackageCard key={entry.name} entry={entry} />

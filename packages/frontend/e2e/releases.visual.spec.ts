@@ -47,7 +47,9 @@ test.describe('releases page visual regression', () => {
       }
       // The deterministic state: no backend, so no channel, so no command —
       // and never a guessed `@alpha` (#2422).
-      await expect(page.getByText(/could not be read just now/)).toHaveCount(5)
+      // One page-level note, never one per card (#3304 design review).
+      await expect(page.getByText(/could not be read just now/)).toHaveCount(1)
+      await expect(page.getByText('Update command', { exact: true })).toHaveCount(0)
       await expect(page.getByText('@alpha')).toHaveCount(0)
 
       await page.evaluate(() => document.fonts.ready)

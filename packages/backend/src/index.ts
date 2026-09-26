@@ -14,6 +14,7 @@ import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
 import { reencryptPlaintextSecretsAtBoot } from './modules/accounting/index.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
+import { sendDelegateAlertFromEnv } from './infra/delegate-alert-webhook.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
@@ -85,6 +86,7 @@ import { AccountedConnector } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
 import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
+  deliverCatalogAlerts,
   refreshCatalog,
   runCatalogIngestTick,
   type QueryableLike,
@@ -461,22 +463,16 @@ const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
  */
 const CATALOG_INGEST_INTERVAL_MS = 5 * 60 * 1000
 
-/** Best-effort ops webhook, same Slack-compatible `{ text }` shape as the
- * delegate/relayer monitors. A failed alert never affects the tick. */
-async function sendCatalogOpsAlert(text: string): Promise<void> {
-  const url = process.env.DELEGATE_ALERT_WEBHOOK_URL
-  if (!url) return
-  try {
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text }),
-      signal: AbortSignal.timeout(10_000),
-    })
-  } catch (err) {
-    // Deliberately silent for the same reason the monitors swallow it:
-    // alerting is best-effort in every monitor in this file.
-  }
+/**
+ * Ops webhook, same Slack-compatible `{ text }` shape as the
+ * delegate/relayer monitors — via the shared sender (#3345), which checks
+ * `res.ok`: a 4xx/5xx or network error logs a warning with the status (never
+ * the URL — it is a credential) and reports `failed`, so the catalog tick
+ * above can re-arm the alarm and retry on the next tick. A failed alert
+ * still never affects the tick itself.
+ */
+async function sendCatalogOpsAlert(text: string): Promise<'delivered' | 'failed' | 'no-webhook'> {
+  return sendDelegateAlertFromEnv(text, app.log, 'catalog-ingestion')
 }
 
 /**
@@ -555,8 +551,17 @@ const start = async () => {
           if (report.acted) app.log.info(report, 'Catalog ingestion tick')
           for (const text of report.alerts) {
             app.log.warn({ text }, 'Catalog ingestion alert')
-            await sendCatalogOpsAlert(text)
           }
+          // Delivery decides the re-arm (#3345): a 'failed' send (4xx/5xx or
+          // network error — logged by the shared sender with the status,
+          // never the URL) rolls the lifecycle edge back so the alarm
+          // re-fires on the next tick while the condition persists.
+          // Delivered alarms stop, edge-triggered as before; 'no-webhook' is
+          // log-only mode — the warn above is the whole alert and the
+          // episode counts as handled.
+          await deliverCatalogAlerts(report.alerts, (text) =>
+            sendCatalogOpsAlert(text),
+          )
         })
       } catch (err) {
         app.log.warn({ err }, 'Catalog ingestion failed')

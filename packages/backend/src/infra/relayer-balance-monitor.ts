@@ -19,6 +19,7 @@ import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
 import { getRelayer, RELAYER_LOW_BALANCE_WEI } from './relayer.js'
 import { relayerSpendSummary } from './relayer-spend-guard.js'
+import { sendDelegateAlertWebhook } from './delegate-alert-webhook.js'
 
 export interface RelayerBalanceStatus {
   chainId: number
@@ -39,21 +40,18 @@ const lastStatus = new Map<number, RelayerBalanceStatus>()
 
 // Edge-trigger state: chains already alerted low. A chain alerts once when it
 // crosses below the mark and re-arms when it recovers, so a persistently low
-// relayer doesn't spam the channel every hour.
+// relayer doesn't spam the channel every hour. A chain is committed here only
+// AFTER its webhook was accepted (#3345) — a failed delivery stays un-armed
+// so the next scan retries while the balance is still low.
 const lowAlerted = new Set<number>()
 
 export function getRelayerBalanceStatus(): RelayerBalanceStatus[] {
   return [...lastStatus.values()].sort((a, b) => a.chainId - b.chainId)
 }
 
-/** POST a plain `{ text }` payload (Slack-compatible). Best-effort. */
-async function sendWebhookAlert(url: string, text: string): Promise<void> {
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
-    signal: AbortSignal.timeout(10_000),
-  })
+/** Reset the module-private edge state (test seam — `lowAlerted`). */
+export function resetRelayerAlertStateForTests(): void {
+  lowAlerted.clear()
 }
 
 export async function runRelayerBalanceMonitor(log: MonitorLogger): Promise<void> {
@@ -87,28 +85,27 @@ export async function runRelayerBalanceMonitor(log: MonitorLogger): Promise<void
           'Relayer balance below low-water mark',
         )
         if (!lowAlerted.has(chainId)) {
-          lowAlerted.add(chainId)
           const url = process.env.DELEGATE_ALERT_WEBHOOK_URL
-          if (url) {
+          if (!url) {
+            // Log-only mode (no webhook configured): the warning above is the
+            // whole alert — treat the episode as handled, as before #3345.
+            lowAlerted.add(chainId)
+          } else {
             const symbol = getChain(chainId).nativeCurrency.symbol
-            try {
-              await sendWebhookAlert(
-                url,
-                `🚨 Relayer low on chain ${chainId}: ${formatEther(balance)} ${symbol} ` +
-                  `(< ${formatEther(RELAYER_LOW_BALANCE_WEI)}) on ${relayer.address} — ` +
-                  `top it up or relayed payments will start failing.`,
-              )
-            } catch (err) {
-              // Best-effort: a failed alert must never affect the scan.
-              log.warn(
-                {
-                  scope: 'relayer-balance-monitor',
-                  chainId,
-                  err: err instanceof Error ? err.message : String(err),
-                },
-                'relayer alert webhook failed (scan unaffected)',
-              )
-            }
+            // Delivered decides the edge commit (#3345): the shared sender
+            // returns false on a 4xx/5xx or network error instead of
+            // throwing, so the failure can never masquerade as this catch's
+            // "relayer balance read failed" — and the chain stays un-armed
+            // so the next scan retries while the balance is still low.
+            const delivered = await sendDelegateAlertWebhook(
+              url,
+              `🚨 Relayer low on chain ${chainId}: ${formatEther(balance)} ${symbol} ` +
+                `(< ${formatEther(RELAYER_LOW_BALANCE_WEI)}) on ${relayer.address} — ` +
+                `top it up or relayed payments will start failing.`,
+              log,
+              'relayer-balance-monitor',
+            )
+            if (delivered) lowAlerted.add(chainId)
           }
         }
       } else {

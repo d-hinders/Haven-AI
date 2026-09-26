@@ -46,6 +46,7 @@
  * ownership proof makes no outbound request for a configuration failure.
  */
 import { config } from '../../config.js'
+import type { EnvAlertDelivery } from '../../infra/delegate-alert-webhook.js'
 import { findOrCreateMerchantByHost } from '../../infra/repositories/merchants.js'
 // dep-lint-exempt: pool appears only as the DEFAULT of the injectable Executor (index.ts and the real-DB tests inject their own); the lifecycle module otherwise runs against an injected db and makes no direct pool usage — same shape as the sibling merchant-catalog.ts exemption
 import pool from '../../db.js'
@@ -313,6 +314,11 @@ interface CatalogAlertInput {
  * ongoing condition fires an alert once (on the 0 -> N edge) instead of on
  * every tick. A leader replica holds steady state; the leader lock means one
  * replica owns the alert channel per tick.
+ *
+ * Since #3345 the edge also rolls BACK when the webhook delivery fails: the
+ * caller (index.ts) checks the sender's verdict and clears this state, so a
+ * rejected webhook re-fires on the next tick instead of being dropped. The
+ * alert text is composed here; delivery happens up-stack where the URL lives.
  */
 const catalogAlertState: { stuckActive: boolean; massFailureActive: boolean } = {
   stuckActive: false,
@@ -343,4 +349,22 @@ export function catalogAlerts(input: CatalogAlertInput): string[] {
     catalogAlertState.massFailureActive = false
   }
   return alerts
+}
+
+/**
+ * Deliver composed alerts through the shared ops webhook and re-arm on a
+ * FAILED send (#3345): a 4xx/5xx or network error (the sender's `'failed'`
+ * verdict) must not consume the alarm — the edge rolls back so the next tick
+ * re-fires while the condition persists. `'delivered'` commits the edge
+ * (edge-triggered as before); `'no-webhook'` is log-only mode — nothing was
+ * sent, so the episode counts as handled, exactly as before #3345. The
+ * sender never throws, so neither does this.
+ */
+export async function deliverCatalogAlerts(
+  alerts: string[],
+  send: (text: string) => Promise<EnvAlertDelivery>,
+): Promise<void> {
+  for (const text of alerts) {
+    if ((await send(text)) === 'failed') resetCatalogAlertStateForTests()
+  }
 }

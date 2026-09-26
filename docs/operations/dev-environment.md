@@ -21,7 +21,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-25"
+last-verified: "2026-09-26"
 ---
 
 # Dev environment
@@ -534,6 +534,21 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > Railway dev backend already does); a tunnel URL works, a loopback URL
   > does not — the provider refuses to dispatch to private/loopback addresses
   > by policy.
+
+  > **Re-verified #3345 (2026-09-26):** the PR's `index.ts` change replaces
+  > the inline `sendCatalogOpsAlert` body with a call to the shared ops-alert
+  > sender (`infra/delegate-alert-webhook.ts`, also used by the relayer and
+  > delegate balance monitors — see `docs/operations/catalog-ingestion.md`
+  > for the alarm semantics) and hands the ingest loop's alerts to
+  > `deliverCatalogAlerts`, so a failed webhook re-arms the alarm instead of
+  > being dropped. Comment-only inside the covered claims: the function
+  > previously swallowed every failure silently. No new env variable (the
+  > sender reads the existing `DELEGATE_ALERT_WEBHOOK_URL`), no route, plugin
+  > registration, boot-order or request-validation change — the new
+  > `catalog*` alert path registers nothing and the route-module table is
+  > untouched. The doc's other `index.ts` claims (boot flags through
+  > `parseBooleanFlag`, the `installRequestValidation` options, the
+  > non-money-route enumeration) were re-read against this tree and hold.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 

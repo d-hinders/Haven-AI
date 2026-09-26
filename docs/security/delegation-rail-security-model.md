@@ -1580,3 +1580,17 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > Nothing this document claims about authority, custody or signing changes.
 > Scope of this note: that endpoint's response shape. Nothing else in this
 > document was re-verified.
+>
+> **Re-verified unchanged (#3296, 2026-09-26, snapshot skip on unpriceable reads):**
+> this doc is coupled through `infra/repositories/dashboard.ts`, whose
+> `insertPortfolioSnapshot` the dashboard now calls for the first CLEAN load of
+> the day only: a read the accounts module marks unpriceable (#3296, reusing
+> #3292's degraded-result marker) skips the insert and logs the skip with the
+> user id only, so a degraded figure can no longer stand as a day's baseline.
+> The repository function, its SQL and its DO NOTHING conflict arm are
+> untouched; a skipped day simply has no row. No handler, query, signing path
+> or refusal moves; the snapshot decides no spend — budget, recipient and
+> expiry remain enforced on-chain by the caveat enforcers. Nothing this
+> document claims about authority, custody or signing changes. Scope of this
+> note: which dashboard load writes the daily row. Nothing else in this
+> document was re-verified.

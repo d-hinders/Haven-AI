@@ -87,6 +87,13 @@ const SCAN_DIRS = [
 // contains strings" — a utility with user-visible identifiers stays out.
 // Repo-root-relative POSIX paths; each MUST exist (see missingTargets below).
 export const SCAN_FILES = [
+  // #3347: the app's message catalog — "the source of truth for the app's
+  // copy" (its own header). Every namespace in it renders as product copy,
+  // including the accounting page and Settings card the #2859 phrases were
+  // banned for; outside SCAN_DIRS, that ban guarded nothing. A locale added
+  // next to it must be listed too — `matchesCopyConvention` makes the
+  // catalog directory part of the naming convention, so an unlisted one fails.
+  'packages/frontend/src/lib/i18n/messages/en.ts',
   // Downloaded verbatim from the connect-agent success screen's "Download the
   // skill" button (SetupStates.tsx) as `haven-pay/SKILL.md`, then read by an
   // agent as instructions. The originating case for this allowlist.
@@ -175,6 +182,8 @@ const LIB_DIR = join(REPO_ROOT, 'packages', 'frontend', 'src', 'lib')
 /** True when `rel`'s basename follows the extracted-copy naming convention. */
 export function matchesCopyConvention(rel) {
   const base = rel.split('/').pop() ?? ''
+  // #3347: every file in the message catalog directory is copy by definition.
+  if (/\/lib\/i18n\/messages\/[^/]+\.ts$/.test(rel)) return true
   return /(-copy\.ts|-labels\.ts|Labels\.ts|\.tsx)$/.test(base)
 }
 

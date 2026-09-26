@@ -104,6 +104,25 @@ function displayPrice(prices: PriceMap, symbol: string): TokenPrice | undefined 
 const degradedResults = new WeakSet<Portfolio>()
 
 /**
+ * #3296: whether this result was read while DEGRADED — a balance leg was
+ * rejected, or a held token had no usable price (fresh or #3297 last-good).
+ * The dashboard refuses to write its daily snapshot from such a read, so a
+ * later clean load that day writes it instead.
+ *
+ * Membership in `degradedResults` — not a field on the object — keeps the
+ * marker off the wire (`GET /portfolio/:accountAddress` returns the object
+ * as-is and the overview schema is `additionalProperties: false`; any wire
+ * field belongs to #3295) and is what makes the answer survive being served
+ * from the cache: the flag was computed inside the loader and rides the
+ * exact instance the cache hands back. This is a READ of the marker only —
+ * a degraded result still lands in the TTL cache and is dropped right after
+ * (#3292/#3297), so the snapshot signal never changes caching behaviour.
+ */
+export function isPortfolioUnpriceable(portfolio: Portfolio): boolean {
+  return degradedResults.has(portfolio)
+}
+
+/**
  * Resolve one read to its raw base-unit string and wire marker. A fulfilled
  * read is recorded as the token's last-known balance and carries no marker;
  * a rejected one substitutes the last-known value and is marked stale with

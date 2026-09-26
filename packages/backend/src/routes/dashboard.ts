@@ -14,6 +14,7 @@ import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import {
   combineBalanceFreshness,
   fetchPortfolioForAccount,
+  isPortfolioUnpriceable,
 } from '../modules/accounts/index.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
@@ -150,7 +151,26 @@ export default async function dashboardRoutes(
     )
 
     if (!snapshotsByDate.has(todayDate)) {
-      await insertPortfolioSnapshot(sub, todayDate, totalUsd, totalEur, totalSek)
+      // #3296: a read valued from a failed balance leg or a missing price is
+      // unpriceable — inserting it would pin an understated figure on the day
+      // (the row is never replaced and becomes tomorrow's baseline), so the
+      // insert is skipped and the first CLEAN load that day writes it. Prices
+      // served from #3297's last-good cache count as priced. One day with no
+      // snapshot reports `change.available = false` tomorrow — a wrong figure
+      // is worse than a missing one.
+      const snapshotBlocked = currentPortfolio.some((portfolio) =>
+        isPortfolioUnpriceable(portfolio),
+      )
+      if (snapshotBlocked) {
+        // No amounts on purpose: the log line is a finding aid for a day with
+        // no snapshot, not a figures channel.
+        request.log.info(
+          { userId: sub },
+          'Daily portfolio snapshot skipped: the portfolio read is unpriceable (#3296)',
+        )
+      } else {
+        await insertPortfolioSnapshot(sub, todayDate, totalUsd, totalEur, totalSek)
+      }
     }
 
     const yesterdaySnapshot = snapshotsByDate.get(yesterdayDate)

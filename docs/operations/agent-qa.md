@@ -5,6 +5,7 @@ covers:
   - .env.dev.example
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-failure-issue.mjs
+  - scripts/ci/qa-retry.mjs
   - .github/workflows/docs-audit.yml
   - .github/workflows/qa-live.yml
   - .github/workflows/dev-gate.yml
@@ -1073,7 +1074,24 @@ Testnet/RPC hiccups must not permanently wedge promotion. Two levers:
 
 - **Retry budget** — each `qa-dev.yml` run retries the whole suite up to
   `QA_MAX_ATTEMPTS` times (default **2**, repo variable) before it's called red.
-  Keep it low; each attempt consumes test funds.
+  Keep it low; each attempt consumes test funds. **A pass that needed the retry
+  reports itself (#3338).** It is not a quiet green: each attempt keeps its own
+  log (`qa-run.attempt-N.log`), and `qa-run.log`, which Coverage completeness
+  reads, is always the final attempt's copy. The run gets a `money-flow retry`
+  notice and a job-summary block listing the earlier attempts' failing legs,
+  with URLs and key-labelled values of 16+ characters scrubbed, because a provider URL
+  carries its key. Count them over a window with
+  `GITHUB_REPOSITORY=d-hinders/Haven-AI node scripts/ci/qa-retry.mjs count --since <YYYY-MM-DD>`.
+  It walks the run-level-successful qa-dev runs one UTC day at a time (the
+  runs API caps a filtered query at 1000 results, and gate-skipped runs fill a
+  day: 131–215 run-level successes on 2026-09-24/25; a day that comes back
+  short of its `total_count` is refused, never silently truncated), keeps those whose `money-flow` job
+  succeeded, reads each job log's `passed on attempt N/M` line, and prints the
+  passes, how many needed the retry, and their run ids. A money-flow pass whose
+  Coverage completeness step then failed is a red run and is not counted. It
+  costs one listing call per 100 runs per UTC day, plus one API call per
+  gate-skipped run and two per harness run. A rising count is a provider wave in the
+  making (epic #3335), not noise.
 - **`qa-override` label** — adding it to a promotion PR **skips** the freshness
   gate (logged as a warning). Use it only to unblock a known-flaky testnet
   hiccup when you've confirmed a recent QA run out-of-band; remove it once a fresh

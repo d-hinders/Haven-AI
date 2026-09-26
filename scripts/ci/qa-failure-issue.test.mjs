@@ -194,11 +194,73 @@ const PREFLIGHT = [
   '',
   '✗ preflight: a resource this run consumes is below its floor. Fix it before reading anything below — the legs cannot pass without it.',
 ].join('\n')
-const HARNESS = "• x402-catalog-guided-purchase … FAIL — TypeError: Cannot read properties of undefined (reading 'amount')"
+// The harness prints err.message, never the error's name (thrown-error-detail.ts).
+const HARNESS = '• x402-catalog-guided-purchase … FAIL — api.getAgent is not a function'
 const HAVEN_4XX = '• delegation-lifecycle … FAIL — throwaway signup failed (400): email already registered'
 const MERCHANT_402 = '• x402-erc7710-hosted … FAIL — hosted haven_settle_mcp_tool refused: MERCHANT_REJECTED_AFTER_FUNDING — Merchant refused to deliver the tool (HTTP 402).'
 
 describe('qa-failure-issue: failure classes (#3337)', () => {
+  test('every provider signature classes a leg on its own', () => {
+    for (const detail of [
+      'authorize failed (502): could not coalesce error (error={ "code": -32016, "message": "over rate limit" })',
+      'settleX402Erc7710 failed: Could not deploy the delegate account — retry the authorize: RPC Request failed.',
+      'Sweep relay failed: {"message":"Batch of more than 3 requests are not allowed on free plan"}',
+      'Sweep relay failed: {"message":"No label `flashblocks`"}',
+      'Sweep relay failed: {"message":"Request timeout on the free plan, please upgrade to paid plan","code":30}',
+      'sweep failed: HTTP request failed. URL: https://sepolia.base.org Status: 503',
+    ]) assert.equal(classifyLog(`• x402-delegation-3009-sweep … FAIL — ${detail}`).runClass, 'provider', detail)
+  })
+
+  test('a leg block stops at the next leg: a provider signature under leg b never classes leg a', () => {
+    const r = classifyLog([MASKED_502, PROVIDER_MULTILINE].join('\n'))
+    assert.deepEqual(r.legs.map((l) => [l.leg, l.class]), [['delegation-lifecycle', 'unclassified'], ['x402-delegation-3009', 'provider']])
+  })
+
+  test('precedence: a provider signature wins over a haven 4xx in the same leg', () => {
+    assert.equal(classifyLog('• a … FAIL — signup failed (400): upstream said Status: 429').legs[0].class, 'provider')
+  })
+
+  test('haven is the leg\'s own call only: a "failed (4xx)" after a relayed refusal is not Haven\'s', () => {
+    assert.equal(classifyLog('• x402-erc7710-hosted … FAIL — hosted tool refused (MERCHANT_REJECTED): the merchant call failed (402)').runClass, 'unclassified')
+  })
+
+  test('harness: a relayed body quoting "TypeError" is not a harness error; a harness crash is run-level', () => {
+    assert.equal(classifyLog('• x … FAIL — fresh-agent authorize failed (500): {"details":"TypeError: fetch failed"}').runClass, 'unclassified')
+    const crash = classifyLog('\n✗ harness crashed: Cannot read properties of undefined (reading \'id\')')
+    assert.equal(crash.runClass, 'harness')
+    assert.deepEqual(crash.legs, [])
+  })
+
+  test('the unclassified and preflight paths are scrubbed too (they are most real runs)', () => {
+    const unclassified = classifyLog(`• x402-erc7710-fresh-agent … FAIL — authorize failed (502): {"details":"server response 500", "requestUrl": "https://lb.example.live/base-sepolia/${KEY}"}`)
+    assert.equal(unclassified.runClass, 'unclassified')
+    assert.doesNotMatch(unclassified.legs[0].signature, new RegExp(KEY))
+    const preflight = classifyLog(`  ✗ observer RPC https://lb.example.live/base-sepolia/${KEY} unreachable\n\n✗ preflight: a resource this run consumes is below its floor.`)
+    assert.equal(preflight.runClass, 'preflight')
+    assert.doesNotMatch(preflight.signature, new RegExp(KEY))
+  })
+
+  test('a continuation-line hit keeps its step; a pipe cannot break the table; an issue number does not link', () => {
+    const [leg] = classifyLog(PROVIDER_MULTILINE).legs
+    assert.match(leg.signature, /^• x402-delegation-3009 … FAIL — Delegation-rail.* → Status: 429/)
+    const body = buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: classifyLog('• a … FAIL — expected a | b, see the #1310 fix') })
+    assert.match(body, /expected a \\\| b/)
+    assert.doesNotMatch(body, /(^|[^\u2060])#1310/)
+  })
+
+  test('a Coverage-completeness failure (no failing leg) carries the green-with-skips marker as its signature', () => {
+    const r = classifyLog('• a … PASS — ok\n\n⚠ green-with-skips: 1 leg(s) skipped')
+    assert.match(r.signature, /green-with-skips:/)
+  })
+
+  test('earlier attempts are reported with their run class, so a first-attempt provider leg is not lost', () => {
+    const logs = { 'qa-run.attempt-1.log': PROVIDER_JSON_URL, 'qa-run.attempt-2.log': MASKED_502 }
+    const r = readFinalAttempt(Object.keys(logs), (f) => logs[f])
+    assert.equal(r.runClass, 'unclassified')
+    assert.deepEqual(r.earlier.map((e) => [e.attempt, e.runClass]), [[1, 'provider']])
+    assert.match(buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: r }), /Earlier attempt 1: `provider`/)
+  })
+
   test('a provider signature on a continuation line classes the leg (Status: 429 after "HTTP request failed.")', () => {
     const r = classifyLog(PROVIDER_MULTILINE)
     assert.equal(r.runClass, 'provider')

@@ -53,7 +53,8 @@ export const ISSUE_TITLE = 'qa-dev money-flow failing'
 //
 //   provider      the RPC/bundler provider refused or failed the request
 //   preflight     the harness stopped before any leg ran (a resource floor)
-//   harness       the harness itself threw (a JS runtime error)
+//   harness       the harness itself threw (a JS runtime error's message, or
+//                 the run-level `✗ harness crashed:` line)
 //   haven         Haven's API answered a 4xx to a request the leg expected to
 //                 succeed (`<step> failed (4xx)` on the FAIL line itself)
 //   unclassified  no signature — including the backend's masked 502 ("Could
@@ -84,8 +85,14 @@ const PROVIDER = [
   // #2511: a 502 whose body quotes the public endpoint is an RPC outage. Matched
   // on the RAW line; the signature is scrubbed afterwards like every other.
   /\bURL: https:\/\/sepolia\.base\.org\b/,
+  // dRPC's free-plan limits (code 30 timeouts, code 31 batches): seen in 4 runs
+  // of the 2026-09-26 sample and otherwise left unclassified.
+  /on the free plan|upgrade to paid plan/,
 ]
-const HARNESS = [/\b(TypeError|ReferenceError|SyntaxError|RangeError)\b/, /Cannot read properties of/]
+// The harness prints `err.message`, never the error's name (thrown-error-detail.ts,
+// run.ts), so match the MESSAGE shapes a JS runtime error has — a quoted
+// "TypeError" in a relayed body is someone else's error.
+const HARNESS = [/\bis not a function\b|\bis not defined\b|Cannot (read|set) properties of (undefined|null)/]
 // The harness's own Haven API client reports `<step> failed (<status>)`. A 4xx
 // relayed from a MERCHANT (`(HTTP 402)` inside a hosted-tool refusal) is not Haven's.
 const HAVEN = [/^• \S+ … FAIL — [^(]*\bfailed \(4\d\d\)/]
@@ -120,13 +127,25 @@ export function excerpt(line, index, { before = 80, after = 160 } = {}) {
   return scrub(`${head}${text}${end < line.length ? ' …' : ''}`, 320)
 }
 
+/**
+ * Neutralise `#123` so a signature quoting an issue does not create a
+ * cross-reference event from the public qa-failure issue.
+ */
+function noIssueRefs(text) {
+  return text.replace(/#(\d)/g, '#\u2060$1')
+}
+
 /** Class and signature for one failing leg: its FAIL line plus continuation lines. */
 export function classifyLeg(lines) {
   for (const [cls, patterns] of [['provider', PROVIDER], ['harness', HARNESS], ['haven', HAVEN]]) {
     const hit = firstMatch(lines, patterns)
-    if (hit) return { class: cls, signature: excerpt(hit.line, hit.index) }
+    if (!hit) continue
+    const found = excerpt(hit.line, hit.index)
+    // A hit on a continuation line (`Status: 429`) keeps the step it belongs to.
+    const signature = hit.line === lines[0] ? found : `${scrub(lines[0] ?? '', 120)} → ${found}`
+    return { class: cls, signature: noIssueRefs(signature) }
   }
-  return { class: 'unclassified', signature: scrub(lines[0] ?? '', 240) }
+  return { class: 'unclassified', signature: noIssueRefs(scrub(lines[0] ?? '', 240)) }
 }
 
 /**
@@ -143,7 +162,12 @@ export function classifyLog(text) {
   if (preflightAt !== -1) {
     // The resource lines that failed their floor say which one.
     const failing = lines.slice(0, preflightAt).filter((l) => /^\s+✗ /.test(l)).map((l) => l.trim())
-    return { runClass: 'preflight', signature: scrub(failing[0] ?? lines[preflightAt].trim(), 200), legs: [] }
+    return { runClass: 'preflight', signature: noIssueRefs(scrub(failing[0] ?? lines[preflightAt].trim(), 200)), legs: [] }
+  }
+  // The harness itself crashed: run-level, no legs.
+  const crashed = lines.find((l) => /^\s*✗ harness crashed:/.test(l))
+  if (crashed) {
+    return { runClass: 'harness', signature: noIssueRefs(scrub(crashed.trim(), 240)), legs: [] }
   }
   const legs = []
   for (let i = 0; i < lines.length; i++) {
@@ -156,9 +180,10 @@ export function classifyLog(text) {
   const counts = new Map()
   for (const l of legs) counts.set(l.class, (counts.get(l.class) ?? 0) + 1)
   if (counts.size === 0) {
-    // No failing leg (e.g. strict mode refusing skipped legs): the run-level ✗ line says why.
-    const runLine = lines.find((l) => /^\s*✗ /.test(l))
-    return { runClass: 'unclassified', signature: runLine ? scrub(runLine.trim(), 200) : null, legs }
+    // No failing leg: strict mode refusing skipped legs, or Coverage completeness
+    // finding the green-with-skips marker. The run-level line says why.
+    const runLine = lines.find((l) => /^\s*✗ /.test(l)) ?? lines.find((l) => /green-with-skips:/.test(l))
+    return { runClass: 'unclassified', signature: runLine ? noIssueRefs(scrub(runLine.trim(), 200)) : null, legs }
   }
   if (counts.size === 1) return { runClass: legs[0].class, signature: legs[0].signature, legs }
   const summary = CLASSES.filter((c) => counts.has(c)).map((c) => `${c} ×${counts.get(c)}`).join(', ')
@@ -175,20 +200,31 @@ export function classificationSection(result) {
     out.push('', '| Leg | Class | Signature |', '|---|---|---|')
     for (const l of result.legs) out.push(`| \`${l.leg}\` | \`${l.class}\` | ${l.signature.replace(/\|/g, '\\|')} |`)
   }
+  for (const e of result.earlier ?? []) {
+    out.push('', `Earlier attempt ${e.attempt}: \`${e.runClass}\`${e.signature ? ` — ${e.signature}` : ''}`)
+  }
   return out
 }
 
-/** Read the attempt logs in attempt order; the last one is the failing attempt. */
+/**
+ * Read the attempt logs in attempt order; the last readable one is the failing
+ * attempt. The earlier attempts' run classes ride along as `earlier`, because
+ * on a red run nothing else reports them (#3338's summary only runs on a pass)
+ * and an earlier attempt's provider leg is exactly the evidence this exists for.
+ */
 export function readFinalAttempt(files, read = (f) => readFileSync(f, 'utf8')) {
-  const ordered = byAttempt(files)
-  for (let i = ordered.length - 1; i >= 0; i--) {
+  const results = []
+  for (const f of byAttempt(files)) {
     try {
-      return classifyLog(read(ordered[i]))
+      const n = Number(/attempt-(\d+)\.log$/.exec(f)?.[1] ?? results.length + 1)
+      results.push({ attempt: n, ...classifyLog(read(f)) })
     } catch {
-      // unreadable or missing (an unmatched glob): try the previous attempt
+      // unreadable or missing (an unmatched glob)
     }
   }
-  return null
+  if (results.length === 0) return null
+  const final = results.at(-1)
+  return { ...final, earlier: results.slice(0, -1).map(({ attempt, runClass, signature }) => ({ attempt, runClass, signature })) }
 }
 
 /** The body: latest failure only. History lives in the comments. */

@@ -160,7 +160,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
     // #3331: a merchant-locked budget names its merchant (the agent page's
     // budget card shows it). LEFT JOIN — most rows carry no merchant, and a
-    // deleted merchant only drops the label (migration 096, ON DELETE SET NULL).
+    // deleted merchant only drops the label (migration 097, ON DELETE SET NULL).
     const result = await pool.query(
       `SELECT d.id, d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
               d.version, d.status, d.budget_atomic, d.period_seconds, d.start_date,

@@ -358,7 +358,7 @@ export async function findOrCreateMerchantByHost(
  * `pay_to` is non-null only when `pay_to_status` is `verified`: every active,
  * verified x402 offer of the merchant on that network names the SAME payTo.
  * `conflicting` (two offers name different addresses) and `unstated` (some
- * offer names none — not yet probed since migration 096, or its challenge
+ * offer names none — not yet probed since migration 097, or its challenge
  * carries none) both mean "we do not know where this merchant is paid";
  * `shared` (another merchant's offer names the same address on that network)
  * means a pin would not be to THIS merchant alone. None of them is offered. `erc7710` is true when every one

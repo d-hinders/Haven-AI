@@ -1,5 +1,5 @@
 /**
- * Real-Postgres proof for migration 096 — merchant-locked budgets (#3331).
+ * Real-Postgres proof for migration 097 — merchant-locked budgets (#3331).
  * No mocks — #1219's rule.
  *
  * Pins the schema half of the issue: `merchant_catalog.pay_to` holds only a
@@ -18,7 +18,7 @@ import {
   resetDb,
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
-import { down, up, version } from '../096_merchant_pay_to.js'
+import { down, up, version } from '../097_merchant_pay_to.js'
 
 async function runUp(): Promise<void> {
   const client = await db.connect()
@@ -97,7 +97,7 @@ async function columnCount(): Promise<string> {
   return rows[0].count
 }
 
-describeDb('migration 096_merchant_pay_to', () => {
+describeDb('migration 097_merchant_pay_to', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
@@ -109,7 +109,7 @@ describeDb('migration 096_merchant_pay_to', () => {
   })
 
   it('names itself', () => {
-    expect(version).toBe('096_merchant_pay_to')
+    expect(version).toBe('097_merchant_pay_to')
   })
 
   it('adds both columns and down() drops them', async () => {

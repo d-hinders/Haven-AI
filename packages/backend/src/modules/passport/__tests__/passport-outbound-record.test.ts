@@ -178,10 +178,15 @@ describe('passport anchor outbound record (#1556)', () => {
 
   // A same-schema log ATTESTED BY SOMEONE ELSE is not this mint either — EAS
   // sets attester to msg.sender, so the event's attester must be the relayer.
+  // The attester topic is an INDEXED ADDRESS: real chain data left-pads it to
+  // the full 32-byte topic word. Unpadded (or 20-byte) topics make ethers
+  // drop or defer-error the log BEFORE the attester guard sees it — the test
+  // then passed with the guard mutated out (#3342 criterion c). Padded, the
+  // guard — not the ABI decoder — is what refuses this log.
   it('a log attested by an address other than the broadcaster is refused', async () => {
     const log = attestedLog(MINED_UID)
     const topics = [...log.topics]
-    topics[2] = '0x' + '77'.repeat(20)
+    topics[2] = '0x' + '00'.repeat(12) + '77'.repeat(20)
     receipt = { status: 1, logs: [{ ...log, topics }] }
     await expect(anchorOnChain(84532, CLAIM)).rejects.toThrow(/no readable Attested log/)
     expect(trace).toEqual(['record:open', 'broadcast', 'record:failed'])

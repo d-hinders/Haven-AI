@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/middleware/owner-cli.ts
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
-  - packages/backend/src/db/migrations/096_merchant_pay_to.ts
+  - packages/backend/src/db/migrations/097_merchant_pay_to.ts
   - packages/backend/src/routes/merchants.ts
   - packages/backend/src/infra/repositories/delegation-budgets.ts
   - packages/sdk/src/delegate-account.ts
@@ -126,7 +126,7 @@ dropped.
 | 7 | UserOps submitted with caller-provided signature only | Redemptions submitted with **client-signed** UserOp/tx only; the backend constructs and relays, never signs | CI (the #737 pattern, delegation flavor) |
 | 8 | Session-config modules signer-free | Delegation lifecycle modules (grant/replace/revoke construction, #827/#828) are **signer-free and relayer-free**: they build payloads and typed data, never sign | CI (module import/AST scan) |
 | 9 | Bundler credential read in exactly one place | Unchanged (one choke point; `redactVendorSecrets` on every error surface) | CI (existing) |
-| 9a | *(new, #1061)* **Redaction covers the shapes vendors actually use** | `redactVendorSecrets` catches `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth (`https://user:pass@host`), and key-in-path segments (`/rpc/<token>`, `/v2/<token>`) — not just the one `apikey=` spelling | Unit tests on the redactor |
+| 9a | *(new, #1061)* **Redaction covers the shapes vendors actually use** | `redactVendorSecrets` catches `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth (`https://user:pass@host`), and key-in-path segments (`/rpc/<token>`, `/v2/<token>`) — not just the one `apikey=` spelling. Since #3371 an RPC URL's key does not reach those patterns at all: the failover transport (`infra/chain/rpc-transport.ts`) scrubs viem's request errors in place, deriving the key-like segments from every configured endpoint URL (dRPC path, `dkey=`, `/v3/`, `/v2/`, QuickNode) | Unit tests on the redactor; transport scrub tests on `rpc-transport` |
 | 10 | Paymaster has no value-transfer surface | Unchanged — sponsorship pays gas only; proven in the spike (agent key held zero ETH and zero USDC) | CI + spike evidence |
 | 11 | *(new)* **No upgrade path from Haven code** | Haven's codebase contains no call site that can reach the account's UUPS upgrade function; upgrade authority = account signers only | CI (ABI/selector scan for `upgradeToAndCall` against DeleGator targets) |
 | 12 | *(new)* **Delegations are client-signed only** | No Haven code path calls `signDelegation`/EIP-712 delegation signing with a server-held key (pilot scripts with throwaway testnet keys excepted, path-scoped) | CI (import + call-site scan) |

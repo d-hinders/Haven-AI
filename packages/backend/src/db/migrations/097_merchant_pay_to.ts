@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg'
 
 /**
- * 096 — merchant-locked budgets (#3331, epic #3328).
+ * 097 — merchant-locked budgets (#3331, epic #3328).
  *
  * `merchant_catalog.pay_to` is the address an entry's own x402 challenge names
  * as `payTo`, recorded by the read-only refresh probe (`refreshCatalog`) that
@@ -29,7 +29,7 @@ import type { PoolClient } from 'pg'
  * stays pinned to the address it was signed for. A merchant-issued row always
  * carries a recipient — an open budget "for" a merchant is not a thing.
  */
-export const version = '096_merchant_pay_to'
+export const version = '097_merchant_pay_to'
 
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`

@@ -199,10 +199,14 @@ decode the EAS `Attested` event; the row's `tx_hash` is in
   deploys self-heal: the repair re-derives the UID from this same receipt,
   swaps the row to it (a paced sweep step), and the next reconcile revokes the
   REAL uid — no operator action, and the alarm keeps firing until that revoke
-  actually lands, which is correct. If the row has NOT converged after a
-  deploy that includes the fix, check `revocation_last_error` for the repair's
-  deferral reasons (no tx hash, unreadable receipt) and raise it as a bug —
-  do not hand-edit `attestation_uid`.
+  actually lands, which is correct. The repair logs every row it could not
+  answer, with the `agent_id` and the reason, on each sweep tick — those lines
+  are the first thing to check, not the passport table (#3342). The repair's
+  refusals and deferrals are counted in the sweep log; they are not written to
+  `revocation_last_error` (that column belongs to the REVOKE attempts, which
+  keep their own schedule). If the row has NOT converged after a deploy that
+  includes the fix — no repair tick ever reports it repaired or confirmed —
+  raise it as a bug; do not hand-edit `attestation_uid`.
 - **The log's uid matches the stored one** → the stored UID is genuine. A
   "no answer" read at Step 1 is then genuinely a young attestation or an RPC
   gap; continue to Step 2.

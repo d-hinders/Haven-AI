@@ -28,7 +28,7 @@ import {
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { AMPERSEND_OFFERS, HOST_OF_URL_SQL, SEED_MERCHANTS, down, up, version } from '../088_merchants.js'
-import { down as down096, up as up096 } from '../096_merchant_pay_to.js'
+import { down as down097, up as up097 } from '../097_merchant_pay_to.js'
 
 async function onClient(fn: (c: import('pg').PoolClient) => Promise<void>): Promise<void> {
   const c = await db.connect()
@@ -40,17 +40,17 @@ async function onClient(fn: (c: import('pg').PoolClient) => Promise<void>): Prom
 }
 
 /**
- * Revert to the pre-088 schema. Migration 096 (#3331) points
+ * Revert to the pre-088 schema. Migration 097 (#3331) points
  * `agent_delegations.merchant_id` at `merchants`, so 088's `down()` cannot
- * drop the table while 096 is applied: revert 096 first, and re-apply it
+ * drop the table while 097 is applied: revert 097 first, and re-apply it
  * last, after the test's own restore has brought 088 back (the 080 test's
  * precedent with 092).
  */
 async function with088Reverted<T>(body: () => Promise<T>, restore: () => Promise<unknown>): Promise<T> {
   return withMigrationReverted(
-    () => onClient(down096),
+    () => onClient(down097),
     () => withMigrationReverted(() => onClient(down), body, restore),
-    () => onClient(up096),
+    () => onClient(up097),
   )
 }
 
@@ -241,8 +241,8 @@ describeDb('migration 088_merchants', () => {
     )
     const client = await db.connect()
     try {
-      // 096 first: its agent_delegations.merchant_id FK would block the drop.
-      await down096(client)
+      // 097 first: its agent_delegations.merchant_id FK would block the drop.
+      await down097(client)
       await down(client)
       const survivor = await db.query<{ n: string }>(
         `SELECT count(*)::text AS n FROM merchant_catalog WHERE resource_url = 'https://services.ampersend.ai/api/later'`,
@@ -271,7 +271,7 @@ describeDb('migration 088_merchants', () => {
       )
       expect(survivorAgain.rows[0]?.slug).toBe('ampersend-demo-api')
     } finally {
-      await up096(client)
+      await up097(client)
       client.release()
     }
   })

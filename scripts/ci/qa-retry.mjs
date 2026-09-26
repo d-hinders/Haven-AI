@@ -49,9 +49,14 @@ export function failingLines(log) {
 
 /**
  * Replace every URL-shaped token (a provider URL embeds its key) and every
- * key-labelled value (`apiKey: …`, `token=…`), then cap the length. Covered:
+ * key-labelled value of 16+ characters (`apiKey: …`, `DRPC_API_KEY=…`,
+ * `private_key=…`, `Bearer …`), then cap the length. The length floor keeps
+ * short labelled words readable (`Unsupported token: USDT`). Covered:
  * any scheme (`https`, `wss`, …), JSON-escaped (`https:\/\/`) and
- * percent-encoded (`https%3A%2F%2F`) URLs, and scheme-less `host.tld/path`.
+ * percent-encoded (`https%3A%2F%2F`) URLs, and unescaped scheme-less
+ * `host.tld/path`. Not covered: an escaped scheme-less URL or a bare key
+ * with neither URL nor label — the harness prints neither today (ethers'
+ * `requestUrl` and viem's `URL:` carry a scheme).
  * Identifiers stay readable — revert reasons, env-var names, leg names, UUIDs,
  * tx hashes — because they are the diagnosis this summary exists to show.
  * Only the first 1024 characters are scanned (the output keeps 240), which
@@ -62,7 +67,7 @@ export function scrub(text, max = 240) {
     .slice(0, 1024)
     .replace(/\b[a-z][a-z0-9+.-]*(?::\/\/|:\\\/\\\/|%3A%2F%2F)[^\s"'`)\]}]+/gi, '<url>')
     .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?\/[^\s"'`)\]}]*/gi, '<url>')
-    .replace(/\b((?:api[_-]?key|access[_-]?token|token|secret|key)["']?\s*[:=]\s*["']?)[^\s"',;)\]}]+/gi, '$1<redacted>')
+    .replace(/(?<![a-z0-9])((?:api[_-]?key|private[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|token|secret|password|key)["']?\s*[:=]\s*["']?|bearer\s+)[^\s"',;)\]}]{16,}/gi, '$1<redacted>')
   return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 

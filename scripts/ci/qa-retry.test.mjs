@@ -24,8 +24,9 @@ test('failingLines reads the harness FAIL lines and the run-level ✗ line, noth
   assert.deepEqual(found.map((f) => f.leg), ['x402-delegation-3009-sweep', 'delegation-lifecycle', null])
   assert.match(found[2].detail, /2\/14 scenario\(s\) failed/)
   assert.deepEqual(failingLines('• a … PASS — ok\n• b … SKIP — no identity'), [])
-  // CRLF logs parse the same.
+  // CRLF logs parse the same, and an indented run-level ✗ line still counts.
   assert.deepEqual(failingLines('• a … FAIL — boom\r\n'), [{ leg: 'a', detail: 'boom' }])
+  assert.deepEqual(failingLines('  ✗ 1/14 scenario(s) failed'), [{ leg: null, detail: '1/14 scenario(s) failed' }])
 })
 
 test('failingLines also reads the run-report row, so a live line split by stderr still names its leg (once)', () => {
@@ -58,6 +59,12 @@ test('scrub covers every URL form and key-labelled values, each rule on its own'
     `apiKey: ${FAKE_KEY}`,
     `"api_key":"${FAKE_KEY}"`,
     `token=${FAKE_KEY}`,
+    `DRPC_API_KEY=${FAKE_KEY}`, // label after an underscore
+    `private_key=${FAKE_KEY}`, // snake_case: the bare `key` label, after the underscore
+    `privateKey: ${FAKE_KEY}`,
+    `accessToken: ${FAKE_KEY}`, // camelCase: only the access[_-]?token alternative reaches this
+    `secret: ${FAKE_KEY}`,
+    `Authorization: Bearer ${FAKE_KEY}`,
   ]) assert.doesNotMatch(scrub(`err (${leak}) end`), /AbCdEf/, leak)
 })
 
@@ -70,12 +77,14 @@ test('scrub leaves identifiers readable — they are the diagnosis', () => {
     'x402-erc7710-over-budget-rejected: x402_retry_rejected_after_funding',
     'mcp__haven-signer__haven_sign_x402 refused (ERC20InsufficientBalance)',
     'payment 3f2b8c1e-9a4d-4e6f-8b7a-2c1d0e9f8a7b stuck',
+    'Unsupported token: USDT', // a short labelled word is not a key
+    'secret: not set',
   ]) assert.equal(scrub(readable), readable)
 })
 
 test('scrub bounds its input: a pathological line returns fast and capped', () => {
   const t0 = Date.now()
-  const out = scrub('a-b.'.repeat(2500)) // ~10 s unbounded (measured in review), well under 2 s bounded
+  const out = scrub('a-b.'.repeat(10000)) // 40k chars: ~15 s unbounded (round-3 review), a few ms bounded
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`)
   assert.ok(out.length <= 240)
 })
@@ -91,6 +100,8 @@ test('a first-attempt pass writes nothing; a later pass lists the earlier attemp
   assert.doesNotMatch(md, /lb\.drpc\.live/)
   // An unreadable attempt log still says so rather than vanishing.
   assert.match(retrySummary(2, ['', '']), /no failure line found/)
+  // Only the attempts BEFORE the passing one are listed.
+  assert.doesNotMatch(md, /\*\*Attempt 2:\*\*/)
 })
 
 test('byAttempt orders the globbed logs numerically, not lexically — and the CLI path uses it', () => {
@@ -119,6 +130,28 @@ test('countRuns queries one UTC day at a time and refuses a day the API cap trun
   assert.ok(calls.some((c) => c.includes('created=2026-09-25')) && calls.some((c) => c.includes('created=2026-09-26')))
   assert.ok(!calls.some((c) => c.includes('created=>=')))
   assert.throws(() => countRuns('2026-09-25', { gh: fakeGh(1500, [1, 2]), repo: 'o/r', until: '2026-09-25' }), /fetched 2 of 1500/)
+})
+
+test('countRuns skips a gate-skipped run (the common case) without reading its logs', () => {
+  const logCalls = []
+  // The shape the jobs API returns for a gate-skipped deployment_status run (2026-09-25).
+  const skipped = [{ id: 1, name: 'gate', conclusion: 'success' }, { id: 2, name: 'money-flow', conclusion: 'skipped' }]
+  const ran = [{ id: 3, name: 'gate', conclusion: 'success' }, { id: 4, name: 'money-flow', conclusion: 'success' }]
+  const gh = (args) => {
+    if (args[1] === '-X') return JSON.stringify({ total: 2, ids: [10, 20] })
+    if (args[1].endsWith('/jobs')) return JSON.stringify(args[1].includes('/runs/10/') ? skipped : ran)
+    logCalls.push(args[1])
+    return 'money-flow QA passed on attempt 1/2'
+  }
+  const t = countRuns('2026-09-25', { gh, repo: 'o/r', until: '2026-09-25' })
+  assert.deepEqual([t.passes, t.firstAttempt, t.unknown], [1, 1, 0])
+  assert.deepEqual(logCalls, ['repos/o/r/actions/jobs/4/logs'])
+})
+
+test('qa-dev.yml: the money-flow job has no display name, so the API reports it as `money-flow`', () => {
+  const job = /^  money-flow:\n([\s\S]*?)\n    steps:/m.exec(QA_DEV)
+  assert.ok(job, 'money-flow job block not found')
+  assert.doesNotMatch(job[1], /^    name:/m)
 })
 
 test('countRuns pages through a real-sized day (215 runs = 100 + 100 + 15)', () => {

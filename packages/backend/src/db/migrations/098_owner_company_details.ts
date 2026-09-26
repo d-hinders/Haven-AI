@@ -11,10 +11,19 @@ import type { PoolClient } from 'pg'
  * block additively (`openapi/party-model.ts`) so an agent's receipt can state
  * who it is paying for.
  *
- * `ON DELETE CASCADE` on `user_id`: deleting the owner's account deletes
- * these details with it — the row has no meaning once the account it
- * describes is gone, and the owner never has to separately ask Haven to
- * forget it. Pinned by the real-DB migration test's cascade case.
+ * `ON DELETE CASCADE` on `user_id`: IF the owner's account is ever deleted,
+ * these details go with it — the row has no meaning once the account it
+ * describes is gone. Pinned by the real-DB migration test's cascade case.
+ * That said, account deletion is an OPERATOR action today — there is no
+ * self-serve delete-my-account route — so this cascade is not itself an
+ * erasure path an owner can reach; `DELETE /user/company-details`
+ * (`routes/owner-company-details.ts`, deliberately NOT gated by
+ * `HAVEN_OWNER_COMPANY_DETAILS`) is the one the owner actually has. Two
+ * OTHER tables reference `users(id)` with no `ON DELETE` action at all
+ * (`payment_intents.user_id`, `agent_rekeys.initiated_by_user_id`) —
+ * whichever future flow implements self-serve account deletion will need to
+ * delete rows here (and everywhere else with an FK to `users`) explicitly
+ * before it can rely on this cascade.
  *
  * `vat_number` is stored NORMALISED (uppercase, no spaces) so an equality
  * lookup and the VIES request never have to re-derive that shape at read

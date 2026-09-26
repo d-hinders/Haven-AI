@@ -242,18 +242,18 @@ export type paths = {
         };
         /**
          * Read the signed-in owner's company details.
-         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. 404 also when the owner has never saved any details (no distinct "not configured" body: both are "nothing here"). A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing) is re-checked asynchronously as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check's eventual outcome.
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. 404 also when the owner has never saved any details (no distinct "not configured" body: both are "nothing here"). A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing, or a genuine DB failure recording the check's result) is re-checked asynchronously (an atomic claim, so concurrent reads start at most one check) as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check's eventual outcome.
          */
         get: operations["getCompanyDetails"];
         /**
          * Create or replace the company details.
-         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears `vies_status` too.
+         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per signed-in owner (`ownerProfileRateLimit`).
          */
         put: operations["putCompanyDetails"];
         post?: never;
         /**
          * Delete the company details.
-         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Deleting the Haven account itself also deletes these details (`ON DELETE CASCADE`); this route is the owner-initiated equivalent for the details alone. The response is `{ ok: true }` whether or not a row existed.
+         * @description The owner's erasure path — deliberately NOT gated by `HAVEN_OWNER_COMPANY_DETAILS` (every other route on this and the vies-check path answers 404 when the feature is off; this one does not), so an owner can always remove details they saved while the feature was on, even after an operator turns it back off. Deleting the Haven account itself would also remove these details (the table's `user_id` foreign key is `ON DELETE CASCADE`), but account deletion is an operator action today — there is no self-serve delete-my-account route — so this is the only erasure path that exists. The response is `{ ok: true }` whether or not a row existed.
          */
         delete: operations["deleteCompanyDetails"];
         options?: never;
@@ -272,7 +272,7 @@ export type paths = {
         put?: never;
         /**
          * Re-run the VIES check for the saved VAT number.
-         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`.
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per signed-in owner (`ownerProfileRateLimit`).
          */
         post: operations["recheckCompanyDetailsVies"];
         delete?: never;
@@ -5634,6 +5634,21 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -5703,6 +5718,21 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -5753,7 +5783,7 @@ export interface operations {
                 };
             };
             /** @description Error response */
-            404: {
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5789,6 +5819,21 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

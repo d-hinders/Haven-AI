@@ -36,6 +36,23 @@ describe('validateCompanyDetailsInput (#3332)', () => {
     expect(result).toEqual({ ok: false, error: 'invalid_legal_name' })
   })
 
+  it.each([
+    '‮', // RIGHT-TO-LEFT OVERRIDE
+    '‪', // LEFT-TO-RIGHT EMBEDDING
+    '⁦', // LEFT-TO-RIGHT ISOLATE
+    '⁩', // POP DIRECTIONAL ISOLATE
+    '\u0080', // a C1 control
+    '\u009F', // the last C1 control
+  ])('rejects a legal name containing a bidi/C1 control character (%j) (#3332 review minor)', (control) => {
+    const result = validateCompanyDetailsInput({
+      legal_name: `Acme${control}AB`,
+      country: 'SE',
+      org_number: '1',
+      vat_number: null,
+    })
+    expect(result).toEqual({ ok: false, error: 'invalid_legal_name' })
+  })
+
   it('rejects a legal name over 200 characters', () => {
     const result = validateCompanyDetailsInput({
       legal_name: 'a'.repeat(201),

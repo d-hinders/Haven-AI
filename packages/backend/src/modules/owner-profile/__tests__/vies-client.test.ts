@@ -7,8 +7,8 @@
  * distinction the owner decision on #3332 turns on.
  */
 import { describe, expect, it } from 'vitest'
-import type { PinnedResponse, PinnedTransport, ResolvedAddress } from '../../../infra/http/ssrf-guard.js'
-import { checkVatWithVies } from '../vies-client.js'
+import type { PinnedRequest, PinnedResponse, PinnedTransport, ResolvedAddress } from '../../../infra/http/ssrf-guard.js'
+import { checkVatWithVies, viesRequestForVatNumber } from '../vies-client.js'
 
 const publicResolver = async (): Promise<ResolvedAddress[]> => [{ address: '93.184.216.34', family: 4 }]
 
@@ -179,3 +179,70 @@ describe('checkVatWithVies (#3332)', () => {
     ).resolves.toMatchObject({ status: 'not_verifiable' })
   })
 })
+
+/**
+ * #3332 review B1 — the request SHAPE bug, verified live against the
+ * production endpoint on 2026-09-27: sending the VAT number's own prefix
+ * INSIDE `vatNumber` (and/or the company's `country` instead of that prefix)
+ * makes VIES answer `valid:false`/`INVALID_INPUT` for numbers that answer
+ * `valid:true` in the correct shape. `viesRequestForVatNumber` is the fix;
+ * these tests pin its pure derivation AND capture the actual transport
+ * request body a real service-path call (`checkVatWithVies` fed the derived
+ * values) produces — the same seam `modules/owner-profile/service.ts`'s
+ * `runViesCheck` calls through.
+ */
+describe('viesRequestForVatNumber (#3332 review B1)', () => {
+  it('a Swedish number: countryCode from the prefix, vatNumber without it', () => {
+    expect(viesRequestForVatNumber('SE556703748501')).toEqual({ countryCode: 'SE', vatNumber: '556703748501' })
+  })
+
+  it('a mismatched-country number: the VAT prefix wins, never the company country', () => {
+    // The company's `country` field never reaches this function at all — it
+    // takes only the stored VAT number, so a DE-prefixed number always maps
+    // to DE regardless of what country the owner's company details say.
+    expect(viesRequestForVatNumber('DE811569869')).toEqual({ countryCode: 'DE', vatNumber: '811569869' })
+  })
+
+  it('Greece: the VAT prefix GR maps to VIES\'s own EL country code', () => {
+    expect(viesRequestForVatNumber('GR094014201')).toEqual({ countryCode: 'EL', vatNumber: '094014201' })
+  })
+
+  it('Northern Ireland: XI is already VIES\'s own country code, no mapping', () => {
+    expect(viesRequestForVatNumber('XI123456789')).toEqual({ countryCode: 'XI', vatNumber: '123456789' })
+  })
+})
+
+describe('checkVatWithVies request body, through the real service path (#3332 review B1)', () => {
+  function capturingTransport(): { transport: PinnedTransport; requests: PinnedRequest[] } {
+    const requests: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      requests.push(req)
+      return { status: 200, location: null, body: JSON.stringify({ valid: true }) }
+    }
+    return { transport, requests }
+  }
+
+  it('SE556703748501 → {countryCode:"SE", vatNumber:"556703748501"} on the wire', async () => {
+    const { transport, requests } = capturingTransport()
+    const { countryCode, vatNumber } = viesRequestForVatNumber('SE556703748501')
+    await checkVatWithVies(countryCode, vatNumber, { resolver: publicResolver, transport })
+    expect(requests).toHaveLength(1)
+    expect(JSON.parse(requests[0].body ?? '')).toEqual({ countryCode: 'SE', vatNumber: '556703748501' })
+  })
+
+  it('a VAT prefix that differs from the company country still sends the VAT prefix as countryCode', async () => {
+    const { transport, requests } = capturingTransport()
+    const { countryCode, vatNumber } = viesRequestForVatNumber('DE811569869')
+    // The company's own `country` ('SE', say) never enters this call at all.
+    await checkVatWithVies(countryCode, vatNumber, { resolver: publicResolver, transport })
+    expect(JSON.parse(requests[0].body ?? '')).toEqual({ countryCode: 'DE', vatNumber: '811569869' })
+  })
+
+  it('a Greek VAT number sends countryCode "EL", never "GR"', async () => {
+    const { transport, requests } = capturingTransport()
+    const { countryCode, vatNumber } = viesRequestForVatNumber('GR094014201')
+    await checkVatWithVies(countryCode, vatNumber, { resolver: publicResolver, transport })
+    expect(JSON.parse(requests[0].body ?? '')).toEqual({ countryCode: 'EL', vatNumber: '094014201' })
+  })
+})
+

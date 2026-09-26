@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect } from 'vitest'
 import { Wallet } from 'ethers'
+import { config } from '../../../config.js'
 import {
   buildPaymentReceipt,
   verifyPaymentReceipt,
@@ -62,5 +63,56 @@ describe('buildPaymentReceipt (backend DB mapping)', () => {
     const signature = DELEGATE.signingKey.sign(SIGN_HASH).serialized
     const receipt = buildPaymentReceipt(row({ signature }))
     expect(verifyPaymentReceipt(receipt).verified).toBe(true)
+  })
+
+  // #3332 review M2 — the FLAG WIRING in this file, not just
+  // `buyerPartyFromJoin`'s own pure test: a row that carries buyer_* columns
+  // must not surface `parties.buyer` when `config.ownerCompanyDetailsEnabled`
+  // is false, and must surface it (present, never present-and-null) when
+  // true. Mutation-proven: replacing `config.ownerCompanyDetailsEnabled` with
+  // a literal `true` at this file's call site would make the "off" case
+  // below fail.
+  describe('#3332: parties.buyer flag wiring', () => {
+    const originalFlag = config.ownerCompanyDetailsEnabled
+
+    afterEach(() => {
+      ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = originalFlag
+    })
+
+    const buyerRow = row({
+      buyer_legal_name: 'Acme AB',
+      buyer_country: 'SE',
+      buyer_org_number: '556677-8899',
+      buyer_vat_number: 'SE556677889901',
+      buyer_vies_status: 'valid',
+      buyer_vies_checked_at: '2026-09-20T10:00:00.000Z',
+    })
+
+    it('flag OFF: parties has no "buyer" key at all, even with a fully-populated join', () => {
+      ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = false
+      const r = buildPaymentReceipt(buyerRow) as unknown as { payment: { parties: Record<string, unknown> } }
+      expect('buyer' in r.payment.parties).toBe(false)
+    })
+
+    it('flag ON: parties.buyer is present and shaped correctly', () => {
+      ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
+      const r = buildPaymentReceipt(buyerRow) as unknown as {
+        payment: { parties: { buyer?: Record<string, unknown> } }
+      }
+      expect(r.payment.parties.buyer).toEqual({
+        legal_name: 'Acme AB',
+        country: 'SE',
+        org_number: '556677-8899',
+        vat_number: 'SE556677889901',
+        vies_status: 'valid',
+        vies_checked_at: '2026-09-20T10:00:00.000Z',
+      })
+    })
+
+    it('flag ON but no saved details (join columns null): still no "buyer" key', () => {
+      ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
+      const r = buildPaymentReceipt(row()) as unknown as { payment: { parties: Record<string, unknown> } }
+      expect('buyer' in r.payment.parties).toBe(false)
+    })
   })
 })

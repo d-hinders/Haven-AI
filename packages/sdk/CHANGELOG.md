@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **Additive `PaymentParties.buyer` (#3332).** `PaymentParties`/`RawPaymentParties` (`types.ts`) gain an optional `buyer` object — the paying agent's owner's company details (legal name, country, org number, VAT number, VIES status/checked-at) — mapped by `payment-mappers.ts`'s `mapParties` on `listReceipts`/`listReceiptsPage`. Present only when the backend has `HAVEN_OWNER_COMPANY_DETAILS` on and the owner has saved details; absent (never present-and-null) otherwise, so an older SDK reading a newer backend's mapped receipts simply never sees it. `HavenClient.getReceipt()` is unaffected in a different way: it already passed the backend's JSON bundle through un-remapped, so `payment.parties.buyer` there is the raw, snake_case shape on the wire, same as every other `parties` field on that surface.
+
 ## 0.6.0-alpha.0 — 2026-09-26
 
 ### Removed

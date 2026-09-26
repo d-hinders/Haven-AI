@@ -74,17 +74,44 @@ describeDb('owner company details routes (#3332)', () => {
   const VALID_BODY = { legal_name: 'Acme AB', country: 'SE', org_number: '556677-8899' }
 
   describe('the flag', () => {
-    it('answers 404 on every route when off, even for a signed-in owner', async () => {
+    it('answers 404 on GET/PUT/POST when off, even for a signed-in owner — DELETE is the deliberate exception', async () => {
       (config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = false
       const userId = await seedUser()
       const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
       expect(get.statusCode).toBe(404)
       const put = await app.inject({ method: 'PUT', url: '/user/company-details', ...auth(userId), payload: VALID_BODY })
       expect(put.statusCode).toBe(404)
-      const del = await app.inject({ method: 'DELETE', url: '/user/company-details', ...auth(userId) })
-      expect(del.statusCode).toBe(404)
       const recheck = await app.inject({ method: 'POST', url: '/user/company-details/vies-check', ...auth(userId) })
       expect(recheck.statusCode).toBe(404)
+      // DELETE (#3332 review, owner-privacy default): erasure works
+      // regardless of the flag, so an owner is never trapped with saved
+      // details behind a flag an operator later turned off.
+      const del = await app.inject({ method: 'DELETE', url: '/user/company-details', ...auth(userId) })
+      expect(del.statusCode).toBe(200)
+      expect(del.json()).toEqual({ ok: true })
+    })
+
+    it('DELETE erases a row that was saved while the flag was on, even after the flag is turned off', async () => {
+      (config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
+      const userId = await seedUser()
+      await app.inject({ method: 'PUT', url: '/user/company-details', ...auth(userId), payload: VALID_BODY })
+      ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = false
+      const del = await app.inject({ method: 'DELETE', url: '/user/company-details', ...auth(userId) })
+      expect(del.statusCode).toBe(200)
+      expect(del.json()).toEqual({ ok: true })
+      ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
+      const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
+      expect(get.statusCode).toBe(404)
+    })
+
+    it('DELETE still refuses an agent API key even with the flag off', async () => {
+      (config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = false
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/user/company-details',
+        headers: { authorization: 'Bearer sk_agent_whatever' },
+      })
+      expect(res.statusCode).toBe(403)
     })
 
     it('serves the routes normally once on', async () => {

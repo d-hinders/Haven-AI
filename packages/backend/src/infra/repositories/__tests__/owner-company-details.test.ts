@@ -9,6 +9,7 @@ import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '..
 import {
   buyerPartyFromJoin,
   type BuyerJoinColumns,
+  claimStalePendingForUser,
   deleteOwnerCompanyDetails,
   findStalePendingForUser,
   getOwnerCompanyDetails,
@@ -98,11 +99,64 @@ describeDb('owner-company-details repository (#3332)', () => {
       vies_checked_at: null,
     })
     const checkedAt = new Date().toISOString()
-    const updated = await setViesResult(userId, 'valid', checkedAt)
+    const updated = await setViesResult(userId, 'valid', checkedAt, 'SE556677889901')
     expect(updated).toMatchObject({ vies_status: 'valid' })
 
     await deleteOwnerCompanyDetails(userId)
-    expect(await setViesResult(userId, 'valid', checkedAt)).toBeNull()
+    expect(await setViesResult(userId, 'valid', checkedAt, 'SE556677889901')).toBeNull()
+  })
+
+  it('setViesResult: the guard (#3332 review M1) — a changed VAT number or a resolved (non-pending) row refuses the write', async () => {
+    const userId = await seedUser()
+    await upsertOwnerCompanyDetails(userId, {
+      legal_name: 'Acme AB',
+      country: 'SE',
+      org_number: '556677-8899',
+      vat_number: 'SE556677889901',
+      vies_status: 'pending',
+      vies_checked_at: null,
+    })
+    // A result computed for a DIFFERENT VAT number than the row now holds
+    // (the owner changed it mid-flight) must not land.
+    expect(await setViesResult(userId, 'valid', new Date().toISOString(), 'DE811569869')).toBeNull()
+    const untouched = await getOwnerCompanyDetails(userId)
+    expect(untouched).toMatchObject({ vat_number: 'SE556677889901', vies_status: 'pending' })
+
+    // A result for the RIGHT number lands while pending…
+    const first = await setViesResult(userId, 'valid', new Date().toISOString(), 'SE556677889901')
+    expect(first).toMatchObject({ vies_status: 'valid' })
+
+    // …and a SECOND, late result for the same number — the row is no longer
+    // `pending` — must not overwrite the resolved status either.
+    expect(await setViesResult(userId, 'invalid', new Date().toISOString(), 'SE556677889901')).toBeNull()
+    expect(await getOwnerCompanyDetails(userId)).toMatchObject({ vies_status: 'valid' })
+  })
+
+  it('setViesResult: a VAT number CLEARED mid-flight refuses the write (reproduces the #3332 review finding)', async () => {
+    const userId = await seedUser()
+    await upsertOwnerCompanyDetails(userId, {
+      legal_name: 'Acme AB',
+      country: 'SE',
+      org_number: '556677-8899',
+      vat_number: 'SE556677889901',
+      vies_status: 'pending',
+      vies_checked_at: null,
+    })
+    // The owner clears the VAT number while the check for it is in flight —
+    // exactly `writeCompanyDetails`'s clearing path (`vat_number: null`,
+    // `vies_status: null`).
+    await upsertOwnerCompanyDetails(userId, {
+      legal_name: 'Acme AB',
+      country: 'SE',
+      org_number: '556677-8899',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+    })
+    // `vat_number = $4` is never true against a NULL column (SQL three-valued
+    // logic) — the stale check's result must not resurrect it.
+    expect(await setViesResult(userId, 'valid', new Date().toISOString(), 'SE556677889901')).toBeNull()
+    expect(await getOwnerCompanyDetails(userId)).toMatchObject({ vat_number: null, vies_status: null })
   })
 
   it('markViesPending: null with no row, null with no VAT number, otherwise flips to pending', async () => {
@@ -152,8 +206,52 @@ describeDb('owner-company-details repository (#3332)', () => {
     const stale = await findStalePendingForUser(userId, 5)
     expect(stale?.vies_status).toBe('pending')
 
-    await setViesResult(userId, 'valid', new Date().toISOString())
+    await setViesResult(userId, 'valid', new Date().toISOString(), 'SE556677889901')
     expect(await findStalePendingForUser(userId, 0)).toBeNull()
+  })
+
+  describe('claimStalePendingForUser (#3332 review M3)', () => {
+    it('claims a stale pending row and bumps updated_at, same shape as findStalePendingForUser', async () => {
+      const userId = await seedUser()
+      await upsertOwnerCompanyDetails(userId, {
+        legal_name: 'Acme AB',
+        country: 'SE',
+        org_number: '556677-8899',
+        vat_number: 'SE556677889901',
+        vies_status: 'pending',
+        vies_checked_at: null,
+      })
+      expect(await claimStalePendingForUser(userId, 5)).toBeNull()
+      await db.query(`UPDATE owner_company_details SET updated_at = NOW() - INTERVAL '10 minutes' WHERE user_id = $1`, [
+        userId,
+      ])
+      const claimed = await claimStalePendingForUser(userId, 5)
+      expect(claimed?.vies_status).toBe('pending')
+      // Immediately re-claiming must find nothing — the claim itself made the
+      // row fresh.
+      expect(await claimStalePendingForUser(userId, 5)).toBeNull()
+    })
+
+    it('two concurrent claims on the same stale row: exactly one wins', async () => {
+      const userId = await seedUser()
+      await upsertOwnerCompanyDetails(userId, {
+        legal_name: 'Acme AB',
+        country: 'SE',
+        org_number: '556677-8899',
+        vat_number: 'SE556677889901',
+        vies_status: 'pending',
+        vies_checked_at: null,
+      })
+      await db.query(`UPDATE owner_company_details SET updated_at = NOW() - INTERVAL '10 minutes' WHERE user_id = $1`, [
+        userId,
+      ])
+      const results = await Promise.all([
+        claimStalePendingForUser(userId, 5),
+        claimStalePendingForUser(userId, 5),
+      ])
+      const wins = results.filter((r) => r !== null)
+      expect(wins).toHaveLength(1)
+    })
   })
 
   describe('buyerPartyFromJoin (pure, but exercised against the join columns\' real shape)', () => {

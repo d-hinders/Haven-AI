@@ -71,6 +71,24 @@ export const demoRateLimit = {
 } as const
 
 /**
+ * Owner company details writes (#3332 review M3): `PUT /user/company-details`
+ * and `POST /user/company-details/vies-check`, both dashboard-JWT-authenticated
+ * so the shared credential key generator buckets per signed-in owner, never
+ * per shared proxy IP. Each write can start a VIES check against the EU
+ * Commission's endpoint — the ceiling here is about being a considerate
+ * caller of THAT external service (and giving the async
+ * `recheckIfStalePending`/atomic-claim guard less to race against), not about
+ * an on-chain spend the way `moneyPathRateLimit` is. 20/min is far above any
+ * legitimate owner editing their own details by hand.
+ */
+export const ownerProfileRateLimit = {
+  rateLimit: {
+    max: 20,
+    timeWindow: '1 minute',
+  },
+} as const
+
+/**
  * Public passport verification (#974). Keyed per **SUBJECT**, not per caller.
  *
  * The endpoint is unauthenticated, so the default key is `ip:` — and there is

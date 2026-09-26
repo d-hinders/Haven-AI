@@ -9,8 +9,8 @@
  * lives in exactly one place.
  */
 import {
+  claimStalePendingForUser,
   deleteOwnerCompanyDetails,
-  findStalePendingForUser,
   getOwnerCompanyDetails,
   markViesPending,
   setViesResult,
@@ -18,11 +18,16 @@ import {
   type OwnerCompanyDetailsRow,
   type ViesStatus,
 } from '../../infra/repositories/owner-company-details.js'
-import { checkVatWithVies } from './vies-client.js'
+import { checkVatWithVies, viesRequestForVatNumber } from './vies-client.js'
 
 export const MAX_LEGAL_NAME_LENGTH = 200
 export const MAX_ORG_NUMBER_LENGTH = 32
-const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
+// #3332 review minor: C0 (\u0000-\u001F), DEL, C1 (\u0080-\u009F), and the
+// bidi override/isolate controls (‪-‮, ⁦-⁩) — a legal
+// name is rendered on receipts a merchant reads, and any of these can make
+// displayed text lie about its own reading order or hide characters
+// (a classic homograph/spoofing vector), not just break rendering.
+const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F-\u009F‪-‮⁦-⁩]/
 const COUNTRY_RE = /^[A-Z]{2}$/
 const ORG_NUMBER_RE = /^[A-Za-z0-9 .\-/]{1,32}$/
 // EU VAT number shape: 2-letter country prefix + 2-20 alnum. Deliberately
@@ -124,28 +129,69 @@ export function nextViesStatus(
 }
 
 /**
+ * Minimal structured logger for the VIES outcome (#3332 review M3) — never
+ * threaded a userId or a request through, because this runs DETACHED from
+ * any request (the HTTP response is already gone by the time a check
+ * completes; see this function's own doc). Deliberately NOT `console.log`
+ * free text: `event`/`status`/`reason` are grep-able fields so a systematic
+ * wrong result (e.g. every check landing `not_verifiable` because Haven's
+ * own request shape drifted from VIES's, or a spike of `invalid`) is visible
+ * in production log search without correlating request logs. Never logs the
+ * VAT number or the org number — `reason` is VIES's own error CODE (or a
+ * locally-assigned one, see `ViesCheckResult.reason`), never the input.
+ */
+function logViesOutcome(status: ViesStatus, reason: string | null, recorded: boolean): void {
+  // eslint-disable-next-line no-console -- no app logger is threaded through
+  // this detached async task (see the comment above); this is the one place
+  // in the module that logs anything, so it stays a single, greppable line.
+  console.log(
+    JSON.stringify({ level: 'info', event: 'owner_profile.vies_check_result', status, reason, recorded }),
+  )
+}
+
+/**
  * Runs the VIES check and records the outcome — ALWAYS records one, even on
  * throw, so a row can never stay `pending` because the runner itself failed
  * outside `checkVatWithVies`'s own never-throws contract. Deliberately
  * fire-and-forget from the route's point of view (see `routes/owner-company-details.ts`):
  * the HTTP response has already gone out with `vies_status: 'pending'`.
+ *
+ * `vatNumber` is the FULL, stored, normalised number (own 2-letter prefix +
+ * digits/letters) — `viesRequestForVatNumber` derives what VIES itself wants
+ * (`{countryCode, vatNumber}`, country from the VAT prefix, never from the
+ * company's `country` field — see that function's own doc, #3332 review B1).
+ * The SAME `vatNumber` is also the guard `setViesResult` binds its write to
+ * (#3332 review M1): a result only lands on the row it was actually computed
+ * for, `AND vat_number = $N AND vies_status = 'pending'` — never onto a VAT
+ * number the owner changed to, or cleared, while this check was in flight.
+ * `setViesResult` returns `null` (not a throw) when that guard does not
+ * match; the `catch` below is for a genuine DB failure (a lost connection),
+ * not for "the row moved on" — that case is the expected, silent no-op the
+ * guard exists to produce.
  */
-export async function runViesCheck(userId: string, country: string, vatNumber: string): Promise<void> {
+export async function runViesCheck(userId: string, vatNumber: string): Promise<void> {
   let status: ViesStatus = 'not_verifiable'
+  let reason: string | null = null
   try {
-    const result = await checkVatWithVies(country, vatNumber)
+    const { countryCode, vatNumber: bareNumber } = viesRequestForVatNumber(vatNumber)
+    const result = await checkVatWithVies(countryCode, bareNumber)
     status = result.status
+    reason = result.reason
   } catch {
     status = 'not_verifiable'
+    reason = 'runner_threw'
   }
+  let recorded = false
   try {
-    await setViesResult(userId, status, new Date().toISOString())
+    const updated = await setViesResult(userId, status, new Date().toISOString(), vatNumber)
+    recorded = updated !== null
   } catch {
-    // The row may have been deleted or the VAT number changed again while
-    // this check was in flight — nothing to record onto any more. Swallowed
-    // deliberately: this runs detached from any request and has no reply to
-    // fail.
+    // A genuine DB failure recording the outcome (e.g. a lost connection) —
+    // the row is left `pending`; `recheckIfStalePending`'s stale-pending
+    // claim (or an explicit `POST .../vies-check`) picks it up later. There
+    // is no request waiting on this detached task to retry immediately.
   }
+  logViesOutcome(status, reason, recorded)
 }
 
 /**
@@ -155,12 +201,17 @@ export async function runViesCheck(userId: string, country: string, vatNumber: s
  * Called from `GET /user/company-details` (a read re-triggering on staleness,
  * chosen over a background sweep so it needs no scheduler — see the route's
  * own comment for the full tradeoff).
+ *
+ * #3332 review M3: `claimStalePendingForUser` is an atomic UPDATE, not a
+ * SELECT — it only matches (and bumps `updated_at`) the FIRST caller to reach
+ * a given stale row, so two concurrent `GET`s (a doubled request, two open
+ * tabs) start AT MOST ONE check rather than one each.
  */
 export async function recheckIfStalePending(userId: string): Promise<void> {
-  const stale = await findStalePendingForUser(userId, STALE_PENDING_MINUTES)
-  if (!stale || !stale.vat_number) return
+  const claimed = await claimStalePendingForUser(userId, STALE_PENDING_MINUTES)
+  if (!claimed || !claimed.vat_number) return
   // Fire-and-forget, same contract as the write path.
-  void runViesCheck(userId, stale.country, stale.vat_number)
+  void runViesCheck(userId, claimed.vat_number)
 }
 
 export async function readCompanyDetails(userId: string): Promise<OwnerCompanyDetailsRow | null> {
@@ -184,11 +235,16 @@ export async function writeCompanyDetails(
   const row = await upsertOwnerCompanyDetails(userId, {
     ...validated.value,
     vies_status: viesStatus,
-    vies_checked_at: viesStatus === 'pending' ? null : previous?.vies_checked_at ?? null,
+    // #3332 review doc F9: `vies_checked_at` is cleared alongside
+    // `vies_status` whenever the VAT number is cleared (`viesStatus === null`)
+    // or a fresh check is starting (`'pending'`) — it names the CHECK'S OWN
+    // clock, not the row's, so a cleared VAT number must not keep displaying
+    // a stale check date it no longer has a status to go with.
+    vies_checked_at: viesStatus === null || viesStatus === 'pending' ? null : previous?.vies_checked_at ?? null,
   })
   if (validated.value.vat_number && shouldTriggerViesCheck(previous, validated.value)) {
     // Deliberately not awaited — see `runViesCheck`'s own doc.
-    void runViesCheck(userId, validated.value.country, validated.value.vat_number)
+    void runViesCheck(userId, validated.value.vat_number)
   }
   return { ok: true, row }
 }
@@ -206,6 +262,6 @@ export async function removeCompanyDetails(userId: string): Promise<boolean> {
 export async function triggerManualRecheck(userId: string): Promise<OwnerCompanyDetailsRow | null> {
   const pending = await markViesPending(userId)
   if (!pending || !pending.vat_number) return null
-  void runViesCheck(userId, pending.country, pending.vat_number)
+  void runViesCheck(userId, pending.vat_number)
   return pending
 }

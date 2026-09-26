@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../config.js'
 import { authMiddleware, OWNER_UNAUTHORIZED_BODY } from '../middleware/auth.js'
+import { ownerProfileRateLimit } from '../middleware/rate-limit.js'
 import {
   readCompanyDetails,
   recheckIfStalePending,
@@ -19,11 +20,17 @@ interface UpsertBody {
 }
 
 /**
- * Shape (lengths, ISO2 country, VAT/org-number pattern) is the spec's,
- * enforced before the handler — this module is born ENFORCED
- * (`index.ts`'s `enforcedModules`). What remains here is semantic: blank-
- * after-trim, the VAT-number normalisation, and the VIES-status transition,
- * none of which a JSON-Schema pattern alone can express.
+ * #3332 review: this module is born ENFORCED (`index.ts`'s `enforcedModules`),
+ * so `UpsertCompanyDetailsRequest`'s field LENGTHS (`legal_name` ≤ 200,
+ * `country` exactly 2 characters, `org_number`/`vat_number` ≤ 32) are checked
+ * before the handler runs. The spec's request schema does NOT carry an ISO2
+ * or VAT-shape pattern (deliberately: `validateCompanyDetailsInput` below
+ * accepts lowercase and internally-spaced input — `'se 5566 7788 9901'` — and
+ * normalises it, so a pre-handler pattern strict enough to name the FINAL
+ * shape would reject requests this route is meant to accept). What remains
+ * here is therefore everything semantic: blank-after-trim, case/whitespace
+ * normalisation, the actual `^[A-Z]{2}$` / VAT-shape checks, and the
+ * VIES-status transition.
  */
 const VALIDATION_MESSAGES: Record<CompanyDetailsValidationError, string> = {
   invalid_legal_name: 'Enter a legal name using 200 characters or fewer.',
@@ -46,10 +53,15 @@ function toWireRow(row: OwnerCompanyDetailsRow) {
 }
 
 /**
- * Behind the flag, EVERY route in this module answers 404 — not just the
- * dashboard form. #3332 gates the feature, not only its UI: a deployment
- * with the flag off must behave as though `parties.buyer` and this whole
- * settings surface do not exist.
+ * Behind the flag, GET/PUT/POST all answer 404 — not just the dashboard form.
+ * #3332 gates the feature, not only its UI: a deployment with the flag off
+ * must behave as though `parties.buyer` and this whole surface do not exist.
+ *
+ * DELETE is the one exception (#3332 review, owner-privacy default): erasure
+ * must work regardless of the flag, so an owner who saved details while the
+ * feature was on can still remove them after an operator turns it back off —
+ * see `ownerCompanyDetailsRoutes`'s own comment on the DELETE route for why
+ * this hook is not registered on it.
  */
 function requireFeatureEnabled(request: FastifyRequest, reply: FastifyReply, done: () => void): void {
   if (!config.ownerCompanyDetailsEnabled) {
@@ -87,13 +99,19 @@ function refuseAgentKey(request: FastifyRequest, reply: FastifyReply, done: () =
   done()
 }
 
-export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): Promise<void> {
-  app.addHook('onRequest', requireFeatureEnabled)
-  app.addHook('onRequest', refuseAgentKey)
-  app.addHook('onRequest', authMiddleware)
+/**
+ * #3332 review: `requireFeatureEnabled` is NOT a blanket `addHook` — it is
+ * listed per-route below, everywhere except DELETE, so erasure keeps working
+ * with the flag off. `refuseAgentKey` and `authMiddleware` still run on every
+ * route including DELETE: an agent key must never manage (or erase) its
+ * owner's details, flag or no flag.
+ */
+const GATED = [requireFeatureEnabled, refuseAgentKey, authMiddleware]
+const UNGATED = [refuseAgentKey, authMiddleware]
 
+export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): Promise<void> {
   // GET /user/company-details
-  app.get('/company-details', async (request, reply) => {
+  app.get('/company-details', { onRequest: GATED }, async (request, reply) => {
     const { sub } = request.user as { sub: string }
     // Re-trigger a stuck `pending` check as a side effect of the read (see
     // the route's own OpenAPI description for the tradeoff against a
@@ -105,36 +123,49 @@ export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): P
   })
 
   // PUT /user/company-details
-  app.put<{ Body: UpsertBody }>('/company-details', async (request, reply) => {
-    const { sub } = request.user as { sub: string }
-    const result = await writeCompanyDetails(sub, {
-      legal_name: request.body.legal_name,
-      country: request.body.country,
-      org_number: request.body.org_number,
-      vat_number: request.body.vat_number ?? null,
-    })
-    if (!result.ok) {
-      return reply.code(400).send({ error: VALIDATION_MESSAGES[result.error] })
-    }
-    return toWireRow(result.row)
-  })
+  app.put<{ Body: UpsertBody }>(
+    '/company-details',
+    { onRequest: GATED, config: { ...ownerProfileRateLimit } },
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const result = await writeCompanyDetails(sub, {
+        legal_name: request.body.legal_name,
+        country: request.body.country,
+        org_number: request.body.org_number,
+        vat_number: request.body.vat_number ?? null,
+      })
+      if (!result.ok) {
+        return reply.code(400).send({ error: VALIDATION_MESSAGES[result.error] })
+      }
+      return toWireRow(result.row)
+    },
+  )
 
-  // DELETE /user/company-details
-  app.delete('/company-details', async (request) => {
+  // DELETE /user/company-details — deliberately NOT gated by the flag
+  // (`UNGATED`, no `requireFeatureEnabled`): erasure is the owner's, always,
+  // regardless of whether the feature is currently on (#3332 review, owner-
+  // privacy default). `removeCompanyDetails`'s `DELETE ... WHERE user_id`
+  // has nothing else to gate on either way — it is a no-op when there is no
+  // row, on or off.
+  app.delete('/company-details', { onRequest: UNGATED }, async (request) => {
     const { sub } = request.user as { sub: string }
     await removeCompanyDetails(sub)
     return { ok: true }
   })
 
   // POST /user/company-details/vies-check
-  app.post('/company-details/vies-check', async (request, reply) => {
-    const { sub } = request.user as { sub: string }
-    const pending = await triggerManualRecheck(sub)
-    if (!pending) {
-      return reply.code(404).send({ error: 'No VAT number saved to check' })
-    }
-    return toWireRow(pending)
-  })
+  app.post(
+    '/company-details/vies-check',
+    { onRequest: GATED, config: { ...ownerProfileRateLimit } },
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const pending = await triggerManualRecheck(sub)
+      if (!pending) {
+        return reply.code(404).send({ error: 'No VAT number saved to check' })
+      }
+      return toWireRow(pending)
+    },
+  )
 }
 
 // Re-exported for the unauthorized-body identity check in tests, and so a

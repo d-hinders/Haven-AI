@@ -105,25 +105,40 @@ export async function deleteOwnerCompanyDetails(userId: string, db: Executor = p
   return (result.rowCount ?? 0) > 0
 }
 
+/**
+ * #3332 review M1 (stale-result race): bound to the row `vatNumber` was
+ * ACTUALLY checked for, and only while it is still `pending` — not merely
+ * `user_id`. Without `AND vat_number = $4 AND vies_status = 'pending'`, a
+ * check started for VAT number A can land on the row after the owner has
+ * since changed it to VAT number B (a new `pending` check for B is already
+ * running) or cleared it entirely (`vat_number IS NULL`) — reproduced: a
+ * `not_verifiable`/`valid`/`invalid` result for a number the row no longer
+ * holds would otherwise overwrite the CURRENT status (or resurrect one on a
+ * cleared row), and that wrong result reaches `parties.buyer` on receipts.
+ */
 export const SET_VIES_RESULT_SQL = `
   UPDATE owner_company_details
   SET vies_status = $2, vies_checked_at = $3, updated_at = NOW()
-  WHERE user_id = $1
+  WHERE user_id = $1 AND vat_number = $4 AND vies_status = 'pending'
   RETURNING user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
 `
 
 /**
- * Records a completed (or timed-out/errored, as `not_verifiable`) VIES check.
- * Null if the row was deleted or the VAT number cleared while the check was
- * in flight — the caller must not resurrect a row the owner removed.
+ * Records a completed (or timed-out/errored, as `not_verifiable`) VIES check
+ * for `vatNumber` — the number the caller (`runViesCheck`) actually ran the
+ * check against. Null when the row was deleted, the VAT number changed, or
+ * the row was already resolved out of `pending` while this check was in
+ * flight (`SET_VIES_RESULT_SQL`'s own guard) — the caller must not resurrect
+ * a row the owner removed, nor overwrite a status for a different VAT number.
  */
 export async function setViesResult(
   userId: string,
   status: ViesStatus,
   checkedAt: string,
+  vatNumber: string,
   db: Executor = pool,
 ): Promise<OwnerCompanyDetailsRow | null> {
-  const result = await db.query<OwnerCompanyDetailsRow>(SET_VIES_RESULT_SQL, [userId, status, checkedAt])
+  const result = await db.query<OwnerCompanyDetailsRow>(SET_VIES_RESULT_SQL, [userId, status, checkedAt, vatNumber])
   return result.rows[0] ?? null
 }
 
@@ -164,6 +179,41 @@ export async function findStalePendingForUser(
   db: Executor = pool,
 ): Promise<OwnerCompanyDetailsRow | null> {
   const result = await db.query<OwnerCompanyDetailsRow>(FIND_STALE_PENDING_SQL, [
+    userId,
+    String(olderThanMinutes),
+  ])
+  return result.rows[0] ?? null
+}
+
+/**
+ * #3332 review M3: the atomic counterpart to `findStalePendingForUser` — an
+ * UPDATE, not a SELECT, so two concurrent callers (two `GET
+ * /user/company-details` requests racing) can never both claim the same
+ * stale row. Bumping `updated_at` to `NOW()` in the SAME statement that reads
+ * the row is what makes this atomic: Postgres takes the row lock and
+ * re-evaluates the WHERE clause under read-committed isolation, so a second
+ * concurrent UPDATE against the same row blocks until the first commits, then
+ * sees the now-fresh `updated_at` and matches zero rows — the second caller
+ * gets `null` and starts no check of its own. The first caller's claim is
+ * indistinguishable on the wire from an ordinary read (the returned row is
+ * unchanged apart from `updated_at`), so this is safe to call from a GET.
+ */
+export const CLAIM_STALE_PENDING_SQL = `
+  UPDATE owner_company_details
+  SET updated_at = NOW()
+  WHERE user_id = $1
+    AND vies_status = 'pending'
+    AND vat_number IS NOT NULL
+    AND updated_at < NOW() - ($2 || ' minutes')::INTERVAL
+  RETURNING user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
+`
+
+export async function claimStalePendingForUser(
+  userId: string,
+  olderThanMinutes: number,
+  db: Executor = pool,
+): Promise<OwnerCompanyDetailsRow | null> {
+  const result = await db.query<OwnerCompanyDetailsRow>(CLAIM_STALE_PENDING_SQL, [
     userId,
     String(olderThanMinutes),
   ])

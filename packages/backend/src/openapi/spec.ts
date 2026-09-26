@@ -1683,7 +1683,7 @@ export const openapiSpec = {
         operationId: 'getCompanyDetails',
         summary: "Read the signed-in owner's company details.",
         description:
-          'Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. 404 also when the owner has never saved any details (no distinct "not configured" body: both are "nothing here"). A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing) is re-checked asynchronously as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check\'s eventual outcome.',
+          'Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. 404 also when the owner has never saved any details (no distinct "not configured" body: both are "nothing here"). A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing, or a genuine DB failure recording the check\'s result) is re-checked asynchronously (an atomic claim, so concurrent reads start at most one check) as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check\'s eventual outcome.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -1691,6 +1691,7 @@ export const openapiSpec = {
             content: { 'application/json': { schema: { $ref: '#/components/schemas/CompanyDetails' } } },
           },
           '401': errorResponse,
+          '403': errorResponse,
           '404': errorResponse,
         },
       },
@@ -1699,7 +1700,7 @@ export const openapiSpec = {
         operationId: 'putCompanyDetails',
         summary: 'Create or replace the company details.',
         description:
-          "Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears `vies_status` too.",
+          "Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per signed-in owner (`ownerProfileRateLimit`).",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -1712,6 +1713,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
+          '403': errorResponse,
           '404': errorResponse,
         },
       },
@@ -1720,7 +1722,7 @@ export const openapiSpec = {
         operationId: 'deleteCompanyDetails',
         summary: 'Delete the company details.',
         description:
-          'Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Deleting the Haven account itself also deletes these details (`ON DELETE CASCADE`); this route is the owner-initiated equivalent for the details alone. The response is `{ ok: true }` whether or not a row existed.',
+          "The owner's erasure path — deliberately NOT gated by `HAVEN_OWNER_COMPANY_DETAILS` (every other route on this and the vies-check path answers 404 when the feature is off; this one does not), so an owner can always remove details they saved while the feature was on, even after an operator turns it back off. Deleting the Haven account itself would also remove these details (the table's `user_id` foreign key is `ON DELETE CASCADE`), but account deletion is an operator action today — there is no self-serve delete-my-account route — so this is the only erasure path that exists. The response is `{ ok: true }` whether or not a row existed.",
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -1728,7 +1730,7 @@ export const openapiSpec = {
             content: { 'application/json': { schema: { $ref: '#/components/schemas/DeleteCompanyDetailsResponse' } } },
           },
           '401': errorResponse,
-          '404': errorResponse,
+          '403': errorResponse,
         },
       },
     },
@@ -1738,7 +1740,7 @@ export const openapiSpec = {
         operationId: 'recheckCompanyDetailsVies',
         summary: 'Re-run the VIES check for the saved VAT number.',
         description:
-          "Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`.",
+          "Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per signed-in owner (`ownerProfileRateLimit`).",
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -1746,6 +1748,7 @@ export const openapiSpec = {
             content: { 'application/json': { schema: { $ref: '#/components/schemas/CompanyDetails' } } },
           },
           '401': errorResponse,
+          '403': errorResponse,
           '404': errorResponse,
         },
       },

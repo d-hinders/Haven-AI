@@ -293,10 +293,11 @@ Isolation rules that are non-negotiable for a payments product:
   lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
   so a copied flag cannot publish them on prod, whose list is `8453`.
 - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
-  boolean) gates the settings form, `/user/company-details*`, and the
-  additive `parties.buyer` field on payment evidence/receipts. Dark by
-  default; every route in the module answers 404 when off, not just the
-  form. See [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
+  boolean) gates `/user/company-details*` and the additive `parties.buyer`
+  field on payment evidence/receipts; there is no settings UI yet (that is
+  the #3332 frontend slice). Dark by default; GET/PUT/POST vies-check answer
+  404 when off — DELETE is the deliberate exception, so an owner can always
+  erase saved details. See [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A

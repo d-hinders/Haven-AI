@@ -3507,7 +3507,14 @@ to call next in structured fields, and those fields are typed end to end
 > saved company details. No existing field, wire shape, or version-skew
 > contract in this document moves: `mapParties` still maps the same four
 > existing fields the same way, and the new field is additive and optional at
-> every layer, so an older SDK reading a newer backend's response simply never
-> sees it. `packages/mcp-server`'s `haven_list_receipts` passes the SDK's typed
-> object through unchanged. Scope of this note: that one field. Nothing else
-> in this document was re-verified.
+> every layer, so an older SDK reading a newer backend's response through the
+> MAPPED surfaces (`listReceipts`/`listReceiptsPage`, and `packages/mcp-server`'s
+> `haven_list_receipts`, which passes the SDK's typed object through unchanged)
+> simply never sees it. Scoped precisely: `HavenClient.getReceipt()`
+> (`packages/sdk/src/account-reads.ts`) is NOT one of those mapped surfaces — it
+> passes the backend's JSON bundle through un-remapped, so
+> `payment.parties.buyer` there is the raw, snake_case shape on the wire at
+> runtime on ANY SDK version old or new (its own published type already says
+> so: `PaymentReceipt['payment'].parties: RawPaymentParties`). Scope of this
+> note: that one field, and this one precision about which surfaces are mapped.
+> Nothing else in this document was re-verified.

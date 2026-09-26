@@ -87,8 +87,45 @@ function parseViesBody(raw: string): ViesCheckResult {
 }
 
 /**
+ * Derives the `{countryCode, vatNumber}` VIES itself expects from a
+ * normalised Haven VAT number (the caller's own 2-letter prefix + 2-20
+ * alnum, uppercase, no spaces — `modules/owner-profile/service.ts`'s
+ * `VAT_NUMBER_RE`).
+ *
+ * VIES's `countryCode` is the VAT number's OWN prefix, never the company's
+ * `country` field — an EU group can register for VAT in a member state that
+ * is not its seat of incorporation, and `country`/the VAT prefix are allowed
+ * to differ (`service.ts`'s own validation comment) — and `vatNumber` is sent
+ * WITHOUT that prefix. Both shapes were VERIFIED LIVE against the production
+ * endpoint on 2026-09-27: `{countryCode:'SE', vatNumber:'SE556703748501'}`
+ * (prefix left inside `vatNumber`) answered `valid:false` for the SAME number
+ * `{countryCode:'SE', vatNumber:'556703748501'}` (prefix stripped) answered
+ * `valid:true` for.
+ *
+ * Greece is the one member state where VIES's own `countryCode` differs from
+ * the ISO 3166-1 / VAT prefix: Greek EU VAT numbers use the prefix `EL`, not
+ * `GR` (Greece's ISO code) — `GR094014201` maps to `{countryCode:'EL',
+ * vatNumber:'094014201'}`. Sending `EL` as the prefix (i.e. asking VIES with
+ * `{countryCode:'EL', vatNumber:'EL094014201'}` — prefix left in twice) was
+ * verified live to answer `INVALID_INPUT`. Northern Ireland's `XI` prefix
+ * already IS VIES's own country code and needs no mapping.
+ */
+export function viesRequestForVatNumber(vatNumber: string): { countryCode: string; vatNumber: string } {
+  const prefix = vatNumber.slice(0, 2)
+  const countryCode = prefix === 'GR' ? 'EL' : prefix
+  return { countryCode, vatNumber: vatNumber.slice(2) }
+}
+
+/**
  * Checks one VAT number. Never throws — every failure mode (network, SSRF
  * refusal, timeout, non-200, malformed body) resolves to `not_verifiable`.
+ *
+ * `countryCode`/`vatNumber` here are already in VIES's OWN shape — the
+ * caller (`modules/owner-profile/service.ts`'s `runViesCheck`) derives them
+ * from the stored VAT number with `viesRequestForVatNumber` before calling
+ * this; this function does not re-derive them, so a caller that passes the
+ * company's `country` field or a still-prefixed `vatNumber` reproduces the
+ * exact wrong-shape bug `viesRequestForVatNumber`'s own doc records.
  *
  * `options` carries the SSRF guard's injectable seams (`transport`,
  * `resolver`, `timeoutMs`) so unit tests can supply a recorded response

@@ -186,8 +186,25 @@ matcher rather than approximating it:
 # branch name says nothing about which commit the harness exercised).
 # `gh` is unavailable in the remote Claude Code environment — use the Actions UI
 # or the GitHub MCP (list workflow runs for qa-dev.yml) there.
-gh run list --workflow=qa-dev.yml --status=success --limit=10 \
-  --json headSha,createdAt,event,headBranch
+#
+# `--status=success` is the RUN conclusion, and most qa-dev runs are
+# gate-skipped deployment_status runs that still conclude success (#3348;
+# 10 of the newest 10 on 2026-09-26). So walk the same 30 rows the gate reads
+# (GREEN_RUN_WINDOW) and apply its four rules: the event, `headBranch == dev`
+# for schedule/dispatch, the commit on `dev`, and the `money-flow` JOB
+# concluding success. The printed sha is <that-sha> below. An empty result
+# means the gate refuses too (#3361): dispatch qa-dev.
+found=
+for id in $(gh run list --workflow=qa-dev.yml --status=success --limit=30 --json databaseId,event \
+    --jq '.[] | select(.event=="deployment_status" or .event=="schedule" or .event=="workflow_dispatch") | .databaseId'); do
+  read -r c sha ev br <<<"$(gh run view "$id" --json jobs,headSha,event,headBranch \
+    --jq '[([.jobs[] | select(.name=="money-flow") | .conclusion][0] // "none"), .headSha, .event, .headBranch] | @tsv')"
+  [ "$c" = success ] || continue                                   # the harness ran and passed
+  [ "$ev" = deployment_status ] || [ "$br" = dev ] || continue     # schedule/dispatch must be on dev
+  git merge-base --is-ancestor "$sha" origin/dev || continue       # its commit is on dev
+  found=1; echo "run $id  sha $sha  event $ev  branch $br"; break
+done
+[ -n "$found" ] || echo "no admissible money-flow success in the newest 30 run-level greens: the gate will refuse too (#3361) — dispatch qa-dev"
 
 # Money-path files changed since that commit. Any output means the gate blocks.
 git diff --name-only <that-sha>..origin/dev | node --input-type=module -e '

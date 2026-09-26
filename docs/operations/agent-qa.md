@@ -622,8 +622,8 @@ The repository needs these encrypted Actions secrets:
 - `QA_DEMO_MERCHANT_URL`
 
 And, for the three delegation-rail EIP-3009 legs (`x402-delegation-3009`,
-`x402-delegation-3009-grace-resume`, and `x402-delegation-3009-sweep` — the run skips them, and the Coverage
-completeness step warns, when either is absent):
+`x402-delegation-3009-grace-resume`, and `x402-delegation-3009-sweep` — the run skips them, and the run goes red, when either is absent: `run.ts` fails
+under `QA_REQUIRE_ALL_LEGS=1`, and the Coverage completeness step otherwise):
 
 - `QA_DELEGATION_AGENT_API_KEY`
 - `QA_DELEGATION_DELEGATE_PRIVATE_KEY`

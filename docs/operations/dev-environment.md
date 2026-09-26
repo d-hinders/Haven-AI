@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
+  - scripts/ci/rpc-conformance.mjs
   - .github/workflows/dev-gate.yml
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
@@ -253,6 +254,15 @@ Isolation rules that are non-negotiable for a payments product:
   wrote through proves only that the backend agrees with itself. The backend
   logs a boot warning when its variable is unset, and the harness prints which
   endpoint CLASS it is observing through (never the URL) in its run preamble.
+  **Before either variable (or a `*_FALLBACK`) points at a new endpoint, run
+  `node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532`
+  (#3336) — a required step.** Every line must be ✓: the chain id, a JSON-RPC batch of 10 (the harness's
+  ethers providers batch up to 100 calls per ~10 ms), the `pending` block tag,
+  `eth_sendRawTransaction` accepted as a method (a zero-balance throwaway key,
+  refused for funds, never mined) and a burst of 20 without a 429. dRPC's free
+  plan, the September 2026 dev primary, fails the batch and the `pending` tag;
+  the shared public node can fail the burst — it is what a dedicated endpoint
+  replaces.
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over
   in order: `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA`, then the optional

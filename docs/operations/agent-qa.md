@@ -2,6 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - scripts/ci/rpc-conformance.mjs
   - .env.dev.example
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-failure-issue.mjs
@@ -1584,7 +1585,10 @@ every leg at once. The backend logs a boot warning while that default is in use
 the deployment logs confirms the service never moved off the default.
 
 The step that clears it: set `RPC_URL_BASE_SEPOLIA` on the dev backend to a
-dedicated provider endpoint and let it redeploy. That is an owner action on the
+dedicated provider endpoint and let it redeploy — after the candidate passes
+`node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532` (#3336; required,
+see dev-environment.md → *Two Base Sepolia RPCs*), which checks the batch limit,
+the `pending` tag, `eth_sendRawTransaction` and a bounded burst. That is an owner action on the
 Railway environment, not a code change — until it is done, an outage of the
 public endpoint shows up in qa-dev as if it were a defect.
 

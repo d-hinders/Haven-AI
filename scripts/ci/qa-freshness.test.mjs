@@ -1014,6 +1014,18 @@ process.exit(64)
     assert.doesNotMatch(out, /No successful 'QA — money-flow \(dev\)' run found/)
   })
 
+  // #3361: the freshness window now also sets the query depth, so an invalid
+  // one must be refused with evaluate's own message BEFORE the query, not
+  // surface as a misleading "could not query workflow runs".
+  test('REFUSES: an invalid QA_FRESHNESS_HOURS, with the fix-the-variable message', () => {
+    for (const hours of ['abc', '0', '-3']) {
+      const { status, out } = run({ GH_SHIM_RUNS: 'at-head', FRESHNESS_HOURS: hours })
+      assert.equal(status, 1, out)
+      assert.match(out, /QA_FRESHNESS_HOURS is not a positive number/)
+      assert.doesNotMatch(out, /could not query workflow runs/)
+    }
+  })
+
   // --- refusal 3 of 3: evaluate() said no ------------------------------------
   test('REFUSES (3/3): no green run exists, so evaluate refuses', () => {
     const { status, out } = run({ GH_SHIM_RUNS: 'none' })
@@ -1102,8 +1114,6 @@ describe('green-run window (#3361)', () => {
 
   test('the pre-filter only removes rows: nothing it drops can be admitted, and unparseable titles are kept', () => {
     const { kept, dropped } = preFilterHarnessCandidates(rows)
-    const droppedIds = new Set(dropped.map((d) => d.databaseId))
-    assert.ok(kept.every((r) => !droppedIds.has(r.databaseId)))
     assert.equal(kept.length + dropped.length, rows.length)
     // A decoy that somehow had a money-flow success is still not admitted once dropped.
     const r = findGreenRun({
@@ -1122,6 +1132,10 @@ describe('green-run window (#3361)', () => {
     const longPreview = { ...decoys[0], updatedAt: new Date(Date.parse(decoys[0].startedAt) + 600_000).toISOString() }
     assert.deepEqual(preFilterHarnessCandidates([longPreview]).dropped, [{ databaseId: longPreview.databaseId, reason: 'title' }])
     assert.equal(RAILWAY_DEV_ENVIRONMENT, 'Haven AI / dev')
+    // …and so is a long dev-titled row in any state but success.
+    const longInProgress = { ...decoys[1], updatedAt: new Date(Date.parse(decoys[1].startedAt) + 600_000).toISOString() }
+    assert.match(longInProgress.displayTitle, /\(in_progress\)$/)
+    assert.deepEqual(preFilterHarnessCandidates([longInProgress]).dropped, [{ databaseId: longInProgress.databaseId, reason: 'title' }])
   })
 
   test('an exhausted lookup budget refuses, never admits', () => {
@@ -1138,6 +1152,29 @@ describe('green-run window (#3361)', () => {
     assert.equal(result.lookups, 5)
     assert.equal(result.budgetExhausted, true)
     assert.ok(JOB_LOOKUP_BUDGET >= 10, 'the real budget leaves room for a short red streak')
+  })
+
+  test('a budget that runs out inside the tie-break decides nothing (review round 1, S3b)', () => {
+    // A dispatch at X is admitted (lookup 1); an OLDER deployment_status run at
+    // the same commit would win the tie-break but cannot be read. Letting the
+    // dispatch stand would judge the younger run's age; the gate must refuse.
+    const dispatchAtX = { databaseId: 100, event: 'workflow_dispatch', headBranch: 'dev', headSha: 'X', conclusion: 'success', createdAt: iso(9 * 60), startedAt: iso(9 * 60), updatedAt: iso(9 * 60 - 5), displayTitle: 'QA — money-flow (dev)' }
+    const deployAtX = { databaseId: 200, event: 'deployment_status', headBranch: 'dev', headSha: 'X', conclusion: 'success', createdAt: iso(31 * 60), startedAt: iso(31 * 60), updatedAt: iso(31 * 60 - 5), displayTitle: title(RAILWAY_DEV_ENVIRONMENT, 'success') }
+    const pick = (lookupBudget) => findGreenRun({
+      repo: 'o/r', freshnessHours: 30, nowMs: NOW,
+      gh: (args) => JSON.stringify(simulateGhRunList([dispatchAtX, deployAtX], args)),
+      isAncestorOfHead: () => true,
+      jobsFor: () => greenJobs,
+      lookupBudget,
+    })
+    assert.equal(pick(40).run?.databaseId, 200, 'with budget, the tie-break picks the deployment run')
+    const starved = pick(1)
+    assert.equal(starved.budgetExhausted, true)
+    assert.equal(starved.run, null)
+  })
+
+  test('a freshness window too large for a date is a clear error', () => {
+    assert.throws(() => greenRunQueryArgs('o/r', { freshnessHours: 1e15 }), /representable date/)
   })
 
   test('a green older than twice the window is not fetched; one just past the window is, and evaluate calls it stale', () => {

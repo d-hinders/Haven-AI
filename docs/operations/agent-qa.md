@@ -753,8 +753,13 @@ it is not just "a run happened recently":
   lookup, rows that cannot have run the harness are dropped and counted, not
   printed one by one. These are a run name naming another deployment
   environment or state, or a run that finished in under 60 s. The lookups
-  are capped (`JOB_LOOKUP_BUDGET`). A row refused for budget is refused, never
-  admitted, and the log says the budget ran out. Measured at 2026-09-26T11:21Z:
+  are capped (`JOB_LOOKUP_BUDGET`, 40). When they run out, no run is anchored
+  and the gate refuses, with a log line saying so; it never decides on a
+  partly read window. Because `QA_FRESHNESS_HOURS` now also sets how far back
+  the query reaches, a value above about 50 h (a 100 h query; the densest
+  60 h since 2026-09-13 held about 500 run-level successes) can reach the runs API's
+  1000-row cap. The gate then warns that the result may be truncated, and only
+  the oldest rows are lost. Measured at 2026-09-26T11:21Z:
   469 run-level successes in 60 h, 446 dropped, one lookup to anchor.
 - a **money-path `hotfix/* → main` blocks**. `qa-dev.yml` is a black-box
   harness against a *deployed* backend, and a hotfix is deployed nowhere until

@@ -617,23 +617,26 @@ export const GREEN_RUN_WINDOW_FACTOR = 2
 
 /**
  * `gh run list` paginates up to this many rows, and the runs API caps a
- * filtered query at 1000 results. Twice a 30 h window held 180–469 run-level
- * successes between 2026-09-20 and 2026-09-26: 180–465 counted in #3361's doc
- * review from `gh run list --workflow qa-dev.yml --status success --created
- * ">=2026-09-01" --limit 1000`, and 469 fetched by findGreenRun itself for
- * the 60 h ending 2026-09-26T11:21Z. So the cap is about 2× away at the default; raising
- * QA_FRESHNESS_HOURS toward ~100 h would approach it. `findGreenRun` reports a
- * result that reaches it as possibly truncated, and truncation only drops the
- * OLDEST rows.
+ * filtered query at 1000 results. A 60 h query (twice the default window)
+ * returned 469 run-level successes at 2026-09-26T11:21Z (findGreenRun's own
+ * `fetched`). Per UTC day, 2026-09-13..26 held 40–215 (the runs API's
+ * `total_count` for `status=success&created=<day>`), so the densest 60 h
+ * held about 500 (2026-09-17/18: 214 + 194 + half of a neighbour).
+ * So the cap is about 2× away at the default, and a QA_FRESHNESS_HOURS above
+ * about 50 h (a 100 h query) can reach it in a busy stretch. `findGreenRun`
+ * reports a result that reaches the cap as possibly truncated, and truncation
+ * only drops the OLDEST rows.
  */
 export const GREEN_RUN_LIMIT = 1000
 
 /**
  * Jobs-API lookups one selection may spend (#3361). After the pre-filter,
  * nearly every remaining row is a real harness run, so the answer comes within
- * a few lookups. The budget bounds the worst case, a long red streak. A lookup
- * refused for budget reads as "could not read the job" and REFUSES the row,
- * so an exhausted budget can block a promotion but never admit a run.
+ * a few lookups. The budget bounds the worst case, a long red streak. Once it
+ * runs out `findGreenRun` returns NO run: an exhausted budget can block a
+ * promotion but never decide one. (Refusing only the unread row is not
+ * enough — inside the tie-break loop that would let an older, better-provenance
+ * row at the same commit go unread and change which run's age is judged.)
  */
 export const JOB_LOOKUP_BUDGET = 40
 
@@ -722,7 +725,11 @@ export function greenRunQueryArgs(repo, { freshnessHours = 30, nowMs = Date.now(
   if (!(Number.isFinite(freshnessHours) && freshnessHours > 0)) {
     throw new Error(`QA_FRESHNESS_HOURS must be a positive number, got '${freshnessHours}'`)
   }
-  const since = new Date(nowMs - GREEN_RUN_WINDOW_FACTOR * freshnessHours * 3600 * 1000).toISOString()
+  const sinceMs = nowMs - GREEN_RUN_WINDOW_FACTOR * freshnessHours * 3600 * 1000
+  if (Number.isNaN(new Date(sinceMs).getTime())) {
+    throw new Error(`QA_FRESHNESS_HOURS '${freshnessHours}' reaches past any representable date`)
+  }
+  const since = new Date(sinceMs).toISOString()
   return [
     'run',
     'list',
@@ -900,7 +907,8 @@ export function findGreenRun({ repo, freshnessHours, nowMs, gh: runGh, isAncesto
     return jobsFor(databaseId)
   }
   const result = selectGreenRun(kept, { isAncestorOfHead, jobsFor: budgeted })
-  return { ...result, dropped, fetched: rows.length, truncated: rows.length >= GREEN_RUN_LIMIT, lookups, budgetExhausted }
+  const decided = budgetExhausted ? { run: null, jobs: null, refused: result.refused } : result
+  return { ...decided, dropped, fetched: rows.length, truncated: rows.length >= GREEN_RUN_LIMIT, lookups, budgetExhausted }
 }
 
 /**
@@ -1021,6 +1029,14 @@ function main() {
 
   const globs = loadMoneyPathGlobs()
 
+  // An invalid window is refused with evaluate's own message before it can
+  // surface as a query failure (#3361: the window now also sets query depth).
+  if (!(Number.isFinite(freshnessHours) && freshnessHours > 0)) {
+    const refusal = evaluate({ sourceBranch, latestGreenRun: null, changedMoneyPathFiles: [], nowMs: Date.now(), freshnessHours })
+    console.error(`::error::${refusal.message}`)
+    process.exit(1)
+  }
+
   // Which run counts is decided by selectGreenRun on the run's SHA and jobs,
   // pinned by test (#2404); the query itself is pinned by greenRunQueryArgs.
   let latestGreenRun = null
@@ -1040,7 +1056,7 @@ function main() {
         `for finishing in under ${MIN_HARNESS_RUN_SECONDS}s (neither can have run the harness); ${lookups} job lookup(s).`,
     )
     if (truncated) console.log(`::warning::qa-freshness: the run query hit its ${GREEN_RUN_LIMIT}-row limit; older runs may be missing.`)
-    if (budgetExhausted) console.log(`::warning::qa-freshness: the ${JOB_LOOKUP_BUDGET}-lookup budget ran out; later candidates were refused unread.`)
+    if (budgetExhausted) console.log(`::warning::qa-freshness: the ${JOB_LOOKUP_BUDGET}-lookup budget ran out; no run is anchored, so the gate refuses. Re-run it, or dispatch qa-dev.`)
     for (const r of refused) {
       console.log(`qa-freshness: passed over run ${r.databaseId ?? '?'} (${r.event ?? '?'} at ${r.headSha ?? '?'}): ${r.reason}`)
     }

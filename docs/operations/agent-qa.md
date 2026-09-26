@@ -942,12 +942,17 @@ them is a string a caller supplies:
   success, the 4-day budget or a page cap. Rows whose run name says another
   environment or a non-`success` status are dropped before any lookup (the
   gate skips them unconditionally), a green run shorter than 60 s is dropped
-  too (only the gate job ran — measured 5–13 s, against 197–215 s for a real
-  harness run), and a run-level `failure` needs no lookup. If
-  the page cap or the lookup budget stops the search first, the finding is
-  `unconfirmed`, not `never-succeeded` — it did not look far enough to say
-  "never". An alarm with no open issue reopens the newest closed `ci-health`
-  issue with the same title instead of filing another.
+  too (gate-only greens measured 5–46 s with one slow gate at 85 s, real
+  harness runs 156–339 s, over ~7 days to 2026-09-26; a gate-only run over the
+  floor still goes to the job lookup, which refuses it), and a run-level
+  `failure` needs no lookup. If the page cap, the lookup budget, or a
+  Deployments index that does not reach back 4 days stops the search first,
+  the finding is `unconfirmed`, not `never-succeeded` — it did not look far
+  enough to say "never"; a complete search with no green says how far back it
+  read. An alarm with no open issue reopens the newest closed `ci-health` issue
+  with the same title instead of filing another, re-asserting `ci-health` and
+  `code-quality`; if the reopen fails, it files a new one rather than editing a
+  closed issue.
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

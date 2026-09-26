@@ -635,12 +635,13 @@ test('filtered rows never reach the job reader, and a run-level failure costs no
 // A stub `gh` for observe(): paginated workflow runs (already --jq projected),
 // the deployment index, and the per-SHA money-flow check runs. Every call is
 // recorded. `jobs(id)` is the money-flow job list of run `id`.
-function fakeGh({ pages, jobs }) {
+function fakeGh({ pages, jobs, deployments }) {
   const calls = []
   const all = pages.flat()
   const gh = (args) => {
     calls.push(args.join(' '))
     if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) {
+      if (deployments) return JSON.stringify(deployments)
       return JSON.stringify([...new Set(all.map((r) => r.head_sha))].map((sha) => ({ sha, creator: { login: RAILWAY_DEPLOY_CREATOR } })))
     }
     if (args[0] === 'api' && args.some((a) => a.includes('/check-runs'))) {
@@ -831,4 +832,43 @@ test('the summary line does not say "never" for an unconfirmed search', () => {
   const summary = renderSummary(result, obs, [QA], OBS_NOW)
   assert.doesNotMatch(summary, /last success never/)
   assert.match(summary, /not found in the 700 runs read/)
+})
+
+
+test('observe(): a full Deployments index that does not reach the horizon makes the search unconfirmed (#3340 review N2)', () => {
+  const page1 = [rest(50000, DEV_TITLE(shaN(50000)), at(1), 'failure', shaN(50000))]
+  // 100 deployments, the oldest only 2 days back — short of the 4-day horizon.
+  const deployments = []
+  for (let i = 0; i < 100; i++) deployments.push({ sha: i === 0 ? shaN(50000) : shaN(60000 + i), created_at: at(0.1 + i * 0.4), creator: { login: RAILWAY_DEPLOY_CREATOR } })
+  const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(seen.searchComplete, false)
+  assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0].kind, 'unconfirmed')
+  // Control: a short index page is the whole history, never "too short".
+  const { gh: gh2 } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments: deployments.slice(0, 50) })
+  assert.equal(observe(QA, { gh: gh2, now: OBS_NOW }).searchComplete, true)
+})
+
+test('observe(): once the lookup budget is spent, it stops paging (API cost, #3340 review)', () => {
+  const pages = []
+  for (let p = 0; p < 4; p++) {
+    const pg = []
+    for (let i = 0; i < 100; i++) {
+      const id = 70000 + p * 100 + i
+      pg.push(rest(id, DEV_TITLE(shaN(id)), at(0.2 + (p * 100 + i) * 0.01), 'success', shaN(id)))
+    }
+    pages.push(pg)
+  }
+  const { gh, calls } = fakeGh({ pages, jobs: () => JOBS_GATE_REFUSED[1] })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(checkRunCalls(calls), JOB_LOOKUP_BUDGET)
+  assert.equal(calls.filter((c) => c.includes('/runs') && c.includes('page=')).length, 1)
+  assert.equal(seen.searchComplete, false)
+})
+
+test('the duration floor applies only to guards judged by a job — a short nightly still counts (#3340 review N2)', () => {
+  const t = agoDays(0.3)
+  const short = { status: 'completed', conclusion: 'success', event: 'schedule', headBranch: 'dev', updatedAt: t,
+    runStartedAt: new Date(Date.parse(t) - 5000).toISOString() }
+  assert.equal(selectQualifyingRuns([short], GUARD, undefined, undefined).length, 1)
 })

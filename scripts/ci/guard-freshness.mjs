@@ -295,9 +295,12 @@ export function mayHaveRunHarness(run, guard) {
 
 /**
  * A green run shorter than this cannot have run the money-flow harness (#3340).
- * Measured over qa-dev's run-level `success` dev runs on 2026-09-26: 38 lasted
- * 5–13 s (the gate job alone, the harness skipped) and the 2 real harness runs
- * 197 s and 215 s. Every dev deploy leaves such a gate-only green (Railway's
+ * Measured over qa-dev's run-level `success` dev runs (1000 deployment_status
+ * runs, ~7 days to 2026-09-26, `run_started_at → updated_at`; #3340 review):
+ * gate-only greens took 5–46 s, with one slow gate at 85 s, and real harness
+ * runs 156–339 s. So 60 s drops almost every gate-only green and no harness
+ * run; a gate-only run over 60 s still goes to the job lookup, which refuses
+ * it. Every dev deploy leaves such a gate-only green (Railway's
  * re-stated `success`, superseded), so without this floor each deploy SHA cost
  * one lookup and the budget reached ~0.85 day back instead of the 4-day budget.
  * Only ever drops runs — a harness run cannot finish in a minute — so it can
@@ -440,7 +443,8 @@ export function evaluate({ guards = SCHEDULED_GUARDS, observations = {}, now = D
         kind: 'unconfirmed',
         detail:
           `No successful run was found among the ${seen.examined ?? 'examined'} runs read ` +
-          `(the search stopped at its API budget before reaching ${guard.maxAgeDays} days back). ` +
+          `(the search stopped before covering ${guard.maxAgeDays} days: the page cap, the job-lookup ` +
+          'budget, or a Deployments index that does not reach that far). ' +
           'A success may exist further back; this is not evidence that it never succeeded.',
       })
       continue
@@ -563,9 +567,11 @@ function readDeploymentIndex({ environment, creator }, gh = defaultGh) {
     '-F', 'per_page=100',
   ]))
   const index = {}
-  const created = (Array.isArray(deployments) ? deployments : []).map((d) => d?.created_at).filter(Boolean).sort()
-  // Non-enumerable: the oldest deployment the index reaches (#3340 review N2).
-  Object.defineProperty(index, '__oldest', { value: created[0] ?? null, enumerable: false })
+  const list = Array.isArray(deployments) ? deployments : []
+  const created = list.map((d) => d?.created_at).filter(Boolean).sort()
+  // Non-enumerable: the oldest deployment a FULL index page reaches (#3340
+  // review N2). A short page is the whole history, so it cannot be "too short".
+  Object.defineProperty(index, '__oldest', { value: list.length >= 100 ? (created[0] ?? null) : null, enumerable: false })
   for (const d of Array.isArray(deployments) ? deployments : []) {
     if (typeof d?.sha !== 'string' || typeof d?.creator?.login !== 'string') continue
     // "A Railway-created deployment of this SHA exists" — so once the expected

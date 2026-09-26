@@ -186,8 +186,17 @@ matcher rather than approximating it:
 # branch name says nothing about which commit the harness exercised).
 # `gh` is unavailable in the remote Claude Code environment — use the Actions UI
 # or the GitHub MCP (list workflow runs for qa-dev.yml) there.
-gh run list --workflow=qa-dev.yml --status=success --limit=10 \
-  --json headSha,createdAt,event,headBranch
+#
+# `--status=success` is the RUN conclusion, and most qa-dev runs are
+# gate-skipped deployment_status runs that still conclude success (#3348;
+# 10 of the newest 10 on 2026-09-26). So check the `money-flow` job of each
+# row and take the first one where it succeeded; its headSha feeds the diff
+# below.
+for id in $(gh run list --workflow=qa-dev.yml --status=success --limit=100 --json databaseId,event \
+    --jq '.[] | select(.event=="deployment_status" or .event=="schedule" or .event=="workflow_dispatch") | .databaseId'); do
+  c=$(gh run view "$id" --json jobs --jq '.jobs[] | select(.name=="money-flow") | .conclusion')
+  if [ "$c" = success ]; then gh run view "$id" --json databaseId,headSha,createdAt,event; break; fi
+done
 
 # Money-path files changed since that commit. Any output means the gate blocks.
 git diff --name-only <that-sha>..origin/dev | node --input-type=module -e '

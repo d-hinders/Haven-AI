@@ -5,7 +5,7 @@
 // default 2), so a pass on attempt 2 is a plain green run: `run_attempt` never
 // moves, the promotion and freshness gates see `success`, and the only trace
 // was a `::warning::` annotation. Measured before this change: 19 of 90
-// successful harness runs passed only on attempt 2 (quality scan 2026-09-25).
+// successful harness runs passed only on attempt 2 (#3338, measured 2026-09-25).
 // A retry that hides a real provider failure is exactly how the RPC waves of
 // epic #3335 went unnoticed, so the retry now reports itself:
 //
@@ -14,31 +14,52 @@
 //   count [--since YYYY-MM-DD]      how many successful money-flow runs needed
 //                                   the retry, read back from the job logs
 //
-// Failure text is printed into a public job summary, so every URL in it is
-// replaced — a provider URL carries its API key in the path.
+// Failure text is printed into a public job summary, so URL-shaped and long
+// key-like tokens in it are replaced — a provider URL carries its API key.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
-/** The harness's per-leg failure lines (`• <name> … FAIL — <detail>`, run.ts) and run-level `✗` lines. */
+/**
+ * The harness's failed legs and run-level `✗` lines. A leg is read from its
+ * live line (`• <name> … FAIL — <detail>`) or, because stderr merged in by
+ * `2>&1` can split that line, from its run-report row
+ * (`| <name> | <invariant> | **FAIL** | <detail> |`, one console.log each);
+ * a leg found both ways is listed once.
+ */
 export function failingLines(log) {
-  const out = []
+  const legs = new Map()
+  const runLevel = []
   for (const raw of String(log ?? '').split('\n')) {
     const line = raw.replace(/\r$/, '')
-    const leg = /^• (\S+) … FAIL — (.*)$/.exec(line)
+    const live = /^• (\S+) … FAIL — (.*)$/.exec(line)
+    const row = /^\| (\S+) \| .* \| \*\*FAIL\*\* \| (.*) \|$/.exec(line)
+    const leg = live ?? row
     if (leg) {
-      out.push({ leg: leg[1], detail: leg[2] })
+      if (!legs.has(leg[1])) legs.set(leg[1], leg[2])
       continue
     }
     const run = /^✗ (.*)$/.exec(line.trim())
-    if (run) out.push({ leg: null, detail: run[1] })
+    if (run) runLevel.push({ leg: null, detail: run[1] })
   }
-  return out
+  return [...[...legs].map(([leg, detail]) => ({ leg, detail })), ...runLevel]
 }
 
-/** Replace every URL (a provider URL embeds its key) and cap the length. */
+/**
+ * Replace every URL-shaped token (a provider URL embeds its key) and, as a
+ * backstop, every long opaque token, then cap the length. Covered: any scheme
+ * (`https`, `wss`, …), JSON-escaped (`https:\/\/`) and percent-encoded
+ * (`https%3A%2F%2F`) URLs, scheme-less `host.tld/path`, and any key-alphabet
+ * token of 20+ characters that mixes upper case with digits, or of 32+
+ * characters, unless it is `0x`-hex (tx hashes and addresses stay readable,
+ * and so do hyphenated leg names like `x402-delegation-3009-sweep`).
+ */
 export function scrub(text, max = 240) {
-  const s = String(text ?? '').replace(/\bhttps?:\/\/[^\s"'`)\]}]+/gi, '<url>')
+  const s = String(text ?? '')
+    .replace(/\b[a-z][a-z0-9+.-]*(?::\/\/|:\\\/\\\/|%3A%2F%2F)[^\s"'`)\]}]+/gi, '<url>')
+    .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?\/[^\s"'`)\]}]*/gi, '<url>')
+    .replace(/(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, (t) =>
+      /^0x[0-9a-fA-F]+$/.test(t) || !(t.length >= 32 || (/[A-Z]/.test(t) && /\d/.test(t))) ? t : '<redacted>')
   return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 
@@ -63,6 +84,17 @@ export function retrySummary(finalAttempt, logs) {
     for (const f of found) lines.push(`  - ${f.leg ? `\`${f.leg}\`: ` : ''}${scrub(f.detail)}`)
   }
   return lines.join('\n') + '\n'
+}
+
+/** The CLI's `summary`: logs read in attempt order (`read` is injectable for tests). */
+export function summaryFromFiles(finalAttempt, files, read) {
+  return retrySummary(finalAttempt, byAttempt(files).map((f) => {
+    try {
+      return read(f)
+    } catch {
+      return ''
+    }
+  }))
 }
 
 /** A shell glob sorts `attempt-10` before `attempt-2`: order the log paths by attempt number. */
@@ -93,22 +125,43 @@ export function tally(rows) {
 
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
 
-function count(since) {
-  const repo = process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
+/** The UTC days from `since` to `until`, inclusive, as YYYY-MM-DD. */
+export function daysFrom(since, until) {
+  const out = []
+  for (let d = new Date(`${since}T00:00:00Z`); d.toISOString().slice(0, 10) <= until; d.setUTCDate(d.getUTCDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10))
+  }
+  return out
+}
+
+/**
+ * The runs API returns at most 1000 results for a filtered query, and qa-dev
+ * records 131–215 run-level successes a day (2026-09-24/25, most
+ * gate-skipped), so a multi-day query truncates silently. Query one day at a time and refuse if even a day
+ * comes back short of its `total_count`.
+ */
+export function countRuns(since, { gh: run = gh, repo, until = new Date().toISOString().slice(0, 10) } = {}) {
   const rows = []
-  for (let page = 1; page <= 20; page++) {
-    const runs = JSON.parse(gh([
-      'api', '-X', 'GET', `repos/${repo}/actions/workflows/qa-dev.yml/runs`,
-      '-f', 'status=success', '-f', `created=>=${since}`, '-F', 'per_page=100', '-F', `page=${page}`,
-      '--jq', '[.workflow_runs[] | {id}]',
-    ]))
-    for (const { id } of runs) {
-      const jobs = JSON.parse(gh(['api', `repos/${repo}/actions/runs/${id}/jobs`, '--jq', '[.jobs[] | {id, name, conclusion}]']))
+  for (const day of daysFrom(since, until)) {
+    const ids = []
+    let total = 0
+    for (let page = 1; page <= 10; page++) {
+      const res = JSON.parse(run([
+        'api', '-X', 'GET', `repos/${repo}/actions/workflows/qa-dev.yml/runs`,
+        '-f', 'status=success', '-f', `created=${day}`, '-F', 'per_page=100', '-F', `page=${page}`,
+        '--jq', '{total: .total_count, ids: [.workflow_runs[].id]}',
+      ]))
+      total = res.total
+      ids.push(...res.ids)
+      if (res.ids.length < 100) break
+    }
+    if (ids.length < total) throw new Error(`${day}: fetched ${ids.length} of ${total} successful runs — the API cap truncated the day`)
+    for (const id of ids) {
+      const jobs = JSON.parse(run(['api', `repos/${repo}/actions/runs/${id}/jobs`, '--jq', '[.jobs[] | {id, name, conclusion}]']))
       const mf = jobs.find((j) => j.name === 'money-flow' && j.conclusion === 'success')
       if (!mf) continue // the gate skipped the harness: not a harness pass
-      rows.push({ runId: id, attempt: passedOnAttempt(gh(['api', `repos/${repo}/actions/jobs/${mf.id}/logs`])) })
+      rows.push({ runId: id, attempt: passedOnAttempt(run(['api', `repos/${repo}/actions/jobs/${mf.id}/logs`])) })
     }
-    if (runs.length < 100) break
   }
   return tally(rows)
 }
@@ -117,17 +170,11 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   const [cmd, ...rest] = process.argv.slice(2)
   if (cmd === 'summary') {
     const [finalAttempt, ...files] = rest
-    process.stdout.write(retrySummary(finalAttempt, byAttempt(files).map((f) => {
-      try {
-        return readFileSync(f, 'utf8')
-      } catch {
-        return ''
-      }
-    })))
+    process.stdout.write(summaryFromFiles(finalAttempt, files, (f) => readFileSync(f, 'utf8')))
   } else if (cmd === 'count') {
     const i = rest.indexOf('--since')
     const since = i >= 0 ? rest[i + 1] : new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)
-    const t = count(since)
+    const t = countRuns(since, { repo: process.env.GITHUB_REPOSITORY || '{owner}/{repo}' })
     console.log(`qa-dev money-flow passes since ${since}: ${t.passes} — first attempt ${t.firstAttempt}, needed the retry ${t.retried}, unknown ${t.unknown}`)
     if (t.retriedRuns.length) console.log(`retried runs: ${t.retriedRuns.join(' ')}`)
   } else {

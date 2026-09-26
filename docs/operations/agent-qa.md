@@ -1079,12 +1079,18 @@ Testnet/RPC hiccups must not permanently wedge promotion. Two levers:
   log (`qa-run.attempt-N.log`), and `qa-run.log`, which Coverage completeness
   reads, is always the final attempt's copy. The run gets a `money-flow retry`
   notice and a job-summary block listing the earlier attempts' failing legs,
-  with every URL scrubbed, because a provider URL carries its key. Count them
-  over a window with
+  with URL-shaped and long key-like tokens scrubbed, because a provider URL
+  carries its key. Count them over a window with
   `GITHUB_REPOSITORY=d-hinders/Haven-AI node scripts/ci/qa-retry.mjs count --since <YYYY-MM-DD>`.
-  It reads each successful money-flow job's `passed on attempt N/M` line and
-  prints the passes, how many needed the retry, and their run ids. A rising
-  count is a provider wave in the making (epic #3335), not noise.
+  It walks the run-level-successful qa-dev runs one UTC day at a time (the
+  runs API caps a filtered query at 1000 results, and gate-skipped runs fill a
+  day: 131–215 run-level successes on 2026-09-24/25; a day that comes back
+  short of its `total_count` is refused, never silently truncated), keeps those whose `money-flow` job
+  succeeded, reads each job log's `passed on attempt N/M` line, and prints the
+  passes, how many needed the retry, and their run ids. A money-flow pass whose
+  Coverage completeness step then failed is a red run and is not counted. It
+  costs about two API calls per run. A rising count is a provider wave in the
+  making (epic #3335), not noise.
 - **`qa-override` label** — adding it to a promotion PR **skips** the freshness
   gate (logged as a warning). Use it only to unblock a known-flaky testnet
   hiccup when you've confirmed a recent QA run out-of-band; remove it once a fresh

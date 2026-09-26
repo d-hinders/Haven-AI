@@ -24,8 +24,10 @@ describe('skip-visibility contract (#1044)', () => {
 
   it('the workflow captures the log the grep reads', () => {
     // The marker is useless if stdout is not tee'd to the file the
-    // completeness step inspects.
-    expect(WORKFLOW).toContain('tee qa-run.log')
+    // completeness step inspects. Since #3338 each attempt tees its own log
+    // and qa-run.log is a copy of the final attempt's, on both paths.
+    expect(WORKFLOW).toContain('tee "qa-run.attempt-$i.log"')
+    expect(WORKFLOW.split('cp "qa-run.attempt-$i.log" qa-run.log').length - 1).toBe(2)
   })
 
   it('strict mode reads the env var the workflow forwards', () => {

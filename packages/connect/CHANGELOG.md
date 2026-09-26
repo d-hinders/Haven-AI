@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.6.0-alpha.0 — 2026-09-26
+
+- **The runtime this connector installs moves to `0.6.0-alpha.0` (no connector source change).** A setup or re-run now wires `@haven_ai/mcp`, `@haven_ai/sdk` and `@haven_ai/signer` `0.6.0-alpha.0`. Two things reach you through them: **BREAKING (#3306)** — `haven_list_receipts` rows no longer carry the deprecated `rail`, `proofStatus`, `resourceUrl` and `merchantAddress` keys (read `source`, `paymentProofStatus`, `x402ResourceUrl`, `x402MerchantAddress`); and three new task-budget tools (#3329), so the consent hash changes and the operator is asked to consent once more on the next launch. The connector's own flags, output and exit codes are unchanged; see the mcp, sdk and signer CHANGELOGs for the full notes.
+
 ## 0.5.0-alpha.1 — 2026-09-25
 
 - **Client identity (#3303, epic #3302).** Every request the connector's API client makes (setup resolve/register, status reports, the agent identity read) carries `X-Haven-Client: @haven_ai/connect/<version>` (`CONNECTOR_CLIENT_IDENTITY`), so the backend can tell an outdated connector what to run. `createConnectApiClient` takes it as an optional third argument. The read-only hosted-identity probe behind `--doctor` / `--unwire` (`probeHostedAgentIdentity`) does not send it: it can never be refused and reads no hint. No flag, output or exit code changes.

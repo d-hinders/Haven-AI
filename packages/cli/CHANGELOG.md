@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.6.0-alpha.0 — 2026-09-26
+
 - **`haven guide`: "If something breaks" (#3304, epic #3302).** The bundled agent runbook (a copy of `@haven_ai/sdk`'s) gains the section that sends an agent to a result's `client_update.upgrade_command` and to the `/releases` page. Text only; no command changes.
 
 - **`wallets balances` renders the balance-freshness marker (#3318).** Since

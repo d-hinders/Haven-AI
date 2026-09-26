@@ -51,7 +51,7 @@ import { tombstonesDirForCredentialRoot } from './tombstone.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.5.0-alpha.1'
+export const CONNECTOR_VERSION = '0.6.0-alpha.0'
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this connector carries. */
 export const CONNECTOR_CLIENT_IDENTITY = `@haven_ai/connect/${CONNECTOR_VERSION}`

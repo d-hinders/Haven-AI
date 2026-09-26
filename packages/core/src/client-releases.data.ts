@@ -15,86 +15,86 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.5.0-alpha.1",
+    "released_version": "0.6.0-alpha.0",
     "notes": [
+      {
+        "version": "0.6.0-alpha.0",
+        "date": "2026-09-26",
+        "summary": "Breaking change — the four deprecated HavenPaymentReceipt twins are gone. mapPaymentReceipt no longer emits rail, proofStatus, resourceUrl or merchantAddress, and HavenPaymentReceipt no longer declares them. (+5 more in the changelog)",
+        "action_required": false
+      },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity on Haven API requests. Every Haven API request now carries X-Haven-Client: <package>/<version>, @haven_ai/sdk/<version> by default.",
         "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.0",
-        "date": "2026-09-25",
-        "summary": "@haven_ai/sdk/edge gains assertFundingLegPaysDelegate and assertOwnSettlementChild. (+8 more in the changelog)",
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.5.0-alpha.1",
+    "released_version": "0.6.0-alpha.0",
     "notes": [
+      {
+        "version": "0.6.0-alpha.0",
+        "date": "2026-09-26",
+        "summary": "haven_sign gains a task_budget_id form and two new signed shapes. { task_budget_id } alone (mutually exclusive with payment_id / payload_hash) fetches the pending task-budget open or close context and signs it, returning { signature, task_budget_id, purpose } instead of { signature, x402_binding }.",
+        "action_required": false
+      },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity at sign-context; client_outdated refusal. Both sign-context reads send X-Haven-Client: @haven_ai/signer/<version>.",
         "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.0",
-        "date": "2026-09-25",
-        "summary": "Breaking change (x402 arm): signX402FundingTypedData signs only a guarded funding leg or a verified settlement child. A valid Haven binding is no longer enough. (+7 more in the changelog)",
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.5.0-alpha.1",
+    "released_version": "0.6.0-alpha.0",
     "notes": [
+      {
+        "version": "0.6.0-alpha.0",
+        "date": "2026-09-26",
+        "summary": "Breaking change — haven_list_receipts rows lose four keys. rail, proofStatus, resourceUrl and merchantAddress, the deprecated twins kept for one full release since 0.5.0-alpha.0, are no longer emitted; read source, paymentProofStatus, x402ResourceUrl and x402MerchantAddress. (+3 more in the changelog)",
+        "action_required": false
+      },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity and update hint. Haven API requests name @haven_ai/mcp/<version> in X-Haven-Client.",
         "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.0",
-        "date": "2026-09-25",
-        "summary": "Consent label copy fix. The first-launch consent screen prints Haven wallet: <address> instead of Haven wallet (Safe): <address>, and the accountAddress field JSDoc loses the retired rail's name. (+2 more in the changelog)",
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.5.0-alpha.1",
+    "released_version": "0.6.0-alpha.0",
     "notes": [
+      {
+        "version": "0.6.0-alpha.0",
+        "date": "2026-09-26",
+        "summary": "The runtime this connector installs moves to 0.6.0-alpha.0 (no connector source change). A setup or re-run now wires @haven_ai/mcp, @haven_ai/sdk and @haven_ai/signer 0.6.0-alpha.0.",
+        "action_required": false
+      },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity. Every request the connector's API client makes (setup resolve/register, status reports, the agent identity read) carries X-Haven-Client: @haven_ai/connect/<version> (CONNECTOR_CLIENT_IDENTITY), so the backend can tell an outdated connector what to run.",
         "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.0",
-        "date": "2026-09-25",
-        "summary": "--doctor no longer needs --runtime: the argument parser used to refuse a flagless --doctor before the doctor ran, which left record resolution reachable only by library callers. (+2 more in the changelog)",
-        "action_required": false
       }
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.5.0-alpha.1",
+    "released_version": "0.6.0-alpha.0",
     "notes": [
+      {
+        "version": "0.6.0-alpha.0",
+        "date": "2026-09-26",
+        "summary": "haven guide: \"If something breaks\". The bundled agent runbook (a copy of @haven_ai/sdk's) gains the section that sends an agent to a result's client_update.upgrade_command and to the /releases page. (+1 more in the changelog)",
+        "action_required": false
+      },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity. Every Haven API request the CLI makes carries X-Haven-Client: @haven_ai/cli/<version> (CLI_CLIENT_IDENTITY), so the backend can tell an outdated CLI what to run.",
-        "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.0",
-        "date": "2026-09-25",
-        "summary": "activity list rows carry scope ({ source: 'wallet', filter } — --agent / --safe narrow the wallet feed, they do not make it the receipts view), timestampSource (which column produced timestamp) and, on x402-synthesized rows, the recorded nullable confirmedAt.",
         "action_required": false
       }
     ]

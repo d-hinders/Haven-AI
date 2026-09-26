@@ -1675,7 +1675,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 >
 > **Re-verified #3331 frontend (2026-09-27, round 3 review fixes):** this diff
 > touches one file in this document's coverage list, `hooks/useDelegationBudget.ts`,
-> plus copy-only changes in `FundMerchantModal.tsx`, `EditBudgetModal.tsx`,
+> plus non-authority UI changes in `FundMerchantModal.tsx`, `EditBudgetModal.tsx`,
 > `MerchantBudgetsList.tsx` and the merchant page that carry no authority and
 > are out of this document's scope. In the covered file: `reload`'s in-flight
 > guard (`manualBudgetsReloadInFlight`) changes from a boolean to a counter so

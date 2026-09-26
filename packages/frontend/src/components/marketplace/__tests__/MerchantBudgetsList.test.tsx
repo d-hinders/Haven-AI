@@ -58,7 +58,7 @@ describe('MerchantBudgetsList (#3331)', () => {
     // Design review round 3, finding D (doc F3): the payTo still matches —
     // this is not "can't pay" — only some offers stopped accepting this kind
     // of budget; its other offers still use it, no re-funding needed.
-    ['not_erc7710', 'Some offers excluded', /no longer accept this kind of budget.*Its other offers still use this budget/],
+    ['not_erc7710', 'Not every offer', /Not every offer from this merchant accepts this kind of budget now.*any offer that still accepts it keeps using this budget/],
   ] as const)('pin_status %s renders its own plain label and one outcome sentence', (status, label, helperText) => {
     render(<MerchantBudgetsList budgets={[row({ pin_status: status })]} />)
     expect(screen.getByText(label)).toBeDefined()
@@ -72,7 +72,7 @@ describe('MerchantBudgetsList (#3331)', () => {
   it('pin_status stale names the agent by name in the "stop it, fund again" step', () => {
     render(<MerchantBudgetsList budgets={[row({ pin_status: 'stale', agent_name: 'Research Agent' })]} />)
     expect(
-      screen.getByText(/Stop this budget on Research Agent's page, then use Fund this merchant above\./),
+      screen.getByText(/Stop this budget on Research Agent's page, then use “Fund this merchant” above\./),
     ).toBeDefined()
   })
 

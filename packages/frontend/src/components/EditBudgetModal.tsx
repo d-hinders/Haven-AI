@@ -105,9 +105,9 @@ function editMerchantRefusalCopy(detail: string | undefined, merchantName: strin
       // accept it keep using this budget. The fallback only applies "if it
       // has one", the same accurate wording `MerchantBudgetsList`'s own
       // helper uses.
-      return `${merchantName} no longer has every offer accepting this kind of budget, so it can't be changed here. Stop it — the offers that still accept it keep using this budget, and the rest use the agent's open budget instead, if it has one.`
+      return `Not every offer from ${merchantName} accepts this kind of budget now, so it can't be changed here. Until you stop it, any offer that still accepts it keeps using this budget; the rest use the agent's open budget, if it has one.`
     case 'merchant_not_found':
-      return `${merchantName} could not be found, so this budget can't be changed here. Stop it from the agent's page.`
+      return `${merchantName} could not be found, so this budget can't be changed here. Close this and use Stop on the budget.`
     default:
       return null
   }

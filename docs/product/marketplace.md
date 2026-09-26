@@ -167,8 +167,7 @@ for the modal's own shape.
   payments are refused until the next period, never falling back to the
   agent's open budget even if it has one. A payment to anyone else still uses
   the open budget, if there is one; only payments to the LOCKED merchant are
-  affected. Two kinds of payment select the OPEN budget instead, on purpose,
-  because their on-chain recipient is not the merchant:
+  affected. Two kinds of payment do not follow this rule:
   - a checkout payment that passes through the **agent's own delegate
     first** — the EIP-3009 funding leg a plain-HTTP x402 checkout takes —
     because the on-chain selection key is the redemption's `to`, which is the
@@ -213,8 +212,9 @@ for the modal's own shape.
   `stale` row's way out is **Stop**, then fund the merchant again from its
   page, which derives a fresh recipient; an `unverified` row's is the same
   **Stop**, then fund again, but only once the merchant confirms an address —
-  there is nothing to fund yet; a `not_erc7710` row's is **Stop** only —
-  payments there use the agent's open budget instead, if it has one, and there
+  there is nothing to fund yet; a `not_erc7710` row has no prescribed step —
+  until it is stopped, any offer that still accepts this kind of budget keeps
+  using it and the rest use the agent's open budget, if it has one, and there
   is no "fund again" step because the payTo itself never moved. An ordinary
   (non-merchant-locked) budget is unaffected: its recipient stays editable
   exactly as before.
@@ -461,7 +461,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   outcome sentence each — `current` shows the "Current" badge with no
   further explanation, `stale` ("Old address"), `unverified` ("Address
   unconfirmed" — it still pays the pinned address on-chain; Haven just cannot
-  confirm it is still the merchant's), `not_erc7710` ("Can't pay now") — plus
+  confirm it is still the merchant's), `not_erc7710` ("Not every offer" — offers that no longer accept this kind of budget are paid from the open budget, if any; any that still accept it keep using this one; this holds whether some or all offers dropped it) — plus
   the #1319 provenance note when `remaining_is_from_chain` is false. An
   unknown token shows the raw atomic amounts labelled "unknown token" rather
   than guessing 18 decimals. Renders nothing when the merchant has none — the

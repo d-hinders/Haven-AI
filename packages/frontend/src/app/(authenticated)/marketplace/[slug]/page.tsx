@@ -194,7 +194,7 @@ export default function MerchantPage() {
             // has an eligible agent to connect a new one, over a read that
             // simply failed.
             <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Haven could not load your agents just now.
+              Haven could not load your agents just now, so funding is unavailable. Reload the page to try again.
             </p>
           ) : showConnectAgentNote ? (
             <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">

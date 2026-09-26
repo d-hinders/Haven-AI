@@ -36,7 +36,7 @@ const PIN_STATUS_COPY: Record<
     // funding again there needs the merchant to confirm an address first, so
     // there is nothing to point at yet.
     helper: (agentName) =>
-      `This merchant now uses a new address. Payments there come from the agent's open budget, if it has one — this budget still only pays the old address. Stop this budget on ${agentName}'s page, then use Fund this merchant above.`,
+      `This merchant now uses a new address. Payments there come from the agent's open budget, if it has one — this budget still only pays the old address. Stop this budget on ${agentName}'s page, then use “Fund this merchant” above.`,
   },
   unverified: {
     label: 'Address unconfirmed',
@@ -50,10 +50,10 @@ const PIN_STATUS_COPY: Record<
     // more; offers that still do are still paid from it. "Can't pay now" was
     // stronger than that, and its old helper's "fund it again" step does not
     // apply — nothing here needs re-funding.
-    label: 'Some offers excluded',
+    label: 'Not every offer',
     tone: 'warning',
     helper: () =>
-      "Some of this merchant's offers no longer accept this kind of budget; payments to those use the agent's open budget, if it has one. Its other offers still use this budget.",
+      "Not every offer from this merchant accepts this kind of budget now. Payments through those offers use the agent's open budget, if it has one; any offer that still accepts it keeps using this budget.",
   },
 }
 

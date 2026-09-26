@@ -123,8 +123,12 @@ function firstMatch(lines, patterns) {
  * text's first and last three whitespace tokens are dropped, one at a time,
  * never past the marker: a label/value pair the window's edge splits lies
  * within those three tokens (`password = <v>`, `Authorization : Bearer <v>`),
- * and an intact pair is already `<redacted>` — so nothing that scrubbing
- * recognised is ever uncovered by a trim.
+ * and an intact pair is already `<redacted>`. One theoretical gap remains
+ * (round 4 review): the token holding the match is never dropped, so a label
+ * cut at the window edge whose value shares that whitespace-free token stays
+ * bare — which needs ~900 characters of URLs with no whitespace between the
+ * value and the match. The harness's error details are compact and capped
+ * (thrownErrorDetail: 200 per value, 700 total), so it cannot print that.
  */
 export function excerpt(line, index, { before = 80, after = 160 } = {}) {
   const MARK = '\u0001'

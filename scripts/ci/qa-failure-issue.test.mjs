@@ -370,6 +370,17 @@ describe('qa-failure-issue: failure classes (#3337)', () => {
     assert.ok(leg.signature.length <= 320)
   })
 
+  test('the crash, run-line and continuation-prefix paths are scrubbed too (round 4 review)', () => {
+    const K = 'FAKEKEYFAKEKEYFAKEKEY0123'
+    const crash = classifyLog(`✗ harness crashed: fetch https://lb.example.live/base-sepolia/${K} is not a function`)
+    assert.doesNotMatch(crash.signature, new RegExp(K))
+    const runLine = classifyLog(`• a … PASS — ok\n✗ strict: skipped leg via https://lb.example.live/${K}`)
+    assert.doesNotMatch(runLine.signature, new RegExp(K))
+    const cont = classifyLog(`• a … FAIL — relay https://lb.example.live/${K} failed\nStatus: 429`)
+    assert.equal(cont.legs[0].class, 'provider')
+    assert.doesNotMatch(cont.legs[0].signature, new RegExp(K))
+  })
+
   test('the body escapes signature markup so <url> stays visible in the rendered issue', () => {
     const body = buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: classifyLog(PROVIDER_JSON_URL) })
     assert.match(body, /&lt;url&gt;/)

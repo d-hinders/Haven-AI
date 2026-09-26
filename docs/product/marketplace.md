@@ -29,9 +29,10 @@ covers:
   - packages/frontend/src/hooks/useDelegationBudget.ts
   - packages/frontend/src/hooks/useMerchantBudgets.ts
   - packages/frontend/src/lib/marketplace.ts
+  - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-26"
+last-verified: "2026-09-27"
 ---
 
 # Marketplace
@@ -154,18 +155,28 @@ for the modal's own shape.
   - a sent `recipient_address` differs from the payTo.
 
   Signing and activation are the ordinary grant flow.
-- **Which budget pays — NO fallback.** Nothing limits an agent to one active
-  delegation, and the merchant-locked budget sits beside the open one, but
+- **Which budget pays — no fallback, with two named exceptions.**
   `selectDelegationForPayment`'s own SQL (`SELECT_DELEGATION_FOR_PAYMENT_SQL`,
   `infra/repositories/delegation-budgets.ts`) orders the row pinned to the
   payee FIRST and picks it whenever it matches — there is no second query that
-  falls back to the open budget once the pinned one exists. In plain terms:
-  while a merchant-locked budget is active, EVERY payment to that merchant in
-  that token draws on it alone, and once it is exhausted those payments are
-  refused until the next period — they do NOT fall back to the agent's open
-  budget, even if the agent has one. A payment to anyone else still uses the
-  open budget, if there is one; only payments to the LOCKED merchant are
-  affected. The fund-merchant modal states this once, on its review step.
+  falls back to the open budget once the pinned one exists. That rule holds
+  for a **direct (ERC-7710) settlement**, and for a plain `POST /payments`
+  that names no task budget: while a merchant-locked budget is active, every
+  such payment to that merchant in that token draws on it alone, and once it
+  is exhausted those payments are refused until the next period, never
+  falling back to the agent's open budget even if it has one. A payment to
+  anyone else still uses the open budget, if there is one; only payments to
+  the LOCKED merchant are affected. Two kinds of payment reach the merchant
+  through the OPEN budget instead, on purpose:
+  - a payment that passes through the **agent's own wallet first** — the
+    EIP-3009 funding leg a plain-HTTP x402 checkout takes — because the
+    on-chain selection key is the redemption's `to`, which is the agent's own
+    address there, never the merchant's;
+  - a payment made **under a task budget**, which redeems its own parent task
+    budget regardless of any merchant-locked row.
+
+  The fund-merchant modal states the rule and both exceptions once, on its
+  review step.
 - **One address, one slot.** A merchant-locked budget and a plain budget
   pinned to the same address share one `(agent, token, recipient)` slot —
   and so does a merchant-locked budget pinned to a DIFFERENT merchant's payTo
@@ -181,14 +192,21 @@ for the modal's own shape.
   naming whichever one it is. A budget for THIS merchant in a *different*
   token, or one still pinned to a payTo the merchant has since rotated away
   from (`stale`, below), is a *different* slot and survives with no warning.
-- **Editing one in place (#3166's REPLACE composition).** `EditBudgetModal`'s
-  Edit on a merchant-locked row keeps the recipient READ-ONLY (shown as "pays
-  `<merchant>` only") and forwards the row's own `merchant_slug` on the
-  replacement grant, so the edit cannot silently downgrade it to a plain
-  pinned budget by retargeting or clearing the recipient — the row keeps its
-  merchant label and stays listed on `GET /merchants/{slug}/budgets` and the
-  merchant page after the edit lands. An ordinary (non-merchant-locked) budget
-  is unaffected: its recipient stays editable exactly as before.
+- **Editing one in place (#3166's REPLACE composition) — only a `current`
+  row.** `EditBudgetModal`'s Edit on a merchant-locked row keeps the recipient
+  READ-ONLY (shown as "pays `<merchant>` only") and forwards the row's own
+  `merchant_slug` on the replacement grant, so the edit cannot silently
+  downgrade it to a plain pinned budget by retargeting or clearing the
+  recipient — the row keeps its merchant label and stays listed on
+  `GET /merchants/{slug}/budgets` and the merchant page after the edit lands.
+  This only ever reaches activation for a `current` row: a `stale`,
+  `unverified` or `not_erc7710` row's build is refused with a 409 naming the
+  reason (its own `pin_status`, above), so nothing changes and the old budget
+  keeps working exactly as before the edit was attempted (round 2 review
+  finding R2-2). The way forward there is not editing — it is **Stop**, then
+  fund the merchant again from its page, which derives a fresh recipient. An
+  ordinary (non-merchant-locked) budget is unaffected: its recipient stays
+  editable exactly as before.
 - **`GET /merchants/{slug}/budgets`** is dashboard-session only (an agent key
   gets 403). It lists the owner's active, unexpired merchant-locked budgets
   for the merchant on agents that are not revoked, each with:

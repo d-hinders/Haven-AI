@@ -2,7 +2,13 @@
  * Visual regression for `/marketplace` and `/marketplace/<slug>` (#3079,
  * epic #3077).
  *
- * Five scenarios, each a distinct branch the merchant layer added:
+ * Five FULL-PAGE scenarios (the `SCENARIOS` loop below), each a distinct
+ * branch the merchant layer added, PLUS two element-scoped clips of the
+ * "Fund this merchant" modal (#3331 round 1/2 — the plain review step and
+ * the replace-warning review step) that run outside that loop, the same
+ * scoping `settings-accounting.visual.spec.ts` uses for its own dialog
+ * (design review round 2, finding 8 — this docstring used to name only the
+ * five full-page ones, undercounting the file's own coverage):
  *
  *   - `marketplace-grid`      — the grid with three merchants (live/verified,
  *     test, coming-soon), at desktop and mobile.
@@ -17,9 +23,15 @@
  *   - `merchant-not-found`    — an unknown slug (desktop only): the client
  *     `notFound()` must land on the segment's own `not-found.tsx` inside
  *     the shell, a join the unit tests cannot see.
+ *   - `merchant-page-fund-merchant-modal` (desktop only, element-scoped) —
+ *     the "Fund this merchant" modal's plain review step.
+ *   - `merchant-page-fund-merchant-modal-review-warning` (desktop only,
+ *     element-scoped) — the same modal's review step with the
+ *     replace-warning seeded (an active budget already in the slot the new
+ *     grant would occupy).
  *
  * Same discipline as `analytics.visual.spec.ts`: the desktop shots of all
- * five ALSO run under `chromium-desktop-dark` (`<name>-dark.png`), no mobile
+ * seven ALSO run under `chromium-desktop-dark` (`<name>-dark.png`), no mobile
  * dark project exists, and every capture is preceded by a structural
  * assertion that runs under `VISUAL_STRUCTURE_ONLY=1` even when pixels are
  * not compared.

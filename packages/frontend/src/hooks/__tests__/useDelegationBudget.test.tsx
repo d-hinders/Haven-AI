@@ -871,6 +871,87 @@ describe('useDelegationBudget agent switch (#3331 review finding F4)', () => {
   })
 })
 
+describe('useDelegationBudget chainId-only rerender (R2-1)', () => {
+  // `/agents/:id/delegations` and `/agents/:id/account-signers` are not
+  // chain-scoped: a rerender that only changes `chainId` (same agent, network
+  // switch) must NOT clear the already-loaded budgets/signers or drop `ready`
+  // — there is no new data to wait for.
+  it('keeps budgets/signers and ready=true across a chainId-only rerender', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const { result, rerender } = renderHook(
+      ({ chainId }) => useDelegationBudget(AGENT, chainId),
+      { initialProps: { chainId: 84532 } },
+    )
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.budgets).toEqual([])
+    const callsBeforeSwitch = mockGet.mock.calls.length
+
+    rerender({ chainId: 8453 })
+
+    // No reset, no refetch — the endpoints are the same for both chains.
+    expect(result.current.budgets).toEqual([])
+    expect(result.current.ready).toBe(true)
+    expect(mockGet.mock.calls.length).toBe(callsBeforeSwitch)
+  })
+})
+
+describe('useDelegationBudget manual reload vs. silent poll (R2-4)', () => {
+  // A manual `reload()` (the "Try again" button) is a direct response to the
+  // owner; a background silent poll tick must never be able to discard its
+  // result by racing it on the shared generation counter.
+  it('a silent poll tick that starts while a manual reload is in flight is skipped, and the manual result lands', async () => {
+    const pending: Array<{ resolve: (v: unknown) => void }> = []
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      if (url.endsWith('/delegations')) {
+        return new Promise((resolve) => {
+          pending.push({ resolve })
+        })
+      }
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(pending.length).toBe(1)) // the initial mount read
+
+    // Resolve the mount read so budgetsError starts false, then force an
+    // error to reach the "Try again" state.
+    await act(async () => {
+      pending[0]!.resolve({ delegations: [] })
+      await Promise.resolve()
+    })
+
+    // Trigger a manual reload (e.g. "Try again") — it does not resolve yet.
+    let manual!: Promise<void>
+    act(() => {
+      manual = result.current.reload(false)
+    })
+    await waitFor(() => expect(pending.length).toBe(2))
+
+    // A background silent poll tick fires WHILE the manual call is still in
+    // flight — before R2-4 this would bump the shared generation counter and
+    // discard the manual call's own result.
+    await act(async () => {
+      await result.current.reload(true)
+    })
+    // The silent tick must have skipped itself entirely — no second in-flight
+    // request was issued for it.
+    expect(pending.length).toBe(2)
+
+    // The manual call's response now lands and must be rendered.
+    await act(async () => {
+      pending[1]!.resolve({
+        delegations: [{ id: 'retry-budget', status: 'active', budget_atomic: '1', token_address: '0xa', recipient_address: null, delegation_hash: '0x1', version: 1, period_seconds: 86400, expires_at: 9_999_999_999 }],
+      })
+      await manual
+    })
+    expect(result.current.budgets).toEqual([
+      { id: 'retry-budget', status: 'active', budget_atomic: '1', token_address: '0xa', recipient_address: null, delegation_hash: '0x1', version: 1, period_seconds: 86400, expires_at: 9_999_999_999 },
+    ])
+    expect(result.current.budgetsError).toBe(false)
+  })
+})
+
 describe('useDelegationBudget visible-only polling (#2732)', () => {
   beforeEach(() => {
     mockGet.mockReset()

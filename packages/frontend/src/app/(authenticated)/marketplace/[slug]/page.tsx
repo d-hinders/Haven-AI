@@ -7,6 +7,7 @@ import { notFound as nextNotFound, useParams } from 'next/navigation'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
+import Link from 'next/link'
 import { MerchantHeader } from '@/components/marketplace/MerchantHeader'
 import { OffersTable } from '@/components/marketplace/OffersTable'
 import { PayWithHavenBlock } from '@/components/marketplace/PayWithHavenBlock'
@@ -14,6 +15,7 @@ import FundMerchantModal, { eligibleFundingAgents } from '@/components/marketpla
 import { MerchantBudgetsList } from '@/components/marketplace/MerchantBudgetsList'
 import CatalogSubmitModal from '@/components/CatalogSubmitModal'
 import { useAgents } from '@/hooks/useAgents'
+import { chainName } from '@/lib/marketplace'
 import { useMerchant } from '@/hooks/useCatalog'
 import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 
@@ -38,7 +40,7 @@ export default function MerchantPage() {
   const params = useParams<{ slug: string }>()
   const slug = params.slug
   const { merchant, offers, funding = [], loading, error, notFound, refetch } = useMerchant(slug)
-  const { agents } = useAgents()
+  const { agents, loading: agentsLoading } = useAgents()
   const [submitOpen, setSubmitOpen] = useState(false)
   const [fundOpen, setFundOpen] = useState(false)
   const comingSoonForBudgets = merchant?.listing_status === 'coming_soon'
@@ -126,6 +128,14 @@ export default function MerchantPage() {
   const hasEligibleAgent = eligibleFundingAgents(agents, funding).length > 0
   const showFundAction = !comingSoon && pinnableFunding.length > 0 && hasEligibleAgent
   const showOpenBudgetNote = !comingSoon && pinnableFunding.length === 0 && verifiedFunding.length > 0
+  // Round 2 review finding R2-5 (design 3): the merchant CAN be pinned to, but
+  // none of the owner's own agents qualify (wrong chain, revoked, archived) —
+  // the page used to show nothing at all where the action would be. Gated on
+  // `!agentsLoading` so the note never flashes on then off again once agents
+  // resolves and `hasEligibleAgent` flips true (or the plain Fund button
+  // takes over) — before that resolves, this slot renders nothing, exactly
+  // like `showFundAction` already does with an empty `agents` array.
+  const showConnectAgentNote = !comingSoon && !agentsLoading && pinnableFunding.length > 0 && !hasEligibleAgent
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
@@ -160,6 +170,13 @@ export default function MerchantPage() {
                 Give one of your agents a budget that pays only {merchant.name}.
               </p>
             </div>
+          ) : showConnectAgentNote ? (
+            <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              Connect an agent on {chainName(pinnableFunding[0]!.chain_id)} to give it a budget for {merchant.name}.{' '}
+              <Link href="/agents" className="font-medium text-[var(--v2-brand)] hover:underline">
+                Connect an agent
+              </Link>
+            </p>
           ) : showOpenBudgetNote ? (
             // #3331 review finding design-12: plain wording, no "pinning it to
             // a recipient", and its own small heading rather than a bare line.

@@ -270,8 +270,11 @@ describe('MerchantPage', () => {
   // agents do — the action must not show a Review that can only ever land on
   // "no eligible agent", and the open-budget note (a DIFFERENT case: a
   // verified payTo that is not ERC-7710) must not show here either.
-  it('withholds the action when a chain qualifies but the owner has no eligible agent, without the open-budget note', () => {
-    mockUseAgents.mockReturnValue({ agents: [] })
+  //
+  // Round 2 review finding R2-5 (design 3): this used to leave the whole slot
+  // BLANK — now it says why, and how to fix it, with a link to /agents.
+  it('shows a plain "connect an agent" line (not the open-budget note) when a chain qualifies but the owner has no eligible agent', () => {
+    mockUseAgents.mockReturnValue({ agents: [], loading: false })
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer()],
@@ -284,6 +287,26 @@ describe('MerchantPage', () => {
     render(<MerchantPage />)
     expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
     expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
+    expect(
+      screen.getByText(/Connect an agent on Base Sepolia to give it a budget for Ampersend Demo API\./),
+    ).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Connect an agent' }).getAttribute('href')).toBe('/agents')
+  })
+
+  it('shows neither the action nor the connect-agent note while agents are still loading — no flash (R2-5)', () => {
+    mockUseAgents.mockReturnValue({ agents: [], loading: true })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByText(/Connect an agent on/)).toBeNull()
   })
 
   it('withholds the action, with open-budget copy, when the only verified payTo is not ERC-7710', () => {

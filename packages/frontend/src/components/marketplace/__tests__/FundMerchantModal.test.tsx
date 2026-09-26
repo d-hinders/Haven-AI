@@ -311,7 +311,9 @@ describe('FundMerchantModal (#3331)', () => {
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     await waitFor(() =>
-      expect(screen.getByText(/replaces this agent's current budget for Other Merchant/)).toBeDefined(),
+      expect(
+        screen.getByText(/replaces this agent's current budget for Other Merchant, which uses the same payment address/),
+      ).toBeDefined(),
     )
   })
 
@@ -324,16 +326,22 @@ describe('FundMerchantModal (#3331)', () => {
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
-  it('review step: states there is no fallback while this budget is active (#3331 F2)', async () => {
+  it('review step: states the no-fallback rule and BOTH exceptions while this budget is active (#3331 F2, corrected R2 doc review 1)', async () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     await waitFor(() =>
       expect(
-        screen.getByText(/Once it runs out, payments to Ampersend Demo API are refused until the next period/),
+        screen.getByText(/Payments this agent sends straight to Ampersend Demo API use this budget, and are refused once it runs out until the next period/),
       ).toBeDefined(),
     )
+    expect(
+      screen.getByText(/Payments that go through the agent's own wallet first, or run under a task budget, still use its open budget/),
+    ).toBeDefined()
     expect(screen.queryByText(/preferred/)).toBeNull()
+    // No jargon: never "delegation", "caveat", "recipient pin", "ERC-7710",
+    // "EIP-3009" or "task budget ID" in the review-step copy shown to the owner.
+    expect(screen.queryByText(/delegation|caveat|recipient pin|erc-?7710|eip-?3009/i)).toBeNull()
   })
 
   it('review step: renders the SIGNED amount (formatUnits of the atomic value), not the typed string (#3331 F5)', async () => {
@@ -350,6 +358,18 @@ describe('FundMerchantModal (#3331)', () => {
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '1e3' } })
     expect(screen.getByText(/Enter a plain number/)).toBeDefined()
     expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  // ── design review round 2, finding 7 ────────────────────────────────────
+  it('links the amount error to the input via aria-describedby and announces it', () => {
+    render(<FundMerchantModal {...PROPS} />)
+    const input = screen.getByLabelText('Budget amount')
+    expect(input.getAttribute('aria-describedby')).toBeNull()
+    fireEvent.change(input, { target: { value: '1e3' } })
+    const error = screen.getByText(/Enter a plain number/)
+    expect(error.id).toBe('fund-merchant-amount-error')
+    expect(error.getAttribute('role')).toBe('alert')
+    expect(input.getAttribute('aria-describedby')).toBe('fund-merchant-amount-error')
   })
 
   it('rejects more fraction digits than the token supports, by name (#3331 F5)', () => {
@@ -438,6 +458,63 @@ describe('FundMerchantModal (#3331)', () => {
     expect(screen.getByText(/Nothing changed\.$/)).toBeDefined()
     // Never the backend's raw sentence verbatim.
     expect(screen.queryByText(detail)).toBeNull()
+    // No jargon anywhere in the error-state copy (doc review 3).
+    expect(screen.queryByText(/delegation|caveat|recipient pin|erc-?7710|eip-?3009/i)).toBeNull()
+  })
+
+  // ── design review round 2, finding 2: permanent refusals drop "Try again" ──
+  it('a payTo-changed refusal offers "Reload page" as the sole action, never "Try again"', async () => {
+    mockGrant.mockResolvedValue({
+      ok: false,
+      reason: 'refused',
+      detail: "recipient_address does not match the merchant's current verified payTo; reload the merchant page",
+    })
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Reload page' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    // The header's own icon-only Close button is aria-label "Close" and is
+    // always present; the footer text button is a distinct visible "Close" —
+    // that one must be absent here (Reload page is the SOLE footer action).
+    expect(screen.queryByText('Close')).toBeNull()
+  })
+
+  it.each([
+    'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet',
+    'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget',
+    "Merchant's payTo is one of this agent's own addresses; a merchant-locked budget cannot be issued to it",
+    'Revoked agents cannot receive new budget delegations',
+    'Delegation rail not enabled on chain 8453',
+  ])('a permanent refusal ("%s") offers only "Close", never "Try again"', async (detail) => {
+    mockGrant.mockResolvedValue({ ok: false, reason: 'refused', detail })
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
+    expect(screen.getByText('Close').closest('button')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it.each([
+    ['A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget'],
+    ['Agent cannot receive a budget while its account or re-key is unavailable'],
+    ['some future backend refusal text'],
+  ])('a transient/unknown refusal ("%s") keeps Close + "Try again"', async (detail) => {
+    mockGrant.mockResolvedValue({ ok: false, reason: 'refused', detail })
+    render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Sign budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign budget' }))
+    await waitFor(() => expect(screen.getByText('The budget could not be set')).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDefined()
+    expect(screen.getByText('Close').closest('button')).toBeDefined()
   })
 
   it('an unrecognised refusal detail falls back to the generic sentence, never raw backend prose (#3331 F9)', async () => {

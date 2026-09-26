@@ -55,7 +55,8 @@ describe('MerchantBudgetsList (#3331)', () => {
   it.each([
     ['stale', 'Old address', /uses a new address/],
     ['unverified', 'Address unconfirmed', /cannot confirm it is still the merchant's/],
-    ['not_erc7710', "Can't pay now", /cannot pay this merchant here any more/],
+    // Design review round 2, finding 4: the outcome AND the next step.
+    ['not_erc7710', "Can't pay now", /open budget instead.*stop this budget, then fund it/],
   ] as const)('pin_status %s renders its own plain label and one outcome sentence', (status, label, helperText) => {
     render(<MerchantBudgetsList budgets={[row({ pin_status: status })]} />)
     expect(screen.getByText(label)).toBeDefined()
@@ -68,7 +69,7 @@ describe('MerchantBudgetsList (#3331)', () => {
     expect(screen.queryByText(/uses a new address|cannot confirm|cannot pay this merchant/)).toBeNull()
   })
 
-  it('one row per agent, keyed by delegation hash', () => {
+  it('one row per BUDGET (delegation hash), not one row per agent', () => {
     render(
       <MerchantBudgetsList
         budgets={[row(), row({ agent_id: 'agent-2', agent_name: 'Second Agent', delegation_hash: '0x' + 'cc'.repeat(32) })]}
@@ -76,5 +77,27 @@ describe('MerchantBudgetsList (#3331)', () => {
     )
     expect(screen.getByText('Research Agent')).toBeDefined()
     expect(screen.getByText('Second Agent')).toBeDefined()
+  })
+
+  // Doc review round 2, finding 7: ONE agent can hold TWO merchant-locked
+  // budgets for this merchant at once (different tokens, or a `stale` row
+  // beside its newer replacement) — each gets its own row, keyed by
+  // delegation hash, never collapsed into one row per agent.
+  it('renders TWO rows for one agent holding two budgets for this merchant', () => {
+    render(
+      <MerchantBudgetsList
+        budgets={[
+          row({ delegation_hash: '0x' + 'aa'.repeat(32), token_address: USDC_SEPOLIA }),
+          row({
+            delegation_hash: '0x' + 'dd'.repeat(32),
+            token_address: '0x' + 'ee'.repeat(20),
+            pin_status: 'stale',
+          }),
+        ]}
+      />,
+    )
+    expect(screen.getAllByText('Research Agent')).toHaveLength(2)
+    expect(screen.getByText('Current')).toBeDefined()
+    expect(screen.getByText('Old address')).toBeDefined()
   })
 })

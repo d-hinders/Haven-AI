@@ -37,7 +37,10 @@ const PIN_STATUS_COPY: Record<MerchantBudget['pin_status'], { label: string; ton
   not_erc7710: {
     label: "Can't pay now",
     tone: 'warning',
-    helper: 'This budget cannot pay this merchant here any more.',
+    // Design review round 2, finding 4: state the outcome AND the next step —
+    // not just that this budget stopped working.
+    helper:
+      "Payments to this merchant now go through the agent's open budget instead, if it has one. To fund it again, stop this budget, then fund it from the merchant's page.",
   },
 }
 

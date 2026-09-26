@@ -32,6 +32,10 @@ import type { Agent } from '@/hooks/useAgents'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import { getChainConfig } from '@/lib/chains'
 import { needsUnpinnedBudget, networkToChainId } from '@/lib/marketplace'
+import {
+  classifyMerchantBudgetRefusal,
+  isPermanentMerchantBudgetRefusal,
+} from '@/lib/merchantBudgetRefusal'
 import { truncateAddress } from '@/components/haven'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
@@ -116,35 +120,34 @@ export function merchantTokenOptions(chainId: number, offers: CatalogEntry[]): T
  * in-flight re-key) — everything else, including a raw/unrecognised message,
  * falls to one generic sentence rather than surfacing backend prose verbatim.
  * The caller always appends "Nothing changed." once, so this never repeats it.
+ * Classification itself is shared with `EditBudgetModal` (round 2 review
+ * finding R2-2) via `@/lib/merchantBudgetRefusal` — only the wording (a NEW
+ * budget vs. an in-place edit) differs between the two modals.
  */
 function refusalCopy(detail: string | undefined, merchantName: string): string {
-  const d = detail ?? ''
-  if (/no verified payTo/i.test(d)) {
-    return `${merchantName} does not have a confirmed payment address on this network yet. Reload the page and try again shortly.`
+  switch (classifyMerchantBudgetRefusal(detail)) {
+    case 'no_verified_pay_to':
+      return `${merchantName} does not have a confirmed payment address on this network yet. Reload the page and try again shortly.`
+    case 'not_erc7710':
+      // #3331 review finding F7: the agent's open budget, not the merchant's.
+      return `${merchantName}'s payments here now go through the agent's open budget instead — a merchant-locked budget is no longer offered.`
+    case 'own_address':
+      return `${merchantName}'s payment address is this agent's own wallet — Haven cannot pin a budget to it.`
+    case 'pay_to_changed':
+      return `${merchantName}'s payment address changed. Reload the page to see the current one.`
+    case 'merchant_not_found':
+      return `${merchantName} could not be found — it may have been removed. Reload the page.`
+    case 'revoked_agent':
+      return 'This agent was revoked and cannot receive a new budget.'
+    case 'rekey_in_flight':
+      return "A key change for this agent's Haven wallet is already in progress. Finish or cancel it, then try again."
+    case 'account_unavailable':
+      return "This agent's Haven wallet is temporarily unavailable. Try again shortly."
+    case 'off_rail':
+      return "This agent cannot receive this kind of budget on its current network."
+    default:
+      return `Haven could not set up this budget.`
   }
-  if (/does not accept ERC-7710/i.test(d) || /not.*erc-7710/i.test(d)) {
-    // #3331 review finding F7: the agent's open budget, not the merchant's.
-    return `${merchantName}'s payments here now go through the agent's open budget instead — a merchant-locked budget is no longer offered.`
-  }
-  if (/agent's own addresses/i.test(d)) {
-    return `${merchantName}'s payment address is this agent's own wallet — Haven cannot pin a budget to it.`
-  }
-  if (/does not match the merchant's current verified payTo/i.test(d)) {
-    return `${merchantName}'s payment address changed. Reload the page to see the current one.`
-  }
-  if (/revoked agents cannot receive/i.test(d)) {
-    return 'This agent was revoked and cannot receive a new budget.'
-  }
-  if (/key rotation is in flight/i.test(d)) {
-    return "A key change for this agent's Haven wallet is already in progress. Finish or cancel it, then try again."
-  }
-  if (/account or re-key is unavailable/i.test(d)) {
-    return "This agent's Haven wallet is temporarily unavailable. Try again shortly."
-  }
-  if (/not on the delegation rail/i.test(d) || /delegation rail not enabled/i.test(d) || /no delegate key or treasury/i.test(d)) {
-    return "This agent cannot receive this kind of budget on its current network."
-  }
-  return `Haven could not set up this budget.`
 }
 
 /**
@@ -333,6 +336,15 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
     }
   }, [grant, input, onGranted])
 
+  // Design review round 2, finding 2: a refusal a same-input retry cannot
+  // ever turn into a success must not offer "Try again" as its primary
+  // action — "Reload page" for a moved payTo (reloading the merchant page IS
+  // the fix), otherwise a single "Close". Transient/unknown refusals keep
+  // Close + Try again exactly as before.
+  const refusalKind =
+    outcome && !outcome.ok && outcome.reason === 'refused' ? classifyMerchantBudgetRefusal(outcome.detail) : null
+  const permanentRefusal = refusalKind !== null && isPermanentMerchantBudgetRefusal(refusalKind)
+
   if (!open) return null
 
   return (
@@ -420,6 +432,11 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                           inputMode="decimal"
                           aria-label="Budget amount"
                           invalid={!!amountFormatError}
+                          // Design review round 2, finding 7: the error text
+                          // below is linked to the field it describes, and
+                          // announced (role="alert" on that paragraph) rather
+                          // than relying on sight alone.
+                          aria-describedby={amountFormatError ? 'fund-merchant-amount-error' : undefined}
                         />
                       </div>
                       {tokenOptions.length > 1 ? (
@@ -436,9 +453,19 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                           ))}
                         </Select>
                       ) : (
-                        <span className="self-end pb-2 text-sm text-[var(--v2-ink-muted)] sm:pb-0 sm:self-end">
-                          {token?.symbol}
-                        </span>
+                        // Design review round 2, finding 7: an invisible label
+                        // spacer, sm+ only, so the symbol's text baseline lines
+                        // up with the Amount input's on desktop (a real fix on
+                        // mobile — the stacked "USDC" orphan, design finding
+                        // 14 — is left to the captain's follow-up).
+                        <div className="flex flex-col sm:self-end">
+                          <span aria-hidden="true" className="mb-1 hidden text-xs sm:block">
+                            &nbsp;
+                          </span>
+                          <span className="flex h-9 items-center pb-2 text-sm text-[var(--v2-ink-muted)] sm:h-10 sm:pb-0">
+                            {token?.symbol}
+                          </span>
+                        </div>
                       )}
                       <Select
                         value={String(period)}
@@ -458,7 +485,9 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                       {payTo ? ` (${truncateAddress(payTo)})` : ''}.
                     </p>
                     {amountFormatError ? (
-                      <p className="text-xs text-[var(--v2-danger)]">{amountFormatError}</p>
+                      <p id="fund-merchant-amount-error" role="alert" className="text-xs text-[var(--v2-danger)]">
+                        {amountFormatError}
+                      </p>
                     ) : !amountValid ? (
                       <p className="text-xs text-[var(--v2-ink-3)]">Enter an amount above zero to continue.</p>
                     ) : null}
@@ -509,16 +538,18 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                     {merchant.name} only{payTo ? ` · ${truncateAddress(payTo)}` : ''}
                   </p>
                 </div>
-                {/* #3331 review finding F2: no fallback while this budget is
-                    active — every payment to this merchant in this token
-                    draws on it alone, and once it is exhausted those
-                    payments are refused until the next period. Stated once,
-                    here on the review step (the select step keeps only the
-                    short "pays only" line). */}
+                {/* #3331 review finding F2, corrected round 2 (doc review 1):
+                    "no fallback" only holds for the two paths named below —
+                    it does not hold for a checkout that funds the agent's own
+                    wallet first, or for a payment under a task budget. Stated
+                    once, here on the review step (the select step keeps only
+                    the short "pays only" line); `docs/product/marketplace.md`
+                    "Which budget pays" states the same rule and exceptions. */}
                 <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                  Payments to {merchant.name} use this budget. Once it runs out, payments to {merchant.name} are
-                  refused until the next period — they do not fall back to this agent's open budget, even if it has
-                  one. Payments above the budget are refused on-chain; they are not held for approval.
+                  Payments this agent sends straight to {merchant.name} use this budget, and are refused once it
+                  runs out until the next period. Payments that go through the agent's own wallet first, or run
+                  under a task budget, still use its open budget. Payments above the budget are refused on-chain;
+                  they are not held for approval.
                 </p>
               </div>
 
@@ -528,7 +559,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                     {replacedBudget.merchant_id === merchant.id
                       ? `This replaces this agent's current budget for ${merchant.name}.`
                       : replacedBudget.merchant_id
-                        ? `This replaces this agent's current budget for ${replacedBudget.merchant_name ?? 'another merchant'}.`
+                        ? `This replaces this agent's current budget for ${replacedBudget.merchant_name ?? 'another merchant'}, which uses the same payment address.`
                         : `This replaces this agent's current budget to the same address.`}
                   </p>
                   <p className="v2-tabular">
@@ -604,12 +635,26 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                 </p>
               </div>
               <div className="flex gap-3">
-                <Button variant="ghost" onClick={handleClose} className="flex-1">
-                  Close
-                </Button>
-                <Button onClick={() => setStep('review')} className="flex-1" disabled={busy}>
-                  Try again
-                </Button>
+                {permanentRefusal ? (
+                  refusalKind === 'pay_to_changed' ? (
+                    <Button onClick={() => window.location.reload()} className="flex-1">
+                      Reload page
+                    </Button>
+                  ) : (
+                    <Button onClick={handleClose} className="flex-1">
+                      Close
+                    </Button>
+                  )
+                ) : (
+                  <>
+                    <Button variant="ghost" onClick={handleClose} className="flex-1">
+                      Close
+                    </Button>
+                    <Button onClick={() => setStep('review')} className="flex-1" disabled={busy}>
+                      Try again
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           )}

@@ -1654,3 +1654,20 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > document claims about authority, custody or signing changes. Scope of this
 > note: which dashboard load writes the daily row. Nothing else in this
 > document was re-verified.
+
+> **Re-verified #3331 frontend (2026-09-27, round 2 review fixes):** this diff
+> touches `hooks/useDelegationBudget.ts` only. `reload`/`reloadSigners` read
+> `/agents/{id}/delegations` and `/agents/{id}/account-signers`, neither
+> chain-scoped, so the hook's own reset effect now clears state on an
+> `agentId` change only — not a `chainId`-only rerender, which used to blank a
+> still-valid signer set for no data reason. `editBudget`'s build call already
+> forwarded `merchant_slug` (#3331 round 1); this diff adds a doc-accurate
+> JSDoc only, no behaviour change: an edit re-derives the recipient on the
+> server from the merchant's CURRENT verified payTo, keeps the merchant label
+> on success, and is refused (409) when that payTo moved since the row was
+> granted — the old budget stays live and untouched either way, exactly as
+> the REPLACE composition above already guarantees. Nothing here changes
+> which signature authorises what: the owner still signs the new grant, then
+> the stop, and the delegate key and local signer are never touched. Scope of
+> this note: `useDelegationBudget.ts`'s reset effect and JSDoc. Nothing else
+> in this document was re-verified.

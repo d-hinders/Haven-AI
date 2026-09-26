@@ -36,6 +36,11 @@ import {
   type EditBudgetResult,
   type GrantInput,
 } from '@/hooks/useDelegationBudget'
+import {
+  classifyMerchantBudgetRefusal,
+  isPermanentMerchantBudgetRefusal,
+} from '@/lib/merchantBudgetRefusal'
+import { truncateAddress } from './haven'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -72,6 +77,33 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
 
 function periodLabel(seconds: number): string {
   return PERIODS.find((p) => p.seconds === seconds)?.label ?? `every ${seconds}s`
+}
+
+/**
+ * Plain copy for the merchant-STALE build refusals a merchant-locked budget's
+ * edit can hit (round 2 review finding R2-2): the merchant's verified payTo
+ * moved since this row was granted, the merchant lost its verified payTo or
+ * its ERC-7710 offers, or the merchant no longer exists. Classification is
+ * shared with `FundMerchantModal` (`@/lib/merchantBudgetRefusal`); only the
+ * wording differs — an EDIT has no "reload and retry", its way out is always
+ * "stop this budget, then fund the merchant again". Returns `null` for every
+ * OTHER refusal (a revoked agent, an in-flight re-key, an unavailable
+ * account, an off-rail chain, or anything unrecognised) — those keep
+ * surfacing the backend's own sentence, unchanged from before this fix.
+ */
+function editMerchantRefusalCopy(detail: string | undefined, merchantName: string): string | null {
+  switch (classifyMerchantBudgetRefusal(detail)) {
+    case 'pay_to_changed':
+      return `${merchantName} now uses a different payment address, so this budget can't be changed here. Stop it, then fund ${merchantName} again from its page.`
+    case 'no_verified_pay_to':
+      return `${merchantName} does not have a confirmed payment address right now, so this budget can't be changed here. Stop it, then fund ${merchantName} again once it has one.`
+    case 'not_erc7710':
+      return `${merchantName} no longer accepts this kind of budget, so it can't be changed here. Stop it — new payments to ${merchantName} will use the agent's open budget instead.`
+    case 'merchant_not_found':
+      return `${merchantName} could not be found, so this budget can't be changed here. Stop it — it can no longer be edited.`
+    default:
+      return null
+  }
 }
 
 export default function EditBudgetModal({
@@ -230,6 +262,21 @@ export default function EditBudgetModal({
     }
   }, [budget.delegation_hash, changes, editBudget, input, onBudgetChange])
 
+  // Round 2 review findings R2-2 / design 2: a merchant-STALE build refusal
+  // gets plain copy naming the way out (Stop, then fund again) instead of the
+  // raw backend sentence, and — because no retry with the SAME input can ever
+  // succeed here — the footer drops "Try again" down to a single "Close".
+  // Every other refusal (re-key in flight, account unavailable, off-rail,
+  // unrecognised) is unchanged: raw detail + "Your current budget is
+  // unchanged.", Close + Try again.
+  const refusalKind =
+    outcome && !outcome.ok && outcome.reason === 'refused' ? classifyMerchantBudgetRefusal(outcome.detail) : null
+  const mappedRefusalCopy =
+    outcome && !outcome.ok && outcome.reason === 'refused'
+      ? editMerchantRefusalCopy(outcome.detail, budget.merchant_name ?? 'This merchant')
+      : null
+  const permanentRefusal = refusalKind !== null && isPermanentMerchantBudgetRefusal(refusalKind)
+
   if (!open) return null
 
   const changed = changes?.changed ?? false
@@ -281,8 +328,12 @@ export default function EditBudgetModal({
               <p className="text-sm text-[var(--v2-ink-2)]">
                 Editing the {formatUnits(BigInt(budget.budget_atomic), token?.decimals ?? 18)}{' '}
                 {token?.symbol} {periodLabel(budget.period_seconds)} budget
-                {budget.recipient_address ? ' for its recipient' : ''}. Your current budget keeps
-                working until the new one is signed.
+                {/* Design review round 2, finding 1: a merchant-locked budget
+                    already names its merchant in the read-only row just below
+                    — "budget for its recipient" here would be a second, vaguer
+                    way of saying the same thing. */}
+                {!isMerchantLocked && budget.recipient_address ? ' for its recipient' : ''}. Your current
+                budget keeps working until the new one is signed.
               </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
@@ -313,7 +364,12 @@ export default function EditBudgetModal({
                 // clear-to-open for a budget that pays exactly one merchant.
                 <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2">
                   <p className="text-xs text-[var(--v2-ink-2)]">
-                    Pays {budget.merchant_name ?? 'this merchant'} only. The recipient cannot be changed here.
+                    {/* Design review round 2, finding 6: show the truncated
+                        address alongside the merchant name, the same "who and
+                        where" shape the review step now uses. */}
+                    Pays {budget.merchant_name ?? 'this merchant'} only
+                    {budget.recipient_address ? ` · ${truncateAddress(budget.recipient_address)}` : ''}. The
+                    recipient cannot be changed here.
                   </p>
                 </div>
               ) : (
@@ -369,14 +425,26 @@ export default function EditBudgetModal({
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Now</p>
                   <p className="text-sm text-[var(--v2-ink-2)]">
                     {changes.oldAmount} {changes.symbol} {periodLabel(changes.oldPeriod)}
-                    {changes.oldRecipient ? ' · one recipient' : ' · any recipient'}
+                    {/* Design review round 2, finding 1: name the merchant (and
+                        its truncated address) for a merchant-locked budget —
+                        the recipient never changes here, so "one recipient" is
+                        a strictly vaguer way of saying the same fixed fact. */}
+                    {isMerchantLocked && changes.oldRecipient
+                      ? ` · ${budget.merchant_name ?? 'this merchant'} only · ${truncateAddress(changes.oldRecipient)}`
+                      : changes.oldRecipient
+                        ? ' · one recipient'
+                        : ' · any recipient'}
                   </p>
                 </div>
                 <div>
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">After you sign</p>
                   <p className="text-sm font-medium text-[var(--v2-ink)]">
                     {changes.newAmount} {changes.symbol} {periodLabel(changes.newPeriod)}
-                    {changes.newRecipient ? ' · one recipient' : ' · any recipient'}
+                    {isMerchantLocked && changes.newRecipient
+                      ? ` · ${budget.merchant_name ?? 'this merchant'} only · ${truncateAddress(changes.newRecipient)}`
+                      : changes.newRecipient
+                        ? ' · one recipient'
+                        : ' · any recipient'}
                   </p>
                 </div>
                 {changes.raised ? (
@@ -467,8 +535,8 @@ export default function EditBudgetModal({
                       The budget could not be changed
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      {outcome.detail ?? 'Haven could not prepare the change.'} Your current
-                      budget is unchanged.
+                      {mappedRefusalCopy ??
+                        `${outcome.detail ?? 'Haven could not prepare the change.'} Your current budget is unchanged.`}
                     </p>
                   </>
                 ) : (
@@ -483,12 +551,20 @@ export default function EditBudgetModal({
                 )}
               </div>
               <div className="flex gap-3">
-                <Button variant="ghost" onClick={handleClose} className="flex-1">
-                  Close
-                </Button>
-                <Button onClick={() => setStep('review')} className="flex-1" disabled={busy}>
-                  Try again
-                </Button>
+                {permanentRefusal ? (
+                  <Button onClick={handleClose} className="flex-1">
+                    Close
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="ghost" onClick={handleClose} className="flex-1">
+                      Close
+                    </Button>
+                    <Button onClick={() => setStep('review')} className="flex-1" disabled={busy}>
+                      Try again
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           )}

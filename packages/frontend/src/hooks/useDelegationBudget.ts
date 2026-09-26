@@ -124,8 +124,9 @@ export interface GrantInput {
   /**
    * A merchant-locked budget (#3331): the server pins the recipient to this
    * live merchant's verified payTo on the agent's chain and records the
-   * merchant on the row. `recipientAddress` must be omitted (or left null) —
-   * the server derives it, and a sent one that disagrees is a 409.
+   * merchant on the row. `recipientAddress` MAY be sent alongside it; it must
+   * then equal the merchant's current verified payTo, or the build is a 409.
+   * Left omitted (or null), the server derives the recipient itself.
    */
   merchantSlug?: string
 }
@@ -214,6 +215,17 @@ export function useDelegationBudget(
   // only the former).
   const budgetsGeneration = useRef(0)
   const signersGeneration = useRef(0)
+  // R2-4: a background silent poll and a manual (non-silent) `reload()` share
+  // the same generation counter above — without this flag, a poll tick that
+  // starts WHILE a manual retry is in flight bumps the generation past the
+  // manual call's `mine`, so the manual call's own (possibly successful)
+  // result is discarded as "stale" the moment it resolves — even though nothing
+  // else answered in between with fresher data. A manual reload is a direct
+  // response to the owner clicking Try again; it must never lose to a poll
+  // tick that fired for no reason the owner asked for. Silent ticks simply
+  // skip themselves while a manual reload is in flight (rather than racing it) —
+  // the next poll a few seconds later covers the same ground.
+  const manualBudgetsReloadInFlight = useRef(false)
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
@@ -236,6 +248,10 @@ export function useDelegationBudget(
   const reload = useCallback(
     async (silent = false) => {
       if (!enabled) return
+      // R2-4: never let a background poll tick race an in-flight manual
+      // reload — see the ref's own comment above.
+      if (silent && manualBudgetsReloadInFlight.current) return
+      if (!silent) manualBudgetsReloadInFlight.current = true
       const mine = ++budgetsGeneration.current
       try {
         const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
@@ -248,6 +264,8 @@ export function useDelegationBudget(
         if (silent) return
         setBudgets(null)
         setBudgetsError(true)
+      } finally {
+        if (!silent) manualBudgetsReloadInFlight.current = false
       }
     },
     [agentId, enabled],
@@ -287,23 +305,30 @@ export function useDelegationBudget(
     void reloadSigners()
   }, [enabled, reload, reloadSigners])
 
-  // #3331 review finding F4: reset IMMEDIATELY when the scope changes —
-  // `agentId` or `chainId` — while the hook stays enabled (a caller that
-  // switches agent mid-flow inside one mounted hook, e.g. `FundMerchantModal`'s
-  // agent picker). Without this, the previous agent's budgets/signer set (and
+  // #3331 review finding F4 (R2-1 correction): reset IMMEDIATELY when the
+  // AGENT changes — while the hook stays enabled (a caller that switches
+  // agent mid-flow inside one mounted hook, e.g. `FundMerchantModal`'s agent
+  // picker). Without this, the previous agent's budgets/signer set (and
   // therefore `ready`/`signingPath`) remain readable — and actionable — for
   // the whole round trip of the new read, which is exactly the "signs with
   // the wrong agent's data" risk on a money path. `reload`/`reloadSigners`
   // above already refetch on this same change (their identity depends on
   // `agentId`); this only clears what a render can see in between.
+  //
+  // Deliberately NOT `chainId`: `/agents/:id/delegations` and
+  // `/agents/:id/account-signers` are not chain-scoped — a chainId-only
+  // rerender (same agent, network switch) must keep the already-loaded
+  // budgets/signers on screen (and `ready` true) rather than blanking them
+  // for no data reason. `useActiveSigner` above still re-derives the signing
+  // path for the new chain from the SAME signer set.
   useEffect(() => {
     if (!enabled) return
     setBudgets(null)
     setBudgetsError(false)
     setSigners(null)
     setSignersError(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately NOT `enabled`: the effect above already resets on enable/disable; this one is scoped to the identity the hook reads.
-  }, [agentId, chainId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately NOT `enabled`/`chainId`: the effect above already resets on enable/disable; chainId is not part of this hook's read scope (see comment above).
+  }, [agentId])
 
   // #2732 visible-only polling — budgets only. The signer set is a DEVICE
   // fact, not payment state; polling it every 10s would churn the signing

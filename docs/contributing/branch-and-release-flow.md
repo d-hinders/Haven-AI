@@ -338,17 +338,17 @@ cannot be merged as prescribed. `dev` is 8 promotion merges behind `main`
 (`git rev-list --count origin/dev..origin/main`, 2026-09-26).
 
 What actually worked: the promotion merges **while behind**, by the owner —
-#3162 in the web UI, #3325 (0.5.0-alpha.1, 2026-09-25) via the API. `Dev gate`
+#3162 and #3325 (0.5.0-alpha.1, 2026-09-25) via the API. `Dev gate`
 lists no bypass actors, so the exact mechanism is unconfirmed —
 with the code-owner approval a migration-carrying promotion needs still
-collected first (#3325 carried migrations). The GitHub mobile app offers no bypass merge; use the web UI or
-the API. Until the owner decides, expect every promotion to need that bypass.
+collected first (#3325 carried migrations). The GitHub mobile app offers no such merge; use the web UI or
+the API. Until the owner decides, expect every promotion to need that owner merge.
 The two options:
 
 1. **Keep the sync-back:** temporarily allow merge commits on `dev` for the
    sync PR (or add a bypass actor to `Dev merge` for it), merge-merge it, then
    restore squash-only.
-2. **Drop the sync-back:** accept that promotions merge behind via bypass, and
+2. **Drop the sync-back:** accept that promotions merge behind by that owner merge, and
    delete this rule.
 
 ## What's in prod vs. pending

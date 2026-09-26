@@ -189,7 +189,7 @@ so this is a rule to point at rather than a question to ask the release runner.
       sync-back that used to bring it forward cannot be merged into squash-only
       `dev`; until the owner decides
       ([`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main)),
-      it merges behind by an owner bypass from the web UI or API — never the
+      it merges behind by an owner merge from the web UI or API — never the
       mobile app, which offers no bypass.
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)

@@ -501,8 +501,8 @@ export function evaluate({
       code: 'search_cut_short',
       message:
         `The search for a green 'QA — money-flow (dev)' run stopped at its job-lookup budget ` +
-        `(#3361) before one was admitted, so this gate cannot tell whether one exists. The ` +
-        `window is dominated by runs whose money-flow job did not pass. ${RERUN}`,
+        `(#3361) before selection finished, so no run is anchored. The runs it read did not ` +
+        `pass, or could not be read. ${RERUN}`,
     }
   }
   if (!latestGreenRun) {
@@ -1026,7 +1026,9 @@ function main() {
   // evaluate is the one place that decides what "invalid" means (#3368).
   const freshnessHoursInput = process.env.FRESHNESS_HOURS
   const preCheck = evaluate({ sourceBranch, latestGreenRun: null, changedMoneyPathFiles: [], nowMs: Date.now(), freshnessHours, freshnessHoursInput })
-  if (preCheck.code === 'bad_freshness_hours') {
+  // An unknown branch is refused here too: evaluate checks it first, and
+  // letting it fall through would surface a bad window as a query failure.
+  if (preCheck.code === 'bad_freshness_hours' || preCheck.code === 'unknown_branch') {
     console.error(`::error::${preCheck.message}`)
     process.exit(1)
   }
@@ -1051,7 +1053,7 @@ function main() {
         `for finishing in under ${MIN_HARNESS_RUN_SECONDS}s (neither can have run the harness); ${lookups} job lookup(s).`,
     )
     if (truncated) console.log(`::warning::qa-freshness: the run query hit its ${GREEN_RUN_LIMIT}-row limit; older runs may be missing.`)
-    if (budgetExhausted) console.log(`::warning::qa-freshness: the ${JOB_LOOKUP_BUDGET}-lookup budget ran out before a run was admitted; no run is anchored, so the gate refuses. The query is deterministic, so re-running this check changes nothing until a new green run lands: dispatch qa-dev.`)
+    if (budgetExhausted) console.log(`::warning::qa-freshness: the ${JOB_LOOKUP_BUDGET}-lookup budget ran out before selection finished; no run is anchored, so the gate refuses. Re-running this check rarely helps (only if a lookup failed transiently): dispatch qa-dev.`)
     searchCutShort = budgetExhausted
     for (const r of refused) {
       console.log(`qa-freshness: passed over run ${r.databaseId ?? '?'} (${r.event ?? '?'} at ${r.headSha ?? '?'}): ${r.reason}`)

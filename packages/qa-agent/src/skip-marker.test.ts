@@ -43,9 +43,12 @@ describe('skip-visibility contract (#1044)', () => {
     const job = /^ {2}money-flow:\n([\s\S]*?)(?=^ {2}[a-z][a-z0-9-]*:\n|(?![\s\S]))/m.exec(WORKFLOW)
     expect(job).not.toBeNull()
     // The YAML key, not the word: the workflow's own comment names it.
-    expect(job![1]).not.toMatch(/^\s*continue-on-error\s*:/m)
+    expect(job![1]).not.toMatch(/^\s*["']?continue-on-error["']?\s*:/m)
     const step = /- name: Coverage completeness\n([\s\S]*?)(?=\n {6}- name:|(?![\s\S]))/.exec(job![1])
     expect(step).not.toBeNull()
-    expect(step![1]).toMatch(/grep -q "green-with-skips:" qa-run\.log[\s\S]*?exit 1/)
+    // It runs whenever the harness passed, and it fails (not `if ! grep`) on the marker.
+    expect(step![1]).toMatch(/^\s*if:\s*success\(\)\s*$/m)
+    expect(step![1].match(/^\s*if:/gm)).toHaveLength(1)
+    expect(step![1]).toMatch(/\bif grep -q "green-with-skips:" qa-run\.log; then[\s\S]*?exit 1/)
   })
 })

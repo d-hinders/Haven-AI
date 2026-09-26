@@ -1032,12 +1032,21 @@ process.exit(64)
     assert.doesNotMatch(out, /could not query workflow runs/)
   })
 
+  test('REFUSES: bad hours on an unknown branch names the branch, not a query failure (#3368 review)', () => {
+    for (const hours of ['abc', '1e15']) {
+      const { status, out } = run({ GH_SHIM_RUNS: 'at-head', SOURCE_BRANCH: 'feature/x', FRESHNESS_HOURS: hours })
+      assert.equal(status, 1, out)
+      assert.match(out, /Unrecognised promotion source branch 'feature\/x'/)
+      assert.doesNotMatch(out, /could not query workflow runs/)
+    }
+  })
+
   test('REFUSES: a search cut short by the lookup budget says so, not "no run found" (#3368)', () => {
     const { status, out } = run({ GH_SHIM_RUNS: 'many-at-head', GH_SHIM_JOBS: 'failure' })
     assert.equal(status, 1, out)
     assert.match(out, /lookup budget ran out/)
     assert.match(out, /not read: job-lookup budget exhausted/)
-    assert.match(out, /stopped at its job-lookup budget/)
+    assert.match(out, /stopped at its job-lookup budget \(#3361\) before selection finished/)
     assert.doesNotMatch(out, /No successful 'QA — money-flow \(dev\)' run found/)
     assert.doesNotMatch(out, /Re-run it, or dispatch/) // a re-run hits the same budget
   })

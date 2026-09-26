@@ -335,11 +335,17 @@ and direct pushes to `dev` are refused. The owner chose to drop it rather than
 loosen either ruleset: `dev` stays squash-only, `main` stays strict, and every
 promotion is merged **behind, by the owner**, from the web UI or the API. The
 GitHub mobile app offers no such merge. #3162 and #3325 (0.5.0-alpha.1) merged
-this way; `Dev gate` lists no bypass actors, so how GitHub admits it is
-unconfirmed. A migration-carrying promotion still needs its code-owner approval
+this way; `Dev gate` lists no bypass actors to an unauthenticated read (GitHub
+hides them from non-admins), so how GitHub admits it is unconfirmed. A migration-carrying promotion still needs its code-owner approval
 first. `dev` falls one more promotion merge behind `main` each time
 (`git rev-list --count origin/dev..origin/main`); that is expected, not drift,
 and never something to "fix" with `gh pr update-branch`.
+
+**A `hotfix/*` reaches `dev` by a back-port PR** (same decision): once the
+hotfix merges to `main`, cherry-pick its commit onto a branch from `dev` and
+open an ordinary squash PR into `dev`, carrying the hotfix's `Closes #` — that
+merge is where the issue closes. Until it lands, `dev` runs without the fix and
+the next promotion may conflict with it.
 
 ## What's in prod vs. pending
 

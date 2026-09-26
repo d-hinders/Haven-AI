@@ -23,6 +23,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
+  - packages/core/src/client-releases.data.ts
 last-verified: "2026-09-15"
 ---
 

@@ -25,6 +25,7 @@ covers:
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
+  - packages/core/src/client-releases.data.ts
 last-verified: "2026-09-24"
 ---
 

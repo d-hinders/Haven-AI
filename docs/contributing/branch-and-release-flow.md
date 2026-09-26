@@ -11,6 +11,7 @@ covers:
   - scripts/release-bump.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
+  - packages/core/src/client-releases.data.ts
 last-verified: "2026-09-26"
 ---
 

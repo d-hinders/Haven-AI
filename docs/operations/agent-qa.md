@@ -5,6 +5,7 @@ covers:
   - .env.dev.example
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-failure-issue.mjs
+  - scripts/ci/qa-retry.mjs
   - .github/workflows/docs-audit.yml
   - .github/workflows/qa-live.yml
   - .github/workflows/dev-gate.yml

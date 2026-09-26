@@ -730,7 +730,7 @@ project owner — collaborators have Viewer access, not env-var write access.
 > tees its own `qa-run.attempt-<i>.log` and `qa-run.log` is copied from the
 > final attempt, so the blocking Coverage completeness step judges exactly
 > what it judged before. A pass after a failed attempt now adds a job-summary
-> block (`scripts/ci/qa-retry.mjs summary`, URLs scrubbed) and a notice. The
+> block (URLs scrubbed) and a notice (agent-qa.md § Flake budget). The
 > run and its `money-flow` job still conclude `success`, so the promotion
 > freshness gate described above selects the same runs as before. Nothing else
 > in this file's coverage was touched; this note is the only edit.

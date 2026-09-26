@@ -40,7 +40,7 @@ export default function MerchantPage() {
   const params = useParams<{ slug: string }>()
   const slug = params.slug
   const { merchant, offers, funding = [], loading, error, notFound, refetch } = useMerchant(slug)
-  const { agents, loading: agentsLoading } = useAgents()
+  const { agents, loading: agentsLoading, error: agentsError } = useAgents()
   const [submitOpen, setSubmitOpen] = useState(false)
   const [fundOpen, setFundOpen] = useState(false)
   const comingSoonForBudgets = merchant?.listing_status === 'coming_soon'
@@ -135,7 +135,25 @@ export default function MerchantPage() {
   // resolves and `hasEligibleAgent` flips true (or the plain Fund button
   // takes over) — before that resolves, this slot renders nothing, exactly
   // like `showFundAction` already does with an empty `agents` array.
-  const showConnectAgentNote = !comingSoon && !agentsLoading && pinnableFunding.length > 0 && !hasEligibleAgent
+  // Design review round 3, finding C (code F5): `agents` reads `[]` on a
+  // failed `useAgents` fetch, which is indistinguishable from "no eligible
+  // agent" here — that used to claim "Connect an agent" for a read that
+  // simply failed. `agentsError` splits the two: the note below only fires
+  // once the read actually succeeded and came up empty.
+  const showConnectAgentNote =
+    !comingSoon && !agentsLoading && !agentsError && pinnableFunding.length > 0 && !hasEligibleAgent
+  const showAgentsErrorNote =
+    !comingSoon && !agentsLoading && agentsError && pinnableFunding.length > 0 && !hasEligibleAgent
+  // Design review round 3, finding C: name every pinnable chain rather than
+  // always reading the first — a merchant qualifying on two chains used to
+  // silently drop the second from this sentence.
+  const pinnableChainIds = Array.from(new Set(pinnableFunding.map((f) => f.chain_id)))
+  const pinnableChainLabel =
+    pinnableChainIds.length === 1
+      ? chainName(pinnableChainIds[0]!)
+      : pinnableChainIds.length > 1
+        ? pinnableChainIds.map(chainName).join(' or ')
+        : 'a supported network'
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
@@ -170,11 +188,19 @@ export default function MerchantPage() {
                 Give one of your agents a budget that pays only {merchant.name}.
               </p>
             </div>
+          ) : showAgentsErrorNote ? (
+            // Design review round 3, finding C: a failed agents read must not
+            // claim "Connect an agent" — that would tell an owner who already
+            // has an eligible agent to connect a new one, over a read that
+            // simply failed.
+            <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              Haven could not load your agents just now.
+            </p>
           ) : showConnectAgentNote ? (
             <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Connect an agent on {chainName(pinnableFunding[0]!.chain_id)} to give it a budget for {merchant.name}.{' '}
+              Connect an agent on {pinnableChainLabel} to give it a budget for {merchant.name}.{' '}
               <Link href="/agents" className="font-medium text-[var(--v2-brand)] hover:underline">
-                Connect an agent
+                Go to Agents
               </Link>
             </p>
           ) : showOpenBudgetNote ? (

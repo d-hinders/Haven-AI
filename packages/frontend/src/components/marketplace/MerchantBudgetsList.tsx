@@ -21,26 +21,39 @@ import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
  * that says who pays now / what happens — never "pinning", "recipient" or
  * jargon about the mechanism.
  */
-const PIN_STATUS_COPY: Record<MerchantBudget['pin_status'], { label: string; tone: StatusTone; helper: string }> = {
-  current: { label: 'Current', tone: 'success', helper: '' },
+const PIN_STATUS_COPY: Record<
+  MerchantBudget['pin_status'],
+  { label: string; tone: StatusTone; helper: (agentName: string) => string }
+> = {
+  current: { label: 'Current', tone: 'success', helper: () => '' },
   stale: {
     label: 'Old address',
     tone: 'warning',
-    helper:
-      "This merchant now uses a new address. Payments there come from the agent's open budget, if it has one — this budget still only pays the old address.",
+    // Design review round 3, finding D: say WHERE — funding again is
+    // actually possible for a stale row (the merchant just moved, it still
+    // qualifies), so the helper names both steps' locations rather than
+    // leaving the owner to find them. Not extended to `unverified` below:
+    // funding again there needs the merchant to confirm an address first, so
+    // there is nothing to point at yet.
+    helper: (agentName) =>
+      `This merchant now uses a new address. Payments there come from the agent's open budget, if it has one — this budget still only pays the old address. Stop this budget on ${agentName}'s page, then use Fund this merchant above.`,
   },
   unverified: {
     label: 'Address unconfirmed',
     tone: 'warning',
-    helper: "This budget still pays the address it was set up with, but Haven cannot confirm it is still the merchant's.",
+    helper: () => "This budget still pays the address it was set up with, but Haven cannot confirm it is still the merchant's.",
   },
   not_erc7710: {
-    label: "Can't pay now",
+    // Design review round 3, finding D (doc F3): `not_erc7710` means the
+    // payTo still matches — this budget has not stopped paying the
+    // merchant — but not EVERY offer there accepts this kind of budget any
+    // more; offers that still do are still paid from it. "Can't pay now" was
+    // stronger than that, and its old helper's "fund it again" step does not
+    // apply — nothing here needs re-funding.
+    label: 'Some offers excluded',
     tone: 'warning',
-    // Design review round 2, finding 4: state the outcome AND the next step —
-    // not just that this budget stopped working.
-    helper:
-      "Payments to this merchant now go through the agent's open budget instead, if it has one. To fund it again, stop this budget, then fund it from the merchant's page.",
+    helper: () =>
+      "Some of this merchant's offers no longer accept this kind of budget; payments to those use the agent's open budget, if it has one. Its other offers still use this budget.",
   },
 }
 
@@ -96,7 +109,10 @@ export function MerchantBudgetsList({ budgets }: { budgets: MerchantBudget[] }) 
                   Haven could not confirm the live figure just now — showing the full budget.
                 </p>
               )}
-              {status.helper && <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{status.helper}</p>}
+              {(() => {
+                const helper = status.helper(b.agent_name)
+                return helper ? <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{helper}</p> : null
+              })()}
             </li>
           )
         })}

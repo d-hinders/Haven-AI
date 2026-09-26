@@ -24,7 +24,8 @@
  *     `notFound()` must land on the segment's own `not-found.tsx` inside
  *     the shell, a join the unit tests cannot see.
  *   - `merchant-page-fund-merchant-modal` (desktop only, element-scoped) —
- *     the "Fund this merchant" modal's plain review step.
+ *     the "Fund this merchant" modal's plain SELECT step (agent, amount,
+ *     token, period) — not the review step; that is the scenario just below.
  *   - `merchant-page-fund-merchant-modal-review-warning` (desktop only,
  *     element-scoped) — the same modal's review step with the
  *     replace-warning seeded (an active budget already in the slot the new

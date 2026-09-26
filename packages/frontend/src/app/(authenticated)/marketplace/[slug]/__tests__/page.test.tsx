@@ -290,7 +290,49 @@ describe('MerchantPage', () => {
     expect(
       screen.getByText(/Connect an agent on Base Sepolia to give it a budget for Ampersend Demo API\./),
     ).toBeDefined()
-    expect(screen.getByRole('link', { name: 'Connect an agent' }).getAttribute('href')).toBe('/agents')
+    // Design review round 3, finding C: the link text must not repeat
+    // "Connect an agent" — the sentence right before it already says that.
+    expect(screen.getByRole('link', { name: 'Go to Agents' }).getAttribute('href')).toBe('/agents')
+  })
+
+  // Design review round 3, finding C (code F5): a failed agents read reads
+  // `agents: []` from `useAgents`, identical to "no eligible agent" — the
+  // page must not claim "Connect an agent" over a read that simply failed.
+  it('shows a neutral line, not "Connect an agent", when useAgents itself errored', () => {
+    mockUseAgents.mockReturnValue({ agents: [], loading: false, error: 'boom' })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByText(/Connect an agent/)).toBeNull()
+    expect(screen.getByText(/Haven could not load your agents/)).toBeDefined()
+  })
+
+  // Design review round 3, finding C: several pinnable chains must each be
+  // named — the sentence used to always read the first chain only.
+  it('names every pinnable chain when the merchant qualifies on more than one', () => {
+    mockUseAgents.mockReturnValue({ agents: [], loading: false })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: [
+        ...verifiedErc7710Funding,
+        { network: 'eip155:100', chain_id: 100, pay_to: '0x' + '22'.repeat(20), pay_to_status: 'verified', erc7710: true },
+      ],
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.getByText(/Connect an agent on Base Sepolia or Gnosis Chain to give it a budget/)).toBeDefined()
   })
 
   it('shows neither the action nor the connect-agent note while agents are still loading — no flash (R2-5)', () => {

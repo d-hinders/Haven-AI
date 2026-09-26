@@ -98,9 +98,16 @@ function editMerchantRefusalCopy(detail: string | undefined, merchantName: strin
     case 'no_verified_pay_to':
       return `${merchantName} does not have a confirmed payment address right now, so this budget can't be changed here. Stop it, then fund ${merchantName} again once it has one.`
     case 'not_erc7710':
-      return `${merchantName} no longer accepts this kind of budget, so it can't be changed here. Stop it — new payments to ${merchantName} will use the agent's open budget instead.`
+      // #3331 round 3, design D / code F5: `not_erc7710` means the payTo
+      // still matches — not every offer there accepts this kind of budget any
+      // more, not that the merchant as a whole stopped — so the build (and
+      // therefore an in-place edit) is refused, but the offers that still
+      // accept it keep using this budget. The fallback only applies "if it
+      // has one", the same accurate wording `MerchantBudgetsList`'s own
+      // helper uses.
+      return `${merchantName} no longer has every offer accepting this kind of budget, so it can't be changed here. Stop it — the offers that still accept it keep using this budget, and the rest use the agent's open budget instead, if it has one.`
     case 'merchant_not_found':
-      return `${merchantName} could not be found, so this budget can't be changed here. Stop it — it can no longer be edited.`
+      return `${merchantName} could not be found, so this budget can't be changed here. Stop it from the agent's page.`
     default:
       return null
   }

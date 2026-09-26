@@ -207,7 +207,7 @@ describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
     ],
     [
       'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget',
-      /Ampersend Demo API no longer accepts this kind of budget, so it can't be changed here/,
+      /Ampersend Demo API no longer has every offer accepting this kind of budget, so it can't be changed here.*open budget instead, if it has one/,
     ],
     ['Merchant not found', /Ampersend Demo API could not be found, so this budget can't be changed here/],
   ])('maps the merchant-stale refusal ("%s") to plain copy with a way out, and offers only Close', async (detail, expected) => {

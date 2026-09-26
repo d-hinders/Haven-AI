@@ -326,17 +326,17 @@ describe('FundMerchantModal (#3331)', () => {
     expect(screen.queryByText(/replaces/)).toBeNull()
   })
 
-  it('review step: states the no-fallback rule and BOTH exceptions while this budget is active (#3331 F2, corrected R2 doc review 1)', async () => {
+  it('review step: states the no-fallback rule and BOTH exceptions while this budget is active (#3331 F2, corrected round 3 captain copy)', async () => {
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     await waitFor(() =>
       expect(
-        screen.getByText(/Payments this agent sends straight to Ampersend Demo API use this budget, and are refused once it runs out until the next period/),
+        screen.getByText(/Payments this agent sends straight to Ampersend Demo API use this budget\. Once it runs out, those payments are refused until the next period/),
       ).toBeDefined(),
     )
     expect(
-      screen.getByText(/Payments that go through the agent's own wallet first, or run under a task budget, still use its open budget/),
+      screen.getByText(/checkout payments that pass through the agent first still use its open budget, and a task budget pays from whichever budget it was set up from/),
     ).toBeDefined()
     expect(screen.queryByText(/preferred/)).toBeNull()
     // No jargon: never "delegation", "caveat", "recipient pin", "ERC-7710",
@@ -420,7 +420,7 @@ describe('FundMerchantModal (#3331)', () => {
   const CASES: Array<[string, RegExp]> = [
     [
       'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet',
-      /does not have a confirmed payment address/,
+      /hasn't confirmed where it is paid on this network yet/,
     ],
     [
       'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget',
@@ -462,13 +462,22 @@ describe('FundMerchantModal (#3331)', () => {
     expect(screen.queryByText(/delegation|caveat|recipient pin|erc-?7710|eip-?3009/i)).toBeNull()
   })
 
-  // ── design review round 2, finding 2: permanent refusals drop "Try again" ──
-  it('a payTo-changed refusal offers "Reload page" as the sole action, never "Try again"', async () => {
-    mockGrant.mockResolvedValue({
-      ok: false,
-      reason: 'refused',
-      detail: "recipient_address does not match the merchant's current verified payTo; reload the merchant page",
-    })
+  // ── design review round 2, finding 2 / round 3 finding A (code F2):
+  // permanent refusals drop "Try again", and every refusal a page reload CAN
+  // fix — the payTo moved, it isn't confirmed yet, or the merchant vanished —
+  // offers "Reload page" rather than a bare "Close".
+  it.each([
+    [
+      "recipient_address does not match the merchant's current verified payTo; reload the merchant page",
+      'pay_to_changed',
+    ],
+    [
+      'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet',
+      'no_verified_pay_to',
+    ],
+    ['merchant not found', 'merchant_not_found'],
+  ])('a %s refusal offers "Reload page" as the sole action, never "Try again"', async (detail) => {
+    mockGrant.mockResolvedValue({ ok: false, reason: 'refused', detail })
     render(<FundMerchantModal {...PROPS} />)
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
@@ -484,7 +493,6 @@ describe('FundMerchantModal (#3331)', () => {
   })
 
   it.each([
-    'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet',
     'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget',
     "Merchant's payTo is one of this agent's own addresses; a merchant-locked budget cannot be issued to it",
     'Revoked agents cannot receive new budget delegations',

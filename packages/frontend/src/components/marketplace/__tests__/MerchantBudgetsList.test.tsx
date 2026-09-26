@@ -55,12 +55,30 @@ describe('MerchantBudgetsList (#3331)', () => {
   it.each([
     ['stale', 'Old address', /uses a new address/],
     ['unverified', 'Address unconfirmed', /cannot confirm it is still the merchant's/],
-    // Design review round 2, finding 4: the outcome AND the next step.
-    ['not_erc7710', "Can't pay now", /open budget instead.*stop this budget, then fund it/],
+    // Design review round 3, finding D (doc F3): the payTo still matches —
+    // this is not "can't pay" — only some offers stopped accepting this kind
+    // of budget; its other offers still use it, no re-funding needed.
+    ['not_erc7710', 'Some offers excluded', /no longer accept this kind of budget.*Its other offers still use this budget/],
   ] as const)('pin_status %s renders its own plain label and one outcome sentence', (status, label, helperText) => {
     render(<MerchantBudgetsList budgets={[row({ pin_status: status })]} />)
     expect(screen.getByText(label)).toBeDefined()
     expect(screen.getByText(helperText)).toBeDefined()
+  })
+
+  // Design review round 3, finding D: a stale row's helper names WHERE to
+  // stop it (the agent's own page) and where to fund the merchant again (the
+  // action just above this list) — funding again is actually possible here,
+  // unlike `unverified`.
+  it('pin_status stale names the agent by name in the "stop it, fund again" step', () => {
+    render(<MerchantBudgetsList budgets={[row({ pin_status: 'stale', agent_name: 'Research Agent' })]} />)
+    expect(
+      screen.getByText(/Stop this budget on Research Agent's page, then use Fund this merchant above\./),
+    ).toBeDefined()
+  })
+
+  it('pin_status unverified does NOT claim funding again is available yet', () => {
+    render(<MerchantBudgetsList budgets={[row({ pin_status: 'unverified' })]} />)
+    expect(screen.queryByText(/Fund this merchant above/)).toBeNull()
   })
 
   it('current carries no helper explanation', () => {

@@ -155,25 +155,30 @@ for the modal's own shape.
   - a sent `recipient_address` differs from the payTo.
 
   Signing and activation are the ordinary grant flow.
-- **Which budget pays — no fallback, with two named exceptions.**
-  `selectDelegationForPayment`'s own SQL (`SELECT_DELEGATION_FOR_PAYMENT_SQL`,
-  `infra/repositories/delegation-budgets.ts`) orders the row pinned to the
-  payee FIRST and picks it whenever it matches — there is no second query that
-  falls back to the open budget once the pinned one exists. That rule holds
-  for a **direct (ERC-7710) settlement**, and for a plain `POST /payments`
-  that names no task budget: while a merchant-locked budget is active, every
-  such payment to that merchant in that token draws on it alone, and once it
-  is exhausted those payments are refused until the next period, never
-  falling back to the agent's open budget even if it has one. A payment to
-  anyone else still uses the open budget, if there is one; only payments to
-  the LOCKED merchant are affected. Two kinds of payment reach the merchant
-  through the OPEN budget instead, on purpose:
-  - a payment that passes through the **agent's own wallet first** — the
-    EIP-3009 funding leg a plain-HTTP x402 checkout takes — because the
-    on-chain selection key is the redemption's `to`, which is the agent's own
-    address there, never the merchant's;
-  - a payment made **under a task budget**, which redeems its own parent task
-    budget regardless of any merchant-locked row.
+- **Which budget pays — selection keys on the payment's recipient, no
+  fallback.** `selectDelegationForPayment`'s own SQL
+  (`SELECT_DELEGATION_FOR_PAYMENT_SQL`, `infra/repositories/delegation-budgets.ts`)
+  orders the row pinned to the payee FIRST and picks it whenever it matches —
+  there is no second query that falls back to the open budget once the pinned
+  one exists. A **direct (ERC-7710) settlement**, and a plain `POST /payments`
+  sent straight to the merchant's own address, both select on that recipient:
+  while a merchant-locked budget is active, every such payment to that
+  merchant in that token draws on it alone, and once it is exhausted those
+  payments are refused until the next period, never falling back to the
+  agent's open budget even if it has one. A payment to anyone else still uses
+  the open budget, if there is one; only payments to the LOCKED merchant are
+  affected. Two kinds of payment select the OPEN budget instead, on purpose,
+  because their on-chain recipient is not the merchant:
+  - a checkout payment that passes through the **agent's own delegate
+    first** — the EIP-3009 funding leg a plain-HTTP x402 checkout takes —
+    because the on-chain selection key is the redemption's `to`, which is the
+    agent's own address there, never the merchant's;
+  - a payment made **under a task budget**, which redeems the budget
+    delegation it was carved from at creation (`routes/task-budgets.ts` picks
+    the parent with the same pinned-first selection), regardless of any
+    merchant-locked row: a task opened for this merchant's address while this
+    budget is active is carved from THIS budget; a task opened with no
+    recipient, or before this budget existed, is carved from the open budget.
 
   The fund-merchant modal states the rule and both exceptions once, on its
   review step.
@@ -201,12 +206,18 @@ for the modal's own shape.
   `GET /merchants/{slug}/budgets` and the merchant page after the edit lands.
   This only ever reaches activation for a `current` row: a `stale`,
   `unverified` or `not_erc7710` row's build is refused with a 409 naming the
-  reason (its own `pin_status`, above), so nothing changes and the old budget
-  keeps working exactly as before the edit was attempted (round 2 review
-  finding R2-2). The way forward there is not editing — it is **Stop**, then
-  fund the merchant again from its page, which derives a fresh recipient. An
-  ordinary (non-merchant-locked) budget is unaffected: its recipient stays
-  editable exactly as before.
+  reason (the 409s listed under *Issuing one*, above; an unlisted merchant is a
+  404, not a 409), so nothing changes and the old budget keeps working exactly
+  as before the edit was attempted (round 2 review finding R2-2). The way
+  forward is named per status, matching `editMerchantRefusalCopy` exactly: a
+  `stale` row's way out is **Stop**, then fund the merchant again from its
+  page, which derives a fresh recipient; an `unverified` row's is the same
+  **Stop**, then fund again, but only once the merchant confirms an address —
+  there is nothing to fund yet; a `not_erc7710` row's is **Stop** only —
+  payments there use the agent's open budget instead, if it has one, and there
+  is no "fund again" step because the payTo itself never moved. An ordinary
+  (non-merchant-locked) budget is unaffected: its recipient stays editable
+  exactly as before.
 - **`GET /merchants/{slug}/budgets`** is dashboard-session only (an agent key
   gets 403). It lists the owner's active, unexpired merchant-locked budgets
   for the merchant on agents that are not revoked, each with:
@@ -426,8 +437,8 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   silently), then ONE signature through `useDelegationBudget`'s own `grant()`
   — the same build → sign → activate composition the agent page's budget form
   uses, extended with `merchant_slug` rather than forked. The review step
-  states there is NO fallback while this budget is active (see "Which budget
-  pays — NO fallback" above) and, if an ACTIVE row already occupies the same
+  states which payments this budget pays and which still use the open budget
+  (see "Which budget pays" above) and, if an ACTIVE row already occupies the same
   `(agent, token, recipient)` slot — plain, locked to this merchant, or locked
   to a DIFFERENT merchant — warns that signing replaces it, naming whichever
   one it is; a budget for this merchant in another token, or one pinned to a

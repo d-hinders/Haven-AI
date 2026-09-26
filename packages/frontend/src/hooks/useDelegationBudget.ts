@@ -205,14 +205,16 @@ export function useDelegationBudget(
   const [signersError, setSignersError] = useState(false)
   const [budgetsError, setBudgetsError] = useState(false)
   const [busy, setBusy] = useState(false)
-  // #3331 review finding F4: a caller can switch WHICH agent/chain this same
-  // mounted hook instance is scoped to (`FundMerchantModal`'s agent picker) —
-  // a monotonic counter per read, bumped every time `reload`/`reloadSigners`
-  // actually runs, so a response for a PREVIOUS agentId/chainId that resolves
-  // after a newer request started is discarded rather than overwriting fresh
-  // state with stale data. Two independent counters: a budgets read and a
-  // signer-set read can be in flight on different schedules (polling reloads
-  // only the former).
+  // #3331 review finding F4, corrected round 3 (doc F7): a caller can switch
+  // WHICH agent this same mounted hook instance is scoped to
+  // (`FundMerchantModal`'s agent picker) — a monotonic counter per read,
+  // bumped every time `reload`/`reloadSigners` actually runs, so a response
+  // for a PREVIOUS agentId that resolves after a newer request started is
+  // discarded rather than overwriting fresh state with stale data. Both reads
+  // (`/agents/:id/delegations`, `/agents/:id/account-signers`) are keyed on
+  // agentId ONLY, never chainId — see the reset effect below. Two independent
+  // counters: a budgets read and a signer-set read can be in flight on
+  // different schedules (polling reloads only the former).
   const budgetsGeneration = useRef(0)
   const signersGeneration = useRef(0)
   // R2-4: a background silent poll and a manual (non-silent) `reload()` share
@@ -225,7 +227,15 @@ export function useDelegationBudget(
   // tick that fired for no reason the owner asked for. Silent ticks simply
   // skip themselves while a manual reload is in flight (rather than racing it) —
   // the next poll a few seconds later covers the same ground.
-  const manualBudgetsReloadInFlight = useRef(false)
+  //
+  // #3331 round 3 finding F4: a COUNTER, not a boolean — a second manual
+  // reload can start before the first one's `finally` runs (a fast double
+  // click on "Try again", or two callers of this same hook instance sharing
+  // one agent). A boolean here would read `false` the instant either manual
+  // call finished, letting a poll tick through and race the OTHER manual call
+  // still in flight; the counter only reaches zero once every overlapping
+  // manual call has finished, so polls stay suppressed for the whole window.
+  const manualBudgetsReloadInFlight = useRef(0)
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
@@ -250,8 +260,8 @@ export function useDelegationBudget(
       if (!enabled) return
       // R2-4: never let a background poll tick race an in-flight manual
       // reload — see the ref's own comment above.
-      if (silent && manualBudgetsReloadInFlight.current) return
-      if (!silent) manualBudgetsReloadInFlight.current = true
+      if (silent && manualBudgetsReloadInFlight.current > 0) return
+      if (!silent) manualBudgetsReloadInFlight.current += 1
       const mine = ++budgetsGeneration.current
       try {
         const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
@@ -265,7 +275,13 @@ export function useDelegationBudget(
         setBudgets(null)
         setBudgetsError(true)
       } finally {
-        if (!silent) manualBudgetsReloadInFlight.current = false
+        // #3331 round 3 finding F3: cleared here — in `finally`, on BOTH the
+        // success and failure paths — so a manual reload that rejects does
+        // not leave polling suppressed forever; only the success branch was
+        // ever exercised by the pre-existing test, which is why the earlier
+        // shape (a plain assignment reachable from either path) was never
+        // proven to cover the failure path until this round's test did.
+        if (!silent) manualBudgetsReloadInFlight.current -= 1
       }
     },
     [agentId, enabled],

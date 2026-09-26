@@ -950,6 +950,124 @@ describe('useDelegationBudget manual reload vs. silent poll (R2-4)', () => {
     ])
     expect(result.current.budgetsError).toBe(false)
   })
+
+  // #3331 round 3 finding F3: the in-flight flag lives in `finally`, so it
+  // must clear on a manual reload that FAILS too — not only the success path
+  // the test above exercises. Left uncleared, every poll tick after a failed
+  // "Try again" would skip itself forever.
+  it('a manual reload that REJECTS still clears the in-flight flag, so a later poll can run', async () => {
+    const pending: Array<{ resolve: (v: unknown) => void; reject: (e: unknown) => void }> = []
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      if (url.endsWith('/delegations')) {
+        return new Promise((resolve, reject) => {
+          pending.push({ resolve, reject })
+        })
+      }
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(pending.length).toBe(1)) // the initial mount read
+
+    await act(async () => {
+      pending[0]!.resolve({ delegations: [] })
+      await Promise.resolve()
+    })
+
+    // Manual reload that will REJECT.
+    let manual!: Promise<void>
+    act(() => {
+      manual = result.current.reload(false)
+    })
+    await waitFor(() => expect(pending.length).toBe(2))
+
+    await act(async () => {
+      pending[1]!.reject(new Error('network blip'))
+      await manual
+    })
+    expect(result.current.budgetsError).toBe(true)
+
+    // A later silent poll tick must be able to issue its OWN request rather
+    // than skipping itself because the flag was never cleared.
+    let poll!: Promise<void>
+    act(() => {
+      poll = result.current.reload(true)
+    })
+    await waitFor(() => expect(pending.length).toBe(3))
+    await act(async () => {
+      pending[2]!.resolve({ delegations: [] })
+      await poll
+    })
+  })
+
+  // #3331 round 3 finding F4: the boolean flag reads `false` — and lets a
+  // poll tick through — the instant EITHER of two overlapping manual reloads
+  // finishes, even while the OTHER one is still in flight. A counter only
+  // reaches zero once both have finished.
+  it('two overlapping manual reloads keep polls suppressed until BOTH finish (counter, not a boolean)', async () => {
+    const pending: Array<{ resolve: (v: unknown) => void }> = []
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      if (url.endsWith('/delegations')) {
+        return new Promise((resolve) => {
+          pending.push({ resolve })
+        })
+      }
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(pending.length).toBe(1)) // the initial mount read
+    await act(async () => {
+      pending[0]!.resolve({ delegations: [] })
+      await Promise.resolve()
+    })
+
+    // Fire TWO overlapping manual reloads before either resolves.
+    let first!: Promise<void>
+    let second!: Promise<void>
+    act(() => {
+      first = result.current.reload(false)
+    })
+    await waitFor(() => expect(pending.length).toBe(2))
+    act(() => {
+      second = result.current.reload(false)
+    })
+    await waitFor(() => expect(pending.length).toBe(3))
+
+    // Resolve the FIRST manual call. A boolean flag would now read `false`
+    // even though the SECOND manual call is still in flight.
+    await act(async () => {
+      pending[1]!.resolve({ delegations: [] })
+      await first
+    })
+
+    // A silent poll tick fires while the SECOND manual call is still
+    // in flight — it must still skip itself (no new request issued).
+    await act(async () => {
+      await result.current.reload(true)
+    })
+    expect(pending.length).toBe(3)
+
+    // Resolve the SECOND manual call — only now is the counter back to zero.
+    await act(async () => {
+      pending[2]!.resolve({ delegations: [] })
+      await second
+    })
+
+    // A poll tick now runs normally and issues its own request.
+    let poll!: Promise<void>
+    act(() => {
+      poll = result.current.reload(true)
+    })
+    await waitFor(() => expect(pending.length).toBe(4))
+    await act(async () => {
+      pending[3]!.resolve({ delegations: [] })
+      await poll
+    })
+    expect(pending.length).toBe(4)
+  })
 })
 
 describe('useDelegationBudget visible-only polling (#2732)', () => {

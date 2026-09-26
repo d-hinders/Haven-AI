@@ -127,7 +127,7 @@ export function merchantTokenOptions(chainId: number, offers: CatalogEntry[]): T
 function refusalCopy(detail: string | undefined, merchantName: string): string {
   switch (classifyMerchantBudgetRefusal(detail)) {
     case 'no_verified_pay_to':
-      return `${merchantName} does not have a confirmed payment address on this network yet. Reload the page and try again shortly.`
+      return `${merchantName} hasn't confirmed where it is paid on this network yet, so no budget can be set up for it. Reload the page later to check again.`
     case 'not_erc7710':
       // #3331 review finding F7: the agent's open budget, not the merchant's.
       return `${merchantName}'s payments here now go through the agent's open budget instead — a merchant-locked budget is no longer offered.`
@@ -538,18 +538,24 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                     {merchant.name} only{payTo ? ` · ${truncateAddress(payTo)}` : ''}
                   </p>
                 </div>
-                {/* #3331 review finding F2, corrected round 2 (doc review 1):
-                    "no fallback" only holds for the two paths named below —
-                    it does not hold for a checkout that funds the agent's own
-                    wallet first, or for a payment under a task budget. Stated
+                {/* #3331 review finding F2, corrected round 3 (code F1, design
+                    B, doc F1/F2 — the captain's final copy): selection keys on
+                    the payment's RECIPIENT, not the checkout path — a direct
+                    (ERC-7710) payment straight to the merchant's own address
+                    uses this budget with no fallback once it runs out; a
+                    checkout that funds the agent's own wallet first (the
+                    EIP-3009 funding leg) selects the open budget instead
+                    because the on-chain recipient there is the agent, not the
+                    merchant; a task budget pays from whichever budget it was
+                    carved from at creation, independent of this row. Stated
                     once, here on the review step (the select step keeps only
                     the short "pays only" line); `docs/product/marketplace.md`
                     "Which budget pays" states the same rule and exceptions. */}
                 <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                  Payments this agent sends straight to {merchant.name} use this budget, and are refused once it
-                  runs out until the next period. Payments that go through the agent's own wallet first, or run
-                  under a task budget, still use its open budget. Payments above the budget are refused on-chain;
-                  they are not held for approval.
+                  Payments this agent sends straight to {merchant.name} use this budget. Once it runs out, those
+                  payments are refused until the next period — they are not held for approval. It does not cap
+                  everything the agent spends at {merchant.name}: checkout payments that pass through the agent
+                  first still use its open budget, and a task budget pays from whichever budget it was set up from.
                 </p>
               </div>
 
@@ -636,7 +642,16 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
               </div>
               <div className="flex gap-3">
                 {permanentRefusal ? (
-                  refusalKind === 'pay_to_changed' ? (
+                  // Design review round 3, finding A (code F2): a refusal that
+                  // a reload CAN resolve — the payTo moved, it isn't confirmed
+                  // yet, or the merchant vanished — offers "Reload page" as its
+                  // primary action, not just "Close". "Close" alone stays for
+                  // the refusals a reload cannot fix (this agent IS the payTo,
+                  // the offer stopped taking this kind of budget, the agent was
+                  // revoked, or the account is off the delegation rail).
+                  refusalKind === 'pay_to_changed' ||
+                  refusalKind === 'no_verified_pay_to' ||
+                  refusalKind === 'merchant_not_found' ? (
                     <Button onClick={() => window.location.reload()} className="flex-1">
                       Reload page
                     </Button>

@@ -1662,12 +1662,29 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `agentId` change only — not a `chainId`-only rerender, which used to blank a
 > still-valid signer set for no data reason. `editBudget`'s build call already
 > forwarded `merchant_slug` (#3331 round 1); this diff adds a doc-accurate
-> JSDoc only, no behaviour change: an edit re-derives the recipient on the
-> server from the merchant's CURRENT verified payTo, keeps the merchant label
-> on success, and is refused (409) when that payTo moved since the row was
-> granted — the old budget stays live and untouched either way, exactly as
-> the REPLACE composition above already guarantees. Nothing here changes
-> which signature authorises what: the owner still signs the new grant, then
-> the stop, and the delegate key and local signer are never touched. Scope of
-> this note: `useDelegationBudget.ts`'s reset effect and JSDoc. Nothing else
-> in this document was re-verified.
+> JSDoc only, no behaviour change: an edit sends the STORED recipient (the
+> row's own `recipient_address`, never re-derived client-side), which the
+> server compares against the merchant's CURRENT verified payTo and refuses
+> (409) on a mismatch, keeping the merchant label on success — on a refusal
+> the old budget stays live and untouched, exactly as the REPLACE composition
+> above already guarantees. Nothing here changes which signature authorises
+> what: the owner still signs the new grant, then the stop, and the delegate
+> key and local signer are never touched. Scope of this note:
+> `useDelegationBudget.ts`'s reset effect and JSDoc. Nothing else in this
+> document was re-verified.
+>
+> **Re-verified #3331 frontend (2026-09-27, round 3 review fixes):** this diff
+> touches one file in this document's coverage list, `hooks/useDelegationBudget.ts`,
+> plus copy-only changes in `FundMerchantModal.tsx`, `EditBudgetModal.tsx`,
+> `MerchantBudgetsList.tsx` and the merchant page that carry no authority and
+> are out of this document's scope. In the covered file: `reload`'s in-flight
+> guard (`manualBudgetsReloadInFlight`) changes from a boolean to a counter so
+> two overlapping MANUAL reloads (e.g. a fast double click on "Try again")
+> both have to finish before a background poll tick can run again — this is
+> the reload() manual-vs-poll guard from the round 2 note above, on the READ
+> path only: it decides whether a `GET /agents/{id}/delegations` poll fires,
+> never whether a build, activation or revoke is authorised. No handler,
+> query, signing path or refusal moves; budget, recipient and expiry remain
+> enforced on-chain by the caveat enforcers exactly as before. Scope of this
+> note: `useDelegationBudget.ts`'s manual-reload counter. Nothing else in this
+> document was re-verified.

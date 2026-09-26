@@ -756,7 +756,7 @@ project owner — collaborators have Viewer access, not env-var write access.
 > in this file's coverage was touched; this note is the only edit.
 
 > **Re-verified #3337 (2026-09-26):** `qa-dev.yml`'s failure step now passes
-> the money-flow attempt logs to `scripts/ci/qa-failure-issue.mjs`, which
+> the money-flow attempt logs to the standing-issue reporter, which
 > records a failure class and signature in the standing `qa-failure` issue, and
 > the retry-budget comment no longer calls a failed attempt a "transient testnet
 > RPC hiccup". Triggers, gating, the retry count and the freshness gate

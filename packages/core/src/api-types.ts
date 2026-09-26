@@ -513,7 +513,10 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** Revoke step 2: submit the signed UserOp; the row flips only after it lands. */
+        /**
+         * Revoke step 2: submit the signed UserOp; the row flips only after it lands.
+         * @description The submitted user_operation is BOUND to the delegation being revoked (#3343): its calldata must disable THAT delegation on the pinned DelegationManager (identity comparison, signature excluded), checked before submission. A userop that disables something else — or nothing — is refused 400 and nothing is recorded. On success the delegation is disabled on-chain and the row is marked revoked.
+         */
         post: operations["submitDelegationRevocation"];
         delete?: never;
         options?: never;
@@ -592,7 +595,7 @@ export type paths = {
         put?: never;
         /**
          * Re-key steps 1b + 2: land the revoke, THEN read the now-frozen meter (#1698).
-         * @description Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe.
+         * @description Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe. The revoked set is derived SERVER-side (#3343): every delegation this agent still holds enabled on-chain (pending, active and replaced rows), and the signed calldata must disable exactly that set before anything is recorded — a subset or stale op answers 409 re-prepare, an unreadable one 400, and the stage stays preflight either way.
          */
         post: operations["submitRekeyRevocation"];
         delete?: never;
@@ -692,7 +695,7 @@ export type paths = {
         put?: never;
         /**
          * Batch revoke step 2: submit the signed batch; rows flip only after the UserOp lands.
-         * @description The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.
+         * @description The revoked set is derived SERVER-side (#3343) — every delegation this agent still holds enabled on-chain (pending, active and replaced rows); the request's delegation_hashes is accepted for compatibility but does not decide anything. The signed calldata must disable exactly that set (checked before submission): a subset or stale op answers 409 re-prepare, an unreadable op 400. The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.
          */
         post: operations["submitRevokeAllDelegations"];
         delete?: never;
@@ -6909,7 +6912,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Delegation disabled on-chain and marked revoked. */
+            /** @description Delegation disabled on-chain and marked revoked. The recorded revocation was verified against the signed calldata (#3343). */
             200: {
                 headers: {
                     [name: string]: unknown;

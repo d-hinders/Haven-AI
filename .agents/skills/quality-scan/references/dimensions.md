@@ -148,11 +148,24 @@ that reached CASP shards and had to be corrected in place: #2421's shard
 files where the re-run gave 33. A figure without its command cannot be
 re-taken, so it cannot be caught.
 
+The figure shape has to match those founding specimens, and a ratio-only
+regex (`N of M`, `N/M`, `N%`) matches none of the three lines (#3348). The
+shape below adds bold numbers and count nouns. It stays single-line: 2423's
+`**33` wraps before `files`, but the bold shape matches line 26 on its own,
+so `rg -U` is not needed. Run the positive control first; a control that
+fails means the regex cannot say yes, and its zero is not a finding.
+
 ```bash
-# Sample A: figure-bearing lines in the last 7 days of CASP shards, and how
-# many of them also quote the command that produced the figure.
-rg -n -o '\b[0-9]+ of [0-9]+\b|\b[0-9]+/[0-9]+\b|\b[0-9]+%' $(ls -t docs/regulatory/casp-changelog/2026-*.md | head -25) | wc -l
-rg -n '\b[0-9]+ of [0-9]+\b|\b[0-9]+/[0-9]+\b|\b[0-9]+%' $(ls -t docs/regulatory/casp-changelog/2026-*.md | head -25) | rg -c '`(rg|grep|git|node|npm|find|ls|wc) '
+R='\b[0-9]+ of [0-9]+\b|\b[0-9]+/[0-9]+\b|\b[0-9]+%|\*\*[0-9]+(\*\*|[ ,;:)]|$)|\b[0-9]+ (passed|failed|skipped|red|files|commits|tests|runs|rows|lines|hits|matches)\b'
+# Positive control: every founding specimen line must match.
+for spec in 2026-09-02-2421.md:110 2026-09-03-2423.md:26 2026-09-03-2423.md:36; do
+  sed -n "${spec##*:}p" "docs/regulatory/casp-changelog/${spec%%:*}" | rg -q "$R" || echo "CONTROL FAILED $spec"
+done
+# Sample A: figure-bearing LINES (not matches) in the 25 newest shards by
+# dated name (not `ls -t`: mtime in a fresh worktree is checkout order), and
+# how many of those lines also quote the command that produced the figure.
+rg -n "$R" $(ls docs/regulatory/casp-changelog/2026-*.md | sort | tail -25) | wc -l
+rg -n "$R" $(ls docs/regulatory/casp-changelog/2026-*.md | sort | tail -25) | rg -c '`(rg|grep|git|node|npm|find|ls|wc) '
 # Sample B: the previous ledger entry's `Probed clean:` lines — re-run each
 # recorded command verbatim and diff the number.
 rg -c ': any\b|as any' packages/*/src --type ts -g '!*test*' | awk -F: '{s+=$2} END{print s}'
@@ -161,8 +174,16 @@ npm run lint:db-mocks 2>&1 | rg 'db-mock gauge'
 
 Clean: every re-derived figure matches its recorded one or the drift is
 explained; every figure-bearing shard line carries a command. Report the
-mismatches as `recorded → now` with the command. On `893d74f6`: 18
-figure-bearing lines across the 25 most recent shards, 1 with a command;
+mismatches as `recorded → now` with the command. On `893d74f6` the old
+ratio-only regex reported 18, but that was `rg -o | wc -l`, i.e. 18 matches
+on 14 lines, with 1 carrying a command. These figures reproduce at
+`893d74f6` with the dated-name sample; the original mtime order cannot be
+recovered. On `9b06b174`, with the shape and sampling above: 11
+figure-bearing lines across the 25 newest shards (`2026-09-24-3271` …
+`2026-09-26-rpc-error-key-scrub`), 2 with a command. Three of the 11 are not
+measured figures: a `10%` protocol constant, a `404/500` status pair and a
+`4/4` slice number. The old regex found exactly those 3 lines and missed
+every specimen;
 ledger re-derivations against the 2026-08-19 entry: `any` 14 → 18, gate
 scripts 27 → 24, db-mocks 62/465/66 → 58/312/61, zod 0 → 0.
 
@@ -274,11 +295,24 @@ latest five are #2494, #2493, #2479, #2480 and #2481, all on 2026-09-03.
 and each gate's green-without-running branches.** This replaces the *CI gate
 coverage vs. what is actually exercised* bullet. #2317, #2333, #2318, #2088,
 #1903, #1896 and #2300 were each a gate green on a file it never read; the
-hole is measurable before the next one is found by hand. The "did the gate
-run at all" half has no dedicated instrument: the real observable is the
-jobs-API completeness warning in `scripts/ci/qa-freshness.mjs`
-(`completenessWarningFromJobs`, lines 555–575, #1044 — advisory only; the
-freshness gate still passes on a green-with-skips run).
+hole is measurable before the next one is found by hand. For qa-dev the "did
+the harness run every leg" half is enforced twice, and both fail the
+`money-flow` job:
+- (a) the `Coverage completeness` step in `.github/workflows/qa-dev.yml`
+  exits 1 on `green-with-skips:` (blocking since #1066, no
+  `continue-on-error`);
+- (b) `packages/qa-agent/src/run.ts` exits 1 on any skip under
+  `QA_REQUIRE_ALL_LEGS=1`, which is set as a repo variable
+  (`gh variable list | grep QA_REQUIRE_ALL_LEGS`).
+
+The freshness gate reads the `money-flow` **job** conclusion (`selectGreenRun`,
+`moneyFlowJobConclusion`), so a skipping run is never admitted. The
+instrument is therefore job level: `gh run view <id> --json jobs --jq
+'.jobs[]|select(.name=="money-flow")|.conclusion'`. `completenessWarningFromJobs`
+in `qa-freshness.mjs` is not the observable. Its only caller passes the jobs
+of a run whose `money-flow` job already succeeded, and the function looks
+for a failed `Coverage completeness` step in them. GitHub cannot produce
+that pair now that the step blocks, so treat it as a dead branch (#3348).
 
 ```bash
 # Copy lint: files that can carry product copy but are outside SCAN_DIRS and
@@ -304,7 +338,8 @@ git ls-files '*.md' | grep -vE '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAV
 #     150, 283);
 #   - `headSha` is the branch tip at trigger time, not the deployed SHA, on
 #     `schedule` / `workflow_dispatch` runs (KNOWN LIMIT, lines 131–136).
-rg -n "Gap 1|#2164|qa-override|KNOWN LIMIT|completenessWarningFromJobs" scripts/ci/qa-freshness.mjs | cut -c1-120
+# (completenessWarningFromJobs is left out on purpose: a dead branch, see above.)
+rg -n "Gap 1|#2164|qa-override|KNOWN LIMIT" scripts/ci/qa-freshness.mjs | cut -c1-120
 ```
 
 Clean: each list is empty or every entry is exempted by name with a reason

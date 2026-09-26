@@ -772,7 +772,7 @@ describe('collect — the production ancestry map answers verdict-vs-verdict (#3
     const url = args[1]
     calls.push(url)
     let out
-    if (url.includes('pulls/7/files?')) out = [{ path: PNG, status: 'modified' }]
+    if (url.includes('pulls/7/files?')) out = [{ filename: PNG, status: 'modified' }]
     else if (url.includes('pulls/7/commits?')) out = [{ commit: { message: 'chore: re-review' } }]
     else if (url.endsWith('pulls/7')) out = { number: 7, draft: false, base: { ref: 'dev', repo: { default_branch: 'dev' } }, head: { sha: HEAD }, body }
     else if (url.includes('issues/7/comments?')) out = []
@@ -806,6 +806,46 @@ describe('collect — the production ancestry map answers verdict-vs-verdict (#3
       'design-review verdict: passed @ cc00000 -- baselines: topbar-desktop.png',
     ])
     assert.equal(result.verdict, 'pass')
+  })
+})
+
+describe('collect — reads the file list in the shape GitHub actually returns (#3231)', () => {
+  // GitHub's pulls/{n}/files entries name the file `filename` (keys, from the
+  // live response for PR #3362: additions, blob_url, changes, contents_url,
+  // deletions, filename, raw_url, sha, status) — there is no `path`. The gate
+  // read `f.path` from #3232 until this fix, so every PR reached `evaluate`
+  // with zero PNGs and passed vacuously; the stubs above carried the same
+  // wrong key, which is why no test noticed. This entry is copied from that
+  // live response, only the path swapped for this suite's PNG.
+  const liveEntry = {
+    sha: '2a9c3b0e5d1f4a6b8c7d9e0f1a2b3c4d5e6f7a8b',
+    filename: PNG,
+    status: 'modified',
+    additions: 0,
+    deletions: 0,
+    changes: 0,
+    blob_url: 'https://github.com/o/r/blob/x/p.png',
+    raw_url: 'https://github.com/o/r/raw/x/p.png',
+    contents_url: 'https://api.github.com/repos/o/r/contents/p.png?ref=x',
+  }
+  const gh = async (args) => {
+    const url = args[1]
+    let out
+    if (url.includes('pulls/7/files?')) out = [liveEntry]
+    else if (url.includes('pulls/7/commits?')) out = [{ commit: { message: 'test: alter a baseline' } }]
+    else if (url.endsWith('pulls/7')) out = { number: 7, draft: false, base: { ref: 'dev', repo: { default_branch: 'dev' } }, head: { sha: 'dd00000' }, body: 'no declaration here' }
+    else if (url.includes('issues/7/comments?')) out = []
+    else if (url.includes('commits?path=')) out = [{ sha: 'aa00000' }]
+    else throw new Error(`unexpected gh call ${url}`)
+    return JSON.stringify(out)
+  }
+
+  test('an undeclared modified baseline in the live entry shape is counted and fails', async () => {
+    const collected = await collect({ gh, repo: 'o/r', prNumber: 7 })
+    assert.deepEqual(collected.files, [{ path: PNG, status: 'modified' }])
+    const result = evaluate(collected)
+    assert.deepEqual(result.pngs.modified, [PNG])
+    assert.equal(result.verdict, 'fail')
   })
 })
 
@@ -1023,7 +1063,7 @@ describe('mutation proofs (each gating branch can fire)', () => {
     const gh = async (args) => {
       const url = args[1]
       let out
-      if (url.includes('pulls/7/files?')) out = [{ path: PNG, status: 'modified' }]
+      if (url.includes('pulls/7/files?')) out = [{ filename: PNG, status: 'modified' }]
       else if (url.includes('pulls/7/commits?')) out = []
       else if (url.endsWith('pulls/7')) out = { base: { ref: 'dev', repo: { default_branch: 'dev' } }, head: { sha: HEAD }, body }
       else if (url.includes('issues/7/comments?')) out = []
@@ -1129,7 +1169,7 @@ describe('CLI end to end with a stub gh on PATH', () => {
   // stub dir alone.
   const stubFor = (bodyJson) => `#!/bin/sh
 case "$*" in
-  *"pulls/7/files?"*) echo '[{"path":"${PNG}","status":"modified"}]' ;;
+  *"pulls/7/files?"*) echo '[{"filename":"${PNG}","status":"modified"}]' ;;
   *"pulls/7/commits?"*) echo '[{"commit":{"message":"chore: regenerate baselines"}}]' ;;
   *"repos/o/r/pulls/7"*) printf '%s' '{"number":7,"draft":false,"base":{"ref":"dev","repo":{"default_branch":"dev"}},"head":{"sha":"${HEAD}"},"body":${bodyJson}}' ;;
   *"issues/7/comments?"*) echo '[]' ;;

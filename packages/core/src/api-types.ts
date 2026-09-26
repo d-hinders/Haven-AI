@@ -3085,7 +3085,7 @@ export type components = {
             /** @description The lowercased payTo every active, verified x402 offer of the merchant on this network names — non-null only when pay_to_status is `verified`. A merchant-locked budget pins its recipient here. */
             pay_to: string | null;
             /**
-             * @description `conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant’s active, verified offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.
+             * @description `conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant’s non-delisted offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.
              * @enum {string}
              */
             pay_to_status: "verified" | "conflicting" | "unstated" | "shared";

@@ -216,12 +216,24 @@ describeDb('listMerchantFundingTargets (#3331)', () => {
     await insertOffer(m.id, 'https://platform-a.example/x', { network: 'eip155:84532', payTo: A, methods: 'erc7710' })
     await insertOffer(m.id, 'https://platform-a.example/y', { network: 'eip155:8453', payTo: A, methods: 'erc7710' })
     await insertOffer(other.id, 'https://platform-b.example/x', { network: 'eip155:84532', payTo: A, methods: 'erc7710' })
-    // Not evidence: the other merchant's degraded row on Base.
-    await insertOffer(other.id, 'https://platform-b.example/y', { network: 'eip155:8453', payTo: A, status: 'degraded' })
+    // Not evidence: the other merchant's DELISTED row on Base.
+    await insertOffer(other.id, 'https://platform-b.example/y', { network: 'eip155:8453', payTo: A, status: 'delisted' })
     expect(await listMerchantFundingTargets(m.id, null)).toEqual([
       { network: 'eip155:8453', chain_id: 8453, pay_to: A, pay_to_status: 'verified', erc7710: true },
       { network: 'eip155:84532', chain_id: 84532, pay_to: null, pay_to_status: 'shared', erc7710: true },
     ])
+  })
+
+  it.each([
+    ['degraded', { status: 'degraded' as const }],
+    ['not yet verified', { verified: false }],
+  ])("counts another merchant's %s offer as sharing the payTo — it can recover without a re-issue", async (_label, opts) => {
+    const m = await findOrCreateMerchantByHost('solo.example', { name: 'Solo' })
+    const other = await findOrCreateMerchantByHost('sleeper.example', { name: 'Sleeper' })
+    await insertOffer(m.id, 'https://solo.example/x', { network: 'eip155:84532', payTo: A, methods: 'erc7710' })
+    await insertOffer(other.id, 'https://sleeper.example/x', { network: 'eip155:84532', payTo: A, ...opts })
+    const [target] = await listMerchantFundingTargets(m.id, null)
+    expect(target).toMatchObject({ pay_to: null, pay_to_status: 'shared' })
   })
 
   it('is empty for a merchant with no qualifying offer', async () => {

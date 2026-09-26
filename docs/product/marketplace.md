@@ -127,8 +127,10 @@ the "Fund this merchant" modal on the merchant page is the frontend slice.
   - `pay_to_status` is `verified` (`pay_to` set), `conflicting` (two offers
     name different addresses), `unstated` (some offer names none, including
     every offer before its first probe after the migration) or `shared`
-    (another merchant's active, verified offer on that network names the same
-    address, so a pin would pay that merchant too).
+    (another merchant's offer on that network names the same address, so a
+    pin would pay that merchant too; a degraded or not-yet-verified offer
+    counts, since it can recover without anyone re-issuing the budget, and
+    only a delisted one does not).
   - `erc7710` is true only when **every** such offer advertises the ERC-7710
     transfer method. A pinned budget cannot fund an EIP-3009 payment, because
     that leg pays the agent's own wallet first, so an EIP-3009 merchant is paid
@@ -154,7 +156,7 @@ the "Fund this merchant" modal on the merchant page is the frontend slice.
   pinned to the same address share one `(agent, token, recipient)` slot.
   Activating either replaces the other: they carry the same on-chain
   authority, and two live grants in one slot would make selection ambiguous.
-  Issuing a plain pinned budget to a merchant's payTo therefore replaces that
+  Activating a plain pinned budget to a merchant's payTo therefore replaces that
   merchant's budget, and drops its merchant label. The fund-merchant modal
   (the frontend slice, not shipped yet) is to warn about this before the
   owner signs.
@@ -172,7 +174,8 @@ the "Fund this merchant" modal on the merchant page is the frontend slice.
     - `unverified`: the merchant names no single payTo there now, including
       a `shared` one;
     - `not_erc7710`: the payTo still matches, but not every offer there
-      advertises ERC-7710, so the pinned budget cannot pay it.
+      advertises ERC-7710 any more. A pinned budget pays only through
+      ERC-7710, so it cannot pay the offers that dropped it.
 
   A budget on a chain this deployment no longer lists is still judged against
   that chain's payTo.
@@ -180,6 +183,11 @@ the "Fund this merchant" modal on the merchant page is the frontend slice.
   `merchant_id`, `merchant_slug` and `merchant_name`, so a budget card can
   name its merchant. A deleted merchant leaves the budget pinned and drops
   only the label.
+- **Known gap: a re-key drops the label.** The replacement grant a re-key
+  issues keeps the recipient pin but not the merchant. After a re-key, the
+  budget still pays only the merchant, but it no longer appears in
+  `GET /merchants/{slug}/budgets` or carries the merchant's name. Tracked in
+  #3386.
 
 ## Prospects
 

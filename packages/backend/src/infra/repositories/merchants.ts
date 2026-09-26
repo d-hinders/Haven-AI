@@ -378,7 +378,14 @@ export interface MerchantFundingAggregateRow {
   pay_tos: string[] | null
   any_unstated: boolean
   all_erc7710: boolean
-  /** Another merchant's active, verified x402 offer on the network names one of these payTos. */
+  /**
+   * Another merchant's non-delisted offer on the network names one of these
+   * payTos. Deliberately wider than what counts toward the merchant's OWN
+   * payTo: a degraded offer recovers without anyone re-issuing a budget, and
+   * a pin built while it was degraded would then pay that merchant too.
+   * `pay_to` is only ever written by a successful x402 probe, so no rail or
+   * verified filter is needed to know the address is real.
+   */
   shared: boolean
 }
 
@@ -408,9 +415,7 @@ const MERCHANT_FUNDING_AGGREGATES_SQL = `
            SELECT 1 FROM merchant_catalog o
            WHERE o.merchant_id <> $1
              AND o.network = mine.network
-             AND o.rail = 'x402'
-             AND o.status = 'active'
-             AND o.verified_at IS NOT NULL
+             AND o.status <> 'delisted'
              AND o.pay_to = ANY(mine.pay_tos)
          ) AS shared
   FROM mine

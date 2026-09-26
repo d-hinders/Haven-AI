@@ -8,6 +8,7 @@ covers:
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/db/migrations/096_merchant_pay_to.ts
   - packages/backend/src/routes/merchants.ts
+  - packages/backend/src/infra/repositories/delegation-budgets.ts
   - packages/sdk/src/delegate-account.ts
   - packages/sdk/src/redemption-guard.ts
   - packages/sdk/src/direct-payment-guard.ts
@@ -26,6 +27,7 @@ covers:
   - packages/backend/src/db/migrations/078_device_authorizations.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
+  - packages/backend/src/infra/repositories/agent-rekeys.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/infra/repositories/agent-organizations.ts
   - packages/backend/src/db/migrations/094_agent_organizations.ts
@@ -265,7 +267,8 @@ probe). The client does not choose it: a sent `recipient_address` must equal
 it (409 otherwise). No merchant-locked budget is issued when:
 - the merchant has no such offer on the agent's chain;
 - the offers disagree, or one of them names no payTo;
-- another merchant's offer on that network names the same address (`shared`);
+- another merchant's non-delisted offer on that network names the same
+  address (`shared`);
 - any of the offers lacks ERC-7710. A pinned budget cannot pay an EIP-3009
   merchant, per the rule in §8 below;
 - the payTo is one of the agent's own addresses: its delegate key, its
@@ -284,6 +287,10 @@ Two limits are deliberate:
 - **Rotation.** A later payTo rotation never re-points a signed grant. The
   budget stays pinned to the address the owner signed for, and the merchant
   page reports it `stale`.
+
+A re-key (§6a) carries the recipient pin to the replacement grant but not
+the merchant label, so the budget keeps its authority and loses only its
+place on the merchant page (#3386).
 
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:

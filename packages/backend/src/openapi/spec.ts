@@ -7655,7 +7655,7 @@ export const openapiSpec = {
           pay_to_status: {
             type: 'string',
             enum: ['verified', 'conflicting', 'unstated', 'shared'],
-            description: '`conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant\u2019s active, verified offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.',
+            description: '`conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant\u2019s non-delisted offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.',
           },
           erc7710: {
             type: 'boolean',

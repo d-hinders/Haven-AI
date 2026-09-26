@@ -28,6 +28,31 @@ import {
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { AMPERSEND_OFFERS, HOST_OF_URL_SQL, SEED_MERCHANTS, down, up, version } from '../088_merchants.js'
+import { down as down096, up as up096 } from '../096_merchant_pay_to.js'
+
+async function onClient(fn: (c: import('pg').PoolClient) => Promise<void>): Promise<void> {
+  const c = await db.connect()
+  try {
+    await fn(c)
+  } finally {
+    c.release()
+  }
+}
+
+/**
+ * Revert to the pre-088 schema. Migration 096 (#3331) points
+ * `agent_delegations.merchant_id` at `merchants`, so 088's `down()` cannot
+ * drop the table while 096 is applied: revert 096 first, and re-apply it
+ * last, after the test's own restore has brought 088 back (the 080 test's
+ * precedent with 092).
+ */
+async function with088Reverted<T>(body: () => Promise<T>, restore: () => Promise<unknown>): Promise<T> {
+  return withMigrationReverted(
+    () => onClient(down096),
+    () => withMigrationReverted(() => onClient(down), body, restore),
+    () => onClient(up096),
+  )
+}
 
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -107,8 +132,7 @@ describeDb('migration 088_merchants', () => {
   })
 
   it('backfills the seeded database into exactly the nine mapped merchants plus one per unknown host, every row attached', async () => {
-    await withMigrationReverted(
-      () => db.connect().then(async (c) => { try { await down(c) } finally { c.release() } }),
+    await with088Reverted(
       async () => {
         // Pre-088 state: no merchant column. The harness resets seed data
         // between tests, so plant the rows the map must group — Anchor's two
@@ -177,8 +201,7 @@ describeDb('migration 088_merchants', () => {
   })
 
   it('suffixes a fallback slug that collides with a different merchant', async () => {
-    await withMigrationReverted(
-      () => db.connect().then(async (c) => { try { await down(c) } finally { c.release() } }),
+    await with088Reverted(
       async () => {
         // Two unknown hosts whose slugs collide: 'a.b.example' and 'a-b.example'
         // both slugify to 'a-b-example'.
@@ -218,6 +241,8 @@ describeDb('migration 088_merchants', () => {
     )
     const client = await db.connect()
     try {
+      // 096 first: its agent_delegations.merchant_id FK would block the drop.
+      await down096(client)
       await down(client)
       const survivor = await db.query<{ n: string }>(
         `SELECT count(*)::text AS n FROM merchant_catalog WHERE resource_url = 'https://services.ampersend.ai/api/later'`,
@@ -246,13 +271,13 @@ describeDb('migration 088_merchants', () => {
       )
       expect(survivorAgain.rows[0]?.slug).toBe('ampersend-demo-api')
     } finally {
+      await up096(client)
       client.release()
     }
   })
 
   it('fails loudly, naming the rows, when a resource_url has no readable host — instead of an anonymous NOT NULL error three statements later', async () => {
-    await withMigrationReverted(
-      () => db.connect().then(async (c) => { try { await down(c) } finally { c.release() } }),
+    await with088Reverted(
       async () => {
         const planted = await db.query<{ id: string }>(
           `INSERT INTO merchant_catalog

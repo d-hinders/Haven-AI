@@ -447,6 +447,16 @@ export const config = {
   // SIE export, finished voucher push, and any asserted-VAT output.
   legacyBookkeepingEnabled: parseBooleanFlag('HAVEN_LEGACY_BOOKKEEPING_ENABLED', process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED),
 
+  // Owner company details + VIES validation (#3332). Dark by default: the
+  // settings form and `/user/company-details*` routes answer 404 when off,
+  // and the evidence `parties.buyer` block (`openapi/party-model.ts`) is
+  // omitted regardless of what the table holds — the flag gates the FEATURE,
+  // not just the form.
+  ownerCompanyDetailsEnabled: parseBooleanFlag(
+    'HAVEN_OWNER_COMPANY_DETAILS',
+    process.env.HAVEN_OWNER_COMPANY_DETAILS,
+  ),
+
   // Managed-deployment marker — true only on Haven's hosted backend. The
   // accounting feed (#491) is a hosted-only add-on and never runs elsewhere.
   hosted: parseBooleanFlag('HAVEN_HOSTED', process.env.HAVEN_HOSTED),

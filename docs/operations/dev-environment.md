@@ -214,7 +214,8 @@ never in code. **Every secret MUST differ from production.**
 **Boolean flags accept only lowercase `true` / `false` (#3015).** Every
 boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
 `HAVEN_FEE_ENABLED`, `HAVEN_LEGACY_BOOKKEEPING_ENABLED`, `HAVEN_HOSTED`,
-`HAVEN_ACCOUNTING_ENABLED` and the deprecated `HAVEN_REPORTING_FEED_ENABLED` —
+`HAVEN_ACCOUNTING_ENABLED`, `HAVEN_OWNER_COMPANY_DETAILS` and the deprecated
+`HAVEN_REPORTING_FEED_ENABLED` —
 goes through `parseBooleanFlag`: unset or blank means false; any other value
 (`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
 variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
@@ -291,6 +292,11 @@ Isolation rules that are non-negotiable for a payments product:
   `84532,8453`, the operator step after PR #3202) and never on prod. The route
   lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
   so a copied flag cannot publish them on prod, whose list is `8453`.
+- **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
+  boolean) gates the settings form, `/user/company-details*`, and the
+  additive `parties.buyer` field on payment evidence/receipts. Dark by
+  default; every route in the module answers 404 when off, not just the
+  form. See [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A

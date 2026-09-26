@@ -239,6 +239,9 @@ describe('index.ts readers', () => {
       // agent-auth lifecycle, the first money-path module born enforced
       // (a brand-new module has no installed caller to shadow for).
       'routes/agent-task-budgets.ts',
+      // #3332: brand-new module, no installed caller — born ENFORCED on the
+      // same reasoning as task-budgets.ts.
+      'routes/owner-company-details.ts',
       'routes/task-budgets.ts',
       // Slice 2 (#3030): the 22 non-money modules and the inline index.ts pair.
       'index.ts',

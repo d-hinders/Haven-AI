@@ -1,4 +1,6 @@
 import { findSettledPaymentReceiptRow } from '../../infra/repositories/payment-intents.js'
+import { buyerPartyFromJoin, type BuyerJoinColumns } from '../../infra/repositories/owner-company-details.js'
+import { config } from '../../config.js'
 import { withParties } from '../../openapi/party-model.js'
 import {
   RECEIPT_VERSION,
@@ -17,7 +19,7 @@ import {
 export { RECEIPT_VERSION, verifyPaymentReceipt }
 export type { PaymentReceipt, ReceiptVerification }
 
-export interface PaymentReceiptRow {
+export interface PaymentReceiptRow extends Partial<BuyerJoinColumns> {
   id: string
   account_address: string
   chain_id: number
@@ -79,6 +81,18 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
         delegate_address: row.delegate_address,
         delegate_account_address: row.delegate_account_address ?? null,
         merchant_address: row.to_address,
+        // #3332: additive, flag-gated — see `buyerPartyFromJoin`'s own doc.
+        buyer_details: buyerPartyFromJoin(
+          {
+            buyer_legal_name: row.buyer_legal_name ?? null,
+            buyer_country: row.buyer_country ?? null,
+            buyer_org_number: row.buyer_org_number ?? null,
+            buyer_vat_number: row.buyer_vat_number ?? null,
+            buyer_vies_status: row.buyer_vies_status ?? null,
+            buyer_vies_checked_at: row.buyer_vies_checked_at ?? null,
+          },
+          config.ownerCompanyDetailsEnabled,
+        ),
       },
     ) as PaymentReceipt['payment'],
     authorization: {

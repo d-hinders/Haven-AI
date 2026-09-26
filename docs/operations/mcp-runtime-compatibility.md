@@ -3499,3 +3499,15 @@ to call next in structured fields, and those fields are typed end to end
 >
 > Scope of this note: those tool results. Nothing else in this document was
 > re-verified.
+
+> **Re-verification (#3332, additive SDK `PaymentParties.buyer`, 2026-09-27):**
+> this diff adds an OPTIONAL `buyer` field to `PaymentParties`/`RawPaymentParties`
+> (`packages/sdk/src/types.ts`) and its mapping in `payment-mappers.ts`, present
+> only when the backend has `HAVEN_OWNER_COMPANY_DETAILS` on and the owner has
+> saved company details. No existing field, wire shape, or version-skew
+> contract in this document moves: `mapParties` still maps the same four
+> existing fields the same way, and the new field is additive and optional at
+> every layer, so an older SDK reading a newer backend's response simply never
+> sees it. `packages/mcp-server`'s `haven_list_receipts` passes the SDK's typed
+> object through unchanged. Scope of this note: that one field. Nothing else
+> in this document was re-verified.

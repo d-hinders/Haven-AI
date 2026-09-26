@@ -22,6 +22,7 @@ import discoveryRoutes from './routes/discovery.js'
 import { buildApiRootDocument } from './routes/root-document.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
+import ownerCompanyDetailsRoutes from './routes/owner-company-details.js'
 import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
 import portfolioRoutes from './routes/portfolio.js'
@@ -142,6 +143,9 @@ installRequestValidation(app, {
     // #3329: the owner-facing task-budget READ is non-money-path (GET only)
     // and born ENFORCED, same precedent as agent-organizations.ts above.
     'routes/agent-task-budgets.ts',
+    // #3332: a brand new module with no live caller yet, same reasoning as
+    // task-budgets.ts below — born ENFORCED, never shadow.
+    'routes/owner-company-details.ts',
     // #3329: `routes/task-budgets.ts` is a BRAND NEW module with no live
     // caller yet (unlike `routes/payments.ts` / `routes/agent-delegations.ts`
     // / `routes/machine-payments.ts`, which predate the request-validation
@@ -367,6 +371,10 @@ logPassportReadiness(app.log)
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })
+// #3332: rides the /user prefix as its own route FILE, same reasoning as
+// agent-labels.ts on /agents — the request-validation rollout keys
+// enforcedModules on the file, not the mount prefix.
+await app.register(ownerCompanyDetailsRoutes, { prefix: '/user' })
 await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })

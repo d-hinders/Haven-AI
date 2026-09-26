@@ -18,6 +18,19 @@ function mapParties(raw: RawPaymentParties | undefined): PaymentParties | undefi
     delegate: raw.delegate,
     delegateAccount: raw.delegate_account,
     merchant: raw.merchant,
+    // #3332: additive — absent unless the wire shape carries it.
+    ...(raw.buyer
+      ? {
+          buyer: {
+            legalName: raw.buyer.legal_name,
+            country: raw.buyer.country,
+            orgNumber: raw.buyer.org_number,
+            vatNumber: raw.buyer.vat_number,
+            viesStatus: raw.buyer.vies_status,
+            viesCheckedAt: raw.buyer.vies_checked_at,
+          },
+        }
+      : {}),
   }
 }
 

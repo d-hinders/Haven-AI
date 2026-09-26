@@ -1023,6 +1023,26 @@ export interface PaymentParties {
   delegate: string | null
   delegateAccount: string | null
   merchant: string | null
+  /**
+   * #3332: the paying agent's owner's company details — additive, present
+   * only when the backend has `HAVEN_OWNER_COMPANY_DETAILS` on AND the owner
+   * saved details; absent (not `undefined`-valued, the KEY is absent)
+   * otherwise. `viesStatus: 'valid'` means VIES accepted the VAT number —
+   * never render that as "verified" (see Haven's agent-passport docs on the
+   * same naming discipline).
+   */
+  buyer?: PaymentPartiesBuyer
+}
+
+export interface PaymentPartiesBuyer {
+  legalName: string
+  /** ISO 3166-1 alpha-2. */
+  country: string
+  /** For a sole trader this IS the personal identity number. */
+  orgNumber: string
+  vatNumber: string | null
+  viesStatus: 'pending' | 'valid' | 'invalid' | 'not_verifiable' | null
+  viesCheckedAt: string | null
 }
 
 /** @internal wire shape of {@link PaymentParties}. */
@@ -1031,6 +1051,17 @@ export interface RawPaymentParties {
   delegate: string | null
   delegate_account: string | null
   merchant: string | null
+  buyer?: RawPaymentPartiesBuyer
+}
+
+/** @internal wire shape of {@link PaymentPartiesBuyer}. */
+export interface RawPaymentPartiesBuyer {
+  legal_name: string
+  country: string
+  org_number: string
+  vat_number: string | null
+  vies_status: 'pending' | 'valid' | 'invalid' | 'not_verifiable' | null
+  vies_checked_at: string | null
 }
 
 /**

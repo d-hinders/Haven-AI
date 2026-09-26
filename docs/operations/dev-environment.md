@@ -746,6 +746,19 @@ project owner — collaborators have Viewer access, not env-var write access.
 > freshness gate described above selects the same runs as before. Nothing else
 > in this file's coverage was touched; this note is the only edit.
 
+> **Re-verified #3342 (2026-09-26):** `index.ts`'s `anchor-repair` phase — the
+> one #3294 added inside the existing leader-gated passport sweep — now also
+> emits a warn-level per-row report when the repair left rows unanswered
+> (`agent_id`, `outcome`, `reason`); the repair result itself gained a
+> `healthy` count and the per-row array. No phase is added, moved, or reordered
+> (the report is ten lines inside the existing `anchor-repair` phase), no route
+> file is added or moved, `enforcedModules` is untouched, and the
+> shadow/enforce semantics this document describes are unchanged. The repair
+> sweep now excludes rows durably confirmed against their anchor receipt
+> (migration 096's `uid_repair_confirmed_at` marker), which only shrinks what
+> the phase re-reads. Nothing else in this file's coverage was touched; this
+> note is the only edit.
+
 > **Re-verified #3361 (2026-09-26):** the promotion freshness gate described
 > above now reads every run-level qa-dev success created within twice
 > `QA_FRESHNESS_HOURS`, instead of the newest 30. Rows whose run name names

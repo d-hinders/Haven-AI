@@ -21,7 +21,7 @@
 import { AbiCoder, Contract, Interface } from 'ethers'
 import { getRelayer } from '../../infra/relayer.js'
 import { openOutboundRecord, submitRecorded } from '../../infra/outbound-queue.js'
-import { repairAnchoredUid } from '../../infra/repositories/agent-passports.js'
+import { confirmAnchorUid, repairAnchoredUid } from '../../infra/repositories/agent-passports.js'
 import {
   findOutboundEvidenceTxHash,
   findOutboundTxByHash,
@@ -189,17 +189,24 @@ export function readMinedAttestationUid(
     let parsed
     try {
       parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
+      if (parsed?.name !== 'Attested') continue
+      // ethers v6 decodes lazily: a malformed topic (e.g. an address topic
+      // without the zero high bytes real chain data always carries) surfaces
+      // as a DEFERRED error on first arg access, not at parseLog. Read every
+      // field inside this guard — an unreadable log is ABSENCE OF EVIDENCE
+      // (#3294), never a crash past the caller's record close or a partial
+      // answer. The #3342 fixture keeps its attester topic left-padded to
+      // 32 bytes so THIS guard, not the ABI decoder, refuses foreign logs.
+      const eventSchema = String(parsed.args.schemaUID ?? '').toLowerCase()
+      if (eventSchema !== schemaUid.toLowerCase()) continue
+      if (opts.from) {
+        const attester = String(parsed.args.attester ?? '').toLowerCase()
+        if (attester !== opts.from.toLowerCase()) continue
+      }
+      return parsed.args.uid as string
     } catch {
       continue // not an EAS_ABI event — other logs in the same tx are fine
     }
-    if (parsed?.name !== 'Attested') continue
-    const eventSchema = String(parsed.args.schemaUID ?? '').toLowerCase()
-    if (eventSchema !== schemaUid.toLowerCase()) continue
-    if (opts.from) {
-      const attester = String(parsed.args.attester ?? '').toLowerCase()
-      if (attester !== opts.from.toLowerCase()) continue
-    }
-    return parsed.args.uid as string
   }
   return null
 }
@@ -339,6 +346,88 @@ export const anchorOnChain: Anchor = async (
 }
 
 /**
+ * The outcome of the proven-ours anchor read (`readProvenAnchorUid`, #3342).
+ *
+ * Tagged rather than nullable so a caller cannot conflate "the chain has no
+ * answer yet" (`no-receipt`, `no-candidate` — retryable silence) with "the
+ * chain answered and the evidence failed the invariant" (`refused` — a
+ * finding, reported per row). `reverted` and `tx-body-unavailable` keep the
+ * #1847 throw semantics of the recovery path; the repair maps every tag to
+ * its own reported reason instead of ever guessing.
+ */
+export type ProvenAnchorRead =
+  | { kind: 'no-receipt' }
+  | { kind: 'reverted' }
+  | { kind: 'no-candidate' }
+  | { kind: 'tx-body-unavailable' }
+  | { kind: 'refused'; reason: string }
+  | { kind: 'ours'; uid: string }
+
+/**
+ * Read the attestation UID an anchor transaction emitted, PROVEN ours
+ * (#3342) — the one reader for the repair and the #1043 recovery, and the
+ * same guards `readMinedAttestationUid` applies on the mint path.
+ *
+ * The repair and the recovery used to take the FIRST `Attested` log from the
+ * EAS address and check neither schema nor attester; a foreign log (a row
+ * whose `tx_hash` is corrupted, points at someone else's tx, or a chain_id
+ * mismatch) was then written into `agent_passports` verbatim. The invariant
+ * (#3294/#3342): a UID is written to `agent_passports` only from an
+ * `Attested` log with the PINNED schema, attested by the mined tx's OWN
+ * `from`, in a transaction whose `to` is the pinned EAS contract.
+ *
+ * - The attester check is against the MINED TRANSACTION's sender, not the
+ *   current relayer address: EAS sets attester to `msg.sender`, and the
+ *   relayer is env-configured and rotatable — checking the current address
+ *   would make every row minted before a key rotation permanently
+ *   unrepairable.
+ * - The candidate scan (pinned schema, under the EAS address) decides WHETHER
+ *   a transaction fetch is spent at all: `no-candidate` answers without one,
+ *   the same absence-of-evidence the mint path answers with. A receipt with
+ *   logs from other contracts in the same tx is fine.
+ *
+ * Returns the outcome tagged (`ProvenAnchorRead`); `refused` names the failed
+ * guard. ABSENCE of evidence is never evidence of a UID — callers write only
+ * on `ours`.
+ */
+export async function readProvenAnchorUid(chainId: number, txHash: string): Promise<ProvenAnchorRead> {
+  const receipt = await getRelayer(chainId).provider?.getTransactionReceipt(txHash)
+  if (!receipt) return { kind: 'no-receipt' }
+  if (receipt.status !== 1) return { kind: 'reverted' }
+
+  const candidate = readMinedAttestationUid(chainId, receipt)
+  if (!candidate) return { kind: 'no-candidate' }
+
+  const tx = await getRelayer(chainId).provider?.getTransaction(txHash)
+  if (!tx) {
+    return { kind: 'tx-body-unavailable' }
+  }
+  const { eas } = getEasDeployment(chainId)
+  // ethers v6 types `tx.to` as `string | null` — no addressable indirection.
+  // A null `to` is a contract CREATE, which cannot be an EAS attest.
+  if (!tx.to || tx.to.toLowerCase() !== eas.toLowerCase()) {
+    return {
+      kind: 'refused',
+      reason: `tx ${txHash} did not target the EAS contract — its Attested log is not ours`,
+    }
+  }
+  if (!tx.from) {
+    return {
+      kind: 'refused',
+      reason: `tx ${txHash} carries no sender — its Attested log cannot be proven ours`,
+    }
+  }
+  const uid = readMinedAttestationUid(chainId, receipt, { from: tx.from })
+  if (!uid || uid.toLowerCase() !== candidate.toLowerCase()) {
+    return {
+      kind: 'refused',
+      reason: `tx ${txHash}'s Attested log fails the proven-ours invariant (attester is not the tx's own sender)`,
+    }
+  }
+  return { kind: 'ours', uid }
+}
+
+/**
  * Repair an ALREADY-anchored row whose UID is the #3294 staticCall prediction
  * (or is otherwise missing) from its recorded anchor tx hash.
  *
@@ -346,49 +435,117 @@ export const anchorOnChain: Anchor = async (
  * reverts every revoke of it `NotFound()` while the agent's real attestation
  * stays live — the exact state found on dev, where one agent's revocation had
  * been retried 590 times against a phantom UID. The repair re-derives the real
- * UID from the receipt's `Attested` log — the same proven-ours reader the mint
- * path records from — and updates the row ONLY on positive evidence:
+ * UID from the receipt's `Attested` log through `readProvenAnchorUid` — since
+ * #3342 the SAME proven-ours reader (pinned schema, attester = the mined tx's
+ * own `from`, tx `to` = EAS) the mint path records from and the #1043
+ * recovery answers from — and updates the row ONLY on positive evidence:
  *
- * - no tx_hash, or a receipt that cannot be read, or no matching log → the row
+ * - no tx_hash, or a receipt that cannot be read, or no proven log → the row
  *   is LEFT UNCHANGED and reported (`repaired: false`), never guessed;
- * - the derived UID equals the stored one → nothing to do (`repaired: false`);
+ * - the derived UID equals the stored one → nothing to write; the match is
+ *   recorded durably (`confirmAnchorUid`) so the row leaves the sweep queue
+ *   (#3342) instead of costing a receipt read every tick forever;
  * - the row moved under us (revocation confirmed, re-anchor reset, a new
  *   anchor) → the compare-and-set refuses and the repair self-heals on a later
  *   sweep, because the underlying tx is durable evidence that does not rot.
  *
- * Idempotent by construction: repaired rows match on the next pass and cost
- * one receipt read. Callers pace it (see `retireAttestationOnChain`) so a
- * burst of repairs shares the one relayer lane rather than stampeding it —
- * each repair-triggered revoke is an ordinary, backoff-scheduled revoke.
+ * Idempotent by construction: repaired (and confirmed) rows no longer match
+ * the selector. Callers pace it (see `retireAttestationOnChain`) so a burst of
+ * repairs shares the one relayer lane rather than stampeding it — each
+ * repair-triggered revoke is an ordinary, backoff-scheduled revoke.
  */
 export async function repairAnchorUidFromReceipt(
   chainId: number,
   agentId: string,
   row: { attestation_uid: string | null; tx_hash: string | null },
-): Promise<{ repaired: boolean; uid: string | null; reason: string }> {
+): Promise<{ repaired: boolean; outcome: 'repaired' | 'confirmed' | 'unrepairable'; uid: string | null; reason: string }> {
   const txHash = row.tx_hash
-  if (!txHash) return { repaired: false, uid: null, reason: 'row has no anchor tx_hash — cannot re-derive its UID' }
-  let uid: string | null = null
+  if (!txHash)
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: 'row has no anchor tx_hash — cannot re-derive its UID',
+    }
+  let read: ProvenAnchorRead
   try {
-    uid = await recoverAnchorFromReceipt(chainId, txHash).then((r) => r?.attestationUid ?? null)
+    read = await readProvenAnchorUid(chainId, txHash)
   } catch (err) {
     return {
       repaired: false,
+      outcome: 'unrepairable',
       uid: null,
       reason: `anchor receipt for ${txHash} unreadable: ${err instanceof Error ? err.message : String(err)}`,
     }
   }
-  if (!uid) {
-    return { repaired: false, uid: null, reason: `no Attested log yet for anchor tx ${txHash}` }
+  if (read.kind === 'no-receipt' || read.kind === 'no-candidate') {
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: `no Attested log yet for anchor tx ${txHash}`,
+    }
   }
+  if (read.kind === 'reverted') {
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: `anchor receipt for ${txHash} unreadable: prior passport attestation reverted`,
+    }
+  }
+  if (read.kind === 'tx-body-unavailable') {
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: `anchor receipt for ${txHash} unreadable: tx body unavailable — attribution deferred (#1847)`,
+    }
+  }
+  if (read.kind === 'refused') {
+    // The invariant refused this log: not provably ours, so not writable.
+    // Named per row (#3342) — the sweep reports it with the agent_id.
+    return { repaired: false, outcome: 'unrepairable', uid: null, reason: read.reason }
+  }
+  const uid = read.uid
   if (row.attestation_uid && row.attestation_uid.toLowerCase() === uid.toLowerCase()) {
-    return { repaired: false, uid, reason: 'stored UID already matches the anchor receipt' }
+    // Already right. Record the confirmation so the row leaves the repair
+    // queue — the pre-#3342 code returned here WITHOUT writing anything, and
+    // the writeless outcome is exactly what re-queued the same oldest rows
+    // every tick. The guard (anchored, same tx, not already confirmed) can
+    // refuse: a row that moved mid-read is re-checked on a later pass, and
+    // its non-confirmation is REPORTED, never folded into healthy.
+    const confirmed = await confirmAnchorUid(agentId, txHash)
+    if (!confirmed) {
+      return {
+        repaired: false,
+        outcome: 'unrepairable',
+        uid,
+        reason: 'row changed since it was read — confirmation deferred to the next pass',
+      }
+    }
+    return {
+      repaired: false,
+      outcome: 'confirmed',
+      uid,
+      reason: 'stored UID already matches the anchor receipt',
+    }
   }
   const applied = await repairAnchoredUid(agentId, row.attestation_uid, uid, txHash)
   if (!applied) {
-    return { repaired: false, uid, reason: 'row changed since it was read — repair deferred to the next pass' }
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid,
+      reason: 'row changed since it was read — repair deferred to the next pass',
+    }
   }
-  return { repaired: true, uid, reason: `UID re-derived from anchor tx ${txHash}` }
+  return {
+    repaired: true,
+    outcome: 'repaired',
+    uid,
+    reason: `UID re-derived from anchor tx ${txHash}`,
+  }
 }
 
 /**
@@ -397,6 +554,14 @@ export async function repairAnchorUidFromReceipt(
  * Returns the result when the tx is mined and successful, null when the tx is
  * unknown or still pending (caller decides whether to re-anchor), and THROWS
  * on a mined-but-reverted tx so the caller records the failure message.
+ *
+ * #3342: the UID is read through `readProvenAnchorUid` — the SAME
+ * proven-ours reader the mint path records from and the repair re-derives
+ * from: the log must carry the pinned schema, be attested by the mined tx's
+ * own `from`, and sit in a transaction whose `to` is the pinned EAS contract.
+ * The pre-#3342 reader here took the FIRST `Attested` log from the EAS
+ * address and checked nothing, so a foreign log placed before ours was
+ * returned — and would have been recorded — as the recovered UID.
  *
  * The result carries `attested` — the addresses decoded from the mined
  * transaction's OWN calldata (#1847). Recovery can cross a re-key: this
@@ -410,48 +575,48 @@ export async function repairAnchorUidFromReceipt(
  * probe's same-calldata walk both rely on that), so the decode holds for a
  * bumped hash too. If the transaction body cannot be fetched or decoded, this
  * THROWS — a retryable failure — rather than let the caller attribute the
- * anchor from facts the chain does not hold.
+ * anchor from facts the chain does not hold. A receipt that carries only a
+ * log the invariant REFUSES also throws: the evidence exists but is not
+ * provably ours, which is a finding to surface, not silence to re-mint over.
  */
 export async function recoverAnchorFromReceipt(
   chainId: number,
   txHash: string,
 ): Promise<RecoveredAnchor | null> {
-  const { eas } = getEasDeployment(chainId)
-  const provider = getRelayer(chainId).provider
-  const receipt = await provider?.getTransactionReceipt(txHash)
-  if (!receipt) return null
-  if (receipt.status !== 1) {
+  const read = await readProvenAnchorUid(chainId, txHash)
+  if (read.kind === 'no-receipt') return null
+  if (read.kind === 'reverted') {
     throw new Error(`prior passport attestation reverted (tx ${txHash})`)
   }
-  const iface = new Interface(EAS_ABI)
-  for (const log of receipt.logs) {
-    if (log.address.toLowerCase() !== eas.toLowerCase()) continue
-    let parsed
-    try {
-      parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
-    } catch {
-      continue // not an EAS_ABI event — other logs in the same tx are fine
-    }
-    if (parsed?.name !== 'Attested') continue
-    // Mined and ours. Attribute it from its own bytes (#1847): failures from
-    // here THROW (retryable) instead of falling through to "no event found".
-    const tx = await provider?.getTransaction(txHash)
-    if (!tx) {
-      throw new Error(
-        `tx ${txHash} mined but its body is unavailable — cannot attribute the recovered attestation (#1847)`,
-      )
-    }
-    const call = iface.decodeFunctionData('attest', tx.data)
-    const claimBytes = call[0].data.data as string
-    const decoded = AbiCoder.defaultAbiCoder().decode([...SCHEMA_TYPES], claimBytes)
-    return {
-      attestationUid: parsed.args.uid as string,
-      txHash,
-      attested: { agentEoa: decoded[0] as string, smartAccount: decoded[1] as string },
-    }
+  if (read.kind === 'no-candidate') {
+    // Mined, successful, but no Attested event from EAS — not our attestation.
+    throw new Error(`tx ${txHash} succeeded but contains no EAS Attested event`)
   }
-  // Mined, successful, but no Attested event from EAS — not our attestation.
-  throw new Error(`tx ${txHash} succeeded but contains no EAS Attested event`)
+  if (read.kind === 'tx-body-unavailable') {
+    throw new Error(
+      `tx ${txHash} mined but its body is unavailable — cannot attribute the recovered attestation (#1847)`,
+    )
+  }
+  if (read.kind === 'refused') {
+    throw new Error(`tx ${txHash} carries no provably-ours Attested log: ${read.reason}`)
+  }
+
+  const provider = getRelayer(chainId).provider
+  const tx = await provider?.getTransaction(txHash)
+  if (!tx) {
+    throw new Error(
+      `tx ${txHash} mined but its body is unavailable — cannot attribute the recovered attestation (#1847)`,
+    )
+  }
+  const iface = new Interface(EAS_ABI)
+  const call = iface.decodeFunctionData('attest', tx.data)
+  const claimBytes = call[0].data.data as string
+  const decoded = AbiCoder.defaultAbiCoder().decode([...SCHEMA_TYPES], claimBytes)
+  return {
+    attestationUid: read.uid,
+    txHash,
+    attested: { agentEoa: decoded[0] as string, smartAccount: decoded[1] as string },
+  }
 }
 
 /**

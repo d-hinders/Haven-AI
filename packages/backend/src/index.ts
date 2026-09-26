@@ -727,6 +727,16 @@ const start = async () => {
           await phase('anchor-repair', async () => {
             const repairs = await repairAnchoredUids()
             if (repairs.attempted) app.log.info(repairs, 'Passport anchor UID repairs')
+            // #3342: every row the repair could not answer is reported BY
+            // AGENT — agent_id and reason — not folded into a count. These
+            // are the lines an operator checks first when a row refuses to
+            // converge (see docs/operations/stuck-revoke-alarm.md).
+            if (repairs.unrepairable) {
+              app.log.warn(
+                { unrepairable: repairs.unrepairable, rows: repairs.rows.filter((r) => r.outcome !== 'confirmed') },
+                'Passport anchor UID repairs left rows unanswered — investigate the reasons',
+              )
+            }
           })
           await phase('revocation', async () => {
             const revocations = await reconcilePendingRevocations()

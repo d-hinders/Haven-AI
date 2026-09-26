@@ -241,14 +241,23 @@ the repair re-derives the UID from the receipt's `Attested` log keyed by the
 row's persisted `tx_hash`, swaps it in through a compare-and-set (a row that
 moved mid-repair — revoked, reset, re-anchored — refuses and defers to the
 next pass), and never guesses: a row with no `tx_hash`, or whose receipt
-cannot be read or carries no proven log, is left unchanged and reported. The
-repair runs as a paced, idempotent sweep step (a bounded batch per tick, a row
-revisited at most hourly) and the revocation reconcile consults it before
-spending gas on a UID the chain cannot see — a repaired row's revoke targets
-the real UID and converges through the ordinary backoff. The re-anchor path
-inherits the same gate: the retire repairs the row and revokes the REAL
-attestation, then hands the row back to issuance keyed on the uid that was
-actually retired.
+cannot be read or carries no proven log, is left unchanged and reported. Each
+repair pass also logs every row it left unrepaired, with the `agent_id` and
+the reason. The log read is PROVEN ours — the same reader the mint path
+records from and the #1043 recovery answers from: the `Attested` log must
+carry the pinned passport schema, be attested by the mined transaction's own
+sender, and sit in a transaction whose `to` is the pinned EAS contract; a log
+that fails any guard is refused and reported, never written (#3342). The
+repair runs as a paced, idempotent sweep step (a bounded batch per tick) whose
+selector excludes rows already CONFIRMED against their receipt — a row whose
+stored UID matches its receipt is confirmed once (`uid_repair_confirmed_at`,
+migration 096) and then leaves the queue, so reads per tick stay bounded
+instead of round-robining the same oldest rows forever (#3342) — and the
+revocation reconcile consults it before spending gas on a UID the chain
+cannot see — a repaired row's revoke targets the real UID and converges
+through the ordinary backoff. The re-anchor path inherits the same gate: the
+retire repairs the row and revokes the REAL attestation, then hands the row
+back to issuance keyed on the uid that was actually retired.
 
 Two limits on "never re-minted", stated because the unqualified version is not
 true today:

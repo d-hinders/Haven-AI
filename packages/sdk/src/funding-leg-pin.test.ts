@@ -141,7 +141,10 @@ describe('HavenClient funding leg — recipient pin (#3375)', () => {
 
     const redirected = serveFundingLeg(twoLinkFundingLeg(ATTACKER))
     const attempt = redirected.client.authorizeX402(paymentRequired, { taskBudgetId: 'tb_1' })
+    await expect(attempt).rejects.toBeInstanceOf(HavenTypedDataRefusedError)
+    await expect(attempt).rejects.toThrow(/Refusing to sign this x402 funding leg/)
     await expect(attempt).rejects.toThrow(/not this agent's own delegate wallet/)
+    await expect(attempt).rejects.toMatchObject({ code: TYPED_DATA_NOT_ALLOWED })
     expect(redirected.signPosts()).toHaveLength(0)
   })
 })

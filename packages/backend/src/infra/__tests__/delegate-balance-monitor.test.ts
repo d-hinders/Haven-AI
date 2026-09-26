@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 
 const { mockQuery, mockGetTokenBalance } = vi.hoisted(() => ({
@@ -15,12 +15,16 @@ const {
   classifyDelegateBalance,
   computeAlerts,
   newAlertState,
+  resetDelegateAlertStateForTests,
   runDelegateBalanceMonitor,
   scanDelegateBalances,
   sweepFloorAtomic,
 } = await import('../delegate-balance-monitor.js')
 
 const FLOOR = ethers.parseUnits('0.01', 6) // config default sweepMinUsdc='0.01'
+
+// A fake hook URL shape — never a real one, and never asserted to appear in logs.
+const WEBHOOK_URL = 'https://hooks.slack.test/services/T000/B000/secrettoken'
 
 function delegateRow(n: number, chainId = 8453) {
   return {
@@ -31,10 +35,36 @@ function delegateRow(n: number, chainId = 8453) {
   }
 }
 
+function httpRes(ok: boolean, status: number, body = ''): Response {
+  return { ok, status, text: async () => body } as unknown as Response
+}
+
+/**
+ * Mock the monitor's two repository queries WITHOUT positional chains for NEW
+ * tests (`mockResolvedValueOnce` is ratchet-counted and this file sits at its
+ * baseline). The SQL is matched by marker, not call order.
+ */
+function mockDelegates(rows: ReturnType<typeof delegateRow>[], freshAgentIds: string[] = []): void {
+  mockQuery.mockImplementation((sql: unknown) => {
+    const text = String(sql)
+    if (text.includes('FROM agents')) return Promise.resolve({ rows })
+    if (text.includes('payment_intents')) {
+      return Promise.resolve({ rows: freshAgentIds.map((agent_id) => ({ agent_id })) })
+    }
+    return Promise.reject(new Error(`unexpected query: ${text.slice(0, 80)}`))
+  })
+}
+
 beforeEach(() => {
   mockQuery.mockReset()
   mockGetTokenBalance.mockReset()
+  resetDelegateAlertStateForTests()
   delete process.env.DELEGATE_DUST_ALERT_USDC
+  delete process.env.DELEGATE_ALERT_WEBHOOK_URL
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('classifyDelegateBalance — the state table', () => {
@@ -170,35 +200,207 @@ describe('computeAlerts — edge-triggered, not spammy (#777)', () => {
   it('pings a lingering finding once, stays silent while it persists', () => {
     const r = report({ lingering: [lingeringFinding(1)] })
     const first = computeAlerts(r, newAlertState())
-    expect(first.messages).toHaveLength(1)
-    expect(first.messages[0]).toContain('Lingering')
+    expect(first).toHaveLength(1)
+    expect(first[0].text).toContain('Lingering')
+    expect(first[0].clearLingeringKey).toBe('agent-1:8453')
     // same finding next scan → no new message
-    const second = computeAlerts(r, first.nextState)
-    expect(second.messages).toHaveLength(0)
+    const state = newAlertState()
+    state.lingeringKeys.add('agent-1:8453')
+    expect(computeAlerts(r, state)).toHaveLength(0)
   })
 
   it('re-pings after the balance clears and returns', () => {
     const r = report({ lingering: [lingeringFinding(1)] })
-    const s1 = computeAlerts(r, newAlertState()).nextState
-    // cleared
-    const cleared = computeAlerts(report({ lingering: [] }), s1)
-    expect(cleared.messages).toHaveLength(0)
-    // returns → pings again
-    const back = computeAlerts(r, cleared.nextState)
-    expect(back.messages).toHaveLength(1)
+    const state = newAlertState()
+    state.lingeringKeys.add('agent-1:8453')
+    // cleared (the caller drops the key once the report has no findings)
+    const cleared = computeAlerts(report({ lingering: [] }), state)
+    expect(cleared).toHaveLength(0)
+    // returns with the key forgotten → pings again
+    const back = computeAlerts(r, newAlertState())
+    expect(back).toHaveLength(1)
   })
 
   it('pings the dust breach only on the below→above crossing', () => {
     const breach = report({ dustAlert: true, dustTotalAtomic: ethers.parseUnits('30', 6) })
     const cross = computeAlerts(breach, newAlertState())
-    expect(cross.messages.some((m: string) => m.includes('dust'))).toBe(true)
+    expect(cross.some((m) => m.text.includes('dust'))).toBe(true)
+    expect(cross.find((m) => m.text.includes('dust'))?.commitDust).toBe(true)
     // still above → no repeat
-    const stay = computeAlerts(breach, cross.nextState)
-    expect(stay.messages).toHaveLength(0)
+    const state = newAlertState()
+    state.dustActive = true
+    expect(computeAlerts(breach, state)).toHaveLength(0)
   })
 
-  it('pings each distinct lingering delegate, dedupes on agent+chain', () => {
+  it('pings each distinct lingering delegate, keyed on agent+chain', () => {
     const r = report({ lingering: [lingeringFinding(1), lingeringFinding(2)] })
-    expect(computeAlerts(r, newAlertState()).messages).toHaveLength(2)
+    const messages = computeAlerts(r, newAlertState())
+    expect(messages).toHaveLength(2)
+    expect(messages.map((m) => m.clearLingeringKey)).toEqual(['agent-1:8453', 'agent-2:8453'])
+  })
+})
+
+describe('runDelegateBalanceMonitor — webhook delivery gates the edge (#3345)', () => {
+  function lingeringOnly(n: number): void {
+    process.env.DELEGATE_ALERT_WEBHOOK_URL = WEBHOOK_URL
+    mockDelegates([delegateRow(n)])
+    mockGetTokenBalance.mockResolvedValue(ethers.parseUnits('2', 6))
+  }
+  /** agent-4 lingering + a dust breach (3 × 0.004 = 0.012 ≥ 0.01 threshold). */
+  function lingeringAndDust(): void {
+    process.env.DELEGATE_ALERT_WEBHOOK_URL = WEBHOOK_URL
+    process.env.DELEGATE_DUST_ALERT_USDC = '0.01'
+    mockDelegates([delegateRow(4), delegateRow(5), delegateRow(6), delegateRow(7)])
+    mockGetTokenBalance.mockImplementation((chainId: unknown, addr: unknown) => {
+      const address = String(addr)
+      // delegateRow(4) mints a 0x44… address (lingering); rows 5-7 are dust.
+      return Promise.resolve(
+        address.startsWith('0x44') ? ethers.parseUnits('2', 6) : ethers.parseUnits('0.004', 6),
+      )
+    })
+  }
+
+  it('a 404: one post, the failure logged by the sender, the scan itself unaffected', async () => {
+    lingeringOnly(4)
+    const fetchMock = vi.fn().mockResolvedValue(httpRes(false, 404, 'nope'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const warn = vi.fn()
+    const info = vi.fn()
+    await runDelegateBalanceMonitor({ info, warn })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const messages = warn.mock.calls.map((c) => c[1] as string)
+    expect(messages.some((m) => m.includes('ops alert webhook failed'))).toBe(true)
+    expect(messages.some((m) => m.includes('404'))).toBe(true)
+    // The scan completed normally — the failed alert never surfaced as a
+    // failed scan, and every warn stays inside the monitor's scope.
+    expect(info.mock.calls.some((c) => c[1] === 'delegate balance scan complete')).toBe(true)
+    expect(warn.mock.calls.every((c) => (c[0] as Record<string, unknown>).scope === 'delegate-balance-monitor')).toBe(true)
+  })
+
+  it('MUTATION: a 404 with the lingering condition persisting retries on the next scan', async () => {
+    // The bug (#3345): state committed before sending → run 2 posts nothing
+    // and the alert is lost while sweepable funds keep sitting on the EOA.
+    lingeringOnly(4)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(httpRes(false, 404)))
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+
+    const fetchMock = vi.fn().mockResolvedValue(httpRes(false, 404))
+    vi.stubGlobal('fetch', fetchMock)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a network error: logged by the sender, retried on the next scan', async () => {
+    lingeringOnly(4)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
+    const warn = vi.fn()
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn })
+
+    expect(warn.mock.calls.some((c) => String(c[1]).includes('network error'))).toBe(true)
+
+    const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'))
+    vi.stubGlobal('fetch', fetchMock)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retry-then-success: delivered on the second scan, silent on the third', async () => {
+    lingeringOnly(4)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(httpRes(false, 404)))
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+
+    const fetchMock = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const fetchMock3 = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock3)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock3).not.toHaveBeenCalled()
+  })
+
+  it('a full batch delivered: both messages post in one scan and each commits its own edge', async () => {
+    lingeringAndDust()
+    const fetchMock = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).toHaveBeenCalledTimes(2) // lingering + dust messages
+
+    // Next scan: BOTH edges committed by their own deliveries → silent.
+    // (The per-condition partial case — one delivery failing — is the test
+    // below, which is the one that kills the commit-before-send mutation.)
+    const fetchMock2 = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock2)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock2).not.toHaveBeenCalled()
+  })
+
+  it('a failed send in a batch re-arms ONLY the failed condition on the next scan', async () => {
+    lingeringAndDust()
+    // lingering post fails, dust post succeeds — queued verdicts, no
+    // positional chain (the db-mock ratchet counts mockResolvedValueOnce)
+    const verdicts: Array<[boolean, number]> = [
+      [false, 500], // lingering
+      [true, 200], // dust
+    ]
+    const fetchMock = vi.fn().mockImplementation(() => {
+      const [ok, status] = verdicts.shift() ?? [true, 200]
+      return Promise.resolve(httpRes(ok, status))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    // Next scan: only the LINGERING message must re-fire.
+    const fetchMock2 = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock2)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock2).toHaveBeenCalledTimes(1)
+    const text = JSON.parse(String((fetchMock2.mock.calls[0] as [string, RequestInit])[1].body)).text as string
+    expect(text).toContain('Lingering')
+  })
+
+  it('with the URL unset nothing is sent and log-only mode handles the episode (pre-#3345 behaviour)', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    lingeringOnly(4)
+    delete process.env.DELEGATE_ALERT_WEBHOOK_URL
+    const warn = vi.fn()
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(warn.mock.calls.some((c) => String(c[1]).includes('LINGERING'))).toBe(true)
+
+    // Log-only mode handled the episode: enabling the webhook on the NEXT
+    // scan must not re-send for the same continuous lingering episode. (The
+    // per-finding LINGERING log warn itself fires every scan by design — the
+    // edge gates only the webhook.)
+    process.env.DELEGATE_ALERT_WEBHOOK_URL = WEBHOOK_URL
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('recovery re-arms the key: a lingering balance that clears and returns pings again', async () => {
+    lingeringOnly(4)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(httpRes(true, 200)))
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    // cleared
+    mockDelegates([delegateRow(4)])
+    mockGetTokenBalance.mockResolvedValue(0n)
+    let fetchMock = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // returns
+    lingeringOnly(4)
+    fetchMock = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock)
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

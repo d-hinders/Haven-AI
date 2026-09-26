@@ -24,6 +24,8 @@ test('failingLines reads the harness FAIL lines and the run-level ✗ line, noth
   assert.deepEqual(found.map((f) => f.leg), ['x402-delegation-3009-sweep', 'delegation-lifecycle', null])
   assert.match(found[2].detail, /2\/14 scenario\(s\) failed/)
   assert.deepEqual(failingLines('• a … PASS — ok\n• b … SKIP — no identity'), [])
+  // CRLF logs parse the same.
+  assert.deepEqual(failingLines('• a … FAIL — boom\r\n'), [{ leg: 'a', detail: 'boom' }])
 })
 
 test('failingLines also reads the run-report row, so a live line split by stderr still names its leg (once)', () => {
@@ -45,26 +47,37 @@ test('scrub removes every URL — a provider URL carries its key in the path', (
   assert.ok(scrub('a'.repeat(1000)).length <= 240)
 })
 
-test('scrub covers every URL form and a bare key, and leaves leg names and tx hashes readable', () => {
+test('scrub covers every URL form and key-labelled values, each rule on its own', () => {
   for (const leak of [
     `wss://base-sepolia.g.alchemy.com/v2/${FAKE_KEY}`,
-    `ws://node/${FAKE_KEY}`,
-    `lb.drpc.live/base-sepolia/${FAKE_KEY}`,
+    `ws://node/${FAKE_KEY}`, // scheme rule only: no TLD, so the scheme-less rule cannot help
+    `lb.drpc.live/base-sepolia/${FAKE_KEY}`, // scheme-less rule only
     `base-sepolia.infura.io/v3/${FAKE_KEY}`,
-    `https:\\/\\/lb.drpc.live\\/base\\/${FAKE_KEY}`,
-    `https%3A%2F%2Flb.drpc.live%2Fbase%2F${FAKE_KEY}`,
+    `https:\\/\\/node\\/v2\\/${FAKE_KEY}`, // JSON-escaped, no TLD: that alternative only
+    `https%3a%2f%2fnode%2f${FAKE_KEY}`, // percent-encoded, no TLD: that alternative only
     `apiKey: ${FAKE_KEY}`,
-    'key 0123456789abcdef0123456789abcdef',
-  ]) assert.doesNotMatch(scrub(`err (${leak}) end`), /AbCdEf|0123456789abcdef/, leak)
-  // Each URL layer holds on its own: a lower-case key the long-token backstop
-  // would let through is still removed with the URL around it.
-  const lowKey = 'abcdefghijklmnopqrstuvwx'
-  for (const url of [`lb.drpc.live/base-sepolia/${lowKey}`, `wss://node/${lowKey}`, `https%3a%2f%2fnode%2f${lowKey}`]) {
-    assert.doesNotMatch(scrub(`err ${url} end`), new RegExp(lowKey), url)
-  }
-  assert.equal(scrub(lowKey), lowKey) // the backstop alone keeps it: the URL rules above did the work
+    `"api_key":"${FAKE_KEY}"`,
+    `token=${FAKE_KEY}`,
+  ]) assert.doesNotMatch(scrub(`err (${leak}) end`), /AbCdEf/, leak)
+})
+
+test('scrub leaves identifiers readable — they are the diagnosis', () => {
   const hash = `0x${'ab'.repeat(32)}`
-  assert.equal(scrub(`x402-delegation-3009-sweep failed, tx ${hash}`), `x402-delegation-3009-sweep failed, tx ${hash}`)
+  for (const readable of [
+    `x402-delegation-3009-sweep failed, tx ${hash}`,
+    'execution reverted: ERC20PeriodTransferEnforcer:transfer-amount-exceeded',
+    'QA_DELEGATION_DELEGATE_PRIVATE_KEY not set',
+    'x402-erc7710-over-budget-rejected: x402_retry_rejected_after_funding',
+    'mcp__haven-signer__haven_sign_x402 refused (ERC20InsufficientBalance)',
+    'payment 3f2b8c1e-9a4d-4e6f-8b7a-2c1d0e9f8a7b stuck',
+  ]) assert.equal(scrub(readable), readable)
+})
+
+test('scrub bounds its input: a pathological line returns fast and capped', () => {
+  const t0 = Date.now()
+  const out = scrub('a-b.'.repeat(2500)) // ~10 s unbounded (measured in review), well under 2 s bounded
+  assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`)
+  assert.ok(out.length <= 240)
 })
 
 test('a first-attempt pass writes nothing; a later pass lists the earlier attempts\' failures, keys scrubbed', () => {
@@ -106,6 +119,23 @@ test('countRuns queries one UTC day at a time and refuses a day the API cap trun
   assert.ok(calls.some((c) => c.includes('created=2026-09-25')) && calls.some((c) => c.includes('created=2026-09-26')))
   assert.ok(!calls.some((c) => c.includes('created=>=')))
   assert.throws(() => countRuns('2026-09-25', { gh: fakeGh(1500, [1, 2]), repo: 'o/r', until: '2026-09-25' }), /fetched 2 of 1500/)
+})
+
+test('countRuns pages through a real-sized day (215 runs = 100 + 100 + 15)', () => {
+  const pages = []
+  const gh = (args) => {
+    if (args[1] === '-X') {
+      const page = Number(args[args.indexOf('-F', args.indexOf('per_page=100')) + 1].split('=')[1])
+      pages.push(page)
+      const n = [100, 100, 15][page - 1] ?? 0
+      return JSON.stringify({ total: 215, ids: Array.from({ length: n }, (_, k) => page * 1000 + k) })
+    }
+    if (args[1].endsWith('/jobs')) return JSON.stringify([{ id: 9, name: 'money-flow', conclusion: 'success' }])
+    return 'money-flow QA passed on attempt 1/2'
+  }
+  const t = countRuns('2026-09-25', { gh, repo: 'o/r', until: '2026-09-25' })
+  assert.deepEqual(pages, [1, 2, 3])
+  assert.deepEqual([t.passes, t.firstAttempt], [215, 215])
 })
 
 test('passedOnAttempt and tally read the job log marker the workflow already prints', () => {

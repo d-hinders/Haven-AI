@@ -3,9 +3,11 @@
 //
 // `qa-dev.yml` retries the money-flow harness inside one step (QA_MAX_ATTEMPTS,
 // default 2), so a pass on attempt 2 is a plain green run: `run_attempt` never
-// moves, the promotion and freshness gates see `success`, and the only trace
-// was a `::warning::` annotation. Measured before this change: 19 of 90
-// successful harness runs passed only on attempt 2 (#3338, measured 2026-09-25).
+// moves, the promotion and freshness gates see `success`, and the only traces
+// were a `::warning::` annotation and a job-log line nobody read. Measured
+// before this change: 19 of 90 successful harness runs passed only on attempt
+// 2, in runs created 2026-09-18T19:27Z → 2026-09-25T19:25Z (#3338; re-taken in
+// review with this file's passedOnAttempt/tally).
 // A retry that hides a real provider failure is exactly how the RPC waves of
 // epic #3335 went unnoticed, so the retry now reports itself:
 //
@@ -14,8 +16,8 @@
 //   count [--since YYYY-MM-DD]      how many successful money-flow runs needed
 //                                   the retry, read back from the job logs
 //
-// Failure text is printed into a public job summary, so URL-shaped and long
-// key-like tokens in it are replaced — a provider URL carries its API key.
+// Failure text is printed into a public job summary, so URLs and key-labelled
+// values in it are replaced — a provider URL carries its API key.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -46,20 +48,21 @@ export function failingLines(log) {
 }
 
 /**
- * Replace every URL-shaped token (a provider URL embeds its key) and, as a
- * backstop, every long opaque token, then cap the length. Covered: any scheme
- * (`https`, `wss`, …), JSON-escaped (`https:\/\/`) and percent-encoded
- * (`https%3A%2F%2F`) URLs, scheme-less `host.tld/path`, and any key-alphabet
- * token of 20+ characters that mixes upper case with digits, or of 32+
- * characters, unless it is `0x`-hex (tx hashes and addresses stay readable,
- * and so do hyphenated leg names like `x402-delegation-3009-sweep`).
+ * Replace every URL-shaped token (a provider URL embeds its key) and every
+ * key-labelled value (`apiKey: …`, `token=…`), then cap the length. Covered:
+ * any scheme (`https`, `wss`, …), JSON-escaped (`https:\/\/`) and
+ * percent-encoded (`https%3A%2F%2F`) URLs, and scheme-less `host.tld/path`.
+ * Identifiers stay readable — revert reasons, env-var names, leg names, UUIDs,
+ * tx hashes — because they are the diagnosis this summary exists to show.
+ * Only the first 1024 characters are scanned (the output keeps 240), which
+ * bounds the regexes' backtracking on a pathological line.
  */
 export function scrub(text, max = 240) {
   const s = String(text ?? '')
+    .slice(0, 1024)
     .replace(/\b[a-z][a-z0-9+.-]*(?::\/\/|:\\\/\\\/|%3A%2F%2F)[^\s"'`)\]}]+/gi, '<url>')
     .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?\/[^\s"'`)\]}]*/gi, '<url>')
-    .replace(/(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, (t) =>
-      /^0x[0-9a-fA-F]+$/.test(t) || !(t.length >= 32 || (/[A-Z]/.test(t) && /\d/.test(t))) ? t : '<redacted>')
+    .replace(/\b((?:api[_-]?key|access[_-]?token|token|secret|key)["']?\s*[:=]\s*["']?)[^\s"',;)\]}]+/gi, '$1<redacted>')
   return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 

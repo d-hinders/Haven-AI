@@ -2057,7 +2057,7 @@ estimation; nothing queues. Key separation for a *different* delegate is
 
 **What the dashboard shows** on the agent's budget card: the budget's on-chain
 remainder unchanged, plus a separate "reserved for task budgets" line and a
-short explanation under the task-budget list —
+short explanation above the task-budget list —
 an open child reserves nothing on-chain, so the two figures are shown apart
 rather than netted into a number the chain would not agree with.
 

@@ -294,10 +294,18 @@ export async function selectActiveDelegationByHash(
 /**
  * #1400: everything the batch revocation must kill — pending AND active
  * (a pending grant is still a signed delegation that could activate).
+ *
+ * #3343: `replaced` rows are in this list deliberately. The edit flow leaves
+ * a row `replaced` in the DB while its delegation is still enabled on-chain
+ * (the slot sweep marks the old grant replaced, and it is disabled only when
+ * the owner's Stop userop lands). A re-key or revoke-all that skipped those
+ * rows would complete while the OLD key's delegation stayed live — so
+ * "still enabled" here means every status the chain has not confirmed dead.
+ * The per-hash path and the payment paths do NOT read this list.
  */
 export const LIST_NON_REVOKED_DELEGATIONS_FOR_AGENT_SQL = `SELECT delegation_hash, delegation_json, status
        FROM agent_delegations
-       WHERE agent_id = $1 AND status IN ('pending', 'active')
+       WHERE agent_id = $1 AND status IN ('pending', 'active', 'replaced')
        ORDER BY created_at ASC`
 
 export async function listNonRevokedDelegationsForAgent(
@@ -308,6 +316,26 @@ export async function listNonRevokedDelegationsForAgent(
     [agentId],
   )
   return result.rows
+}
+
+/**
+ * The row a per-hash revocation targets — the same read its prepare makes,
+ * and since #3343 the submit makes too (it must resolve the row it would
+ * mark, 404 on a missing one, before anything is submitted).
+ */
+export const SELECT_DELEGATION_ROW_FOR_AGENT_BY_HASH_SQL = `SELECT delegation_json, status
+       FROM agent_delegations
+       WHERE agent_id = $1 AND delegation_hash = $2`
+
+export async function selectDelegationRowForAgentByHash(
+  agentId: string,
+  delegationHash: string,
+): Promise<{ delegation_json: string; status: string } | null> {
+  const result = await pool.query<{ delegation_json: string; status: string }>(
+    SELECT_DELEGATION_ROW_FOR_AGENT_BY_HASH_SQL,
+    [agentId, delegationHash],
+  )
+  return result.rows[0] ?? null
 }
 
 /**

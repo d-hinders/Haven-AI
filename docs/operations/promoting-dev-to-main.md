@@ -239,23 +239,28 @@ so this is a rule to point at rather than a question to ask the release runner.
       Use a key distinct from the dev/QA ones, so usage is attributable and
       either can be rotated alone.
 
-      **Before any of these variables points at a new endpoint, run the RPC
-      conformance probe against it (#3336)** — a required step, from the repo
-      root after `npm ci`, with the URL in a shell variable so it never lands in
-      history or a log:
+      **Before any of these variables — or `RPC_URL_BASE_FALLBACK` /
+      `RPC_URL_BASE_SEPOLIA_FALLBACK` (#3255) — points at a new endpoint, run
+      the RPC conformance probe against it (#3336).** It is a required step, run
+      from the repo root after `npm ci`, with the URL in a shell variable so it
+      never lands in history or a log, and `--chain` set to the variable's chain
+      (8453 for `RPC_URL_BASE*`, 84532 for `RPC_URL_BASE_SEPOLIA*`), so a URL
+      pasted into the wrong variable fails:
 
       ```sh
-      node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL"
+      node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 8453
       ```
 
-      Every line must be ✓ (JSON-RPC batch of 10, the `pending` block tag,
-      `eth_sendRawTransaction` accepted as a method, a burst of 20 without a
-      429). It is safe against a **prod** key: 32 read calls at the defaults
-      (1 + a batch of 10 + 1 + a burst of 20; the burst is capped at 50) plus one transaction
-      signed by a fresh zero-balance key, which the node refuses for funds and
-      can never mine. A failing line means the endpoint cannot carry Haven's
-      traffic — the September 2026 qa-dev waves were a provider that refused
-      batches over three and the `pending` tag (epic #3335).
+      Every line must be ✓: the chain id, a JSON-RPC batch of 10, the `pending`
+      block tag, `eth_sendRawTransaction` accepted as a method, and a burst of 20
+      without a 429. At the defaults it makes 32 read calls (1 + a batch of 10 +
+      1 + a burst of 20) plus one transaction signed by a fresh zero-balance key,
+      which the node refuses for funds and can never mine. The burst deliberately
+      spends up to 20 requests of the key's per-second budget: against a key the
+      live mainnet relayer already uses, run it off-peak or with a smaller
+      `--burst`. A failing line means the endpoint cannot carry Haven's traffic —
+      the September 2026 qa-dev waves were a provider that refused batches over
+      three and the `pending` tag (epic #3335).
 
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.

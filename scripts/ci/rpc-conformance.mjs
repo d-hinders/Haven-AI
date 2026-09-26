@@ -9,11 +9,12 @@
 // "No label `flashblocks`"; and its rate limits arrived as scenario failures.
 // Run this against a candidate endpoint BEFORE it goes into a variable:
 //
-//   node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_RPC_URL" [--batch 10] [--burst 20]
+//   node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_RPC_URL" --chain <id> [--batch 10] [--burst 20]
 //
 // One line per capability, pass (✓) or fail (✗); exit 1 on any failure.
 //
-//   chain id     eth_chainId answers (the other checks sign for this chain)
+//   chain id     eth_chainId answers AND equals --chain (84532 Base Sepolia,
+//                8453 Base): a Sepolia URL pasted into RPC_URL_BASE fails here
 //   batch        a JSON-RPC batch of N eth_blockNumber calls all succeed
 //   pending tag  eth_getTransactionCount(<addr>, "pending") answers
 //   send raw tx  eth_sendRawTransaction is ACCEPTED as a method: a transaction
@@ -24,9 +25,11 @@
 //   burst        K concurrent eth_blockNumber calls: ANY HTTP 429 or JSON-RPC
 //                rate-limit error fails. The harness and the backend fire more
 //                than that in a single leg, so an endpoint that throttles a
-//                burst of K will throttle a run. K is capped at 50: this is
-//                safe to run against a PROD key, whose rate budget the live
-//                mainnet relayer shares — 50 reads is well under any plan.
+//                burst of K will throttle a run. K is capped at 50. The burst
+//                deliberately spends up to K requests of the key's per-second
+//                budget: against a key the live relayer already uses (a PROD
+//                key), run it off-peak or with a smaller --burst, because a key
+//                that fails this check has just throttled everyone else on it.
 //
 // The endpoint URL is never printed: a provider URL carries its API key in the
 // path, and error bodies echo it (`"requestUrl": "…"`). Every message goes
@@ -41,10 +44,15 @@ export const DEFAULT_BURST = 20
 export const MAX_BURST = 50
 const TIMEOUT_MS = 10_000
 
-/** A method the node validated: it read the transaction and refused it on its merits. */
-const VALIDATED = /insufficient funds|nonce|intrinsic gas|gas too low|underpriced|exceeds block gas limit|max fee per gas/i
+/**
+ * A method the node validated: it read the transaction and refused it on its
+ * merits. geth/reth/erigon say "insufficient funds …", Nethermind
+ * "InsufficientFunds", Besu "Upfront cost exceeds account balance".
+ */
+const VALIDATED = /insufficient ?funds|upfront cost|nonce|intrinsic gas|gas too low|underpriced|exceeds block gas limit|max fee per gas/i
 /** A JSON-RPC error that means "slow down" rather than "no". */
-const RATE_LIMITED = /rate limit|too many requests|-32005|-32016|exceeded.*(quota|limit)|limit exceeded/i
+// Base's public node answers `-32007 25/second request limit reached` (2026-09-26).
+const RATE_LIMITED = /rate limit|too many requests|-32005|-32007|-32016|request limit reached|exceeded.*(quota|limit)|limit exceeded/i
 
 /** Scrub a message for printing: the URL verbatim, then every URL-shaped or key-labelled token. */
 export function redact(text, url) {
@@ -81,14 +89,18 @@ const call = (id, method, params = []) => ({ jsonrpc: '2.0', id, method, params 
 const errText = (e) => (e && typeof e === 'object' ? `${e.code ?? ''} ${e.message ?? ''}`.trim() : String(e))
 
 /** The five checks, in order. Each returns { name, ok, detail }. `sign` builds a signed raw tx. */
-export async function probe({ url, batch = DEFAULT_BATCH, burst = DEFAULT_BURST, fetchImpl = fetch, sign }) {
+export async function probe({ url, chain, batch = DEFAULT_BATCH, burst = DEFAULT_BURST, fetchImpl = fetch, sign }) {
   const results = []
   const record = (name, ok, detail) => results.push({ name, ok, detail: redact(detail, url) })
   const guard = async (name, fn) => {
     try {
       await fn()
     } catch (err) {
-      record(name, false, err?.name === 'AbortError' ? `no answer within ${TIMEOUT_MS / 1000}s` : err?.message ?? err)
+      // undici says only "fetch failed" for DNS, TLS and refused connections
+      // alike; the cause's code (ENOTFOUND, CERT_HAS_EXPIRED, …) carries no URL.
+      const why = err?.cause?.code ?? err?.cause?.message
+      const cause = why ? ` (${why})` : ''
+      record(name, false, err?.name === 'AbortError' ? `no answer within ${TIMEOUT_MS / 1000}s` : `${err?.message ?? err}${cause}`)
     }
   }
 
@@ -96,7 +108,10 @@ export async function probe({ url, batch = DEFAULT_BATCH, burst = DEFAULT_BURST,
   await guard('chain id', async () => {
     const r = await post(url, call(1, 'eth_chainId'), fetchImpl)
     if (r.status !== 200 || typeof r.body?.result !== 'string') return record('chain id', false, `HTTP ${r.status}: ${errText(r.body?.error ?? r.body)}`)
-    chainId = Number.parseInt(r.body.result, 16)
+    const answered = Number.parseInt(r.body.result, 16)
+    if (!Number.isSafeInteger(answered)) return record('chain id', false, `unreadable chain id ${JSON.stringify(r.body.result)}`)
+    if (chain !== undefined && answered !== chain) return record('chain id', false, `chain ${answered}, expected ${chain} — wrong network for this variable`)
+    chainId = answered
     record('chain id', true, `chain ${chainId}`)
   })
 
@@ -121,8 +136,11 @@ export async function probe({ url, batch = DEFAULT_BATCH, burst = DEFAULT_BURST,
     const raw = await sign(chainId)
     const r = await post(url, call(1, 'eth_sendRawTransaction', [raw]), fetchImpl)
     const message = errText(r.body?.error ?? r.body)
-    if (r.status === 200 && r.body?.error && VALIDATED.test(message)) return record('send raw tx', true, `accepted and validated (${message})`)
-    if (r.status === 200 && typeof r.body?.result === 'string') return record('send raw tx', false, 'a zero-balance transaction was ACCEPTED into the pool — check the endpoint')
+    // Any status: a proxy may wrap the node's JSON-RPC error in an HTTP 400.
+    if (r.body?.error && VALIDATED.test(message)) return record('send raw tx', true, `accepted and validated (${message})`)
+    if (r.status === 200 && typeof r.body?.result === 'string') {
+      return record('send raw tx', false, 'a zero-balance transaction was answered with a hash — no funds are at risk (the key is fresh, the tx a 0-value self-transfer), but a node that skips the balance check is not one to route writes through')
+    }
     record('send raw tx', false, `HTTP ${r.status}: ${message}`)
   })
 
@@ -146,15 +164,51 @@ export async function throwawaySign(chainId) {
   return w.signTransaction({ to: w.address, value: 0n, nonce: 0, gasLimit: 21000n, maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 1_000_000n, chainId, type: 2 })
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
-  const args = process.argv.slice(2)
+/** Parse --batch/--burst/--chain strictly: a typo must not become a vacuous pass (NaN sends nothing). */
+export function parseArgs(args) {
   const arg = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined)
+  const int = (flag, fallback, min, max) => {
+    const raw = arg(flag)
+    if (raw === undefined) return fallback
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${flag} must be an integer from ${min} to ${max}, got '${raw}'`)
+    return n
+  }
   const url = arg('--url')
-  if (!url) {
-    console.error('usage: rpc-conformance.mjs --url <endpoint> [--batch N] [--burst K]  (the URL is never printed)')
+  if (!url) throw new Error('--url is required')
+  const chainRaw = arg('--chain')
+  if (chainRaw === undefined) throw new Error('--chain is required (84532 for Base Sepolia, 8453 for Base)')
+  return {
+    url,
+    chain: int('--chain', undefined, 1, Number.MAX_SAFE_INTEGER),
+    batch: int('--batch', DEFAULT_BATCH, 2, 100),
+    burst: int('--burst', DEFAULT_BURST, 1, MAX_BURST),
+  }
+}
+
+// Real paths on both sides: a symlinked path (macOS /tmp → /private/tmp) or a
+// space in it must not skip the CLI and exit 0 — a silent pass for a required step.
+const isMain = (() => {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+})()
+
+if (isMain) {
+  let opts
+  try {
+    opts = parseArgs(process.argv.slice(2))
+  } catch (err) {
+    console.error(`rpc-conformance: ${err.message}`)
+    console.error('usage: rpc-conformance.mjs --url <endpoint> --chain <id> [--batch 2..100] [--burst 1..50]  (the URL is never printed)')
     process.exit(2)
   }
-  const results = await probe({ url, batch: Number(arg('--batch') ?? DEFAULT_BATCH), burst: Number(arg('--burst') ?? DEFAULT_BURST), sign: throwawaySign })
+  const results = await probe({ ...opts, sign: throwawaySign })
   for (const r of results) console.log(`${r.ok ? '✓' : '✗'} ${r.name.padEnd(12)} ${r.detail}`)
   const failed = results.filter((r) => !r.ok).length
   console.log(failed ? `✗ ${failed} of ${results.length} check(s) failed — do not put this endpoint in a variable` : `✓ all ${results.length} checks passed`)

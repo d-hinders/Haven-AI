@@ -1586,7 +1586,7 @@ the deployment logs confirms the service never moved off the default.
 
 The step that clears it: set `RPC_URL_BASE_SEPOLIA` on the dev backend to a
 dedicated provider endpoint and let it redeploy — after the candidate passes
-`node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL"` (#3336; required,
+`node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532` (#3336; required,
 see dev-environment.md → *Two Base Sepolia RPCs*), which checks the batch limit,
 the `pending` tag, `eth_sendRawTransaction` and a bounded burst. That is an owner action on the
 Railway environment, not a code change — until it is done, an outage of the

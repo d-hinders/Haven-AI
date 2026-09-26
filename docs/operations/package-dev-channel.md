@@ -322,6 +322,17 @@ and the `release` skill.
 
 ## The loop: test a package change on dev without a prod release
 
+> **Re-verification (#3305):** `release-bump.mjs` gained a second documentary
+> write, and the snapshot path skips it exactly like the CHANGELOG heading. The
+> write regenerates the client release data file in `@haven_ai/core` (the
+> public release data behind `/releases`) from the CHANGELOGs, and a real
+> release first refuses a hand-edited copy. In snapshot mode neither the refusal
+> nor the write runs: the bump logs that the data was skipped because a dev
+> snapshot is not a release, and `release-bump.test.mjs` pins the guard with a
+> mutation that goes red. A snapshot therefore never depends on that file; CI
+> keeps the committed copy in step with the CHANGELOGs. Nothing about the snapshot version format, the five guards,
+> `HAVEN_CONNECTOR_CHANNEL` or the publish job moved.
+
 > **Re-verification (changelog-heading gap, 2026-09-14):** `release-bump.mjs`
 > gained one responsibility — rewriting `## Unreleased` to
 > `## <version> — <date>` in each published package's CHANGELOG — and the

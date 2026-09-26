@@ -308,7 +308,7 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
               }
             }
             return reply.code(502).send({
-              error: 'The close UserOp was submitted but its outcome could not be confirmed — check again shortly.',
+              error: 'The close operation was submitted but its outcome is not confirmed yet. It settles by itself once the chain finalises the block (on Base that can take tens of minutes); call close again later and it will report closed — do not re-sign.',
               error_code: 'close_outcome_unconfirmed',
               details: safeDetails(err),
             })

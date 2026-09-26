@@ -344,6 +344,15 @@ export async function isTaskBudgetChildDisabledOnChain(
   chainId: number,
   delegationHash: Hex,
 ): Promise<boolean> {
-  const disabled = await readDisabledDelegationHashes(chainId, [delegationHash])
-  return disabled.has(delegationHash)
+  // #3329 review finding N6: a failed read is "not confirmed disabled", never
+  // an error — the same degrade the delegation revoke-all healer applies
+  // (`routes/agent-delegations.ts`). Throwing here took the close re-prepare
+  // down with a 500 on an RPC blip, and turned the submit path's intended
+  // 502 close_outcome_unconfirmed into a 500.
+  try {
+    const disabled = await readDisabledDelegationHashes(chainId, [delegationHash])
+    return disabled.has(delegationHash)
+  } catch {
+    return false
+  }
 }

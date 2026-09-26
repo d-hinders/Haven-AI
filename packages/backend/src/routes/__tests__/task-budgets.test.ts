@@ -405,6 +405,49 @@ describe('task budgets API (#3329)', () => {
     expect(res.json().error_code).toBe('close_outcome_unconfirmed')
   })
 
+  it('#3329 review finding N6: a FAILED disabled-read on a POST-SEND submit failure is "not confirmed" — 502 close_outcome_unconfirmed, never a 500', async () => {
+    const { SubmittedUserOpFailedError } = await import('../../rails/delegation-rail.js')
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareAccountCall: vi.fn(),
+      submitRedemption: vi.fn().mockRejectedValue(
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+      ),
+    })
+    mockReadDisabled.mockRejectedValue(new Error('rpc down'))
+    mockDb({ taskBudget: taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ userOp: true }) }) })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/task-budgets/tb-1/submit',
+      payload: { signature: `0x${'ab'.repeat(65)}` },
+    })
+
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBe('close_outcome_unconfirmed')
+  })
+
+  it('#3329 review finding N6: a FAILED disabled-read on POST /:id/close for a CLOSING row re-prepares instead of 500ing', async () => {
+    const prepareAccountCall = vi.fn().mockResolvedValue({
+      userOperation: { fresh: true },
+      userOpHash: `0x${'44'.repeat(32)}`,
+      signingTypedData: { types: {}, primaryType: 'PackedUserOperation', domain: {}, message: {} },
+    })
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareAccountCall,
+      submitRedemption: vi.fn(),
+    })
+    const row = taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ stale: true }) })
+    mockReadDisabled.mockRejectedValue(new Error('rpc down'))
+    mockDb({ taskBudget: row, markClosingReturn: taskBudgetRow({ status: 'closing' }) })
+
+    const res = await app.inject({ method: 'POST', url: '/task-budgets/tb-1/close' })
+
+    expect(res.statusCode).toBe(200)
+    expect(prepareAccountCall).toHaveBeenCalledTimes(1)
+  })
+
   it('#3329 review finding N2(b): POST /:id/close on a CLOSING row whose child is ALREADY disabled closes without re-preparing', async () => {
     const prepareAccountCall = vi.fn()
     mockCreateRail.mockResolvedValue({

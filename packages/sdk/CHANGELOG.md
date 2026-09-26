@@ -15,6 +15,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.6.0-alpha.0 — 2026-09-26
+
+### Removed
+
+- **BREAKING (#3306, epic #3130) — the four deprecated `HavenPaymentReceipt` twins are gone.** `mapPaymentReceipt` no longer emits `rail`, `proofStatus`, `resourceUrl` or `merchantAddress`, and `HavenPaymentReceipt` no longer declares them. Read the survivors #3134 added in `0.5.0-alpha.0`: `source`, `paymentProofStatus`, `x402ResourceUrl`, `x402MerchantAddress` (same columns, same values). Removed under the condition #3134 wrote on `mapPaymentReceipt`: `@haven_ai/sdk` `latest`, `@haven_ai/mcp` `latest` and the hosted mcp-server's `serverInfo.version` all read `0.5.0-alpha.1`, at or above the twin-bearing `0.5.0-alpha.0`. Breaking for any reader of an old key, so the release carrying this entry takes a **MINOR** bump under the 0.x convention (`docs/operations/mcp-runtime-compatibility.md`). A `.d.ts` diff shows the type change but is blind to the matching tool-output break: `haven_list_receipts` rows lose the same four keys on both MCP runtimes. The backend wire (`RawHavenPaymentReceipt`) is unchanged; no route, no migration.
+
 ### Added
 
 - **Task budgets (#3329).** Six new `HavenClient` methods — `openTaskBudget`, `getTaskBudget`, `listTaskBudgets`, `getTaskBudgetSignContext`, `submitTaskBudget`, `closeTaskBudget` — reserve, inspect, sign and close a short-lived, self-delegated child of the agent's own budget delegation, scoped to one task. `PaymentRequest`, `X402AuthorizationOptions` and `prepareX402Erc7710`'s options all gain an optional `taskBudgetId`, spending against that open task budget's own child delegation instead of the agent's budget delegation directly; `authorizeX402()`, `fetch()` and `payX402Quote()` all carry it to `/x402` (`payX402Quote` dropped it on the `dev` channel until #3378). New exports from `task-budget-guards.ts`: `MAX_TASK_BUDGET_TTL_SECONDS`, `isTaskChildTypedData`, `assertOwnTaskChild`, `assertOwnTaskBudgetCloseUserOp`, `hashDelegation`, and the `TaskChildTypedData` / `TaskChildExpectation` / `TaskBudgetCloseExpectation` types. `getAgentSummary()` gains a third, fail-soft read (`listOpenTaskBudgetsSummary` — an older backend or a transport failure degrades to `[]`, never throws) alongside the agent and allowance reads it already ran in parallel.
@@ -25,11 +31,9 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 - **Agent runbook: "If something breaks" (#3304, epic #3302).** `HAVEN_AGENT_RUNBOOK_MD` (served at `/for-agents.md`, mirrored into `@haven_ai/cli`'s `haven guide`) gains a short section: a `client_update` on a Haven result means run its `upgrade_command` and retry, `required: true` means payments are refused until you do, and the release notes live at `/releases`. Text only; no API change.
 
+- **Shared `send` tool description (#3277).** The description `@haven_ai/mcp` serves for `haven_send` no longer claims every signer refuses a payload whose typed data does not match its hash — true only of a current signer. Copy only; no API change.
+
 - **`signForData` / the redemption guard now accept a second chain shape (#3329).** Beyond a single budget-delegation grant made directly to the agent's own account, `assertRedeemsOwnBudgetDelegation` (and `assertBoundDirectPaymentUserOp`, which calls it) now also accepts the two-link `[task child, budget]` chain: a task-budget child self-delegated by the agent's own account, redeemed under its parent budget delegation. Any other multi-link chain, or a leaf delegated by a third party, is still refused. `HavenSigningError`'s refusal wording now names both accepted shapes instead of describing only the single-grant case.
-
-### Removed
-
-- **BREAKING (#3306, epic #3130) — the four deprecated `HavenPaymentReceipt` twins are gone.** `mapPaymentReceipt` no longer emits `rail`, `proofStatus`, `resourceUrl` or `merchantAddress`, and `HavenPaymentReceipt` no longer declares them. Read the survivors #3134 added in `0.5.0-alpha.0`: `source`, `paymentProofStatus`, `x402ResourceUrl`, `x402MerchantAddress` (same columns, same values). Removed under the condition #3134 wrote on `mapPaymentReceipt`: `@haven_ai/sdk` `latest`, `@haven_ai/mcp` `latest` and the hosted mcp-server's `serverInfo.version` all read `0.5.0-alpha.1`, at or above the twin-bearing `0.5.0-alpha.0`. Breaking for any reader of an old key, so the release carrying this entry takes a **MINOR** bump under the 0.x convention (`docs/operations/mcp-runtime-compatibility.md`). A `.d.ts` diff shows the type change but is blind to the matching tool-output break: `haven_list_receipts` rows lose the same four keys on both MCP runtimes. The backend wire (`RawHavenPaymentReceipt`) is unchanged; no route, no migration.
 
 ## 0.5.0-alpha.1 — 2026-09-25
 

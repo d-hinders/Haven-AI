@@ -17,7 +17,7 @@
  * This SDK's own version. Owned by `scripts/release-bump.mjs`, which rewrites
  * it with the package version on every release — never hand-edit it.
  */
-export const SDK_VERSION = '0.5.0-alpha.1'
+export const SDK_VERSION = '0.6.0-alpha.0'
 
 /** The request header every published Haven client sends. */
 export const HAVEN_CLIENT_HEADER = 'X-Haven-Client'

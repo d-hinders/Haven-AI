@@ -1101,6 +1101,26 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.6.0-alpha.0 release, 2026-09-26):** the manifest table
+> above is re-pinned by the bump to `0.6.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from the
+> published `0.5.0-alpha.1` is **MINOR** for one break: #3306 removes the four
+> deprecated receipt twins from `haven_list_receipts` output on both runtimes.
+> Surfaces this release moves, each recorded where it is owned:
+> **the tool set** — three new local tools (#3329, *Task budgets* below), so the
+> consent hash changes and every local operator is asked to consent once more,
+> and the exported `HavenMcpToolName` union widens by those names; **the signer
+> handshake** — `task_sign_context_versions` is additive beside
+> `direct_sign_context_versions`, and the signer's redemption allowlist admits
+> exactly one more shape, the two-link `[task child, budget]` chain; **hosted
+> direct-payment guidance** — #3277's `haven_sign({ payment_id })` handoff and
+> old-signer recovery (its own section below), whose skew rule is refusal
+> recovery, never an `initialize` version comparison. The SDK's funding-leg pin
+> (#3375) and `task_budget_id` forwarding (#3378) move no tool, argument or
+> schema. Every `CLIENT_COMPAT` threshold is still null, so no client is hinted
+> or refused. Re-read, not rubber-stamped: the Node floor and the Codex and
+> Claude Code rows are unchanged. `last-verified` is not bumped.
+
 > **Re-verification (0.5.0-alpha.1 release, 2026-09-25):** the manifest table
 > above is re-pinned by the bump to `0.5.0-alpha.1` for `connect`, `mcp`, `sdk`
 > and `signer`, and the bump also rewrote `SDK_VERSION` in
@@ -1297,10 +1317,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.5.0-alpha.1` |
-| `@haven_ai/mcp` | `0.5.0-alpha.1` |
-| `@haven_ai/sdk` | `0.5.0-alpha.1` |
-| `@haven_ai/signer` | `0.5.0-alpha.1` |
+| `@haven_ai/connect` | `0.6.0-alpha.0` |
+| `@haven_ai/mcp` | `0.6.0-alpha.0` |
+| `@haven_ai/sdk` | `0.6.0-alpha.0` |
+| `@haven_ai/signer` | `0.6.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

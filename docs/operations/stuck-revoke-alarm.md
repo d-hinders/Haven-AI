@@ -381,6 +381,15 @@ the stuck revoke can never mine. It is encoded; run it with the stuck row's id:
 npm run ops:cancel-stuck-lane -w packages/backend -- <outbound-row-id>
 ```
 
+On Railway, where the deployed image has no `scripts/` or `tsx` (only
+`dist/`, `--omit=dev`), run the compiled command from a shell on the service
+instead:
+
+```bash
+railway ssh --environment <env> --service @haven/backend
+node packages/backend/dist/ops/cancel-stuck-lane.js <outbound-row-id>
+```
+
 It re-checks precondition 4 itself: below the bump cap it refuses with
 `automated_recovery_owns_it` and sends nothing (#2769). It does not check
 preconditions 1, 2, 3 or 5 — those stay yours. On a capped lane nothing

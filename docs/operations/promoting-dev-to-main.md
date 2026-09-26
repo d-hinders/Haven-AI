@@ -185,13 +185,19 @@ so this is a rule to point at rather than a question to ask the release runner.
       - **Frontend browser smoke** — required here since the same change.
 
       `main` is also the only branch still requiring the head to be up to date,
-      so a `BEHIND` promotion PR must be brought forward before it can merge.
+      so a `BEHIND` promotion PR cannot merge through the ordinary button. The
+      sync-back that used to bring it forward cannot be merged into squash-only
+      `dev`; until the owner decides
+      ([`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main)),
+      it merges behind by an owner merge from the web UI or API — never the
+      mobile app, which offers no bypass.
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.
 - [ ] **Sweep the docs staleness audit** ([#2645](https://github.com/d-hinders/Haven-AI/issues/2645), "Docs staleness audit (weekly)" — one standing issue that `docs-audit.yml` rewrites every Monday). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
-- [ ] A code-owner approval is present if the batch touches an owned path
-      (migrations / release tooling / CODEOWNERS).
+- [ ] A code-owner approval, from an owner other than the PR author, is present
+      if the batch touches an owned path — today only migration files:
+      `git diff --name-only origin/main origin/dev -- ':(glob)packages/backend/src/db/migrations/*.ts'`.
 
 ## Merge, deploy, and verify prod
 

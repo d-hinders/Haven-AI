@@ -191,6 +191,15 @@ warning. Operator response:
    npm run ops:cancel-stuck-attest -w packages/backend -- <outbound-row-id>
    ```
 
+   On Railway, where the deployed image has no `scripts/` or `tsx` (only
+   `dist/`, `--omit=dev`), open a shell on the running service and run the
+   compiled command instead — same logic, same output:
+
+   ```bash
+   railway ssh --environment <env> --service @haven/backend
+   node packages/backend/dist/ops/cancel-stuck-lane.js <outbound-row-id>
+   ```
+
    The command re-verifies the row is really the wedge before sending anything
    (fail-closed: it refuses a young/slow broadcast, an already-mined one, a
    row already cancelled, or a rebroadcast-safe row the bump worker still owns
@@ -255,7 +264,9 @@ clears it, and refuses while the lane is still below the cap:
    ([`stuck-revoke-alarm.md`](stuck-revoke-alarm.md) §4) is the reason to look
    first, above all for a `passport_attest`.
 3. Run `npm run ops:cancel-stuck-lane -w packages/backend -- <row-id>` for
-   that row. The burned payload's owner retries on a fresh record:
+   that row — or, on Railway (`railway ssh --environment <env> --service
+   @haven/backend`), `node packages/backend/dist/ops/cancel-stuck-lane.js
+   <row-id>`. The burned payload's owner retries on a fresh record:
    `reconcileRevocation` submits a fresh revoke, and the deploy is
    re-attempted at the next activation or erc7710 authorize. A sweep is not
    retried automatically: its funds stay visible as stranded on the delegate

@@ -28,6 +28,7 @@
 
 import pool from '../../db.js'
 import { type Executor, type QueryRow, withTransaction } from '../transaction.js'
+import { OWNER_COMPANY_DETAILS_JOIN_COLUMNS } from './owner-company-details.js'
 
 export type { Executor }
 
@@ -389,9 +390,11 @@ export async function attachEvidenceProof<R extends QueryRow>(
 export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
               pi.machine_metadata->>'delegate_account_address' AS intent_delegate_account_address,
               pi.budget_delegation_hash,
-              pi.delegate_address AS intent_delegate_address
+              pi.delegate_address AS intent_delegate_address,
+              ${OWNER_COMPANY_DETAILS_JOIN_COLUMNS}
        FROM machine_payment_evidence e
        LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
+       LEFT JOIN owner_company_details ocd ON ocd.user_id = e.user_id
        WHERE e.agent_id = $1
          AND ($3::uuid IS NULL OR (e.created_at, e.id) < (
            SELECT c.created_at, c.id FROM machine_payment_evidence c WHERE c.id = $3::uuid AND c.agent_id = $1

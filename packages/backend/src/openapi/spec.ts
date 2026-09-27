@@ -1078,6 +1078,37 @@ const paymentSignData = {
  * exactly the collision #2960 exists to name explicitly instead of leaving
  * implicit in a single ambiguous `payer` field.
  */
+/**
+ * #3332: the paying agent's owner's company details, additive alongside the
+ * address quadruple above — present only when `HAVEN_OWNER_COMPANY_DETAILS`
+ * is on AND the owner has saved company details; absent otherwise (never
+ * `null` — a caller distinguishes "not on this deployment / not filled in"
+ * from "filled in with a genuinely empty field", which none of these are,
+ * since the row's own CHECK constraints refuse an empty legal name, country
+ * or organisation number).
+ *
+ * `vies_status` here mirrors the settings copy's own naming discipline
+ * (`docs/product/agent-passport.md:71`): Haven never renders a `valid` VIES
+ * result as "verified" anywhere, and this field is named for what VIES
+ * itself calls it, not for that word.
+ */
+const partiesBuyerSchema = {
+  type: 'object',
+  required: ['legal_name', 'country', 'org_number', 'vat_number', 'vies_status', 'vies_checked_at'],
+  properties: {
+    legal_name: { type: 'string' },
+    country: { type: 'string', pattern: '^[A-Z]{2}$', description: 'ISO 3166-1 alpha-2.' },
+    org_number: { type: 'string' },
+    vat_number: { type: ['string', 'null'] },
+    vies_status: {
+      type: ['string', 'null'],
+      enum: ['pending', 'valid', 'invalid', 'not_verifiable', null],
+    },
+    vies_checked_at: { type: ['string', 'null'], format: 'date-time' },
+  },
+  additionalProperties: false,
+} as const
+
 const partiesSchema = {
   type: 'object',
   required: ['treasury_account', 'delegate', 'delegate_account', 'merchant'],
@@ -1090,6 +1121,11 @@ const partiesSchema = {
         "The agent's delegate smart account (erc7710 `delegator`), persisted at authorize time. Null for rows authorized before #2960 and on the legacy rail.",
     },
     merchant: { anyOf: [address, { type: 'null' }], description: '`payTo`.' },
+    buyer: {
+      $ref: '#/components/schemas/PartiesBuyer',
+      description:
+        "The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /machine-payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise.",
+    },
   },
   additionalProperties: false,
 } as const
@@ -1638,6 +1674,84 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
+        },
+      },
+    },
+    '/user/company-details': {
+      get: {
+        tags: ['User'],
+        operationId: 'getCompanyDetails',
+        summary: "Read the signed-in owner's company details.",
+        description:
+          'Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and ONLY then. When the feature is on and the owner has never saved details (or deleted them), 200 with a JSON `null` body, so a client can tell "feature off" from "nothing saved" by status alone. A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing, or a genuine DB failure recording the check\'s result) is re-checked asynchronously (an atomic claim, so concurrent reads start at most one check) as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check\'s eventual outcome.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: "The owner's saved company details, or `null` when none are saved.",
+            content: { 'application/json': { schema: { anyOf: [{ $ref: '#/components/schemas/CompanyDetails' }, { type: 'null' }] } } },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      put: {
+        tags: ['User'],
+        operationId: 'putCompanyDetails',
+        summary: 'Create or replace the company details.',
+        description:
+          "Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (`ownerProfileRateLimit`).",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/UpsertCompanyDetailsRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'The saved company details.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CompanyDetails' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '429': { ...errorResponse, description: 'Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls.' },
+        },
+      },
+      delete: {
+        tags: ['User'],
+        operationId: 'deleteCompanyDetails',
+        summary: 'Delete the company details.',
+        description:
+          "The owner's erasure path — deliberately NOT gated by `HAVEN_OWNER_COMPANY_DETAILS` (every other route on this and the vies-check path answers 404 when the feature is off; this one does not), so an owner can always remove details they saved while the feature was on, even after an operator turns it back off. Deleting the Haven account itself would also remove these details (the table's `user_id` foreign key is `ON DELETE CASCADE`), but account deletion is an operator action today — there is no self-serve delete-my-account route — so this is the only erasure path that exists. The response is `{ ok: true }` whether or not a row existed.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Deleted (or there was nothing to delete).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DeleteCompanyDetailsResponse' } } },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/user/company-details/vies-check': {
+      post: {
+        tags: ['User'],
+        operationId: 'recheckCompanyDetailsVies',
+        summary: 'Re-run the VIES check for the saved VAT number.',
+        description:
+          "Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per session credential (`ownerProfileRateLimit`).",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The details, with `vies_status` now `pending`.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CompanyDetails' } } },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '429': { ...errorResponse, description: 'Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls.' },
         },
       },
     },
@@ -8360,6 +8474,56 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       /**
+       * Owner company details (#3332), behind `HAVEN_OWNER_COMPANY_DETAILS`.
+       * Onboarding data about the SIGNED-IN OWNER, not an organization the
+       * owner's agents belong to and not a passport tier — see
+       * `docs/product/agent-passport.md`'s onboarding-data paragraph. VIES
+       * `valid` is never rendered as "verified" anywhere this shape reaches.
+       */
+      CompanyDetails: {
+        type: 'object',
+        required: ['legal_name', 'country', 'org_number', 'vat_number', 'vies_status', 'vies_checked_at', 'created_at', 'updated_at'],
+        properties: {
+          legal_name: { type: 'string', minLength: 1, maxLength: 200 },
+          country: { type: 'string', pattern: '^[A-Z]{2}$', description: 'ISO 3166-1 alpha-2.' },
+          org_number: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 32,
+            description: 'For a sole trader this is the personal identity number — see docs/product/owner-company-details.md.',
+          },
+          vat_number: { type: ['string', 'null'], description: 'Normalised: uppercase, no spaces.' },
+          vies_status: {
+            type: ['string', 'null'],
+            enum: ['pending', 'valid', 'invalid', 'not_verifiable', null],
+          },
+          vies_checked_at: { type: ['string', 'null'], format: 'date-time' },
+          created_at: isoDateTime,
+          updated_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      UpsertCompanyDetailsRequest: {
+        type: 'object',
+        required: ['legal_name', 'country', 'org_number'],
+        properties: {
+          legal_name: { type: 'string', minLength: 1, maxLength: 200 },
+          country: { type: 'string', minLength: 2, maxLength: 2 },
+          org_number: { type: 'string', minLength: 1, maxLength: 32 },
+          /** Omit or null clears it. Setting or changing it re-runs the VIES check asynchronously. */
+          vat_number: { type: ['string', 'null'], maxLength: 32 },
+        },
+        additionalProperties: false,
+      },
+      DeleteCompanyDetailsResponse: {
+        type: 'object',
+        required: ['ok'],
+        properties: {
+          ok: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+      /**
        * FULL REPLACEMENT is the mutation: the agent ends up carrying exactly
        * this set. An empty array clears the agent's labels — that is the
        * editor's "remove every chip", not a refused no-op.
@@ -9204,6 +9368,7 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       Parties: partiesSchema,
+      PartiesBuyer: partiesBuyerSchema,
       AgentPaymentStatus: agentPaymentStatus,
       // #3031 note: this option's `maxTimeoutSeconds` stays `integer` while
       // `X402AuthorizeRequest`'s is `number, minimum: 1`. Not a contradiction —

@@ -22,6 +22,7 @@
 
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
+import { OWNER_COMPANY_DETAILS_JOIN_COLUMNS, type BuyerJoinColumns, type ViesStatus } from './owner-company-details.js'
 
 export type { Executor }
 
@@ -754,12 +755,14 @@ export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_addres
             pi.signature, pi.tx_hash, pi.confirmed_at,
             pi.machine_metadata->>'delegate_account_address' AS delegate_account_address,
             mpe.resource_url AS resource_url,
-            mpe.amount_sek AS amount_sek
+            mpe.amount_sek AS amount_sek,
+            ${OWNER_COMPANY_DETAILS_JOIN_COLUMNS}
      FROM payment_intents pi
      LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
+     LEFT JOIN owner_company_details ocd ON ocd.user_id = pi.user_id
      WHERE pi.id = $1 AND pi.agent_id = $2 AND pi.status = 'confirmed'`
 
-export interface PaymentReceiptRow {
+export interface PaymentReceiptRow extends BuyerJoinColumns {
   id: string
   account_address: string
   chain_id: number

@@ -24,6 +24,7 @@ import {
   findIntentForAgent,
   findMachineIntentByKeyOrChallenge,
   findSendIntentByIdempotencyKey,
+  findSettledPaymentReceiptRow,
   getIntentStatus,
   insertDelegationIntent,
   insertMachineIntent,
@@ -32,6 +33,7 @@ import {
   listIntentsForAgent,
   releaseSubmittedClaim,
 } from '../payment-intents.js'
+import { upsertOwnerCompanyDetails, type BuyerJoinColumns } from '../owner-company-details.js'
 
 let seq = 0
 
@@ -401,5 +403,60 @@ describeDb('payment-intents repository (#1223)', () => {
     expect(list.map((r) => r.id)).toEqual([b.id, a.id])
     expect(b.execution_rail).toBe('delegation')
     expect(await findIntentForAgent(a.id, other.agentId)).toBeNull()
+  })
+
+  // ── #3332 review M2: findSettledPaymentReceiptRow's OWNER_COMPANY_DETAILS_JOIN_COLUMNS ──
+  it('#3332: findSettledPaymentReceiptRow joins each intent\'s OWN owner\'s company details — no cross-owner mixing', async () => {
+    const ownerA = await seedAgent()
+    const ownerB = await seedAgent()
+
+    async function seedConfirmedIntent(agentId: string, userId: string, signHashSeed: string): Promise<string> {
+      const r = await db.query<{ id: string }>(
+        `INSERT INTO payment_intents
+           (agent_id, user_id, account_address, token_symbol, token_address, to_address,
+            amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+            status, expires_at)
+         VALUES ($1, $2, '0x00000000000000000000000000000000000001', 'USDC',
+                 '0x00000000000000000000000000000000000002', '0x00000000000000000000000000000000000003',
+                 '100000', '0.10', '0x00000000000000000000000000000000000004', 1, $3,
+                 'confirmed', NOW() + interval '10 minutes')
+         RETURNING id`,
+        [agentId, userId, `0x${signHashSeed.repeat(64)}`.slice(0, 66)],
+      )
+      return r.rows[0].id
+    }
+
+    const intentA = await seedConfirmedIntent(ownerA.agentId, ownerA.userId, 'a')
+    const intentB = await seedConfirmedIntent(ownerB.agentId, ownerB.userId, 'b')
+
+    // Before either owner has details: found, buyer columns null.
+    const beforeA = await findSettledPaymentReceiptRow(intentA, ownerA.agentId)
+    expect(beforeA?.id).toBe(intentA)
+    expect(beforeA?.buyer_legal_name).toBeNull()
+
+    await upsertOwnerCompanyDetails(ownerA.userId, {
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+    })
+    await upsertOwnerCompanyDetails(ownerB.userId, {
+      legal_name: 'Owner B GmbH',
+      country: 'DE',
+      org_number: '222',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+    })
+
+    const afterA = await findSettledPaymentReceiptRow(intentA, ownerA.agentId)
+    expect(afterA?.id).toBe(intentA) // row count/identity unchanged by the join
+    expect(afterA?.buyer_legal_name).toBe('Owner A AB')
+
+    const afterB = await findSettledPaymentReceiptRow(intentB, ownerB.agentId)
+    expect(afterB?.id).toBe(intentB)
+    expect(afterB?.buyer_legal_name).toBe('Owner B GmbH')
   })
 })

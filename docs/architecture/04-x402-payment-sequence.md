@@ -2206,3 +2206,16 @@ rather than netted into a number the chain would not agree with.
 > unchanged). The leg's assertions, its reads and every payment step it drives
 > are unchanged; its suite passes unmodified. Scope of this note: that helper.
 > Nothing else in this document was re-verified.
+
+> **Re-verification (#3332, additive `parties.buyer`, 2026-09-27):** this diff
+> adds an OPTIONAL `buyer` field to `Parties` (`openapi/party-model.ts`) — the
+> paying agent's owner's company details, present only when
+> `HAVEN_OWNER_COMPANY_DETAILS` is on and the owner has saved details, absent
+> (the key missing, never present-and-null) otherwise. It is not part of any
+> settlement typed data, does not change `withParties`' existing four fields,
+> and does not touch `routes/x402.ts`, `x402-delegation.ts`, the settlement-
+> transfer verifier, or `agent-payment-status.ts` (deliberately not wired in
+> this slice — see `docs/product/owner-company-details.md`). Every existing
+> consumer of `Parties` is unaffected by construction: an optional key nothing
+> previously read. Scope of this note: that one field. Nothing else in this
+> document was re-verified.

@@ -194,8 +194,11 @@ describeDb('#3342 — the repair sweep drains (real DB)', () => {
 
   it('STALL: N = limit healthy older rows + one phantom — the phantom is repaired within ceil(N/limit)+1 ticks and healthy rows stop being read', async () => {
     const limit = 4
-    // The phantom is the OLDEST row (anchored_at furthest back), like the
-    // issue's probe where it sits behind the correct rows.
+    // The phantom is the OLDEST row here, so the first batch reaches it
+    // immediately — this test pins the #3342 steady state (one-tick repair,
+    // durable confirmation, bounded reads), NOT the reach behind a full
+    // batch of unanswerable rows; that shape (phantom NEWEST behind N ≥
+    // limit unanswerable older rows) is the DRAIN test below (#3395).
     const phantom = await seedAnchoredRow({ storedUid: phantomUid(1), txHash: txOf(1), older: true })
     const healthy: string[] = []
     const specs: Record<string, ReceiptSpec> = {
@@ -366,8 +369,8 @@ describeDb('#3342 — the repair sweep drains (real DB)', () => {
     void healthy
 
     const tick1 = await repairAnchoredUids(10)
-    expect(tick1.repaired).toBe(1) // the healthy row
-    expect(tick1.healthy).toBe(1) // the collision holder (matches its receipt)
+    expect(tick1.repaired).toBe(1) // the collision holder: stored realUid(1), receipt says realUid(2)
+    expect(tick1.healthy).toBe(1) // the healthy row: stored UID already matches its receipt
     expect(tick1.unrepairable).toBe(1) // the poison row (its repair threw)
     const deferred = tick1.rows.find((r) => r.outcome === 'deferred')
     expect(deferred?.agent_id).toBe(poison)

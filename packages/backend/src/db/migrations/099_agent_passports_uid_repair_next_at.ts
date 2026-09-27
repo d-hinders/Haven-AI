@@ -20,9 +20,10 @@ import type { PoolClient } from 'pg'
  * skips a row whose stamp is still in the future. The stamp is GUARDED —
  * `status = 'anchored'` and the row's own `tx_hash` — so a defer can never
  * pace a row that has moved to another lifecycle (a re-anchor reset hands the
- * row back to issuance; an anchored write replaces the anchor tx), and the
- * one statement that still uses the unguarded legacy bump is the throw path
- * where the row's own data may be the problem.
+ * row back to issuance; an anchored write replaces the anchor tx). Both defer
+ * call sites use THIS guarded statement, the throw path included: a throw
+ * during the repair does not exempt the row from the guard, and a stamp the
+ * guard refuses costs nothing — the next tick re-reads the row.
  *
  * Nullable with no default: every existing row reads as not-pacing and is
  * answered once — repaired, confirmed, or paced out — on the first

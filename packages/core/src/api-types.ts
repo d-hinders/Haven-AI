@@ -242,7 +242,7 @@ export type paths = {
         };
         /**
          * Read the signed-in owner's company details.
-         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. 404 also when the owner has never saved any details (no distinct "not configured" body: both are "nothing here"). A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing, or a genuine DB failure recording the check's result) is re-checked asynchronously (an atomic claim, so concurrent reads start at most one check) as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check's eventual outcome.
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and ONLY then. When the feature is on and the owner has never saved details (or deleted them), 200 with a JSON `null` body, so a client can tell "feature off" from "nothing saved" by status alone. A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing, or a genuine DB failure recording the check's result) is re-checked asynchronously (an atomic claim, so concurrent reads start at most one check) as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check's eventual outcome.
          */
         get: operations["getCompanyDetails"];
         /**
@@ -5609,13 +5609,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The owner's saved company details. */
+            /** @description The owner's saved company details, or `null` when none are saved. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompanyDetails"];
+                    "application/json": components["schemas"]["CompanyDetails"] | null;
                 };
             };
             /** @description Error response */

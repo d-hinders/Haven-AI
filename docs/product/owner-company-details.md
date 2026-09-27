@@ -102,7 +102,7 @@ exception (see its row below).
 
 | Route | Notes |
 |---|---|
-| `GET /user/company-details` | 404 when the flag is off. 404 if nothing is saved. Re-triggers a stale `pending` check (an atomic claim) as a side effect. |
+| `GET /user/company-details` | 404 when the flag is off, and only then. 200 with `null` if nothing is saved. Re-triggers a stale `pending` check (an atomic claim) as a side effect. |
 | `PUT /user/company-details` | 404 when the flag is off. Full replacement. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
 | `DELETE /user/company-details` | **Works regardless of the flag** — the owner's erasure path always works, even after an operator turns the feature back off (owner-privacy default). `{ ok: true }` whether or not a row existed. |
 | `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |

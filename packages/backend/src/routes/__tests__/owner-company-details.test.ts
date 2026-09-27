@@ -103,7 +103,8 @@ describeDb('owner company details routes (#3332)', () => {
       expect(del.json()).toEqual({ ok: true })
       ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
       const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
-      expect(get.statusCode).toBe(404)
+      expect(get.statusCode).toBe(200)
+      expect(get.json()).toBeNull()
     })
 
     it('DELETE still refuses an agent API key even with the flag off', async () => {
@@ -120,9 +121,9 @@ describeDb('owner company details routes (#3332)', () => {
       (config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
       const userId = await seedUser()
       const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
-      // Not 404-for-the-flag: 404 because nothing is saved yet.
-      expect(get.statusCode).toBe(404)
-      expect(get.json()).not.toEqual({ error: 'Not found' })
+      // Nothing saved yet is 200 + null — a 404 here means only "feature off".
+      expect(get.statusCode).toBe(200)
+      expect(get.json()).toBeNull()
     })
   })
 
@@ -183,7 +184,8 @@ describeDb('owner company details routes (#3332)', () => {
       })
       expect(put.statusCode).toBe(400)
       const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
-      expect(get.statusCode).toBe(404)
+      expect(get.statusCode).toBe(200)
+      expect(get.json()).toBeNull()
     })
 
     it('setting a VAT number moves vies_status to pending immediately, then resolves', async () => {
@@ -238,7 +240,8 @@ describeDb('owner company details routes (#3332)', () => {
       expect(second.statusCode).toBe(200)
       expect(second.json()).toEqual({ ok: true })
       const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
-      expect(get.statusCode).toBe(404)
+      expect(get.statusCode).toBe(200)
+      expect(get.json()).toBeNull()
     })
 
     it('POST vies-check 404s when there is no VAT number saved', async () => {

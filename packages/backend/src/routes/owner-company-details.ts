@@ -133,7 +133,10 @@ export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): P
     // background sweep) — fire-and-forget, never blocks this response.
     void recheckIfStalePending(sub)
     const row = await readCompanyDetails(sub)
-    if (!row) return reply.code(404).send({ error: 'No company details saved' })
+    // 200 with `null`, not 404, when nothing is saved: a 404 on this route
+    // means only "the feature is off", so a client can gate on the status
+    // alone instead of reading an error string.
+    if (!row) return null
     return toWireRow(row)
   })
 

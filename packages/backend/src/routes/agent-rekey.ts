@@ -651,12 +651,14 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
 
     const { signature, user_operation, delegation_hashes } = request.body ?? {}
     // `signature`'s 0x-hex shape, `user_operation`'s object shape and
-    // `delegation_hashes`' non-empty-array shape are the request schema's
+    // `delegation_hashes`' array-of-hashes shape are the request schema's
     // (#3032: this module is enforced — required fields + patterns answer
     // them before this handler runs). What stays here is what the schema
     // cannot say: `signature` must PARSE for the chain kit, which ajv's
     // pattern alone does not prove, and the empty-array case must still name
-    // the prepare step.
+    // the prepare step. The list's CONTENT decides nothing either way
+    // (#3343): the server derives the set it holds as still-enabled (below)
+    // and binds the signed calldata to exactly that set.
     if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
       return reply.code(400).send({ error: 'signature is required' })
     }

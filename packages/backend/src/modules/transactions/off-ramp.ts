@@ -21,7 +21,7 @@
  * Payment-adjacent SQL lives in `infra/repositories/` by rule — see the
  * boundary gates in `scripts/dep-lint.mjs`.
  */
-import { getChain } from '../../domain/chains.js'
+import { settlementTokenForChain } from '../../domain/chains.js'
 import {
   findOffRampDestinationRow,
   upsertOffRampDestinationRow,
@@ -55,11 +55,13 @@ export function setOffRampDestination(input: {
   return upsertOffRampDestinationRow(input)
 }
 
-/** The chain registry's USDC contract for `chainId`, or null when the chain has none. */
+/**
+ * The chain registry's USDC contract for `chainId`, or null when the chain has
+ * none. Resolved by the registry's own asset data (`settlementTokenForChain`),
+ * never by a symbol string — on Gnosis that is the bridged USDC.e contract
+ * `0x2a22f9c3…` (#3333 round-2 finding F-1; the same settlement asset
+ * `merchant-catalog.ts` already treats as a known asset by address).
+ */
 export function usdcAddressForChain(chainId: number): string | null {
-  const chain = getChain(chainId)
-  const token = Object.values(chain.tokens).find(
-    (candidate) => candidate.address !== null && candidate.symbol.toUpperCase().replace('.', '') === 'USDC',
-  )
-  return token?.address ?? null
+  return settlementTokenForChain(chainId)?.address ?? null
 }

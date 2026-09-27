@@ -142,7 +142,7 @@ export async function fetchAccountTransactions({
     // index costs no second explorer call. Ingestion is best-effort and
     // non-blocking for the read (errors are logged inside); a USDC transfer
     // inbound to the account's address is upserted idempotently on
-    // (chain, hash). The live explorer read stays the wire's source; the
+    // (chain, hash, account). The live explorer read stays the wire's source; the
     // index is the matching substrate.
     void ingestInboundTransfers(
       {

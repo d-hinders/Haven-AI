@@ -38,7 +38,6 @@ import type { OffRampDestination, OffRampPrepareResponse } from '@/types/transac
 
 interface ReceivePanelProps {
   accountAddress: string
-  accountId: string
   chainId: number
 }
 

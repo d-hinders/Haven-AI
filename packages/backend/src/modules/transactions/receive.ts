@@ -9,7 +9,7 @@
  *    read verbatim — no second explorer call) are upserted into
  *    `inbound_transfers`. USDC only: the slice's asset is the settlement
  *    token, and the ledger is a USDC receive balance, not a general token
- *    inventory. Idempotent per (chain, hash).
+ *    inventory. Idempotent per (chain, hash, account).
  *
  * 2. `matchInboundTransferForAccount` — one row is linked to its evidence,
  *    by one of exactly two match kinds the issue names:
@@ -35,7 +35,7 @@
  * the owner's own transfer through `rails/hybrid-transfers.ts` with the
  * destination constrained to the owner-saved off-ramp address.
  */
-import { getChain } from '../../domain/chains.js'
+import { settlementTokenForChain } from '../../domain/chains.js'
 import {
   insertInboundTransfer,
   findUnmatchedByTxHash,
@@ -55,9 +55,17 @@ export interface IngestInboundTransferAccount {
   chainId: number
 }
 
-/** The asset the receive index tracks: USDC (by chain-registry symbol). */
-function isUsdcSymbol(symbol: string): boolean {
-  return symbol.toUpperCase().replace('.', '') === 'USDC'
+/**
+ * The asset the receive index tracks: the registry's USDC asset, identified by
+ * its registry ADDRESS per chain — never by a symbol string. Gnosis's bridged
+ * asset is 'USDC.e', which the old dot-stripped symbol test silently excluded
+ * (`'USDCE' !== 'USDC'`), so no Gnosis leg ever persisted (#3333 round-2
+ * finding F-1). A contract that merely NAMED itself USDC is not the
+ * settlement asset; the registry entry is.
+ */
+function isSettlementToken(chainId: number, contractAddress: string): boolean {
+  const settlement = settlementTokenForChain(chainId)
+  return settlement?.address?.toLowerCase() === contractAddress.toLowerCase()
 }
 
 /**
@@ -71,7 +79,6 @@ export async function ingestInboundTransfers(
   rows: RawERC20Transfer[],
   log: FastifyBaseLogger,
 ): Promise<number> {
-  const chain = getChain(account.chainId)
   const addrLower = account.accountAddress.toLowerCase()
   if (!account.userId || !addrLower) return 0
   let inserted = 0
@@ -80,9 +87,10 @@ export async function ingestInboundTransfers(
     const toLower = tx.to.toLowerCase()
     if (toLower !== addrLower) continue
 
-    const knownToken = chain.tokenByAddress[tx.contractAddress.toLowerCase()]
-    const symbol = knownToken?.symbol ?? tx.tokenSymbol ?? ''
-    if (!isUsdcSymbol(symbol)) continue
+    // The settlement asset by registry ADDRESS, not by symbol: on Gnosis the
+    // asset is 'USDC.e' and only its registry address identifies it (F-1). A
+    // contract that merely names itself USDC is not the settlement asset.
+    if (!isSettlementToken(account.chainId, tx.contractAddress)) continue
 
     // Explorer timestamps are unix seconds; the column is TIMESTAMPTZ.
     const seconds = Number.parseInt(tx.timeStamp, 10)
@@ -123,7 +131,7 @@ export interface ReceiptDrop {
 
 export type InboundMatchResult =
   | { ok: true; matchKind: InboundMatchKind; transferId: string }
-  | { ok: false; error: string }
+  | { ok: false; failure: { status: 404 | 409; error: string } }
 
 /**
  * Match ONE inbound row for `accountId`. Resolution order is the issue's:
@@ -171,11 +179,23 @@ export async function matchInboundTransferForAccount(
     input.db,
   )
   if (!row) {
-    return { ok: false, error: 'No unmatched inbound transfer for that tx hash' }
+    return {
+      ok: false,
+      failure: { status: 404, error: 'No unmatched inbound transfer for that tx hash' },
+    }
   }
 
   if (input.expectedAmountRaw != null && input.expectedAmountRaw !== row.amount_raw) {
-    return { ok: false, error: `amount mismatch: drop names ${input.expectedAmountRaw}, transfer carries ${row.amount_raw}` }
+    return {
+      ok: false,
+      // 409: the row exists but the document contradicts it (amount). The
+      // STATUS is decided here, where the cause is known — never re-derived
+      // from message text at the route.
+      failure: {
+        status: 409,
+        error: `amount mismatch: drop names ${input.expectedAmountRaw}, transfer carries ${row.amount_raw}`,
+      },
+    }
   }
 
   const settlement = await findX402PaytoSettlement(
@@ -226,7 +246,13 @@ export async function matchInboundTransferForAccount(
     }
   }
 
-  return { ok: false, error: 'Nothing to match against — supply a receipt the transfer was paid for' }
+  return {
+    ok: false,
+    failure: {
+      status: 404,
+      error: 'Nothing to match against — supply a receipt the transfer was paid for',
+    },
+  }
 }
 
 /**

@@ -2,7 +2,7 @@
  * Real-DB tests for the persisted inbound-transfer index (#3333, epic #3328).
  *
  * Everything here is an assertion about what Postgres does — the unique
- * (chain, hash) dedupe, the one-way match, the balance-consumed flag — so it
+ * (chain, hash, account) dedupe, the one-way match, the balance-consumed flag — so it
  * belongs on the real harness rather than on mocks (epic #1219,
  * `docs/contributing/testing-strategy.md`). The ingest pass and the matcher
  * both sit on top of these invariants; a module bug can route around them,
@@ -78,7 +78,7 @@ describeDb('inbound_transfers index (#3333)', () => {
     expect(id).not.toBeNull()
   })
 
-  it('is idempotent per (chain, tx hash) — a re-read explorer window cannot double-count', async () => {
+  it('is idempotent per (chain, tx hash, account) — a re-read explorer window cannot double-count', async () => {
     const seeded = await seedAccount()
     const input = ingestInput(seeded)
     const first = await insertInboundTransfer(input)
@@ -88,6 +88,46 @@ describeDb('inbound_transfers index (#3333)', () => {
 
     const rows = await db.query(`SELECT id FROM inbound_transfers WHERE account_id = $1`, [seeded.accountId])
     expect(rows.rowCount).toBe(1)
+  })
+
+  it('one tx paying two accounts yields one row per account, each matchable independently (round-2 F-2)', async () => {
+    const first = await seedAccount()
+    const second = await seedAccount()
+    const sharedHash = `0x${'d'.repeat(64)}`
+
+    const firstRow = (await insertInboundTransfer(ingestInput(first, { txHash: sharedHash })))!
+    const secondRow = (await insertInboundTransfer(ingestInput(second, { txHash: sharedHash })))!
+    expect(firstRow).not.toBeNull()
+    expect(secondRow).not.toBeNull()
+
+    // A re-read of the same explorer window duplicates nothing for either account.
+    expect(await insertInboundTransfer(ingestInput(first, { txHash: sharedHash }))).toBeNull()
+    expect(await insertInboundTransfer(ingestInput(second, { txHash: sharedHash }))).toBeNull()
+
+    const rows = await db.query<{ account_id: string }>(
+      `SELECT account_id FROM inbound_transfers WHERE LOWER(tx_hash) = LOWER($1)`,
+      [sharedHash],
+    )
+    expect(rows.rowCount).toBe(2)
+    expect(new Set(rows.rows.map((r) => r.account_id))).toEqual(new Set([first.accountId, second.accountId]))
+
+    // Each leg is matchable independently — the second account's drop for the
+    // shared hash lands on ITS row, never on the other account's.
+    const forSecond = await matchInboundTransferForAccount({
+      accountId: second.accountId,
+      userId: second.userId,
+      accountAddress: second.address,
+      txHash: sharedHash,
+      receiptId: '44444444-4444-4444-8444-444444444444',
+    })
+    expect(forSecond).toEqual({ ok: true, matchKind: 'receipt', transferId: secondRow })
+
+    // The first account's row is untouched by the second account's match.
+    const firstRows = await db.query<{ match_kind: string | null }>(
+      `SELECT match_kind FROM inbound_transfers WHERE account_id = $1`,
+      [first.accountId],
+    )
+    expect(firstRows.rows[0].match_kind).toBeNull()
   })
 
   it('matches by hash case-insensitively and lowercases stored addresses', async () => {
@@ -103,10 +143,11 @@ describeDb('inbound_transfers index (#3333)', () => {
   it('findUnmatchedByTxHash pins the payer when asked — a drop cannot land on another payer', async () => {
     const seeded = await seedAccount()
     const payerA = `0x${'1'.repeat(40)}`
-    // The (chain, hash) unique index keeps ONE row per transfer: a batch tx
-    // collapses to the first observed leg, which is exactly why the drop
-    // path pins the payer — a drop for another payer of the same hash finds
-    // nothing to link rather than linking the wrong leg.
+    // The (chain, hash, account) unique index keeps ONE row per account, and
+    // the drop path pins the payer WITHIN an account's rows: a drop for
+    // another payer of the same hash finds nothing to link rather than
+    // linking the wrong leg. (A second receiving ACCOUNT of the same tx gets
+    // its own row — the two-account test below.)
     const sharedHash = `0x${'9'.repeat(64)}`
     await insertInboundTransfer(ingestInput(seeded, { txHash: sharedHash, payerAddress: payerA }))
 
@@ -247,7 +288,7 @@ describeDb('inbound_transfers index (#3333)', () => {
       accountAddress: seeded.address,
       txHash,
     })
-    expect(nothing).toEqual({ ok: false, error: 'Nothing to match against — supply a receipt the transfer was paid for' })
+    expect(nothing).toEqual({ ok: false, failure: { status: 404, error: 'Nothing to match against — supply a receipt the transfer was paid for' } })
 
     // A mismatching document is refused BEFORE any link is written.
     const mismatch = await matchInboundTransferForAccount({
@@ -259,7 +300,9 @@ describeDb('inbound_transfers index (#3333)', () => {
       expectedAmountRaw: '999',
     })
     expect(mismatch.ok).toBe(false)
-    expect((mismatch as { error: string }).error).toMatch(/amount mismatch/)
+    const failure = (mismatch as { failure: { status: 404 | 409; error: string } }).failure
+    expect(failure.status).toBe(409)
+    expect(failure.error).toMatch(/amount mismatch/)
 
     const ok = await matchInboundTransferForAccount({
       accountId: seeded.accountId,
@@ -337,6 +380,6 @@ describeDb('inbound_transfers index (#3333)', () => {
       txHash,
     })
     // No settlement names THIS account and no receipt came with the call.
-    expect(result).toEqual({ ok: false, error: 'Nothing to match against — supply a receipt the transfer was paid for' })
+    expect(result).toEqual({ ok: false, failure: { status: 404, error: 'Nothing to match against — supply a receipt the transfer was paid for' } })
   })
 })

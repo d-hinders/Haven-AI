@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { moneyPathRateLimit } from '../middleware/rate-limit.js'
+import { moneyPathRateLimit, receiptDropRateLimit } from '../middleware/rate-limit.js'
 import { findAccountOwnership } from '../infra/repositories/transaction-history.js'
 import {
   isSupportedChain,
@@ -136,7 +136,21 @@ async function parseChainParam(request: {
   return { chainId }
 }
 
-export default async function receiveRoutes(app: FastifyInstance): Promise<void> {
+export interface ReceiveRoutesOptions {
+  /**
+   * The deployment's `TRUST_PROXY_HOPS` (config.ts), threaded from index.ts —
+   * the same wiring the auth routes get. Arms the receipt-drop limiter
+   * (`receiptDropRateLimit`): the drop is unauthenticated, so its only
+   * meaningful key is the client IP, and a per-IP limit is only real when the
+   * proxy is trusted (#3333 round-2 finding F-3).
+   */
+  trustProxyHops: number
+}
+
+export default async function receiveRoutes(
+  app: FastifyInstance,
+  options: ReceiveRoutesOptions,
+): Promise<void> {
   // ── The payer's signed receipt drop — NO auth middleware ──────────────────
   // Registered OUTSIDE the owner plugin below: a payer has no Haven account
   // and no dashboard JWT. The route's authentication is the signature over
@@ -145,6 +159,7 @@ export default async function receiveRoutes(app: FastifyInstance): Promise<void>
   // inbound row's earned flag for the account it names.
   app.post<{ Params: { accountAddress: string }; Querystring: { chain_id?: string }; Body: ReceiptDropBody }>(
     '/:accountAddress/receipt-drop',
+    { config: receiptDropRateLimit(options.trustProxyHops) },
     async (request, reply) => {
       const chain = await parseChainParam(request)
       if ('error' in chain) {
@@ -201,12 +216,12 @@ export default async function receiveRoutes(app: FastifyInstance): Promise<void>
         expectedAmountRaw: String(request.body?.amount_raw),
       })
       if (!match.ok) {
-        // 404: nothing to match (unknown hash, or every row for it already
-        // matched). 409: the row exists but the drop's document contradicts
-        // it (amount). The distinction is the caller's only actionable
-        // signal, and neither moves a matched row.
-        const isMismatch = match.error.startsWith('amount')
-        return reply.code(isMismatch ? 409 : 404).send({ error: match.error })
+        // The failure code is decided WHERE the cause is known (the matcher
+        // sets 404 or 409 itself); the route only maps it. 404: nothing to
+        // match (unknown hash, or every row for it already matched). 409: the
+        // row exists but the drop's document contradicts it (amount). Neither
+        // moves a matched row.
+        return reply.code(match.failure.status).send({ error: match.failure.error })
       }
       return { matched: true, match_kind: match.matchKind, transfer_id: match.transferId }
     },

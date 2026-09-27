@@ -14,10 +14,12 @@ export const version = '097_inbound_transfers'
  *
  * One row per inbound USDC transfer observed on an account's address:
  *
- * - `chain_id` + `tx_hash` + `log_index` identify the transfer on-chain. The
- *   (chain, hash) pair is unique across the table — the log index is carried
- *   for forensics, not identity; a hash identifies one transfer for the
- *   matching key (#3333: "key: tx hash").
+ * - `chain_id` + `tx_hash` + `account_id` identify the row. The dedupe key is
+ *   PER ACCOUNT: one transaction can pay two Haven accounts on the same chain
+ *   (or carry several USDC legs), and each receiving account gets its own row
+ *   — collapsing on (chain, hash) alone silently deleted the second account's
+ *   payment from its ledger and 404'd its receipt drop (#3333 round-2 finding
+ *   F-2). The log index is carried for forensics, not identity.
  * - `payer_address` / `amount_raw` / `block_time` are the explorer's own
  *   fields, persisted so matching and the running balance never re-read the
  *   explorer for history that is already indexed.
@@ -54,11 +56,13 @@ export async function up(client: PoolClient): Promise<void> {
       updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    -- The dedupe identity: one row per on-chain transfer per chain. Idempotent
+    -- The dedupe identity: one row per on-chain transfer PER ACCOUNT. Idempotent
     -- ingestion upserts on this key, so a re-read explorer window can never
-    -- double-count an inbound payment.
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_inbound_transfers_chain_hash
-      ON inbound_transfers (chain_id, LOWER(tx_hash));
+    -- double-count an inbound payment — while one tx paying two accounts (or
+    -- carrying several USDC legs) still lands one row per receiving account
+    -- (#3333 round-2 F-2: the key is per account, not global across them).
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_inbound_transfers_chain_hash_account
+      ON inbound_transfers (chain_id, LOWER(tx_hash), account_id);
 
     -- The balance query: one account's consumed rows, newest first.
     CREATE INDEX IF NOT EXISTS idx_inbound_transfers_account_balance

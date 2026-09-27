@@ -284,9 +284,11 @@ and stay that way — the wire shape (`direction: 'in' | 'out'`) is unchanged
 for the CLI and dashboard. What is NEW is that the same explorer read feeds a
 persisted index (`inbound_transfers`, migration 097): every USDC transfer
 inbound to the account's address is upserted idempotently per
-(chain, tx hash) with payer, raw amount and block time. The live read remains
-the feed's source; the index is the matching substrate — and it costs no
-second explorer call.
+(chain, tx hash, account) with payer, raw amount and block time — one row per
+RECEIVING ACCOUNT, so one transaction paying two Haven accounts (or carrying
+several USDC legs) credits each account's ledger instead of collapsing into
+one. The live read remains the feed's source; the index is the matching
+substrate — and it costs no second explorer call.
 
 The dashboard's receive panel (`GET /receive/{accountAddress}`) reads the
 index directly: the receiving address per chain, the running USDC balance

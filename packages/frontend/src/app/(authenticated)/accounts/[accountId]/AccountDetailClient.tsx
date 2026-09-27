@@ -663,7 +663,6 @@ export default function AccountDetailClient() {
       {accountAddress && (
         <ReceivePanel
           accountAddress={accountAddress}
-          accountId={accountId}
           chainId={chainId}
         />
       )}

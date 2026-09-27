@@ -438,8 +438,9 @@ await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
 // #3333: the receive side — persisted inbound index, receipt matching and the
 // owner-signed off-ramp hand-off. Owner-scoped (authMiddleware inside the
-// file); no agent-auth route reaches it.
-await app.register(receiveRoutes, { prefix: '/receive' })
+// file); no agent-auth route reaches it. `trustProxyHops` arms the receipt
+// drop's limiter — the receive side's one unauthenticated route (#794 tiers).
+await app.register(receiveRoutes, { prefix: '/receive', trustProxyHops: config.trustProxyHops })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 // #2847 (epic #1440): `GET /safe/:addr/details` and `POST /safe/exec` are

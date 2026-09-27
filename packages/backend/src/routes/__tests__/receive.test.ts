@@ -19,12 +19,14 @@
  */
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
+import rateLimit from '@fastify/rate-limit'
 import { Wallet } from 'ethers'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import receiveRoutes from '../receive.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import pool from '../../db.js'
+import { rateLimitKeyFor } from '../../middleware/rate-limit.js'
 import { prepareTransfer } from '../../rails/hybrid-transfers.js'
 import { loadHybridOwnerConfig } from '../../rails/hybrid-account-config.js'
 
@@ -164,7 +166,7 @@ describe('receive routes (#3333)', () => {
     // Production wiring: root-scope install, the receive module born ENFORCED.
     installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/receive.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
-    await app.register(receiveRoutes, { prefix: '/receive' })
+    await app.register(receiveRoutes, { prefix: '/receive', trustProxyHops: 0 })
   })
 
   afterAll(async () => {
@@ -546,5 +548,73 @@ describe('receive routes (#3333)', () => {
     expect(response.statusCode).toBe(200)
     expectMatchesSpec('POST', '/receive/{accountAddress}/ingest', response.json())
     expect(response.json().ingested).toBe(true)
+  })
+})
+
+// ── The receipt-drop rate-limit tier (#3333 round-2 F-3) ──────────────────────
+// The route's limiter wiring, in miniature — the store's own behaviour has its
+// own suites (#1680), so this uses the plugin default store like the catalog
+// submit tier's suite does. The first 20 requests are refused 400 by the
+// enforced schema (deterministic, no database); the ceiling turns the 21st
+// into 429. Without a trusted proxy the tier refuses to arm and the same
+// flood is unlimited — the shared-bucket DoS trade every public per-IP tier
+// in rate-limit.ts documents.
+
+describe('receive receipt-drop rate-limit tier (round-2 F-3)', () => {
+  // Fails the enforced schema before the handler: no pool, no DB, no state.
+  const MALFORMED_DROP = {
+    tx_hash: 'not-a-hash',
+    amount_raw: '1000000',
+    payer_address: PAYER_WALLET.address,
+    signature: '0x00',
+  }
+
+  async function dropApp(trustProxyHops: number): Promise<FastifyInstance> {
+    const app = Fastify({ logger: false })
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/receive.ts'] })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(rateLimit, {
+      global: false,
+      keyGenerator: (request: { headers: Record<string, string | string[] | undefined>; ip: string }) =>
+        rateLimitKeyFor(request),
+    })
+    await app.register(receiveRoutes, { prefix: '/receive', trustProxyHops })
+    await app.ready()
+    return app
+  }
+
+  it('MUTATION PROOF: with a trusted proxy, the 21st drop from one address is 429', async () => {
+    const app = await dropApp(1)
+
+    const codes: number[] = []
+    let retryAfter: string | undefined
+    for (let i = 0; i < 21; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/receive/${ACCOUNT_ADDRESS}/receipt-drop?chain_id=8453`,
+        payload: MALFORMED_DROP,
+      })
+      codes.push(res.statusCode)
+      if (res.statusCode === 429) retryAfter = res.headers['retry-after'] as string | undefined
+    }
+
+    expect(codes.filter((c) => c === 400)).toHaveLength(20)
+    expect(codes[20]).toBe(429)
+    expect(retryAfter).toBeDefined()
+    await app.close()
+  })
+
+  it('without a trusted proxy the tier does not arm — the same flood stays unlimited', async () => {
+    const app = await dropApp(0)
+
+    for (let i = 0; i < 25; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/receive/${ACCOUNT_ADDRESS}/receipt-drop?chain_id=8453`,
+        payload: MALFORMED_DROP,
+      })
+      expect(res.statusCode).toBe(400)
+    }
+    await app.close()
   })
 })

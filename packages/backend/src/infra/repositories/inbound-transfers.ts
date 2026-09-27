@@ -7,8 +7,8 @@
  * `smart_accounts` — so an account's receive index is never readable through
  * another account's id.
  *
- * The index is written by ingestion (idempotent upsert on chain+hash) and by
- * the matcher (a one-way link: set once, never overwritten). No statement here
+ * The index is written by ingestion (idempotent upsert on chain+hash+account)
+ * and by the matcher (a one-way link: set once, never overwritten). No statement here
  * moves money, holds a key, or grants authority — a matched receipt is a
  * document reference, and the off-ramp hand-off is the owner's own signed
  * transfer (`rails/hybrid-transfers.ts`), which this file never touches.
@@ -56,13 +56,16 @@ const INSERT_INGEST_SQL = `
     payer_address, token_address, amount_raw, block_number, block_time
   )
   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-  ON CONFLICT (chain_id, LOWER(tx_hash)) DO NOTHING
+  ON CONFLICT (chain_id, LOWER(tx_hash), account_id) DO NOTHING
   RETURNING id`
 
 /**
- * Idempotent ingest: the unique index on (chain_id, LOWER(tx_hash)) is the
- * dedupe, so re-reading an explorer window cannot double-count an inbound
- * payment. Returns the row id; `null` means the transfer was already indexed.
+ * Idempotent ingest: the unique index on (chain_id, LOWER(tx_hash), account_id)
+ * is the dedupe, so re-reading an explorer window cannot double-count an
+ * inbound payment — while one tx paying two accounts still lands one row per
+ * receiving account (round-2 F-2; the old chain+hash key silently deleted the
+ * second account's row). Returns the row id; `null` means the transfer was
+ * already indexed for THIS account.
  */
 export async function insertInboundTransfer(
   input: InsertInboundTransferInput,

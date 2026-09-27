@@ -102,7 +102,7 @@ describe('ReceivePanel (#3333)', () => {
     })
 
     const { container } = render(
-      <ReceivePanel accountAddress={ADDRESS} accountId="acc-1" chainId={8453} />,
+      <ReceivePanel accountAddress={ADDRESS} chainId={8453} />,
     )
     // The skeleton state is up; the earned/matched rows are NOT rendered
     // from nothing — no body, no balance figure.
@@ -119,7 +119,7 @@ describe('ReceivePanel (#3333)', () => {
     })
 
     const { container } = render(
-      <ReceivePanel accountAddress={ADDRESS} accountId="acc-1" chainId={8453} />,
+      <ReceivePanel accountAddress={ADDRESS} chainId={8453} />,
     )
     expect(screen.getByText('Receive panel could not load')).not.toBeNull()
     expect(container.textContent).not.toContain('USDC')
@@ -134,7 +134,7 @@ describe('ReceivePanel (#3333)', () => {
     })
 
     const { container } = render(
-      <ReceivePanel accountAddress={ADDRESS} accountId="acc-1" chainId={8453} />,
+      <ReceivePanel accountAddress={ADDRESS} chainId={8453} />,
     )
     const badges = Array.from(container.querySelectorAll('span')).map((el) => el.textContent)
     expect(badges.filter((t) => t === 'Matched')).toHaveLength(1)
@@ -155,7 +155,7 @@ describe('ReceivePanel (#3333)', () => {
     })
 
     const { container } = render(
-      <ReceivePanel accountAddress={ADDRESS} accountId="acc-1" chainId={8453} />,
+      <ReceivePanel accountAddress={ADDRESS} chainId={8453} />,
     )
     const prepare = Array.from(container.querySelectorAll('button')).find(
       (b) => b.textContent === 'Prepare transfer',
@@ -174,7 +174,7 @@ describe('ReceivePanel (#3333)', () => {
     })
 
     const { container } = render(
-      <ReceivePanel accountAddress={ADDRESS} accountId="acc-1" chainId={8453} />,
+      <ReceivePanel accountAddress={ADDRESS} chainId={8453} />,
     )
     expect(container.textContent).toContain('0x5555')
     const prepare = Array.from(container.querySelectorAll('button')).find(

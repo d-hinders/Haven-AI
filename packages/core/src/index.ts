@@ -93,6 +93,7 @@ export {
   buildReleaseCompat,
   type ClientRelease,
   type ClientReleaseNote,
+  type ClientReleaseSummarySegment,
   type PackageReleaseCompat,
   type BuildReleaseCompatOptions,
 } from './client-releases.js'

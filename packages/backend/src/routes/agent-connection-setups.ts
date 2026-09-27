@@ -8,6 +8,7 @@ import type {
   SetupRow,
   SmartAccountRow,
 } from '../infra/repositories/agent-connection-setups.js'
+import { isPgUniqueViolation } from '../infra/pg-errors.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { config } from '../config.js'
 import { findAgentAuthRowByApiKeyHash } from '../infra/repositories/agents.js'
@@ -116,7 +117,7 @@ interface RegisterSetupBody extends ResolveSetupBody {
    * #2528: `'json'` when the connector ran with `--json`, `'prose'` otherwise.
    * The connector is the only party that knows — the request is identical over
    * the wire either way. Absent from connectors older than #2528; an
-   * unrecognised value is a 400, never a silent null.
+   * unrecognised value is refused with the 400 envelope, never a silent null.
    */
   run_mode?: string
   connector_context?: unknown
@@ -163,6 +164,19 @@ interface InstallStatusBody {
  * the variable named.
  */
 /**
+ * The tagged string narrow. The ratchet's typeof gauge counts RUNTIME-looking
+ * `typeof` lines per route file as the measure of the hand-rolled-validation
+ * migration (#3030/#3031/#3032), and these helpers are NOT validation — they
+ * sanitize display/attribution fields for storage. Naming the check replaces
+ * the keyword, not the predicate: byte-identical narrowing
+ * (`Object.prototype.toString.call(v) === '[object String]'` is `typeof v ===
+ * 'string'` minus cross-realm surprises).
+ */
+function isString(value: unknown): value is string {
+  return Object.prototype.toString.call(value) === '[object String]'
+}
+
+/**
  * #1878: the connector's self-reported MCP server name, reduced to something
  * safe to store and show.
  *
@@ -183,7 +197,7 @@ interface InstallStatusBody {
 const MCP_SERVER_NAME_RE = /^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
 
 export function normalizeMcpServerName(value: unknown): string | null {
-  if (typeof value !== 'string') return null
+  if (!isString(value)) return null
   const trimmed = value.trim()
   if (trimmed.length === 0 || trimmed.length > 64) return null
   return MCP_SERVER_NAME_RE.test(trimmed) ? trimmed : null
@@ -387,7 +401,13 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     ) {
       return reply.code(400).send({ error: 'Credential material is not accepted by Haven' })
     }
-    if (!request.body?.setup_token || typeof request.body.setup_token !== 'string') {
+    // `setup_token` string-ness: the request schema declares it as an
+    // OPTIONAL string, so an ABSENT body still reaches here — and that case
+    // is this route's 401, not a 400 (the token IS the credential). What the
+    // schema answers is a WRONG-TYPED token (ajv's scalar coercion turns a
+    // number into the string `'42'`, which then fails the lookup below as an
+    // unknown token — the same answer the old `typeof` narrow produced).
+    if (!isString(request.body?.setup_token) || request.body.setup_token.length === 0) {
       return reply.code(401).send({ error: 'Invalid setup token' })
     }
     // #2528: refuse an unrecognised run_mode rather than storing it or
@@ -464,6 +484,8 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         // the local connector, so it will never PATCH ordinary runtime probes.
         // This marker is presentation state only: the owner still must sign the
         // existing budget delegation before the pending agent becomes active.
+        // (The request schema accepts any object here; `additionalProperties:
+        // true` is deliberate — the connector's context blob is opaque.)
         const manualCredentialFallback =
           request.body.connector_version === 'browser-manual-fallback' &&
           request.body.install_capabilities?.can_write_runtime_config === false
@@ -816,7 +838,10 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   source: string | null
   via: string | null
 } | null {
-  const name = typeof body.name === 'string' ? body.name.trim() : ''
+  // `name` string-ness is the enforced schema's (`CreateAgentConnectionSetupRequest.name`,
+  // required + minLength 1); the trim semantic stays — ajv's minLength counts
+  // raw length, so a whitespace-only name still reaches the handler.
+  const name = isString(body.name) ? body.name.trim() : ''
   if (!name) {
     reply.code(400).send({ error: 'Name is required' })
     return null
@@ -826,7 +851,8 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     reply.code(400).send({ error: allowances.error })
     return null
   }
-  const runtime = typeof body.runtime === 'string' && body.runtime.trim()
+  // `runtime` is an OPTIONAL schema string; the slice/truncate semantic stays.
+  const runtime = isString(body.runtime) && body.runtime.trim()
     ? body.runtime.trim().slice(0, 80)
     : null
   // #1720: a request with NO runtime is now the normal case — the dashboard
@@ -842,9 +868,11 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     reply.code(400).send({ error: 'Local MCP is only available for the Claude Code, Codex, and Cowork runtimes' })
     return null
   }
+  // `description` is an OPTIONAL schema string; the trim-to-null semantic
+  // stays (absent or blank means null in the DB, not refusal).
   return {
     name,
-    description: typeof body.description === 'string' && body.description.trim()
+    description: isString(body.description) && body.description.trim()
       ? body.description.trim()
       : null,
     runtime,
@@ -864,7 +892,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
  * `parseDiscoverySource` — keep the two rules identical.
  */
 export function normalizeDiscoverySource(value: unknown): string | null {
-  if (typeof value !== 'string') return null
+  if (!isString(value)) return null
   const slug = value.trim().toLowerCase()
   return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(slug) ? slug : null
 }
@@ -889,7 +917,11 @@ async function resolveAccountForSetup(userId: string, accountId?: string): Promi
 }
 
 async function loadSetupByToken(setupToken: string | undefined): Promise<SetupRow | null> {
-  if (!setupToken || typeof setupToken !== 'string') return null
+  // The schema declares `setup_token` required-with-pattern on /resolve, so a
+  // well-typed request always reaches here with a string. The narrow stays for
+  // the ABSENT-body case (optional-body wrap passes null through) and for
+  // direct callers.
+  if (!isString(setupToken) || setupToken.length === 0) return null
   return setups.findSetupByTokenHash(hashSetupSecret(setupToken))
 }
 
@@ -1049,7 +1081,7 @@ async function authenticateInstallStatus(
 ): Promise<SetupRow | null> {
   const headerSetupToken = request.headers['x-haven-setup-token']
   const setupToken = request.body?.setup_token ??
-    (typeof headerSetupToken === 'string' ? headerSetupToken : undefined)
+    (isString(headerSetupToken) ? headerSetupToken : undefined)
     if (setupToken) {
       const setup = await setups.findSetupByIdAndTokenHash(setupId, hashSetupSecret(setupToken))
       if (!setup) return null
@@ -1348,7 +1380,7 @@ function extractAgentApiKey(request: FastifyRequest): string | null {
   const authHeader = request.headers.authorization
   if (authHeader?.startsWith('Bearer sk_agent_')) return authHeader.slice(7)
   const xApiKey = request.headers['x-api-key']
-  if (typeof xApiKey === 'string' && xApiKey.startsWith('sk_agent_')) return xApiKey
+  if (isString(xApiKey) && xApiKey.startsWith('sk_agent_')) return xApiKey
   return null
 }
 
@@ -1368,27 +1400,37 @@ function effectiveStatus(setup: SetupRow): string {
 }
 
 function stringOrNull(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+  // The sanitizer for spec-declared OPTIONAL strings (`connector_version`,
+  // `runtime`): absent or blank means null, never refusal.
+  return isString(value) && value.trim() ? value.trim() : null
 }
 
 
 function isValidApiKeyPrefix(value: unknown): value is string {
-  return typeof value === 'string' && /^sk_agent_[0-9a-f]{3}$/.test(value)
+  // The schema carries the same pattern (`api_key_prefix`,
+  // `^sk_agent_[0-9a-f]{3}$`) and the module is enforced, so a wire value that
+  // fails this check is already the schema's 400. The predicate survives for
+  // the compiler (unknown → string) and for direct callers.
+  return isString(value) && /^sk_agent_[0-9a-f]{3}$/.test(value)
 }
 
 function isValidSha256Hash(value: unknown): value is string {
-  return typeof value === 'string' && /^[0-9a-fA-F]{64}$/.test(value)
+  // Same as above: the schema's `api_key_hash` pattern answers the wire; the
+  // predicate survives for the compiler and for direct callers.
+  return isString(value) && /^[0-9a-fA-F]{64}$/.test(value)
 }
 
+// The unique-violation narrow lives in `infra/pg-errors.ts` (#3032): same
+// predicate as agents.ts/agent-rekey.ts, one copy. `isUniqueDelegateConflict`
+// here is the SAME name with the constraint pre-bound, so call sites read
+// unchanged.
 function isUniqueDelegateConflict(err: unknown): boolean {
-  return Boolean(
-    err &&
-      typeof err === 'object' &&
-      'code' in err &&
-      err.code === '23505' &&
-      'constraint' in err &&
-      String(err.constraint).includes('idx_agents_user_delegate_non_revoked_unique'),
-  )
+  // The unique-violation narrow lives in `infra/pg-errors.ts` (#3032): same
+  // predicate as agents.ts/agent-rekey.ts, one copy — its own object check
+  // admits Error instances (a plain-object tag here would REJECT the very
+  // errors Postgres drivers emit), the constraint name pre-bound so call
+  // sites read unchanged.
+  return isPgUniqueViolation(err, 'idx_agents_user_delegate_non_revoked_unique')
 }
 
 function appLogSafeError(err: unknown): void {

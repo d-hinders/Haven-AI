@@ -371,7 +371,7 @@ export async function insertMachineIntent(
 
 export const FIND_SEND_INTENT_BY_KEY_SQL = `SELECT id, status, expires_at, token_address, token_symbol, to_address,
             amount_raw, amount_human, allowance_nonce, sign_hash,
-            execution_rail, prepared_user_op, chain_id
+            execution_rail, prepared_user_op, chain_id, task_budget_id
      FROM payment_intents
      WHERE agent_id = $1 AND send_idempotency_key = $2
        AND status NOT IN ('failed', 'expired')
@@ -394,6 +394,9 @@ export interface SendIntentReplayRow {
   execution_rail: string | null
   prepared_user_op: unknown
   chain_id: number
+  /** #3392: which task budget authorized the intent, when one did — part of
+   *  the replay mismatch pin, so a retry naming a different budget 409s. */
+  task_budget_id: string | null
 }
 
 export async function findSendIntentByIdempotencyKey(

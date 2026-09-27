@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { allowanceModuleRailRetired, serializeUserOp } from '../../rails/execution-rail.js'
 
 /**
@@ -157,6 +158,14 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — routes/payments.ts is in `enforcedModules`,
+    // so the request schema refuses off-spec shapes before the handler (and
+    // the `/sign` shape rung this suite's case 3 used to exercise is gone;
+    // the SCHEMA is the local refusal now, which keeps the property — the
+    // shape-invalid signature still never reaches a chain call — while the
+    // app is assembled the way production assembles it, not a plugin-less
+    // copy of it).
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
   afterAll(async () => { await app.close() })
@@ -168,8 +177,10 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
   })
 
   it('refuses to spend for an authenticated request with no signature', async () => {
-    // Rail-independent: the shape guard in routes/payments.ts runs before any
-    // intent (and therefore any rail) is even loaded.
+    // Rail-independent: with the module ENFORCED (#3031), the request schema
+    // refuses a body without the required `signature` before any intent (and
+    // therefore any rail) is even loaded — the refusal is the plugin's, and
+    // no spend call can have been made.
     primeDb(AUTH)
 
     const res = await app.inject({
@@ -180,6 +191,8 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
     })
 
     expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('Request does not match the API spec')
+    expect(res.json().details).toMatch(/signature/)
     expect(delegationMocks.submitDelegationPayment).not.toHaveBeenCalled()
   })
 
@@ -214,12 +227,17 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
       method: 'POST',
       url: `/payments/${PAYMENT_ID}/sign`,
       headers: { authorization: 'Bearer sk_agent_test' },
-      // Too short to pass the `/^0x[0-9a-fA-F]{100,}$/` shape check.
+      // Too short to pass the signature shape the enforced schema declares
+      // (`^0x[0-9a-fA-F]{100,}$` — the rung's floor, now the schema's).
       payload: { signature: SHAPE_INVALID_SIGNATURE },
     })
 
+    // #3031: the SCHEMA refuses it now (the handler rung is gone), and the
+    // property this case owns is unchanged: a shape-invalid signature never
+    // reaches a chain call.
     expect(res.statusCode).toBe(400)
-    expect(res.json().error).toBe('Invalid signature format')
+    expect(res.json().error).toBe('Request does not match the API spec')
+    expect(res.json().details).toMatch(/signature/)
     expect(delegationMocks.submitDelegationPayment).not.toHaveBeenCalled()
   })
 

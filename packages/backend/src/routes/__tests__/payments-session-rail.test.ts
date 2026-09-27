@@ -47,6 +47,8 @@ vi.mock('../../modules/payments/refusal-ledger.js', async (importOriginal) => {
 })
 
 const paymentRoutes = (await import('../payments.js')).default
+// #3031: production wiring for the enforced module (see the beforeAll blocks).
+const { installRequestValidation } = await import('../../openapi/request-validation.js')
 const { serializeUserOp, allowanceModuleRailRetired, sessionRailRetired } = await import(
   '../../rails/execution-rail.js'
 )
@@ -201,6 +203,8 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — routes/payments.ts is in `enforcedModules`.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
 
@@ -482,6 +486,8 @@ describe('POST /payments — the refusal ledger on the direct paths (#2945)', ()
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — routes/payments.ts is in `enforcedModules`.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
   afterAll(async () => {

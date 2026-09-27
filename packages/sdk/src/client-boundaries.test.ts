@@ -493,6 +493,7 @@ describe('HavenClient structural boundary', () => {
       'TYPED_DATA_NOT_ALLOWED', // #3283
       'X402AlreadySettledError',
       'X402PaymentHeaderValidationError',
+      'X402TaskBudgetMismatchError', // #3392
       'X402UnexpectedStatusError',
       'X402_LEGACY_PAYMENT_HEADER_NAME',
       'X402_MAX_AUTHORIZATION_WINDOW_SECONDS',

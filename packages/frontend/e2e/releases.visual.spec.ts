@@ -68,7 +68,10 @@ test.describe('releases page visual regression', () => {
       // Code renders as code, never as body text; a break the headline omits
       // is surfaced (#3393).
       await expect(page.locator('code', { hasText: 'haven_list_task_budgets' })).toHaveCount(1)
-      await expect(page.getByText(/Includes a breaking change: see the changelog\./)).toHaveCount(1)
+      // Both notice forms, and never the changelog named twice (#3402).
+      await expect(page.getByText(/Includes a breaking change: see the changelog\.$/)).toHaveCount(1)
+      await expect(page.getByText(/Includes a breaking change\. \(\+1 more in the changelog\)$/)).toHaveCount(1)
+      await expect(page.getByText(/see the changelog\. \(\+/)).toHaveCount(0)
       // The deterministic state: no backend, so no channel, so no command —
       // and never a guessed `@alpha` (#2422).
       // One page-level note, never one per card (#3304 design review).

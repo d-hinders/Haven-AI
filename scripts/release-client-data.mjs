@@ -50,8 +50,10 @@
  * A released section carrying a bold span that opens with `BREAKING`, outside
  * code spans, always says so: when its summary does not already contain
  * "Breaking change", {@link BREAK_NOTICE} is appended, ahead of the next
- * sentence if both do not fit. Prose that merely says "breaking for any
- * reader" is not the marker.
+ * sentence if both do not fit. When the "(+N more in the changelog)" count
+ * follows, {@link BREAK_NOTICE_BEFORE_COUNT} is appended instead, so the
+ * summary names the changelog once (#3402). Prose that merely says "breaking
+ * for any reader" is not the marker.
  *
  * ## The action-required marker
  *
@@ -89,6 +91,13 @@ export const MAX_SUMMARY_CHARS = 300
 
 /** Appended to a summary whose section carries a break its text does not show (#3393). */
 export const BREAK_NOTICE = 'Includes a breaking change: see the changelog.'
+
+/**
+ * {@link BREAK_NOTICE} when "(+N more in the changelog)" follows it: that
+ * count already names the changelog, so the notice does not (#3402). It never
+ * says the break is among the N — the break can sit in the lead bullet itself.
+ */
+export const BREAK_NOTICE_BEFORE_COUNT = 'Includes a breaking change.'
 
 const RELEASE_HEADING = /^## (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?) — (\d{4}-\d{2}-\d{2})\s*$/
 
@@ -386,8 +395,10 @@ export function noteFromSection({ version, date, body }) {
     // A break the kept text does not show is surfaced, never hidden (#3393).
     // The notice outranks the next sentence for the budget, and is appended
     // even past it: a long summary beats a hidden break.
-    const withNotice = withNext !== null ? `${withNext} ${BREAK_NOTICE}` : null
-    text = withNotice !== null && lengthOf(withNotice) <= MAX_SUMMARY_CHARS ? withNotice : `${headline} ${BREAK_NOTICE}`
+    // Budgeted on the form actually appended; the count after it is not.
+    const notice = bullets.length > 1 ? BREAK_NOTICE_BEFORE_COUNT : BREAK_NOTICE
+    const withNotice = withNext !== null ? `${withNext} ${notice}` : null
+    text = withNotice !== null && lengthOf(withNotice) <= MAX_SUMMARY_CHARS ? withNotice : `${headline} ${notice}`
   }
   if (bullets.length > 1) text += ` (+${bullets.length - 1} more in the changelog)`
   return withSegments({ version, date, text, spans, actionRequired })

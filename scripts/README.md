@@ -186,6 +186,9 @@ The developer loop that *consumes* a snapshot — merge, wait for the run, poll 
      says so. When its summary does not already contain "Breaking change",
      `BREAK_NOTICE` ("Includes a breaking change: see the changelog.") is
      appended, and it outranks the lead's next sentence for the length budget.
+     When "(+N more in the changelog)" follows, the notice is the shorter
+     `BREAK_NOTICE_BEFORE_COUNT` ("Includes a breaking change."), so the summary
+     names the changelog once ([#3402](https://github.com/d-hinders/Haven-AI/issues/3402)).
    - **Code stays code** ([#3393](https://github.com/d-hinders/Haven-AI/issues/3393)).
      `summary` is plain text; `summary_segments` is the same text as
      `{ text, code }` parts, which `/releases` renders. While a note is built, a

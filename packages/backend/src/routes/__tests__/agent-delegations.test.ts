@@ -2124,9 +2124,17 @@ describe('POST /:id/delegations/build — OPEN budget through request validation
           url: `/agents/${AGENT_ID}/delegations/build`,
           payload: { token_address: USDC, budget_atomic: '1000000', period_seconds: 86400, merchant_slug: 'Not A Slug' },
         })
-        // Enforced: the spec pattern refuses it (400) before the handler.
-        // Otherwise the handler looks it up and finds nothing (404). Never 201.
-        expect(res.statusCode).toBe(options.enforcedModules ? 400 : 404)
+        // #3032 slice 4: `enforcedModules` no longer overrides a global mode —
+        // enforcement needs `mode: 'enforce'` AND the module listed. In this
+        // SETUPS loop that combination does not exist (all four take the
+        // shadow branch or no layer at all), so the handler's 404 is the
+        // answer everywhere; the 400-before-handler half is pinned in the
+        // lifecycle describe, whose app runs `mode: 'enforce'` with this
+        // module listed.
+        const enforced =
+          options.mode === 'enforce' &&
+          (options.enforcedModules as readonly string[] | undefined)?.includes('routes/agent-delegations.ts')
+        expect(res.statusCode).toBe(enforced ? 400 : 404)
       })
 
       it('a PINNED budget is unaffected', async () => {

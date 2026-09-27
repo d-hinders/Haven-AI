@@ -2115,7 +2115,12 @@ export const openapiSpec = {
                   period_seconds: { type: 'integer', minimum: 60, description: 'Native refill period; ≥ 60.' },
                   expires_at: { type: 'integer', description: 'Unix seconds, must be in the future. Default: now + 90 days.' },
                   merchant_slug: {
-                    type: 'string',
+                    // `['string', 'null']`, not a bare `string` (#3331 merge):
+                    // the handler treats an explicit null as absent (a plain
+                    // build, no lookup) — the same omit-or-null contract as
+                    // `recipient_address` above (#3082). `pattern` constrains
+                    // strings only, so it still refuses a malformed slug.
+                    type: ['string', 'null'],
                     pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
                     description: "A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury).",
                   },

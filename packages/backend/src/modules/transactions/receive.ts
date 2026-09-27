@@ -41,12 +41,12 @@ import {
   findUnmatchedByTxHash,
   matchInboundTransfer,
   markInboundTransferBalanceConsumed,
+  findX402PaytoSettlementIntent,
 } from '../../infra/repositories/inbound-transfers.js'
 import type { InboundMatchKind } from '../../infra/repositories/inbound-transfers.js'
 import type { RawERC20Transfer } from '../../infra/explorer-api.js'
 import type { FastifyBaseLogger } from 'fastify'
-import pool from '../../db.js'
-import { type Executor } from '../../infra/transaction.js'
+import type { Executor } from '../../infra/transaction.js'
 
 export interface IngestInboundTransferAccount {
   id: string
@@ -155,15 +155,20 @@ export async function matchInboundTransferForAccount(
      * would let a contradicting document stand as the row's earned evidence.
      */
     expectedAmountRaw?: string | null
+    /**
+     * Optional executor for transactional threading; when omitted the
+     * repository's own pool default applies (the pool lives behind
+     * `infra/repositories/` — `pg-only-in-infra`).
+     */
+    db?: Executor
   },
-  db: Executor = pool,
 ): Promise<InboundMatchResult> {
   const row = await findUnmatchedByTxHash(
     input.accountId,
     input.userId,
     input.txHash,
     input.payerAddress ?? null,
-    db,
+    input.db,
   )
   if (!row) {
     return { ok: false, error: 'No unmatched inbound transfer for that tx hash' }
@@ -180,8 +185,8 @@ export async function matchInboundTransferForAccount(
       accountAddress: input.accountAddress,
       chainId: row.chain_id,
       txHash: input.txHash,
+      db: input.db,
     },
-    db,
   )
   if (settlement) {
     const matched = await matchInboundTransfer(
@@ -192,14 +197,14 @@ export async function matchInboundTransferForAccount(
         matchedReceiptId: input.receiptId ?? null,
         matchedPaymentIntentId: settlement,
       },
-      db,
+      input.db,
     )
     if (matched) {
       // A matched transfer is EARNED: it now counts in the receive balance.
       // The flag write is part of the match outcome, not best-effort: a
       // failure propagates so the caller never reports a match whose amount
       // the balance would silently understate.
-      await markInboundTransferBalanceConsumed(row.id, input.userId, db)
+      await markInboundTransferBalanceConsumed(row.id, input.userId, input.db)
       return { ok: true, matchKind: 'x402_payto', transferId: row.id }
     }
   }
@@ -213,10 +218,10 @@ export async function matchInboundTransferForAccount(
         matchedReceiptId: input.receiptId,
         matchedPaymentIntentId: null,
       },
-      db,
+      input.db,
     )
     if (matched) {
-      await markInboundTransferBalanceConsumed(row.id, input.userId, db)
+      await markInboundTransferBalanceConsumed(row.id, input.userId, input.db)
       return { ok: true, matchKind: 'receipt', transferId: row.id }
     }
   }
@@ -224,34 +229,12 @@ export async function matchInboundTransferForAccount(
   return { ok: false, error: 'Nothing to match against — supply a receipt the transfer was paid for' }
 }
 
-const FIND_X402_PAYTO_SETTLEMENT_SQL = `
-  SELECT pi.id
-    FROM payment_intents pi
-   WHERE pi.source = 'x402'
-     AND pi.status = 'confirmed'
-     AND pi.tx_hash IS NOT NULL
-     AND pi.chain_id IS NOT NULL
-     AND pi.chain_id = $3
-     AND (LOWER(pi.to_address) = LOWER($2)
-          OR LOWER(COALESCE(pi.x402_merchant_address, '')) = LOWER($2))
-     AND LOWER(pi.tx_hash) = LOWER($4)
-     AND EXISTS (
-       SELECT 1 FROM smart_accounts sa
-        WHERE sa.id = $1
-          AND sa.user_id = $5
-          AND LOWER(sa.account_address) = LOWER($2)
-          AND sa.chain_id = pi.chain_id
-     )
-   LIMIT 1`
-
 /**
  * The x402-payTo half of the match: is there a CONFIRMED x402 settlement
  * whose `payTo` is THIS account's address and whose transaction hash is the
- * inbound row's? The settlement intent belongs to the PAYER (whoever's agent
- * paid this account — on the same deployment that payer is another user), so
- * the query is deliberately NOT scoped `pi.user_id = receiver`: the account
- * was payTo FOR someone else's payment. The hash is the whole key — it names
- * one on-chain event, and the payTo address test ties it to this account.
+ * inbound row's? The lookup itself lives in the repository
+ * (`findX402PaytoSettlementIntent`); this wrapper keeps the module's public
+ * shape for the matcher and its tests.
  *
  * Cross-user by construction, and kept read-only: the matched intent id is
  * stored on the inbound row for audit but is never served to the receiver —
@@ -259,22 +242,20 @@ const FIND_X402_PAYTO_SETTLEMENT_SQL = `
  * records that the payer's settlement names the same on-chain event the
  * account already sees, nothing more.
  */
-export async function findX402PaytoSettlement(
-  input: {
-    accountId: string
-    userId: string
-    accountAddress: string
-    chainId: number
-    txHash: string
-  },
-  db: Executor = pool,
-): Promise<string | null> {
-  const result = await db.query<{ id: string }>(FIND_X402_PAYTO_SETTLEMENT_SQL, [
-    input.accountId,
-    input.accountAddress,
-    input.chainId,
-    input.txHash,
-    input.userId,
-  ])
-  return result.rows[0]?.id ?? null
+export async function findX402PaytoSettlement(input: {
+  accountId: string
+  userId: string
+  accountAddress: string
+  chainId: number
+  txHash: string
+  db?: Executor
+}): Promise<string | null> {
+  return findX402PaytoSettlementIntent({
+    accountId: input.accountId,
+    userId: input.userId,
+    accountAddress: input.accountAddress,
+    chainId: input.chainId,
+    txHash: input.txHash,
+    db: input.db,
+  })
 }

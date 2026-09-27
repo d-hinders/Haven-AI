@@ -16,4 +16,4 @@ export { RiskExplainer } from './RiskExplainer'
 export { CredentialHandoffCard } from './CredentialHandoffCard'
 export { LabelChip, LabelChipRow, LabelOptionRow, type AgentLabel } from './LabelChip'
 export { BalanceFreshnessIndicator, WhenBalanceDegraded, type BalanceFreshness } from './BalanceFreshnessIndicator'
-export { default as ReceivePanel } from './ReceivePanel'
+export { default as ReceivePanel } from './ReceivePanel' // design-system-exempt: a live-data account-page composite — its visual pieces (Card, Button, Address, EmptyState, Skeleton) are the registered primitives; the panel itself is a screen section, not a primitive

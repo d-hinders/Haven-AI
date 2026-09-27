@@ -8,7 +8,6 @@ import {
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
 import { prepareTransfer } from '../rails/hybrid-transfers.js'
-import pool from '../db.js'
 import {
   findOffRampDestination,
   setOffRampDestination,
@@ -19,10 +18,11 @@ import {
   inboundReceiveBalanceAtomic,
   listInboundTransfers,
   findAccountIdByAddressAndChain,
+  insertInboundTransfer,
+  insertInboundReceiptDrop,
 } from '../infra/repositories/inbound-transfers.js'
 import { matchInboundTransferForAccount } from '../modules/transactions/index.js'
-import { insertInboundTransfer } from '../infra/repositories/inbound-transfers.js'
-import { verifyMessage } from 'ethers'
+import { recoverReceiptDropSigner } from '../infra/chain/receipt-drop-signature.js'
 
 /**
  * The receive side (#3333, epic #3328) — TWO route topologies, deliberately:
@@ -105,13 +105,8 @@ function receiptDropSigner(body: ReceiptDropBody): string | null {
   if (!/^0x[0-9a-fA-F]+$/.test(signature)) return null
   if (!Number.isInteger(Number(amountRaw)) || BigInt(amountRaw) <= 0n) return null
 
-  try {
-    const message = `haven:receipt-drop\ntx:${txHash}\namount_raw:${amountRaw}`
-    const recovered = verifyMessage(message, signature)
-    return recovered.toLowerCase() === payerAddress.toLowerCase() ? payerAddress.toLowerCase() : null
-  } catch {
-    return null
-  }
+  const message = `haven:receipt-drop\ntx:${txHash}\namount_raw:${amountRaw}`
+  return recoverReceiptDropSigner(message, signature, payerAddress)
 }
 
 function destinationBody(row: OffRampDestinationRow) {
@@ -178,27 +173,21 @@ export default async function receiveRoutes(app: FastifyInstance): Promise<void>
 
       // The drop's document row. `merchant_receipts` is keyed on payment
       // evidence (agent-side payments), so the receive side stores the
-      // payer-supplied document as its own JSONB row here and links the
-      // inbound transfer to IT — the tables never join across ownership
-      // domains, and the #956 agent endpoint stays exactly as scoped.
+      // payer-supplied document as its own JSONB row (`inbound_receipt_drops`,
+      // through the repository) and links the inbound transfer to IT — the
+      // tables never join across ownership domains, and the #956 agent
+      // endpoint stays exactly as scoped.
       // One document per (chain, hash, payer); a re-drop is idempotent and a
       // different signer for the same transfer is a distinct row the matcher
       // refuses (it only accepts the row's own payer).
-      const inserted = await pool.query<{ id: string }>(
-        `INSERT INTO inbound_receipt_drops (account_id, user_id, chain_id, tx_hash, payer_address, document)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-         ON CONFLICT (chain_id, LOWER(tx_hash), payer_address) DO NOTHING
-         RETURNING id`,
-        [
-          receiving.accountId,
-          receiving.userId,
-          chain.chainId,
-          txHash,
-          payerAddress,
-          JSON.stringify({ tx_hash: txHash, amount_raw: request.body?.amount_raw, payer_address: payerAddress }),
-        ],
-      )
-      const dropId = inserted.rows[0]?.id ?? null
+      const dropId = await insertInboundReceiptDrop({
+        accountId: receiving.accountId,
+        userId: receiving.userId,
+        chainId: chain.chainId,
+        txHash,
+        payerAddress,
+        document: { tx_hash: txHash, amount_raw: request.body?.amount_raw, payer_address: payerAddress },
+      })
 
       const match = await matchInboundTransferForAccount({
         accountId: receiving.accountId,

@@ -17,55 +17,27 @@
  *   `authMiddleware`, never agent-auth), and only REPLACED by the owner —
  *   an agent has no route to it at all;
  * - the USDC token address comes from the chain registry, not the request.
+ *
+ * Payment-adjacent SQL lives in `infra/repositories/` by rule — see the
+ * boundary gates in `scripts/dep-lint.mjs`.
  */
-import pool from '../../db.js'
-import type { Executor } from '../../infra/transaction.js'
 import { getChain } from '../../domain/chains.js'
+import {
+  findOffRampDestinationRow,
+  upsertOffRampDestinationRow,
+  type OffRampDestinationRow,
+} from '../../infra/repositories/inbound-transfers.js'
 
-export interface OffRampDestinationRow {
-  id: string
-  account_id: string
-  chain_id: number
-  destination_address: string
-  destination_kind: string
-  label: string | null
-  created_at: Date
-  updated_at: Date
-}
-
-const FIND_DESTINATION_SQL = `
-  SELECT id, account_id, chain_id, destination_address, destination_kind,
-         label, created_at, updated_at
-    FROM off_ramp_destinations
-   WHERE account_id = $1
-     AND user_id = $2
-     AND chain_id = $3
-   LIMIT 1`
+export type { OffRampDestinationRow } from '../../infra/repositories/inbound-transfers.js'
 
 /** The owner's saved off-ramp destination for one account+chain, or null. */
-export async function findOffRampDestination(
+export function findOffRampDestination(
   accountId: string,
   userId: string,
   chainId: number,
-  db: Executor = pool,
 ): Promise<OffRampDestinationRow | null> {
-  const result = await db.query<OffRampDestinationRow>(FIND_DESTINATION_SQL, [
-    accountId,
-    userId,
-    chainId,
-  ])
-  return result.rows[0] ?? null
+  return findOffRampDestinationRow(accountId, userId, chainId)
 }
-
-const UPSERT_DESTINATION_SQL = `
-  INSERT INTO off_ramp_destinations (account_id, user_id, chain_id, destination_address, destination_kind)
-  VALUES ($1, $2, $3, $4, $5)
-  ON CONFLICT (account_id, chain_id) DO UPDATE
-     SET destination_address = EXCLUDED.destination_address,
-         destination_kind = EXCLUDED.destination_kind,
-         updated_at = NOW()
-  RETURNING id, account_id, chain_id, destination_address, destination_kind,
-            label, created_at, updated_at`
 
 /**
  * Set (or replace) the owner's off-ramp destination. OWNER-only by caller
@@ -73,24 +45,14 @@ const UPSERT_DESTINATION_SQL = `
  * (dashboard JWT), never agent-auth — an agent key cannot set or change a
  * destination, and no agent route exists for it.
  */
-export async function setOffRampDestination(
-  input: {
-    accountId: string
-    userId: string
-    chainId: number
-    destinationAddress: string
-    destinationKind: string
-  },
-  db: Executor = pool,
-): Promise<OffRampDestinationRow> {
-  const result = await db.query<OffRampDestinationRow>(UPSERT_DESTINATION_SQL, [
-    input.accountId,
-    input.userId,
-    input.chainId,
-    input.destinationAddress.toLowerCase(),
-    input.destinationKind,
-  ])
-  return result.rows[0]
+export function setOffRampDestination(input: {
+  accountId: string
+  userId: string
+  chainId: number
+  destinationAddress: string
+  destinationKind: string
+}): Promise<OffRampDestinationRow> {
+  return upsertOffRampDestinationRow(input)
 }
 
 /** The chain registry's USDC contract for `chainId`, or null when the chain has none. */

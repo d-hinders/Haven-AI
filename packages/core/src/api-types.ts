@@ -5203,10 +5203,10 @@ export type components = {
              */
             destination_address: string;
             /**
-             * @default custody_deposit
+             * @description Defaults to custody_deposit when omitted (handler fallback).
              * @enum {string}
              */
-            destination_kind: "safello" | "coinbase" | "custody_deposit";
+            destination_kind?: "safello" | "coinbase" | "custody_deposit";
         };
         OffRampPrepareInput: {
             /** @description The amount to move, atomic units. The recipient and token are NOT in the request: they are the saved destination and the chain registry USDC. */

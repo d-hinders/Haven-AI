@@ -294,6 +294,10 @@ describe('index.ts readers', () => {
       'routes/agent-connection-setups.ts',
       'routes/agent-passports.ts',
       'routes/hybrid-accounts.ts',
+      // #3333: the receive side is born enforced — the request-validation
+      // rollout is in `enforce` mode, so a new route file registers enforced
+      // from its first commit (one file = one enforcedModules entry).
+      'routes/receive.ts',
     ])
   })
 })

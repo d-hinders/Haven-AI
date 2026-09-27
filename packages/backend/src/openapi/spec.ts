@@ -10887,7 +10887,11 @@ export const openapiSpec = {
         required: ['destination_address'],
         properties: {
           destination_address: { ...address, description: 'The deposit address. The zero address is refused.' },
-          destination_kind: { type: 'string', enum: ['safello', 'coinbase', 'custody_deposit'], default: 'custody_deposit' },
+          // No schema-side default: a request-body default would let ajv
+          // inject the value into payloads (shadow invariant, #3135 S5) and
+          // read as a server-coerced field. The handler falls back to
+          // custody_deposit when the field is absent.
+          destination_kind: { type: 'string', enum: ['safello', 'coinbase', 'custody_deposit'], description: 'Defaults to custody_deposit when omitted (handler fallback).' },
         },
         additionalProperties: false,
       },

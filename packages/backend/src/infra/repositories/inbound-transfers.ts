@@ -298,3 +298,161 @@ export async function listInboundTransfers(
   ])
   return result.rows
 }
+
+// ── Off-ramp destinations (#3333) ────────────────────────────────────────────
+// The OWNER's saved off-ramp deposit address, one per account+chain. The
+// OWNER-only contract (agents have no route to these writes) lives in the
+// routes and `modules/transactions/off-ramp.ts`; the rows live here with the
+// rest of the receive side's payment-adjacent SQL.
+
+export interface OffRampDestinationRow {
+  id: string
+  account_id: string
+  chain_id: number
+  destination_address: string
+  destination_kind: string
+  label: string | null
+  created_at: Date
+  updated_at: Date
+}
+
+const FIND_DESTINATION_SQL = `
+  SELECT id, account_id, chain_id, destination_address, destination_kind,
+         label, created_at, updated_at
+    FROM off_ramp_destinations
+   WHERE account_id = $1
+     AND user_id = $2
+     AND chain_id = $3
+   LIMIT 1`
+
+/** The owner's saved off-ramp destination for one account+chain, or null. */
+export async function findOffRampDestinationRow(
+  accountId: string,
+  userId: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<OffRampDestinationRow | null> {
+  const result = await db.query<OffRampDestinationRow>(FIND_DESTINATION_SQL, [
+    accountId,
+    userId,
+    chainId,
+  ])
+  return result.rows[0] ?? null
+}
+
+const UPSERT_DESTINATION_SQL = `
+  INSERT INTO off_ramp_destinations (account_id, user_id, chain_id, destination_address, destination_kind)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (account_id, chain_id) DO UPDATE
+     SET destination_address = EXCLUDED.destination_address,
+         destination_kind = EXCLUDED.destination_kind,
+         updated_at = NOW()
+  RETURNING id, account_id, chain_id, destination_address, destination_kind,
+            label, created_at, updated_at`
+
+/** Set (or replace) the owner's off-ramp destination. Owner-scoped by caller contract. */
+export async function upsertOffRampDestinationRow(input: {
+  accountId: string
+  userId: string
+  chainId: number
+  destinationAddress: string
+  destinationKind: string
+  db?: Executor
+}): Promise<OffRampDestinationRow> {
+  const db = input.db ?? pool
+  const result = await db.query<OffRampDestinationRow>(UPSERT_DESTINATION_SQL, [
+    input.accountId,
+    input.userId,
+    input.chainId,
+    input.destinationAddress.toLowerCase(),
+    input.destinationKind,
+  ])
+  return result.rows[0]
+}
+
+// ── The x402 payTo settlement lookup (#3333) ─────────────────────────────────
+// Read-only evidence for the match: is there a CONFIRMED x402 settlement whose
+// `payTo` is THIS account's address and whose transaction hash is the inbound
+// row's? The settlement intent belongs to the PAYER (whoever's agent paid this
+// account — on the same deployment that payer is another user), so the query
+// is deliberately NOT scoped `pi.user_id = receiver`: the account was payTo
+// FOR someone else's payment. The hash is the whole key — it names one
+// on-chain event, and the payTo address test ties it to this account.
+
+const FIND_X402_PAYTO_SETTLEMENT_SQL = `
+  SELECT pi.id
+    FROM payment_intents pi
+   WHERE pi.source = 'x402'
+     AND pi.status = 'confirmed'
+     AND pi.tx_hash IS NOT NULL
+     AND pi.chain_id IS NOT NULL
+     AND pi.chain_id = $3
+     AND (LOWER(pi.to_address) = LOWER($2)
+          OR LOWER(COALESCE(pi.x402_merchant_address, '')) = LOWER($2))
+     AND LOWER(pi.tx_hash) = LOWER($4)
+     AND EXISTS (
+       SELECT 1 FROM smart_accounts sa
+        WHERE sa.id = $1
+          AND sa.user_id = $5
+          AND LOWER(sa.account_address) = LOWER($2)
+          AND sa.chain_id = pi.chain_id
+     )
+   LIMIT 1`
+
+/**
+ * The settlement intent id the account was payTo for at this tx hash, or null.
+ * Cross-user by construction and kept read-only: the matched intent id is
+ * stored on the inbound row for audit but is never served to the receiver —
+ * the wire carries only `match_kind`. No authority is involved.
+ */
+export async function findX402PaytoSettlementIntent(input: {
+  accountId: string
+  userId: string
+  accountAddress: string
+  chainId: number
+  txHash: string
+  db?: Executor
+}): Promise<string | null> {
+  const db = input.db ?? pool
+  const result = await db.query<{ id: string }>(FIND_X402_PAYTO_SETTLEMENT_SQL, [
+    input.accountId,
+    input.accountAddress,
+    input.chainId,
+    input.txHash,
+    input.userId,
+  ])
+  return result.rows[0]?.id ?? null
+}
+
+// ── The payer's signed receipt drop (#3333) ──────────────────────────────────
+// One document per (chain, hash, payer); a re-drop is idempotent and a
+// different signer for the same transfer is a distinct row the matcher
+// refuses (it only accepts the row's own payer).
+
+const INSERT_RECEIPT_DROP_SQL = `
+  INSERT INTO inbound_receipt_drops (account_id, user_id, chain_id, tx_hash, payer_address, document)
+  VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+  ON CONFLICT (chain_id, LOWER(tx_hash), payer_address) DO NOTHING
+  RETURNING id`
+
+/** Persist a payer-supplied receipt document; returns its id, or null on a re-drop. */
+export async function insertInboundReceiptDrop(input: {
+  accountId: string
+  userId: string
+  chainId: number
+  txHash: string
+  payerAddress: string
+  document: Record<string, unknown>
+  db?: Executor
+}): Promise<string | null> {
+  const db = input.db ?? pool
+  const result = await db.query<{ id: string }>(INSERT_RECEIPT_DROP_SQL, [
+    input.accountId,
+    input.userId,
+    input.chainId,
+    input.txHash,
+    input.payerAddress,
+    JSON.stringify(input.document),
+  ])
+  return result.rows[0]?.id ?? null
+}

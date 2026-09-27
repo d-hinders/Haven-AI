@@ -14,6 +14,12 @@
  *   OWNER on this page (an agent has no route to it), and the prepared op
  *   is signed with the account's own signer via the same signing flow the
  *   owner send uses (#1083).
+ *
+ * The signing surface is its own component (`ReceiveHandoff`, below) and
+ * mounts ONLY when an op is prepared: it is the one piece that resolves the
+ * active signer (`useActiveSigner` → wagmi context), and scoping it to the
+ * hand-off keeps the panel renderable anywhere wagmi is not provided —
+ * including tests that render the surrounding account page.
  */
 
 import { useEffect, useState } from 'react'
@@ -44,10 +50,7 @@ function receivePanelCopy() {
     saveDestination: 'Save deposit address',
     prepare: 'Prepare transfer',
     preparing: 'Preparing...',
-    signNow: 'Sign transfer',
-    signing: 'Waiting for signature...',
     destinationLabel: 'Off-ramp deposit address',
-    destinationSaved: 'Saved deposit address',
     noDestination: 'No deposit address saved yet.',
     destinationNote:
       'The transfer goes only to this saved address. Only you can set it — your agents cannot.',
@@ -55,7 +58,7 @@ function receivePanelCopy() {
   }
 }
 
-export default function ReceivePanel({ accountAddress, chainId }: ReceivePanelProps) {
+export default function ReceivePanel({ accountAddress, chainId }: ReceivePanelProps) { // design-system-exempt: a live-data account-page composite — its visual pieces (Card, Button, Address, EmptyState, Skeleton) are the registered primitives; the panel itself is a screen section, not a primitive
   const { ledger, loading, error, refetch } = useReceiveLedger(accountAddress, chainId)
   const { toast } = useToast()
   const copy = receivePanelCopy()
@@ -65,33 +68,12 @@ export default function ReceivePanel({ accountAddress, chainId }: ReceivePanelPr
   const [destination, setDestination] = useState<OffRampDestination | null>(null)
   const [prepareBusy, setPrepareBusy] = useState(false)
   const [prepared, setPrepared] = useState<OffRampPrepareResponse | null>(null)
-  const [signBusy, setSignBusy] = useState(false)
 
   // The destination arrives ON the ledger response; keep a local mirror so
   // a save can update it without refetching the whole ledger.
   useEffect(() => {
     if (ledger) setDestination(ledger.off_ramp_destination)
   }, [ledger])
-
-  const signer = useActiveSigner({
-    accountAddress: accountAddress as `0x${string}` | undefined,
-    chainId,
-  })
-  const [signers, setSigners] = useState<AccountSigners | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    api
-      .get<AccountSigners>(`/accounts/hybrid/${accountAddress}/signers?chain_id=${chainId}`)
-      .then((rows) => {
-        if (!cancelled) setSigners(rows)
-      })
-      .catch(() => {
-        if (!cancelled) setSigners(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [accountAddress, chainId])
 
   async function saveDestination() {
     if (destinationInput === '') return
@@ -130,37 +112,6 @@ export default function ReceivePanel({ accountAddress, chainId }: ReceivePanelPr
     }
   }
 
-  async function signAndSubmit() {
-    if (!prepared) return
-    setSignBusy(true)
-    try {
-      const submitBody = {
-        token_address: prepared.submit.token_address,
-        to: prepared.submit.to,
-        amount_atomic: prepared.submit.amount_atomic,
-        // The device decides the scheme (#1086): a secure passkey signs the
-        // user op with webauthn, EOA owners with eip712 typed data.
-        signature_scheme: signer?.type === 'eoa' ? 'eip712_userop' : 'webauthn_userop',
-        signature: '' as string,
-        user_operation: prepared.prepared,
-      }
-      const preparedOp = prepared.prepared as unknown as PreparedAccountOp
-      const signature = await signPreparedAccountOp(preparedOp, signers, signer)
-      submitBody.signature = signature
-      const done = await api.post<{ tx_hash?: string | null }>(
-        `/accounts/hybrid/${accountAddress}/transfers/submit?chain_id=${chainId}`,
-        submitBody,
-      )
-      setPrepared(null)
-      toast.success(done.tx_hash ? 'Transfer submitted' : 'Transfer submitted')
-      refetch()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Signing was cancelled or failed')
-    } finally {
-      setSignBusy(false)
-    }
-  }
-
   if (loading && !ledger) {
     return (
       <Card hover={false}>
@@ -179,7 +130,13 @@ export default function ReceivePanel({ accountAddress, chainId }: ReceivePanelPr
         <EmptyState
           title="Receive panel could not load"
           body={error}
-          action={<Button variant="ghost" size="sm" onClick={refetch}>Try again</Button>}
+          // The account page carries other retry affordances (agent access,
+          // the unlink dialog); the accessible name says WHICH one this is.
+          action={
+            <Button variant="ghost" size="sm" aria-label="Retry loading the receive panel" onClick={refetch}>
+              Try again
+            </Button>
+          }
         />
       </Card>
     )
@@ -266,23 +223,17 @@ export default function ReceivePanel({ accountAddress, chainId }: ReceivePanelPr
         </div>
 
         {prepared ? (
-          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <p className="text-sm font-semibold text-[var(--v2-ink)]">
-              Ready to sign: {prepared.submit.amount_atomic} atomic units to{' '}
-              <Address value={prepared.submit.to} truncate />
-            </p>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-              You sign with this account&apos;s own signer. The transfer can only go to the saved address.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" onClick={signAndSubmit} disabled={signBusy}>
-                {signBusy ? copy.signing : copy.signNow}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setPrepared(null)} disabled={signBusy}>
-                Cancel
-              </Button>
-            </div>
-          </div>
+          <ReceiveHandoff
+            accountAddress={accountAddress}
+            chainId={chainId}
+            prepared={prepared}
+            onDone={() => {
+              setPrepared(null)
+              toast.success('Transfer submitted')
+              refetch()
+            }}
+            onCancel={() => setPrepared(null)}
+          />
         ) : (
           <div className="mt-4">
             <Button size="sm" onClick={prepareHandoff} disabled={prepareBusy || !destination || ledger.balance_atomic === '0'}>
@@ -295,5 +246,95 @@ export default function ReceivePanel({ accountAddress, chainId }: ReceivePanelPr
         )}
       </div>
     </Card>
+  )
+}
+
+interface ReceiveHandoffProps {
+  accountAddress: string
+  chainId: number
+  prepared: OffRampPrepareResponse
+  onDone: () => void
+  onCancel: () => void
+}
+
+/**
+ * The sign step of the off-ramp hand-off: the owner signs the prepared op
+ * with the account's own signer and submits it. Mounted only when an op is
+ * prepared — it is the only part of the receive panel that touches wagmi
+ * (`useActiveSigner`), so the panel above never requires a wagmi provider
+ * to render.
+ */
+function ReceiveHandoff({ accountAddress, chainId, prepared, onDone, onCancel }: ReceiveHandoffProps) {
+  const { toast } = useToast()
+  const [signBusy, setSignBusy] = useState(false)
+
+  const signer = useActiveSigner({
+    accountAddress: accountAddress as `0x${string}` | undefined,
+    chainId,
+  })
+  const [signers, setSigners] = useState<AccountSigners | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<AccountSigners>(`/accounts/hybrid/${accountAddress}/signers?chain_id=${chainId}`)
+      .then((rows) => {
+        if (!cancelled) setSigners(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setSigners(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [accountAddress, chainId])
+
+  async function signAndSubmit() {
+    setSignBusy(true)
+    try {
+      const submitBody = {
+        token_address: prepared.submit.token_address,
+        to: prepared.submit.to,
+        amount_atomic: prepared.submit.amount_atomic,
+        // The device decides the scheme (#1086): a secure passkey signs the
+        // user op with webauthn, EOA owners with eip712 typed data.
+        signature_scheme: signer?.type === 'eoa' ? 'eip712_userop' : 'webauthn_userop',
+        signature: '' as string,
+        user_operation: prepared.prepared,
+      }
+      const preparedOp = prepared.prepared as unknown as PreparedAccountOp
+      const signature = await signPreparedAccountOp(preparedOp, signers, signer)
+      submitBody.signature = signature
+      const done = await api.post<{ tx_hash?: string | null }>(
+        `/accounts/hybrid/${accountAddress}/transfers/submit?chain_id=${chainId}`,
+        submitBody,
+      )
+      onDone()
+      return done
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Signing was cancelled or failed')
+      return null
+    } finally {
+      setSignBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+      <p className="text-sm font-semibold text-[var(--v2-ink)]">
+        Ready to sign: {prepared.submit.amount_atomic} atomic units to{' '}
+        <Address value={prepared.submit.to} truncate />
+      </p>
+      <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+        You sign with this account&apos;s own signer. The transfer can only go to the saved address.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={signAndSubmit} disabled={signBusy}>
+          {signBusy ? 'Waiting for signature...' : 'Sign transfer'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={signBusy}>
+          Cancel
+        </Button>
+      </div>
+    </div>
   )
 }

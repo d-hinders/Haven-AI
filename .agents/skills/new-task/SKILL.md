@@ -339,9 +339,35 @@ gh issue list --label money-path --state all --limit 200 \
 
 ## Backlog And Shipping
 
-- Default to backlog-only: do not add `code-quality`.
-- When the requester passes `--ship` or clearly asks to ship now, run § *Issue review* first, then add `code-quality` and continue with [ship-next](../ship-next/SKILL.md).
-- To queue an existing backlog issue later, add `code-quality` or make it an epic sub-issue.
+**An issue is ready when its spec is right, not when it carries a label.** The
+spec is right once:
+- every claim is measured (step 1);
+- the § *Issue review* pass has run and its corrections are applied;
+- the verdict comment is posted;
+- every owner decision it needed is recorded on the issue.
+
+Report readiness on those terms. Do not present adding `code-quality` as the
+step that makes an issue ready or pickable.
+
+**How work actually gets picked up (measured 2026-09-25).** Partners and
+sessions claim issues through the `🔒 CLAIM` protocol in
+[`AGENTS.md`](../../../AGENTS.md). Since 2026-09-15 there have been about 240
+claim comments across about 95 distinct issues. Only 6 of the last 60 completed
+non-epic issues carried `code-quality`. #3307 went from claim to merge in about
+75 minutes, and never carried the label.
+
+`code-quality` is the selector for a no-argument
+[ship-next](../ship-next/SKILL.md) run. That loop is rarely driven by hand. Two
+scheduled workflows (`guard-freshness.yml`, `db-concurrency-proof.yml`) also add
+the label automatically, to queue the CI-health issues they file.
+
+- Do not add `code-quality` by default, and do not offer it as a closing step.
+- When the requester passes `--ship` or clearly asks to ship now, run § *Issue
+  review* first, then continue with [ship-next](../ship-next/SKILL.md) on that
+  issue number. A specified issue needs no label.
+- Add `code-quality` to a backlog issue only when someone asks for the
+  autonomous loop to pick it up. Making the issue an epic sub-issue queues it for
+  `epic=#<n>` instead.
 
 ## Guardrails
 

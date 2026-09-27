@@ -36,6 +36,7 @@ export {
   issuePassport,
   issuePassportBestEffort,
   retryPendingPassports,
+  repairAnchoredUids,
   setAnchor,
   setAnchorRecovery,
   setAnchorLiveness,
@@ -60,6 +61,10 @@ export {
   buildRevokeCall,
   encodeClaim,
   PASSPORT_REVOKE_SUBMITTER,
+  // #3294: the mined-UID reader the anchor records from, and the repair of
+  // pre-fix rows whose stored UID is the staticCall prediction.
+  readMinedAttestationUid,
+  repairAnchorUidFromReceipt,
 } from './attestation.js'
 
 // The merchant-facing verifier (#974). Haven's DB is the authority here; the
@@ -111,6 +116,8 @@ export {
   isStaleAnchor,
   setRevoker,
   setRevocationProbe,
+  setAnchorUidRepair,
+  retireAttestationOnChain,
   type Standing,
   type AnchorState,
   type PassportStanding,
@@ -118,6 +125,9 @@ export {
   type RevocationAnchorProbe,
   type RevocationAnchorReading,
   type RevocationAnchorState,
+  type AnchorUidRepair,
+  type RetireOutcome,
+  type RetireResult,
 } from './revocation.js'
 
 // Re-anchoring after a re-key (#1699, epic #1694). EAS attestations are

@@ -176,19 +176,40 @@ Check whether a green run has actually **covered** the money-path files now on
 matcher rather than approximating it:
 
 ```sh
-# The newest green qa-dev runs and the commits they ran at. This is a local
-# APPROXIMATION of the gate's selector (#2404): the gate admits a run only if
-# its event is deployment_status/schedule/workflow_dispatch, its commit is an
-# ancestor of `dev`'s tip, and its `money-flow` JOB concluded success — so
-# take the newest row whose event is one of those three and whose SHA is on
-# `dev`. There is deliberately no `--branch` filter: the gate does not use one
-# (a post-deploy run does report `headBranch=dev` — measured, #2427 — but a
-# branch name says nothing about which commit the harness exercised).
+# The green qa-dev run the gate anchors to, and the commit it ran at. This
+# calls the gate's OWN selection (`findGreenRun` in qa-freshness.mjs, #3361):
+# the same query (every run-level success created within 2 × QA_FRESHNESS_HOURS),
+# the same pre-filter, and the same rules (#2404): the event, `headBranch == dev`
+# for schedule/dispatch, the commit on `dev`, and the `money-flow` JOB
+# concluding success. Most qa-dev runs are gate-skipped deployment_status runs
+# that still conclude success at run level (#3348), which is why a hand-rolled
+# `gh run list --status=success` approximation over-reports. Ancestry is taken
+# against origin/dev, the promotion head. The printed sha is <that-sha> below.
+# "No admissible run" means the gate refuses too: dispatch qa-dev.
 # `gh` is unavailable in the remote Claude Code environment — use the Actions UI
 # or the GitHub MCP (list workflow runs for qa-dev.yml) there.
-gh run list --workflow=qa-dev.yml --status=success --limit=10 \
-  --json headSha,createdAt,event,headBranch
+git fetch -q origin dev
+node --input-type=module -e '
+import { execFileSync } from "node:child_process"
+import { findGreenRun, jobsQueryArgs } from "./scripts/ci/qa-freshness.mjs"
+const gh = (args) => execFileSync("gh", args, { encoding: "utf8", maxBuffer: 64 << 20 })
+const repo = "d-hinders/Haven-AI"
+const isAncestorOfHead = (sha) => {
+  try { execFileSync("git", ["merge-base", "--is-ancestor", sha, "origin/dev"], { stdio: "ignore" }); return true }
+  catch (e) { return e.status === 1 ? false : null }
+}
+const jobsFor = (id) => { try { return JSON.parse(gh(jobsQueryArgs(repo, id))).jobs } catch { return null } }
+const freshnessHours = Number(process.env.QA_FRESHNESS_HOURS || 30)
+const r = findGreenRun({ repo, freshnessHours, nowMs: Date.now(), gh, isAncestorOfHead, jobsFor })
+console.log(r.run
+  ? `run ${r.run.databaseId}  sha ${r.run.headSha}  event ${r.run.event}  created ${r.run.createdAt}`
+  : `no admissible money-flow success in the last ${2 * freshnessHours}h: the gate will refuse too — dispatch qa-dev`)
+'
 
+# If the printed `created` is QA_FRESHNESS_HOURS + 1 h old or more (the gate
+# counts whole hours; 31 h at the default 30), the gate refuses it as stale
+# whatever the diff below says: dispatch qa-dev.
+# Run both snippets from the repo root (they import ./scripts/ci/qa-freshness.mjs).
 # Money-path files changed since that commit. Any output means the gate blocks.
 git diff --name-only <that-sha>..origin/dev | node --input-type=module -e '
 import { readFileSync } from "node:fs"
@@ -260,9 +281,12 @@ Read it there; nothing about the choice lives here.
 npm run release:bump -- <version> --yes
 ```
 
-Never hand-edit a version field, a cross-package pin, or a source version
-constant — the script owns all of them atomically, and a missed one ships a
-package that lies about itself. Never run `npm publish`.
+Never hand-edit a version field, a cross-package pin, a source version
+constant, or the client release data (`packages/core/src/client-releases.data.ts`,
+#3305) — the script owns all of them atomically, and a missed one ships a
+package that lies about itself. The release data comes from the CHANGELOGs: fix
+a note there, and the bump refuses to run over a hand-edited file. Never run
+`npm publish`.
 
 The lockfile needs no attention from you: since #1663 the bump rewrites it
 structurally and fails loudly if the diff holds anything but version lines
@@ -408,8 +432,28 @@ tell that PR's author what changed underneath them.
 
 Publishing happens on the `dev → main` promotion. **Follow
 `branch-and-release-flow.md` § *Promotion to production*** — it owns the
-sequence, the BEHIND/sync-back rule, and why both merge with a merge commit
-rather than a squash. Do not restate it; read it.
+sequence, why a promotion merges with a merge commit rather than a squash, and
+why it merges BEHIND by the owner with no sync-back (owner decision,
+2026-09-26). Do not restate it; read it.
+
+**Promotion preflight** — run before opening the promotion PR; each line cost
+0.5.0-alpha.1 (#3325) a round-trip with the owner.
+
+- [ ] **BEHIND is a blocker, not noise.** `git rev-list --count origin/dev..origin/main`
+      non-zero plus `strict_required_status_checks_policy: true` on `Dev gate`
+      (`curl -sS https://api.github.com/repos/d-hinders/Haven-AI/rules/branches/main`)
+      means the ordinary merge button is refused, and by design only the owner
+      merges it (no sync-back). Tell the owner so up front.
+- [ ] **Code-owner review.** `git diff --name-only origin/main origin/dev -- ':(glob)packages/backend/src/db/migrations/*.ts'`
+      non-empty means an approving review from a code owner other than the PR
+      author is required — request it when opening, not when it blocks.
+- [ ] **Decide `qa-override` before opening, and apply it at open.**
+      `qa-freshness` reads labels only on `opened`/`synchronize`/`reopened`, and
+      a re-run replays the old payload; a label added later takes a
+      close/reopen, which is the owner's call, never an agent's.
+- [ ] **The owner merges from the web UI or the API**, not the GitHub mobile
+      app — it offers no bypass merge and reports only "Some checks did not
+      pass".
 
 Since #2165 the merge-method half is enforced by the `Dev gate` ruleset rather
 than by you remembering it: a PR based on `main` can only be merge-merged. Treat
@@ -448,13 +492,6 @@ What it leaves to you:
 - It calls the promotion a human step; it does not say whose. **Confirm the user
   wants it** before opening one — cutting the release and shipping it to
   production are two decisions, and only the first is yours.
-- A sync-back claims zero content change, so **prove it**: the merged tree hash
-  must equal `dev`'s, and `git diff origin/dev` must be empty, before you push.
-  Test the merge in a throwaway worktree rather than on a shared branch.
-- **If the promotion merges while a sync PR is still open, that sync is stale.**
-  It carries the superseded `main` and will leave `dev` behind by the newest
-  promotion merge. Re-point it at current `main` before merging it.
-
 ## Closeout
 
 Two halves, **both** owed by every release including a no-bump one:

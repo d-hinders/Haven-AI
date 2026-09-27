@@ -6,9 +6,39 @@ time while being false. The bump rewrites the `## Unreleased` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 
+Mark a bullet `**Update required**` when a client must update to keep paying.
+The bump then flags that release `action_required` in the public release data
+(`/releases`, `GET /discovery`, `/.well-known/haven.json`; #3305). It is not
+`**BREAKING**`, which means updating may break you, not that you must update.
+Write it exactly: "update required" in any other form (including "no update
+required") is refused — reword to "no update needed", or quote it in a code span.
+
 ## Unreleased
 
-- **Behaviour change, via `@haven_ai/sdk` (#3283):** `haven_send` and the x402 payment tools (`haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool`) now refuse, before anything is signed or submitted, a served UserOp that is not this delegate key's own direct-payment shape. So is an erc7710 settlement child that does not match the merchant's 402, is a root grant, is delegated by another account, or has no 402 expectation to check it against. Every such refusal is the SDK's `HavenTypedDataRefusedError`, code `TYPED_DATA_NOT_ALLOWED`. No tool, argument, schema or description changed on this package.
+## 0.6.0-alpha.0 — 2026-09-26
+
+### Removed
+
+- **BREAKING (#3306, via `@haven_ai/sdk`) — `haven_list_receipts` rows lose four keys.** `rail`, `proofStatus`, `resourceUrl` and `merchantAddress`, the deprecated twins kept for one full release since `0.5.0-alpha.0` (#3134), are no longer emitted; read `source`, `paymentProofStatus`, `x402ResourceUrl` and `x402MerchantAddress`. This is a tool-output re-shape, breaking for any agent or script still reading an old key, so the release carrying it takes a **MINOR** bump under the 0.x convention (`docs/operations/mcp-runtime-compatibility.md`). A `.d.ts` diff of this package shows nothing — the break is in tool output, which no declaration file carries. No tool, argument, schema or description changed **by this bullet's change alone** — see the task-budget tool additions below for what else this release carries; the hosted runtime drops the keys with its deploy.
+
+### Added
+
+- **Task budgets: three new tools (#3329).** `haven_open_task_budget` and `haven_close_task_budget` reserve and end a short-lived, self-delegated child of the agent's own budget delegation, scoped to one task; `haven_submit` is new on this runtime and relays the local signer's signature for a task budget by `task_budget_id` only — a `payment_id` is refused here, because this runtime signs and submits a payment inline and has no relay step for it. `task_budget_id` is an optional argument on `haven_send`, `haven_pay_x402_quote` and `haven_pay_x402` (`haven_pay_x402_quote` dropped it on the `dev` channel until #3378). A task budget pinned to a recipient is checked against where each payment first goes, and the x402 tools here first fund the agent's own wallet, so a merchant-pinned task budget is declined on them — `haven_open_task_budget`'s description says so. The exported `HavenMcpToolName` union gains the three names, so a consumer with an exhaustive `switch` or a `Record<HavenMcpToolName, …>` over it must add them. The tool set grew by three, so the consent hash changes and every operator is asked to consent once more on the next launch.
+
+### Changed
+
+- **Behaviour change, via `@haven_ai/sdk` (#3375, epic #3284):** `haven_pay_x402`, `haven_pay_x402_quote` and `haven_pay_mcp_tool` now refuse, before anything is signed or submitted, an x402 funding leg that does not pay the quoted amount of the quoted token into this key's own delegate wallet. The backend already builds exactly that shape, so no live payment changes; the check closes a redirect a compromised Haven API could otherwise serve under an open budget. No tool, argument, schema or description changes, so the consent hash does not move. Update to get the check.
+
+- **`haven_send` description copy (#3277, via `@haven_ai/sdk`).** The shared send description no longer claims every signer refuses a payload whose typed data does not match its hash — only a current signer does. Copy only: the consent hash covers tool names, never descriptions, so nobody is re-prompted.
+
+## 0.5.0-alpha.1 — 2026-09-25
+
+- **Client identity and update hint (#3303, epic #3302).** Haven API requests name `@haven_ai/mcp/<version>` in `X-Haven-Client`. When the backend sends a `client_update` hint for this runtime, the tool result carries it as `client_update`, on success and failure alike, with the exact update command. A 426 `client_outdated` refusal also keeps the backend's `next_tool_omitted_reason` at the top level of the failure. No tool, schema or consent input changes, so nobody is re-prompted.
+
+## 0.5.0-alpha.0 — 2026-09-25
+
+- **Consent label copy fix (#3279).** The first-launch consent screen prints `Haven wallet: <address>` instead of `Haven wallet (Safe): <address>`, and the `accountAddress` field JSDoc loses the retired rail's name. Copy only: **the consent hash is unchanged** — `computeConsentHash` covers identity, the tool set and the allowance summary, never the rendered text, so nobody is re-prompted; the label pin test is retargeted to the new wording, not removed. The spend-gate wording on the same screen ("the real spend gate — enforced by the agent's signed delegation") was already correct and stays.
+- **Behaviour change, via `@haven_ai/sdk` (#3283):** `haven_send` and the x402 payment tools (`haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool`) now refuse, before anything is signed or submitted, a served UserOp that is not this delegate key's own direct-payment shape. So is an erc7710 settlement child that does not match the merchant's 402, is a root grant, is delegated by another account, or has no 402 expectation to check it against. Every such refusal is the SDK's `HavenTypedDataRefusedError`, code `TYPED_DATA_NOT_ALLOWED`. Separately, `haven_send` inherits #3271's direct-payment binding check: a served UserOp whose typed data does not hash to its own `payload_hash` is refused with `HavenUserOpBindingError`, code `USEROP_BINDING_MISMATCH`. No tool, argument, schema or description changed on this package.
 - `haven_list_receipts` rows gain `source`, `paymentProofStatus`, `x402ResourceUrl` and `x402MerchantAddress` (#3134, via `@haven_ai/sdk`'s `mapPaymentReceipt`) beside the deprecated `rail`, `proofStatus`, `resourceUrl`, `merchantAddress`, which stay for one full release (removal condition in the SDK CHANGELOG entry). No tool, argument, schema or description changed on this package; the change is carried by the SDK dependency.
 
 ## 0.4.0-alpha.0 — 2026-09-19

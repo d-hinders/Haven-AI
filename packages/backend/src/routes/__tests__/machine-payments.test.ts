@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getAddress } from 'ethers'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
 // #3031 round 2: the reconciliation-events module — split out of
@@ -486,7 +487,9 @@ describe('machine payment routes', () => {
         chain_id: 84532,
         allowances: [{
           id: 'd-1',
-          token_address: SEPOLIA_USDC,
+          // #3319: the read boundary checksums `token_address` (the seed stays
+          // lowercase; the constant is letter-bearing so the two differ).
+          token_address: getAddress(SEPOLIA_USDC),
           token_symbol: 'USDC',
           configured_amount: '10.00',
           reset_period_min: 1440,
@@ -852,9 +855,9 @@ describe('machine payment routes', () => {
         settlement_tx_hash: null,
         chain_id: 8453,
         resource_url: challenge.resource,
-        merchant_address: RECIPIENT.toLowerCase(),
-        payer_address: AGENT.account_address.toLowerCase(),
-        settlement_address: RECIPIENT.toLowerCase(),
+        merchant_address: RECIPIENT, // #3307: checksummed at the read boundary
+        payer_address: getAddress(AGENT.account_address),
+        settlement_address: RECIPIENT,
         token_symbol: 'USDC',
         token_address: USDC,
         amount_raw: '10000',
@@ -872,10 +875,10 @@ describe('machine payment routes', () => {
         updated_at: '2026-05-15T12:00:01.000Z',
         // #2960: additive alongside `payer_address` above (`treasury_account` only).
         parties: {
-          treasury_account: AGENT.account_address.toLowerCase(),
+          treasury_account: getAddress(AGENT.account_address),
           delegate: AGENT.delegate_address,
           delegate_account: null,
-          merchant: RECIPIENT.toLowerCase(),
+          merchant: RECIPIENT,
         },
       }],
     })
@@ -946,10 +949,10 @@ describe('machine payment routes', () => {
       }>
     }
     expect(body.receipts[0].parties).toEqual({
-      treasury_account: AGENT.account_address.toLowerCase(),
+      treasury_account: getAddress(AGENT.account_address), // #3307
       delegate: AGENT.delegate_address,
-      delegate_account: delegateAccount,
-      merchant: RECIPIENT.toLowerCase(),
+      delegate_account: getAddress(delegateAccount),
+      merchant: RECIPIENT,
     })
     // #2998: erc7710 — one transaction, `tx_hash` IS the settlement, no
     // funding leg.
@@ -1095,7 +1098,7 @@ describe('machine payment routes', () => {
       token: 'USDC',
       tx_hash: TX_HASH,
       resource_url: challenge.resource,
-      merchant_address: RECIPIENT.toLowerCase(),
+      merchant_address: RECIPIENT, // #3307: agent-facing, checksummed
       payer_address: AGENT.delegate_address,
       amount_atomic: '10000',
       asset: USDC,
@@ -1107,7 +1110,7 @@ describe('machine payment routes', () => {
         asset: USDC,
         network: challenge.network.name,
         resource_url: challenge.resource,
-        merchant_address: RECIPIENT.toLowerCase(),
+        merchant_address: RECIPIENT, // #3307: the rail context is checksummed too
         description: challenge.description,
         idempotency_key: 'mpp_demo:test',
         challenge_id: challenge.challengeId,
@@ -1117,7 +1120,7 @@ describe('machine payment routes', () => {
         treasury_account: AGENT.account_address,
         delegate: AGENT.delegate_address,
         delegate_account: null,
-        merchant: RECIPIENT.toLowerCase(),
+        merchant: RECIPIENT,
       },
     })
     expectMatchesSpec('GET', '/machine-payments/{id}/status', response.json())

@@ -58,6 +58,7 @@ import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
 import { listDelegationJsonByIds } from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { getChainClient } from '../../infra/chain/index.js'
+import { toCanonicalAddress } from '../transactions/index.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
 
@@ -163,7 +164,12 @@ export async function handleBalanceCoverage(
       covered,
       ...(coverageError ? { coverage_error: coverageError } : {}),
       chain_id: agent.chain_id,
-      token_address: tokenAddress,
+      // #3319: echoed checksummed so `haven_check_funds` returns ONE casing
+      // whether the caller passed a lowercase address, a checksummed one or a
+      // symbol (resolved from the checksummed allowances read). The match and
+      // the chain read above keep using the value as sent — the echo is the
+      // only thing canonicalised.
+      token_address: toCanonicalAddress(tokenAddress),
       token_symbol: symbol,
       checked_amount_atomic: amountAtomic.toString(),
       budget_remaining_atomic: budgetRemainingAtomic,

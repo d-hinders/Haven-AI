@@ -686,6 +686,15 @@ export async function mockHavenApi(page: Page) {
     // 30 days), so the two cannot disagree; any OTHER agent id is one the
     // connect flow just created, which by construction has no delegation until
     // the budget is granted, so it gets an empty list rather than a 599.
+    // #3329: the budget card reads the agent's open task budgets next to its
+    // delegations (`useTaskBudgets`). No fixture agent has opened one, so every
+    // agent gets the empty list the API returns in that state — the card
+    // renders unchanged, and the read is no longer an "Unmocked API route"
+    // that `unexpectedBrowserErrors` fails the mobile agent-detail spec on.
+    if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/task-budgets')) {
+      await fulfillJson(route, { task_budgets: [] })
+      return
+    }
     if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/delegations')) {
       const forTestAgent = path === `/agents/${testAgent.id}/delegations`
       await fulfillJson(route, {

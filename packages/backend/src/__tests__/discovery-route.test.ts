@@ -1,8 +1,8 @@
 import Fastify from 'fastify'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import discoveryRoutes, { buildDiscoveryDocument } from '../routes/discovery.js'
 import { openapiSpec } from '../openapi/spec.js'
-import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
+import { CLIENT_COMPAT, CLIENT_RELEASES, DEFAULT_CHAIN_ID, PUBLISHED_CLIENT_PACKAGES } from '@haven_ai/core'
 
 /**
  * `GET /discovery` (#2531).
@@ -27,7 +27,10 @@ describe('GET /discovery', () => {
     // key here fails until someone adds it deliberately — and has to justify
     // it against the list below.
     const doc = buildDiscoveryDocument(req()) as unknown as Record<string, unknown>
-    const allowed = ['hosted_mcp_url', 'hosted_mcp_note', 'connector_package', 'cli_package', 'openapi_url', 'chains']
+    // `client_releases` (#3304) is public elsewhere too: the notes are the
+    // published CHANGELOGs, and the thresholds are what every `client_update`
+    // hint and `client_outdated` refusal already tells the client it names.
+    const allowed = ['hosted_mcp_url', 'hosted_mcp_note', 'connector_package', 'cli_package', 'openapi_url', 'chains', 'client_releases']
     for (const key of Object.keys(doc)) {
       expect(allowed, `unexpected key ${key}`).toContain(key)
     }
@@ -39,7 +42,22 @@ describe('GET /discovery', () => {
   it('leaks nothing per-user, per-agent, or operational', () => {
     // Named explicitly rather than left to the allow-list, because these are
     // the categories the issue forbids and a reader should see them refused.
-    const serialized = JSON.stringify(buildDiscoveryDocument(req()))
+    // Release-note prose is excluded (#3304 review): it is the published
+    // CHANGELOG restated, and ordinary changelog words ("balances",
+    // "feedback" ⊃ "db") would trip these substrings without leaking anything.
+    // The rest of `client_releases` — versions, thresholds, commands, URL — is
+    // still scanned.
+    const doc = buildDiscoveryDocument(req())
+    const withoutNotes = {
+      ...doc,
+      client_releases: {
+        ...doc.client_releases,
+        packages: Object.fromEntries(
+          Object.entries(doc.client_releases.packages).map(([pkg, entry]) => [pkg, { ...entry, notes: [] }]),
+        ),
+      },
+    }
+    const serialized = JSON.stringify(withoutNotes)
     for (const forbidden of ['user', 'agent_id', 'relayer', 'database', 'db', 'secret', 'key_hash', 'balance']) {
       expect(serialized.toLowerCase(), forbidden).not.toContain(forbidden)
     }
@@ -104,5 +122,48 @@ describe('GET /discovery', () => {
     const chains = schema.properties.chains as { properties: Record<string, unknown>; required: string[] }
     expect(chains.required).toContain('default')
     expect(chains.properties).toHaveProperty('default')
+  })
+
+  describe('client_releases (#3304)', () => {
+    const saved = structuredClone(CLIENT_COMPAT)
+    afterEach(() => {
+      for (const pkg of PUBLISHED_CLIENT_PACKAGES) Object.assign(CLIENT_COMPAT[pkg], saved[pkg])
+    })
+
+    it('names every published client with its released version, notes and an update command', () => {
+      const { client_releases: releases } = buildDiscoveryDocument(req())
+      expect(Object.keys(releases.packages).sort()).toEqual([...PUBLISHED_CLIENT_PACKAGES].sort())
+      for (const pkg of PUBLISHED_CLIENT_PACKAGES) {
+        expect(releases.packages[pkg].released_version).toBe(CLIENT_RELEASES[pkg].released_version)
+        expect(releases.packages[pkg].notes).toEqual(CLIENT_RELEASES[pkg].notes)
+        expect(releases.packages[pkg].upgrade_command).toMatch(/^(npx -y|npm install) @haven_ai\//)
+      }
+      expect(releases.release_notes_url).toMatch(/\/releases$/)
+    })
+
+    // Mutates the SOURCE table the client-compat middleware enforces — not a
+    // copy — so this fails if the document ever stops reading it, and a
+    // published minimum can never disagree with an enforced one.
+    it('follows a min_version change in CLIENT_COMPAT', () => {
+      expect(buildDiscoveryDocument(req()).client_releases.packages['@haven_ai/signer'].min_version).toBeNull()
+      ;(CLIENT_COMPAT['@haven_ai/signer'] as { min_version: string | null }).min_version = '0.5.0-alpha.1'
+      expect(buildDiscoveryDocument(req()).client_releases.packages['@haven_ai/signer'].min_version).toBe('0.5.0-alpha.1')
+    })
+
+    it('the spec schema names every key the real block carries', () => {
+      const schemas = openapiSpec.components.schemas as unknown as Record<
+        string,
+        { properties: Record<string, { properties?: Record<string, unknown>; required?: string[] }>; required?: string[] }
+      >
+      const block = schemas.DiscoveryDocument.properties.client_releases
+      const { client_releases: releases } = buildDiscoveryDocument(req())
+      for (const key of Object.keys(releases)) expect(block.properties, key).toHaveProperty(key)
+      for (const pkg of PUBLISHED_CLIENT_PACKAGES) {
+        expect((block.properties?.packages as { required: string[] }).required).toContain(pkg)
+        for (const key of Object.keys(releases.packages[pkg])) {
+          expect(schemas.PackageReleaseCompat.properties, key).toHaveProperty(key)
+        }
+      }
+    })
   })
 })

@@ -82,5 +82,7 @@ export const config = {
     '/onboarding',
     '/for-agents.md',
     '/device',
+    // #3304: where a `client_update` hint sends an agent.
+    '/releases',
   ],
 }

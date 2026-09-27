@@ -45,20 +45,52 @@
 //   <names>   comma- or space-separated base names or repo paths of the
 //             baselines the line covers, or `*` for a mass re-bless (a font or
 //             Playwright bump moves all of them at once — the #1760-class
-//             dispatch, declared rather than silent).
+//             dispatch, declared rather than silent). Write `*` itself: a
+//             glob (`*.png`, `dir/*.png`) covers NOTHING in a pass or a
+//             declaration. In a non-passing line any `*` in the list covers
+//             every baseline — a block reads as wide as its author meant it,
+//             fail closed (#3309) — unless it is emphasis around a whole
+//             `.png` name: one name, the whole list or the whole line.
 //   <reason>  why the pixels moved, at least 20 characters — a label is not a
 //             reason. The same length the copy lint and the ratchets demand of
 //             an inline marker, for the same reason: an empty or one-word
 //             reason is the declaration checked off, not made.
-//   <verdict> `passed` or `approved` (case-insensitive). A line that says
-//             `skipped` or `n/a` does not verify a MODIFIED baseline: a
-//             skipped design review is the absence of the review.
-//   <sha>     the commit the verdict was given at. Verified, not just present:
+//   <verdict> `passed` or `approved` (case-insensitive), as the WHOLE verdict
+//             word before the first `@`, `--` or `baselines:` — `not approved`, `unapproved` or
+//             `passed-with-nits` are not passing, and a baseline named
+//             `approved-mock.png` does not make its line one (#3301). A line
+//             that says `skipped` or `n/a` does not verify a MODIFIED
+//             baseline: a skipped design review is the absence of the review.
+//   <sha>     the commit the verdict was given at, read only right after the
+//             `@` that ends the verdict word — an `@` later in the line (an
+//             email in the name list) binds nothing (#3301). Verified, not just present:
 //             the last commit that touched the PNG must be an ancestor of it
 //             (or equal), and it an ancestor of the PR head — a verdict naming
 //             a commit older than the baseline's re-commit does not count.
 //
-// `--` and `—` both work as the separator; matching is on the BASE NAME, the
+// A block is also read in shapes a pass is not (#3309): a table row, a
+// heading, a task-list item, an italic or backticked label, an HTML-wrapped
+// line, `design review verdict:` without the hyphen, a space before the
+// colon (BLOCK_LABEL_RE). A pass in those shapes is dropped: its line shape
+// stays the one above.
+//
+// When verdicts conflict (#3301), the newest one decides, per baseline:
+//
+//   - Every non-passing line that covers the baseline — naming it or `*` —
+//     vetoes a pass bound at or before its own sha; a tie vetoes. A pass
+//     clears an earlier block only when the block's sha is a strict ancestor
+//     of the pass's, and a `*` pass never clears a block that NAMES the file:
+//     a mass re-bless does not overrule a reviewer's specific objection.
+//   - "Newest" is commit ancestry, never text order (the body is read first
+//     even when it was edited last).
+//     Unrelated shas, unknown ancestry and an unbound block (no `@`, or a malformed sha) all
+//     fail closed: the block stands.
+//   - A block bound before the baseline's last touch, or to a commit that is
+//     not on the head, describes a different image and is ignored — the same
+//     binding a pass has to meet.
+//
+// `--` and `—` both work as the separator; matching is on the BASE NAME, case-
+// insensitively and with surrounding markdown stripped (#3301), the
 // same convention `parseExpected` in baseline-audit.mjs uses, for the same
 // reason: the lines are typed by a human about files whose directory prefix
 // carries no information (no duplicate base names exist across the 85 PNGs —
@@ -68,7 +100,10 @@
 //
 // Declarations come from the PR body and the PR's commit messages; verdicts
 // from the PR body AND the PR's comments (#2816's verdict was posted as a
-// comment — a verdict that exists only in the thread still exists). The author
+// comment — a verdict that exists only in the thread still exists). A GitHub
+// REVIEW body is not read (#3309): submitting a review does not re-run this
+// workflow, and a `pull_request_review` trigger would run the PR's own code,
+// so a block must be posted in the body or as a comment. The author
 // writes every line the gate reads, so the gate proves the TEXT exists, not
 // who wrote it or that the review happened; it is a checklist the PR cannot
 // leave blank, not an authentication of the review. The report and the
@@ -131,11 +166,107 @@ export const PASSING_VERDICTS = new Set(['passed', 'approved'])
  * One line of the declaration format. Exported for the playbook's testability
  * and so the self-test and the report cannot restate the spelling.
  */
-export const DECLARATION_RE = /^\s*(?:[-*]\s*)?baseline-change:\s*(.+)$/gim
-export const VERDICT_RE = /^\s*(?:[-*]\s*)?design-review\s+verdict:\s*(.+)$/gim
+export const DECLARATION_RE = /^[^\S\r\n\u2028\u2029]*(?:[-*][^\S\r\n\u2028\u2029]*)?baseline-change:\s*(.+)$/gim
+// A verdict line may sit in a quote, a bullet or a numbered list, and the
+// label may be bold: a block written in any of those shapes must still be
+// read, or the gate cannot see it (#3301). Before the label, whitespace is
+// `[^\S\r\n\u2028\u2029]` — any space but a line break (U+2028/U+2029
+// start a line for `^` too), NBSP included — never `\s`:
+// `^\s*` spans line breaks, and a comment of blank lines took seconds
+// (#3309). After the colon it stays `\s*`, as at base: a status on a later
+// line (blank lines between) is read, and there the run is scanned once.
+export const VERDICT_RE = /^[^\S\r\n\u2028\u2029]*(?:>[^\S\r\n\u2028\u2029]*)*(?:(?:[-*+]|\d+[.)])[^\S\r\n\u2028\u2029]*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?\s*(.+)$/gim
+// A BLOCK is read in more shapes than a pass (#3309): a table row (the label
+// in its own cell, with or without the colon), a heading, a task-list item,
+// an italic or backticked label, an HTML-wrapped line, an emoji shortcode
+// (`:x:`) before the label, `design review verdict:` without the hyphen, a
+// space before the colon. An unread block
+// lets an older pass verify, so the wider reading fails closed; a pass in
+// one of these shapes is dropped, never read — the line a pass needs stays
+// VERDICT_RE. Tags and `[ ]`/`[x]` boxes are removed from the line first, and
+// the label is then found with this unanchored pattern; what precedes it is
+// checked in code (`blockPrefixOk`), not by an anchored alternation — one
+// where a box could match two ways backtracked exponentially on a line of
+// boxes, and any PR author writes those lines.
+export const BLOCK_LABEL_RE = /design[-\s]*review\s+verdict[\s*_`]*[:|][\s*_`]*/i
+const NO_LETTERS_RE = /^[^A-Za-z]*$/
 
-const SHA_RE = /@\s*([0-9a-fA-F]{7,40})\b/
-const SEPARATOR_RE = /\s+(?:--|—)\s+/
+/**
+ * May this text precede a block label? Anything but letters (`#`, `>`, `-`,
+ * `|`, `` ` ``, `_`, `*`, digits); or whole table cells and then anything but
+ * letters — so a sentence that merely mentions the label is not a line.
+ */
+function blockPrefixOk(prefix) {
+  // An emoji shortcode (`:x:`, `:no_entry:`) is stored as literal text.
+  const p = prefix.replace(/:[a-z0-9_+-]+:/gi, ' ')
+  if (NO_LETTERS_RE.test(p)) return true
+  return p.trimStart().startsWith('|') && NO_LETTERS_RE.test(p.slice(p.lastIndexOf('|') + 1))
+}
+
+/** Strip leading and trailing runs of `chars` — a loop, never a `+$` regex (those go quadratic on a long run). */
+function trimChars(s, chars) {
+  let a = 0
+  let b = s.length
+  while (a < b && chars.includes(s[a])) a += 1
+  while (b > a && chars.includes(s[b - 1])) b -= 1
+  return s.slice(a, b)
+}
+
+/** `[a.png](url)` names a.png: drop each link target, in one pass. */
+function stripLinkTargets(text) {
+  let out = ''
+  let i = 0
+  for (;;) {
+    const open = text.indexOf('](', i)
+    const close = open === -1 ? -1 : text.indexOf(')', open + 2)
+    if (close === -1) return out + text.slice(i)
+    out += text.slice(i, open + 1)
+    i = close + 1
+  }
+}
+
+/**
+ * The emphasis run written right before the label (`**design-review verdict:
+ * … b.png**`), found by walking back from the label — '' when the label
+ * closes it itself (`*design-review verdict:* …`, where the close may sit
+ * just after the colon), so a trailing `*` after the list is then not its
+ * close.
+ */
+function lineEmphasis(line, labelStart) {
+  let a = labelStart
+  while (a > 0 && (line[a - 1] === '*' || line[a - 1] === '_')) a -= 1
+  const open = line.slice(a, labelStart)
+  if (!open) return ''
+  const rest = line.slice(labelStart)
+  const tail = rest.slice(rest.toLowerCase().indexOf('verdict') + 'verdict'.length).match(/^[\s*_`]*[:|]?[\s*_`]*/)[0]
+  return /[*_]/.test(tail) ? '' : open
+}
+
+const SHA_RE = /@\s*`?([0-9a-fA-F]{7,40})\b/
+/** The sha a verdict is bound to: only right after the `@` that ends its verdict word. */
+const BOUND_SHA_RE = /^@\s*`?([0-9a-fA-F]{7,40})\b/
+/**
+ * The first `\s+(?:--|—)\s+` in a line — the `--`/`—` separator — found by a
+ * scan, not that regex: on a long whitespace run with no separator it went
+ * quadratic (#3309). Same first match: `{ index, length }` or null.
+ */
+function findSeparator(s) {
+  const ws = (c) => c !== undefined && /\s/.test(c)
+  for (let i = 1; i < s.length; i += 1) {
+    const len = s.startsWith('--', i) ? 2 : s[i] === '—' ? 1 : 0
+    if (!len || !ws(s[i - 1]) || !ws(s[i + len])) continue
+    let a = i - 1
+    while (a > 0 && ws(s[a - 1])) a -= 1
+    let b = i + len + 1
+    while (b < s.length && ws(s[b])) b += 1
+    return { index: a, length: b - a }
+  }
+  return null
+}
+const withoutSeparator = (s) => {
+  const sep = findSeparator(s)
+  return sep ? `${s.slice(0, sep.index)} ${s.slice(sep.index + sep.length)}` : s
+}
 const LIST_SPLIT_RE = /[\s,]+/
 
 /**
@@ -152,18 +283,68 @@ export function baselineName(path) {
  * the `*` wildcard. Tolerates a full path or a missing `.png`, like
  * `parseExpected` does — typed by a human under mild irritation.
  */
-export function parseNameList(raw) {
-  const parts = String(raw ?? '').split(LIST_SPLIT_RE).map((s) => s.trim()).filter(Boolean)
+export function parseNameList(raw, { block = false } = {}) {
+  // A markdown link's target is not a name: `[a.png](url)` names a.png.
+  const text = stripLinkTargets(String(raw ?? ''))
+  const parts = text.split(LIST_SPLIT_RE).map((s) => s.trim()).filter(Boolean)
   const out = []
-  for (const part of parts) {
-    if (part === '*') {
+  for (const rawPart of parts) {
+    // Markdown around a name (`a.png`, (a.png), a.png., **a.png**, *.) is not
+    // part of it, and case is not either (every committed baseline name is
+    // lower-case): a block written that way must name the same file (#3301).
+    const kept = trimChars(rawPart.replace(/[^A-Za-z0-9._\-/*]/g, ''), '.').toLowerCase()
+    if (kept === '*') {
       out.push('*')
       continue
     }
+    // In a BLOCK, `_`/`__` emphasis around a name is not part of it either
+    // (#3309; no committed baseline name holds a `_`). A pass keeps the base
+    // reading, where `a.png__` names nothing — never widened.
+    const part = trimChars(kept.replace(/\*/g, ''), block ? '._' : '.')
+    if (!part) continue
     const base = part.split('/').pop()
-    out.push(base.toLowerCase().endsWith('.png') ? base : `${base}.png`)
+    if (!base) continue
+    out.push(base.endsWith('.png') ? base : `${base}.png`)
   }
   return [...new Set(out)]
+}
+
+/** A whole baseline name — all that emphasis may wrap without the `*` being a glob. */
+const WHOLE_NAME_RE = /^[a-z0-9][a-z0-9._\-/]*\.png$/i
+
+/**
+ * Does a BLOCK's name list use a glob (#3309)? `*.png`, `**`, `*-mobile.png`,
+ * `dir/*.png` and `./*.png` each mean "all of them" to the human who typed
+ * them, while `parseNameList` reads them as `png.png`, nothing, `-mobile.png`
+ * or `.png` — names no baseline has, so the block covered nothing. Read for
+ * blocks only: a pass or a declaration with the same names keeps covering
+ * nothing (`parseNameList` is shared and unchanged), because widening those
+ * would verify, not veto.
+ *
+ * One rule per name: a `*` is emphasis only when what it wraps is a WHOLE
+ * `.png` name — `**a.png**` on one name; the opening half on the first name
+ * and the closing half on the last when they pair around the whole list
+ * (`**a.png, b.png**`); or the closing half on the last name of a line whose
+ * label opened that emphasis (`**design-review verdict: … b.png**`, passed in
+ * as `lineOpen`). Every other `*` is a glob: `*.png*`, `*top*`, `topbar*`,
+ * `*desktop.png` alone. Ambiguity reads wide — a block fails closed.
+ */
+export function listHasGlob(raw, lineOpen = '') {
+  const parts = stripLinkTargets(String(raw ?? ''))
+    .split(LIST_SPLIT_RE)
+    .map((part) => trimChars(part.replace(/[^A-Za-z0-9._\-/*]/g, ''), '.'))
+    .filter(Boolean)
+  const lead = (p) => p[0] === '*' || p[0] === '_'
+  const trail = (p) => p[p.length - 1] === '*' || p[p.length - 1] === '_'
+  return parts.some((part, i) => {
+    if (!part.includes('*')) return false
+    if (!WHOLE_NAME_RE.test(trimChars(part, '*_'))) return true
+    const first = i === 0
+    const last = i === parts.length - 1
+    if (lead(part) && trail(part)) return false
+    if (lead(part)) return !(first && trail(parts[parts.length - 1]))
+    return !(last && (lead(parts[0]) || lineOpen !== ''))
+  })
 }
 
 /**
@@ -178,10 +359,10 @@ export function parseDeclarations(texts) {
     if (!text) continue
     for (const m of String(text).matchAll(DECLARATION_RE)) {
       const body = m[1] ?? ''
-      const sep = body.match(SEPARATOR_RE)
+      const sep = findSeparator(body)
       if (!sep) continue // no `-- reason` half: not a declaration, reported as malformed
       const names = parseNameList(body.slice(0, sep.index))
-      const reason = body.slice(sep.index + sep[0].length).trim()
+      const reason = body.slice(sep.index + sep.length).trim()
       out.push({ names, reason, raw: m[0].trim() })
     }
   }
@@ -196,24 +377,76 @@ export function parseDeclarations(texts) {
  */
 export function parseVerdicts(texts) {
   const out = []
+  const strictLine = new RegExp(VERDICT_RE.source, 'i')
   for (const text of texts ?? []) {
     if (!text) continue
     for (const m of String(text).matchAll(VERDICT_RE)) {
       const body = m[1] ?? ''
-      const shaMatch = body.match(SHA_RE)
-      // The names live after the `baselines:` marker when the line follows the
-      // format; a line that only names files also counts — the word
-      // "baselines:" is the convention, not the contract, and the failure
-      // report quotes the line either way.
-      const listIdx = body.toLowerCase().lastIndexOf('baselines:')
-      const listPart = listIdx === -1 ? body : body.slice(listIdx + 'baselines:'.length)
-      const names = parseNameList(listPart.replace(SHA_RE, ' '))
-      const word = body.toLowerCase()
-      const passing = [...PASSING_VERDICTS].some((v) => word.includes(v))
-      out.push({ names, sha: shaMatch ? shaMatch[1] : null, passing, raw: m[0].trim() })
+      const labelStart = m[0].search(/design/i)
+      const open = lineEmphasis(m[0], labelStart)
+      out.push(parseVerdictBody(body, m[0].trim(), open))
+    }
+    // The block-only shapes (#3309): a line VERDICT_RE already read is not
+    // read twice, and a pass found here is dropped. CRLF text (the web
+    // editor's) splits the same as LF. The trailing strip leaves `*` alone:
+    // `baselines: *` must stay the wildcard.
+    for (const rawLine of String(text).split(/\r?\n/)) {
+      if (strictLine.test(rawLine)) continue
+      const line = rawLine.replace(/<[^<>]*>/g, ' ').replace(/\[[ xX]\]/g, ' ')
+      const label = line.match(BLOCK_LABEL_RE)
+      if (!label || !blockPrefixOk(line.slice(0, label.index))) continue
+      const body = trimChars(line.slice(label.index + label[0].length).replace(/\|/g, ' '), ' \t\r\n\f\v`_').trimStart()
+      if (!body) continue
+      const v = parseVerdictBody(body, rawLine.trim(), lineEmphasis(line, label.index))
+      if (!v.passing) out.push(v)
     }
   }
   return out
+}
+
+/** One verdict line's text after the label, parsed. */
+function parseVerdictBody(rawBody, raw, lineOpen = '') {
+  // One space per whitespace run first: every regex below then sees short
+  // runs.
+  const body = rawBody.replace(/\s+/g, ' ')
+  // The verdict word is the head of the line: the text before the first
+  // `@`, `--` separator or `baselines:` marker, whichever comes first. It
+  // is read only as a whole — a substring match over the line let `not
+  // approved`, and a baseline named `approved-mock.png`, verify (#3301).
+  // The sha is read only right after the `@` that ends the head. A pass
+  // with a malformed sha (`@ <head-sha>` pasted from a template) stays an
+  // unbound pass, and an `@` later in the line (an email in the name
+  // list, even a hex-looking one) binds nothing — so it can neither turn a
+  // pass into a block nor move a block onto a commit where it is ignored.
+  const sep = findSeparator(body)
+  const markerIdx = body.toLowerCase().indexOf('baselines:')
+  const atIdx = body.indexOf('@')
+  const headEnd = Math.min(
+    atIdx === -1 ? body.length : atIdx,
+    sep ? sep.index : body.length,
+    markerIdx === -1 ? body.length : markerIdx,
+  )
+  const shaMatch = atIdx !== -1 && headEnd === atIdx ? body.slice(atIdx).match(BOUND_SHA_RE) : null
+  const head = body.slice(0, headEnd).toLowerCase()
+  let wa = 0
+  let wb = head.length
+  while (wa < wb && !/[a-z/]/.test(head[wa])) wa += 1
+  while (wb > wa && !/[a-z/]/.test(head[wb - 1])) wb -= 1
+  const word = head.slice(wa, wb)
+  const passing = PASSING_VERDICTS.has(word)
+  // The names live after the `baselines:` marker when the line follows the
+  // format; a line that only names files also counts — the word
+  // "baselines:" is the convention, not the contract, and the failure
+  // report quotes the line either way. Without the marker the names are
+  // what follows the verdict head, so the verdict word is never read as a
+  // baseline name.
+  const listIdx = body.toLowerCase().lastIndexOf('baselines:')
+  const listPart = listIdx === -1 ? body.slice(headEnd).replace(BOUND_SHA_RE, ' ') : body.slice(listIdx + 'baselines:'.length)
+  const listText = withoutSeparator(listPart.replace(SHA_RE, ' '))
+  const names = parseNameList(listText, { block: !passing })
+  // A block's glob covers every baseline (#3309); a pass's covers nothing.
+  if (!passing && !names.includes('*') && listHasGlob(listText, lineOpen)) names.push('*')
+  return { names, sha: shaMatch ? shaMatch[1] : null, passing, raw }
 }
 
 /**
@@ -223,8 +456,16 @@ export function declaredFor(name, declarations) {
   return declarations.some((d) => d.names.includes('*') || d.names.includes(name))
 }
 
+/** Two shas name the same commit — one may be abbreviated. */
+function sameSha(a, b) {
+  const x = String(a).toLowerCase()
+  const y = String(b).toLowerCase()
+  return x.startsWith(y) || y.startsWith(x)
+}
+
 /**
- * Does any PASSING verdict cover this baseline, bound to a sha that verifies?
+ * Is this baseline verified: a PASSING verdict covers it, bound to a sha that
+ * verifies, and no newer non-passing verdict vetoes that pass?
  *
  * The binding: `lastTouchSha` (the newest commit that touched the PNG, read
  * from the PR head) must be an ancestor of — or equal to — the verdict's sha,
@@ -233,19 +474,36 @@ export function declaredFor(name, declarations) {
  * tree: the #3222 shape, where the review happened and the baselines were
  * re-committed after it.
  *
+ * The veto (#3301): a pass stands only if every non-passing line covering
+ * the baseline (named or `*`) is provably older — its sha a strict ancestor
+ * of the pass's — and, for a `*` pass, no such block names the file. A tie, unrelated
+ * shas, unknown ancestry or an unbound block leave the block standing. A
+ * block provably about a different image (before the last touch, or off the
+ * head) is ignored, like an unbound pass.
+ *
  * `isAncestor(a, b)` answers "is commit a an ancestor of (or equal to) b?" —
  * null when ancestry could not be determined, which fails closed.
  */
 export function verifiedFor(name, verdicts, { lastTouchSha, headSha, isAncestor }) {
-  for (const v of verdicts) {
-    if (!v.passing) continue
-    if (!(v.names.includes('*') || v.names.includes(name))) continue
-    if (!v.sha || !lastTouchSha || !headSha) continue // unbindable: not evidence
+  if (!lastTouchSha || !headSha) return false // unbindable: nothing can verify
+  const bound = (v) => {
+    if (!v.sha) return false
     const touchOk = isAncestor(lastTouchSha, v.sha)
     const headOk = isAncestor(v.sha, headSha)
-    if (touchOk === true && headOk === true) return true
+    return touchOk === true && headOk === true
   }
-  return false
+  // A block is ignored only when its sha provably describes another image; an
+  // unbound or unknown one stands (fail closed).
+  const blockApplies = (v) =>
+    !v.sha || (isAncestor(lastTouchSha, v.sha) !== false && isAncestor(v.sha, headSha) !== false)
+  const relevant = (v) => (v.passing ? bound(v) : blockApplies(v))
+  const names = (v) => v.names.includes(name)
+  const lines = verdicts.filter((v) => (names(v) || v.names.includes('*')) && relevant(v))
+  const blocks = lines.filter((v) => !v.passing)
+  const clears = (pass, block) =>
+    Boolean(block.sha) && !sameSha(block.sha, pass.sha) && isAncestor(block.sha, pass.sha) === true &&
+    (names(pass) || !names(block))
+  return lines.some((v) => v.passing && blocks.every((b) => clears(v, b)))
 }
 
 /**
@@ -292,7 +550,7 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     declarations.some((d) => (d.names.includes('*') || d.names.includes(name)) && d.reason.length >= MIN_REASON_CHARS)
   const missing = []
   for (const path of pngs.modified) {
-    const name = baselineName(path)
+    const name = baselineName(path).toLowerCase()
     const declared = declaredForName(name)
     const verified = verifiedFor(name, verdicts, {
       lastTouchSha: lastTouch[path] ?? null,
@@ -302,7 +560,7 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     if (!declared || !verified) missing.push({ path, needsVerdict: true, declared, verified })
   }
   for (const path of pngs.added) {
-    const name = baselineName(path)
+    const name = baselineName(path).toLowerCase()
     const declared = declaredForName(name)
     if (!declared) missing.push({ path, needsVerdict: false, declared, verified: false })
   }
@@ -335,6 +593,11 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     `The verdict's <sha> must name a commit at or after the last commit that touched each`,
     `PNG (a review given before the baseline was re-committed does not verify it). For a`,
     `mass re-bless — a font or Playwright bump that moves every baseline — declare \`*\`.`,
+    `A non-passing verdict (\`changes requested\`), named or \`*\`, at or after a pass vetoes`,
+    `it: re-review the fixed PNG and post a new \`passed\` NAMING THE FILE at a later sha (a`,
+    `\`*\` pass never clears a block that names the file).`,
+    `For "all baselines" write \`*\`: a glob such as \`*.png\` covers nothing in a pass. A block`,
+    `posted only as a GitHub review body is never read — post it in the body or a comment.`,
     ``,
     `Per file:`,
     ``,
@@ -365,10 +628,14 @@ export async function collect({ gh, repo, prNumber }) {
   // `gh` (ghRunner) is async and never rejects — execFileSync errors propagate
   // as a rejection, which the CLI boundary fails closed on.
   const run = async (args) => JSON.parse(await gh(['api', ...args, '--jq', '.'], { input: null }))
+  // GitHub's pulls/{n}/files entries name the file `filename`, never `path`
+  // (#3231 verification, PR #3362): reading `f.path` gave every PR zero PNGs
+  // and a vacuous pass. Normalised here, once, to the `{ path, status }` shape
+  // `evaluate` takes.
   const files = []
   for (let page = 1; ; page += 1) {
     const chunk = await run([`repos/${repo}/pulls/${prNumber}/files?per_page=100&page=${page}`])
-    files.push(...chunk)
+    files.push(...(chunk ?? []).map((f) => ({ path: f?.filename ?? null, status: f?.status ?? null })))
     if (!Array.isArray(chunk) || chunk.length < 100) break
   }
   const prJson = await run([`repos/${repo}/pulls/${prNumber}`])
@@ -396,8 +663,10 @@ export async function collect({ gh, repo, prNumber }) {
   }
   // Resolve the commit-graph questions the verdict needs BEFORE the pure
   // `evaluate` runs, so `evaluate` stays synchronous and dependency-free: for
-  // each last-touch sha × verdict sha, and each verdict sha × head sha, is a
-  // an ancestor of (or equal to) b? Unknown pairs read as null — fail closed.
+  // each last-touch sha × verdict sha, each verdict sha × head sha, and each
+  // ordered pair of verdict shas (which of two conflicting verdicts is newer,
+  // #3301), is a an ancestor of (or equal to) b? Unknown pairs read as null —
+  // fail closed.
   // Equal shas are trivially ancestors and are short-circuited in the reader,
   // so a self-compare the API refuses cannot sink a valid verdict.
   const verdictShas = [...new Set(parseVerdicts([prJson.body ?? '', ...comments]).map((v) => v.sha).filter(Boolean))]
@@ -419,6 +688,7 @@ export async function collect({ gh, repo, prNumber }) {
   }
   for (const t of touchShas) for (const s of verdictShas) await probe(t, s)
   for (const s of verdictShas) if (headSha) await probe(s, headSha)
+  for (const a of verdictShas) for (const b of verdictShas) if (a !== b) await probe(a, b)
   const isAncestor = (a, b) => {
     if (a === b) return true
     const v = ancestry.get(`${a}|${b}`)
@@ -432,7 +702,7 @@ export async function collect({ gh, repo, prNumber }) {
       draft: prJson.draft === true,
       headSha: prJson.head?.sha ?? null,
     },
-    files: files.map((f) => ({ path: f.path, status: f.status })),
+    files,
     declarationTexts: [prJson.body ?? '', ...commits],
     verdictTexts: [prJson.body ?? '', ...comments],
     lastTouch,

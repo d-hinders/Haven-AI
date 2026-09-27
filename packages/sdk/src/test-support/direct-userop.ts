@@ -25,6 +25,7 @@ import {
   encodeAbiParameters,
   encodeFunctionData,
   encodePacked,
+  hashTypedData,
   type Address,
   type Hex,
 } from 'viem'
@@ -326,4 +327,50 @@ export function rebuildDirectUserOpForSender(
   }
   const payloadHash = packedUserOperationHash(typedData as never) as Hex
   return { typedData, payloadHash }
+}
+
+export interface FundingLegUserOpOptions {
+  /** The delegate EOA (`signer.delegateAddress`): the account is derived from it AND it is the transfer's recipient. */
+  delegate: Address
+  /** The quoted token (the expected context's `asset`). */
+  asset: Address
+  /** The quoted atomic amount (the expected context's `amount`). */
+  amount: bigint | string
+  chainId?: number
+  /** Override the transfer recipient (default: `delegate`) — for the recipient-pin negative test. */
+  recipient?: Address
+  /** Override the budget delegation's caveats (e.g. a multi-KB term, for relay-size tests). */
+  caveats?: DelegationOverrides['caveats']
+}
+
+/**
+ * #3281: an x402 EIP-3009 bridge FUNDING LEG exactly as the backend builds it
+ * (`delegation-authorize.ts` → `prepareDelegationPayment(agent, token,
+ * payTo = the delegate EOA, amountRaw)` → `prepareRedemption`): the
+ * direct-payment shape, whose single execution is
+ * `transfer(<delegate EOA>, <amount>)` on the quoted token. Returns the typed
+ * data, its v0.7 UserOp hash (the expected context's `payloadHash`) and its
+ * EIP-712 digest (the expected context's `typedDataHash`).
+ */
+export function buildFundingLegUserOp(options: FundingLegUserOpOptions) {
+  const sender = deriveDelegateAccountAddress(options.delegate)
+  const callData = buildExecuteCallData(
+    DELEGATION_MANAGER as Address,
+    0n,
+    buildBoundRedeemDelegationsCallData({
+      delegate: sender,
+      caveats: options.caveats,
+      executionCallData: buildTransferExecutionCallData(
+        options.asset,
+        options.recipient ?? options.delegate,
+        BigInt(options.amount),
+      ),
+    }),
+  )
+  const { typedData, payloadHash } = buildBoundDirectUserOp({
+    delegate: options.delegate,
+    chainId: options.chainId ?? 84532,
+    callData,
+  })
+  return { typedData, payloadHash, digest: hashTypedData(typedData as never) }
 }

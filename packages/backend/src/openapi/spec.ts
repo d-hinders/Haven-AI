@@ -909,6 +909,34 @@ const spendTotals = {
   },
 } as const
 
+/**
+ * #3303 (epic #3302): the client-version refusal. Only below a minimum the
+ * deployment has explicitly set, only at the payment-initiating routes and
+ * (for the signer) sign-context, and always before anything is written.
+ */
+const clientOutdatedResponse = {
+  description:
+    'Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this ' +
+    'deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` ' +
+    'updates it; retry the same request afterwards.',
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['error', 'error_code', 'client_update', 'next_action', 'next_tool_omitted_reason'],
+        properties: {
+          error: { type: 'string' },
+          error_code: { type: 'string', enum: ['client_outdated'] },
+          client_update: { $ref: '#/components/schemas/ClientUpdate' },
+          next_action: { type: 'string', enum: [AgentPaymentNextAction.StopAndTellUser] },
+          next_tool_omitted_reason: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -2223,6 +2251,8 @@ export const openapiSpec = {
         tags: ['Delegations'],
         operationId: 'submitDelegationRevocation',
         summary: 'Revoke step 2: submit the signed UserOp; the row flips only after it lands.',
+        description:
+          'The submitted user_operation is BOUND to the delegation being revoked (#3343): its calldata must disable THAT delegation on the pinned DelegationManager (identity comparison, signature excluded), checked before submission. A userop that disables something else — or nothing — is refused 400 and nothing is recorded. On success the delegation is disabled on-chain and the row is marked revoked.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
         requestBody: {
@@ -2242,7 +2272,8 @@ export const openapiSpec = {
         },
         responses: {
           '200': {
-            description: 'Delegation disabled on-chain and marked revoked.',
+            description:
+              'Delegation disabled on-chain and marked revoked. The recorded revocation was verified against the signed calldata (#3343).',
             content: {
               'application/json': {
                 schema: {
@@ -2261,6 +2292,36 @@ export const openapiSpec = {
           '404': errorResponse,
           '409': errorResponse,
           '502': errorResponse,
+        },
+      },
+    },
+    // ── Task budgets (#3329), owner-facing read ────────────────────────────
+    '/agents/{id}/task-budgets': {
+      get: {
+        tags: ['Delegations'],
+        operationId: 'listAgentTaskBudgets',
+        summary: "List an agent's task budgets.",
+        description:
+          "Every task budget on this agent, newest first — the owner-facing twin of the agent-auth list at GET /task-budgets. Scoped by BOTH agent id and the caller's ownership of it.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'Task budgets ordered by created_at DESC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budgets'],
+                  properties: {
+                    task_budgets: { type: 'array', items: { $ref: '#/components/schemas/TaskBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
         },
       },
     },
@@ -2370,7 +2431,7 @@ export const openapiSpec = {
         operationId: 'submitRekeyRevocation',
         summary: 'Re-key steps 1b + 2: land the revoke, THEN read the now-frozen meter (#1698).',
         description:
-          "Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe.",
+          "Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe. The revoked set is derived SERVER-side (#3343): every delegation this agent still holds enabled on-chain (pending, active and replaced rows), and the signed calldata must disable exactly that set before anything is recorded — a subset or stale op answers 409 re-prepare, an unreadable one 400, and the stage stays preflight either way.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
         requestBody: {
@@ -2625,7 +2686,7 @@ export const openapiSpec = {
         operationId: 'submitRevokeAllDelegations',
         summary: 'Batch revoke step 2: submit the signed batch; rows flip only after the UserOp lands.',
         description:
-          'The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.',
+          'The revoked set is derived SERVER-side (#3343) — every delegation this agent still holds enabled on-chain (pending, active and replaced rows); the request\'s delegation_hashes is accepted for compatibility but does not decide anything. The signed calldata must disable exactly that set (checked before submission): a subset or stale op answers 409 re-prepare, an unreadable op 400. The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -3294,7 +3355,7 @@ export const openapiSpec = {
         operationId: 'getAccountFunding',
         summary: 'Machine-readable funding facts for one account: what to fund, with what, where, and how much.',
         description:
-          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
+          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id (the delegation-rail account).' }],
         responses: {
@@ -5574,6 +5635,257 @@ export const openapiSpec = {
         },
       },
     },
+    // ── Task budgets (#3329), agent-facing lifecycle ────────────────────────
+    // A short-lived, self-delegated CHILD of the agent's own budget
+    // delegation, scoped to one task. Haven never signs: build/open return
+    // typed data for the agent to sign, close returns a userOp typed data
+    // for a live child's revocation.
+    '/task-budgets': {
+      post: {
+        tags: ['TaskBudgets'],
+        operationId: 'openTaskBudget',
+        summary: 'Open a task budget, step 1: build the budget to sign (nothing signed yet).',
+        description:
+          "Carves an unsigned, self-delegated child from the agent's active budget delegation for (token, recipient|open) — chain [taskChild, budget], delegate = the agent's own delegate account, never ANY_BENEFICIARY. Stored pending; the agent signs sign_data.typed_data and POSTs it to /task-budgets/{id}/submit to open it. Pre-sign refusal (409 task_budget_exceeds_remaining) when max_amount_atomic plus this agent's other OPEN task budgets under the same parent would exceed the parent's on-chain remaining budget — a convenience, never the real control: the enforcers still rule at redemption.",
+        security: [{ AgentApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['max_amount_atomic', 'ttl_seconds'],
+                properties: {
+                  token_address: { ...address, description: 'Defaults to the chain\'s USDC.' },
+                  max_amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'Positive atomic amount; must fit uint96.' },
+                  ttl_seconds: { type: 'integer', minimum: 60, maximum: 86400, description: 'This task budget\'s lifetime, 60 s to 24 h.' },
+                  recipient_address: { ...address, description: 'Optional recipient pin.' },
+                  label: { type: 'string', maxLength: 120 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Pending task budget stored; the agent signs sign_data.typed_data next.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget', 'sign_data', 'next_action', 'instructions'],
+                  properties: {
+                    task_budget: { $ref: '#/components/schemas/TaskBudget' },
+                    sign_data: {
+                      type: 'object',
+                      required: ['signature_scheme', 'typed_data'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_delegation'] },
+                        typed_data: { type: 'object', additionalProperties: true, description: "EIP-712 typed data (primaryType 'Delegation') the agent signs verbatim." },
+                      },
+                    },
+                    next_action: { type: 'string', enum: ['sign_then_submit'] },
+                    instructions: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': { ...errorResponse, description: 'no_delegation_for_target — no active budget delegation authorizes this token/recipient.' },
+          '409': {
+            ...errorResponse,
+            description: 'not_delegation_rail, or task_budget_exceeds_remaining (carries remaining_atomic, reserved_atomic, requested_atomic).',
+          },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+      get: {
+        tags: ['TaskBudgets'],
+        operationId: 'listTaskBudgets',
+        summary: 'List task budgets for the authenticated agent.',
+        description: "Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['open', 'all'] },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Task budgets.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budgets'],
+                  properties: {
+                    task_budgets: { type: 'array', items: { $ref: '#/components/schemas/TaskBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/task-budgets/{id}': {
+      get: {
+        tags: ['TaskBudgets'],
+        operationId: 'getTaskBudget',
+        summary: 'Fetch one task budget.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The task budget.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget'],
+                  properties: { task_budget: { $ref: '#/components/schemas/TaskBudget' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/task-budgets/{id}/sign-context': {
+      get: {
+        tags: ['TaskBudgets'],
+        operationId: 'getTaskBudgetSignContext',
+        summary: 'Re-servable, byte-free signing handoff for a pending or closing task budget.',
+        description:
+          "purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for the task child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The sign context for whichever signature is currently pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget_id', 'purpose', 'task_sign_context_version', 'typed_data', 'expected'],
+                  properties: {
+                    task_budget_id: uuid,
+                    purpose: { type: 'string', enum: ['open', 'close'] },
+                    task_sign_context_version: { type: 'integer', enum: [1] },
+                    typed_data: { type: 'object', additionalProperties: true },
+                    user_operation: { type: 'object', additionalProperties: true, description: 'purpose=close only.' },
+                    user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'purpose=close only.' },
+                    expected: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'sign_context_unavailable — the task budget is open, closed, or has no signature currently pending.' },
+        },
+      },
+    },
+    '/task-budgets/{id}/submit': {
+      post: {
+        tags: ['TaskBudgets'],
+        operationId: 'submitTaskBudget',
+        summary: 'Submit the agent signature — opens a pending child, or relays the signed close operation.',
+        description:
+          "status=pending: verifies signature recovers the agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed; if the operation could not be sent (the account moved on since it was prepared) the answer is 409 close_needs_reprepare — call close again and re-sign; if it was sent but its outcome is unconfirmed, the answer is 200 status='closed' when the chain shows the child disabled, else 502 close_outcome_unconfirmed — call close again later: it reports closed once the disable has finalised, or returns new sign_data if the earlier operation did not land (sign and submit that one). Any other status is 409.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: { signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Opened (from pending) or closed (from closing).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget', 'status'],
+                  properties: {
+                    task_budget: { $ref: '#/components/schemas/TaskBudget' },
+                    status: { type: 'string', enum: ['open', 'closed'] },
+                    close_tx_hash: { type: 'string', description: 'Present when status=closed.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'signature_mismatch, or a malformed signature.' },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': { ...errorResponse, description: "The close was sent but its outcome is unconfirmed and the chain does not yet show the child disabled (error_code close_outcome_unconfirmed): call close again later — it reports closed once the disable has finalised, or returns new sign_data if the earlier operation did not land." },
+        },
+      },
+    },
+    '/task-budgets/{id}/close': {
+      post: {
+        tags: ['TaskBudgets'],
+        operationId: 'closeTaskBudget',
+        summary: 'Close a task budget — trivially if never signed or already expired, otherwise prepares the revocation.',
+        description:
+          "status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the agent's own delegate account and returns sign_data for the agent to sign, then submit via POST /task-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed' with nothing to sign; otherwise re-prepares a fresh close operation and replaces the stored one, so calling close again is always safe. status=closed: 409.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'Closed trivially, or a close signature is now pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget'],
+                  properties: {
+                    task_budget: { $ref: '#/components/schemas/TaskBudget' },
+                    status: { type: 'string', enum: ['closed'], description: 'Present on a trivial close.' },
+                    sign_data: {
+                      type: 'object',
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        typed_data: { type: 'object', additionalProperties: true },
+                        user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' },
+                      },
+                      description: 'Present when a live child needs a revocation signature.',
+                    },
+                    next_action: { type: 'string', enum: ['sign_then_submit'] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'Already closed.' },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
     '/payments': {
       get: {
         tags: ['Payments'],
@@ -5627,7 +5939,9 @@ export const openapiSpec = {
         // from `routes/payments.ts` with the approval_requests replay fallback
         // (#2055, the comment at its old site). The 409 below is the reachable
         // replay outcome that was never documented.
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '201': {
             description: 'Payment intent requires the agent signature.',
             content: {
@@ -5719,8 +6033,9 @@ export const openapiSpec = {
           'x402/MPP intent id is refused here (fetch GET /x402/{id}/sign-context instead), and a ' +
           'direct intent id is refused there — each surface serves only its own rail\'s shape.',
         security: [{ AgentApiKey: [] }],
-        parameters: [{ $ref: '#/components/parameters/PaymentId' }],
+        parameters: [{ $ref: '#/components/parameters/PaymentId' }, { $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           // #1464: a malformed uuid in the path is a 400 (central 22P02
           // mapping in infra/http-error-handler.ts), not a 500.
           '400': errorResponse,
@@ -5903,7 +6218,9 @@ export const openapiSpec = {
             },
           },
         },
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '200': {
             description: 'Existing or resumed x402 state.',
             content: {
@@ -5947,8 +6264,10 @@ export const openapiSpec = {
             schema: { type: 'string' },
             description: 'Payment intent id from the quote/authorize response.',
           },
+          { $ref: '#/components/parameters/HavenClient' },
         ],
         responses: {
+          '426': clientOutdatedResponse,
           // #1464: a malformed uuid in the path is a 400 (central 22P02
           // mapping in infra/http-error-handler.ts), not a 500.
           '400': errorResponse,
@@ -6015,7 +6334,9 @@ export const openapiSpec = {
             },
           },
         },
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           // #2105: this alias is registered to the SAME `authorizeX402Handler`
           // as POST /x402/authorize, so its status set is identical. The 202 it
           // documented is unreachable for the same reason (see the note there);
@@ -6350,7 +6671,9 @@ export const openapiSpec = {
         // entirely. `handleSend` returns exactly one of the three refusals below
         // and `resolveExecutionRail`'s union has no fourth member, so there is
         // no success response left to describe.
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '400': {
             ...errorResponse,
             description:
@@ -6582,9 +6905,9 @@ export const openapiSpec = {
       post: {
         tags: ['Machine payments'],
         operationId: 'prepareDelegateSweep',
-        summary: 'Prepare a gasless USDC sweep from the delegate wallet to the Safe.',
+        summary: "Prepare a gasless USDC sweep from the delegate wallet to the agent's account (Haven wallet).",
         description:
-          'Reads the delegate EOA\'s stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent\'s own Safe) plus Haven\'s authorization binding. ' +
+          "Reads the delegate EOA's stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent's account (Haven wallet)) plus Haven's authorization binding. " +
           'The edge signer signs the authorization with haven_sign_sweep_delegate; POST /machine-payments/sweep/submit relays it. The delegate never needs ETH and Haven never holds the key. ' +
           'Returns { nothing_stranded: true } when the delegate is empty.',
         security: [{ AgentApiKey: [] }],
@@ -7166,6 +7489,26 @@ export const openapiSpec = {
       },
     },
     parameters: {
+      // #3303 (epic #3302): the client-version signal.
+      HavenClient: {
+        name: 'X-Haven-Client',
+        in: 'header',
+        required: false,
+        // Deliberately unconstrained: a missing, malformed or unknown value is
+        // treated as "no header" and never refused, so the spec must not
+        // refuse one either.
+        schema: { type: 'string' },
+        description:
+          'The calling published client and its version, `<package>/<version>` (for example ' +
+          '`@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector\'s read-only identity ' +
+          'probe excepted). When the client is ' +
+          'below the version this deployment recommends, any JSON-object response carries a ' +
+          '`client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment ' +
+          'has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at ' +
+          'the payment-initiating routes (the signer: at sign-context). A missing or unparseable ' +
+          'value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never ' +
+          'refused.',
+      },
       AgentId: {
         name: 'id',
         in: 'path',
@@ -7198,6 +7541,28 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      ClientUpdate: {
+        type: 'object',
+        description:
+          '#3303: the backend\'s update hint for an outdated published client. `required: true` ' +
+          'means the client is below a minimum this deployment set and will be refused at its ' +
+          'refusal points; `upgrade_command` is the exact command that updates it, on this ' +
+          'deployment\'s channel.',
+        required: ['package', 'current', 'recommended', 'min_version', 'required', 'upgrade_command', 'notes_url'],
+        properties: {
+          package: { type: 'string', examples: ['@haven_ai/mcp'] },
+          current: { type: 'string', examples: ['0.4.0-alpha.0'] },
+          recommended: { type: ['string', 'null'] },
+          min_version: { type: ['string', 'null'] },
+          required: { type: 'boolean' },
+          upgrade_command: { type: 'string', examples: ['npx -y @haven_ai/connect@alpha'] },
+          notes_url: {
+            type: ['string', 'null'],
+            description: '#3304: the public release notes page. Nullable for clients built before it existed.',
+          },
+        },
+        additionalProperties: false,
+      },
       HybridAccountSigners: {
         type: 'object',
         description:
@@ -7253,6 +7618,42 @@ export const openapiSpec = {
           start_date: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
           expires_at: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
           created_at: { type: 'string', format: 'date-time' },
+        },
+      },
+      /**
+       * #3329: one task budget — a short-lived, self-delegated CHILD of an
+       * agent's budget delegation, scoped to one task. `is_expired` is
+       * DERIVED (`expires_at <= now`), never a stored status.
+       */
+      TaskBudget: {
+        type: 'object',
+        required: [
+          'id', 'agent_id', 'chain_id', 'token_address', 'recipient_address',
+          'parent_delegation_hash', 'delegation_hash', 'label', 'max_atomic',
+          'status', 'expires_at', 'is_expired', 'created_at', 'opened_at',
+          'closed_at', 'close_tx_hash',
+        ],
+        properties: {
+          id: uuid,
+          agent_id: uuid,
+          chain_id: { type: 'integer' },
+          token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Stored lowercase.' },
+          recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description: 'Lowercase recipient pin, or null when this task budget carries none.',
+          },
+          parent_delegation_hash: delegationHash,
+          delegation_hash: { ...delegationHash, description: "This task budget's own child delegation hash." },
+          label: { type: ['string', 'null'], maxLength: 120 },
+          max_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          status: { type: 'string', enum: ['pending', 'open', 'closing', 'closed'] },
+          expires_at: { type: 'integer', description: 'Unix seconds.' },
+          is_expired: { type: 'boolean', description: 'Derived: expires_at <= now.' },
+          created_at: { type: 'string', format: 'date-time' },
+          opened_at: { type: ['string', 'null'], format: 'date-time' },
+          closed_at: { type: ['string', 'null'], format: 'date-time' },
+          close_tx_hash: { type: ['string', 'null'] },
         },
       },
       /**
@@ -7566,7 +7967,7 @@ export const openapiSpec = {
       },
       DiscoveryDocument: {
         type: 'object',
-        required: ['hosted_mcp_url', 'connector_package', 'cli_package', 'openapi_url', 'chains'],
+        required: ['hosted_mcp_url', 'connector_package', 'cli_package', 'openapi_url', 'chains', 'client_releases'],
         properties: {
           hosted_mcp_url: {
             anyOf: [{ type: 'string', format: 'uri' }, { type: 'null' }],
@@ -7588,6 +7989,71 @@ export const openapiSpec = {
               supported: { type: 'array', items: { type: 'integer' } },
             },
             additionalProperties: false,
+          },
+          client_releases: {
+            type: 'object',
+            description:
+              '#3304: per published client, the version released in source (not a claim about ' +
+              "npm's `latest` dist-tag — npm publishes later, on promotion), the thresholds this " +
+              'deployment enforces (the same table the `client_outdated` refusal reads), the ' +
+              "update command on this deployment's channel, and short notes. `release_notes_url` " +
+              'is the human-readable page on the dashboard origin.',
+            required: ['release_notes_url', 'packages'],
+            properties: {
+              release_notes_url: { type: 'string', format: 'uri' },
+              packages: {
+                type: 'object',
+                required: ['@haven_ai/sdk', '@haven_ai/signer', '@haven_ai/mcp', '@haven_ai/connect', '@haven_ai/cli'],
+                properties: {
+                  '@haven_ai/sdk': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                  '@haven_ai/signer': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                  '@haven_ai/mcp': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                  '@haven_ai/connect': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                  '@haven_ai/cli': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      PackageReleaseCompat: {
+        type: 'object',
+        description: '#3304: one published client in `DiscoveryDocument.client_releases`.',
+        required: ['released_version', 'recommended_version', 'min_version', 'upgrade_command', 'notes'],
+        properties: {
+          released_version: {
+            type: 'string',
+            description: "The newest version released in source. Not npm's `latest` dist-tag.",
+          },
+          recommended_version: {
+            type: ['string', 'null'],
+            description: 'Below this, responses carry a non-blocking `client_update` hint. Null = no hint.',
+          },
+          min_version: {
+            type: ['string', 'null'],
+            description: "Below this, the package's refusal points answer `client_outdated`. Null = never refused.",
+          },
+          upgrade_command: { type: ['string', 'null'], examples: ['npx -y @haven_ai/connect@alpha'] },
+          notes: {
+            type: 'array',
+            description: 'Newest first. What changed, for deciding whether to update — not the full CHANGELOG.',
+            items: {
+              type: 'object',
+              required: ['version', 'date', 'summary', 'action_required'],
+              properties: {
+                version: { type: 'string' },
+                date: { type: 'string', format: 'date' },
+                summary: { type: 'string' },
+                action_required: {
+                  type: 'boolean',
+                  description: 'True when a client must update to keep paying. Not the same as a breaking change.',
+                },
+              },
+              additionalProperties: false,
+            },
           },
         },
         additionalProperties: false,
@@ -8550,6 +9016,12 @@ export const openapiSpec = {
             description:
               'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send.',
           },
+          task_budget_id: {
+            type: 'string',
+            minLength: 1,
+            description:
+              '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
+          },
         },
         // #3031: CLOSED. The shipped SDK sends exactly the four fields above
         // (`createIntent`), and every field the handler used to rung out is
@@ -8842,6 +9314,12 @@ export const openapiSpec = {
             description:
               '#1355: the merchant\'s full parsed 402 PaymentRequired (max 64KB serialized). Persisted so GET /x402/{id}/sign-context can re-serve it and a local signer needs only payment_id. Reporting material, not payment authority — the signer verifies whichever copy it uses against the Haven-signed expected context.',
             additionalProperties: true,
+          },
+          taskBudgetId: {
+            type: 'string',
+            minLength: 1,
+            description:
+              '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
           },
         },
         additionalProperties: false,
@@ -9409,7 +9887,7 @@ export const openapiSpec = {
       },
       SweepAuthorization: {
         type: 'object',
-        description: 'EIP-3009 TransferWithAuthorization fields for a delegate → Safe USDC sweep.',
+        description: "EIP-3009 TransferWithAuthorization fields for a delegate → the agent's account (Haven wallet) USDC sweep.",
         required: ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce', 'token', 'chainId'],
         properties: {
           from: address,
@@ -9553,11 +10031,35 @@ export const openapiSpec = {
         properties: {
           symbol: { type: 'string' },
           address: { type: ['string', 'null'], description: 'Token contract address; null for the chain-native token (exactly one entry).' },
-          balance: { type: 'string', description: "Raw base units; '0' when the RPC lookup failed." },
+          balance: { type: 'string', description: "Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token." },
           formatted: { type: 'string' },
           decimals: { type: 'integer' },
+          balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
         },
         additionalProperties: false,
+      },
+      BalanceFreshness: {
+        type: 'object',
+        description: 'Present only when this entry\'s balance read FAILED (#3295). Absent on a clean read. The balance string it marks is still additive: the last-known value when one exists (status stale), else the filler \'0\' (status unavailable).',
+        oneOf: [
+          {
+            type: 'object',
+            required: ['status', 'asOf'],
+            properties: {
+              status: { type: 'string', enum: ['stale'] },
+              asOf: { type: 'string', format: 'date-time', description: 'When the served value was last successfully read from the chain.' },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: { type: 'string', enum: ['unavailable'] },
+            },
+            additionalProperties: false,
+          },
+        ],
       },
       BalancesResponse: {
         type: 'object',
@@ -9574,11 +10076,12 @@ export const openapiSpec = {
           symbol: { type: 'string' },
           address: { ...address, description: "The token contract. (A funding token is always an ERC-20 — the chain-native asset is reported under `native`, not here.)" },
           decimals: { type: 'integer' },
-          balance_human: { type: 'string', description: "Human-decimal balance via formatTokenValue — '0' or <int>.<2–6 fraction digits>; '0' on balance-RPC failure." },
+          balance_human: { type: 'string', description: "Human-decimal balance via formatTokenValue — '0' or <int>.<2–6 fraction digits>. On a failed read (#3317), the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token." },
           minimum_useful_human: {
             type: ['string', 'null'],
             description: "Documented per-token constant from @haven_ai/core — the smallest amount worth moving for this token (one small x402 payment plus headroom). A CONSTANT, not a policy: not a spend limit, not a minimum balance check. null when no constant is documented for the symbol; then `funded` ignores the token.",
           },
+          balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
         },
         additionalProperties: false,
       },
@@ -9603,13 +10106,15 @@ export const openapiSpec = {
             required: ['symbol', 'balance_human', 'needed'],
             properties: {
               symbol: { type: 'string' },
-              balance_human: { type: 'string' },
+              balance_human: { type: 'string', description: "On a failed read (#3317), the last successfully read native balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read." },
               needed: { type: 'boolean', description: 'Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI.' },
+              balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
             },
             additionalProperties: false,
           },
           faucet_url: { type: 'string', description: 'Present ONLY on testnets, from the chain registry — where a HUMAN gets dev funds. Haven never calls a faucet. Absent (not null) on mainnets.' },
-          funded: { type: 'boolean', description: 'True when ANY token balance ≥ its `minimum_useful_human` constant. Native gas is not part of the question.' },
+          funded: { type: 'boolean', description: "True when ANY token's KNOWN balance ≥ its `minimum_useful_human` constant — a fresh read, or the stale last-known balance a failed read serves (#3317). A failed read with no last-known value can never make this true (or false): unknown is not unfunded. Native gas is not part of the question." },
+          balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
         },
         additionalProperties: false,
       },
@@ -9618,11 +10123,20 @@ export const openapiSpec = {
         required: ['symbol', 'balance', 'formatted', 'usdValue', 'eurValue'],
         properties: {
           symbol: { type: 'string' },
-          balance: { type: 'string', description: "Raw base units; '0' on RPC failure." },
+          balance: { type: 'string', description: "Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token." },
           formatted: { type: 'string' },
-          usdValue: { type: 'number', description: '0 when the price feed failed.' },
+          usdValue: {
+            type: 'number',
+            description:
+              'When the price feed fails, valued at the last good price this server instance has seen for the token; 0 only if it has none (#3297).',
+          },
           eurValue: { type: 'number' },
-          sekValue: { type: 'number', description: 'Same one price read as usd/eur (#3127 round 2); 0 when the price feed failed.' },
+          sekValue: {
+            type: 'number',
+            description:
+              'Same one price read as usd/eur (#3127 round 2). When the price feed fails, the last good price this server instance has seen; 0 only if it has none (#3297).',
+          },
+          balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
         },
         additionalProperties: false,
       },
@@ -9742,12 +10256,13 @@ export const openapiSpec = {
             required: ['available', 'usdAmount', 'eurAmount', 'usdPercent', 'eurPercent'],
             properties: {
               available: { type: 'boolean', description: 'true iff a yesterday snapshot existed to diff against.' },
-              usdAmount: { type: 'number' },
-              eurAmount: { type: 'number' },
-              sekAmount: { type: ['number', 'null'], description: 'Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) — the client reports the change as unavailable rather than reading a fabricated swing.' },
+              usdAmount: { type: ['number', 'null'], description: 'Null when balanceFreshness below is unavailable: the totals are understated by an unknown amount, so no swing may be claimed.' },
+              eurAmount: { type: ['number', 'null'], description: 'Null when balanceFreshness below is unavailable, as usdAmount.' },
+              sekAmount: { type: ['number', 'null'], description: 'Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) or when balanceFreshness below is unavailable — the client reports the change as unavailable rather than reading a fabricated swing.' },
               usdPercent: { type: 'number', description: '0 when unavailable or the previous total was 0.' },
               eurPercent: { type: 'number' },
               sekPercent: { type: 'number', description: '0 when the SEK baseline is missing or the previous total was 0.' },
+              balancesFreshness: { $ref: '#/components/schemas/BalanceFreshness', description: 'Present only when at least one of the totals\' balance reads failed (#3295): stale with the oldest served as-of time, or unavailable when some token has no known value. Absent on a clean read.' },
             },
             additionalProperties: false,
           },

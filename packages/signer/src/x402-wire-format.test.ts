@@ -18,18 +18,19 @@ import type { PaymentPayload, PaymentRequirements } from '@x402/core/types'
 import { privateKeyToAccount } from 'viem/accounts'
 import { hashTypedData, recoverTypedDataAddress } from 'viem'
 import {
+  addressFromKey,
   buildX402ExpectedMessage,
   normalizePaymentRequired,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
 } from '@haven_ai/sdk'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner } from './core.js'
 
 // Well-known test keys (Hardhat accounts). Never used for real funds.
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 
 // Base USDC, verbatim checksummed — EIP-712 hashes are byte-sensitive.
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
@@ -88,22 +89,23 @@ function decodeHeader(header: string): DecodedHeader {
   return JSON.parse(Buffer.from(header, 'base64').toString('utf8')) as DecodedHeader
 }
 
-// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
-// data now — the shape below stands in for the real UserOp/settlement typed
-// data these wire-format tests don't otherwise care about; only its digest
-// matters (it is what `expectedX402`'s `typedDataHash` commits to).
-const FUNDING_TYPED_DATA = {
-  domain: { name: 'HavenX402Funding', version: '1', chainId: 8453, verifyingContract: BASE_USDC },
-  types: { Funding: [{ name: 'note', type: 'string' }] },
-  primaryType: 'Funding',
-  message: { note: 'x402 funding leg (#3272 test fixture)' },
-}
-const FUNDING_DIGEST = hashTypedData(FUNDING_TYPED_DATA as Parameters<typeof hashTypedData>[0])
+// #3281: a REAL funding leg (the shared builder) — this key's own account
+// redeeming one budget delegation, transferring the quoted amount of the
+// quoted token to this key's own delegate EOA. The toy 'Funding' fixture the
+// x402 arm now refuses.
+const FUNDING = buildFundingLegUserOp({
+  delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+  asset: ACCEPTED.asset as `0x${string}`,
+  amount: ACCEPTED.amount,
+  chainId: 8453, // ACCEPTED.network ('eip155:8453')
+})
+const FUNDING_TYPED_DATA = FUNDING.typedData
+const FUNDING_DIGEST = FUNDING.digest
 
 async function expectedX402() {
   const context = {
     paymentId: 'pay_x402_wire',
-    payloadHash: FUNDING_HASH,
+    payloadHash: FUNDING.payloadHash as string,
     resourceUrl: PAYMENT_REQUIRED.resource.url,
     merchantTo: ACCEPTED.payTo,
     amount: ACCEPTED.amount,

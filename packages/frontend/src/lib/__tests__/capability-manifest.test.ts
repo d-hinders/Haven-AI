@@ -4,13 +4,21 @@ import { join } from 'node:path'
 import {
   backendBaseUrl,
   buildManifestFrom,
+  channelFrom,
   MANIFEST_SCHEMA_VERSION,
   DEFERRED_MANIFEST_KEYS,
   HUMAN_ONLY_STEPS,
   type DiscoveryFacts,
 } from '../capability-manifest'
 import { AUTH_MARKED_PREFIXES, PUBLIC_SURFACES } from '../discovery-surfaces'
-import { CHAIN_REGISTRY, DEFAULT_CHAIN_ID, getChainData } from '@haven_ai/core'
+import {
+  CHAIN_REGISTRY,
+  CLIENT_COMPAT,
+  CLIENT_RELEASES,
+  DEFAULT_CHAIN_ID,
+  PUBLISHED_CLIENT_PACKAGES,
+  getChainData,
+} from '@haven_ai/core'
 
 /**
  * The capability manifest at `/.well-known/haven.json` (#2531).
@@ -323,5 +331,58 @@ describe('capability manifest', () => {
     const frontend = join(__dirname, '../../..')
     expect(readFileSync(join(frontend, 'public/llms.txt'), 'utf8')).toContain('/.well-known/haven.json')
     expect(readFileSync(join(frontend, 'src/middleware.ts'), 'utf8')).toContain("'/.well-known/haven.json'")
+  })
+
+  describe('release data (#3304)', () => {
+    const saved = structuredClone(CLIENT_COMPAT)
+    afterEach(() => {
+      for (const pkg of PUBLISHED_CLIENT_PACKAGES) Object.assign(CLIENT_COMPAT[pkg], saved[pkg])
+    })
+    const SHORT = { '@haven_ai/sdk': 'sdk', '@haven_ai/signer': 'signer', '@haven_ai/mcp': 'mcp', '@haven_ai/connect': 'connect', '@haven_ai/cli': 'cli' } as const
+
+    it('extends every existing packages entry with its release record, and links the page relatively', () => {
+      const manifest = buildManifestFrom(ORIGIN, FACTS)
+      for (const pkg of PUBLISHED_CLIENT_PACKAGES) {
+        const entry = manifest.packages[SHORT[pkg]]
+        expect(entry.name).toBe(pkg)
+        expect(entry.released_version).toBe(CLIENT_RELEASES[pkg].released_version)
+        expect(entry.notes).toEqual(CLIENT_RELEASES[pkg].notes)
+        expect(entry.upgrade_command).toMatch(/@dev$/)
+      }
+      expect(manifest.packages.connect.channel).toBe('@haven_ai/connect@dev')
+      expect(manifest.release_notes_url).toBe('/releases')
+    })
+
+    it('omits every update command, rather than guessing, when the channel is unknown', () => {
+      const manifest = buildManifestFrom(ORIGIN, null)
+      for (const entry of Object.values(manifest.packages)) expect(entry.upgrade_command).toBeNull()
+      expect(channelFrom({ ...FACTS, connector_package: 'not-a-package' })).toBeNull()
+      expect(channelFrom(FACTS)).toBe('dev')
+    })
+
+    // The backend enforces its OWN copy of CLIENT_COMPAT and deploys separately,
+    // so when it answers, its thresholds are the true ones (#3304 review).
+    it('prefers the thresholds the reachable backend reports over the bundled copy', () => {
+      const facts: DiscoveryFacts = {
+        ...FACTS,
+        client_releases: {
+          release_notes_url: 'https://app.test/releases',
+          packages: { '@haven_ai/signer': { min_version: '0.5.0-alpha.1', recommended_version: '0.5.0-alpha.1' } },
+        },
+      }
+      const manifest = buildManifestFrom(ORIGIN, facts)
+      expect(manifest.packages.signer.min_version).toBe('0.5.0-alpha.1')
+      expect(manifest.packages.signer.recommended_version).toBe('0.5.0-alpha.1')
+      // A package the backend did not report keeps the bundled values.
+      expect(manifest.packages.sdk.min_version).toBe(CLIENT_COMPAT['@haven_ai/sdk'].min_version)
+    })
+
+    // Mutates the SOURCE table the backend enforces (client-compat.ts), not a
+    // copy, so this fails if the manifest ever stops reading it.
+    it('follows a min_version change in CLIENT_COMPAT', () => {
+      expect(buildManifestFrom(ORIGIN, FACTS).packages.signer.min_version).toBeNull()
+      ;(CLIENT_COMPAT['@haven_ai/signer'] as { min_version: string | null }).min_version = '0.5.0-alpha.1'
+      expect(buildManifestFrom(ORIGIN, FACTS).packages.signer.min_version).toBe('0.5.0-alpha.1')
+    })
   })
 })

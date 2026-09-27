@@ -389,7 +389,10 @@ stamp is rejected, it re-reads and re-signs. The guarded stamp doubles as the
 fence — whoever stamps, sends. The bump worker sends through the same
 pipeline without a record id (it stamps its own rows), under its leader lock:
 a same-nonce replacement re-uses the row's explicit nonce, and an orphan
-re-send reads a fresh one.
+re-send reads a fresh one. When the provider refuses the `pending` block tag
+(#2769), the fresh nonce is the first one at or above its `latest` count that
+no live-broadcast row in that same table holds, so a losing replica's re-read
+sees the winner's stamp and moves past it.
 
 The Safe-bound sites that once relied on the in-process `withRelayerSendLock`
 alone were deleted with the rail (#1440). **Two paths remain** that read a

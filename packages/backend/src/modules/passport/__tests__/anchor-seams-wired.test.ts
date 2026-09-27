@@ -53,6 +53,9 @@ describe('passport anchor seams are wired in index.ts', () => {
     // relayer re-broadcasts a doomed transaction hourly. Same silent-failure
     // shape as the liveness probe: every unit test injects its own.
     ['setRevocationProbe', 'readRevocationAnchor'],
+    // #3294: unwired, a pre-fix row's phantom UID is revoked (reverting
+    // NotFound() forever) instead of repaired from its own anchor receipt.
+    ['setAnchorUidRepair', 'repairAnchorUidFromReceipt'],
   ])('%s(%s)', (fn, arg) => {
     expect(callsWith(fn, arg)).toBe(true)
   })
@@ -63,6 +66,7 @@ describe('passport anchor seams are wired in index.ts', () => {
     // still pass on a commented-out call.
     expect(INDEX).toMatch(/^\s*classifyAnchorTxLiveness,\s*$/m)
     expect(INDEX).toMatch(/^\s*readRevocationAnchor,\s*$/m)
+    expect(INDEX).toMatch(/^\s*repairAnchorUidFromReceipt,\s*$/m)
   })
 
   it('a COMMENTED-OUT call does not count as wired', () => {

@@ -25,6 +25,20 @@ import {
   releaseChangelog,
 } from './release-changelog.mjs'
 import {
+  ACTION_REQUIRED_MARKER,
+  CLIENT_RELEASE_DATA_FILE,
+  MAX_NOTES_PER_PACKAGE,
+  MAX_SUMMARY_CHARS,
+  bulletSentences,
+  clientReleaseDataViolations,
+  clientReleasesFrom,
+  nearMissMarker,
+  noteFromSection,
+  publicText,
+  releasedSections,
+  renderClientReleaseDataFile,
+} from './release-client-data.mjs'
+import {
   formatSnapshotVersion,
   isSnapshotVersion,
   snapshotModeViolation,
@@ -2184,4 +2198,238 @@ test('changelog headings — no CHANGELOG reaches a tarball, so this is a repo-r
       `packages/${name} would publish its CHANGELOG — this premise no longer holds`,
     )
   }
+})
+
+// ---------------------------------------------------------------------------
+// Client release data (#3305, epic #3302 slice 3)
+//
+// `packages/core/src/client-releases.data.ts` is a pure function of the five
+// CHANGELOGs, written by the bump after the release headings. These call the
+// bump's pure functions directly — the script has no dry-run mode.
+// ---------------------------------------------------------------------------
+
+/** A minimal CHANGELOG with an Unreleased section and one prior release. */
+function fixtureChangelog(pkgName, unreleasedBullets) {
+  return [
+    `# @haven_ai/${pkgName}`,
+    '',
+    'Release headers are written by the release bump.',
+    '',
+    '## Unreleased',
+    '',
+    ...unreleasedBullets,
+    '',
+    '## 0.5.0-alpha.1 — 2026-09-25',
+    '',
+    '- **Client identity (#3303).** Requests name the client.',
+    '',
+  ].join('\n')
+}
+
+/** What the bump does to the CHANGELOGs, then to the data: heading first, data from it. */
+function bumpedData(changelogs, version, date) {
+  const released = {}
+  for (const [name, source] of Object.entries(changelogs)) {
+    released[name] = releaseChangelog(source, version, date) ?? source
+  }
+  return clientReleasesFrom(released)
+}
+
+test('client release data — the bump produces the new version for all five packages, notes from each Unreleased section (#3305)', () => {
+  const changelogs = Object.fromEntries(
+    CHANGELOG_PACKAGES.map((name) => [name, fixtureChangelog(name, [`- **${name} change (#9${name.length}).** Detail that is not the headline.`])]),
+  )
+  const data = bumpedData(changelogs, '0.6.0-alpha.0', '2026-10-01')
+  assert.deepEqual(Object.keys(data).sort(), CHANGELOG_PACKAGES.map((n) => `@haven_ai/${n}`).sort())
+  for (const name of CHANGELOG_PACKAGES) {
+    const entry = data[`@haven_ai/${name}`]
+    assert.equal(entry.released_version, '0.6.0-alpha.0', name)
+    assert.deepEqual(entry.notes[0], {
+      version: '0.6.0-alpha.0',
+      date: '2026-10-01',
+      summary: `${name} change. Detail that is not the headline.`,
+      action_required: false,
+    })
+    // The previous release is kept, newest first.
+    assert.equal(entry.notes[1].version, '0.5.0-alpha.1', name)
+  }
+})
+
+test('client release data — the Update required marker sets action_required and KEEPS the headline; BREAKING alone does not (#3305)', () => {
+  const note = (body) => noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n${body}\n`)[0])
+
+  // The marker leading the bullet, as the CHANGELOG headers document it.
+  const marked = note(`- ${ACTION_REQUIRED_MARKER} **Signer refuses v2 contexts (#1).** Update the connector to keep paying.`)
+  assert.equal(marked.action_required, true)
+  assert.equal(marked.summary, 'Signer refuses v2 contexts. Update the connector to keep paying.')
+
+  // Colon or full stop inside the span still counts, and the rest of the bullet leads.
+  for (const span of ['**Update required:**', '**Update required.**']) {
+    const n = note(`- ${span} signer refuses v2 (#1).`)
+    assert.equal(n.action_required, true, span)
+    assert.equal(n.summary, 'signer refuses v2.', span)
+  }
+
+  // Where the marker sits never hides it: a nested bullet, a continuation paragraph.
+  assert.equal(note(`- **A change.** Detail.\n  - ${ACTION_REQUIRED_MARKER} for the signer.`).action_required, true)
+  assert.equal(note(`- **A change.** Detail.\n\n  ${ACTION_REQUIRED_MARKER}: the signer must update.`).action_required, true)
+
+  // The marked bullet leads the note even when it is not first.
+  const second = note(`- **Docs tidy.** Words.\n- ${ACTION_REQUIRED_MARKER} **Signer refuses v2.** Update it.`)
+  assert.equal(second.summary, 'Signer refuses v2. Update it. (+1 more in the changelog)')
+
+  // A marker wrapped across two lines is still the marker.
+  const wrapped = note('- **Update\n  required** Signer v2.')
+  assert.equal(wrapped.action_required, true)
+  assert.equal(wrapped.summary, 'Signer v2.')
+
+  // A near-miss is REFUSED, never read as "no update needed".
+  for (const miss of ['- **Update required — new signer.** Old ones stop.', '- **update required** x.', '- Update required for the signer.', '- **Update\n  required — new.** x.']) {
+    assert.throws(() => note(miss), /not as the marker/, miss)
+  }
+  assert.throws(() => note('- No update required for existing agents.'), /no update needed/, 'the refusal names the rewording fix')
+  assert.equal(note('- Autoupdate required changes.').action_required, false, 'a word containing "update" is not the phrase')
+  assert.throws(
+    () => clientReleasesFrom(Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, '## 0.6.0 — 2026-10-01\n\n- update required.\n']))),
+    /packages\/sdk\/CHANGELOG\.md 0\.6\.0: /,
+    'the refusal names the file and the release',
+  )
+  // A marker mid-bullet leaves no stray punctuation.
+  assert.equal(note(`- **Signer v2.** ${ACTION_REQUIRED_MARKER}: old versions stop.`).summary, 'Signer v2. old versions stop.')
+
+  // Prose QUOTING the marker in a code span is not the marker.
+  assert.equal(note('- Explains the `**Update required**` marker.').action_required, false)
+
+  const breaking = note('- **BREAKING (#2).** A field was removed; updating may break a reader.')
+  assert.equal(breaking.action_required, false, 'BREAKING means "updating may break you", not "you must update"')
+  assert.equal(breaking.summary, 'Breaking change. A field was removed; updating may break a reader.')
+})
+
+test('client release data — an empty release says so; a release with prose but no bullets is never "no changes" (#3305)', () => {
+  const note = (body) => noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n${body}\n`)[0])
+  const empty = note('')
+  assert.equal(empty.summary, 'No changes to this package in this release.')
+  assert.equal(empty.action_required, false)
+  assert.equal(note('Renamed the client (#7). Old names are gone.\n\n| old | new |\n|---|---|').summary, 'Renamed the client. Old names are gone.')
+  assert.equal(note('### Changed\n').summary, 'No changes to this package in this release.', 'a bare heading is not a change')
+})
+
+test('client release data — summaries are whole sentences, public text, never cut mid-clause (#3305)', () => {
+  assert.deepEqual(bulletSentences('**Client identity (#3303, epic #3302).** More here. And more.'), ['Client identity.', 'More here.', 'And more.'])
+  assert.deepEqual(
+    bulletSentences("`activity list` rows carry `scope` (`{ source: 'wallet' }`). Second sentence."),
+    ["activity list rows carry scope ({ source: 'wallet' }).", 'Second sentence.'],
+  )
+  assert.equal(publicText('#3128: listReceiptsPage pages, which left #3120\'s record resolution open'), 'listReceiptsPage pages, which left record resolution open')
+  assert.equal(publicText('BREAKING (x402 arm): signs less (#3281, epic #3284).'), 'Breaking change (x402 arm): signs less.')
+  // A reference before punctuation or at the end is removed too.
+  assert.equal(publicText('Fixed the thing in #3303. Fixed #3304, and more. See #3305'), 'Fixed the thing in. Fixed, and more. See')
+  // An abbreviation's full stop does not end a sentence.
+  assert.deepEqual(bulletSentences('Adds helpers, e.g. foo and bar. Second.'), ['Adds helpers, e.g. foo and bar.', 'Second.'])
+  // A dot that belongs to a word (`.env`) is kept, at the start and mid-text.
+  assert.deepEqual(bulletSentences('`.env` is now read at startup.'), ['.env is now read at startup.'])
+  assert.equal(publicText('Reads `.env` and `.npmrc` now.'), 'Reads .env and .npmrc now.')
+  // A lead is served as written: identifiers and flags are not re-cased or stripped.
+  assert.equal(noteFromSection(releasedSections('## 0.6.0 — 2026-10-01\n\n- --doctor needs no flag.\n')[0]).summary, '--doctor needs no flag.')
+
+  // A next sentence that would overflow is dropped whole, never cut.
+  const long = 'x'.repeat(MAX_SUMMARY_CHARS)
+  const n = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- **Short head.** ${long}.\n`)[0])
+  assert.equal(n.summary, 'Short head.')
+  // A headline longer than the limit is served whole when it has no clause boundary…
+  const h = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- **${long}.** Next.\n`)[0])
+  assert.equal(h.summary, `${long}.`)
+  // …and shortened at the last `;` outside parentheses that fits when it has one.
+  const clauses = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- First clause (a; b); second clause; ${long}.\n`)[0])
+  assert.equal(clauses.summary, 'First clause (a; b); second clause.')
+  // Braces nest like parentheses, and a shortened headline gets no next sentence.
+  const braces = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- Pays now; then { a; ${long} }. Next.\n`)[0])
+  assert.equal(braces.summary, 'Pays now.')
+})
+
+test(`client release data — at most ${MAX_NOTES_PER_PACKAGE} notes per package, newest first (#3305)`, () => {
+  const sections = Array.from({ length: MAX_NOTES_PER_PACKAGE + 2 }, (_, i) =>
+    `## 0.${9 - i}.0 — 2026-09-${String(20 - i).padStart(2, '0')}\n\n- **Change ${i}.** x\n`,
+  ).join('\n')
+  const data = clientReleasesFrom(Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, `# x\n\n## Unreleased\n\n${sections}`])))
+  for (const entry of Object.values(data)) {
+    assert.equal(entry.notes.length, MAX_NOTES_PER_PACKAGE)
+    assert.equal(entry.notes[0].version, '0.9.0')
+    assert.equal(entry.released_version, '0.9.0')
+  }
+})
+
+test('client release data — a HAND EDIT is refused, a regenerated file is not (#3305)', () => {
+  const changelogs = Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, fixtureChangelog(n, [])]))
+  const pristine = renderClientReleaseDataFile(clientReleasesFrom(changelogs))
+  assert.deepEqual(clientReleaseDataViolations(pristine, changelogs), [])
+  const edited = pristine.replace('"action_required": false', '"action_required": true')
+  assert.notEqual(edited, pristine, 'fixture must actually change')
+  const violations = clientReleaseDataViolations(edited, changelogs)
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /hand-edited/)
+  assert.match(violations[0], /first difference at line \d+/)
+})
+
+test('client release data — the REAL data file is what the REAL CHANGELOGs produce at this commit (#3305)', async () => {
+  // A CI drift gate, deliberately: a PR that hand-edits the data file, or edits
+  // a released CHANGELOG section in the window without regenerating, goes red
+  // here, before the bump's own refusal (refuseHandEditedClientReleaseData)
+  // would stop the next release. Fix with `node scripts/release-client-data.mjs --write`.
+  const changelogs = {}
+  for (const name of CHANGELOG_PACKAGES) {
+    changelogs[name] = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+  }
+  const onDisk = await readFile(join(ROOT, CLIENT_RELEASE_DATA_FILE), 'utf8')
+  assert.deepEqual(clientReleaseDataViolations(onDisk, changelogs), [])
+})
+
+test('client release data — no CHANGELOG\'s Unreleased section carries a near-miss marker, so the PR that adds one goes red, not the bump (#3305)', async () => {
+  for (const name of CHANGELOG_PACKAGES) {
+    const source = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+    const unreleased = /^## Unreleased[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(source)
+    if (!unreleased) continue
+    assert.equal(nearMissMarker(unreleased[1]), false, `packages/${name}/CHANGELOG.md ## Unreleased: "update required" not written as ${ACTION_REQUIRED_MARKER}`)
+  }
+  assert.equal(nearMissMarker('- update required for x.'), true, 'positive control')
+})
+
+test('client release data — the bump refuses a hand edit BEFORE writing, regenerates AFTER the headings, and skips both for a snapshot (#3305)', async () => {
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const refuse = source.indexOf('await refuseHandEditedClientReleaseData()')
+  const firstWrite = source.indexOf('await updatePackageVersion(name, newVersion)')
+  const headings = source.indexOf('await updateChangelogs(newVersion, isoDate)')
+  const write = source.indexOf('await updateClientReleaseData()')
+  const verify = source.indexOf('await verifyClientReleaseData(newVersion)')
+  for (const [label, at] of [['refuse', refuse], ['write', write], ['verify', verify]]) {
+    assert.notEqual(at, -1, `release-bump.mjs no longer calls the ${label} step`)
+  }
+  assert.ok(refuse < firstWrite, 'the hand-edit check must run before anything is written')
+  assert.ok(headings < write && write < verify, 'the data is generated FROM the headings, then re-read to verify')
+  // The write sits in the same `if (!snapshot)` block as the headings; the
+  // refusal sits in the `else` of `if (snapshot)`.
+  const block = source.slice(source.indexOf('if (!snapshot) {\n    const isoDate'), source.indexOf('// ── 6. Wipe all dists'))
+  const ifBranch = block.slice(0, block.indexOf('} else {'))
+  assert.ok(ifBranch.includes('await updateClientReleaseData()'), 'a snapshot must not write the release data')
+  assert.equal(source.split('await updateClientReleaseData()').length, 2, 'exactly one call site — inside the non-snapshot branch')
+  assert.match(block, /\} else \{[\s\S]*skipped — a dev snapshot is not a release[\s\S]*skipped — a dev snapshot is not a release/)
+  assert.match(source, /if \(snapshot\) \{\n[^\n]*SNAPSHOT[^\n]*\n\s*\} else \{[\s\S]{0,400}await refuseHandEditedClientReleaseData\(\)/)
+})
+
+test('client release data — the bump never writes client-compat.ts: a release must not raise a minimum (#3305)', async () => {
+  const bump = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const data = await readFile(join(ROOT, 'scripts', 'release-client-data.mjs'), 'utf8')
+  // Code lines only: the comment beside the writer says it never touches the
+  // file, which is the point, not a violation.
+  const code = bump.split('\n').filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join('\n')
+  assert.ok(/client-releases\.data|CLIENT_RELEASE_DATA_FILE/.test(code), 'positive control: the scan sees the file the bump DOES write')
+  assert.equal(/client-compat/.test(code), false, 'release-bump.mjs code must not name client-compat')
+  // The data module mentions it only in prose; it writes ONE path.
+  assert.equal(CLIENT_RELEASE_DATA_FILE, 'packages/core/src/client-releases.data.ts')
+  assert.equal((data.match(/writeFile\(/g) ?? []).length, 1, 'release-client-data.mjs writes exactly one file (its --write CLI)')
+  // And the generated file carries no threshold at all.
+  const rendered = renderClientReleaseDataFile(clientReleasesFrom(
+    Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, fixtureChangelog(n, [])])),
+  ))
+  assert.equal(/min_version|recommended_version/.test(rendered.split('*/')[1]), false)
 })

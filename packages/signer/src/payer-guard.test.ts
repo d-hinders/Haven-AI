@@ -14,12 +14,12 @@
 import { describe, it, expect } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
 import { hashTypedData } from 'viem'
-import { buildX402ExpectedMessage } from '@haven_ai/sdk'
+import { addressFromKey, buildX402ExpectedMessage } from '@haven_ai/sdk'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner } from './core.js'
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 
 /** The #1681 field shapes: the OLD agent's delegate, stamped into the quote. */
@@ -27,22 +27,32 @@ const OTHER_DELEGATE = '0xF278a857b981Ab00e2ad00cE0BdC595d05f1AB69'
 const OTHER_AGENT = '4f67d16e'
 const LOCAL_AGENT = '0a9fda23'
 
+const MERCHANT_TO = '0x000000000000000000000000000000000000dEaD'
+const AMOUNT = '40000'
+const ASSET = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+const NETWORK = 'base'
+
+// #3281: a REAL funding leg (the shared builder) — this key's own account
+// redeeming one budget delegation, transferring the quoted amount of the
+// quoted token to this key's own delegate EOA. The toy 'Payload' fixture the
+// x402 arm now refuses.
+const FUNDING = buildFundingLegUserOp({
+  delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+  asset: ASSET,
+  amount: AMOUNT,
+  chainId: 8453, // NETWORK ('base')
+})
+const TYPED_DATA = FUNDING.typedData
+
 const BASE = {
   paymentId: 'pay_guard_1690',
-  payloadHash: FUNDING_HASH,
+  payloadHash: FUNDING.payloadHash as string,
   resourceUrl: 'https://merchant.test/paid',
-  merchantTo: '0x000000000000000000000000000000000000dEaD',
-  amount: '40000',
-  asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-  network: 'base',
+  merchantTo: MERCHANT_TO,
+  amount: AMOUNT,
+  asset: ASSET,
+  network: NETWORK,
   expiresAt: '2099-01-01T00:00:00.000Z',
-}
-
-const TYPED_DATA = {
-  domain: { name: 'HavenGuard', version: '1', chainId: 8453 },
-  types: { Payload: [{ name: 'hash', type: 'bytes32' }] },
-  primaryType: 'Payload',
-  message: { hash: FUNDING_HASH },
 }
 
 async function signedContext(overrides: Record<string, unknown> = {}, versionOverride?: number) {

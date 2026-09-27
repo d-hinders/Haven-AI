@@ -23,10 +23,19 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
+// The double below replaces only the FETCHING half of the accounts barrel;
+// the route also reads the pure freshness combiner from it (#3295), which
+// stays real so the marker math this file pins is the production math.
+import { combineBalanceFreshness } from '../../modules/accounts/balance-freshness.js'
 
 const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  portfolioMocks: { fetchPortfolioForAccount: vi.fn() },
+  portfolioMocks: {
+    fetchPortfolioForAccount: vi.fn(),
+    // #3296: the route consults the module's unpriceable predicate before
+    // writing the daily snapshot; clean by default, the snapshot tests pin.
+    isPortfolioUnpriceable: vi.fn(),
+  },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
     enrichedTransactionIdentityKey: vi.fn((tx: { hash: string }) => tx.hash),
@@ -43,7 +52,10 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../modules/accounts/index.js', () => portfolioMocks)
+vi.mock('../../modules/accounts/index.js', () => ({
+  ...portfolioMocks,
+  combineBalanceFreshness,
+}))
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../modules/transactions/index.js', () => transactionMocks)
 
@@ -135,6 +147,8 @@ describe('dashboard aggregates (characterization, #1167)', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     portfolioMocks.fetchPortfolioForAccount.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(false)
     transactionMocks.fetchAccountTransactions.mockReset()
     transactionMocks.mergeX402Transactions.mockReset()
     transactionMocks.resolveTransactionCurrency.mockClear()

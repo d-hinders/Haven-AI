@@ -30,7 +30,7 @@ import {
   type PermissiveInputToolName,
 } from './tools.js'
 
-/** The 23 hosted tool names, in `HostedToolName` declaration order. */
+/** The 26 hosted tool names, in `HostedToolName` declaration order. */
 const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_get_agent',
   'haven_get_allowances',
@@ -56,13 +56,16 @@ const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_sweep_delegate',
   'haven_discover_tools',
   'haven_submit_catalog_entry',
+  // #3329:
+  'haven_open_task_budget',
+  'haven_close_task_budget',
 ]
 
 describe('hosted tool contract surface (#2807 characterization)', () => {
-  it('advertises exactly the 24 hosted tool names, each exactly once', () => {
+  it('advertises exactly the 26 hosted tool names, each exactly once', () => {
     const schemaKeys = Object.keys(toolSchemas)
-    expect(schemaKeys).toHaveLength(24)
-    expect(new Set(schemaKeys).size).toBe(24)
+    expect(schemaKeys).toHaveLength(26)
+    expect(new Set(schemaKeys).size).toBe(26)
     expect([...schemaKeys].sort()).toEqual([...HOSTED_TOOL_NAMES].sort())
   })
 
@@ -190,6 +193,6 @@ describe('hosted tool contract surface (#2807 characterization)', () => {
       expect(toolDescriptions[name as HostedToolName]).toBeTruthy()
       expect(toolInputSchema(name as HostedToolName)).toBeTruthy()
     }
-    expect(advertised.size).toBe(24)
+    expect(advertised.size).toBe(26)
   })
 })

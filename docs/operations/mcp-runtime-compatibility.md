@@ -11,6 +11,7 @@ covers:
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/x402/sign-context.ts
   - packages/sdk/src/userop-binding.ts
+  - packages/sdk/src/task-budget-guards.ts
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
   - packages/backend/src/routes/machine-payments.ts
@@ -21,6 +22,12 @@ covers:
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/edge.ts
+  - packages/sdk/src/client-identity.ts
+  - packages/core/src/client-compat.ts
+  - packages/core/src/client-releases.ts
+  - packages/backend/src/middleware/client-compat.ts
+  - packages/sdk/src/haven-api-transport.ts
+  - packages/cli/src/api.ts
   - packages/sdk/package.json
   - packages/sdk/tsup.config.ts
   - scripts/release-bump.mjs
@@ -56,7 +63,8 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-24"
+  - packages/core/src/client-releases.data.ts
+last-verified: "2026-09-26"
 ---
 
 # MCP Runtime Compatibility
@@ -64,6 +72,25 @@ last-verified: "2026-09-24"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Re-verified unchanged (#3279, 2026-09-25, Safe-vocabulary copy):** copy-only
+> edits on two surfaces this document covers. The local signer's first-launch
+> consent block (`packages/signer/src/consent.ts`) now names the agent's signed
+> budget delegation as the real spend gate, and the local MCP server's consent
+> screen prints `Haven wallet: <address>` (`packages/mcp/src/consent.ts`) — the
+> retired rail's name is gone from both. `haven_sign_sweep_delegate`'s
+> description (`packages/signer/src/tools.ts`) and the sweep `to`-guard refusal
+> message (`packages/signer/src/core.ts`) name the destination as the agent's
+> account (Haven wallet) and state the conditional destination check: it runs
+> only when the local credential carries an account address (#2247), and
+> otherwise rests on Haven's binding signature. No tool added, renamed or
+> re-shaped, no schema or argument change, no version-skew axis moves, and the
+> consent-hash contract holds: neither `computeConsentHash`
+> (`packages/mcp/src/consent.ts`) nor `computeSignerConsentHash`
+> (`packages/signer/src/consent.ts`) hashes rendered text, and
+> `SIGNER_CONSENT_SURFACE_VERSION` stays 2 (newly pinned by a test). Scope of
+> this note: those copy strings and their pins. Nothing else in this document
+> was re-verified in this pass.
 >
 > **Re-verified unchanged (#3241):** the change is test-only in
 > `packages/connect/src/doctor.test.ts` (+47/−1) — a `stampAgentMtimes()`
@@ -223,6 +250,55 @@ last-verified: "2026-09-24"
 > authenticated, unlike the two `npm view` reads. Nothing else in this document
 > was re-verified in this pass.
 >
+> **Recent re-verification (#3304):** no tool, argument, schema, description
+> or consent input changes on either runtime. Two agent-facing things move.
+> First, the agent runbook (`HAVEN_AGENT_RUNBOOK_MD` in
+> `packages/sdk/src/agent-guidance.ts`, served as `/for-agents.md` and bundled
+> into `haven guide`) gains a short "If something breaks" section pointing at
+> `client_update` and `/releases`. That is text, not a contract: nothing parses
+> it. Second, the backend's `client_update` hint now carries a non-null
+> `notes_url`. The SDK's `readClientUpdate` already passes a string through, and
+> the field was always in the schema, so a client from #3303 on reads it without
+> a change. The version-skew and consent-hash contracts do not move. Nothing
+> else in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3375):** the local runtime's x402 payment tools
+> (`haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool`) pay through
+> `@haven_ai/sdk`'s own funding leg, which now also runs the #3281 recipient pin
+> (`assertFundingLegPaysDelegate`) against the 402 option being paid. A funding
+> leg that does not transfer the quoted amount of the quoted token into the
+> key's own delegate EOA is refused as `TYPED_DATA_NOT_ALLOWED`, with nothing
+> signed or posted to `/sign`. No tool, argument, schema, description or
+> consent input changes, so the handshake and consent hash do not move. Skew:
+> the backend already builds exactly this shape, so an updated SDK against the
+> current backend refuses no live leg; installed `@haven_ai/mcp` / SDK copies
+> keep the old funding leg until updated. The hosted runtime signs through the
+> signer, which has pinned this since #3281. Nothing else in this document was
+> re-verified in this pass.
+>
+> **Recent re-verification (#3306):** each `haven_list_receipts` row on BOTH
+> runtimes LOSES four keys — `rail`, `proofStatus`, `resourceUrl`,
+> `merchantAddress`, the deprecated twins #3134 dual-emitted from
+> `0.5.0-alpha.0` — so a row carries only `source`, `paymentProofStatus`,
+> `x402ResourceUrl` and `x402MerchantAddress` for those values. This is a
+> tool-output RE-SHAPE, and breaking for any agent or script still reading an
+> old key. The removal condition held at merge: `@haven_ai/sdk` `latest`,
+> `@haven_ai/mcp` `latest` and the hosted prod `serverInfo.version` on
+> `initialize` all read `0.5.0-alpha.1` (≥ `0.5.0-alpha.0`; evidence on #3130).
+> Those clocks prove clients *received* the survivors, not that they stopped
+> reading the twins — accepted by design (#3134 decision 1). The change is made
+> at `mapPaymentReceipt` only: the receipts WIRE (`RawHavenPaymentReceipt`) is
+> unchanged, neither runtime reshapes receipt rows itself (hosted
+> `state-direct-recovery.ts` and local `tools.ts` pass `listReceiptsPage`
+> through), so the hosted runtime drops the keys with its deploy (the SDK is a
+> workspace link there) and the local runtime with its SDK dependency. No tool
+> added or renamed, no argument, schema or description change, and the
+> version-skew and consent-hash contracts do not move. Under the 0.x
+> convention this document records below (the 0.4.0-alpha.0 note: a break
+> takes the minor step), the release carrying this is a MINOR step, and a
+> `.d.ts` diff does not show a tool-output break. Nothing else in this document was re-verified in this
+> pass.
+>
 > **Recent re-verification (#3213):** `haven_check_funds` now accepts its
 > `token` argument as the contract address OR the SYMBOL the identity and
 > allowance reads report (`packages/mcp-server/src/tools/state-direct-recovery.ts`,
@@ -265,6 +341,20 @@ last-verified: "2026-09-24"
 > Installed signers keep the pre-#3272 behaviour until upgraded, and Haven
 > cannot gate that. Nothing else in this document was re-verified in this
 > pass.
+>
+> **Recent re-verification (#3281):** the signer's x402 arm (`haven_sign` with
+> `x402_expected` or a fetched x402 context, and `haven_sign_x402`) now signs
+> only a funding-leg `PackedUserOperation` that passes the same allowlist plus
+> a recipient pin (a transfer of the quoted amount to the signer's own
+> delegate EOA), or an erc7710 settlement child delegated by the signer's own
+> account. Anything else answers `TYPED_DATA_NOT_ALLOWED` or
+> `USEROP_BINDING_MISMATCH`, with the same envelopes as the unbound branch,
+> even when Haven's binding validly declared it. No tool, argument or version
+> set changes, so the handshake and consent hash do not move. Skew: a new
+> signer against the current backend signs every live shape, which the
+> backend's `funding-leg-signer-shape.contract.test.ts` pins. Installed
+> signers keep the old x402 arm until upgraded. Nothing else in this document
+> was re-verified in this pass.
 >
 > **Recent re-verification (#3283):** the allowlist above moved into
 > `@haven_ai/sdk` (`assertBoundDirectPaymentUserOp` and friends, exported from
@@ -973,6 +1063,19 @@ The source of truth is `packages/connect/src/runtime-manifest.ts` (the SDK and
 signer versions are pinned there; `@haven_ai/mcp` tracks its own `MCP_VERSION`,
 and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 
+> **Re-verification (#3305):** this doc's covered trees changed in four ways,
+> none of which is a runtime or compatibility change:
+> - each published CHANGELOG gains a header paragraph defining the
+>   `**Update required**` marker;
+> - `release-bump.mjs` gains a step that regenerates
+>   `packages/core/src/client-releases.data.ts`, the release notes #3304 serves;
+> - `client-releases.ts` now re-exports that generated data;
+> - `scripts/README.md` documents the new step.
+>
+> No version constant, tool, schema, capability, consent input or version-skew
+> surface moved, and `client-compat.ts` is not written by the bump. The
+> Supported Runtime Manifest table and every claim below stand unchanged.
+
 > **Re-verification (changelog-heading gap, 2026-09-14):** this doc's covered
 > trees changed only by a CHANGELOG heading — `release-bump.mjs` now rewrites
 > `## Unreleased` to `## <version> — <date>` in the five published packages.
@@ -1026,6 +1129,88 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > nonetheless re-read before upgrading is the `settled` semantics and the local
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
+
+> **Re-verification (0.6.0-alpha.0 release, 2026-09-26):** the manifest table
+> above is re-pinned by the bump to `0.6.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from the
+> published `0.5.0-alpha.1` is **MINOR** for one break: #3306 removes the four
+> deprecated receipt twins from `haven_list_receipts` output on both runtimes.
+> Surfaces this release moves, each recorded where it is owned:
+> **the tool set** — three new local tools (#3329, *Task budgets* below), so the
+> consent hash changes and every local operator is asked to consent once more,
+> and the exported `HavenMcpToolName` union widens by those names; **the signer
+> handshake** — `task_sign_context_versions` is additive beside
+> `direct_sign_context_versions`, and the signer's redemption allowlist admits
+> exactly one more shape, the two-link `[task child, budget]` chain; **hosted
+> direct-payment guidance** — #3277's `haven_sign({ payment_id })` handoff and
+> old-signer recovery (its own section below), whose skew rule is refusal
+> recovery, never an `initialize` version comparison. The SDK's funding-leg pin
+> (#3375) and `task_budget_id` forwarding (#3378) move no tool, argument or
+> schema. Every `CLIENT_COMPAT` threshold is still null, so no client is hinted
+> or refused. Re-read, not rubber-stamped: the Node floor and the Codex and
+> Claude Code rows are unchanged. `last-verified` is not bumped.
+
+> **Re-verification (0.5.0-alpha.1 release, 2026-09-25):** the manifest table
+> above is re-pinned by the bump to `0.5.0-alpha.1` for `connect`, `mcp`, `sdk`
+> and `signer`, and the bump also rewrote `SDK_VERSION` in
+> `packages/sdk/src/client-identity.ts`, as the client-identity section below
+> says it must. **`0.5.0-alpha.0` was cut but never published**: #3303
+> (#3316) landed on `dev` after that cut and before its promotion, with its
+> five CHANGELOG entries under `Unreleased`. Publishing it as alpha.0 would
+> have shipped code its own CHANGELOG called unreleased, so alpha.1 stamps it.
+> The published step is therefore `0.4.0-alpha.0` → `0.5.0-alpha.1`: MINOR,
+> for exactly the fail-closed signer refusals the alpha.0 note below records.
+> **#3303 adds no break.** Every client now sends `X-Haven-Client` (except the
+> connector's read-only `probeHostedAgentIdentity`, behind `--doctor` /
+> `--unwire`, which deliberately sends none), and the
+> backend hints below a `recommended_version` and refuses (426) only below a
+> SET `min_version`. Every threshold in `CLIENT_COMPAT` is null at this cut, so
+> no client is hinted or refused by this release. The signer maps a future 426
+> to its existing `SIGN_CONTEXT_REFUSED`; what is new is the
+> `backend_error_code: 'client_outdated'` value and the `client_update` field,
+> both additive.
+> Re-read, not rubber-stamped: the Node floor and the Codex and Claude Code rows
+> are unchanged. `last-verified` is not bumped.
+>
+> **Re-verification (0.5.0-alpha.0 release, 2026-09-25):** the manifest table
+> above is re-pinned by the bump to `0.5.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`; the four numbers were not copied by hand. **Re-read, not
+> rubber-stamped**: the Node floor (`>= 22.0.0`, CI on LTS 24 via `.nvmrc`) and
+> the Codex and Claude Code rows are unchanged.
+>
+> **MINOR, because the signer now refuses things it used to sign.** Every break
+> in this release narrows what a delegate key will sign (epic #3284), and every
+> one moves **fail-closed** — a refusal, never a different signature. The two
+> the signer's CHANGELOG marks BREAKING: `haven_sign`'s unbound branch signs
+> only a bound direct-payment UserOp and **x402 expected-context v1 is retired**
+> (#3272), and the x402 arm signs only a guarded funding leg or a verified
+> settlement child (#3281). Alongside them, `haven_sign` refuses a bare
+> `payload_hash` (#3169) and the signer CLI refuses unknown options (#3173). The
+> SDK's `signForData` refuses the same shapes (#3283), so `mcp`'s payment tools
+> inherit the narrowing through it. None of this is visible to a declaration
+> diff — the lesson the 0.4.0 note above records applies again, one layer in:
+> these are runtime refusals, and the CHANGELOGs are what name them.
+>
+> **The v1 retirement's skew, verified rather than assumed.** The signer's
+> `SUPPORTED_X402_EXPECTED_VERSIONS` goes `[1, 2, 3]` → `[2, 3]`. The risky
+> direction is a new signer against the backend still on `main` at cut time
+> (`fe717b58`), which selects `payerDelegate ? 3 : typedDataHash ? 2 : 1` — so
+> v1 is emittable there, where `dev` selects `payerDelegate ? 3 : 2`. Re-read at
+> the cut: `main` has exactly three `signX402ExpectedContext` call sites
+> (`delegation-authorize.ts` twice, `replay.ts` once). The first two pass
+> `typedDataDigest(...)` of a value they always build. The replay site passes
+> `typedDataDigest(sign_data.typed_data)`, and it too always builds that value:
+> it returns `null` early when `prepared_user_op` is null (`replay.ts:94`,
+> `:146`), and otherwise sets `typed_data` to an object on both branches
+> (`delegationSigningPayload`, `userOpTypedData`). `typedDataDigest` throws on
+> unhashable input rather than returning `undefined`. So v1 cannot be produced
+> at any of the three sites, and the
+> note's earlier claim holds: **a new signer meeting an old backend's v1 is not
+> a live case.** The other direction is unaffected: an old signer against the
+> new backend receives only v2/v3, which it has always supported.
+>
+> `last-verified` is **not** bumped: this note re-reads the manifest rows and the
+> v1 skew claim, and nothing else in the document.
 
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** the manifest table
 > above is re-pinned by the bump to `0.4.0-alpha.0` for `connect`, `mcp`, `sdk`
@@ -1161,10 +1346,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.4.0-alpha.0` |
-| `@haven_ai/mcp` | `0.4.0-alpha.0` |
-| `@haven_ai/sdk` | `0.4.0-alpha.0` |
-| `@haven_ai/signer` | `0.4.0-alpha.0` |
+| `@haven_ai/connect` | `0.6.0-alpha.0` |
+| `@haven_ai/mcp` | `0.6.0-alpha.0` |
+| `@haven_ai/sdk` | `0.6.0-alpha.0` |
+| `@haven_ai/signer` | `0.6.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -1953,6 +2138,51 @@ of them on the delegation rail as a version-skew report, not a credential
 problem — and note the last is also what a *legacy-rail* intent looks like if
 a caller passes `typed_data` that the context never committed to.
 
+### Task budgets — a third sign-context, and the tool set moves (#3329)
+
+`haven_sign` accepts `task_budget_id` (mutually exclusive with `payment_id`
+and `payload_hash`). The signer fetches
+`GET /task-budgets/:id/sign-context`, whose `task_sign_context_version` is
+pinned to `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` (`packages/signer/src/sign-context.ts`,
+currently `[1]`) and advertised in the handshake as
+`task_sign_context_versions` next to `direct_sign_context_versions`. Two
+shapes are signed and nothing else: a self-delegated task child
+(`assertOwnTaskChild`) and the `disableDelegation` UserOp that closes one
+(`assertOwnTaskBudgetCloseUserOp`), both from `@haven_ai/sdk`'s
+`task-budget-guards.ts` — the security model §10 states the allowlist.
+
+**The tool-name set changes on both runtimes.** Only the local `@haven_ai/mcp`
+has a consent gate, so its hash moves and every installed operator of the
+local runtime is asked to consent again on the next launch; the signer's own
+hash covers tool names and does not move, so its reworded `haven_sign`
+consent summary is not re-prompted:
+local `@haven_ai/mcp` gains `haven_open_task_budget`, `haven_close_task_budget`
+and `haven_submit` (the local relay step task budgets need; its `payment_id`
+branch refuses, because the local runtime signs and submits a payment inline);
+the hosted MCP gains `haven_open_task_budget` and `haven_close_task_budget`,
+and its existing `haven_submit` takes `task_budget_id` XOR `payment_id`.
+`task_budget_id` is an optional argument on `haven_send`, `haven_pay`,
+`haven_pay_x402_quote` and `haven_pay_x402` where each exists. (#3378
+re-verification: until then the local `haven_pay_x402_quote` and the hosted
+`haven_send`, `haven_pay` and `haven_pay_x402_quote` accepted it and dropped
+it, charging the whole budget; all four now carry it to the wire, pinned by
+wire-level tests on both runtimes. A merchant-pinned task budget is declined
+on an EIP-3009 funding leg, which pays the agent's own wallet first; both
+runtimes' `haven_open_task_budget` descriptions say so. Descriptions are not
+consent inputs, so no consent hash moves.)
+
+Skew, both directions fail closed, each by a different mechanism: an
+**older signer** strips the unknown `task_budget_id` key (its `haven_sign`
+schema predates it) and then refuses with "Pass payment_id … or
+payload_hash" — it never fetches and never signs; an **older hosted MCP**
+lists no task-budget tools, and its `haven_submit`, which the signer's
+hand-off names, is strict, so a `task_budget_id` there is refused with the
+`-32602 unrecognized_keys` envelope below; a **newer signer against an older
+backend** gets a 404 from the sign-context read and refuses with
+`SIGN_CONTEXT_REFUSED`, never a signature. The SDK's `getAgentSummary()` now performs a third read
+(`GET /task-budgets?status=open`) and degrades to an empty `taskBudgets`
+list on any failure, so an older backend does not break `haven_get_agent`.
+
 ### An undeclared argument is refused, not stripped (#2312)
 
 This produces the same `-32602` vocabulary as the skew rows above, and it is
@@ -2303,6 +2533,121 @@ of any version literal, since nothing there should ever need a release to stay
 true (unlike the signer's compatibility numbers above, which are point-in-time
 by design). See [`07-edge-signer.md`](../architecture/07-edge-signer.md) for
 what each server's instructions say and why they differ in length.
+
+## Direct-payment signing handoff and old-signer refusal recovery (#3277, 2026-09-26)
+
+The hosted `haven_send` / `haven_pay` results now always name the byte-free
+signing handoff: `next_action: sign_and_submit_payment`,
+`next_tool: haven_sign` (rendered `mcp__haven-signer__haven_sign`),
+`next_arguments: { payment_id }` — the exact shape the hosted handoff map
+declares for the signer's `haven_sign` — plus a `signer_compatibility` notice
+carrying `direct_sign_context_version` (the SDK's
+`DIRECT_SIGN_CONTEXT_VERSION`, the version
+`GET /payments/:id/sign-context` serves) and the recovery instruction.
+
+This replaces #3271's planned "named only when the signer advertises support"
+gating (owner decision on #3277, 2026-09-24): the hosted server never sees the
+signer's `initialize` handshake, and per the #1547 lesson the notice must not
+ask the agent to compare a version against `initialize` instructions either.
+Old signers are handled by refusal recovery instead. Every installed pre-#3271
+signer that follows `haven_sign({ payment_id })` for a direct payment answers
+`SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
+(its x402-context fetch draws the backend's 409) and has signed NOTHING — so
+the notice says: re-sign with `{ payload_hash, typed_data_b64 }` from the
+payment result, passed through unchanged, then update the connector by
+rerunning the connect command. The relay fields
+(`payload_hash`, `signature_scheme`, `typed_data`, `typed_data_b64`) stay on
+every delegation-rail result unchanged — they are the recovery route, not a
+deprecated path.
+
+Compatibility: additive result fields only; no tool name, schema key, failure
+code, expected-context version or signing wire format changes. The
+`SIGN_CONTEXT_REFUSED` code and the `sign_context_unavailable` backend code
+named in the notice are pinned to what `@haven_ai/signer` emits
+(`sign-context.ts`) by a cross-package test
+(`hosted-signer-integration.test.ts`). No gate upgrades existing installs —
+production runs the signer at `@haven_ai/connect@alpha`'s exact pin
+(`0.4.0-alpha.0`) — which is why the recovery route, not an update prompt, is
+the compatibility story. Merging to `dev` waits for the promotion carrying
+#3271 to publish a connect/signer pair that includes the direct sign-context.
+
+## Client-version signal (#3303, epic #3302)
+
+Every published client names itself on each Haven API request with
+`X-Haven-Client: <package>/<version>`. That covers the SDK transport (default
+`@haven_ai/sdk/<SDK_VERSION>`, or the embedding package's own name through
+`HavenClientConfig.clientIdentity`), the local `@haven_ai/mcp` runtime, the CLI,
+the connector's API client, and the signer on its two sign-context reads.
+One Haven call deliberately sends no header: the connector's read-only
+hosted-identity probe behind `--doctor` / `--unwire` (`probeHostedAgentIdentity`).
+It can never be refused and reads no hint. The hosted
+`mcp-server` names itself too; it is not one of the five published packages, so
+nothing below ever applies to it.
+
+The backend reads the header against one hand-edited table, `CLIENT_COMPAT` in
+`packages/core/src/client-compat.ts`. Two things can happen:
+
+| Client is… | Effect | Where |
+|---|---|---|
+| below `recommended_version` | `client_update` (`required: false`) on any JSON-object response | every route |
+| below a **set** `min_version` | 426 `client_outdated`, before the handler runs; nothing written | `POST /payments`, `POST /machine-payments/send`, `POST /x402`, `POST /x402/authorize` for the API clients; `GET /payments/:id/sign-context` and `GET /x402/:id/sign-context` for the signer |
+| no header, unparseable, not a published package, or a `0.0.0-dev.*` snapshot | nothing, whatever the table says | — |
+
+A below-minimum client on a route that does not refuse it gets
+`client_update.required: true` instead. Sweep, sign, settle, evidence and
+status reads are never refused, and neither is an agent on a retired rail. An
+idempotent replay is exempt only when the handler would answer it from the
+existing row. A `pending_signature` row past its `expires_at` does not qualify:
+the handler would replace it with a new payment, so that request is refused
+like any new one.
+
+**What a signer minimum does and does not cover.** The signer meets the
+backend only when it signs by `payment_id`: that path runs the sign-context
+read, which is where the refusal lives. A signer handed `typed_data_b64` or
+`x402_expected` directly never contacts the backend before signing, and the
+sign and settle legs are never refused. A signer minimum therefore stops the
+default path and tells the agent what to run, but it does not guarantee that no
+older signer ever signs. The table ships with every threshold `null`, so until an
+owner sets one the only observable change is the header itself.
+
+**How each runtime surfaces it.**
+- `@haven_ai/mcp` attaches the hint its own dispatch received as `client_update`
+  on the tool result, success or failure. A refusal also keeps the backend's
+  `next_tool_omitted_reason` at the top level.
+- The signer turns a refusal into `SIGN_CONTEXT_REFUSED` with
+  `backend_error_code: 'client_outdated'`, the hint as `client_update`,
+  `next_action: stop_and_tell_user`, and a `next_tool_omitted_reason` naming the
+  update command. It carries no `fallback`, because relaying other bytes cannot
+  help.
+- A hint on a successful sign-context read rides on the signing result.
+- The update command is built from the **deployment's** connector channel, not a
+  client's build-time one. Since #3304 the command itself comes from
+  `upgradeCommandFor` in `packages/core/src/client-releases.ts`, the same
+  function the public release documents use.
+- **Since #3304 the hint's `notes_url` is set**, to the dashboard's public
+  `/releases` page, resolved against the backend's configured frontend URL and
+  never against a request header. The same per-package data is served as
+  `client_releases` in `GET /discovery` and in each `packages` entry of
+  `/.well-known/haven.json`: the version released in source, the thresholds
+  from `CLIENT_COMPAT`, the update command, and short notes. A test mutates
+  `CLIENT_COMPAT` itself to prove both documents follow the table the backend
+  enforces. `notes_url` stays typed nullable, so a client built before this
+  keeps parsing it.
+
+**This does not reopen the 2026-08-07 decision above.** That decision ("a
+mismatch warns, it does not block") is about the x402 expected-context version a
+quote *reports*, and it stands. This signal is a separate mechanism. It refuses
+only when an owner has explicitly set a minimum for a package (owner decision
+2026-09-25, on #3302), and even then never a client that sends no header. The
+signer's refusal comes after prepare, so its contract is "nothing signed or
+submitted" and the prepared payment is left unsigned (owner decision
+2026-09-25, on #3303).
+
+**`SDK_VERSION` is a bump-managed source constant too** (`packages/sdk/src/client-identity.ts`,
+in `release-bump.mjs`'s `SOURCE_VERSION_CONSTANTS` beside `SIGNER_VERSION`,
+`HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION` and `CLI_VERSION`). The "fifth
+bump-managed constant" heading above counts the constants that existed at #2423
+and is left as written. Do not hand-edit `SDK_VERSION` either.
 
 ## Typed next steps — the agent contract and its ratchet (epic #3105)
 
@@ -3055,3 +3400,131 @@ to call next in structured fields, and those fields are typed end to end
 > No tool, schema key, `next_tool` value, expected-context version or signer
 > contract changes. Scope of this note: those renames — nothing else in this
 > document was re-verified.
+
+> **Re-verified #3307 (2026-09-25, Haven-owned addresses checksummed on the
+> receipt, payment-status and payment reads):** this diff changes the *values*
+> of several read tools on both MCP runtimes. No names or schemas change.
+> - **Receipt:** `haven_list_receipts` / `GET /machine-payments/receipts`,
+>   checksummed in `mapEvidence`. Covers `merchantAddress`, `payerAddress`,
+>   `settlementAddress`, `tokenAddress` and every `parties` entry.
+> - **Payment status:** `haven_get_payment_status` and the `POST /payments`
+>   idempotent-replay body. Covers every address: top-level
+>   `merchant_address` / `payer_address`, the rail context (`asset`,
+>   `x402` / `mpp` `.asset` / `.merchant_address`) and `parties`.
+> - **`GET /payments/:id` and `GET /payments`:** checksum `to`.
+> - **Why:** for one payment, the receipt and the status now carry the same
+>   checksummed `merchant_address`, token address and `parties` (a
+>   cross-surface real-Postgres test proves it). The transaction row (#3129)
+>   uses the same `toCanonicalAddress` for its merchant and token addresses.
+>
+> **What stays as stored:**
+> - Storage (`LOWER(...)`).
+> - `tx_hash`.
+> - The relayed merchant objects (#3125).
+> - The signed receipt bundle (`haven_verify_receipt`).
+> - **The resume state's rebuilt payment objects.** `haven_get_resume_state`
+>   builds `accepted`, `paymentRequired`, the MPP `challenge` and its
+>   `merchantAddress` from the row in stored casing, so what goes back to
+>   merchants and signers is byte-identical. Every address
+>   `haven_get_resume_state` returns stays in stored casing. The status the
+>   lookup reads internally is checksummed, but it is not part of the response.
+> - **Declared asymmetry:** the SDK's `X402Receipt.merchantTo` is now
+>   checksummed on the resume path, where it is read from the status. On a
+>   fresh payment it stays lowercase, because there it comes from the authorize
+>   response's `merchant_to`, which sits inside Haven's signed binding.
+>
+> **Compatibility:**
+> - The OpenAPI `address` pattern is case-agnostic, and the SDK mappers pass
+>   values through.
+> - No tool schema, package, version floor or failure code moves.
+> - Every in-repo consumer compares addresses case-insensitively.
+>
+> Scope of this note: those tool results. Nothing else in this document was
+> re-verified.
+>
+> **Re-verified unchanged (#3295, 2026-09-25, last-known balances):** this doc
+> is coupled through `routes/user-accounts.ts`, whose change is comment-only:
+> the funding endpoint's parity comment now states that `GET
+> /balances/:accountAddress` serves a last-known balance on a failed read
+> (#3295) while THIS endpoint still answers `'0'` and computes `funded` from
+> it — behaviour byte-identical, the marker gap deferred by name to a
+> follow-up. The `/user/accounts*` reads the CLI calls keep their shapes; no
+> tool, schema key, `next_tool` value, expected-context version or signer
+> contract changes. Scope of this note: that comment. Nothing else in this
+> document was re-verified.
+>
+> **Re-verified unchanged (#3317, 2026-09-25, funding-endpoint degraded read):**
+> this doc is coupled through `routes/user-accounts.ts`, whose funding endpoint
+> now JOINS the #3295 degraded read instead of deferring it: a failed balance
+> leg serves the last-known balance marked stale (or `'0'` marked
+> `unavailable` when never read) and the response carries the additive optional
+> `balanceFreshness` marker; `funded` is computed only from known values. The
+> `/user/accounts*` reads the CLI calls keep their shapes — every previously
+> required field stays required, the markers are optional additions on one
+> read-only GET — so no tool, schema key, `next_tool` value, expected-context
+> version or signer contract changes. Scope of this note: that endpoint's
+> response shape. Nothing else in this document was re-verified.
+>
+> **Re-verified unchanged (#3318, 2026-09-25, CLI balance-freshness render):**
+> this doc is coupled through `packages/cli/src/commands.ts` and
+> `packages/cli/src/commands.test.ts`, and #3318 changes what the CLI's human
+> output SHOWS, not what any party sends or accepts: `wallets balances` reads
+> the additive optional `balanceFreshness` marker that #3295/#3317 already put
+> on the wire and renders `≈ … (as of …)` for a stale entry and
+> `unavailable` for a never-read one instead of presenting those figures as
+> current. The CLI sends nothing new, accepts nothing new (the marker is
+> optional and absent on clean reads), calls no new route, and the registry
+> consumers — budget grant and connect, which read address/decimals/symbol —
+> neither read nor render the marker. No tool, schema key, `next_tool` value,
+> expected-context version or signer contract changes. Scope of this note:
+> that rendering. Nothing else in this document was re-verified.
+>
+> **Re-verified #3319 (2026-09-25, agent-side allowance/identity addresses
+> checksummed):** the residual after #3307 — the agent-side reads still
+> emitting two addresses lowercase — is closed with the same
+> `toCanonicalAddress` rule, at the response boundary, storage untouched.
+> - **`haven_get_allowances`:** the top-level `delegate_address` and every
+>   `allowances[].token_address` are checksummed (`handleGetAllowances`).
+> - **`haven_get_agent`:** `delegate_address` is checksummed;
+>   `account_address` and `delegate_account_address` are canonicalised through
+>   the same total helper — a no-op on the checksummed forms they already
+>   carry (viem-computed; verified live on dev), healing for any lowercase
+>   row.
+> - **`haven_check_funds`:** the `token_address` echo is canonicalised, so the
+>   response carries ONE casing whether the caller sent a lowercase address, a
+>   checksummed one, or a symbol (resolved from the now-checksummed
+>   allowances read).
+> - **`haven_get_payment_status` and `haven_settle_mcp_tool`:** no diff of
+>   their own — the joined `allowance` block's `token_address` comes from the
+>   allowances read (`account-reads.ts` copies `match.tokenAddress`), so it
+>   is checksummed through the fix above. With that, the #3307 block's
+>   "covers every address" is now true of the status tool result as a whole:
+>   `asset` and `allowance.token_address` are the same checksummed string for
+>   one payment.
+>
+> **What stays as stored:**
+> - **Owner-side reads:** `allowances[].token_address` on `GET /agents`,
+>   `GET /agents/:id`, `PUT /agents/:id` and `/dashboard` (via
+>   `deriveDelegationAllowances`), and the `/agents/:id/delegations*` routes.
+>   The owner and agent views of one delegation therefore differ in casing —
+>   declared, not fixed; every frontend consumer compares case-insensitively.
+> - **The budget-precheck refusal:** `merchant_address` is deliberately
+>   lowercased and `asset` echoes the input.
+> - **`rails/delegation-budget-view.ts`**, storage (`LOWER(...)` writes and
+>   the `agent_delegations` CHECK), and the spec's owner-side `Delegation`
+>   schema, whose "Stored lowercase" note stays true.
+> - **The x402 binding:** the signer lowercases `delegate_address`
+>   independently, so canonicalising the emitted value cannot move a signed
+>   byte.
+> - The x402 quote/prepare responses were not re-surveyed beyond the status
+>   and settle paths above.
+>
+> **Compatibility:** the OpenAPI `address` pattern is case-agnostic, so no
+> wire schema moves; no tool name, schema key, `next_tool` value,
+> expected-context version or failure code changes; the SDK join and every
+> in-repo consumer compares addresses case-insensitively. A real-DB route
+> test seeds lowercase rows (the CHECK-constraint storage form) and pins the
+> checksummed responses with raw storage reads guarding the boundary.
+>
+> Scope of this note: those tool results. Nothing else in this document was
+> re-verified.

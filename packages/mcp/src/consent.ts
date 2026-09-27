@@ -42,7 +42,7 @@ export interface ConsentInput {
   apiUrl?: string
   /** Agent identity from the credential file, when present. */
   agentId?: string
-  /** Haven wallet (Safe) the agent spends from. */
+  /** Haven wallet the agent spends from. */
   accountAddress?: string
   /** Agent's delegate EOA — the local signer. */
   delegateAddress?: string
@@ -114,7 +114,7 @@ export function renderConsentBlock(input: ConsentInput, hash: string): string {
   ]
   if (input.apiUrl) lines.push(`Haven API: ${input.apiUrl}`)
   if (input.agentId) lines.push(`Agent ID:  ${input.agentId}`)
-  if (input.accountAddress) lines.push(`Haven wallet (Safe): ${input.accountAddress}`)
+  if (input.accountAddress) lines.push(`Haven wallet: ${input.accountAddress}`)
   if (input.delegateAddress) lines.push(`Delegate (local signer): ${input.delegateAddress}`)
   if (typeof input.chainId === 'number') lines.push(`Chain ID:  ${input.chainId}`)
   lines.push('')

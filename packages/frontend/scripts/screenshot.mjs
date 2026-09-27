@@ -1806,6 +1806,28 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     // catch, which turns it into "nothing to recover" (`:52-54`).
     return balance ?? httpError(422, DELEGATE_BALANCE_NO_DELEGATE)
   }
+  // #3329: the agent's open task budgets (`GET /agents/:id/task-budgets`),
+  // read by the budget card next to its delegations. agent-research carries
+  // one open budget under its pinned delegation so the capture shows both
+  // branches the card gained — the "reserved by open task budgets" line and
+  // the "Task budgets" section; every other agent id gets the empty list the
+  // API returns for an agent that opened none, so the card renders unchanged.
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/task-budgets')) {
+    if (pathname !== '/agents/agent-research/task-budgets') return { task_budgets: [] }
+    return {
+      task_budgets: [{
+        id: 'tb-1', agent_id: 'agent-research', chain_id: FIXTURE_ACCOUNT.chain_id,
+        token_address: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+        recipient_address: ADDR.merchant,
+        parent_delegation_hash: '0x' + '4d'.repeat(32),
+        delegation_hash: '0x' + '5e'.repeat(32),
+        label: 'Nightly market scan', max_atomic: '15000000',
+        status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3 * 3600, is_expired: false,
+        created_at: '2026-09-25T20:00:00.000Z', opened_at: '2026-09-25T20:01:00.000Z',
+        closed_at: null, close_tx_hash: null,
+      }],
+    }
+  }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
     // #2106: the delegation rail's actual spend authority, as
     // `GET /agents/:id/delegations` returns it. The agent's budget card

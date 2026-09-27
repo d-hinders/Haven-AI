@@ -107,14 +107,18 @@ You don't have to hand-write those issues. **Capture is its own step:**
 task into a well-formed issue (Scope + Acceptance + Surface + Money-path), asking
 a clarifying question or two when needed. It's **backlog-only by default** — it
 applies `area:*` labels but *not* `code-quality`, so capturing a task doesn't
-queue it. Promote it later by adding `code-quality`, or skip straight to shipping
+queue it for the loop. In practice, most issues are picked up by a partner or
+session claiming them (the `🔒 CLAIM` protocol in [`AGENTS.md`](../../AGENTS.md)),
+not by the label. An issue is ready when its reviewed spec is right. See
+[new-task § *Backlog And Shipping*](../../.agents/skills/new-task/SKILL.md). Add `code-quality` only when you want the
+loop below to take it, or skip straight to shipping
 with `ship-next "<description>"` (drafts the issue *and* runs the pipeline). This
 is the low-friction front door for partners: throw a sentence, the system does
 the paperwork. Then the loop consumes those issues one of these ways:
 
 1. **Standalone labeled issues** — for small, self-contained tasks. Open an issue
    with a concrete **scope + acceptance criteria** and add the **`code-quality`**
-   label (the loop's default "ready" marker). The "🔁 Loop task" issue template
+   label (the loop's default selector label). The "🔁 Loop task" issue template
    (`.github/ISSUE_TEMPLATE/`) prompts for the fields the loop needs and applies
    the label for you. Run `/loop /ship-next` (or `label=<name>` for a different
    loop label); the loop takes them oldest-first.
@@ -596,10 +600,15 @@ least twice.
   `Ign:N http://azure.archive.ubuntu.com/ubuntu …` repeating until the step
   times out or the job is canceled. apt hangs on the runner's regional mirror;
   nothing in the PR is implicated. Observed repeatedly, most recently twice on 2026-08-19.
-- **Base Sepolia RPC flap** — `qa-dev` money-flow legs: transient RPC timeouts
-  or stale-nonce reads from the public Base Sepolia endpoint fail a leg that
-  passes on rerun. Stability-gate reruns rather than chasing the payment code
-  (the 2026-08-12 promotion lesson).
+- **Base Sepolia RPC failures** — `qa-dev` money-flow legs: an RPC provider's
+  refusals or timeouts fail a leg that may pass on rerun. The one rerun above
+  still applies to a first occurrence — unless the signature is a rate limit
+  (`-32016`, `Status: 429`), where a rerun into the same limit reproduces it
+  (#2449). Do not chase the payment code for them, and do not treat a
+  rerun-to-green as the fix either: the standing `qa-failure` issue records the
+  failure class (#3337), and a recurring `provider` class is a finding for the
+  provider (epic #3335). See
+  [Classify the failure](../operations/agent-qa.md#classify-the-failure).
 
   **#2004 widened where this signature can appear.** The backend test job now
   reaches Base Sepolia too: `non-custody-onchain-enforcer.contract.test.ts` is

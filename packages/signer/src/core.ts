@@ -3,9 +3,14 @@ import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
   addressFromKey,
+  assertBoundDirectPaymentUserOp,
+  assertOwnSettlementChild,
+  assertFundingLegPaysDelegate,
+  assertUserOpTypedDataBinding,
   chainIdForNetwork,
+  HavenTypedDataRefusedError,
+  isPackedUserOperationTypedData,
   isSettlementChildTypedData,
-  verifySettlementChild,
   buildX402ExpectedMessage,
   buildSweepAuthorizationMessage,
   buildSweepTypedData,
@@ -77,9 +82,10 @@ export interface EdgeSigner {
   ): Promise<X402HeaderResult>
   /**
    * Sign a Haven-prepared EIP-3009 sweep authorization (gasless USDC recovery
-   * delegate → Safe). Verifies the authorization came from Haven and pays out to
-   * the delegate's own Safe before signing; the relayer broadcasts it and pays
-   * gas. Never broadcasts — pure signing.
+   * delegate → the agent's account (Haven wallet)). Verifies the authorization
+   * came from Haven and pays out to the agent's account (Haven wallet) — the
+   * account belongs to the agent, not the delegate — before signing; the
+   * relayer broadcasts it and pays gas. Never broadcasts — pure signing.
    */
   signSweepAuthorization(input: SweepSignatureInput): Promise<SweepSignatureResult>
 }
@@ -89,7 +95,7 @@ export interface SweepSignatureInput {
   authorization: SweepAuthorization
   /** Haven's signature over the authorization context (binding). */
   expectedAuth: SweepExpectedAuth
-  /** Optional Safe address from the local credential, cross-checked against `to`. */
+  /** Optional account (Haven wallet) address from the local credential, cross-checked against `to` when present. */
   expectedSafe?: string
 }
 
@@ -286,7 +292,10 @@ export function createEdgeSigner(
               'scoped to. Update @haven_ai/signer.',
           )
         }
-        verifySettlementChild(typedData, {
+        // #3281: through the shared SDK wrapper, so every child refusal is
+        // TYPED_DATA_NOT_ALLOWED (structured at the tool layer), like the
+        // funding-leg refusals below — not a bare SIGNING_ERROR.
+        assertOwnSettlementChild(typedData, {
           merchantTo: expected.merchantTo,
           amount: expected.amount,
           asset: expected.asset,
@@ -296,7 +305,39 @@ export function createEdgeSigner(
           // signed another" class this file exists to catch (#1455 review).
           chainId: settlementChainId,
           expiresAt: expected.expiresAt,
+        }, delegateAddress)
+        // #3281 criterion 8: the wrapper also requires the child to be
+        // re-delegated FROM this signer's own account, and the verifier refuses
+        // a ROOT authority. The exact budget-delegation hash is not checked: it
+        // is knowable here only by trusting Haven for it, and the invariant
+        // does not need it — a non-ROOT authority must resolve on-chain to a
+        // delegation made TO this account, which only its owner can sign.
+      } else if (isPackedUserOperationTypedData(typedData)) {
+        // #3281 (epic #3284): the binding above proves Haven DECLARED these
+        // bytes — but a compromised binding key can declare anything. So the
+        // funding leg must also be the ONE shape a funding leg is: the #3271
+        // UserOp binding against the declared UserOp hash, the #3272
+        // direct-payment allowlist (own account, pinned chain, a single
+        // redemption of one budget delegation granted by another account),
+        // and a single transfer of the quoted token and amount to THIS
+        // signer's own delegate EOA — a local value no binding can rewrite.
+        assertUserOpTypedDataBinding(typedData, expected.payloadHash)
+        assertBoundDirectPaymentUserOp(typedData as unknown as Record<string, unknown>, delegateAddress)
+        assertFundingLegPaysDelegate(typedData as unknown as Record<string, unknown>, {
+          delegateAddress,
+          asset: expected.asset,
+          amount: expected.amount,
         })
+      } else {
+        // #3281 criterion 1: the x402 arm signs exactly two shapes. Anything
+        // else — a TransferWithAuthorization, a Permit, an invented type —
+        // is refused however validly Haven's binding key declared it.
+        throw new HavenTypedDataRefusedError(
+          `This signer's x402 arm signs only a funding-leg PackedUserOperation or an erc7710 ` +
+            `settlement Delegation; this typed data is '${String(
+              (typedData as { primaryType?: unknown }).primaryType,
+            )}'. Refusing, even though its digest is bound by the expected context.`,
+        )
       }
       const account = privateKeyToAccount(delegateKey as `0x${string}`)
       // Signed VERBATIM (#829): the exact structure Haven sent, never one
@@ -447,7 +488,7 @@ export function createEdgeSigner(
       }
       if (expectedSafe && !sameAddress(authorization.to, expectedSafe)) {
         throw new HavenSigningError(
-          'Sweep authorization `to` does not match the Safe in the local credential.',
+          "Sweep authorization `to` does not match the agent's account (Haven wallet) in the local credential.",
         )
       }
 

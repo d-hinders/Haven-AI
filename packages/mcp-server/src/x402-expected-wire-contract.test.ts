@@ -51,6 +51,7 @@ import {
   toolSchemas as signerToolSchemas,
 } from '@haven_ai/signer'
 import { z } from 'zod/v3'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,7 +93,6 @@ const RESOURCE = 'https://merchant.test/mcp'
 const AMOUNT = '1000'
 const NETWORK = 'base-sepolia'
 const PAYMENT_ID = 'pay_wire_contract'
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 const EXPIRES_AT = '2099-01-01T00:00:00.000Z'
 
 const PAYMENT_REQUIRED: X402PaymentRequired = {
@@ -111,23 +111,24 @@ const PAYMENT_REQUIRED: X402PaymentRequired = {
 } as unknown as X402PaymentRequired
 
 /**
- * The EIP-712 payload a delegation-rail account validates. Shape only — the
- * digest is what the contract turns on, and it is re-derived from these exact
- * bytes at three independent points.
+ * #3281 (epic #3284): the x402 FUNDING LEG exactly as the backend builds it —
+ * this delegate's own account redeeming one budget delegation, transferring
+ * the quoted AMOUNT of ASSET to this delegate's own EOA on Base Sepolia. The
+ * signer's x402 arm now signs only this shape (or a verified settlement
+ * child), so the shared builder replaces the pre-#3281 2-field toy. The
+ * digest is still what the wire contract turns on, re-derived from these
+ * exact bytes at three independent points.
  */
-const TYPED_DATA = {
-  domain: { name: 'HybridDeleGator', version: '1', chainId: 84532, verifyingContract: DELEGATE_ADDR },
-  types: {
-    PackedUserOperation: [
-      { name: 'sender', type: 'address' },
-      { name: 'nonce', type: 'uint256' },
-    ],
-  },
-  primaryType: 'PackedUserOperation',
-  message: { sender: DELEGATE_ADDR, nonce: '7' },
-} as const
+const FUNDING = buildFundingLegUserOp({
+  delegate: DELEGATE_ADDR,
+  asset: ASSET as `0x${string}`,
+  amount: AMOUNT,
+  chainId: 84532,
+})
+const TYPED_DATA = FUNDING.typedData
 
 const TYPED_DATA_DIGEST = hashTypedData(TYPED_DATA as Parameters<typeof hashTypedData>[0])
+const FUNDING_HASH = FUNDING.payloadHash as string
 
 /**
  * The backend's `POST /x402` 201 body, written to mirror

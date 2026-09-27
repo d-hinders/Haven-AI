@@ -5,35 +5,32 @@ import {
   AgentPaymentFailureCode,
   addressFromKey,
   buildX402ExpectedMessage,
+  deriveDelegateAccountAddress,
   verifySignature,
   HavenSigningError,
 } from '@haven_ai/sdk'
 import { createEdgeSigner, type EdgeSigner, type X402ExpectedPayment } from './core.js'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 
 // Well-known test key (Hardhat account #0). Never used for real funds.
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 
-// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
-// data now — v1's bare `FUNDING_HASH` is retired along with
-// `signX402FundingHash`. This fixture's SHAPE does not matter (it is never a
-// direct-payment UserOp; the funding leg's shape checks live in
-// `signX402FundingTypedData`'s settlement-child branch, exercised below with
-// a real Delegation fixture) — only that its digest is what `expectedX402`'s
-// `typedDataHash` commits to.
-const FUNDING_TYPED_DATA = {
-  domain: {
-    chainId: 84532,
-    name: 'HavenX402Funding',
-    version: '1',
-    verifyingContract: '0x98ffBf30459a98FD80fAce18f519967769641F76' as const,
-  },
-  types: { Funding: [{ name: 'note', type: 'string' }] },
-  primaryType: 'Funding',
-  message: { note: 'x402 funding leg (#3272 test fixture)' },
-}
-const FUNDING_DIGEST = hashTypedData(FUNDING_TYPED_DATA as Parameters<typeof hashTypedData>[0])
+// #3281 (epic #3284): the x402 arm signs exactly two shapes, so the funding
+// fixture is a REAL funding leg as the backend builds it — this key's own
+// account redeeming one budget delegation, transferring the quoted amount of
+// the quoted token to this key's own delegate EOA (`buildFundingLegUserOp`,
+// the shared builder). Its v0.7 UserOp hash is the expected context's
+// `payloadHash` and its EIP-712 digest the `typedDataHash`.
+const FUNDING = buildFundingLegUserOp({
+  delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+  asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // Base USDC — PAYMENT_REQUIRED's asset
+  amount: '1000000', // PAYMENT_REQUIRED's amount
+  chainId: 8453, // PAYMENT_REQUIRED's network ('base')
+})
+const FUNDING_TYPED_DATA = FUNDING.typedData
+const FUNDING_DIGEST = FUNDING.digest
 
 const PAYMENT_REQUIRED = {
   x402Version: 1,
@@ -52,7 +49,7 @@ const PAYMENT_REQUIRED = {
 
 const EXPECTED_X402_BASE = {
   paymentId: 'pay_x402',
-  payloadHash: `0x${'cd'.repeat(32)}`,
+  payloadHash: FUNDING.payloadHash as string,
   resourceUrl: PAYMENT_REQUIRED.resource.url,
   merchantTo: PAYMENT_REQUIRED.accepts[0].payTo,
   amount: PAYMENT_REQUIRED.accepts[0].amount,
@@ -89,13 +86,29 @@ async function expectedX402(
   }
 }
 
-/** Signs the funding leg with the shared fixture typed data — the v2/v3 path, the only one left. */
+/**
+ * Signs the funding leg — the v2/v3 path, the only one left. #3281: the
+ * funding leg must move exactly the QUOTED amount of the QUOTED token, so a
+ * test that quotes something else gets a funding leg built for that quote
+ * (and an expected context committing to it), not the default fixture.
+ */
 async function fundV2(
   signer: EdgeSigner,
   overrides: Partial<typeof EXPECTED_X402_BASE> = {},
 ) {
-  const expected = await expectedX402(overrides)
-  return signer.signX402FundingTypedData(FUNDING_TYPED_DATA as never, expected as unknown as X402ExpectedPayment)
+  const quoted = { ...EXPECTED_X402_BASE, ...overrides }
+  const funding = buildFundingLegUserOp({
+    delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+    asset: quoted.asset as `0x${string}`,
+    amount: quoted.amount,
+    chainId: quoted.network === 'base-sepolia' || quoted.network === 'eip155:84532' ? 84532 : 8453,
+  })
+  const expected = await expectedX402({
+    payloadHash: funding.payloadHash,
+    typedDataHash: funding.digest,
+    ...overrides,
+  })
+  return signer.signX402FundingTypedData(funding.typedData as never, expected as unknown as X402ExpectedPayment)
 }
 
 describe('createEdgeSigner', () => {
@@ -515,30 +528,9 @@ describe('buildX402PaymentHeader', () => {
  * version rather than silently accepted.
  */
 describe('signX402FundingTypedData (#1138, #3272)', () => {
-  // A minimally realistic account UserOp payload — shape matters (viem hashes
-  // it), the values do not.
-  const TYPED_DATA = {
-    domain: {
-      chainId: 84532,
-      name: 'HybridDeleGator',
-      version: '1',
-      verifyingContract: '0x98ffBf30459a98FD80fAce18f519967769641F76' as const,
-    },
-    types: {
-      PackedUserOperation: [
-        { name: 'sender', type: 'address' },
-        { name: 'nonce', type: 'uint256' },
-        { name: 'callData', type: 'bytes' },
-      ],
-    },
-    primaryType: 'PackedUserOperation',
-    message: {
-      sender: '0x98ffBf30459a98FD80fAce18f519967769641F76',
-      nonce: '1',
-      callData: '0xdeadbeef',
-    },
-  }
-
+  // #3281: a real funding leg (the shared builder), not a 3-field toy — the
+  // x402 arm now refuses any UserOp that is not the funding-leg shape.
+  const TYPED_DATA = FUNDING_TYPED_DATA
   const digest = () => hashTypedData(TYPED_DATA as Parameters<typeof hashTypedData>[0])
 
   async function expectedV2(overrides: Record<string, unknown> = {}) {
@@ -627,6 +619,9 @@ describe('signX402FundingTypedData with a settlement child (#1455)', () => {
   const CHILD = JSON.parse(
     JSON.stringify(require('../../sdk/src/__fixtures__/settlement-delegation-payload.json')),
   )
+  // #3281 criterion 8: the child is re-delegated FROM this signer's own
+  // account; the real fixture's stand-in delegator (0x1111…) is refused now.
+  CHILD.message.delegator = deriveDelegateAccountAddress(addressFromKey(TEST_KEY) as `0x${string}`)
   const childDigest = () => hashTypedData(CHILD as Parameters<typeof hashTypedData>[0])
 
   // The fixture's own values, so a pass means agreement rather than luck.

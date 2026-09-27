@@ -179,6 +179,41 @@ Now branch:
   block before doing anything else.
 - **`revocationTime == 0` (live)** → the divergence is real. Go to Step 2.
 
+### Step 1b — is the row's UID even the real one? (#3294)
+
+Before treating "no answer" as "young attestation" or "live", compare the
+row's stored `attestation_uid` with what its own mint produced. Rows anchored
+before [#3294](https://github.com/d-hinders/Haven-AI/issues/3294) recorded the
+pre-send `staticCall` **prediction**, which never existed on-chain: every
+`getAttestation` on it returns the zeroed struct forever, every revoke reverts
+`NotFound()`, and the agent's REAL attestation — the one the mint transaction
+actually emitted — stays live under a UID Haven never stored. A row in this
+state retries revocation forever (dev ran one to 590 attempts).
+
+Compare in one read: replay the row's anchor `tx_hash` and read the `Attested`
+log's uid from the receipt (`cast receipt <tx_hash> --rpc-url <RPC_URL>`, then
+decode the EAS `Attested` event; the row's `tx_hash` is in
+`agent_passports.tx_hash`).
+
+- **The log's uid differs from the stored one** → phantom-UID row. Post-fix
+  deploys self-heal: the repair re-derives the UID from this same receipt,
+  swaps the row to it (a paced sweep step), and the next reconcile revokes the
+  REAL uid — no operator action, and the alarm keeps firing until that revoke
+  actually lands, which is correct. The repair logs every row it could not
+  answer, with the `agent_id` and the reason, on each sweep tick — those lines
+  are the first thing to check, not the passport table (#3342). The repair's
+  refusals and deferrals are counted in the sweep log; they are not written to
+  `revocation_last_error` (that column belongs to the REVOKE attempts, which
+  keep their own schedule). If the row has NOT converged after a deploy that
+  includes the fix — no repair tick ever reports it repaired or confirmed —
+  raise it as a bug; do not hand-edit `attestation_uid`.
+- **The log's uid matches the stored one** → the stored UID is genuine. A
+  "no answer" read at Step 1 is then genuinely a young attestation or an RPC
+  gap; continue to Step 2.
+- **No `tx_hash` on the row** → the anchor never completed; this is an
+  issuance-side condition, not a revoke one. Check `last_error` and the
+  issuance retry queue.
+
 ### Step 2 — is a revoke transaction actually in flight?
 
 ```sql
@@ -242,6 +277,16 @@ the lane has capped out does it become yours:
 ```
 ERROR outbound-bump: nonce lane stuck after 3 replacements — INCIDENT, not retrying
 ```
+
+Since [#3293](https://github.com/d-hinders/Haven-AI/issues/3293) a row whose nonce another transaction already consumed is closed rather than alarmed about, but **only once that consumption is visible at a settled block**. The relayer's mined nonce as of the settled block must be past N, no node the relayer provider answers from knows the row's hash, and its receipt is still null. On Base Sepolia, `finalized` trailed the head by about 19 minutes when this was measured.
+
+So an INCIDENT within about 20 minutes of a same-nonce race can be a false alarm that closes itself. That race can be a bumped revoke or sweep whose earlier transaction mined, or a lane cancel that lost to the attest. Before you treat such an INCIDENT as yours, or run a cancel, check on the explorer whether nonce N already mined. If it did, wait for the next settled tick. An INCIDENT that outlives the finality lag means the lane really is held. When the worker does close the row, it logs:
+
+```
+WARN  outbound-bump: stale broadcast whose nonce was consumed by another transaction — closed failed, not bumped
+```
+
+That row can never mine, so there is nothing to cancel. The lane was never blocked by it.
 
 ## 3. "Landed and unconverged" — this self-heals, and here is how long
 
@@ -334,13 +379,36 @@ being cancelled.
 
 With every precondition met, the action is a **same-nonce cancel**: a 0-value
 self-transfer from the relayer at that exact nonce, with bumped fees, so that
-the stuck revoke can never mine.
+the stuck revoke can never mine. It is encoded; run it with the stuck row's id:
+
+```bash
+npm run ops:cancel-stuck-lane -w packages/backend -- <outbound-row-id>
+```
+
+On Railway, where the deployed image has no `scripts/` or `tsx` (only
+`dist/`, `--omit=dev`), run the compiled command from a shell on the service
+instead:
+
+```bash
+railway ssh --environment <env> --service @haven/backend
+node packages/backend/dist/ops/cancel-stuck-lane.js <outbound-row-id>
+```
+
+It re-checks precondition 4 itself: below the bump cap it refuses with
+`automated_recovery_owns_it` and sends nothing (#2769). It does not check
+preconditions 1, 2, 3 or 5 — those stay yours. On a capped lane nothing
+re-sends the cancel if it sticks; the output says so and prints the cancel
+row's id to re-run the command with.
 
 - **Do this even if the transaction has vanished from the mempool.** A dropped
   transaction does not free its own nonce here: its row is still `broadcast`,
   and migration 061's partial `UNIQUE (chain_id, nonce) WHERE status =
   'broadcast'` refuses the stamp, so `submitRecorded` re-reads the same nonce
-  and fails with `could not win a nonce lane`.
+  and fails with `could not win a nonce lane`. On an RPC that refuses the
+  `pending` tag (#2769) the symptom differs: later sends step over the live
+  row, broadcast at N+1, N+2 … and never confirm, and the bump worker raises
+  INCIDENTs at those nonces. The nonce to cancel is still the lowest live
+  one, N.
 - **Do not hand-broadcast the stored revoke calldata, and do not hand-run a
   fee bump.** A hand-run bump leaves no `outbound_txs` record, so nothing
   downstream can see it — the same objection that makes it forbidden for

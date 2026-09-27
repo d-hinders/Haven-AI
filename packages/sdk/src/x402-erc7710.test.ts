@@ -234,6 +234,22 @@ describe('settleX402Erc7710 (#1454)', () => {
       expect(without.posts[0].body).not.toHaveProperty('idempotencyKey')
     })
 
+    // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest` declares
+    // `taskBudgetId`, `additionalProperties: false`) — the SDK used to send
+    // `task_budget_id` here, which the backend's schema refuses outright.
+    it('forwards taskBudgetId as the camelCase wire key, never task_budget_id (#3329)', async () => {
+      const withBudget = harness()
+      await withBudget.client.prepareX402Erc7710(paymentRequired([erc7710Option()]), {
+        taskBudgetId: 'tb_1',
+      })
+      expect(withBudget.posts[0].body.taskBudgetId).toBe('tb_1')
+      expect(withBudget.posts[0].body).not.toHaveProperty('task_budget_id')
+
+      const without = harness()
+      await without.client.prepareX402Erc7710(paymentRequired([erc7710Option()]))
+      expect(without.posts[0].body).not.toHaveProperty('taskBudgetId')
+    })
+
     it('never posts anything when the account is on the legacy rail', async () => {
       const { client, posts } = harness({ rail: 'legacy' })
       await expect(

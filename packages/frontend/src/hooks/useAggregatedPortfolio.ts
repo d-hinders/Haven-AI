@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import { useAuth } from '@/context/AuthContext'
+import type { ApiSchema } from '@haven_ai/core'
 import type {
   PortfolioResponse,
   BalancesResponse,
@@ -11,6 +12,43 @@ import type {
   TransactionsResponse,
   Transaction,
 } from '@/types/transactions'
+
+/**
+ * The wire's balance-freshness marker (#3295) — `stale` (served the
+ * last-known balance, `asOf` = when it was read) or `unavailable` (no balance
+ * has ever been read for this token). Typed from the generated schema; the
+ * rendering primitive is `components/haven`'s `BalanceFreshnessIndicator`.
+ */
+type BalanceFreshness = ApiSchema<'BalanceFreshness'>
+
+/**
+ * OR-merge two markers (#3295). The aggregated dashboard figures span
+ * several accounts, so a token held on two accounts merges its per-account
+ * markers: `unavailable` dominates (one unknown part understates the sum by
+ * an unknown amount); otherwise the OLDEST `asOf` wins, because the sum is
+ * at least as old as its oldest part. Same rule the backend's
+ * `combineBalanceFreshness` applies to totals — this is the frontend's own
+ * copy because the backend module is not importable from the browser bundle.
+ */
+function mergeBalanceFreshness(
+  a: BalanceFreshness | undefined,
+  b: BalanceFreshness | undefined,
+): BalanceFreshness | undefined {
+  if (!a) return b
+  if (!b) return a
+  if (a.status === 'unavailable' || b.status === 'unavailable') {
+    return { status: 'unavailable' }
+  }
+  const asOf =
+    a.status === 'stale' && b.status === 'stale'
+      ? a.asOf < b.asOf
+        ? a.asOf
+        : b.asOf
+      : a.status === 'stale'
+        ? a.asOf
+        : b.asOf
+  return { status: 'stale', asOf }
+}
 
 /**
  * Stable stringified key for an array of Safes.
@@ -185,9 +223,18 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
       }
 
       const merged = new Map<string, BalanceItem>()
+      // #3295: the aggregated token's marker — per-account markers merged
+      // with OR (`unavailable` dominates; oldest `asOf` wins among stale).
+      const mergedFreshness = new Map<string, BalanceFreshness | undefined>()
+      let anyDegraded = false
       for (const r of results) {
         for (const b of r.balances) {
           const balanceKey = balanceIdentityKey(b, r.account.chainId)
+          mergedFreshness.set(
+            balanceKey,
+            mergeBalanceFreshness(mergedFreshness.get(balanceKey), b.balanceFreshness),
+          )
+          if (b.balanceFreshness) anyDegraded = true
           const existing = merged.get(balanceKey)
           if (existing) {
             const rawSum = BigInt(existing.balance) + BigInt(b.balance)
@@ -202,7 +249,17 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
         }
       }
 
-      setBalances(Array.from(merged.values()))
+      const mergedList = Array.from(merged.values())
+      if (anyDegraded) {
+        setBalances(
+          mergedList.map((item) => ({
+            ...item,
+            balanceFreshness: mergedFreshness.get(balanceIdentityKey(item, item.chainId ?? 0)),
+          })),
+        )
+      } else {
+        setBalances(mergedList)
+      }
       if (silent) setError(null)
     } catch (err) {
       if (generationRef.current === generation && !silent) {

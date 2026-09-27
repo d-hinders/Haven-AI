@@ -3,7 +3,7 @@ import {
   SUPPORTED_SWEEP_BINDING_VERSIONS,
   SUPPORTED_X402_EXPECTED_VERSIONS,
 } from './core.js'
-import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
+import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS, SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
 
 /**
  * Pre-payment skew detection (#1155).
@@ -56,6 +56,13 @@ export interface SignerCompatibility {
    * never a second literal.
    */
   direct_sign_context_versions: number[]
+  /**
+   * #3329: `task_sign_context_version`s this signer will fetch and verify
+   * from `GET /task-budgets/:id/sign-context` — derived from
+   * `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS`, never a second literal, same
+   * discipline as `direct_sign_context_versions`.
+   */
+  task_sign_context_versions: number[]
 }
 
 /** The supported sets this signer enforces, as a plain serialisable object. */
@@ -64,6 +71,7 @@ export function signerCompatibility(): SignerCompatibility {
     x402_expected_context_versions: [...SUPPORTED_X402_EXPECTED_VERSIONS],
     sweep_binding_versions: [...SUPPORTED_SWEEP_BINDING_VERSIONS],
     direct_sign_context_versions: [...SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS],
+    task_sign_context_versions: [...SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS],
   }
 }
 
@@ -105,6 +113,7 @@ export function signerInstructions(): string {
     `- x402 expected-context versions supported: ${compatibility.x402_expected_context_versions.join(', ')}`,
     `- sweep authorization binding versions supported: ${compatibility.sweep_binding_versions.join(', ')}`,
     `- direct-payment (haven_send / haven_pay) sign-context versions supported: ${compatibility.direct_sign_context_versions.join(', ')} — pass payment_id alone to haven_sign; this signer fetches the exact bytes`,
+    `- task-budget sign-context versions supported: ${compatibility.task_sign_context_versions.join(', ')} — pass task_budget_id alone to haven_sign; this signer fetches the exact bytes`,
     '',
     'Haven quote and prepare results report the expected-context version they will emit',
     '(signer_compatibility.x402_expected_context_version). If that version is not in the list',

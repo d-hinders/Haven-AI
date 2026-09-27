@@ -26,6 +26,9 @@
     "ops:register-passport-schema": "tsx scripts/register-passport-schema.ts",
     "ops:check-mainnet-reconciliation": "tsx scripts/check-mainnet-reconciliation.ts",
     "ops:cancel-stuck-attest": "tsx scripts/cancel-stuck-attest-lane.ts",
+    "ops:cancel-stuck-lane": "tsx scripts/cancel-stuck-attest-lane.ts",
+    "ops:cancel-stuck-attest:built": "node dist/ops/cancel-stuck-lane.js",
+    "ops:cancel-stuck-lane:built": "node dist/ops/cancel-stuck-lane.js",
     "db:reap-test-schemas": "node scripts/reap-test-schemas.mjs",
     "generate:route-modules": "tsx scripts/generate-route-modules.ts",
     "check:route-modules": "tsx scripts/generate-route-modules.ts --check"

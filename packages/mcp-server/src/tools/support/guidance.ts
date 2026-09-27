@@ -31,16 +31,57 @@ import { toolSchemas } from '../contracts.js'
  * here rather than imported from `@haven_ai/signer`: the hosted server is
  * keyless by design and its deploy image carries only `sdk` + `mcp-server`
  * (Dockerfile), so a runtime import of the edge signer both breaks the build
- * and pulls key-handling code into the hosted bundle. The hosted server only
- * ever hands the signer a `payment_id` (the signer fetches the signing
- * context itself, #1263), so the shape is exactly that — a subset of the
- * signer's own schema, pinned to it by `next-step-signer-parity.test.ts`
- * (test-time import, which the workspace has).
+ * and pulls key-handling code into the hosted bundle. The hosted server hands
+ * the signer either a `payment_id` (a payment) or a `task_budget_id` (#3329,
+ * a task-budget open/close) — never both, never neither — so the shape is
+ * exactly that pair of alternatives, a subset of the signer's own schema,
+ * pinned to it by `next-step-signer-parity.test.ts` (test-time import, which
+ * the workspace has).
  */
 const SIGNER_HANDOFF_SHAPES = {
-  haven_sign: { payment_id: z.string().min(1) },
   haven_sign_x402: { payment_id: z.string().min(1) },
 } as const satisfies Record<string, z.ZodRawShape>
+
+const HAVEN_SIGN_PAYMENT_SHAPE = { payment_id: z.string().min(1) } as const satisfies z.ZodRawShape
+const HAVEN_SIGN_TASK_BUDGET_SHAPE = { task_budget_id: z.string().min(1) } as const satisfies z.ZodRawShape
+
+/**
+ * #3329 (round-2 review N1): `haven_sign` takes EXACTLY ONE of `payment_id` /
+ * `task_budget_id`, never both, never neither — a plain shape with both
+ * fields `.optional()` let `{}` and the conflicting pair both build with no
+ * compile or runtime error, which defeats the whole point of a typed target
+ * (the signer itself refuses that pair; a caller should not be able to build
+ * it in the first place). `z.union` of two `.strict()` objects rejects both
+ * at runtime, and the resulting `TArgs` union (`{payment_id} | {task_budget_id}`)
+ * means an excess- or missing-property object literal at a call site is a
+ * compile error, exactly as every other target already gets from `target()`.
+ */
+function exactlyOneTarget<A extends z.ZodRawShape, B extends z.ZodRawShape>(
+  role: 'hosted' | 'signer',
+  a: A,
+  b: B,
+): NextStepTarget<
+  | (z.input<z.ZodObject<A>> & { [K in keyof B]?: never })
+  | (z.input<z.ZodObject<B>> & { [K in keyof A]?: never })
+> {
+  // A plain `z.input<A> | z.input<B>` union would NOT reject a literal
+  // carrying both shapes' keys: TS's excess-property check for a fresh
+  // object literal against a union only flags a key unknown to EVERY
+  // member, and `payment_id`/`task_budget_id` are each known to one member —
+  // exactly the gap round-2 N1 found (`{}` and the conflicting pair both
+  // built with no error). The `{ [K in keyof <other>]?: never }` intersection
+  // on each arm turns "the other shape's key, if present, must be `never`"
+  // into a real type mismatch on both arms for a literal carrying both keys,
+  // so the union is rejected — the standard TS "exactly one of" idiom.
+  const schema = z.union([z.object(a).strict(), z.object(b).strict()])
+  return {
+    role,
+    validate: (input) => {
+      const r = schema.safeParse(input ?? {})
+      return r.success ? null : r.error.errors.map((e) => `${e.path.join('.') || '(root)'}: ${e.message}`).join('; ')
+    },
+  }
+}
 
 /**
  * #3101 (epic #3105, slice 2/5): the hosted next-step TARGET MAP — every tool a
@@ -78,6 +119,7 @@ function hostedTargets<M extends Record<string, z.ZodRawShape>>(role: 'hosted' |
 const HOSTED_NEXT_STEP_TARGETS = {
   ...hostedTargets('hosted', toolSchemas),
   ...hostedTargets('signer', SIGNER_HANDOFF_SHAPES),
+  haven_sign: exactlyOneTarget('signer', HAVEN_SIGN_PAYMENT_SHAPE, HAVEN_SIGN_TASK_BUDGET_SHAPE),
 }
 export type HostedNextStepTargets = typeof HOSTED_NEXT_STEP_TARGETS
 
@@ -94,6 +136,21 @@ export type HostedHandoff = NextStepHandoff<HostedNextStepTargets>
  */
 export function refusalNextStep(input: { nextAction: AgentNextStep['next_action'] } & HostedHandoff): NextStep {
   return nextStep({ ...input, safeToContinue: false, reason: '' } as NextStepInput<HostedNextStepTargets>)
+}
+
+/**
+ * #3329: the SUCCESS-side counterpart of {@link refusalNextStep} for a next
+ * step that has no payment to summarize — a task budget is not a payment, so
+ * forcing it through {@link buildAgentGuidance}'s `AgentPaymentSummary` (which
+ * requires `payment_id`) would mislabel a `task_budget_id` under that key.
+ * Same builder, same target map, same compile-time twins as every other
+ * next-step site; `safeToContinue` defaults true since this is the success
+ * path, overridable for a not-yet-safe hand-off.
+ */
+export function taskBudgetNextStep(
+  input: { nextAction: AgentNextStep['next_action']; reason: string; safeToContinue?: boolean } & HostedHandoff,
+): NextStep {
+  return nextStep({ ...input, safeToContinue: input.safeToContinue ?? true } as NextStepInput<HostedNextStepTargets>)
 }
 
 const nextStep = createNextStepBuilder(HOSTED_NEXT_STEP_TARGETS)

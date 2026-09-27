@@ -11,6 +11,7 @@ import { usePreferences } from '@/hooks/usePreferences'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
 import { formatFiat, timeAgo } from '@/lib/format'
+import { BalanceFreshnessIndicator } from '@/components/haven'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -65,6 +66,11 @@ function AccountCard({
     breakdown,
     loading: portfolioLoading,
   } = usePortfolio(account.account_address, { chainId: account.chain_id })
+  // #3295: the freshest — actually, the oldest — degraded marker among the
+  // card's tokens. Any stale/unavailable token means the card's total is
+  // computed partly from last-known values, so the whole total gets the
+  // indicator; "Unavailable" only when some token has never been read.
+  const degradedFreshness = breakdown.find((item) => item.balanceFreshness)?.balanceFreshness
   // SEK (#3127): `?? 0` as on every currency here — the wire's `totalSek` /
   // `sekValue` are optional and an absent key must degrade to 0, not crash.
   const fiatTotal = currency === 'USD' ? totalUsd : currency === 'EUR' ? totalEur : totalSek
@@ -295,14 +301,22 @@ function AccountCard({
         <span>Added {timeAgo(account.created_at)}</span>
       </div>
 
-      {/* Fiat total */}
+      {/* Fiat total — carries the stale indicator when any token's balance
+          read failed (#3295): the figure is the last-known value, not a
+          fresh one, and "Unavailable" only replaces it when nothing is
+          known. A clean read renders no indicator at all. */}
       <div className="mb-4" role="status" aria-busy={portfolioLoading} aria-live="polite">
         {portfolioLoading ? (
           <Skeleton className="h-7 w-28" />
         ) : (
-          <p className="v2-tabular text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">
-            {formatFiat(fiatTotal, currency)}
-          </p>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <p className="v2-tabular text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">
+              {formatFiat(fiatTotal, currency)}
+            </p>
+            {degradedFreshness && (
+              <BalanceFreshnessIndicator freshness={degradedFreshness} size="compact" />
+            )}
+          </div>
         )}
       </div>
 

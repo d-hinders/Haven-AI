@@ -48,6 +48,7 @@ import { describeRuntimeSpecOverride } from './runtime-spec-override.js'
 import { generateDelegateKey } from './key.js'
 import { redactSecrets } from './redact.js'
 import { REKEY_FINISH_NEEDS_API_KEY } from './rekey-messages.js'
+import { CONNECTOR_CLIENT_IDENTITY } from './runtime.js'
 import { serverNamesFor } from './server-names.js'
 import {
   REKEY_PENDING_TTL_MS,
@@ -117,7 +118,7 @@ export async function startRekey(
     options.credentialsDir,
   )
 
-  const api = (deps.createApi ?? ((url: string) => createConnectApiClient(url)))(stored.apiUrl)
+  const api = (deps.createApi ?? ((url: string) => createConnectApiClient(url, undefined, CONNECTOR_CLIENT_IDENTITY)))(stored.apiUrl)
   const identity = await probeIdentity(api, stored.apiKey, 'current')
   assertRekeyable(identity, stored)
 
@@ -191,7 +192,7 @@ export async function finishRekey(
     )
   }
 
-  const api = (deps.createApi ?? ((url: string) => createConnectApiClient(url)))(stored.apiUrl)
+  const api = (deps.createApi ?? ((url: string) => createConnectApiClient(url, undefined, CONNECTOR_CLIENT_IDENTITY)))(stored.apiUrl)
   const identity = await probeIdentity(api, options.newApiKey, 'new')
 
   // The load-bearing check, and the reason this phase talks to Haven at all.

@@ -121,6 +121,7 @@ describe('base-SHA handling', () => {
     assert.deepEqual(changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName: 'push' }), [
       'diff',
       '-z',
+      '--no-renames',
       '--name-only',
       'aaa',
       'bbb',
@@ -134,7 +135,7 @@ describe('base-SHA handling', () => {
     for (const eventName of ['pull_request', 'pull_request_target']) {
       assert.deepEqual(
         changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName }),
-        ['diff', '-z', '--name-only', 'aaa...bbb'],
+        ['diff', '-z', '--no-renames', '--name-only', 'aaa...bbb'],
         `${eventName} must ask what this branch changed since it diverged`,
       )
     }
@@ -150,6 +151,7 @@ describe('base-SHA handling', () => {
       assert.deepEqual(changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName }), [
         'diff',
         '-z',
+        '--no-renames',
         '--name-only',
         'aaa',
         'bbb',
@@ -519,6 +521,55 @@ describe('the git-derived path ci.yml actually runs', () => {
       assert.match(output, /^cli=true$/m)
       assert.match(output, /^code=true$/m)
       // seed.txt is in the tree and routes nowhere; cli came from ls-tree.
+      assert.match(output, /^backend=false$/m)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a renamed file lists BOTH paths — --no-renames (#3346)', () => {
+    // git rename-detects by default, and a rename then reports only the NEW
+    // path: the old spelling vanishes from the list. For a served doc that is
+    // the #3288 shape — the old path is the allowlisted one, so the change
+    // routes nowhere and the served copy goes stale green. The classifier
+    // therefore passes --no-renames, which widens the list to both spellings;
+    // the direction is over-routing, which costs minutes rather than guards.
+    // Measured through the production entry point (BASE_SHA/HEAD_SHA + git),
+    // because the defect lives in the git invocation, not in classify().
+    const dir = mkdtempSync(path.join(tmpdir(), 'classifier-rename-'))
+    const git = (...args) =>
+      execFileSync('git', args, {
+        cwd: dir,
+        encoding: 'utf8',
+        env: {
+          PATH: process.env.PATH,
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_SYSTEM: '/dev/null',
+          GIT_AUTHOR_NAME: 't',
+          GIT_AUTHOR_EMAIL: 't@example.com',
+          GIT_COMMITTER_NAME: 't',
+          GIT_COMMITTER_EMAIL: 't@example.com',
+        },
+      }).trim()
+    try {
+      git('init', '-q', '-b', 'main')
+      execFileSync('mkdir', ['-p', path.join(dir, 'docs/product')])
+      writeFileSync(path.join(dir, 'docs/product/agent-passport.md'), 'passport\n')
+      writeFileSync(path.join(dir, 'seed.txt'), 'seed\n')
+      git('add', '-A')
+      git('commit', '-qm', 'seed')
+      const base = git('rev-parse', 'HEAD')
+      git('mv', 'docs/product/agent-passport.md', 'docs/product/agent-passport-v2.md')
+      git('commit', '-qm', 'rename')
+      const head = git('rev-parse', 'HEAD')
+
+      const { output } = runCli([], { BASE_SHA: base, HEAD_SHA: head }, '', dir)
+      // The OLD spelling is the allowlisted one; with rename detection left
+      // on, only the new path is listed, nothing matches, and this fails.
+      // Both spellings reaching the classifier is the point: the served arm
+      // routes on the old path regardless of what the new one is named.
+      assert.match(output, /^frontend=true$/m, 'the renamed served doc must still route frontend')
+      assert.match(output, /^code=true$/m)
       assert.match(output, /^backend=false$/m)
     } finally {
       rmSync(dir, { recursive: true, force: true })

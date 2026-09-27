@@ -17,6 +17,7 @@ import {
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
 import { listDelegationJsonByIds } from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
+import { toCanonicalAddress } from '../transactions/index.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
 
@@ -83,8 +84,16 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
       statusCode: 200,
       body: {
         agent_id: agent.id,
-        account_address: agent.account_address,
-        delegate_address: agent.delegate_address,
+        // #3319: the agent-side identity/allowance read checksums its
+        // Haven-owned addresses at the response boundary, the same rule the
+        // receipt (#3307) and the transactions feed (#3129) apply — storage
+        // (agents.delegate_address, agent_delegations.token_address under its
+        // LOWER CHECK) stays untouched. Canonicalised HERE, not inside
+        // `deriveDelegationBudgets`: its other callers (budget-precheck,
+        // balance-coverage) compare the value and one echoes it, so the view
+        // keeps the stored casing.
+        account_address: toCanonicalAddress(agent.account_address),
+        delegate_address: toCanonicalAddress(agent.delegate_address),
         chain_id: agent.chain_id,
         allowances: budgets.map((b) => {
           const { remainingAtomic, fromChain } = remainingById.get(b.id) ?? {
@@ -114,7 +123,9 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
           const spentAtomic = (spent > 0n ? spent : 0n).toString()
           return {
             id: b.id,
-            token_address: b.token_address,
+            // #3319: checksummed at the response boundary like the
+            // top-level identity fields above; storage stays lowercase.
+            token_address: toCanonicalAddress(b.token_address),
             token_symbol: b.token_symbol,
             configured_amount: b.allowance_amount,
             reset_period_min: b.reset_period_min,

@@ -4,7 +4,7 @@ import {
   addressFromKey,
   toolDescriptions as sharedDescriptions,
 } from '@haven_ai/sdk'
-import { buildBoundDirectUserOp } from '@haven_ai/sdk/test-support'
+import { buildBoundDirectUserOp, buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { z } from 'zod'
 import { createToolHandlers, toolDescriptions, toolSchemas } from './tools.js'
 import { readFileSync } from 'node:fs'
@@ -62,10 +62,23 @@ const x402PaymentRequired = {
 // SDK's allowlist signs — this key's own derived account redeeming a single
 // budget delegation through the DelegationManager — so it comes from the ONE
 // shared guard-valid builder (`@haven_ai/sdk/test-support`), not a local toy.
+// A DIRECT payment (`haven_send`): pays a third party, as `pay()` may.
 function buildUserOpSignData(key: string = delegateKey) {
   return buildBoundDirectUserOp({ delegate: addressFromKey(key) as `0x${string}`, chainId: 8453 })
 }
-const { typedData: userOpTypedData, payloadHash: userOpPayloadHash } = buildUserOpSignData()
+// #3375: an x402 FUNDING LEG is pinned to the 402 option's token and amount,
+// paid into this key's own delegate EOA — the shape the backend builds. Kept
+// apart from the direct-payment builder so `haven_send` keeps its third-party
+// recipient and the pin cannot leak into it unnoticed.
+function buildFundingLegSignData(key: string = delegateKey) {
+  return buildFundingLegUserOp({
+    delegate: addressFromKey(key) as `0x${string}`,
+    asset: challenge.asset.address as `0x${string}`,
+    amount: challenge.amount.atomic,
+    chainId: 8453,
+  })
+}
+const { typedData: userOpTypedData, payloadHash: userOpPayloadHash } = buildFundingLegSignData()
 
 // resourceUrl is used by the #190 security tests below
 const resourceUrl = challenge.resource
@@ -256,7 +269,10 @@ describe('Haven MCP tool handlers', () => {
     vi.restoreAllMocks()
   })
 
-  it('pays x402 quotes without leaking the delegate key over HTTP', async () => {
+  // #3378: also run with a task budget, through the REAL client — the stub
+  // test in task-budgets.test.ts only proves the tool hands the option to the
+  // SDK; this proves it reaches the /x402 wire (payX402Quote dropped it).
+  it.each([[undefined], ['tb_3378']] as const)('pays x402 quotes without leaking the delegate key over HTTP (task_budget_id: %s)', async (taskBudgetId) => {
     const requests: CapturedRequest[] = []
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
       requests.push({ url: String(url), init })
@@ -345,9 +361,16 @@ describe('Haven MCP tool handlers', () => {
     expect(quote.success).toBe(true)
     if (!quote.success) throw new Error('quote failed')
 
-    const paid = await handlers.haven_pay_x402_quote({ quote: quote.data })
+    const paid = await handlers.haven_pay_x402_quote({
+      quote: quote.data,
+      ...(taskBudgetId ? { task_budget_id: taskBudgetId } : {}),
+    })
     expect(paid.success).toBe(true)
     expect(JSON.stringify(paid)).toContain('paid-x402')
+
+    const x402Body = JSON.parse(String(requests.find((r) => r.url.endsWith('/x402'))?.init?.body)) as Record<string, unknown>
+    if (taskBudgetId) expect(x402Body.taskBudgetId).toBe(taskBudgetId)
+    else expect(x402Body).not.toHaveProperty('taskBudgetId')
 
     // Haven traffic must have happened (sign data + sign endpoint) and
     // delegate_key must not appear in any request URL, header, or body.
@@ -1088,7 +1111,7 @@ describe('haven_send', () => {
 describe('haven_pay_mcp_tool', () => {
   const MCP_DELEGATE_KEY = '0x' + 'c'.repeat(64)
   // #3283: the funding-leg UserOp must come from THIS block's delegate key's own account.
-  const { typedData: MCP_USEROP_TYPED_DATA, payloadHash: MCP_USEROP_HASH } = buildUserOpSignData(MCP_DELEGATE_KEY)
+  const { typedData: MCP_USEROP_TYPED_DATA, payloadHash: MCP_USEROP_HASH } = buildFundingLegSignData(MCP_DELEGATE_KEY)
   const MCP_MERCHANT_URL = 'https://mcp.merchant.example/mcp'
   const SIGN_HASH = `0x${'cc'.repeat(32)}`
 
@@ -1241,7 +1264,7 @@ describe('haven_pay_mcp_tool', () => {
 describe('merchant MCP endpoint discovery (#1301)', () => {
   const DISCOVERY_DELEGATE_KEY = '0x' + 'e'.repeat(64)
   // #3283: the funding-leg UserOp must come from THIS block's delegate key's own account.
-  const { typedData: DISCOVERY_USEROP_TYPED_DATA, payloadHash: DISCOVERY_USEROP_HASH } = buildUserOpSignData(DISCOVERY_DELEGATE_KEY)
+  const { typedData: DISCOVERY_USEROP_TYPED_DATA, payloadHash: DISCOVERY_USEROP_HASH } = buildFundingLegSignData(DISCOVERY_DELEGATE_KEY)
   const DISCOVERY_SIGN_HASH = `0x${'ee'.repeat(32)}`
   const PAYMENT_REQUIRED_HEADER = btoa(JSON.stringify(x402PaymentRequired))
 

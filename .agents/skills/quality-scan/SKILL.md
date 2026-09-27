@@ -147,7 +147,11 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    and count recurrence over time (the method the 2026-08-18 outbound finding
    used by hand: 6 issues in the class in 7 weeks); and **workflow
    archaeology** — rerun frequency per CI check, rerun/flake mentions in
-   commits and PR comments, checks that pass only on retry. Runtime-UX stays
+   commits and PR comments, checks that pass only on retry. Read qa-dev at
+   the `money-flow` **job** level, never the run conclusion: most qa-dev runs
+   are gate-skipped `deployment_status` runs that still conclude `success`
+   (#3348). The harness's in-step retry never moves `run_attempt`, so count
+   it from the job log's `money-flow QA passed on attempt 2/2` line. Runtime-UX stays
    out of scope: that class surfaces through external testing (epic #1585's
    origin), not repo scanning. Then take the numbered **wave dimensions** — the
    classes the 600-issue wave was measured to consist of — each as its

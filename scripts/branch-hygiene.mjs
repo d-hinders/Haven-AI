@@ -128,8 +128,8 @@ export function summarizePullRequests(prs, isOnDev) {
   let commits = 0
   let considered = 0
   for (const pr of prs) {
-    // A sync-back from `main` is MERGE-merged onto `dev` on purpose
-    // (branch-and-release-flow § After every promotion); its merges are
+    // A sync-back from `main` was MERGE-merged onto `dev` on purpose until the
+    // owner dropped it (branch-and-release-flow § Promotion to production); its merges are
     // release reconciliation, not a work branch going stale.
     // Detected by content, not only by name: a sync-back carries main's own
     // promotion merges (`Merge pull request #N from <owner>/dev`), whatever

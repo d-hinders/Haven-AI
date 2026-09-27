@@ -9,7 +9,7 @@
  * One-direction dependencies: imports only the SDK and the connector channel.
  * Never imports a capability module.
  */
-import { signerUpdateFallback } from '@haven_ai/sdk'
+import { DIRECT_SIGN_CONTEXT_VERSION, signerUpdateFallback } from '@haven_ai/sdk'
 import { HOSTED_CONNECTOR_CHANNEL, hostedConnectorRerunCommand } from '../../connector-channel.js'
 
 /**
@@ -91,5 +91,46 @@ export function signerCompatibilityNotice(emittedVersion: number) {
     // (#2423) rather than the SDK build's, because a hosted server is deployed
     // per environment while the signer is published per release.
     fallback: signerUpdateFallback(HOSTED_CONNECTOR_CHANNEL),
+  }
+}
+
+/**
+ * #3277: the direct-payment (`haven_send` / `haven_pay`) twin of
+ * `signerCompatibilityNotice` above. The hosted server cannot see the local
+ * signer's `initialize` handshake, so it cannot gate the handoff on advertised
+ * support — and per the #1547 lesson it must not ask the agent to compare a
+ * version against `initialize` instructions either (most agent harnesses
+ * cannot read an `initialize` result). Instead the result always names the
+ * byte-free `payment_id` handoff, and this notice carries the RECOVERY route
+ * for the one failure a pre-#3271 signer can produce: it answers
+ * `haven_sign({ payment_id })` with the structured refusal
+ * `SIGN_CONTEXT_REFUSED` + `backend_error_code: 'sign_context_unavailable'`
+ * (its x402-context fetch hit the backend's 409, `sign-context.ts` /
+ * `x402/sign-context.ts`) having signed NOTHING — so re-signing through the
+ * relay fields this result already carries is safe. The codes named in the
+ * text are pinned to the signer's real emission by
+ * `hosted-signer-integration.test.ts` (cross-package).
+ *
+ * `direct_sign_context_version` is `DIRECT_SIGN_CONTEXT_VERSION` from
+ * `@haven_ai/sdk` (`userop-binding.ts`) — the same constant the backend's
+ * `GET /payments/:id/sign-context` route is versioned against — never
+ * re-derived here.
+ */
+export function directSignerCompatibilityNotice() {
+  return {
+    direct_sign_context_version: DIRECT_SIGN_CONTEXT_VERSION,
+    signer_capability: SIGNER_CAPABILITY_KEY,
+    check:
+      'Call next_tool with next_arguments EXACTLY as given — the signer fetches the exact bytes ' +
+      'by payment_id. If haven_sign refuses with code SIGN_CONTEXT_REFUSED and backend_error_code ' +
+      "'sign_context_unavailable' (a pre-#3271 signer: it signed nothing), sign through the relay " +
+      'instead: call haven_sign with { payload_hash, typed_data_b64 } from THIS result, passed ' +
+      `through unchanged, then update the connector by rerunning \`${hostedConnectorRerunCommand()}\`.`,
+    // The same recovery sentence as structured data, mirroring the #1309
+    // pattern on the x402 notice above: prose to read, data to route on.
+    fallback:
+      'haven_sign refused SIGN_CONTEXT_REFUSED / sign_context_unavailable and signed nothing: call ' +
+      'haven_sign again with { payload_hash, typed_data_b64 } from the payment result, unchanged, ' +
+      `then update the connector by rerunning \`${hostedConnectorRerunCommand()}\`.`,
   }
 }

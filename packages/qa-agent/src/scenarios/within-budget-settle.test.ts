@@ -10,7 +10,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ScenarioContext } from './types.js'
 
-const { mockGetAllowances, mockCreatePayment, mockSignPayment, mockPoll, mockSign } = vi.hoisted(() => ({
+const { mockGetAllowances, mockCreatePayment, mockSignPayment, mockPoll, mockSign, mockGetAgent, mockProve } = vi.hoisted(() => ({
+  mockGetAgent: vi.fn(),
+  mockProve: vi.fn(),
   mockGetAllowances: vi.fn(),
   mockCreatePayment: vi.fn(),
   mockSignPayment: vi.fn(),
@@ -24,9 +26,13 @@ vi.mock('../lib/haven-api.js', () => ({
     createPayment = mockCreatePayment
     signPayment = mockSignPayment
     pollUntilSettled = mockPoll
+    getAgent = mockGetAgent
   },
 }))
 vi.mock('@haven_ai/sdk', () => ({ signUserOpTypedDataForDelegation: mockSign }))
+// #3344: the observer read is mocked (its own tests: lib/chain.test.ts); what is
+// pinned is that the leg ASKS the chain for the exact Transfer before passing.
+vi.mock('../lib/chain.js', async (orig) => ({ ...(await orig<typeof import('../lib/chain.js')>()), proveUsdcTransfer: mockProve }))
 
 const { withinBudgetSettle } = await import('./within-budget-settle.js')
 
@@ -55,13 +61,39 @@ beforeEach(() => {
   mockCreatePayment.mockResolvedValue(OFFERED)
   mockSignPayment.mockResolvedValue({ ok: true, status: 200, data: {} })
   mockPoll.mockResolvedValue({ status: 'confirmed', tx_hash: '0xdeadbeef' })
+  mockGetAgent.mockResolvedValue({ ok: true, status: 200, data: { account_address: TREASURY } })
+  mockProve.mockResolvedValue({ ok: true })
 })
 
+const TREASURY = '0x' + 'aa'.repeat(20)
+
 describe('within-budget-settle, re-based onto the delegation rail', () => {
-  it('passes on a confirmed on-chain settlement', async () => {
+  it('passes on a confirmed settlement ONLY after the observer shows the exact Transfer', async () => {
     const r = await withinBudgetSettle.run(ctx)
     expect(r.pass).toBe(true)
     expect(r.detail).toContain('0xdeadbeef')
+    expect(mockProve).toHaveBeenCalledWith('0xdeadbeef', { from: TREASURY, to: ctx.cfg.paymentTo, amount: 10_000n }, expect.anything())
+  })
+
+  it('FAILS when the backend says confirmed but the chain does not show the Transfer', async () => {
+    for (const error of [
+      'no receipt for 0xdeadbeef on the observer node within 60s (observer: PUBLIC https://sepolia.base.org — outages here read as scenario failures)',
+      'receipt 0xdeadbeef has status 0 on the observer node',
+      'receipt 0xdeadbeef (status 1) carries no USDC Transfer … — a 4337 user operation whose inner call reverted still leaves the bundler tx at status 1',
+    ]) {
+      mockProve.mockResolvedValue({ ok: false, error })
+      const r = await withinBudgetSettle.run(ctx)
+      expect(r.pass).toBe(false)
+      expect(r.detail).toContain(error)
+    }
+  })
+
+  it('FAILS when the paying treasury cannot be resolved', async () => {
+    mockGetAgent.mockResolvedValue({ ok: false, status: 500, data: {} })
+    const r = await withinBudgetSettle.run(ctx)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/could not resolve the paying treasury/)
+    expect(mockProve).not.toHaveBeenCalled()
   })
 
   it('signs the typed data client-side with the DELEGATION delegate key', async () => {

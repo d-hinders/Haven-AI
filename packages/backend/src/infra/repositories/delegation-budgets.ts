@@ -215,7 +215,7 @@ export async function withDelegationBuildSlotLock<T>(
  * same reason: two app instances disagreeing about "now" must not disagree
  * about which grant authorizes a payment.
  */
-export const SELECT_DELEGATION_FOR_PAYMENT_SQL = `SELECT delegation_hash, delegation_json, recipient_address
+export const SELECT_DELEGATION_FOR_PAYMENT_SQL = `SELECT delegation_hash, delegation_json, recipient_address, budget_atomic
      FROM agent_delegations
      WHERE agent_id = $1
        AND token_address = LOWER($2)
@@ -229,6 +229,12 @@ export interface DelegationForPaymentRow {
   delegation_hash: string
   delegation_json: string
   recipient_address: string | null
+  /**
+   * #3329 review finding D: the period budget as GRANTED — the fallback a
+   * caller reads `readRemainingBudget` against on a failed on-chain read.
+   * Distinct from any REQUESTED amount a caller is checking against it.
+   */
+  budget_atomic: string
 }
 
 /** `agentId` is the scope: delegations belong to exactly one agent. */
@@ -246,12 +252,60 @@ export async function selectDelegationForPayment(
 }
 
 /**
+ * #3329 review finding E: the delegation a TASK BUDGET names as its parent
+ * (`agent_task_budgets.parent_delegation_hash`), by its OWN identity — never
+ * re-derived by (token, to). An agent holding both an open and a pinned
+ * grant for the same token can have a task budget carved from the open one
+ * while the payment's `to` also matches the pinned grant's recipient;
+ * `selectDelegationForPayment`'s (token, to) selection would then pick the
+ * PINNED grant — a different row than the task child's `authority` names —
+ * and the redemption reverts. Selecting by hash cannot make that mistake:
+ * it names the exact row, or none.
+ */
+// #3329 review finding N5: the SAME validity window `SELECT_DELEGATION_FOR_
+// PAYMENT_SQL` enforces (#1698) — a not-yet-started or already-expired row
+// is "active" only in Haven's bookkeeping; the on-chain TimestampEnforcer
+// would revert redeeming it regardless. Excluding it here means a task
+// budget whose parent fell outside its window answers a clean 409 at THIS
+// lookup, not a gas-estimation revert three calls later. Owner decision
+// #3329 review N5: both "not found/not active" and "active but out of
+// window" collapse to the SAME null return and the SAME caller-side
+// `task_budget_parent_mismatch` refusal — the agent's fix is identical in
+// both cases (the referenced parent cannot currently authorize this task
+// budget), so a second error code would distinguish without changing what
+// anyone does about it.
+export const SELECT_ACTIVE_DELEGATION_BY_HASH_SQL = `SELECT delegation_hash, delegation_json, recipient_address, budget_atomic
+     FROM agent_delegations
+     WHERE agent_id = $1 AND delegation_hash = $2 AND status = 'active'
+       AND start_date <= EXTRACT(EPOCH FROM NOW())
+       AND expires_at > EXTRACT(EPOCH FROM NOW())`
+
+export async function selectActiveDelegationByHash(
+  agentId: string,
+  delegationHash: string,
+): Promise<DelegationForPaymentRow | null> {
+  const result = await pool.query<DelegationForPaymentRow>(SELECT_ACTIVE_DELEGATION_BY_HASH_SQL, [
+    agentId,
+    delegationHash,
+  ])
+  return result.rows[0] ?? null
+}
+
+/**
  * #1400: everything the batch revocation must kill — pending AND active
  * (a pending grant is still a signed delegation that could activate).
+ *
+ * #3343: `replaced` rows are in this list deliberately. The edit flow leaves
+ * a row `replaced` in the DB while its delegation is still enabled on-chain
+ * (the slot sweep marks the old grant replaced, and it is disabled only when
+ * the owner's Stop userop lands). A re-key or revoke-all that skipped those
+ * rows would complete while the OLD key's delegation stayed live — so
+ * "still enabled" here means every status the chain has not confirmed dead.
+ * The per-hash path and the payment paths do NOT read this list.
  */
 export const LIST_NON_REVOKED_DELEGATIONS_FOR_AGENT_SQL = `SELECT delegation_hash, delegation_json, status
        FROM agent_delegations
-       WHERE agent_id = $1 AND status IN ('pending', 'active')
+       WHERE agent_id = $1 AND status IN ('pending', 'active', 'replaced')
        ORDER BY created_at ASC`
 
 export async function listNonRevokedDelegationsForAgent(
@@ -262,6 +316,26 @@ export async function listNonRevokedDelegationsForAgent(
     [agentId],
   )
   return result.rows
+}
+
+/**
+ * The row a per-hash revocation targets — the same read its prepare makes,
+ * and since #3343 the submit makes too (it must resolve the row it would
+ * mark, 404 on a missing one, before anything is submitted).
+ */
+export const SELECT_DELEGATION_ROW_FOR_AGENT_BY_HASH_SQL = `SELECT delegation_json, status
+       FROM agent_delegations
+       WHERE agent_id = $1 AND delegation_hash = $2`
+
+export async function selectDelegationRowForAgentByHash(
+  agentId: string,
+  delegationHash: string,
+): Promise<{ delegation_json: string; status: string } | null> {
+  const result = await pool.query<{ delegation_json: string; status: string }>(
+    SELECT_DELEGATION_ROW_FOR_AGENT_BY_HASH_SQL,
+    [agentId, delegationHash],
+  )
+  return result.rows[0] ?? null
 }
 
 /**

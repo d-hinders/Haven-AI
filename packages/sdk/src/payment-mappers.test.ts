@@ -248,9 +248,9 @@ describe('list scope survives the receipt mapper (#3132)', () => {
 })
 
 describe('receipt vocabulary converges on the transaction names (#3134)', () => {
-  // Each pair is asserted from the RAW column, not from its twin: a test that
-  // only compared receipt.source to receipt.rail would pass if the mapper
-  // pointed both at the wrong column.
+  // Each pair is asserted from the RAW column, not from another mapped key: a
+  // test that compared two mapped keys would pass if the mapper pointed both at
+  // the wrong column.
   it('emits the four survivors from the same columns the old names read', () => {
     const receipt = mapPaymentReceipt(rawReceipt({
       rail: 'x402',
@@ -264,22 +264,20 @@ describe('receipt vocabulary converges on the transaction names (#3134)', () => 
     expect(receipt.x402MerchantAddress).toBe('0xMerchantTwin')
   })
 
-  it('keeps the deprecated twins for one full release, byte-equal to the survivors', () => {
+  // #3306: inverted, not deleted — string keys, because `receipt.rail` no longer
+  // compiles; kept beside the survivors test above, so a mapper returning `{}`
+  // passes this one and fails that one.
+  it('no longer emits the four removed twins beside the survivors', () => {
     const receipt = mapPaymentReceipt(rawReceipt({
       rail: 'x402',
       proof_status: 'pending',
       resource_url: 'https://merchant.example/paid',
       merchant_address: null,
     }))
-    expect(receipt.rail).toBe('x402')
-    expect(receipt.proofStatus).toBe('pending')
-    expect(receipt.resourceUrl).toBe('https://merchant.example/paid')
-    expect(receipt.merchantAddress).toBeNull()
+    expect(receipt.source).toBe('x402')
     expect(receipt.x402MerchantAddress).toBeNull()
-    // The removal condition lives on mapPaymentReceipt; when all three release
-    // clocks have moved, invert these four `toHaveProperty` lines.
     for (const twin of ['rail', 'proofStatus', 'resourceUrl', 'merchantAddress']) {
-      expect(receipt).toHaveProperty(twin)
+      expect(receipt).not.toHaveProperty(twin)
     }
   })
 

@@ -101,6 +101,23 @@ export const MARK_OUTBOUND_TX_REPLACED_SQL = `UPDATE outbound_txs
    WHERE id = $1 AND status = 'broadcast'
    RETURNING *`
 
+/**
+ * The nonces this relayer holds a LIVE broadcast at on a chain, at or above
+ * `$2`, ascending (#2769). Backed by `idx_outbound_txs_live_nonce`, the
+ * partial UNIQUE index on (chain_id, nonce) WHERE status = 'broadcast'.
+ *
+ * It is the ledger half of the nonce fallback in `outbound-queue.ts`: when
+ * the RPC refuses the `pending` block tag, the next nonce is the first one at
+ * or above the chain's `latest` count that no live row holds — a walk over
+ * CONTIGUOUS live rows, never a jump to `MAX(nonce) + 1`. The table has no
+ * from-address column, so a stale row far above the current key's count (an
+ * earlier key's dropped send, say) must not be able to push every later send
+ * into a gap nothing fills.
+ */
+export const LIST_LIVE_BROADCAST_NONCES_FROM_SQL = `SELECT nonce::text AS nonce FROM outbound_txs
+   WHERE chain_id = $1 AND status = 'broadcast' AND nonce >= $2
+   ORDER BY nonce`
+
 /** The bump worker's scan (#1558): broadcast rows nothing has confirmed. */
 export const LIST_UNMINED_OUTBOUND_TXS_SQL = `SELECT * FROM outbound_txs
    WHERE chain_id = $1 AND status = 'broadcast'
@@ -446,4 +463,16 @@ export async function listUnminedOutboundTxs(
     olderThanSeconds,
   ])
   return rows
+}
+
+export async function listLiveBroadcastNoncesFrom(
+  chainId: number,
+  from: bigint,
+  db: Executor = pool,
+): Promise<bigint[]> {
+  const { rows } = await db.query<{ nonce: string }>(LIST_LIVE_BROADCAST_NONCES_FROM_SQL, [
+    chainId,
+    from.toString(),
+  ])
+  return rows.map((r) => BigInt(r.nonce))
 }

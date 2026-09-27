@@ -43,6 +43,7 @@ import {
 } from '../infra/repositories/agents.js'
 import type { HybridOwnerConfig } from '../rails/hybrid-provisioning.js'
 import {
+  assertUserOperationDisablesDelegations,
   buildBudgetDelegation,
   buildRevocation,
   delegationIdentity,
@@ -62,6 +63,7 @@ import {
   withDelegationBuildSlotLock,
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
+  selectDelegationRowForAgentByHash,
 } from '../infra/repositories/delegation-budgets.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
@@ -806,6 +808,42 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
+    // The server's own still-enabled set (pending/active/replaced). The batch
+    // prepared at step 1 named exactly these rows; if the set has moved since
+    // (a grant, a heal, another revoke), the prepared op no longer covers it
+    // and the client must re-prepare — an exact-bind mismatch below answers
+    // the same 409.
+    const expectedRows = await listNonRevokedDelegationsForAgent(request.params.id)
+    if (expectedRows.length === 0) {
+      return reply.code(409).send({
+        error: 'Nothing to revoke — the agent has no pending or active budget delegations. Re-prepare.',
+      })
+    }
+
+    // Binding BEFORE submitCall (#3343, exact): every still-enabled row must
+    // be disabled by the signed calldata, and nothing beyond it. An
+    // undecodable userop is a malformed client artifact (400); a decoded op
+    // that does not cover exactly this set means prepare and submit disagree
+    // (409 re-prepare), never a DB write.
+    const binding = assertUserOperationDisablesDelegations(
+      (user_operation as { callData?: unknown }).callData,
+      agent.chain_id,
+      expectedRows,
+      'exact',
+    )
+    if (!binding.ok) {
+      if (binding.reason === 'undecodable') {
+        return reply.code(400).send({
+          error: 'user_operation is not a readable execution batch — submit the userOp the prepare step returned.',
+        })
+      }
+      return reply.code(409).send({
+        error:
+          'The delegations to revoke have changed since prepare — fetch a fresh prepare and sign it again.',
+      })
+    }
+    const delegation_hashes_server = binding.disabled
+
     try {
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
@@ -821,10 +859,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         signature as Hex,
       )
       // DB write ONLY after the UserOp landed — a failed submit leaves every
-      // row untouched (no optimistic revocation). Scoped to this agent, so a
-      // stray hash flips nothing foreign; the response reports what actually
+      // row untouched (no optimistic revocation). Scoped to this agent AND to
+      // the server-derived set the signed op was bound to (#3343), so a stray
+      // hash flips nothing foreign; the response reports what actually
       // flipped rather than echoing the request.
-      const revoked = await revokeDelegationsByHashes(request.params.id, delegation_hashes)
+      const revoked = await revokeDelegationsByHashes(request.params.id, delegation_hashes_server)
       return { revoked: true, tx_hash: result.txHash, delegation_hashes: revoked }
     } catch (err) {
       return reply.code(502).send({ error: 'Batch revocation failed', details: safeDetails(err) })
@@ -950,6 +989,33 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
     const { signature, user_operation } = request.body
+    // #3343: the submit validates the hash exactly as its prepare does (:820) —
+    // and resolves the ROW it would mark, refusing 404 before anything is
+    // submitted. The pairing of userop → hash is client-supplied and not
+    // trusted; the binding check below is what makes the marking honest.
+    // (The hash's SHAPE is the enforced `delegationHashParam` pattern; the
+    // in-handler regex rung dev carried here is the request schema's since
+    // #3031, same as the signature/user_operation rungs above.)
+    const target = await selectDelegationRowForAgentByHash(request.params.id, request.params.hash)
+    if (!target) return reply.code(404).send({ error: 'Delegation not found' })
+
+    // Binding BEFORE submitCall (#3343): the signed calldata must disable THIS
+    // delegation on the pinned manager, derived from the row's own identity —
+    // the same posture `submitSignerChange` has held since #906. A userop that
+    // disables something else, or nothing, is refused here and nothing is
+    // recorded; a retry with the correctly prepared op is safe.
+    const binding = assertUserOperationDisablesDelegations(
+      (user_operation as { callData?: unknown }).callData,
+      agent.chain_id,
+      [{ delegation_hash: request.params.hash, delegation_json: target.delegation_json }],
+      'subset',
+    )
+    if (!binding.ok) {
+      return reply.code(400).send({
+        error:
+          'user_operation does not match the requested revocation — its calldata does not disable this delegation. Prepare the revocation again and sign the fresh userOp.',
+      })
+    }
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 

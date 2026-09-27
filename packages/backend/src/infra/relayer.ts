@@ -1,6 +1,16 @@
-import { JsonRpcProvider, Wallet, formatEther, parseEther, type Provider } from 'ethers'
+import {
+  JsonRpcProvider,
+  Network,
+  Wallet,
+  formatEther,
+  parseEther,
+  type JsonRpcPayload,
+  type JsonRpcResult,
+  type Provider,
+} from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from '../domain/chains.js'
+import { secondaryRpcUrl, secretSegments } from './chain/rpc-transport.js'
 
 const providers = new Map<number, JsonRpcProvider>()
 const relayers = new Map<number, Wallet>()
@@ -88,13 +98,149 @@ export async function getRelayerFeeOverrides(
  * broadcast to one node is invisible to a second, and the log scanners and
  * receipt verifier behind `relayer-reads.ts` would read "no log" from a
  * lagging fallback rather than fail. A quota-dead `RPC_URL_BASE*` still fails
- * the ethers side; configuring a healthy endpoint is the remedy there.
+ * the ethers side; configuring a healthy endpoint is the remedy there. The one
+ * provider refusal handled in code is dRPC's "No label `flashblocks`" (#2769),
+ * at two points. On the `pending` nonce read, `readNextRelayerNonce` in
+ * `outbound-queue.ts` walks up from this same provider's `latest` count over
+ * the live-broadcast ledger. On `eth_sendRawTransaction`, `broadcastSigned`
+ * sends the identical signed bytes through the configured second provider
+ * (`RPC_URL_BASE*_FALLBACK`), while every read and receipt wait stays here.
+ *
+ * JSON-RPC batching is OFF (`batchMaxCount: 1`). By default ethers bundles
+ * every call made within about 10 ms into ONE request of up to 100 calls.
+ * dRPC's free plan, the dev primary since 2026-09-24, refuses any batch over
+ * three and returns code 31 on every item ("Batch of more than 3 requests are
+ * not allowed on free plan"). Whether a read landed in a large batch depended
+ * on what else fired in the same 10 ms. As a result, dashboard balances
+ * flickered to zero, and sweep relays and account deploys failed
+ * intermittently (#2769). Providers bill per call either way, so batching
+ * saved only round trips.
+ *
+ * `staticNetwork: true` goes with it. Without it, ethers sends an
+ * `eth_chainId` before each call, which used to travel inside the same batch.
+ * With batching off, that would double the request count on a rate-limited
+ * free plan. With it, the chain is detected once, on first use, and then
+ * cached.
  */
 export function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)
   if (!provider) {
-    provider = new JsonRpcProvider(getChain(chainId).rpcUrl)
+    provider = newEthersProvider(getChain(chainId).rpcUrl)
     providers.set(chainId, provider)
+  }
+  return provider
+}
+
+/**
+ * The key-like pieces of an endpoint URL — path segments and query values of
+ * 12+ characters — now the shared `secretSegments` from `chain/rpc-transport.ts`
+ * (#3371 converged the third copy; #2769 wrote the first two). The alias keeps
+ * the call sites below unchanged. It can live in `rpc-transport.ts` because that
+ * file is BELOW this one in the provider graph (this file already imports
+ * `secondaryRpcUrl` from it); `outbound-queue.ts` reaches it through this file,
+ * which must stay its free-standing base.
+ */
+const keySegments = secretSegments
+
+/**
+ * Scrub an RPC URL — and so any embedded provider API key — out of an ethers
+ * error before it leaves this file, for EVERY provider `newEthersProvider`
+ * builds (primary and fallback). The 2026-09-26 incident: a dRPC 408 timeout
+ * on the PRIMARY provider threw with the full URL, key included, inside both
+ * `message` and the enumerable `info.requestUrl` / `request` / `response` —
+ * `FetchResponse.assertOk()` (ethers `utils/fetch.js`) builds that shape, and
+ * `JsonRpcProvider._send` (`providers/provider-jsonrpc.js`) is the one place
+ * it throws from; the message reached logs, the `outbound_txs` error column
+ * and could reach an operator response. `outbound-queue.ts`'s
+ * `fallbackSendError` already rebuilt the FALLBACK send's error from safe
+ * fields (#3323/#2769) at its one call site; this closes the same hole one
+ * layer down, so every caller of either provider is covered, not only that
+ * one.
+ *
+ * Every JSON-RPC-LEVEL error (a wrong nonce, a revert, dRPC's flashblocks
+ * refusal) is built later, by `getRpcError`, from the response BODY alone —
+ * never from `_send`'s throw — so `isPendingTagRefusal`, `isDeterministicRevert`
+ * and ethers' own NONCE_EXPIRED classification are untouched by this: none of
+ * them read a field this rebuilds. `request` and `response` (ethers'
+ * `FetchRequest`/`FetchResponse` instances, which hold the URL in
+ * non-string form too) are dropped outright; every remaining own property —
+ * `code`, `shortMessage`, `info`, a nested JSON-RPC `error` body if present —
+ * is copied through with every string value scrubbed, so classification that
+ * reads them keeps working.
+ */
+function scrubRpcUrlError(err: unknown, url: string): unknown {
+  if (typeof err !== 'object' || err === null) return err
+  const secrets = keySegments(url)
+  const scrub = (text: string): string =>
+    secrets
+      .reduce((acc, secret) => acc.split(secret).join('<redacted>'), text)
+      .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\]}]+/gi, '<rpc-url>')
+  const deepScrub = (value: unknown): unknown => {
+    if (typeof value === 'string') return scrub(value)
+    if (Array.isArray(value)) return value.map(deepScrub)
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [key, val] of Object.entries(value)) out[key] = deepScrub(val)
+      return out
+    }
+    return value
+  }
+  const e = err as Error & Record<string, unknown>
+  const scrubbed = new Error(scrub(String(e.message ?? err))) as Error & Record<string, unknown>
+  for (const key of Object.getOwnPropertyNames(e)) {
+    if (key === 'message' || key === 'stack' || key === 'request' || key === 'response') continue
+    scrubbed[key] = deepScrub(e[key])
+  }
+  return scrubbed
+}
+
+/**
+ * The ONE place ethers' HTTP client throws a transport-level error
+ * (`_send`, via `FetchResponse.assertOk()`): every send this provider makes
+ * — reads, `eth_sendRawTransaction`, everything `getRelayer`'s wallet signs
+ * — routes through it, so scrubbing here covers all of them without a
+ * per-caller wrapper. `send()` (the public entry point) calls `_send`
+ * directly with no intervening catch, so nothing between here and the
+ * caller can re-attach the URL.
+ */
+class ScrubbingJsonRpcProvider extends JsonRpcProvider {
+  async _send(payload: JsonRpcPayload | Array<JsonRpcPayload>): Promise<Array<JsonRpcResult>> {
+    try {
+      return await super._send(payload)
+    } catch (err) {
+      throw scrubRpcUrlError(err, this._getConnection().url)
+    }
+  }
+}
+
+/**
+ * The ONE place an ethers provider is constructed (`rpc-transport-guard`).
+ * The primary passes no network (detected once, then static). The fallback
+ * pins it: an unreachable fallback must not start ethers' 1 s `eth_chainId`
+ * detection retry, which never stops, and a pinned network also stops the
+ * fallback's own `eth_chainId` answer from being trusted.
+ */
+function newEthersProvider(url: string, network?: Network): JsonRpcProvider {
+  return new ScrubbingJsonRpcProvider(url, network, { batchMaxCount: 1, staticNetwork: true })
+}
+
+const fallbackBroadcastProviders = new Map<number, JsonRpcProvider>()
+
+/**
+ * The provider for the chain's configured second endpoint
+ * (`RPC_URL_BASE*_FALLBACK`), or null when none is configured (#2769). It is
+ * used for ONE thing: re-sending an already signed raw transaction that the
+ * primary refused with dRPC's flashblocks error (`broadcastSigned` in
+ * `outbound-queue.ts`). The relayer wallet is never bound to it, so it never
+ * picks a nonce, signs, or answers a read: the single nonce view above holds.
+ */
+export function getFallbackBroadcastProvider(chainId: number): JsonRpcProvider | null {
+  const url = secondaryRpcUrl(chainId)
+  if (!url) return null
+  let provider = fallbackBroadcastProviders.get(chainId)
+  if (!provider) {
+    provider = newEthersProvider(url, Network.from(chainId))
+    fallbackBroadcastProviders.set(chainId, provider)
   }
   return provider
 }

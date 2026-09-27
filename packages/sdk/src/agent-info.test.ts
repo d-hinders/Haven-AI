@@ -197,6 +197,7 @@ describe('agent info helpers', () => {
       const u = String(url)
       if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
       if (u.endsWith('/machine-payments/allowances')) return allowancesResponse()
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
     })
 
@@ -225,6 +226,7 @@ describe('agent info helpers', () => {
         resetPeriodMin: 60,
         isResetPending: false,
       }],
+      taskBudgets: [],
     })
   })
 
@@ -238,6 +240,7 @@ describe('agent info helpers', () => {
         raw.allowances[0].id = 'allowance-42'
         return new Response(JSON.stringify(raw), { status: 200, headers: { 'content-type': 'application/json' } })
       }
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
     })
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
@@ -300,6 +303,7 @@ describe('agent info helpers', () => {
       const u = String(url)
       if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
       if (u.endsWith('/machine-payments/allowances')) return allowancesResponse({ remaining: '0' })
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
     })
 
@@ -322,6 +326,7 @@ describe('agent info helpers', () => {
       if (u.endsWith('/machine-payments/allowances')) {
         return delegationAllowancesResponse([{ tokenAddress: USDC_BASE, tokenSymbol: 'USDC', budgetAtomic: '10000000' }])
       }
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
     })
 
@@ -346,6 +351,7 @@ describe('agent info helpers', () => {
       const u = String(url)
       if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
       if (u.endsWith('/machine-payments/allowances')) return delegationAllowancesResponse([])
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
     })
 
@@ -362,6 +368,7 @@ describe('agent info helpers', () => {
       const u = String(url)
       if (u.endsWith('/machine-payments/agent')) return agentResponse('revoked')
       if (u.endsWith('/machine-payments/allowances')) return allowancesResponse()
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
     })
 
@@ -381,6 +388,7 @@ describe('agent info helpers', () => {
         // 1.5 EURe = 1.5 * 10^18 atomic.
         return allowancesResponse({ tokenAddress: EURE_GNOSIS, tokenSymbol: 'EURe', remaining: '1500000000000000000' })
       }
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
     })
 
@@ -401,6 +409,7 @@ describe('agent info helpers', () => {
       if (u.endsWith('/machine-payments/allowances')) {
         return allowancesResponse({ tokenAddress: '0xUnregisteredToken', tokenSymbol: 'FOO', remaining: '12345' })
       }
+      if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
     })
 
@@ -450,22 +459,18 @@ describe('agent info helpers', () => {
     await expect(haven.listReceipts({ limit: 10 })).resolves.toEqual([{
       id: 'receipt-1',
       paymentId: 'payment-1',
-      // #3134: the transaction feed's names, with the old receipt names kept
-      // as deprecated twins for one full release (removal condition on
-      // mapPaymentReceipt). This is an exact-shape assertion on purpose.
+      // #3134/#3306: the transaction feed's names only — the four old receipt
+      // twins were removed. This is an exact-shape assertion on purpose, so it
+      // also pins their absence.
       source: 'x402',
-      rail: 'x402',
       paymentProofStatus: 'payment_confirmed',
-      proofStatus: 'payment_confirmed',
       txHash: `0x${'ab'.repeat(32)}`,
       // #2998: additive, default to null when the wire response omits them.
       fundingTxHash: null,
       settlementTxHash: null,
       chainId: 8453,
       x402ResourceUrl: 'https://paid.example/data',
-      resourceUrl: 'https://paid.example/data',
       x402MerchantAddress: '0xMerchant',
-      merchantAddress: '0xMerchant',
       payerAddress: '0xSafe',
       settlementAddress: '0xMerchant',
       tokenSymbol: 'USDC',

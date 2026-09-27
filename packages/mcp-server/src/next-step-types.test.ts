@@ -3,7 +3,9 @@ import { AgentPaymentNextAction } from '@haven_ai/sdk'
 import { buildAgentGuidance, paymentStatusHandoff, type HostedHandoff } from './tools/support/guidance.js'
 
 /**
- * #3101 — the COMPILE-TIME twins (seven: six per-handoff, one on the full input). `npm run typecheck -w packages/mcp-server`
+ * #3101 — the COMPILE-TIME twins (nine: eight per-handoff, one on the full input;
+ * #3329 round-2 N1 added twins 7 and 8 for haven_sign's exactly-one shape).
+ * `npm run typecheck -w packages/mcp-server`
  * covers test files, so each `@ts-expect-error` below is an assertion that the
  * line does NOT compile: delete one and typecheck fails with "Unused
  * '@ts-expect-error' directive" — that is the mutation, and the diagnostics
@@ -47,6 +49,18 @@ const nullId: HostedHandoff = { nextTool: 'haven_get_payment_status', nextArgume
 // @ts-expect-error nextTool is required on the full guidance input too
 const fullOmitted = () => buildAgentGuidance({ nextAction: AgentPaymentNextAction.None, safeToContinue: true, reason: 'r', summary: SUMMARY })
 
+// #3329 round-2 N1 — haven_sign is EXACTLY ONE of payment_id / task_budget_id.
+// Positive control: the task-budget alternative compiles.
+const okTaskBudget: HostedHandoff = { nextTool: 'haven_sign', nextArguments: { task_budget_id: 'tb_1' } }
+
+// Twin 7 — neither field: {} matches neither alternative.
+// @ts-expect-error haven_sign requires payment_id or task_budget_id
+const signNeither: HostedHandoff = { nextTool: 'haven_sign', nextArguments: {} }
+
+// Twin 8 — both fields: the exact pair the signer itself refuses.
+// @ts-expect-error haven_sign takes exactly one of payment_id or task_budget_id, never both
+const signBoth: HostedHandoff = { nextTool: 'haven_sign', nextArguments: { payment_id: 'pay_1', task_budget_id: 'tb_1' } }
+
 describe('typed next-step handoff (#3101)', () => {
   it('the positive controls build the byte-identical wire', () => {
     const out = buildAgentGuidance({ ...ok1, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, safeToContinue: true, reason: 'r', summary: SUMMARY })
@@ -60,6 +74,7 @@ describe('typed next-step handoff (#3101)', () => {
     const none = buildAgentGuidance({ ...ok4, nextAction: AgentPaymentNextAction.None, safeToContinue: true, reason: 'r', summary: SUMMARY })
     expect(none.next_tool).toBeUndefined()
     expect(none.next_tool_omitted_reason).toBe('nothing follows')
+    expect(buildAgentGuidance({ ...okTaskBudget, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, safeToContinue: true, reason: 'r', summary: SUMMARY }).next_arguments).toEqual({ task_budget_id: 'tb_1' })
   })
 
   it('the runtime twin fails safe for a caller that bypasses the types', () => {
@@ -73,6 +88,39 @@ describe('typed next-step handoff (#3101)', () => {
     })
     expect(out.next_tool).toBeUndefined()
     expect(out.next_tool_omitted_reason).toMatch(/do not parse under haven_get_payment_status: payment_id: Required/)
+  })
+
+  it('#3329 round-2 N1: haven_sign rejects neither field and both fields at the runtime twin too', () => {
+    const both = buildAgentGuidance({
+      ...({ nextTool: 'haven_sign', nextArguments: { payment_id: 'pay_1', task_budget_id: 'tb_1' } } as unknown as HostedHandoff),
+      nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+      safeToContinue: true,
+      reason: 'r',
+      summary: SUMMARY,
+    })
+    expect(both.next_tool).toBeUndefined()
+    expect(both.next_tool_omitted_reason).toMatch(/do not parse under haven_sign/)
+
+    const neither = buildAgentGuidance({
+      ...({ nextTool: 'haven_sign', nextArguments: {} } as unknown as HostedHandoff),
+      nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+      safeToContinue: true,
+      reason: 'r',
+      summary: SUMMARY,
+    })
+    expect(neither.next_tool).toBeUndefined()
+    expect(neither.next_tool_omitted_reason).toMatch(/do not parse under haven_sign/)
+
+    const taskBudgetOnly = buildAgentGuidance({
+      nextTool: 'haven_sign',
+      nextArguments: { task_budget_id: 'tb_1' },
+      nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+      safeToContinue: true,
+      reason: 'r',
+      summary: SUMMARY,
+    })
+    expect(taskBudgetOnly.next_tool).toBe('mcp__haven-signer__haven_sign')
+    expect(taskBudgetOnly.next_arguments).toEqual({ task_budget_id: 'tb_1' })
   })
 
   it('paymentStatusHandoff names the status tool only when it has an id (decision 3)', () => {

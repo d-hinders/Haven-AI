@@ -4,11 +4,19 @@ import fastifyJwt from '@fastify/jwt'
 // #2392: the spec's own schema decides whether the overview matches what the
 // dashboard's generated wire types promise — see the #1090 block below.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
+// The double below replaces only the FETCHING half of the accounts barrel;
+// the route also reads the pure freshness combiner from it (#3295), which
+// stays real so the marker math this file pins is the production math.
+import { combineBalanceFreshness } from '../../modules/accounts/balance-freshness.js'
 
 const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   portfolioMocks: {
     fetchPortfolioForAccount: vi.fn(),
+    // #3296: the route asks the module whether a result is unpriceable before
+    // writing the daily snapshot; the real predicate is proven against the
+    // marker in modules/accounts/__tests__/portfolio-unpriceable.test.ts.
+    isPortfolioUnpriceable: vi.fn(),
   },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
@@ -46,7 +54,10 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../modules/accounts/index.js', () => portfolioMocks)
+vi.mock('../../modules/accounts/index.js', () => ({
+  ...portfolioMocks,
+  combineBalanceFreshness,
+}))
 vi.mock('../../infra/fiat-values.js', () => ({
   getFiatValuesForTokenAmount: vi.fn(),
 }))
@@ -99,6 +110,8 @@ describe('dashboard routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     portfolioMocks.fetchPortfolioForAccount.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(false)
     transactionMocks.compareTransactions.mockClear()
     transactionMocks.enrichedTransactionIdentityKey.mockClear()
     transactionMocks.enrichTransactionsWithAgents.mockClear()
@@ -413,4 +426,383 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
       { tokenSymbol: 'USDC', allowanceAmount: '1.00', resetPeriodMin: 1440 },
     ])
   })
+})
+
+// #3295 — `GET /dashboard/overview` under a degraded balance read.
+//
+// The route tests above mock `fetchPortfolioForAccount` wholesale, which is
+// exactly the seam this behavior needs: the module-level substitution itself
+// is proven in `modules/accounts/__tests__/portfolio-last-known.test.ts`;
+// what a route test CAN pin is how the overview projects a degraded
+// portfolio — totals computed from the substituted values, the additive
+// marker on `change`, and the change amounts reported unavailable when some
+// token has no known value (never a swing computed from a zero).
+describe('dashboard overview under degraded balance reads (#3295)', () => {
+  let app: FastifyInstance
+  let token: string
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(dashboardRoutes, { prefix: '/dashboard' })
+    token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
+  })
+  afterAll(async () => app.close())
+
+  beforeEach(() => {
+    portfolioMocks.fetchPortfolioForAccount.mockReset()
+    transactionMocks.fetchAccountTransactions.mockReset()
+    transactionMocks.mergeX402Transactions.mockReset()
+    transactionMocks.resolveTransactionCurrency.mockClear()
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
+    transactionMocks.mergeX402Transactions.mockResolvedValue([])
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
+      }
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: [SAFE] })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('GROUP BY token_symbol')) {
+        return Promise.resolve({ rows: [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+  })
+
+  async function getOverview() {
+    return app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+  }
+
+  it('reports degraded totals built from the last-known balances, with the additive marker', async () => {
+    // What the module returns when one token's read failed after a good one:
+    // the breakdown entry carries the SUBSTITUTED last-known balance and the
+    // stale marker; the totals are priced from those substituted values.
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 2000,
+      totalEur: 1800,
+      totalSek: 20_000,
+      breakdown: [
+        {
+          symbol: 'USDC',
+          balance: '2000000',
+          formatted: '2.00',
+          usdValue: 2000,
+          eurValue: 1800,
+          sekValue: 20_000,
+          balanceFreshness: { status: 'stale', asOf: '2026-09-25T07:55:00.000Z' },
+        },
+      ],
+    })
+
+    const body = (await getOverview()).json()
+
+    expect(body.totals).toEqual({ usd: 2000, eur: 1800, sek: 20_000 })
+    expect(body.change.balancesFreshness).toEqual({
+      status: 'stale',
+      asOf: '2026-09-25T07:55:00.000Z',
+    })
+    // Stale tokens still diff normally — the last-known figures sit on both
+    // sides of the subtraction.
+    expect(body.change.usdAmount).not.toBeNull()
+  })
+
+  it('reports the change as unavailable when some token has no known value — never a swing from a zero', async () => {
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 0,
+      totalEur: 0,
+      totalSek: 0,
+      breakdown: [
+        {
+          symbol: 'USDC',
+          balance: '0',
+          formatted: '0.00',
+          usdValue: 0,
+          eurValue: 0,
+          sekValue: 0,
+          balanceFreshness: { status: 'unavailable' },
+        },
+      ],
+    })
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) {
+        return Promise.resolve({
+          rows: [
+            {
+              snapshot_date: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+              total_usd: '80',
+              total_eur: '75',
+              total_sek: '740',
+            },
+          ],
+        })
+      }
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
+      }
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: [SAFE] })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('GROUP BY token_symbol')) {
+        return Promise.resolve({ rows: [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+
+    const body = (await getOverview()).json()
+
+    expect(body.change.balancesFreshness).toEqual({ status: 'unavailable' })
+    // Amounts null (matches how `sekAmount: null` already reads), percentages
+    // inert: no -100% swing fabricated from a zero.
+    expect(body.change.usdAmount).toBeNull()
+    expect(body.change.eurAmount).toBeNull()
+    expect(body.change.sekAmount).toBeNull()
+  })
+
+  it('clean reads carry no marker and unchanged change amounts', async () => {
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 100,
+      totalEur: 92,
+      totalSek: 920,
+      breakdown: [
+        {
+          symbol: 'USDC',
+          balance: '100000000',
+          formatted: '100.00',
+          usdValue: 100,
+          eurValue: 92,
+          sekValue: 920,
+        },
+      ],
+    })
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) {
+        return Promise.resolve({
+          rows: [
+            {
+              snapshot_date: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+              total_usd: '80',
+              total_eur: '75',
+              total_sek: '740',
+            },
+          ],
+        })
+      }
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
+      }
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: [SAFE] })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('GROUP BY token_symbol')) {
+        return Promise.resolve({ rows: [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+
+    const body = (await getOverview()).json()
+
+    expect(body.change.balancesFreshness).toBeUndefined()
+    expect(body.change.usdAmount).toBeCloseTo(20, 10)
+    expect(body.change.eurAmount).toBeCloseTo(17, 10)
+    expect(body.change.sekAmount).toBeCloseTo(180, 10)
+  })
+})
+
+// #3296 — the daily snapshot is written only from a CLEAN read.
+//
+// `isPortfolioUnpriceable` is mocked per-portfolio above, so what these tests
+// pin is the ROUTE's use of it: any account unpriceable → no INSERT into
+// user_daily_portfolio_snapshots plus an info log naming the user only, a
+// clean read → the insert exactly as before. The predicate's own truth table
+// (marker reuse, cache-hit survival, price-vs-balance failure) is proven
+// against the real marker in modules/accounts/__tests__/
+// portfolio-unpriceable.test.ts. The query stubs keep the
+// characterization suite's keyword-dispatched shape — the ratchet forbids
+// growing positional mocking on db.js (mockResolvedValueOnce).
+describe('dashboard writes the daily snapshot only from a clean read (#3296)', () => {
+  const SKIP_MSG = 'Daily portfolio snapshot skipped: the portfolio read is unpriceable (#3296)'
+  let app: FastifyInstance
+  let token: string
+  const logLines: Array<Record<string, unknown>> = []
+
+  beforeAll(async () => {
+    app = Fastify({
+      // Capture pino's own JSON lines so the skip log can be pinned without
+      // stubbing the logger (a stubbed request.log would no longer prove the
+      // route logs at info through the real pipeline).
+      logger: {
+        level: 'info',
+        stream: {
+          write(chunk: string) {
+            try {
+              logLines.push(JSON.parse(chunk))
+            } catch {
+              // Non-JSON line — not a pino record, not ours to pin.
+            }
+          },
+        },
+      },
+    })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(dashboardRoutes, { prefix: '/dashboard' })
+    token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
+  })
+  afterAll(async () => app.close())
+
+  /** Same UTC-day arithmetic the route uses for its snapshot keys. */
+  function snapshotDate(offsetDays = 0): string {
+    const date = new Date()
+    date.setUTCDate(date.getUTCDate() + offsetDays)
+    return date.toISOString().slice(0, 10)
+  }
+
+  function installQueryMock(accountRows: unknown[] = [SAFE]) {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
+      }
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: accountRows })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('GROUP BY token_symbol')) {
+        return Promise.resolve({ rows: [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+  }
+
+  beforeEach(() => {
+    logLines.length = 0
+    mockQuery.mockReset()
+    portfolioMocks.fetchPortfolioForAccount.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(false)
+    transactionMocks.fetchAccountTransactions.mockReset()
+    transactionMocks.mergeX402Transactions.mockReset()
+    transactionMocks.resolveTransactionCurrency.mockClear()
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 100,
+      totalEur: 92,
+      totalSek: 920,
+    })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
+    transactionMocks.mergeX402Transactions.mockResolvedValue([])
+    installQueryMock()
+  })
+
+  async function getOverview() {
+    return app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+  }
+
+  function insertCalls() {
+    return mockQuery.mock.calls.filter(([sql]) =>
+      String(sql).includes('INSERT INTO user_daily_portfolio_snapshots'),
+    )
+  }
+
+  it('a clean read still inserts today\'s snapshot exactly as before', async () => {
+    const response = await getOverview()
+
+    expect(response.statusCode).toBe(200)
+    const inserts = insertCalls()
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0][1]).toEqual(['user-1', snapshotDate(0), 100, 92, 920])
+    expect(logLines.find((line) => line.msg === SKIP_MSG)).toBeUndefined()
+  })
+
+  it('an unpriceable read writes NO snapshot and logs the skip with the user id only', async () => {
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(true)
+
+    const response = await getOverview()
+
+    expect(response.statusCode).toBe(200)
+    expect(insertCalls()).toHaveLength(0)
+    const skip = logLines.find((line) => line.msg === SKIP_MSG)
+    expect(skip, 'expected one skip log line').toBeDefined()
+    expect(skip).toMatchObject({ userId: 'user-1' })
+    // The route controls exactly these fields — no amounts, no portfolio
+    // figures on the skip line (finding aid, not a figures channel). `reqId`
+    // is fastify's automatic per-request binding, present on every line.
+    const routeControlled = Object.keys(skip ?? {}).filter(
+      (key) => !['level', 'time', 'pid', 'hostname', 'msg'].includes(key),
+    )
+    expect(routeControlled).toEqual(['reqId', 'userId'])
+  })
+
+  it('asks every account and skips when ANY of them is unpriceable', async () => {
+    const gnosisSafe = { ...SAFE, id: 'safe-gnosis', chain_id: 100 }
+    installQueryMock([SAFE, gnosisSafe])
+    // Clean on the first account, unpriceable on the second.
+    portfolioMocks.isPortfolioUnpriceable
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true)
+
+    const response = await getOverview()
+
+    expect(response.statusCode).toBe(200)
+    expect(portfolioMocks.isPortfolioUnpriceable).toHaveBeenCalledTimes(2)
+    expect(insertCalls()).toHaveLength(0)
+    expect(logLines.find((line) => line.msg === SKIP_MSG)).toBeDefined()
+  })
+
+  it('all accounts clean after a skipped load writes the snapshot — the day is recoverable', async () => {
+    // First load: degraded (the stale row skips the insert — mocked db has no
+    // snapshot row to begin with, so the skip is what this pins).
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(true)
+    await getOverview()
+    expect(insertCalls()).toHaveLength(0)
+
+    // Later load the same day: clean → the snapshot lands after all.
+    portfolioMocks.isPortfolioUnpriceable.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(false)
+    await getOverview()
+
+    expect(insertCalls()).toHaveLength(1)
+    expect(insertsToParams()).toEqual(['user-1', snapshotDate(0), 100, 92, 920])
+  })
+
+  function insertsToParams(): unknown {
+    const inserts = insertCalls()
+    expect(inserts).toHaveLength(1)
+    return inserts[0][1]
+  }
 })

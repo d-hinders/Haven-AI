@@ -19,6 +19,7 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import { createHash } from 'crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getAddress } from 'ethers'
 
 const { mockGetTokenBalance } = vi.hoisted(() => ({ mockGetTokenBalance: vi.fn() }))
 vi.mock('../../infra/chain/index.js', () => ({
@@ -136,7 +137,10 @@ describeDb('GET /machine-payments/balance-coverage (#3126)', () => {
     expect(res.json()).toEqual({
       covered: true,
       chain_id: CHAIN,
-      token_address: USDC,
+      // #3319: the echo is checksummed at the response boundary — one casing
+      // whether the caller sent lowercase or checksummed. The chain read
+      // below keeps the value as sent.
+      token_address: getAddress(USDC),
       token_symbol: 'USDC',
       checked_amount_atomic: '1000000',
       budget_remaining_atomic: '5000000',

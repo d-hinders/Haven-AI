@@ -10,15 +10,14 @@
  */
 import { describe, it, expect } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
-import { hashTypedData } from 'viem'
-import { buildX402ExpectedMessage } from '@haven_ai/sdk'
+import { addressFromKey, buildX402ExpectedMessage } from '@haven_ai/sdk'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner } from './core.js'
 import { createToolHandlers } from './tools.js'
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 // expires_at is part of the signed binding and required by the tool schema, so
 // every x402_expected fixture carries it (matching the hosted server's output).
 const EXPIRES_AT = '2099-01-01T00:00:00.000Z'
@@ -38,16 +37,19 @@ const PAYMENT_REQUIRED = {
   ],
 }
 
-// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
-// data now. The shape does not matter — only that its digest is what
-// `expectedX402`'s `typedDataHash` commits to.
-const FUNDING_TYPED_DATA = {
-  domain: { name: 'HavenX402Funding', version: '1', chainId: 84532, verifyingContract: `0x${'11'.repeat(20)}` },
-  types: { Funding: [{ name: 'note', type: 'string' }] },
-  primaryType: 'Funding',
-  message: { note: 'x402 funding leg (#3272 test fixture)' },
-}
-const FUNDING_DIGEST = hashTypedData(FUNDING_TYPED_DATA as Parameters<typeof hashTypedData>[0])
+// #3281: a REAL funding leg (the shared builder) — this key's own account
+// redeeming one budget delegation, transferring the quoted amount of the
+// quoted token to this key's own delegate EOA. The toy 'Funding' fixture the
+// x402 arm now refuses.
+const FUNDING = buildFundingLegUserOp({
+  delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+  asset: PAYMENT_REQUIRED.accepts[0].asset as `0x${string}`,
+  amount: PAYMENT_REQUIRED.accepts[0].amount,
+  chainId: 8453, // PAYMENT_REQUIRED.accepts[0].network ('base')
+})
+const FUNDING_TYPED_DATA = FUNDING.typedData
+const FUNDING_HASH = FUNDING.payloadHash as string
+const FUNDING_DIGEST = FUNDING.digest
 
 async function expectedX402() {
   const context = {

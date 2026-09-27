@@ -13,3 +13,4 @@
 // retirement) together with the routes that were their only callers.
 export * from './mainnet-gate.js'
 export * from './portfolio.js'
+export * from './balance-freshness.js'

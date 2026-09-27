@@ -102,6 +102,16 @@ export interface X402SettlementRequest {
   delegateAccountAddress: Address
   /** The SIGNED budget delegation (the parent) as stored by #828. */
   budgetDelegation: Delegation
+  /**
+   * #3329: when a task budget authorizes this settlement, its SIGNED child
+   * becomes the settlement child's `parentDelegation` instead of the budget
+   * delegation directly — the redemption chain becomes
+   * `[settlement, taskChild, budget]`. `budgetDelegation` above is still
+   * required (it is what `assembleSettlementPayload` appends as the chain's
+   * root), even though it is no longer the settlement child's immediate
+   * parent.
+   */
+  taskBudgetChild?: Delegation
   asset: Address
   /** Exact atomic amount from the 402 requirements. */
   amountAtomic: bigint
@@ -165,7 +175,10 @@ export function buildSettlementDelegation(req: X402SettlementRequest): BuiltSett
     // amount, payee-pinned, ≤600s expiry) — exposure ceiling "merchant
     // gets paid without delivering", never fund loss (#1053 finding 1).
     to: '0x0000000000000000000000000000000000000a11' as Address, // ANY_BENEFICIARY
-    parentDelegation: req.budgetDelegation,
+    // #3329: a task budget's child stands in as the immediate parent when
+    // one authorizes this settlement — the redemption chain becomes
+    // [settlement, taskChild, budget] (see assembleSettlementPayload).
+    parentDelegation: req.taskBudgetChild ?? req.budgetDelegation,
     scope: {
       type: 'erc20TransferAmount',
       tokenAddress: req.asset,
@@ -194,8 +207,12 @@ export interface X402Erc7710Payload {
 
 /**
  * Assemble the X-PAYMENT payload once the agent has signed the child. The
- * permission context is the encoded CHAIN — child first, then the budget
- * delegation whose enforcers meter the spend.
+ * permission context is the encoded CHAIN, leaf first: `[settlement, budget]`
+ * ordinarily, or `[settlement, taskChild, budget]` (#3329) when a task
+ * budget's SIGNED child sat between them — pass it as `taskBudgetChild` when
+ * `buildSettlementDelegation` was given one (the settlement child's
+ * `authority` then names the task child, so the chain must include it or
+ * every enforcer on that hop reverts).
  */
 export function assembleSettlementPayload(
   chainId: number,
@@ -203,11 +220,15 @@ export function assembleSettlementPayload(
   childSignature: Hex,
   budgetDelegation: Delegation,
   delegateAccountAddress: Address,
+  taskBudgetChild?: Delegation,
 ): X402Erc7710Payload {
   const signedChild: Delegation = { ...child, signature: childSignature } as Delegation
+  const chain: Delegation[] = taskBudgetChild
+    ? [signedChild, taskBudgetChild, budgetDelegation]
+    : [signedChild, budgetDelegation]
   return {
     delegationManager: getDelegationContracts(chainId).delegationManager,
-    permissionContext: encodeDelegations([signedChild, budgetDelegation]),
+    permissionContext: encodeDelegations(chain),
     delegator: delegateAccountAddress,
   }
 }

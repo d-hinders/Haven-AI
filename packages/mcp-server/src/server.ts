@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, havenClientIdentity } from '@haven_ai/sdk'
 import { hostedConnectorRerunCommand } from './connector-channel.js'
 import {
   assertHostedToolRegistry,
@@ -12,7 +12,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.4.0-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.6.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -88,9 +88,13 @@ export const HOSTED_INSTRUCTIONS = [
   '',
   'Signing and settling, every x402 payment tool: the response guidance names',
   'the signer tool — pass JUST { payment_id }; the signer fetches the exact',
-  'bytes itself, so never copy or re-type typed_data. (haven_pay is the',
-  'exception: sign it per its own response guidance, passing typed_data_b64',
-  'through unchanged when present.) On the EIP-3009 shape, settle',
+  'bytes itself, so never copy or re-type typed_data. Direct payments',
+  '(haven_send / haven_pay) name the same handoff: sign by payment_id per',
+  "their response guidance. If the signer refuses with code",
+  'SIGN_CONTEXT_REFUSED and backend_error_code sign_context_unavailable',
+  '(an older signer — it signed nothing), re-sign with { payload_hash,',
+  'typed_data_b64 } from the payment result, passed through unchanged, then',
+  'update the connector. On the EIP-3009 shape, settle',
   'with payment_id + signature + payment_header. On the erc7710 shape there is',
   'no funding leg and NO payment_header — settle with payment_id + signature',
   'only. The guidance says which shape you are on.',
@@ -152,6 +156,10 @@ export function createHostedHavenClient(options: HostedClientOptions): HavenClie
     apiKey: options.apiKey,
     baseUrl: options.baseUrl,
     chainRpcs,
+    // #3303: the hosted server is Haven-deployed and outside the five
+    // published packages, so the backend's compat table never hints or refuses
+    // it; naming it keeps its requests from reading as a bare SDK embedder's.
+    clientIdentity: havenClientIdentity('@haven_ai/mcp-server', HOSTED_SERVER_VERSION),
     // Intentionally NO delegateKey. See custody invariant in
     // docs/architecture/06-hosted-mcp-connect-flow.md.
   })

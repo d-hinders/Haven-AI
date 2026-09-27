@@ -54,6 +54,7 @@ import {
   isStaleAnchor,
   retireAttestationOnChain,
   type AnchorState,
+  type RetireOutcome,
 } from './revocation.js'
 
 /**
@@ -103,25 +104,39 @@ export async function reconcileReanchor(agentId: string, userId: string): Promis
   // Skipping straight to the reset is safe precisely because `resetForReanchor`
   // re-checks `revocation_status = 'confirmed'` and the uid itself, atomically.
   // This branch cannot invent a confirmation it did not find.
+  // The uid the retire actually revoked / that is confirmed revoked. For an
+  // unrepaired row this is the stored one; after a #3294 repair the row was
+  // CAS-swapped to the receipt UID inside the retire, and the retire reports
+  // THAT as `revokedUid` — which is what `resetForReanchor` checks the row
+  // against. On the resume path (`confirmed` already) the row still holds the
+  // uid that was retired, so the initial value is simply the row's.
+  let revokedUid: string | null = row.attestation_uid
   if (row.revocation_status !== 'confirmed') {
     // The single gate: invariant + lease, atomically. A loser submits NOTHING.
     if (!(await repo.claimReanchorRevocation(agentId))) return 're_anchoring'
 
-    const retired = await retireAttestationOnChain(
+    // The repair gate rides INSIDE the retire (see `retireAttestationOnChain`,
+    // #3294): a pre-fix row stores the staticCall prediction, so retiring the
+    // stored UID loops forever on `NotFound()`. The retire repairs the row to
+    // the receipt's real UID and revokes THAT.
+    let retired: RetireOutcome
+    ;({ outcome: retired, revokedUid } = await retireAttestationOnChain(
       agentId,
       row.chain_id,
       row.attestation_uid,
       row.revocation_attempts,
-    )
+      row,
+    ))
     // The retire scheduled its own backoff and stays due. Critically, the row
-    // is NOT reset — the old uid is still the only pointer Haven holds to a
+    // is NOT reset — the real uid is still the only pointer Haven holds to a
     // credential that is still live on-chain, and losing it would strand it.
     if (retired !== 'revoked_onchain') return 're_anchoring'
+    if (!revokedUid) return 're_anchoring'
   }
 
   // Hand the row back to the issuance state machine. Refuses unless the
   // revocation is confirmed AND the uid matches the one just retired.
-  if (!(await repo.resetForReanchor(agentId, row.attestation_uid))) return 're_anchoring'
+  if (!(await repo.resetForReanchor(agentId, revokedUid))) return 're_anchoring'
 
   // Anchor the new key now rather than waiting for the issuance sweep's next
   // tick. `issuePassport` is idempotent and re-reads the agent's facts, so it

@@ -189,11 +189,26 @@ export interface AgentIdentity {
   execution_rail: 'legacy' | 'delegation' | string
 }
 
-export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch = fetch): ConnectApiClient {
+/**
+ * @param clientIdentity #3303: `@haven_ai/connect/<version>`, sent as
+ *   `X-Haven-Client` on every request so the backend can tell an outdated
+ *   connector what to run. Passed in by the callers that own
+ *   `CONNECTOR_VERSION` (`runtime.ts` imports this file, so it cannot be
+ *   imported here).
+ */
+export function createConnectApiClient(
+  baseUrl: string,
+  fetchImpl: typeof fetch = fetch,
+  clientIdentity?: string,
+): ConnectApiClient {
   const root = baseUrl.replace(/\/+$/, '')
+  const send = <T>(url: string, init: RequestInit): Promise<T> =>
+    request<T>(fetchImpl, url, clientIdentity
+      ? { ...init, headers: { ...(init.headers as Record<string, string> | undefined), 'X-Haven-Client': clientIdentity } }
+      : init)
   return {
     resolveSetup: (input) =>
-      request(fetchImpl, `${root}/agent-connection-setups/resolve`, {
+      send(`${root}/agent-connection-setups/resolve`, {
         method: 'POST',
         body: JSON.stringify({
           setup_token: input.setupToken,
@@ -203,7 +218,7 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
       }),
 
     registerSetup: (input) =>
-      request(fetchImpl, `${root}/agent-connection-setups/register`, {
+      send(`${root}/agent-connection-setups/register`, {
         method: 'POST',
         body: JSON.stringify({
           setup_token: input.setupToken,
@@ -225,19 +240,19 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
       }),
 
     getAgentIdentity: (apiKey) =>
-      request(fetchImpl, `${root}/machine-payments/agent`, {
+      send(`${root}/machine-payments/agent`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${apiKey}` },
       }),
 
     getConnectorStatus: (setupId, apiKey) =>
-      request(fetchImpl, `${root}/agent-connection-setups/${encodeURIComponent(setupId)}/connector-status`, {
+      send(`${root}/agent-connection-setups/${encodeURIComponent(setupId)}/connector-status`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${apiKey}` },
       }),
 
     updateInstallStatus: async (setupId, apiKey, input) => {
-      await request(fetchImpl, `${root}/agent-connection-setups/${encodeURIComponent(setupId)}/install-status`, {
+      await send(`${root}/agent-connection-setups/${encodeURIComponent(setupId)}/install-status`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({

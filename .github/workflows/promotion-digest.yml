@@ -125,11 +125,23 @@ jobs:
           fi
 
           # Self-heal the label so the workflow works even before labels.yml syncs.
-          gh label create promotion --color 1d76db --description "Tracks dev → prod promotion" --force >/dev/null 2>&1 || true
+          # No `--force`: the description in `.github/labels.yml` — "(used by the
+          # pending-promotion digest)" — is the ONLY warning to a human that
+          # labelling their issue `promotion` feeds this digest, and `--force`
+          # here was overwriting it with a blander one on every run. `create`
+          # without `--force` fails on an existing label, which is the no-op we
+          # want; the error is tolerated and the sync workflow owns updates.
+          gh label create promotion --color 1d76db --description "Tracks dev → prod promotion (used by the pending-promotion digest)" >/dev/null 2>&1 || true
 
-          num=$(gh issue list --label promotion --state open --json number --jq '.[0].number' || true)
-          if [ -n "${num:-}" ] && [ "$num" != "null" ]; then
-            gh issue edit "$num" --body "$body"
-          else
-            gh issue create --title "📦 Pending promotion: dev → main" --label promotion --body "$body"
-          fi
+          # Find and update the digest issue through the bot-ownership upsert
+          # (#3341): it selects by AUTHOR — the one attribute a human cannot
+          # set — plus an exact title, so a human issue labelled `promotion`
+          # (as #3262 was, losing its body to this digest 33+ times) is never
+          # adopted or edited; the workflow creates its own digest beside it.
+          # It also fails the step when the lookup itself fails, instead of
+          # `|| true`-ing its way into a duplicate create.
+          printf '%s' "$body" | node scripts/ci/standing-issue-upsert.mjs \
+            --title '📦 Pending promotion: dev → main' \
+            --author 'app/github-actions' \
+            --list-args '--label promotion --state open --json' \
+            --label promotion

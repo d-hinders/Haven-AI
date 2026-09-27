@@ -46,4 +46,5 @@ One line: give your agent a budget, not your wallet.
 - Your agent hit a 402: /402.md
 - Dashboard: / (this host's root)
 - Independent exit (inspect/revoke without Haven): /exit
+- Releases, and whether a client update is needed: /releases
 - npm: https://www.npmjs.com/package/@haven_ai/connect (also @haven_ai/sdk, @haven_ai/mcp, @haven_ai/signer, @haven_ai/cli)

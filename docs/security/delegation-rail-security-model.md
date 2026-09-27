@@ -8,8 +8,12 @@ covers:
   - packages/sdk/src/redemption-guard.ts
   - packages/sdk/src/direct-payment-guard.ts
   - packages/sdk/src/settlement-child.ts
+  - packages/sdk/src/task-budget-guards.ts
+  - packages/sdk/src/userop-binding.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-erc7710.ts
+  - packages/sdk/src/x402-funding-leg.ts
+  - packages/sdk/src/delegate-sweep.ts
   - packages/signer/src/tools.ts
   - packages/signer/src/core.ts
   - packages/backend/src/middleware/auth.ts
@@ -46,7 +50,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-22"
+last-verified: "2026-09-25"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -116,7 +120,7 @@ dropped.
 | 7 | UserOps submitted with caller-provided signature only | Redemptions submitted with **client-signed** UserOp/tx only; the backend constructs and relays, never signs | CI (the #737 pattern, delegation flavor) |
 | 8 | Session-config modules signer-free | Delegation lifecycle modules (grant/replace/revoke construction, #827/#828) are **signer-free and relayer-free**: they build payloads and typed data, never sign | CI (module import/AST scan) |
 | 9 | Bundler credential read in exactly one place | Unchanged (one choke point; `redactVendorSecrets` on every error surface) | CI (existing) |
-| 9a | *(new, #1061)* **Redaction covers the shapes vendors actually use** | `redactVendorSecrets` catches `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth (`https://user:pass@host`), and key-in-path segments (`/rpc/<token>`, `/v2/<token>`) — not just the one `apikey=` spelling | Unit tests on the redactor |
+| 9a | *(new, #1061)* **Redaction covers the shapes vendors actually use** | `redactVendorSecrets` catches `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth (`https://user:pass@host`), and key-in-path segments (`/rpc/<token>`, `/v2/<token>`) — not just the one `apikey=` spelling. Since #3371 an RPC URL's key does not reach those patterns at all: the failover transport (`infra/chain/rpc-transport.ts`) scrubs viem's request errors in place, deriving the key-like segments from every configured endpoint URL (dRPC path, `dkey=`, `/v3/`, `/v2/`, QuickNode) | Unit tests on the redactor; transport scrub tests on `rpc-transport` |
 | 10 | Paymaster has no value-transfer surface | Unchanged — sponsorship pays gas only; proven in the spike (agent key held zero ETH and zero USDC) | CI + spike evidence |
 | 11 | *(new)* **No upgrade path from Haven code** | Haven's codebase contains no call site that can reach the account's UUPS upgrade function; upgrade authority = account signers only | CI (ABI/selector scan for `upgradeToAndCall` against DeleGator targets) |
 | 12 | *(new)* **Delegations are client-signed only** | No Haven code path calls `signDelegation`/EIP-712 delegation signing with a server-held key (pilot scripts with throwaway testnet keys excepted, path-scoped) | CI (import + call-site scan) |
@@ -197,14 +201,27 @@ the retired session rail's (one period's budget per recipient) — with
 revocation one `disableDelegation` away.
 
 **Batch revocation (#1400):** `POST /agents/:id/delegations/revoke-all`
-prepares ONE UserOp batching a `disableDelegation` call per pending/active
+prepares ONE UserOp batching a `disableDelegation` call per still-enabled
 delegation (`prepareCalls`, `ExecutionMode.BatchDefault` — atomic: all
-disable or none do). The owner signs that UserOp exactly as a single revoke;
-Haven still cannot sign it (invariant 3 unchanged). Fail-closed ordering: the
-DB rows flip to `revoked` only AFTER the UserOp lands, so a crash window can
-leave on-chain-disabled rows still marked active (a directionally safe
-surplus — a later redemption attempt reverts on-chain), never the reverse.
-Because `disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
+disable or none do; "still enabled" spans `pending`, `active` AND `replaced`
+rows since #3343 — a replaced row's delegation is live until its own disable
+lands). The owner signs that UserOp exactly as a single revoke; Haven still
+cannot sign it (invariant 3 unchanged). Fail-closed ordering: the DB rows
+flip to `revoked` only AFTER the UserOp lands, so a crash window can leave
+on-chain-disabled rows still marked active (a directionally safe surplus — a
+later redemption attempt reverts on-chain), never the reverse. What makes
+that ordering honest is the CALldata binding (#3343): a submit route records
+`revoked` only after its server verifies the signed UserOp's calldata —
+decoded from the account's `execute` envelope, selector-checked — actually
+disables the delegation(s) it is about to mark, by `delegationIdentity`
+(signature excluded), against the set the SERVER derives (`pending`/`active`/
+`replaced`), not a client-supplied hash list. The per-hash route refuses an
+op that does not disable its one row (400, before submission); revoke-all and
+the re-key revoke refuse an op that does not disable exactly the server's
+whole still-enabled set (409 re-prepare — the re-key stays at `preflight`,
+its point of no return). The client pairing of a userop with delegation
+hashes, and any client-supplied hash list, are not trusted inputs. Because
+`disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
 the batch is atomic, the prepare step reconciles that window (#1423): it reads
 `disabledDelegations(hash)` for every candidate, heals already-disabled rows
 to `revoked`, and drops them from the batch — a failed read degrades to the
@@ -1343,65 +1360,143 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > those two files and those four fields. Nothing else in this document was
 > re-verified.
 
-## 10. The edge signer's signing surface (#3272)
+## 10. The delegate key's signing surface (#3272, epic #3284)
 
-The agent's delegate key lives in `@haven_ai/signer` on the user's machine. For
-most of the rail's life, `haven_sign` would sign **any** EIP-712 typed data it
-was handed. The only exceptions were a `Delegation` without a Haven-signed
-context (#1476) and a bare hash (#3169). It worked as a signing oracle: on
-2026-09-24 it returned a valid signature over a made-up `Probe` message
-(`primaryType: "Probe"`, no `verifyingContract`). Since #3272 the MCP tool
-layer signs only these shapes, and refuses everything else with
-`TYPED_DATA_NOT_ALLOWED` (no signature, no audit entry):
+The agent's delegate key signs in two places: `@haven_ai/signer` on the user's
+machine (the MCP tool `haven_sign` and its x402 siblings), and
+`HavenClient.signForData` in `@haven_ai/sdk`, which runs in-process for
+`pay()`, the x402 funding leg and erc7710 settlement, including inside the
+local `@haven_ai/mcp` server. Until #3272 the signer's `haven_sign` signed
+**any** EIP-712 typed data it was handed, apart from an unbound `Delegation`
+(#1476) and a bare hash (#3169). On 2026-09-24 it returned a valid signature
+over a made-up `Probe` message. The SDK signed whatever the Haven API response
+contained after only the #3271 binding check.
 
-- **A direct-payment `PackedUserOperation`**, only when all of these hold:
-  - it passes the #3271 binding check;
+**Threat model (epic #3284, owner-confirmed 2026-09-24).**
+
+| Actor | Trusted for the signing decision? |
+|---|---|
+| The account owner's signers and the on-chain enforcers | Yes: they are the real control |
+| The agent / caller of the signer | No (#3272) |
+| Haven's API responses and the network path to them | No (#3283) |
+| Haven's x402 binding key | No (#3281) |
+
+**The invariant:** whatever Haven serves, the delegate key signs nothing that
+acts on the delegate smart account beyond redeeming the agent's budget
+delegation within its caveats.
+
+**What is signed, in both places, and nothing else.** One implementation in
+`@haven_ai/sdk` (`direct-payment-guard.ts`, `redemption-guard.ts`,
+`delegate-account.ts`, `settlement-child.ts`, `userop-binding.ts`), which the
+signer imports:
+
+- **A redemption `PackedUserOperation`** (a direct payment, or the x402
+  EIP-3009 funding leg), only when all of these hold:
+  - it passes the #3271 binding against its hash (the direct payment's
+    `payload_hash`, or the funding leg's Haven-declared `payloadHash`);
   - its chain has pinned delegation contracts (Base, Base Sepolia);
-  - its sender is the signer's OWN delegate account: the counterfactual
-    HybridDeleGator for the delegate key, derived offline by CREATE2 in
-    `packages/sdk/src/delegate-account.ts` and pinned to the MetaMask kit;
+  - its sender is this key's OWN delegate account: the counterfactual
+    HybridDeleGator for the delegate key, derived offline by CREATE2 and
+    pinned to the MetaMask kit;
   - its `callData` is a single `execute` to the DelegationManager calling
-    `redeemDelegations`, with exactly one delegation: a single grant made to
-    this account by a different account, in
-    `SingleDefault` mode, canonically encoded (`redemption-guard.ts`).
-- **An erc7710 settlement child or an EIP-3009 funding leg**, against a
-  Haven-signed expected context (versions 2 and 3 only; the bare-hash v1
-  context was removed in #3272).
-- **The EIP-3009 merchant header**, against the recorded binding.
-- **The sweep home**, against Haven's recovery binding.
+    `redeemDelegations` with exactly one permission context holding either a
+    single grant made to this account by a different account, or — since
+    #3329 — a two-link chain whose leaf is a task-budget child this account
+    delegated to itself under that grant; in `SingleDefault` mode,
+    canonically encoded at every level;
+  - **on an x402 funding leg**, its single execution is a `transfer` of the
+    quoted amount of the quoted token to this key's own delegate EOA. That
+    address is local, not from Haven. The signer checks it on its x402 arm
+    (#3281), against the Haven-signed expected context's asset and amount.
+    The SDK's own funding leg (`signForData`, #3375) checks it against the
+    402 option being paid, never against the `/x402` response.
+- **An erc7710 settlement child `Delegation`**, verified against an
+  expectation Haven cannot rewrite: payee, amount, token, chain, and an expiry
+  of at most 600 seconds. It must not be a ROOT delegation, and it must be
+  delegated by this key's own account. The signer checks it against the
+  Haven-signed expected context; the SDK checks it against the merchant's own
+  402 (payee, amount, token, chain, advertised facilitators).
+- **The EIP-3009 merchant header**, against the recorded binding, and **the
+  sweep home**, against Haven's recovery binding (see residual 2).
+- **A task-budget child `Delegation` (#3329)** — a self-delegation: delegator
+  AND delegate are this key's own delegate account, authority is the agent's
+  budget delegation (never ROOT), an `erc20TransferAmount` cap on the expected
+  token, a `timestamp` caveat of at most 24 hours, and an `allowedCalldata`
+  payee pin exactly when a recipient was requested. Verified by
+  `assertOwnTaskChild` (`task-budget-guards.ts`) against the Haven-served
+  sign-context, which the guard treats as untrusted input the way it treats
+  the settlement child's. It is a different typed-data class from the
+  settlement child, verified by a different function: a task child is refused
+  by `assertOwnSettlementChild` outright, because that verifier now refuses
+  any child whose delegate is its own delegator (a self-delegation is never a
+  settlement child, whatever its amount, payee or window), and a settlement
+  child is refused by `assertOwnTaskChild`; both directions are pinned by
+  tests, including a short-lived self-delegated child that matches a
+  settlement expectation in every other field. A self-delegated child can only **narrow** what the
+  account may already redeem under its budget, never widen it.
+- **A `disableDelegation` `PackedUserOperation` for one of those children
+  (#3329)** — the same sender, chain and single-`execute`-to-the-
+  DelegationManager rules as a redemption, but the inner call is
+  `disableDelegation` of a delegation whose delegator and delegate are both
+  this account and whose hash Haven's sign-context for that task budget names
+  (`assertOwnTaskBudgetCloseUserOp`) — the guard re-derives the hash from the
+  bytes in the UserOp and refuses a mismatch, so the context cannot point it
+  at a different delegation.
+  Authority-reducing only: it cannot disable the owner's budget delegation
+  (a different delegator) or anything not self-granted.
+- **The redemption allowlist admits one more chain (#3329):** exactly two
+  links where the leaf is a self-delegation by this account and the parent is
+  a grant to this account from a different account — the task-budget shape —
+  in addition to the single grant. An empty chain, a longer chain, a leaf
+  delegated by anyone else and a leaf delegated *to* anyone else stay refused.
 
-The core's `signDelegationTypedData` remains a verbatim primitive for embedders.
-The allowlist lives in the tool layer, and an embedder calling the core
-directly owns that check.
+The signer's x402 arm (#3281) signs only the first two shapes, however validly
+Haven's binding key declared anything else. Every refusal on the shape checks,
+the settlement child's (malformed children included), is
+`TYPED_DATA_NOT_ALLOWED`, or `USEROP_BINDING_MISMATCH` for a funding leg whose
+hash does not match. A settlement network the signer cannot map keeps its own
+`SIGNING_ERROR`, which asks for a signer update. In every
+case nothing is signed, audited or submitted.
+In the SDK, a funding-leg refusal (#3375) throws `HavenTypedDataRefusedError`
+before the funding leg is signed or posted to `/sign`. The EIP-3009 merchant
+header, minted in-process just before (#1521), is discarded and never returned;
+the funding intent stays `pending_signature` until it expires.
+The core's `signDelegationTypedData`, `HavenClient.sign(hash)` and the SDK's
+exported signing primitives stay verbatim, for embedders; the checks are in
+`haven_sign`, `signX402FundingTypedData` and `signForData`.
 
-**The SDK runs the same check (#3283, epic #3284).** The allowlist, the
-redemption guard, the delegate-account derivation and the settlement-child
-verifier now live in `@haven_ai/sdk` (`direct-payment-guard.ts`,
-`redemption-guard.ts`, `delegate-account.ts`, `settlement-child.ts`), and the
-signer imports them, so there is one implementation. `HavenClient.signForData`,
-the SDK's in-process signing used by `pay()`, the x402 funding leg and erc7710
-settlement, now refuses:
-- any UserOp outside the direct-payment shape above;
-- a settlement child that fails verification against the merchant's own 402:
-  payee, amount, token, chain, the advertised facilitators, and a bounded
-  expiry;
-- a ROOT-authority child, or one delegated by any account other than the key's
-  own;
-- a child it has no such expectation for.
+**Accepted residuals** (owner-accepted, epic #3284):
 
-Before this, a compromised Haven API alone could get an SDK-embedded agent to
-sign an account-capturing payload. `HavenClient.sign(hash)` and the exported
-signing primitives stay verbatim, for embedders. The epic rewrites this section
-once, against its fixed threat model, when its last slice lands.
+1. **Payments within the budget caveats.** A fully compromised Haven can still
+   prepare payments the caveats allow, because preparing payments is what the
+   agent delegated to Haven. For a pinned budget that means only the pinned
+   recipient. For an open budget it means any recipient, up to the full period
+   budget, every period, until expiry or revocation. The funding-leg recipient
+   pin narrows this for the EIP-3009 bridge, on the signer's x402 arm (#3281)
+   and on the SDK's own funding leg (#3375): under a compromised Haven, a
+   funding leg can move budget only into the agent's own EOA. A correctly
+   shaped direct payment (`haven_sign` without an x402 context, or the SDK's
+   `pay()`) still pays whatever recipient the budget allows, by design.
+2. **Delegate-EOA balances.** The bridge's merchant header and
+   `haven_sign_sweep_delegate` sign token authorisations over the delegate
+   EOA's own transient balance. With no local account address configured, the
+   sweep destination rests on Haven's binding signature alone, so a
+   compromised binding key could redirect such a balance. The SDK's
+   `sweepDelegate()` has the same shape: it sends the delegate balance to
+   `getAgent().accountAddress`, which Haven's API serves (#3375 names it; it
+   does not close it). This is bounded by the hot-delegate discipline
+   (transient balances, sweep).
 
 **The blast-radius questions #3272 asked, and where each now stands:**
 
 - **The delegate wallet's token balance.** The EIP-3009 bridge funds the
   delegate EOA, so a `TransferWithAuthorization` or USDC `Permit` signed
   through the old oracle could move that balance. A max-value `Permit` would
-  also have covered every future funding leg. **Closed for an updated signer:**
-  neither is a `PackedUserOperation`, so both are refused (pinned by the signer's
-  tests).
+  also have covered every future funding leg. **Closed for an updated signer,
+  on every branch:** neither is a signable shape, so both are refused on the
+  unbound branch (#3272) and on the x402 arm even when Haven's binding key
+  declared them (#3281). Each case is pinned by the signer's tests
+  (`server.test.ts` and `x402-arm-guard.test.ts`).
 - **Capture of the delegate account.** `transferOwnership`, `updateSigners`
   and `addKey` on the HybridDeleGator are `onlyEntryPointOrSelf` (upstream
   MetaMask delegation-framework v1.3.0, read against the source, not the
@@ -1417,11 +1512,14 @@ once, against its fixed threat model, when its last slice lands.
     function selector.
 
   The allowlist therefore decodes the redemption. It must carry exactly one
-  permission context holding exactly one delegation: a grant to this signer's
-  own account from a different account, in `SingleDefault` mode, with every
-  level canonically encoded. An empty chain, a multi-link chain, a
-  self-granted delegation and a delegation to another account are each
-  refused, and each case is pinned by a test. The
+  permission context holding either exactly one delegation — a grant to this
+  signer's own account from a different account — or, since #3329, that
+  grant with a single self-delegated task-budget child in front of it, in
+  `SingleDefault` mode, with every level canonically encoded. An empty chain,
+  a chain of three or more links, a two-link chain whose leaf is not
+  delegated by this account to itself, a self-granted delegation standing
+  alone and a delegation to another account are each refused, and each case
+  is pinned by a test. The
   treasury was never exposed beyond the caveats either way: budget, recipient
   pin and expiry are enforced by the DelegationManager on redemption. A
   captured delegate account would still have been able to redeem the budget
@@ -1439,13 +1537,22 @@ once, against its fixed threat model, when its last slice lands.
   remedy is the signer upgrade (a connector re-run), carried by the release
   notes (`packages/signer/CHANGELOG.md`).
 
-> **Scope of this section:** written for #3272 against the signer at that
-> change. The rest of this document was not re-read for it, and
+> **Scope of this section:** written for #3272 and rewritten once for epic
+> #3284 (#3283, #3281) against the signer and SDK at those changes; #3375
+> (the epic's third slice) then updated the funding-leg pin and the two
+> residuals above. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3378, 2026-09-26):** `client.ts`'s `payX402Quote`
+> now forwards its options (`taskBudgetId`) to `authorizeX402`, as `fetch()`
+> already did. No signing check moves: the funding leg still runs the #3271
+> binding, the allowlist (which accepts the #3329 two-link task chain) and the
+> #3375 recipient pin, whichever delegation the backend redeems under. The rest
+> of this document was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this diff renames backend-internal identifiers to account vocabulary in the
-> files this document covers, namely `userSafeId` → `accountId`
+> files this document spans: `userSafeId` → `accountId`
 > (`routes/agent-delegations.ts`, `routes/hybrid-accounts.ts`,
 > `infra/repositories/{hybrid-signers}.ts`,
 > `rails/{hybrid-signer-actions,hybrid-account-config}.ts`), `safes` /
@@ -1465,3 +1572,74 @@ once, against its fixed threat model, when its last slice lands.
 > claims about authority, custody or signing moves. Scope of this note: those
 > identifier renames in the files named. Nothing else in this document was
 > re-verified.
+>
+> **Re-verified unchanged (#3279, 2026-09-25, Safe-vocabulary copy):** copy-only
+> edits in `packages/signer/src/tools.ts` and `packages/signer/src/core.ts`,
+> both covered here. `haven_sign_sweep_delegate`'s agent-facing description and
+> the sweep `to`-guard refusal message now name the destination as the agent's
+> account (Haven wallet) and state the conditional destination check: the local
+> comparison runs only when the credential carries an account address (#2247),
+> and otherwise the destination rests on Haven's binding signature. The guard
+> itself — the `expectedSafe &&` conditional, the `from` check, the binding
+> verification and the canonical-USDC assertion — is byte-identical; the field
+> comment on `expectedSafe` was reworded and the field keeps its name
+> (`SweepSignatureInput` remains unexported by name). No signing, verification
+> or sweep logic moves, so nothing this document claims about authority,
+> custody or signing changes. Scope of this note: those copy strings. Nothing
+> else in this document was re-verified.
+>
+> **Re-verified unchanged (#3303, 2026-09-25, client-version signal):**
+> `packages/signer/src/tools.ts` and `packages/sdk/src/client.ts`, both covered
+> here, change only around the sign-context read and the transport. The signer
+> sends `X-Haven-Client` on its sign-context reads and maps a 426
+> `client_outdated` refusal to a structured `SIGN_CONTEXT_REFUSED` with no
+> signature. That is one more way for the signer to decline before signing,
+> never a way to sign more. It carries a successful read's `client_update` hint
+> onto the result. `HavenClient` gains a read-only `clientUpdate()` accessor,
+> and its transport sends the header. §10's allowlist, the binding checks,
+> `signForData` and every guard it runs are byte-identical. The backend refusal
+> is **not a security layer**: the header is self-reported and unauthenticated,
+> so a client that misstates its version simply gets today's behaviour. It can
+> only withhold service, never widen it, and spend authority remains the
+> on-chain delegation alone. Scope of this note: those files. Nothing else in
+> this document was re-verified.
+>
+> **Re-verified unchanged (#3295, 2026-09-25, last-known balances):** this doc
+> is coupled through `routes/user-accounts.ts`, whose change is comment-only:
+> the funding endpoint's parity comment now states that `GET
+> /balances/:accountAddress` serves a last-known balance on a failed read
+> (#3295) while THIS endpoint still answers `'0'` and computes `funded` from
+> it — behaviour byte-identical, the marker gap deferred by name to a
+> follow-up. No handler, query, response field, or signing path moves; the
+> endpoint still reads balances with the same ethers client and spends
+> nothing. Nothing this document claims about authority, custody or signing
+> changes. Scope of this note: that comment. Nothing else in this document
+> was re-verified.
+>
+> **Re-verified unchanged (#3317, 2026-09-25, funding-endpoint degraded read):**
+> this doc is coupled through `routes/user-accounts.ts`, whose funding endpoint
+> now JOINS the #3295 degraded read instead of deferring it: a failed balance
+> leg serves the last-known balance marked stale (or `'0'` marked
+> `unavailable` when never read), the response carries the additive optional
+> `balanceFreshness` marker, and `funded` is computed only from known values —
+> an RPC blip can no longer report a funded account as unfunded. No handler,
+> query, signing path or refusal moves; the endpoint still reads balances with
+> the same ethers client, constructs no transfer and grants no authority, and
+> budget/recipient/expiry remain enforced on-chain by the caveat enforcers.
+> Nothing this document claims about authority, custody or signing changes.
+> Scope of this note: that endpoint's response shape. Nothing else in this
+> document was re-verified.
+>
+> **Re-verified unchanged (#3296, 2026-09-26, snapshot skip on unpriceable reads):**
+> this doc is coupled through `infra/repositories/dashboard.ts`, whose
+> `insertPortfolioSnapshot` the dashboard now calls for the first CLEAN load of
+> the day only: a read the accounts module marks unpriceable (#3296, reusing
+> #3292's degraded-result marker) skips the insert and logs the skip with the
+> user id only, so a degraded figure can no longer stand as a day's baseline.
+> The repository function, its SQL and its DO NOTHING conflict arm are
+> untouched; a skipped day simply has no row. No handler, query, signing path
+> or refusal moves; the snapshot decides no spend — budget, recipient and
+> expiry remain enforced on-chain by the caveat enforcers. Nothing this
+> document claims about authority, custody or signing changes. Scope of this
+> note: which dashboard load writes the daily row. Nothing else in this
+> document was re-verified.

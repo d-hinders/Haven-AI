@@ -47,7 +47,9 @@ name: QA — money-flow (dev)
 #     fired" only when a Railway-created deployment of that run's exact SHA
 #     exists AND the money-flow JOB concluded success — a run the gate refused
 #     has run-level conclusion `success` with the job skipped, so the run-level
-#     field alone would count the two or three decoys every deploy leaves. So a
+#     field alone would count the decoys every deploy leaves (Vercel `Preview`,
+#     `in_progress` and re-stated `success` runs; scripts/ci/qa-freshness.mjs
+#     drops them by run name and duration before its job lookup, #3361). So a
 #     manual `workflow_dispatch`, a Deployment a human creates by hand through
 #     the API, or a gate-skipped decoy can no longer mute the freshness alarm.
 #
@@ -239,24 +241,36 @@ jobs:
           # purpose, and an on-chain assertion verified on the writer's own
           # node proves only that the backend agrees with itself.
           QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}
-          # Flake budget (#578): the harness is idempotent-safe to re-run, so a transient
-          # testnet RPC hiccup gets one more shot before the run is called red. Bump via a
-          # repo variable if a chain is flaky; keep low — each attempt consumes test funds.
+          # Retry budget (#578): the harness is idempotent-safe to re-run, so one failed
+          # attempt gets one more before the run is called red. A pass that needed it
+          # reports itself (#3338), and a red run's issue records its failure class
+          # (#3337): a recurring provider class is a finding for the provider, not a
+          # reason to raise this. Keep low — each attempt consumes test funds.
           QA_MAX_ATTEMPTS: ${{ vars.QA_MAX_ATTEMPTS || '2' }}
-          # #1044: once every leg's identity is provisioned, set the repo
-          # variable QA_REQUIRE_ALL_LEGS=1 -- from then on a skipped leg fails
-          # the run instead of reading as coverage.
+          # #1044: the repo variable QA_REQUIRE_ALL_LEGS=1 is set (#1066), so a
+          # skipped leg fails the run instead of reading as coverage.
           QA_REQUIRE_ALL_LEGS: ${{ vars.QA_REQUIRE_ALL_LEGS || '' }}
         run: |
           set -o pipefail
           attempts="${QA_MAX_ATTEMPTS:-2}"
+          # #3338: each attempt keeps its own log, and qa-run.log is always a copy
+          # of the FINAL attempt's — the blocking Coverage completeness step
+          # below reads it, so what it judges must not change. A pass after a
+          # failed attempt reports itself in the job summary (URLs scrubbed) and
+          # as a notice, instead of reading as a plain first-try green.
           for i in $(seq 1 "$attempts"); do
             echo "::group::money-flow attempt $i/$attempts"
-            if npm run qa:dev -w packages/qa-agent 2>&1 | tee qa-run.log; then
+            if npm run qa:dev -w packages/qa-agent 2>&1 | tee "qa-run.attempt-$i.log"; then
+              cp "qa-run.attempt-$i.log" qa-run.log
               echo "::endgroup::"
               echo "money-flow QA passed on attempt $i/$attempts"
+              if [ "$i" -gt 1 ]; then
+                echo "::notice title=money-flow retry::passed on attempt $i/$attempts after a failed attempt (#3338)"
+                node scripts/ci/qa-retry.mjs summary "$i" qa-run.attempt-*.log >> "$GITHUB_STEP_SUMMARY" || true
+              fi
               exit 0
             fi
+            cp "qa-run.attempt-$i.log" qa-run.log
             echo "::endgroup::"
             echo "::warning::money-flow QA attempt $i/$attempts failed"
             if [ "$i" -lt "$attempts" ]; then sleep 30; fi
@@ -264,8 +278,10 @@ jobs:
           echo "::error::money-flow QA failed after $attempts attempt(s)"
           exit 1
       # #1044: a green run that SKIPPED legs is partial coverage, and the
-      # dev->main promotion gate keys on this run's conclusion. This step turns
-      # the run.ts skip marker into a step-level FAILURE. Blocking since #1066:
+      # dev->main promotion gate keys on this job's (money-flow) conclusion,
+      # not the run's (#2404). This step turns the run.ts skip marker into a
+      # step-level FAILURE, which fails the job: never add continue-on-error
+      # here (skip-marker.test.ts pins that, #3368). Blocking since #1066:
       # every leg is provisioned (#1063 closed the last legitimate skip), so a
       # skip now means a broken credential or a drained identity -- red is the
       # honest color. To retire a leg for real, delete its scenario in the same
@@ -308,4 +324,7 @@ jobs:
             *)
               TRIGGER="${GITHUB_EVENT_NAME}" ;;
           esac
-          TRIGGER="$TRIGGER" RUN_URL="$RUN_URL" node scripts/ci/qa-failure-issue.mjs
+          # The attempt logs the money-flow step kept (#3338) are classified into the
+          # issue (#3337). If the run failed before the harness, the glob stays
+          # unmatched and the issue says "no harness log".
+          TRIGGER="$TRIGGER" RUN_URL="$RUN_URL" node scripts/ci/qa-failure-issue.mjs qa-run.attempt-*.log

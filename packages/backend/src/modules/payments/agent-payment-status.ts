@@ -15,6 +15,7 @@ import {
 } from '../../infra/repositories/payment-intents.js'
 import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
+import { toCanonicalAddress } from '../transactions/index.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from '../x402/x402-delegation.js'
 
 /**
@@ -787,8 +788,14 @@ export async function getAgentPaymentResumeState(
   agent: AgentContext,
   paymentId: string,
 ): Promise<AgentPaymentResumeStateLookup> {
-  const status = await getAgentPaymentStatus(agent, paymentId)
-  if (!status) return { status: null, resumeState: null }
+  const read = await readPaymentStatus(agent, paymentId)
+  if (!read) return { status: null, resumeState: null }
+  // #3307: the resume lookup EMBEDS the agent-facing (checksummed) status, but
+  // REBUILDS its payment objects — `accepted` / `paymentRequired` / the MPP
+  // `challenge`, which go back to merchants and signers — from the same row in
+  // STORED casing, so they stay byte-identical to before the casing change.
+  const { canonical: status, stored } = read
+  const embed = (lookup: AgentPaymentResumeStateLookup): AgentPaymentResumeStateLookup => ({ ...lookup, status })
 
   if (status.status === 'expired') {
     return {
@@ -800,11 +807,11 @@ export async function getAgentPaymentResumeState(
   }
 
   if (status.rail === AgentPaymentRail.X402) {
-    return buildX402ResumeState(status)
+    return embed(buildX402ResumeState(stored))
   }
 
   if (isMppRail(status.rail)) {
-    return buildMppResumeState(status)
+    return embed(buildMppResumeState(stored))
   }
 
   // `AgentPaymentRail` declares `stripe_deposit` and `spt` as valid rails so
@@ -823,57 +830,86 @@ export async function getAgentPaymentStatus(
   agent: AgentContext,
   paymentId: string,
 ): Promise<AgentPaymentStatus | null> {
+  return (await readPaymentStatus(agent, paymentId))?.canonical ?? null
+}
+
+/** How a status build cases its addresses: canonical for agents, identity for merchant-bound rebuilds. */
+type AddressCasing = <T extends string | null | undefined>(value: T) => T
+const storedCasing: AddressCasing = (value) => value
+
+/**
+ * One read of the payment row, as two builds of the same status (#3307):
+ * `canonical` — every Haven-owned address EIP-55 checksummed, the same rule as
+ * the receipt (`mapEvidence`) and the transactions feed (#3129), which is what
+ * agents see; `stored` — the row's own casing, which the resume builders read
+ * so the payment objects they hand back to merchants and signers do not change.
+ */
+async function readPaymentStatus(
+  agent: AgentContext,
+  paymentId: string,
+): Promise<{ canonical: AgentPaymentStatus; stored: AgentPaymentStatus } | null> {
   await expireOverdueIntentById(paymentId, agent.id)
 
   const payment: PaymentIntentStatusRow | null = await findIntentStatusRow(paymentId, agent.id)
-  if (payment) {
-    const state = intentStateFor(payment)
-    const rail = railFor(payment)
-    const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
-    const merchantAddress = payment.merchant_address ?? payment.x402_merchant_address
-    return withParties(
-      {
-        payment_id: payment.id,
-        kind: 'payment_intent' as const,
-        rail,
-        status: payment.status,
-        phase: state.phase,
-        next_action: state.nextAction,
-        amount: payment.amount_human,
-        token: payment.token_symbol,
-        resource_url: resourceUrl,
-        merchant_address: merchantAddress,
-        payer_address: payment.delegate_address,
-        tx_hash: payment.tx_hash,
-        expires_at: payment.expires_at,
-        chain_id: payment.chain_id,
-        message: state.message,
-        fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
-        ...railContext({
-          rail,
-          amountRaw: payment.amount_raw,
-          tokenAddress: payment.token_address,
-          resourceUrl,
-          merchantAddress,
-          idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
-          challengeId: payment.machine_challenge_id,
-          machineMetadata: payment.machine_metadata,
-        }),
-      },
-      {
-        account_address: payment.account_address ?? null,
-        delegate_address: payment.delegate_address,
-        // #2960: `machine_metadata.delegate_account_address`, written at
-        // authorize on both delegation-rail legs — null for rows authorized
-        // before #2960 and on the legacy rail, where no such account exists.
-        delegate_account_address: delegateAccountAddressOf(payment.machine_metadata),
-        merchant_address: merchantAddress,
-      },
-    )
-  }
-
   // #2055: the approval_requests fallback that stood here is gone — the table
   // is dropped and queue history is waived (owner decision on #2021). An id
   // that is not a payment intent is now simply unknown.
-  return null
+  if (!payment) return null
+  return {
+    canonical: statusFromRow(agent, payment, toCanonicalAddress),
+    stored: statusFromRow(agent, payment, storedCasing),
+  }
+}
+
+function statusFromRow(
+  agent: AgentContext,
+  payment: PaymentIntentStatusRow,
+  address: AddressCasing,
+): AgentPaymentStatus {
+  const state = intentStateFor(payment)
+  const rail = railFor(payment)
+  const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
+  // #3307: canonicalised in THIS caller's arguments, never inside
+  // `withParties`, which also builds the signed receipt bundle (left as it is).
+  const merchantAddress = address(payment.merchant_address ?? payment.x402_merchant_address)
+  const delegateAddress = address(payment.delegate_address)
+  return withParties(
+    {
+      payment_id: payment.id,
+      kind: 'payment_intent' as const,
+      rail,
+      status: payment.status,
+      phase: state.phase,
+      next_action: state.nextAction,
+      amount: payment.amount_human,
+      token: payment.token_symbol,
+      resource_url: resourceUrl,
+      merchant_address: merchantAddress,
+      payer_address: delegateAddress,
+      tx_hash: payment.tx_hash,
+      expires_at: payment.expires_at,
+      chain_id: payment.chain_id,
+      message: state.message,
+      fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
+      ...railContext({
+        rail,
+        amountRaw: payment.amount_raw,
+        tokenAddress: address(payment.token_address),
+        resourceUrl,
+        merchantAddress,
+        idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
+        challengeId: payment.machine_challenge_id,
+        machineMetadata: payment.machine_metadata,
+      }),
+    },
+    {
+      account_address: address(payment.account_address) ?? null,
+      delegate_address: delegateAddress,
+      // #2960: `machine_metadata.delegate_account_address`, written at
+      // authorize on both delegation-rail legs — null for rows authorized
+      // before #2960 and on the legacy rail, where no such account exists.
+      delegate_account_address: address(delegateAccountAddressOf(payment.machine_metadata)),
+      merchant_address: merchantAddress,
+    },
+  )
 }

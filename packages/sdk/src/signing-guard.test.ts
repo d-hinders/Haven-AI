@@ -8,11 +8,13 @@
  * assert the SDK signs none of them and posts nothing to `/sign`.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { decodeFunctionData, erc20Abi, type Hex } from 'viem'
 import { HavenClient } from './client.js'
 import { addressFromKey } from './edge-signing.js'
 import { deriveDelegateAccountAddress } from './delegate-account.js'
-import { HavenTypedDataRefusedError, TYPED_DATA_NOT_ALLOWED } from './direct-payment-guard.js'
+import { EXECUTE_ABI, HavenTypedDataRefusedError, TYPED_DATA_NOT_ALLOWED } from './direct-payment-guard.js'
 import { DELEGATION_MANAGER } from './settlement-child.js'
+import { REDEEM_DELEGATIONS_ABI } from './redemption-guard.js'
 import {
   buildBoundDirectUserOp,
   buildEmptyPermissionContextRedemption,
@@ -40,11 +42,28 @@ function serving(userOp: { typedData: unknown; payloadHash: string }) {
   return { client, submitted }
 }
 
+/** The single execution's ERC-20 `transfer` recipient (encodePacked(target, value, transfer(to, amount))). */
+function transferRecipient(typedData: { message: Record<string, unknown> }): string {
+  const { args: executeArgs } = decodeFunctionData({ abi: EXECUTE_ABI, data: typedData.message.callData as Hex })
+  const { args } = decodeFunctionData({
+    abi: REDEEM_DELEGATIONS_ABI,
+    data: (executeArgs[0] as { callData: Hex }).callData,
+  })
+  const body = (args[2] as readonly Hex[])[0].slice(2)
+  const { args: transferArgs } = decodeFunctionData({ abi: erc20Abi, data: `0x${body.slice(104)}` as Hex })
+  return transferArgs[0] as string
+}
+
 const REQUEST = { amount: '1', asset: 'USDC', recipient: '0x98ffBf30459a98FD80fAce18f519967769641F76' } as never
 
 describe('HavenClient.signForData direct-payment allowlist (#3283)', () => {
   it('control: signs and submits the bound shape Haven emits', async () => {
-    const { client, submitted } = serving(buildBoundDirectUserOp({ delegate: DELEGATE }))
+    const userOp = buildBoundDirectUserOp({ delegate: DELEGATE })
+    // #3375: this direct payment pays a THIRD party, not the delegate. The
+    // funding-leg recipient pin must never reach `pay()`: a direct payment's
+    // recipient is the caller's intent, bounded by the budget's caveats.
+    expect(transferRecipient(userOp.typedData).toLowerCase()).not.toBe(DELEGATE.toLowerCase())
+    const { client, submitted } = serving(userOp)
     await client.pay(REQUEST)
     expect(submitted).toHaveLength(1)
   })

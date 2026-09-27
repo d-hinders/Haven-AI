@@ -21,13 +21,19 @@
 import { AbiCoder, Contract, Interface } from 'ethers'
 import { getRelayer } from '../../infra/relayer.js'
 import { openOutboundRecord, submitRecorded } from '../../infra/outbound-queue.js'
+import { confirmAnchorUid, repairAnchoredUid } from '../../infra/repositories/agent-passports.js'
 import {
   findOutboundEvidenceTxHash,
   findOutboundTxByHash,
   findOutboundTxById,
 } from '../../infra/repositories/outbound-txs.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
-import type { Anchor, AnchorResult, PassportClaim, RecoveredAnchor } from './issuance.js'
+import { settledReadBlock } from '../../infra/chain/settled-read-block.js'
+// The anchor seam's contract types live in their own leaf (#3294): this
+// module implements the seam, issuance.ts owns its setters, and neither
+// imports the other (no-circular is absolute — the #3294 repair's value
+// import would otherwise close a cycle through these very types).
+import type { Anchor, AnchorResult, PassportClaim, RecoveredAnchor } from './anchor-contract.js'
 import type { RevocationAnchorProbe, RevocationAnchorReading, Revoker } from './revocation.js'
 
 /** Field order MUST match PASSPORT_SCHEMA — the encoding is positional. */
@@ -145,12 +151,77 @@ export function buildAttestCall(chainId: number, claim: PassportClaim): { to: st
 }
 
 /**
- * Submit the attestation with the gas-only relayer and return its UID.
+ * Read the attestation UID the chain actually emitted, out of a receipt's
+ * `Attested` log (#3294).
  *
- * The UID is read back from the call's return value via `staticCall` before
- * sending, rather than parsed out of a receipt log: log ordering is not a
- * contract, and an anchored passport without its UID is unverifiable (the
- * migration makes that state unrepresentable, so we must not produce it).
+ * This is THE reader for "what UID did this mint produce". It deliberately
+ * answers only from the log — the same source `recoverAnchorFromReceipt` has
+ * always used — because the alternative is what #3294 shipped as: a
+ * `staticCall` prediction taken BEFORE the broadcast, which bakes in the
+ * pre-send block's inputs and therefore names a UID the chain never attested.
+ * A prediction is a revert check, never a record.
+ *
+ * Returns null unless a log is PROVEN ours. Each guard removes one way a
+ * foreign event could be mistaken for the anchor:
+ *
+ * - the log must come from the pinned EAS contract address;
+ * - it must decode as `Attested`;
+ * - its `schemaUID` must equal the pinned passport schema for this chain — an
+ *   attestation under any other schema is somebody else's credential, even
+ *   inside a receipt we hold;
+ * - when `from` is given (the broadcast transaction's sender), the event's
+ *   attester must match it. On the direct-mint path EAS sets attester to
+ *   `msg.sender`, so a mismatch means the log does not describe this mint.
+ *
+ * A receipt with no such log returns null — ABSENCE OF EVIDENCE. Callers must
+ * never fall back to a prediction on null; see `anchorOnChain`.
+ */
+export function readMinedAttestationUid(
+  chainId: number,
+  receipt: { logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data: string }> },
+  opts: { from?: string } = {},
+): string | null {
+  const { eas } = getEasDeployment(chainId)
+  const schemaUid = getPassportSchemaUid(chainId)
+  const iface = new Interface(EAS_ABI)
+  for (const log of receipt.logs) {
+    if (log.address.toLowerCase() !== eas.toLowerCase()) continue
+    let parsed
+    try {
+      parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
+      if (parsed?.name !== 'Attested') continue
+      // ethers v6 decodes lazily: a malformed topic (e.g. an address topic
+      // without the zero high bytes real chain data always carries) surfaces
+      // as a DEFERRED error on first arg access, not at parseLog. Read every
+      // field inside this guard — an unreadable log is ABSENCE OF EVIDENCE
+      // (#3294), never a crash past the caller's record close or a partial
+      // answer. The #3342 fixture keeps its attester topic left-padded to
+      // 32 bytes so THIS guard, not the ABI decoder, refuses foreign logs.
+      const eventSchema = String(parsed.args.schemaUID ?? '').toLowerCase()
+      if (eventSchema !== schemaUid.toLowerCase()) continue
+      if (opts.from) {
+        const attester = String(parsed.args.attester ?? '').toLowerCase()
+        if (attester !== opts.from.toLowerCase()) continue
+      }
+      return parsed.args.uid as string
+    } catch {
+      continue // not an EAS_ABI event — other logs in the same tx are fine
+    }
+  }
+  return null
+}
+
+/**
+ * Submit the attestation with the gas-only relayer and return the UID the
+ * MINED transaction emitted (#3294).
+ *
+ * The UID is read back from the receipt's `Attested` log — the chain's own
+ * answer — rather than taken from the pre-send `staticCall` prediction: EAS
+ * derives the UID from inputs that include the block the transaction lands
+ * in, so a prediction made at the pre-send block is not the UID the mint
+ * emits. Recording the prediction left every anchored row pointing at a UID
+ * that never existed, which made revocation impossible (`NotFound()` on EAS)
+ * while the agent's REAL attestation stayed live.
  */
 export const anchorOnChain: Anchor = async (
   chainId: number,
@@ -163,9 +234,12 @@ export const anchorOnChain: Anchor = async (
 
   const request = buildAttestRequest(chainId, claim)
 
-  // Predict the UID; this also reverts here (costing nothing) if the schema or
-  // the payload is wrong, instead of burning gas on a failing transaction.
-  const attestationUid: string = await contract.attest.staticCall(request)
+  // Pre-send revert check ONLY (#3294). This costs nothing and catches a wrong
+  // schema or payload before gas is spent. Its return value is a prediction
+  // made at the pre-send block — EAS derives the UID from inputs that include
+  // the landing block — and is NEVER recorded; the UID below comes from the
+  // receipt's own `Attested` log.
+  await contract.attest.staticCall(request)
 
   // #1556: durable record OPENED BEFORE the broadcast — a crash between here
   // and the send leaves a queued row the bump worker can adopt, instead of a
@@ -234,9 +308,10 @@ export const anchorOnChain: Anchor = async (
   // ~180 s after this broadcast. It no longer is. The re-mint now needs
   // positive evidence that this transaction can never mine, and the only
   // thing that counts is its nonce being consumed by something else; see
-  // `classifyAnchorTxLiveness` below. Leaving the record `broadcast` is what
-  // makes that evidence available at all — the nonce this branch stamped is
-  // the fact the probe reads.
+  // `classifyAnchorTxLiveness` below. Keeping the stamped nonce on the record
+  // is what makes that evidence available at all — the probe reads it from a
+  // `broadcast` row, and equally from one the bump worker later closed
+  // `failed` as consumed (#3293: `markFailed` keeps the row's nonce).
   if (!receipt && (!waitError || isWaitTimeout(waitError))) {
     throw new PassportAnchorUnconfirmedError(tx.hash, PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS)
   }
@@ -245,8 +320,232 @@ export const anchorOnChain: Anchor = async (
     if (waitError) throw waitError
     throw new Error(`passport attestation reverted (tx ${tx.hash})`)
   }
+  // The ONLY source of the recorded UID (#3294): the mined receipt's own
+  // `Attested` log, proven ours by `readMinedAttestationUid`. The broadcaster
+  // is the relayer, so requiring the event's attester to match it is a
+  // no-op-shaped guard that still refuses a same-schema log attested by
+  // someone else in the same receipt. There is deliberately NO fallback to
+  // the staticCall prediction (criterion 2) and no second read: a receipt
+  // without a provable log follows the existing failed path below, where the
+  // #1043 retry re-reads THIS tx's receipt instead of minting a second
+  // attestation. The record closes ONCE, after the outcome is known: mined
+  // only when the mint produced a provable UID, failed otherwise — the same
+  // disposition a mined-and-reverted tx gets, for the same reason (the
+  // submission did not produce a usable anchor).
+  const minedUid = readMinedAttestationUid(chainId, receipt, { from: relayer.address })
+  if (!minedUid) {
+    await record.failed(
+      `passport attestation mined (tx ${tx.hash}) but carried no readable Attested log — not recording a predicted UID`,
+    )
+    throw new Error(
+      `passport attestation mined (tx ${tx.hash}) but carried no readable Attested log — not recording a predicted UID`,
+    )
+  }
   await record.mined()
-  return { attestationUid, txHash: tx.hash }
+  return { attestationUid: minedUid, txHash: tx.hash }
+}
+
+/**
+ * The outcome of the proven-ours anchor read (`readProvenAnchorUid`, #3342).
+ *
+ * Tagged rather than nullable so a caller cannot conflate "the chain has no
+ * answer yet" (`no-receipt`, `no-candidate` — retryable silence) with "the
+ * chain answered and the evidence failed the invariant" (`refused` — a
+ * finding, reported per row). `reverted` and `tx-body-unavailable` keep the
+ * #1847 throw semantics of the recovery path; the repair maps every tag to
+ * its own reported reason instead of ever guessing.
+ */
+export type ProvenAnchorRead =
+  | { kind: 'no-receipt' }
+  | { kind: 'reverted' }
+  | { kind: 'no-candidate' }
+  | { kind: 'tx-body-unavailable' }
+  | { kind: 'refused'; reason: string }
+  | { kind: 'ours'; uid: string }
+
+/**
+ * Read the attestation UID an anchor transaction emitted, PROVEN ours
+ * (#3342) — the one reader for the repair and the #1043 recovery, and the
+ * same guards `readMinedAttestationUid` applies on the mint path.
+ *
+ * The repair and the recovery used to take the FIRST `Attested` log from the
+ * EAS address and check neither schema nor attester; a foreign log (a row
+ * whose `tx_hash` is corrupted, points at someone else's tx, or a chain_id
+ * mismatch) was then written into `agent_passports` verbatim. The invariant
+ * (#3294/#3342): a UID is written to `agent_passports` only from an
+ * `Attested` log with the PINNED schema, attested by the mined tx's OWN
+ * `from`, in a transaction whose `to` is the pinned EAS contract.
+ *
+ * - The attester check is against the MINED TRANSACTION's sender, not the
+ *   current relayer address: EAS sets attester to `msg.sender`, and the
+ *   relayer is env-configured and rotatable — checking the current address
+ *   would make every row minted before a key rotation permanently
+ *   unrepairable.
+ * - The candidate scan (pinned schema, under the EAS address) decides WHETHER
+ *   a transaction fetch is spent at all: `no-candidate` answers without one,
+ *   the same absence-of-evidence the mint path answers with. A receipt with
+ *   logs from other contracts in the same tx is fine.
+ *
+ * Returns the outcome tagged (`ProvenAnchorRead`); `refused` names the failed
+ * guard. ABSENCE of evidence is never evidence of a UID — callers write only
+ * on `ours`.
+ */
+export async function readProvenAnchorUid(chainId: number, txHash: string): Promise<ProvenAnchorRead> {
+  const receipt = await getRelayer(chainId).provider?.getTransactionReceipt(txHash)
+  if (!receipt) return { kind: 'no-receipt' }
+  if (receipt.status !== 1) return { kind: 'reverted' }
+
+  const candidate = readMinedAttestationUid(chainId, receipt)
+  if (!candidate) return { kind: 'no-candidate' }
+
+  const tx = await getRelayer(chainId).provider?.getTransaction(txHash)
+  if (!tx) {
+    return { kind: 'tx-body-unavailable' }
+  }
+  const { eas } = getEasDeployment(chainId)
+  // ethers v6 types `tx.to` as `string | null` — no addressable indirection.
+  // A null `to` is a contract CREATE, which cannot be an EAS attest.
+  if (!tx.to || tx.to.toLowerCase() !== eas.toLowerCase()) {
+    return {
+      kind: 'refused',
+      reason: `tx ${txHash} did not target the EAS contract — its Attested log is not ours`,
+    }
+  }
+  if (!tx.from) {
+    return {
+      kind: 'refused',
+      reason: `tx ${txHash} carries no sender — its Attested log cannot be proven ours`,
+    }
+  }
+  const uid = readMinedAttestationUid(chainId, receipt, { from: tx.from })
+  if (!uid || uid.toLowerCase() !== candidate.toLowerCase()) {
+    return {
+      kind: 'refused',
+      reason: `tx ${txHash}'s Attested log fails the proven-ours invariant (attester is not the tx's own sender)`,
+    }
+  }
+  return { kind: 'ours', uid }
+}
+
+/**
+ * Repair an ALREADY-anchored row whose UID is the #3294 staticCall prediction
+ * (or is otherwise missing) from its recorded anchor tx hash.
+ *
+ * Anchored before this fix, a row points at a UID that never existed: EAS
+ * reverts every revoke of it `NotFound()` while the agent's real attestation
+ * stays live — the exact state found on dev, where one agent's revocation had
+ * been retried 590 times against a phantom UID. The repair re-derives the real
+ * UID from the receipt's `Attested` log through `readProvenAnchorUid` — since
+ * #3342 the SAME proven-ours reader (pinned schema, attester = the mined tx's
+ * own `from`, tx `to` = EAS) the mint path records from and the #1043
+ * recovery answers from — and updates the row ONLY on positive evidence:
+ *
+ * - no tx_hash, or a receipt that cannot be read, or no proven log → the row
+ *   is LEFT UNCHANGED and reported (`repaired: false`), never guessed;
+ * - the derived UID equals the stored one → nothing to write; the match is
+ *   recorded durably (`confirmAnchorUid`) so the row leaves the sweep queue
+ *   (#3342) instead of costing a receipt read every tick forever;
+ * - the row moved under us (revocation confirmed, re-anchor reset, a new
+ *   anchor) → the compare-and-set refuses and the repair self-heals on a later
+ *   sweep, because the underlying tx is durable evidence that does not rot.
+ *
+ * Idempotent by construction: repaired (and confirmed) rows no longer match
+ * the selector. Callers pace it (see `retireAttestationOnChain`) so a burst of
+ * repairs shares the one relayer lane rather than stampeding it — each
+ * repair-triggered revoke is an ordinary, backoff-scheduled revoke.
+ */
+export async function repairAnchorUidFromReceipt(
+  chainId: number,
+  agentId: string,
+  row: { attestation_uid: string | null; tx_hash: string | null },
+): Promise<{ repaired: boolean; outcome: 'repaired' | 'confirmed' | 'unrepairable'; uid: string | null; reason: string }> {
+  const txHash = row.tx_hash
+  if (!txHash)
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: 'row has no anchor tx_hash — cannot re-derive its UID',
+    }
+  let read: ProvenAnchorRead
+  try {
+    read = await readProvenAnchorUid(chainId, txHash)
+  } catch (err) {
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: `anchor receipt for ${txHash} unreadable: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+  if (read.kind === 'no-receipt' || read.kind === 'no-candidate') {
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: `no Attested log yet for anchor tx ${txHash}`,
+    }
+  }
+  if (read.kind === 'reverted') {
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: `anchor receipt for ${txHash} unreadable: prior passport attestation reverted`,
+    }
+  }
+  if (read.kind === 'tx-body-unavailable') {
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid: null,
+      reason: `anchor receipt for ${txHash} unreadable: tx body unavailable — attribution deferred (#1847)`,
+    }
+  }
+  if (read.kind === 'refused') {
+    // The invariant refused this log: not provably ours, so not writable.
+    // Named per row (#3342) — the sweep reports it with the agent_id.
+    return { repaired: false, outcome: 'unrepairable', uid: null, reason: read.reason }
+  }
+  const uid = read.uid
+  if (row.attestation_uid && row.attestation_uid.toLowerCase() === uid.toLowerCase()) {
+    // Already right. Record the confirmation so the row leaves the repair
+    // queue — the pre-#3342 code returned here WITHOUT writing anything, and
+    // the writeless outcome is exactly what re-queued the same oldest rows
+    // every tick. The guard (anchored, same tx, not already confirmed) can
+    // refuse: a row that moved mid-read is re-checked on a later pass, and
+    // its non-confirmation is REPORTED, never folded into healthy.
+    const confirmed = await confirmAnchorUid(agentId, txHash)
+    if (!confirmed) {
+      return {
+        repaired: false,
+        outcome: 'unrepairable',
+        uid,
+        reason: 'row changed since it was read — confirmation deferred to the next pass',
+      }
+    }
+    return {
+      repaired: false,
+      outcome: 'confirmed',
+      uid,
+      reason: 'stored UID already matches the anchor receipt',
+    }
+  }
+  const applied = await repairAnchoredUid(agentId, row.attestation_uid, uid, txHash)
+  if (!applied) {
+    return {
+      repaired: false,
+      outcome: 'unrepairable',
+      uid,
+      reason: 'row changed since it was read — repair deferred to the next pass',
+    }
+  }
+  return {
+    repaired: true,
+    outcome: 'repaired',
+    uid,
+    reason: `UID re-derived from anchor tx ${txHash}`,
+  }
 }
 
 /**
@@ -255,6 +554,14 @@ export const anchorOnChain: Anchor = async (
  * Returns the result when the tx is mined and successful, null when the tx is
  * unknown or still pending (caller decides whether to re-anchor), and THROWS
  * on a mined-but-reverted tx so the caller records the failure message.
+ *
+ * #3342: the UID is read through `readProvenAnchorUid` — the SAME
+ * proven-ours reader the mint path records from and the repair re-derives
+ * from: the log must carry the pinned schema, be attested by the mined tx's
+ * own `from`, and sit in a transaction whose `to` is the pinned EAS contract.
+ * The pre-#3342 reader here took the FIRST `Attested` log from the EAS
+ * address and checked nothing, so a foreign log placed before ours was
+ * returned — and would have been recorded — as the recovered UID.
  *
  * The result carries `attested` — the addresses decoded from the mined
  * transaction's OWN calldata (#1847). Recovery can cross a re-key: this
@@ -268,48 +575,48 @@ export const anchorOnChain: Anchor = async (
  * probe's same-calldata walk both rely on that), so the decode holds for a
  * bumped hash too. If the transaction body cannot be fetched or decoded, this
  * THROWS — a retryable failure — rather than let the caller attribute the
- * anchor from facts the chain does not hold.
+ * anchor from facts the chain does not hold. A receipt that carries only a
+ * log the invariant REFUSES also throws: the evidence exists but is not
+ * provably ours, which is a finding to surface, not silence to re-mint over.
  */
 export async function recoverAnchorFromReceipt(
   chainId: number,
   txHash: string,
 ): Promise<RecoveredAnchor | null> {
-  const { eas } = getEasDeployment(chainId)
-  const provider = getRelayer(chainId).provider
-  const receipt = await provider?.getTransactionReceipt(txHash)
-  if (!receipt) return null
-  if (receipt.status !== 1) {
+  const read = await readProvenAnchorUid(chainId, txHash)
+  if (read.kind === 'no-receipt') return null
+  if (read.kind === 'reverted') {
     throw new Error(`prior passport attestation reverted (tx ${txHash})`)
   }
-  const iface = new Interface(EAS_ABI)
-  for (const log of receipt.logs) {
-    if (log.address.toLowerCase() !== eas.toLowerCase()) continue
-    let parsed
-    try {
-      parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
-    } catch {
-      continue // not an EAS_ABI event — other logs in the same tx are fine
-    }
-    if (parsed?.name !== 'Attested') continue
-    // Mined and ours. Attribute it from its own bytes (#1847): failures from
-    // here THROW (retryable) instead of falling through to "no event found".
-    const tx = await provider?.getTransaction(txHash)
-    if (!tx) {
-      throw new Error(
-        `tx ${txHash} mined but its body is unavailable — cannot attribute the recovered attestation (#1847)`,
-      )
-    }
-    const call = iface.decodeFunctionData('attest', tx.data)
-    const claimBytes = call[0].data.data as string
-    const decoded = AbiCoder.defaultAbiCoder().decode([...SCHEMA_TYPES], claimBytes)
-    return {
-      attestationUid: parsed.args.uid as string,
-      txHash,
-      attested: { agentEoa: decoded[0] as string, smartAccount: decoded[1] as string },
-    }
+  if (read.kind === 'no-candidate') {
+    // Mined, successful, but no Attested event from EAS — not our attestation.
+    throw new Error(`tx ${txHash} succeeded but contains no EAS Attested event`)
   }
-  // Mined, successful, but no Attested event from EAS — not our attestation.
-  throw new Error(`tx ${txHash} succeeded but contains no EAS Attested event`)
+  if (read.kind === 'tx-body-unavailable') {
+    throw new Error(
+      `tx ${txHash} mined but its body is unavailable — cannot attribute the recovered attestation (#1847)`,
+    )
+  }
+  if (read.kind === 'refused') {
+    throw new Error(`tx ${txHash} carries no provably-ours Attested log: ${read.reason}`)
+  }
+
+  const provider = getRelayer(chainId).provider
+  const tx = await provider?.getTransaction(txHash)
+  if (!tx) {
+    throw new Error(
+      `tx ${txHash} mined but its body is unavailable — cannot attribute the recovered attestation (#1847)`,
+    )
+  }
+  const iface = new Interface(EAS_ABI)
+  const call = iface.decodeFunctionData('attest', tx.data)
+  const claimBytes = call[0].data.data as string
+  const decoded = AbiCoder.defaultAbiCoder().decode([...SCHEMA_TYPES], claimBytes)
+  return {
+    attestationUid: read.uid,
+    txHash,
+    attested: { agentEoa: decoded[0] as string, smartAccount: decoded[1] as string },
+  }
 }
 
 /**
@@ -362,7 +669,13 @@ export async function recoverAnchorFromReceipt(
  *   transaction still holds a `broadcast` row at that nonce, and migration
  *   061's partial UNIQUE `(chain_id, nonce) WHERE status = 'broadcast'`
  *   refuses the stamp — `submitRecorded` re-reads the same nonce and throws
- *   `could not win a nonce lane`.
+ *   `could not win a nonce lane`. On a provider that REFUSES the `pending`
+ *   tag (#2769) the shape differs: the ledger walk steps over the live row at
+ *   N, so later sends stamp and broadcast at N+1, N+2 … and then never
+ *   confirm (a deploy 502s at its confirmation timeout, a sweep reports "not
+ *   confirmed"). After the bump worker's age gate those gap-blocked rows are
+ *   bumped to their cap and raise INCIDENTs at N+1 and above — the nonce to
+ *   clear is still N, the lowest live one, not the ones alarming.
  *
  * And the blast radius is wider than this passport: `getRelayer(chainId)`
  * returns ONE wallet per chain, shared by every submitter, so a stuck
@@ -389,54 +702,10 @@ export async function recoverAnchorFromReceipt(
  * heights — a node that says "nonce consumed" while holding our receipt
  * contradicts itself, and we believe the receipt.
  */
-/**
- * How far back chain state is read when the node cannot name a finalized
- * block.
- *
- * A fallback, not the preferred path. Base and Base Sepolia are OP-stack and
- * expose `finalized`, which is the honest answer; this exists so a provider
- * that does not understand the tag degrades to something conservative rather
- * than to reading the head. At 2 s blocks this is ~10 minutes of burial,
- * comfortably past any ordinary reorg, and the latency costs nothing for
- * either caller — both are passport anchors that have already been stuck for
- * minutes.
- *
- * Two probes share it, and deliberately so: #1745's nonce read (is the attest
- * still mineable) and #1758's revocation read (is the attestation revoked).
- * They ask different questions of the chain but need the identical property
- * from the vantage point — that what it shows will not be un-shown — so a
- * second constant would be the same number argued twice.
- */
-export const SETTLED_CHAIN_READ_DEPTH_BLOCKS = 300
-
-/**
- * A block old enough that what it shows will not be un-shown — a nonce
- * consumed as of it stays consumed, an attestation revoked as of it stays
- * revoked.
- *
- * Returns null when no such vantage point exists (a chain shorter than the
- * fallback depth), which every caller reads as "no evidence" — never as a
- * conclusion.
- *
- * The `finalized` result is sanity-checked against the head rather than
- * trusted: a node that does not implement the tag may echo the latest block
- * back, and silently reading the head is precisely the reorg exposure this
- * function exists to remove.
- */
-async function settledReadBlock(provider: {
-  getBlockNumber: () => Promise<number>
-  getBlock: (tag: string) => Promise<{ number: number } | null>
-}): Promise<number | null> {
-  const head = await provider.getBlockNumber()
-  try {
-    const finalized = await provider.getBlock('finalized')
-    if (finalized && finalized.number < head) return finalized.number
-  } catch {
-    // Tag unsupported — fall through to the depth fallback.
-  }
-  const buried = head - SETTLED_CHAIN_READ_DEPTH_BLOCKS
-  return buried > 0 ? buried : null
-}
+// `settledReadBlock` and its depth moved to `infra/chain/settled-read-block.ts`
+// (#3293) so the outbound bump worker reads nonces from the same settled
+// vantage point as the two passport probes. Re-exported for existing callers.
+export { SETTLED_CHAIN_READ_DEPTH_BLOCKS } from '../../infra/chain/settled-read-block.js'
 
 export type AnchorTxLiveness = 'live' | 'dead'
 

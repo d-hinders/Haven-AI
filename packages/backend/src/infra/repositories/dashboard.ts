@@ -201,8 +201,10 @@ export async function findPortfolioSnapshots(
  * Record today's portfolio totals. `userId` is REQUIRED.
  *
  * `DO NOTHING` on conflict makes this a first-write-wins baseline rather than
- * a running total: whichever request first loads the dashboard on a given day
- * sets that day's figure, and later loads leave it alone. That is what the
+ * a running total: the first CLEAN dashboard load on a given day sets that
+ * day's figure (#3296 — a load whose portfolio read is unpriceable skips the
+ * insert instead of pinning a degraded figure on the day), and later loads
+ * leave it alone. That is what the
  * day-over-day change depends on — a snapshot that kept being revised would
  * make yesterday's comparison drift.
  */

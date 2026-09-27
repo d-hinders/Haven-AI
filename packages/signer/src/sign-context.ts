@@ -16,8 +16,14 @@
  */
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { AgentPaymentNextAction, DIRECT_SIGN_CONTEXT_VERSION, HavenSigningError } from '@haven_ai/sdk/edge'
-import type { NextStep } from '@haven_ai/sdk/edge'
+import {
+  AgentPaymentNextAction,
+  DIRECT_SIGN_CONTEXT_VERSION,
+  HAVEN_CLIENT_HEADER,
+  HavenSigningError,
+  readClientUpdate,
+} from '@haven_ai/sdk/edge'
+import type { HavenClientUpdate, NextStep } from '@haven_ai/sdk/edge'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
 export interface HavenIdentity {
@@ -114,18 +120,28 @@ export class HavenSignContextError extends HavenSigningError {
   readonly http_status?: number
   /** Present only for `SIGN_CONTEXT_REFUSED`: the backend's own `error_code`. */
   readonly backend_error_code?: string
+  /**
+   * #3303: on a 426 `client_outdated` refusal, the backend's update hint —
+   * this signer is below the minimum the deployment set, and
+   * `client_update.upgrade_command` is what updates it.
+   */
+  readonly client_update?: HavenClientUpdate
 
   constructor(
     message: string,
     code: SignContextErrorCode,
-    refusal: { httpStatus: number; errorCode?: string } | undefined,
+    refusal: { httpStatus: number; errorCode?: string; clientUpdate?: HavenClientUpdate } | undefined,
     /** #3103: the payment the context was fetched for, so a refusal can name the status read. */
     paymentId: string,
     /**
      * #3271: which fetch failed. A DIRECT payment has no quote tool to re-run
      * and its result always carries `typed_data_b64`, so its remedies differ.
+     * #3329: `'task'` is the task-budget sign-context fetch — it has no
+     * `typed_data_b64` relay at all (there is no quote tool to re-run and no
+     * caller-supplied fallback payload), so every refusal on this flow is
+     * stop-and-tell with no fallback field.
      */
-    flow: 'x402' | 'direct' = 'x402',
+    flow: 'x402' | 'direct' | 'task' = 'x402',
   ) {
     super(message)
     ;(this as { code: string }).code = code
@@ -134,7 +150,22 @@ export class HavenSignContextError extends HavenSigningError {
     if (code === 'SIGN_CONTEXT_REFUSED') {
       this.http_status = refusal?.httpStatus
       this.backend_error_code = refusal?.errorCode
-      if (flow === 'direct' && refusal?.httpStatus === 404) {
+      if (refusal?.errorCode === 'client_outdated') {
+        // #3303: this signer is below the minimum the deployment set, so it is
+        // refused at sign-context — nothing is signed or submitted, and the
+        // prepared payment is left unsigned (owner decision 2026-09-25, #3303).
+        // No retry and no other bytes can help; only an update can.
+        this.client_update = refusal.clientUpdate
+        this.next_action = AgentPaymentNextAction.StopAndTellUser
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason:
+            'this signer is below the minimum version Haven accepts — tell the user to run ' +
+            `${refusal.clientUpdate?.upgrade_command ?? 'the connector again'}, restart the agent runtime, ` +
+            'then retry the same haven_sign / haven_sign_x402 call',
+        })
+      } else if (flow === 'direct' && refusal?.httpStatus === 404) {
         // Either the payment is not this agent's, or the backend predates
         // #3271 and has no direct sign-context route at all (deploy skew). The
         // payment result's relay fields still work whenever the payment is real.
@@ -165,6 +196,18 @@ export class HavenSignContextError extends HavenSigningError {
           nextToolOmittedReason:
             're-run the hosted quote tool you called with the same idempotency_key; which one depends on the flow',
         })
+      } else if (flow === 'task') {
+        // #3329: no quote tool to re-run and no typed_data_b64 relay — the
+        // task budget's own status (pending/open/closing/closed/expired) is
+        // the only useful next read, and this signer does not assume a
+        // hosted tool name for it.
+        this.next_action = AgentPaymentNextAction.StopAndTellUser
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason:
+            `re-check this task budget's status (id ${paymentId}) with the hosted Haven server before retrying`,
+        })
       } else {
         this.next_action = AgentPaymentNextAction.StopAndTellUser
         step = signerRefusalStep({
@@ -173,6 +216,15 @@ export class HavenSignContextError extends HavenSigningError {
           nextArguments: { payment_id: paymentId },
         })
       }
+    } else if (flow === 'task') {
+      // #3329: transport failure or a malformed body — no fallback field:
+      // there is nothing this signer can sign instead.
+      this.next_action = AgentPaymentNextAction.StopAndTellUser
+      step = signerRefusalStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: 'retry the same haven_sign call with the same task_budget_id',
+      })
     } else {
       this.fallback = 'typed_data_b64'
       this.next_action = AgentPaymentNextAction.StopAndTellUser
@@ -226,6 +278,8 @@ export interface FetchedSignContext {
    * context either way.
    */
   paymentRequired: Record<string, unknown> | null
+  /** #3303: the backend's update hint when this signer is behind; absent when current. */
+  clientUpdate?: HavenClientUpdate
 }
 
 /**
@@ -247,18 +301,41 @@ export interface FetchedSignContext {
  */
 export const SIGN_CONTEXT_TIMEOUT_MS = 15_000
 
+/**
+ * The sign-context request headers. `clientIdentity` is this signer's
+ * `@haven_ai/signer/<version>` (#3303), passed in by the server that owns
+ * `SIGNER_VERSION` — the backend refuses a signer below a minimum it has set,
+ * here and nowhere else.
+ */
+function signContextHeaders(identity: HavenIdentity, clientIdentity: string | undefined): Record<string, string> {
+  return {
+    Authorization: `Bearer ${identity.apiKey}`,
+    ...(clientIdentity ? { [HAVEN_CLIENT_HEADER]: clientIdentity } : {}),
+  }
+}
+
+/** #3303: the refusal fields a backend answer carries, `client_update` included. */
+function refusalOf(status: number, body: Record<string, unknown>) {
+  return {
+    httpStatus: status,
+    errorCode: typeof body.error_code === 'string' ? body.error_code : undefined,
+    clientUpdate: readClientUpdate(body.client_update),
+  }
+}
+
 export async function fetchX402SignContext(
   identity: HavenIdentity,
   paymentId: string,
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
+  clientIdentity?: string,
 ): Promise<FetchedSignContext> {
   let response: Response
   try {
     response = await fetchImpl(
       `${identity.apiUrl}/x402/${encodeURIComponent(paymentId)}/sign-context`,
       {
-        headers: { Authorization: `Bearer ${identity.apiKey}` },
+        headers: signContextHeaders(identity, clientIdentity),
         signal: AbortSignal.timeout(timeoutMs),
       },
     )
@@ -305,7 +382,7 @@ export async function fetchX402SignContext(
             ? ' Re-run the quote with the same idempotency key, then sign the fresh payment_id.'
             : ''),
       'SIGN_CONTEXT_REFUSED',
-      { httpStatus: response.status, errorCode: typeof body.error_code === 'string' ? body.error_code : undefined },
+      refusalOf(response.status, body),
       paymentId,
     )
   }
@@ -336,6 +413,7 @@ export async function fetchX402SignContext(
       paymentRequired && typeof paymentRequired === 'object' && !Array.isArray(paymentRequired)
         ? (paymentRequired as Record<string, unknown>)
         : null,
+    clientUpdate: readClientUpdate(body.client_update),
   }
 }
 
@@ -359,6 +437,8 @@ export interface FetchedDirectSignContext {
   typedData: Record<string, unknown>
   status: string
   expiresAt?: string
+  /** #3303: the backend's update hint when this signer is behind; absent when current. */
+  clientUpdate?: HavenClientUpdate
 }
 
 /**
@@ -375,13 +455,14 @@ export async function fetchDirectSignContext(
   paymentId: string,
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
+  clientIdentity?: string,
 ): Promise<FetchedDirectSignContext> {
   let response: Response
   try {
     response = await fetchImpl(
       `${identity.apiUrl}/payments/${encodeURIComponent(paymentId)}/sign-context`,
       {
-        headers: { Authorization: `Bearer ${identity.apiKey}` },
+        headers: signContextHeaders(identity, clientIdentity),
         signal: AbortSignal.timeout(timeoutMs),
       },
     )
@@ -429,7 +510,7 @@ export async function fetchDirectSignContext(
             ? ' The payment window has expired; call haven_send / haven_pay again with the same idempotency_key.'
             : ''),
       'SIGN_CONTEXT_REFUSED',
-      { httpStatus: response.status, errorCode: typeof body.error_code === 'string' ? body.error_code : undefined },
+      refusalOf(response.status, body),
       paymentId,
       'direct',
     )
@@ -465,5 +546,191 @@ export async function fetchDirectSignContext(
     typedData: signData.typed_data as Record<string, unknown>,
     status: typeof body.status === 'string' ? body.status : 'pending_signature',
     expiresAt: typeof body.expires_at === 'string' ? body.expires_at : undefined,
+    clientUpdate: readClientUpdate(body.client_update),
   }
+}
+
+/**
+ * #3329: `task_sign_context_version`s this signer install understands.
+ * Pinned locally — task budgets have no SDK-side version constant, the way
+ * `DIRECT_SIGN_CONTEXT_VERSION` pins the direct-payment fetch — because the
+ * signer, not the SDK, is what enforces this version at the fetch boundary.
+ */
+export const SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS: readonly number[] = [1]
+
+/** `GET /task-budgets/:id/sign-context`, `purpose: 'open'` shape. */
+export interface FetchedTaskBudgetOpenSignContext {
+  purpose: 'open'
+  taskBudgetId: string
+  typedData: Record<string, unknown>
+  expected: {
+    delegateAccount: string
+    chainId: number
+    tokenAddress: string
+    maxAmountAtomic: string
+    recipientAddress: string | null
+    expiresAt: number
+    parentDelegationHash: string
+  }
+}
+
+/** `GET /task-budgets/:id/sign-context`, `purpose: 'close'` shape. */
+export interface FetchedTaskBudgetCloseSignContext {
+  purpose: 'close'
+  taskBudgetId: string
+  typedData: Record<string, unknown>
+  userOpHash: string
+  expected: {
+    delegateAccount: string
+    chainId: number
+    delegationHash: string
+  }
+}
+
+export type FetchedTaskBudgetSignContext =
+  | FetchedTaskBudgetOpenSignContext
+  | FetchedTaskBudgetCloseSignContext
+
+/**
+ * GET /task-budgets/:id/sign-context (#3329). Same auth header, timeout and
+ * refusal-structuring as `fetchDirectSignContext`, for a task budget's own
+ * `Delegation` (purpose `open`) or `disableDelegation` UserOp (purpose
+ * `close`) typed data. No `typed_data_b64` fallback exists for this flow —
+ * a task budget's typed data is never caller-supplied.
+ */
+export async function fetchTaskBudgetSignContext(
+  identity: HavenIdentity,
+  taskBudgetId: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
+  clientIdentity?: string,
+): Promise<FetchedTaskBudgetSignContext> {
+  let response: Response
+  try {
+    response = await fetchImpl(
+      `${identity.apiUrl}/task-budgets/${encodeURIComponent(taskBudgetId)}/sign-context`,
+      {
+        headers: signContextHeaders(identity, clientIdentity),
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    )
+  } catch (err) {
+    const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    throw new HavenSignContextError(
+      timedOut
+        ? `Haven did not answer the task-budget signing-context fetch for ${taskBudgetId} within ${timeoutMs} ms. Retry.`
+        : `Could not reach Haven to fetch the task-budget signing context for ${taskBudgetId}: ` +
+          `${err instanceof Error ? err.message : String(err)}.`,
+      timedOut ? 'SIGN_CONTEXT_TIMEOUT' : 'SIGN_CONTEXT_UNREACHABLE',
+      undefined,
+      taskBudgetId,
+      'task',
+    )
+  }
+  let body: Record<string, unknown>
+  try {
+    body = (await response.json()) as Record<string, unknown>
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new HavenSignContextError(
+        `Haven did not finish sending the task-budget signing context for ${taskBudgetId} within ${timeoutMs} ms. Retry.`,
+        'SIGN_CONTEXT_TIMEOUT',
+        undefined,
+        taskBudgetId,
+        'task',
+      )
+    }
+    body = {}
+  }
+  if (!response.ok) {
+    const detail = typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
+    throw new HavenSignContextError(
+      `Haven refused the task-budget signing-context fetch for ${taskBudgetId}: ${detail}`,
+      'SIGN_CONTEXT_REFUSED',
+      refusalOf(response.status, body),
+      taskBudgetId,
+      'task',
+    )
+  }
+  const purpose = body.purpose
+  const typedData = body.typed_data
+  const version = body.task_sign_context_version
+  const expected = body.expected
+  const malformed = (detail: string): never => {
+    throw new HavenSignContextError(
+      `The Haven task-budget sign-context response for ${taskBudgetId} is malformed: ${detail}.`,
+      'SIGN_CONTEXT_MALFORMED',
+      undefined,
+      taskBudgetId,
+      'task',
+    )
+  }
+  if (typeof version !== 'number' || !SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS.includes(version)) {
+    throw new HavenSignContextError(
+      `The Haven task-budget sign-context response is version ${String(version)}, which this signer ` +
+        `does not support (supported: ${SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS.join(', ')}). Update @haven_ai/signer.`,
+      'SIGN_CONTEXT_MALFORMED',
+      undefined,
+      taskBudgetId,
+      'task',
+    )
+  }
+  if (!typedData || typeof typedData !== 'object') return malformed('missing typed_data')
+  if (!expected || typeof expected !== 'object') return malformed('missing expected')
+  // The wire `expected` object is snake_case, like every other Haven response;
+  // the SDK guards it feeds (`assertOwnTaskChild` / `assertOwnTaskBudgetCloseUserOp`)
+  // take camelCase — mapped explicitly here rather than cast, so a field this
+  // signer relies on being absent is a thrown error, not `undefined` silently
+  // reaching a guard that then fails a DIFFERENT, more confusing check.
+  const e = expected as Record<string, unknown>
+  if (purpose === 'open') {
+    if (
+      typeof e.delegate_account !== 'string' ||
+      typeof e.chain_id !== 'number' ||
+      typeof e.token_address !== 'string' ||
+      typeof e.max_amount_atomic !== 'string' ||
+      (e.recipient_address !== null && typeof e.recipient_address !== 'string') ||
+      typeof e.expires_at !== 'number' ||
+      typeof e.parent_delegation_hash !== 'string'
+    ) {
+      return malformed('expected is missing a required field for purpose open')
+    }
+    return {
+      purpose: 'open',
+      taskBudgetId: String(body.task_budget_id ?? taskBudgetId),
+      typedData: typedData as Record<string, unknown>,
+      expected: {
+        delegateAccount: e.delegate_account,
+        chainId: e.chain_id,
+        tokenAddress: e.token_address,
+        maxAmountAtomic: e.max_amount_atomic,
+        recipientAddress: (e.recipient_address as string | null) ?? null,
+        expiresAt: e.expires_at,
+        parentDelegationHash: e.parent_delegation_hash,
+      },
+    }
+  }
+  if (purpose === 'close') {
+    const userOpHash = body.user_op_hash
+    if (typeof userOpHash !== 'string') return malformed('missing user_op_hash for purpose close')
+    if (
+      typeof e.delegate_account !== 'string' ||
+      typeof e.chain_id !== 'number' ||
+      typeof e.delegation_hash !== 'string'
+    ) {
+      return malformed('expected is missing a required field for purpose close')
+    }
+    return {
+      purpose: 'close',
+      taskBudgetId: String(body.task_budget_id ?? taskBudgetId),
+      typedData: typedData as Record<string, unknown>,
+      userOpHash,
+      expected: {
+        delegateAccount: e.delegate_account,
+        chainId: e.chain_id,
+        delegationHash: e.delegation_hash,
+      },
+    }
+  }
+  return malformed(`unknown purpose '${String(purpose)}'`)
 }

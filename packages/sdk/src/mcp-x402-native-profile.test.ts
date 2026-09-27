@@ -12,7 +12,7 @@ import {
 } from './mcp-merchant-transport.js'
 import { X402UnexpectedStatusError } from './types.js'
 import type { X402PaymentOption } from './types.js'
-import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
+import { buildFundingLegSignData } from './__fixtures__/valid-userop.js'
 
 // #3118: the official x402 MCP transport profile — payment-required as an
 // `isError: true` tool RESULT (HTTP 200), payment in
@@ -22,7 +22,8 @@ import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
 
 // #3271: a real, self-consistent PackedUserOperation — the binding check
 // recomputes its hash and refuses a hand-rolled 3-field toy.
-const userOpSignData = buildValidUserOpSignData()
+// #3375: the funding leg is pinned to the 402 option's token and amount, paid to the delegate.
+const userOpSignData = buildFundingLegSignData({ asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', amount: '20000' })
 const userOpTypedData = userOpSignData.typed_data
 
 const accepted: X402PaymentOption = {

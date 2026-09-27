@@ -30,6 +30,12 @@ export interface CreateCliApiOptions {
   baseUrl: string
   token?: string
   fetchImpl?: typeof fetch
+  /**
+   * #3303: `@haven_ai/cli/<version>`, sent as `X-Haven-Client` so the backend
+   * can tell an outdated CLI what to run. Passed in by `commands.ts`, which
+   * owns `CLI_VERSION`, rather than imported here (commands.ts imports this file).
+   */
+  clientIdentity?: string
 }
 
 /**
@@ -37,12 +43,13 @@ export interface CreateCliApiOptions {
  * token when present, and surfaces backend `{ error }` messages as
  * `CliApiError` so commands can print something human.
  */
-export function createCliApi({ baseUrl, token, fetchImpl = fetch }: CreateCliApiOptions): CliApi {
+export function createCliApi({ baseUrl, token, fetchImpl = fetch, clientIdentity }: CreateCliApiOptions): CliApi {
   const root = baseUrl.replace(/\/+$/, '')
 
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (token) headers.Authorization = `Bearer ${token}`
+    if (clientIdentity) headers['X-Haven-Client'] = clientIdentity
     if (body !== undefined) headers['Content-Type'] = 'application/json'
 
     let res: Response
@@ -80,6 +87,7 @@ export function createCliApi({ baseUrl, token, fetchImpl = fetch }: CreateCliApi
   async function requestText(path: string): Promise<string> {
     const headers: Record<string, string> = { Accept: 'text/plain' }
     if (token) headers.Authorization = `Bearer ${token}`
+    if (clientIdentity) headers['X-Haven-Client'] = clientIdentity
 
     let res: Response
     try {

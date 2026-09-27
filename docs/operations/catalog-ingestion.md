@@ -97,6 +97,10 @@ All in `packages/backend/src/modules/catalog/lifecycle.ts` (and the probe's
 ## Alarms
 
 Edge-triggered per process — an ongoing condition fires once, not every tick.
+Delivery-gated since #3345: an alarm whose webhook POST fails (4xx/5xx or
+network error, logged with the status — never the URL) re-arms and fires again
+on the next tick while the condition persists. With no webhook configured the
+backend log warning is the whole alert, as before.
 
 1. **Stuck submissions**: N rows in `submitted` past 48 h. Causes to check:
    `CATALOG_OWNERSHIP_SECRET` unset, or merchants never publishing their proof

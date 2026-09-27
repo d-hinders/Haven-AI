@@ -11,7 +11,14 @@ import {
 // copy: one answer, three surfaces, which was the point of lifting it.
 import { apiBaseUrl } from '../domain/request-origin.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
-import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
+import {
+  DEFAULT_CHAIN_ID,
+  buildReleaseCompat,
+  type PackageReleaseCompat,
+  type PublishedClientPackage,
+} from '@haven_ai/core'
+import { config } from '../config.js'
+import { releaseNotesUrl } from '../domain/release-notes.js'
 
 /**
  * `GET /discovery` — the public, read-only facts an agent's CODE needs (#2531).
@@ -43,6 +50,18 @@ export interface DiscoveryDocument {
   cli_package: string
   openapi_url: string
   chains: { default: number; deployable: number[]; supported: readonly number[] }
+  /**
+   * #3304 (epic #3302): what each published client needs to know about
+   * releases — the version released in source, the thresholds this deployment
+   * ENFORCES (read from `CLIENT_COMPAT`, the table the client-compat middleware
+   * refuses against, so the published and the enforced minimum are one value),
+   * the update command on this deployment's channel, and short notes.
+   * `release_notes_url` is the human-readable page on the dashboard origin.
+   */
+  client_releases: {
+    release_notes_url: string
+    packages: Record<PublishedClientPackage, PackageReleaseCompat>
+  }
 }
 
 export function buildDiscoveryDocument(request: FastifyRequest): DiscoveryDocument {
@@ -70,6 +89,10 @@ export function buildDiscoveryDocument(request: FastifyRequest): DiscoveryDocume
     cli_package: CLI_PACKAGE,
     openapi_url: `${base}/openapi.json`,
     chains: { default: DEFAULT_CHAIN_ID, deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS },
+    client_releases: {
+      release_notes_url: releaseNotesUrl(),
+      packages: buildReleaseCompat(config.connectorChannel),
+    },
   }
 }
 

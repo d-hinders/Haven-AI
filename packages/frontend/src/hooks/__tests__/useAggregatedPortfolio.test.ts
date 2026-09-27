@@ -156,6 +156,93 @@ describe('aggregated portfolio hooks', () => {
     ])
   })
 
+  // #3295: the aggregated token's marker is the OR of the per-account
+  // markers — `unavailable` dominates, the oldest `asOf` wins among stale.
+  it('merges the balanceFreshness flag across accounts with OR (#3295)', async () => {
+    mockSafes([
+      { id: 'base-1', account_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base-2', account_address: SECOND_SAFE_ADDRESS, chain_id: 8453 },
+    ])
+    mockApiGet.mockImplementation(async (path: string) => {
+      if (path === `/balances/${SAFE_ADDRESS}?chain_id=8453`) {
+        return {
+          balances: [usdc('1000000')],
+        }
+      }
+      if (path === `/balances/${SECOND_SAFE_ADDRESS}?chain_id=8453`) {
+        return {
+          balances: [
+            {
+              ...usdc('2500000'),
+              balanceFreshness: { status: 'stale', asOf: '2026-09-25T07:00:00.000Z' },
+            },
+          ],
+        }
+      }
+      return { balances: [] }
+    })
+
+    const { result } = renderHook(() => useAggregatedBalances())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.balances).toEqual([
+      {
+        ...usdc('1000000'),
+        balance: '3500000',
+        formatted: '3.5',
+        chainId: 8453,
+        balanceFreshness: { status: 'stale', asOf: '2026-09-25T07:00:00.000Z' },
+      },
+    ])
+  })
+
+  it('among stale markers the OLDEST asOf wins — the sum is at least as old as its oldest part (#3295)', async () => {
+    mockSafes([
+      { id: 'base-1', account_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base-2', account_address: SECOND_SAFE_ADDRESS, chain_id: 8453 },
+    ])
+    mockApiGet.mockImplementation(async (path: string) => {
+      if (path === `/balances/${SAFE_ADDRESS}?chain_id=8453`) {
+        return {
+          balances: [
+            {
+              ...usdc('1000000'),
+              balanceFreshness: { status: 'stale', asOf: '2026-09-25T09:00:00.000Z' },
+            },
+          ],
+        }
+      }
+      if (path === `/balances/${SECOND_SAFE_ADDRESS}?chain_id=8453`) {
+        return {
+          balances: [
+            {
+              ...usdc('2500000'),
+              balanceFreshness: { status: 'stale', asOf: '2026-09-25T07:00:00.000Z' },
+            },
+          ],
+        }
+      }
+      return { balances: [] }
+    })
+
+    const { result } = renderHook(() => useAggregatedBalances())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    // OR-merge: any marker present wins; among stale ones the oldest asOf
+    // is the honest lower bound on the summed figure's age.
+    expect(result.current.balances).toEqual([
+      {
+        ...usdc('1000000'),
+        balance: '3500000',
+        formatted: '3.5',
+        chainId: 8453,
+        balanceFreshness: { status: 'stale', asOf: '2026-09-25T07:00:00.000Z' },
+      },
+    ])
+  })
+
   it('surfaces an aggregate balance error instead of treating failures as zero funds', async () => {
     mockSafes([
       { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },

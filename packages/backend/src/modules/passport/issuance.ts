@@ -37,66 +37,37 @@ import {
   isPassportIssuableAccount,
   passportRailRefusalReason,
 } from '../../domain/passport-issuance-rail.js'
+// The anchor seam's contract lives in its own leaf (#3294): this module holds
+// the SETTERS, attestation.ts the IMPLEMENTATION — neither imports the other,
+// which the repair's value import would otherwise make a cycle (no-circular
+// is absolute). The types are re-exported unchanged below.
+import type {
+  Anchor,
+  AnchorResult,
+  AnchorRecovery,
+  AnchorLivenessProbe,
+  PassportClaim,
+  RecoveredAnchor,
+} from './anchor-contract.js'
+import { repairAnchorUidFromReceipt } from './attestation.js'
 import { revokePassportBestEffort } from './revocation.js'
 
 export type { PassportStatus, PassportRow } from '../../infra/repositories/agent-passports.js'
 import type { PassportRow } from '../../infra/repositories/agent-passports.js'
 
-/** What the attestation says. Assembled here, submitted by the anchor seam. */
-export interface PassportClaim {
-  agentEoa: string
-  smartAccount: string
-  treasury: string
-  assuranceLevel: AssuranceLevel
-  policyUri: string
-  issuedAt: number
-  expiresAt: number
-}
-
-/**
- * The on-chain write, isolated behind one function so issuance logic is
- * testable without a chain — and so the ONLY place that touches the relayer is
- * small enough to audit.
- */
-export interface AnchorResult {
-  attestationUid: string
-  txHash: string
-}
-export type Anchor = (
-  chainId: number,
-  claim: PassportClaim,
-  onBroadcast?: (txHash: string) => Promise<void>,
-) => Promise<AnchorResult>
-
-/**
- * A recovered anchor carries what the mined transaction ACTUALLY attested
- * (#1847). Recovery can cross a re-key: the broadcast was built from the
- * facts of its day, and by the time its receipt is read the agent may hold a
- * different key. `attested` is decoded from the transaction's own bytes so
- * `markAnchored` can record the chain's truth — the fresh claim would blind
- * `STALE_ANCHOR_PREDICATE` forever, silencing the #1699 re-anchor sweep and
- * its alarm for exactly the attestation that most needs them.
- */
-export interface RecoveredAnchor extends AnchorResult {
-  attested: { agentEoa: string; smartAccount: string }
-}
-
-export type AnchorRecovery = (chainId: number, txHash: string) => Promise<RecoveredAnchor | null>
+export type {
+  Anchor,
+  AnchorResult,
+  AnchorRecovery,
+  AnchorLivenessProbe,
+  PassportClaim,
+  RecoveredAnchor,
+} from './anchor-contract.js'
 
 let recoveryImpl: AnchorRecovery | null = null
 export function setAnchorRecovery(recovery: AnchorRecovery | null): void {
   recoveryImpl = recovery
 }
-
-/**
- * Can a previously broadcast attest still mine? (#1745)
- *
- * Separate from {@link AnchorRecovery} on purpose. Recovery answers "did it
- * succeed", and its null means "no answer yet". This answers the different
- * question the re-mint actually depends on — "can it still succeed" — and only
- * `'dead'` may unlock a second attest. See `classifyAnchorTxLiveness`.
- */
-export type AnchorLivenessProbe = (chainId: number, txHash: string) => Promise<'live' | 'dead'>
 
 let livenessImpl: AnchorLivenessProbe | null = null
 export function setAnchorLiveness(probe: AnchorLivenessProbe | null): void {
@@ -412,4 +383,98 @@ export async function retryPendingPassports(
     }
   }
   return { attempted: rows.length, failed, needingAttention }
+}
+
+/**
+ * Repair rows anchored before #3294, whose stored UID is the staticCall
+ * prediction and therefore never existed on-chain (#3294 criterion 3).
+ *
+ * Deliberately a SELF-HEALING SWEEP STEP, not a one-shot operator job — that
+ * choice belongs to the issue's owner (open question 2), and this one is the
+ * strictly weaker commitment: it is idempotent (the CAS in
+ * `repairAnchoredUid` only ever writes a receipt-derived UID over a mismatched
+ * one, and both it and `confirmAnchorUid` stamp the durable
+ * `uid_repair_confirmed_at` marker, migration 096), paced (a `limit`ed batch
+ * per tick — so a repair-triggered revoke burst shares the one relayer lane
+ * through the revocation sweep's ordinary backoff, never a stampede), and
+ * needs no operator to remember to run anything. If the owner later wants an
+ * explicit one-shot job, it wraps the same `repairAnchorUidFromReceipt` call.
+ *
+ * #3342 accounting — three counts, never folded into one another:
+ *
+ * - `repaired` — a phantom UID was replaced by the receipt's;
+ * - `healthy` — the stored UID already matched the receipt (confirmed, and
+ *   now marked out of the queue); previously these were counted
+ *   `unrepairable`, which read as 10 failures a tick on an all-healthy batch;
+ * - `unrepairable` — the row could not be answered this pass: no tx hash, an
+ *   unreadable receipt, no proven `Attested` log, a log the proven-ours
+ *   invariant refused, or a row that moved mid-repair.
+ *
+ * Every row is REPORTED, not just counted: `rows` carries `agent_id`,
+ * `outcome` and the reason for each, and the caller logs them — a row left
+ * unrepaired is never silently dropped, and the selector hands it back on a
+ * later tick.
+ *
+ * **Each row is isolated**, exactly like `retryPendingPassports`: one bad row
+ * or transient pool error must not stop the batch. A repair that THROWS (a
+ * UID collision on the unique `agent_passports_uid_idx`, a pool error) is
+ * deferred — `updated_at` is bumped so the row cannot head the oldest-first
+ * batch again on the very next tick (#3342) — and re-attempted after the
+ * same hour every due row waits, keeping the poison row visible in the
+ * per-row report instead of starving the queue behind it.
+ */
+export async function repairAnchoredUids(
+  limit = 10,
+): Promise<{
+  attempted: number
+  repaired: number
+  healthy: number
+  unrepairable: number
+  rows: Array<{ agent_id: string; outcome: 'repaired' | 'confirmed' | 'unrepairable' | 'deferred'; reason: string }>
+}> {
+  const rows = await repo.listAnchorRepairsDue(limit)
+  let repaired = 0
+  let healthy = 0
+  let unrepairable = 0
+  const reported: Array<{
+    agent_id: string
+    outcome: 'repaired' | 'confirmed' | 'unrepairable' | 'deferred'
+    reason: string
+  }> = []
+  for (const row of rows) {
+    try {
+      const result = await repairAnchorUidFromReceipt(row.chain_id, row.agent_id, {
+        attestation_uid: row.attestation_uid,
+        tx_hash: row.tx_hash,
+      })
+      if (result.repaired) {
+        repaired++
+        reported.push({ agent_id: row.agent_id, outcome: 'repaired', reason: result.reason })
+      } else if (result.outcome === 'confirmed') {
+        healthy++
+        reported.push({ agent_id: row.agent_id, outcome: 'confirmed', reason: result.reason })
+      } else {
+        unrepairable++
+        reported.push({ agent_id: row.agent_id, outcome: 'unrepairable', reason: result.reason })
+      }
+    } catch (err) {
+      // A thrown repair (UID collision, transient pool error) must not head
+      // the queue on every tick: bump `updated_at` so the row waits out the
+      // same hour as every other due row before it is retried (#3342). If
+      // even this bump fails the database itself is down — the next tick
+      // re-reads the same row then, which a dead tick cannot make worse.
+      try {
+        await repo.deferAnchorRepair(row.agent_id)
+      } catch {
+        /* the next tick re-reads the row — never mask the original failure */
+      }
+      unrepairable++
+      reported.push({
+        agent_id: row.agent_id,
+        outcome: 'deferred',
+        reason: `repair threw: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
+  }
+  return { attempted: rows.length, repaired, healthy, unrepairable, rows: reported }
 }

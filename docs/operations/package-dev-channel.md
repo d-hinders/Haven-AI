@@ -24,6 +24,7 @@ covers:
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
+  - packages/core/src/client-compat.ts
 last-verified: "2026-09-24"
 ---
 
@@ -193,6 +194,58 @@ and the `release` skill.
 > today**, and a scoped check of one constant is not a re-verification of this
 > document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
+> **Re-verification (0.6.0-alpha.0 release, 2026-09-26):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.5.0-alpha.1` → `0.6.0-alpha.0`, with `HAVEN_CONNECTOR_CHANNEL` = `alpha`
+> unchanged (a prerelease of `0.6.0` keeps the `alpha` label). Re-measured at
+> `origin/dev` `8944227d`: `git log origin/main..origin/dev` over `publish.yml`,
+> `release-channel.mjs`, `release-snapshot-version.mjs` and
+> `release-version-order.mjs` returns **0** commits, and the bump's own diff
+> touches **0** of them. Live dist-tags read during this release: `dev` =
+> `0.0.0-dev.202609261411.8944227` on all five packages, below `alpha`/`latest`
+> = `0.5.0-alpha.1`; the next `alpha`/`latest` is `0.6.0-alpha.0`. This bump is
+> also the first to regenerate the client release data (#3305); a snapshot run
+> still skips it. `last-verified` is not bumped.
+
+> **Re-verification (0.5.0-alpha.1 release, 2026-09-25):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.5.0-alpha.0` → `0.5.0-alpha.1`, with channel `alpha` agreeing across
+> source, bundle and resolved SDK. Re-measured at `origin/dev` `20176679`:
+> `git log origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+> `release-snapshot-version.mjs` and `release-version-order.mjs` returns **0**
+> commits, and the bump's own diff touches **0** of them. Live dist-tags read
+> during this release: `dev` = `0.0.0-dev.202609251409.98ed67a` on all five
+> packages, below `alpha`/`latest` = `0.4.0-alpha.0`. `0.5.0-alpha.0` never
+> reached npm (see the runtime-compatibility note), so the next `alpha`/`latest`
+> is `0.5.0-alpha.1`. `last-verified` is not bumped.
+>
+> **Re-verification (0.5.0-alpha.0 release, 2026-09-25):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
+> is in this doc's `covers:`. Verified rather than asserted: the constant moved
+> `0.4.0-alpha.0` → `0.5.0-alpha.0`, and the bump's own checks report channel
+> `alpha` agreeing across the source, the built connect bundle and the SDK that
+> bundle resolves. **No channel behaviour changed** — re-measured, not carried
+> over from the 0.4.0 note: `git log origin/main..origin/dev` over
+> `publish.yml`, `release-channel.mjs`, `release-snapshot-version.mjs` and
+> `release-version-order.mjs` returns **0** commits, and this bump's own diff
+> touches **0** of them, so the `0.0.0-dev.*` snapshot path and the rule that the
+> two channels cannot cross are untouched. The `dev` tag observed during this
+> release, `0.0.0-dev.202609250737.3bd5a51`, sits below `alpha`/`latest` at
+> `0.4.0-alpha.0` exactly as the ordering rule requires; a MINOR step changes
+> nothing about that. `last-verified` deliberately NOT bumped — it already
+> reads 2026-09-24 from an earlier change, and this note re-reads only
+> `CONNECTOR_VERSION` and the channel constant's value.
+>
+> **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
+> is in this doc's `covers:`. The only edit there is a comment: the sentence
+> saying the public release documents "will read" the table became "read", now
+> that `client-releases.ts` does. The snapshot exemption this doc states
+> (`isSnapshotVersion`, a `0.0.0-dev.*` client never hinted or refused) is
+> unchanged: `evaluateClient` and `isSnapshotVersion` have no diff. The new
+> release documents publish `released_version` per package; a snapshot is not a
+> release, so nothing a `--snapshot` run writes appears in them. `last-verified`
+> is not bumped.
+
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
 > is in this doc's `covers:`. Verified rather than asserted: the constant moved
@@ -229,6 +282,11 @@ and the `release` skill.
   sorts below every real version, so no `^0.1.x` range can resolve to a snapshot
   by accident and nobody has to reason about `dev` vs `alpha` prerelease
   ordering.
+  The same property is why the backend's client-version signal (#3303)
+  **exempts** a snapshot: a `0.0.0-dev.*` version in `X-Haven-Client` is never
+  hinted or refused, whatever minimum the deployment sets
+  (`isSnapshotVersion` in `packages/core/src/client-compat.ts`), so a dev-channel
+  install keeps working against dev after a minimum is set.
 - **All five carry the same version.** The job runs the ordinary
   `scripts/release-bump.mjs` with `--snapshot` over the CI checkout, so the
   cross-package pins, connect's `runtime-manifest.ts`, the baked version
@@ -276,6 +334,17 @@ and the `release` skill.
   0.1.35-alpha.0 release failed E401 ([#2647](https://github.com/d-hinders/Haven-AI/issues/2647)).
 
 ## The loop: test a package change on dev without a prod release
+
+> **Re-verification (#3305):** `release-bump.mjs` gained a second documentary
+> write, and the snapshot path skips it exactly like the CHANGELOG heading. The
+> write regenerates the client release data file in `@haven_ai/core` (the
+> public release data behind `/releases`) from the CHANGELOGs, and a real
+> release first refuses a hand-edited copy. In snapshot mode neither the refusal
+> nor the write runs: the bump logs that the data was skipped because a dev
+> snapshot is not a release, and `release-bump.test.mjs` pins the guard with a
+> mutation that goes red. A snapshot therefore never depends on that file; CI
+> keeps the committed copy in step with the CHANGELOGs. Nothing about the snapshot version format, the five guards,
+> `HAVEN_CONNECTOR_CHANNEL` or the publish job moved.
 
 > **Re-verification (changelog-heading gap, 2026-09-14):** `release-bump.mjs`
 > gained one responsibility — rewriting `## Unreleased` to

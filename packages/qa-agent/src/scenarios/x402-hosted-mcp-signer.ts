@@ -82,7 +82,7 @@ import {
   type HostedSettleMcpToolResult,
 } from '../lib/hosted-mcp.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
-import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, waitForReceipt as waitForReceiptOn } from '../lib/chain.js'
 import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
@@ -106,22 +106,9 @@ interface SignX402Data {
   accepted: Record<string, unknown>
 }
 
-/**
- * Wait for a transaction receipt, tolerating an RPC that has not yet indexed a
- * just-mined tx. Returns null on timeout — the caller reports which leg.
- */
-async function waitForReceipt(
-  provider: ethers.JsonRpcProvider,
-  hash: string,
-): Promise<ethers.TransactionReceipt | null> {
-  const deadline = Date.now() + TIMING.receiptWaitMs
-  for (;;) {
-    const receipt = await provider.getTransactionReceipt(hash).catch(() => null)
-    if (receipt) return receipt
-    if (Date.now() >= deadline) return null
-    await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
-  }
-}
+/** The shared observer-receipt wait (lib/chain.ts, #3344) with this leg's TIMING, read per call. */
+const waitForReceipt = (provider: ethers.JsonRpcProvider, hash: string) =>
+  waitForReceiptOn(provider, hash, { timeoutMs: TIMING.receiptWaitMs, intervalMs: TIMING.pollIntervalMs })
 
 /**
  * The ONLY merchant plan that advertises eip3009 ALONE (#1441).

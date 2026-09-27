@@ -63,6 +63,8 @@ describe('buildHostedMcpServer', () => {
         'haven_submit',
         'haven_submit_catalog_entry',
         'haven_sweep_delegate',
+        'haven_open_task_budget',
+        'haven_close_task_budget',
       ].sort(),
     )
 

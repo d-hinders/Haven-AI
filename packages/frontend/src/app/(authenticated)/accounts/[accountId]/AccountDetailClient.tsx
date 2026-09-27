@@ -35,6 +35,7 @@ import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
+import { BalanceFreshnessIndicator } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 // #3127 (finding 6): the shared formatter — this page's inline copy was the
@@ -149,6 +150,12 @@ export default function AccountDetailClient() {
   const chain = getChainConfig(chainId)
   const formattedTotal = formatFiat(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
+  // #3295: a token whose balance read failed renders its last-known value
+  // with the stale indicator beside it — the headline carries the same
+  // marker when any token under it is degraded. "Unavailable" (the word)
+  // stays reserved for the WHOLE-portfolio failure states above; per-token
+  // unavailability shows inside the token row instead of erasing the row.
+  const degradedFreshness = breakdown.find((item) => item.balanceFreshness)?.balanceFreshness
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -329,9 +336,14 @@ export default function AccountDetailClient() {
                   Unavailable
                 </p>
               ) : (
-                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                  {formattedTotal}
-                </p>
+                <div className="mt-2 flex flex-wrap items-baseline gap-3">
+                  <p className="text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                    {formattedTotal}
+                  </p>
+                  {degradedFreshness && (
+                    <BalanceFreshnessIndicator freshness={degradedFreshness} />
+                  )}
+                </div>
               )}
             </div>
             <p className="max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
@@ -395,6 +407,15 @@ export default function AccountDetailClient() {
                     <span className="text-sm text-[var(--v2-ink)]">{item.symbol}</span>
                     <span className="text-sm text-[var(--v2-ink-2)] text-right font-mono v2-tabular">
                       {item.formatted}
+                      {/* #3295: this token's read failed — the figure is the
+                          last-known balance, and the row says how old it is.
+                          Never an unmarked zero: an entry that has never been
+                          read shows "Unavailable" beside the filler. */}
+                      {item.balanceFreshness && (
+                        <span className="ml-2">
+                          <BalanceFreshnessIndicator freshness={item.balanceFreshness} size="compact" />
+                        </span>
+                      )}
                     </span>
                     <span className="text-sm text-[var(--v2-ink)] text-right v2-tabular">
                       {formatFiat(fiatValue ?? 0, currency)}

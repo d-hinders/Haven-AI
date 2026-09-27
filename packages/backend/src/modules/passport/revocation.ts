@@ -242,6 +242,26 @@ export function setRevocationProbe(probe: RevocationAnchorProbe | null): void {
 }
 
 /**
+ * Re-derive an anchored row's REAL attestation UID from its anchor receipt
+ * (#3294), injectable for the same reason the probe is: this module stays
+ * free of ethers and the relayer, so its state machine is testable without a
+ * chain. The real implementation is `repairAnchorUidFromReceipt` in
+ * `attestation.ts`, wired in `index.ts` next to the other seams — and, like
+ * every seam here, unwired/throwing/`repaired: false` all degrade to exactly
+ * the pre-#3294 behaviour: the stored UID is submitted as before.
+ */
+export type AnchorUidRepair = (
+  chainId: number,
+  agentId: string,
+  row: { attestation_uid: string | null; tx_hash: string | null },
+) => Promise<{ repaired: boolean; uid: string | null; reason: string }>
+
+let anchorUidRepairImpl: AnchorUidRepair | null = null
+export function setAnchorUidRepair(repair: AnchorUidRepair | null): void {
+  anchorUidRepairImpl = repair
+}
+
+/**
  * Exponential backoff, capped. Attempt 0 → 30s, then 1m, 2m, 4m … up to 1h.
  * Capped rather than unbounded because revocation must keep trying: a schedule
  * that grows forever is indistinguishable from giving up.
@@ -283,12 +303,20 @@ export async function reconcileRevocation(agentId: string): Promise<AnchorState>
     return row.revocation_status === 'pending' ? 'revocation_pending' : 'anchored'
   }
 
-  return retireAttestationOnChain(
+  // Retire THE row's attestation. On a #3294 phantom-UID row the retire
+  // repairs the stored UID from the anchor receipt and revokes the REAL one;
+  // `not_found_repaired` (nothing on-chain under the stored UID) reports
+  // honestly as `revocation_pending` — the anchor is still catching up, which
+  // is exactly what that state means, and the stuck-revoke alarm must keep
+  // firing until the real UID is revoked for real.
+  const { outcome } = await retireAttestationOnChain(
     agentId,
     row.chain_id,
     row.attestation_uid,
     row.revocation_attempts,
+    row,
   )
+  return outcome === 'revoked_onchain' ? 'revoked_onchain' : 'revocation_pending'
 }
 
 /**
@@ -306,20 +334,44 @@ export async function reconcileRevocation(agentId: string): Promise<AnchorState>
  * (`claimRevocation` for a revoked agent, `claimReanchorRevocation` for a
  * stale anchor). It never checks agent status itself, which is exactly why it
  * must not be exported beyond this module's own callers.
+ *
+ * `anchorRow` is the caller's freshly read passport row — the anchor evidence
+ * (`tx_hash`, stored `attestation_uid`) the #3294 repair re-derives the real
+ * UID from when the probe cannot see the stored one. Passed rather than
+ * re-read so the row the repair guards against is exactly the row the caller
+ * claimed the lease on.
+ *
+ * The result carries `revokedUid` — the attestation the outcome describes.
+ * It differs from the passed `attestationUid` exactly when the #3294 repair
+ * fired: the row's stored prediction was swapped for the receipt's real UID
+ * and THAT one was revoked. Callers that key a follow-up on the row
+ * (`resetForReanchor`) must use this, not the stale argument.
  */
-export async function retireAttestationOnChain(
+export type RetireOutcome =
+  | 'revoked_onchain'
+  | 'revocation_pending'
+  | 'not_found_repaired'
+
+export interface RetireResult {
+  outcome: RetireOutcome
+  revokedUid: string | null
+}
+
+async function retireAttestationCore(
   agentId: string,
   chainId: number,
   attestationUid: string,
   revocationAttempts: number,
-): Promise<'revoked_onchain' | 'revocation_pending'> {
+  anchorRow: { attestation_uid: string | null; tx_hash: string | null },
+  allowRepair: boolean,
+): Promise<RetireResult> {
   if (!isPassportConfigured(chainId)) {
     await repo.scheduleRevocationRetry(
       agentId,
       'revocation anchor unavailable (schema unregistered or no revoker configured)',
       revocationBackoffSeconds(revocationAttempts),
     )
-    return 'revocation_pending'
+    return { outcome: 'revocation_pending', revokedUid: null }
   }
 
   // ── Converge before spending gas (#1758) ────────────────────────────────
@@ -366,10 +418,49 @@ export async function retireAttestationOnChain(
             'cannot record a confirmation without its evidence pointer (#1758)',
           revocationBackoffSeconds(revocationAttempts),
         )
-        return 'revocation_pending'
+        return { outcome: 'revocation_pending', revokedUid: null }
       }
       await repo.markRevocationConfirmed(agentId, reading.txHash)
-      return 'revoked_onchain'
+      return { outcome: 'revoked_onchain', revokedUid: attestationUid }
+    }
+    if (reading.state === 'unknown' && allowRepair && anchorUidRepairImpl) {
+      // ── Repair the #3294 phantom-UID row before spending gas ─────────────
+      //
+      // `unknown` here is not always innocence. For a row minted BEFORE the
+      // #3294 fix it is the exact signature of a PHANTOM UID: the stored value
+      // is the pre-send `staticCall` prediction, which never existed on-chain,
+      // so `getAttestation` returns the zeroed struct at every settled block
+      // and the probe reads `unknown` forever — while the agent's REAL
+      // attestation stays live and every revoke reverts `NotFound()`. (Dev ran
+      // one such row to 590 attempts before this existed.) The deliberate
+      // young-attestation guard from #1758 is preserved by scoping this to
+      // rows that HAVE an anchor tx hash: a young attestation has one too, so
+      // the repair read below runs for it as well — but it can only ever
+      // CONFIRM the stored UID (compare-and-set with the row's own UID is a
+      // no-op) and never changes the probe's answer or the submit below.
+      //
+      // Never guesses: no tx hash, an unreadable receipt, or no derivable UID
+      // leaves the row untouched (`repaired: false`). A repair that lands
+      // swaps the row to the receipt's UID and the retire re-runs ONCE for the
+      // real UID — bounded, because the repair cannot fire twice. Unwired or
+      // throwing, this falls through to the submit below: exactly the
+      // pre-#3294 behaviour, never a wrong write.
+      let repair: Awaited<ReturnType<AnchorUidRepair>> | null = null
+      try {
+        repair = await anchorUidRepairImpl(chainId, agentId, anchorRow)
+      } catch {
+        // An unreadable chain is not an answer. Fall through and submit.
+      }
+      if (repair?.repaired && repair.uid) {
+        return retireAttestationCore(
+          agentId,
+          chainId,
+          repair.uid,
+          revocationAttempts,
+          { ...anchorRow, attestation_uid: repair.uid },
+          false,
+        )
+      }
     }
   }
 
@@ -379,22 +470,37 @@ export async function retireAttestationOnChain(
       'revocation anchor unavailable (schema unregistered or no revoker configured)',
       revocationBackoffSeconds(revocationAttempts),
     )
-    return 'revocation_pending'
+    return { outcome: 'revocation_pending', revokedUid: null }
   }
 
   try {
     getEasDeployment(chainId)
     const { txHash } = await revokerImpl(chainId, attestationUid)
     await repo.markRevocationConfirmed(agentId, txHash)
-    return 'revoked_onchain'
+    return { outcome: 'revoked_onchain', revokedUid: attestationUid }
   } catch (err) {
     await repo.scheduleRevocationRetry(
       agentId,
       redactVendorSecrets(err instanceof Error ? err.message : String(err)),
       revocationBackoffSeconds(revocationAttempts),
     )
-    return 'revocation_pending'
+    return { outcome: 'revocation_pending', revokedUid: null }
   }
+}
+
+/**
+ * The exported shape: the outcome plus the UID it describes. `outcome` alone
+ * maps onto `AnchorState` at the call sites; `revokedUid` is what a caller
+ * must key a follow-up on (see `reconcileReanchor` → `resetForReanchor`).
+ */
+export function retireAttestationOnChain(
+  agentId: string,
+  chainId: number,
+  attestationUid: string,
+  revocationAttempts: number,
+  anchorRow: { attestation_uid: string | null; tx_hash: string | null },
+): Promise<RetireResult> {
+  return retireAttestationCore(agentId, chainId, attestationUid, revocationAttempts, anchorRow, true)
 }
 
 /** Enqueue the anchor flip. Called after the DB standing has already changed. */

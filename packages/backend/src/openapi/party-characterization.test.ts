@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { getAddress } from 'ethers'
 
 const FIXTURES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '__fixtures__/party-characterization')
 
@@ -484,7 +485,8 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ total: '1' }] })
     const liveBody = await listReceipts('agent-1', 25)
     const live = liveBody!.receipts[0] as { parties: { delegate_account: string | null } }
-    expect(live.parties.delegate_account).toBe(authorizeTimeDelegator)
+    // #3307: read back EIP-55 checksummed at the read boundary (storage stays lowercase).
+    expect(live.parties.delegate_account).toBe(getAddress(authorizeTimeDelegator))
   })
 
   it('getAgentPaymentStatus — erc7710: parties.delegate_account reads back machine_metadata.delegate_account_address', async () => {
@@ -539,6 +541,7 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     })
     const liveBody = await getAgentPaymentStatus(agent as never, 'pi-6')
     const live = liveBody as unknown as { parties: { delegate_account: string | null } }
-    expect(live.parties.delegate_account).toBe(authorizeTimeDelegator)
+    // #3307: read back EIP-55 checksummed at the read boundary (storage stays lowercase).
+    expect(live.parties.delegate_account).toBe(getAddress(authorizeTimeDelegator))
   })
 })

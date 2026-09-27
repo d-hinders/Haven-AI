@@ -61,7 +61,13 @@
  * backoff, against 4 × 10 s on one node before. Callers that need a bound pass
  * `timeout` and `retryCount` (the budget reader does).
  *
- * Endpoint URLs can carry provider API keys: this module never logs them.
+ * Endpoint URLs can carry provider API keys. This module never logs them, and
+ * since #3371 it does not let them leave inside an error either: the transport
+ * it returns wraps viem's `request` and scrubs every configured endpoint's
+ * key-like segments out of a transport error in place (`scrubTransportErrorSecrets`)
+ * — viem's request errors carry the URL in `message`, `metaMessages`, `details`,
+ * `shortMessage`, `stack` and a raw enumerable `url`, and viem's own `getUrl`
+ * strips only `user:password`, so a key in the path or query survives otherwise.
  */
 import { fallback, http, shouldThrow as viemShouldThrow, type Transport } from 'viem'
 import {
@@ -71,8 +77,12 @@ import {
 } from '../../config.js'
 import { getChain } from '../../domain/chains.js'
 
-/** The optional second provider per chain. Empty string = not configured. */
-function secondaryRpcUrl(chainId: number): string {
+/**
+ * The optional second provider per chain (`RPC_URL_BASE_FALLBACK` /
+ * `RPC_URL_BASE_SEPOLIA_FALLBACK`). Empty string = not configured. Also the
+ * relayer's broadcast fallback when the primary refuses a raw send (#2769).
+ */
+export function secondaryRpcUrl(chainId: number): string {
   if (chainId === 8453) return config.rpcUrlBaseFallback
   if (chainId === 84532) return config.rpcUrlBaseSepoliaFallback
   return ''
@@ -88,6 +98,124 @@ function publicRpcUrl(chainId: number): string {
 export function rpcEndpoints(chainId: number): string[] {
   const ordered = [getChain(chainId).rpcUrl, secondaryRpcUrl(chainId), publicRpcUrl(chainId)]
   return [...new Set(ordered.filter((url) => url !== ''))]
+}
+
+/**
+ * The key-like pieces of an endpoint URL — path segments and query values of
+ * 12+ characters (#3371). The shared helper behind this module's transport
+ * scrub and `infra/relayer.ts`'s `keySegments` / `infra/outbound-queue.ts`'s
+ * `secretSegments` (#2769, #3365): a provider that echoes its key WITHOUT the
+ * URL (say `dkey=<key>` in a JSON-RPC message) is still scrubbed. It lives
+ * here because `relayer.ts` already imports this file (`secondaryRpcUrl`) and
+ * this file must stay below both in the provider graph — a third private copy
+ * was one more place for the 12+ heuristic to drift.
+ *
+ * #3391: candidates come from a PARSED URL's path, query and hash only —
+ * never the host. #3387's whole-string split made the host a candidate
+ * (`sepolia.base.org` is 16 characters, `base-sepolia.g.alchemy.com` longer),
+ * which redacted the public node out of the very errors the qa-dev failure
+ * classifier keys on and left a public-only transport reporting
+ * `URL: https://<redacted>`. The whole-string split over `[/?&=#]` remains
+ * the fallback for strings `new URL` refuses, and the 12+-and-no-colon
+ * filter is unchanged — a key-shaped PATH segment (`/v3/<key>`, dRPC's
+ * `/base-sepolia/<key>`) is still derived, and basic-auth credentials still
+ * are not (`user:pass` carries a colon).
+ */
+export function secretSegments(url: string): string[] {
+  let parsed: URL | null = null
+  try {
+    parsed = new URL(url)
+  } catch {
+    parsed = null
+  }
+  // Raw parts: `URL` does not decode percent-escapes in path/query/hash, so a
+  // key the vendor percent-encoded still surfaces as its raw candidate text.
+  // The leading `?` is stripped so the first query KEY is a candidate without
+  // it, exactly as the whole-string split (which delimited on `?`) produced.
+  const parts = parsed
+    ? [
+        ...parsed.pathname.split('/'),
+        ...parsed.search.replace(/^\?/, '').split(/[&=]/),
+        parsed.hash.slice(1),
+      ]
+    : url.split(/[/?&=#]/)
+  return parts.filter((part) => part.length >= 12 && !part.includes(':'))
+}
+
+const REDACTED = '<redacted>'
+
+/**
+ * Scrub every configured endpoint's key-like segments out of a viem RPC
+ * transport error IN PLACE (`err: E`, returns the same instance): `message`,
+ * `stack`, `metaMessages`, `details`, `shortMessage`, the raw enumerable
+ * `url`, and every string inside nested plain-object/array own properties
+ * (`data`, a JSON-RPC `error` body), walked down the `.cause` chain (#3371).
+ *
+ * Class identity, `status`, `headers`, `code` and non-scrubbed `data` shapes
+ * are preserved — this is load-bearing: viem's retry logic branches on
+ * `instanceof HttpRequestError` and turns any non-`BaseError` into a
+ * retryable `UnknownRpcError`, so REBUILDING the error (the ethers-side
+ * `scrubRpcUrlError` approach, #3365) would turn a terminal 401 into four
+ * attempts and a terminal `eth_call` revert into a retried one.
+ *
+ * #3391 hardening: a value is written back only when the scrub changed it,
+ * every write is guarded individually, and nested objects carry a visited
+ * guard. A frozen error, a getter-only own property (a DOMException's
+ * `message` is one) or a cyclic nested value can no longer throw inside the
+ * caller's `catch` — the error surfaces exactly as it was, never broken.
+ */
+export function scrubTransportErrorSecrets<E extends Error>(err: E, urls: string[]): E {
+  const secrets = urls.flatMap(secretSegments)
+  const scrub = (text: string): string =>
+    secrets.reduce((acc, secret) => acc.split(secret).join(REDACTED), text)
+
+  const visited = new WeakSet<object>()
+  const scrubValue = (value: unknown): unknown => {
+    if (typeof value === 'string') return scrub(value)
+    if (Array.isArray(value)) return value.map(scrubValue)
+    if (value !== null && typeof value === 'object') {
+      if (visited.has(value)) return value
+      visited.add(value)
+      const record = value as Record<string, unknown>
+      for (const [key, member] of Object.entries(record)) {
+        try {
+          const scrubbed = scrubValue(member)
+          if (scrubbed !== member) record[key] = scrubbed
+        } catch {
+          // Unwritable member of a nested object: leave it as it is.
+        }
+      }
+    }
+    return value
+  }
+
+  let current: unknown = err
+  const causes = new Set<unknown>()
+  while (current instanceof Error && !causes.has(current)) {
+    causes.add(current)
+    const target = current as unknown as Record<string, unknown>
+    for (const prop of ['message', 'stack', 'shortMessage', 'details'] as const) {
+      if (typeof target[prop] !== 'string') continue
+      try {
+        const scrubbed = scrub(target[prop] as string)
+        if (scrubbed !== target[prop]) target[prop] = scrubbed
+      } catch {
+        // Getter-only (a DOMException's `message`) or a frozen target: leave
+        // it as it is — the scrub must never throw inside a `catch`.
+      }
+    }
+    for (const [key, value] of Object.entries(target)) {
+      if (key === 'cause' || key === 'request' || key === 'response') continue
+      try {
+        const scrubbed = scrubValue(value)
+        if (scrubbed !== value) target[key] = scrubbed
+      } catch {
+        // Getter-only or otherwise unwritable own property: leave it as it is.
+      }
+    }
+    current = target.cause
+  }
+  return err
 }
 
 /** JSON-RPC `code: 3` is the EIP-1474 execution error: an `eth_call` revert. */
@@ -115,8 +243,24 @@ export function rpcTransport(chainId: number, opts: RpcTransportOptions = {}): T
   const legs = urls.map((url) =>
     http(url, opts.timeout === undefined ? {} : { timeout: opts.timeout }),
   )
-  return fallback(legs, {
-    shouldThrow: havenShouldThrow,
-    ...(opts.retryCount === undefined ? {} : { retryCount: opts.retryCount }),
-  })
+  // #3371: the scrub wraps the transport's `request` — OUTSIDE `fallback()`, so
+  // the error is cleaned only after viem's failover/retry logic has classified
+  // it, and never via viem `custom()`, which would add its own retryCount:3
+  // layer and multiply retries. viem's own error instances are mutated in place
+  // and rethrown unchanged, so every `instanceof` classification downstream is
+  // untouched; only the key-bearing strings are replaced.
+  return (args) => {
+    const inner = fallback(legs, {
+      shouldThrow: havenShouldThrow,
+      ...(opts.retryCount === undefined ? {} : { retryCount: opts.retryCount }),
+    })(args)
+    const request: typeof inner.request = async (...requestArgs) => {
+      try {
+        return await inner.request(...requestArgs)
+      } catch (err) {
+        throw scrubTransportErrorSecrets(err as Error, urls)
+      }
+    }
+    return { ...inner, request }
+  }
 }

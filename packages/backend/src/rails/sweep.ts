@@ -44,7 +44,8 @@ export function generateSweepNonce(): string {
 
 /**
  * Build a `TransferWithAuthorization` paying the full stranded balance from the
- * delegate to its own Safe, valid for a short window from now.
+ * delegate to the agent's account (Haven wallet), valid for a short window
+ * from now.
  */
 export function buildSweepAuthorization(params: {
   delegateAddress: string

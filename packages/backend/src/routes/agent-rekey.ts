@@ -71,6 +71,7 @@ import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
 // "has an owner" must never mean "must sign as the owner".
 import { resolveSignatureScheme } from '../rails/hybrid-signer-actions.js'
 import {
+  assertUserOperationDisablesDelegations,
   buildBudgetDelegation,
   buildRevocation,
   delegationIdentity,
@@ -86,6 +87,7 @@ import {
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
 } from '../infra/repositories/delegation-budgets.js'
+import { isDelegationHashList } from '../domain/delegation-hash.js'
 import {
   abandonRekey,
   adoptAbandonedCarry,
@@ -571,7 +573,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
   // Two different contracts; the read consults nothing the revoke writes.
   app.post<{
     Params: { id: string; rekeyId: string }
-    Body: { signature?: string; user_operation?: unknown; delegation_hashes?: string[] }
+    Body: { signature?: string; user_operation?: unknown; delegation_hashes?: unknown }
   }>('/:id/rekey/:rekeyId/revoke/submit', async (request, reply) => {
     const loaded = await loadStep(request, reply)
     if (!loaded) return reply
@@ -591,18 +593,64 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     if (!user_operation || typeof user_operation !== 'object') {
       return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
     }
-    if (!Array.isArray(delegation_hashes) || delegation_hashes.length === 0) {
+    // #3343: the client's delegation_hashes no longer decides anything — the
+    // server derives the set it holds as still-enabled (below) and binds the
+    // signed calldata to exactly that set. The field stays required-by-schema
+    // for client compatibility and is only shape-checked here (the shared
+    // guard — a per-route typeof ladder is what the request-schemas ratchet
+    // counts).
+    if (delegation_hashes !== undefined && !isDelegationHashList(delegation_hashes)) {
       return reply.code(400).send({ error: 'delegation_hashes (from the prepare step) is required' })
     }
 
     // Capture the terms BEFORE the revoke flips them — the terms are DB rows
     // and do not change on-chain, but the read must be scoped to what is
     // about to be revoked. The METER, which does move, is read afterwards.
+    //
+    // #3343: this same list is now the authority for WHAT this submit may
+    // record. The client-supplied list used to drive `markRevoked` and the
+    // meter while the server's own set was ignored — a signed subset op could
+    // complete the re-key with other delegations still live on-chain. Still
+    // enabled includes `replaced` rows now (the repository list was widened),
+    // because a replaced-but-not-yet-disabled delegation is live authority
+    // the old key holds.
     const toRevoke = await listNonRevokedDelegationsForAgent(request.params.id)
+    if (toRevoke.length === 0) {
+      // Nothing server-side to revoke. Prepare handles this (adoption or the
+      // empty walk); a submit that reaches here anyway is a stale client.
+      return reply.code(409).send({
+        error: 'Nothing to revoke for this agent — restart the re-key from prepare.',
+      })
+    }
     const termsByHash = new Map(toRevoke.map((t) => [t.delegation_hash, t]))
 
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+
+    // Binding BEFORE submitCall (#3343, exact) — the point-of-no-return rule:
+    // a refusal here writes nothing and the stage stays `preflight`, so the
+    // old key is still live and a retry (with a correctly prepared op) is
+    // safe. An undecodable userop is a malformed client artifact (400); a
+    // decoded op that does not disable exactly the server-derived set means
+    // prepare and submit disagree (409 re-prepare) — never markRevoked.
+    const binding = assertUserOperationDisablesDelegations(
+      (user_operation as { callData?: unknown }).callData,
+      agent.chain_id,
+      toRevoke,
+      'exact',
+    )
+    if (!binding.ok) {
+      if (binding.reason === 'undecodable') {
+        return reply.code(400).send({
+          error: 'user_operation is not a readable execution batch — submit the userOp the prepare step returned.',
+        })
+      }
+      return reply.code(409).send({
+        error:
+          'The delegations to revoke have changed since prepare — fetch a fresh prepare and sign it again.',
+      })
+    }
+    const delegation_hashes_server = binding.disabled
 
     let txHash: string
     try {
@@ -633,7 +681,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       return reply.code(502).send({ error: 'Revocation failed', details: safeDetails(err) })
     }
 
-    await revokeDelegationsByHashes(request.params.id, delegation_hashes)
+    await revokeDelegationsByHashes(request.params.id, delegation_hashes_server)
     const advanced = await markRevoked(rekey.id, request.params.id, txHash)
     if (!advanced) {
       // Someone else advanced this re-key between our stage check and here.
@@ -642,8 +690,10 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     }
 
     // ── Step 2: the meter, now frozen ────────────────────────────────────
+    // Metered over the SERVER-derived set (#3343) — the same rows the
+    // signature was bound to and the DB just flipped.
     const snapshot: CarrySnapshotEntry[] = []
-    for (const hash of delegation_hashes) {
+    for (const hash of delegation_hashes_server) {
       const row = termsByHash.get(hash)
       if (!row) continue
       const terms = await findDelegationTerms(request.params.id, hash)
@@ -672,7 +722,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     return {
       revoked: true,
       tx_hash: txHash,
-      delegation_hashes,
+      delegation_hashes: delegation_hashes_server,
       stage: metered.stage,
       // Surfaced so a client can see the carry it is about to be given, and
       // so a fallback reading is visible rather than silently refused later.

@@ -26,10 +26,12 @@ import {
 } from './release-changelog.mjs'
 import {
   ACTION_REQUIRED_MARKER,
+  BREAK_NOTICE,
   CLIENT_RELEASE_DATA_FILE,
   MAX_NOTES_PER_PACKAGE,
   MAX_SUMMARY_CHARS,
   bulletSentences,
+  carriesBreak,
   clientReleaseDataViolations,
   clientReleasesFrom,
   nearMissMarker,
@@ -2248,6 +2250,7 @@ test('client release data — the bump produces the new version for all five pac
       version: '0.6.0-alpha.0',
       date: '2026-10-01',
       summary: `${name} change. Detail that is not the headline.`,
+      summary_segments: [{ text: `${name} change. Detail that is not the headline.`, code: false }],
       action_required: false,
     })
     // The previous release is kept, newest first.
@@ -2316,6 +2319,8 @@ test('client release data — an empty release says so; a release with prose but
 
 test('client release data — summaries are whole sentences, public text, never cut mid-clause (#3305)', () => {
   assert.deepEqual(bulletSentences('**Client identity (#3303, epic #3302).** More here. And more.'), ['Client identity.', 'More here.', 'And more.'])
+  // `summary` is plain text: code keeps its content, loses its ticks. The braces
+  // here are code, and `summary_segments` says so (#3393) — see the next test.
   assert.deepEqual(
     bulletSentences("`activity list` rows carry `scope` (`{ source: 'wallet' }`). Second sentence."),
     ["activity list rows carry scope ({ source: 'wallet' }).", 'Second sentence.'],
@@ -2328,7 +2333,7 @@ test('client release data — summaries are whole sentences, public text, never 
   assert.deepEqual(bulletSentences('Adds helpers, e.g. foo and bar. Second.'), ['Adds helpers, e.g. foo and bar.', 'Second.'])
   // A dot that belongs to a word (`.env`) is kept, at the start and mid-text.
   assert.deepEqual(bulletSentences('`.env` is now read at startup.'), ['.env is now read at startup.'])
-  assert.equal(publicText('Reads `.env` and `.npmrc` now.'), 'Reads .env and .npmrc now.')
+  assert.equal(publicText('Reads `.env` and `.npmrc` now.'), 'Reads .env and .npmrc now.', 'plain `summary`; the segments mark both as code (#3393)')
   // A lead is served as written: identifiers and flags are not re-cased or stripped.
   assert.equal(noteFromSection(releasedSections('## 0.6.0 — 2026-10-01\n\n- --doctor needs no flag.\n')[0]).summary, '--doctor needs no flag.')
 
@@ -2342,9 +2347,113 @@ test('client release data — summaries are whole sentences, public text, never 
   // …and shortened at the last `;` outside parentheses that fits when it has one.
   const clauses = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- First clause (a; b); second clause; ${long}.\n`)[0])
   assert.equal(clauses.summary, 'First clause (a; b); second clause.')
-  // Braces nest like parentheses, and a shortened headline gets no next sentence.
+  // Braces in prose nest like parentheses, and a shortened headline gets no next sentence.
   const braces = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- Pays now; then { a; ${long} }. Next.\n`)[0])
   assert.equal(braces.summary, 'Pays now.')
+})
+
+test('client release data — code spans are opaque: marked in summary_segments, never split, cut or rewritten (#3393)', () => {
+  const note = (body) => noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n${body}\n`)[0])
+
+  // The segments carry the code the plain summary cannot show; their texts join to exactly `summary`.
+  const scope = note("- `activity list` rows carry `scope` (`{ source: 'wallet' }`). Second sentence.")
+  assert.deepEqual(scope.summary_segments, [
+    { text: 'activity list', code: true },
+    { text: ' rows carry ', code: false },
+    { text: 'scope', code: true },
+    { text: ' (', code: false },
+    { text: "{ source: 'wallet' }", code: true },
+    { text: '). Second sentence.', code: false },
+  ])
+  assert.equal(scope.summary, scope.summary_segments.map((s) => s.text).join(''))
+  assert.deepEqual(note('- Reads `.env` now.').summary_segments, [
+    { text: 'Reads ', code: false },
+    { text: '.env', code: true },
+    { text: ' now.', code: false },
+  ])
+  // No code, one prose segment.
+  assert.deepEqual(note('- Plain words.').summary_segments, [{ text: 'Plain words.', code: false }])
+
+  // A sentence never ends inside a span: `a. b` is one piece of code.
+  assert.deepEqual(bulletSentences('Reads `a. B` now. Second.'), ['Reads a. B now.', 'Second.'])
+  // No rewrite reaches inside a span: an issue reference and the BREAKING word stay as written.
+  assert.equal(publicText('Sets `BREAKING` and `#12` literally (#7).'), 'Sets BREAKING and #12 literally.')
+  // A span wrapped across lines is one span, whitespace normalised.
+  assert.deepEqual(note('- Reads `a\n  b` now.').summary_segments[1], { text: 'a b', code: true })
+
+  // A clause is never cut inside a span: its `;` and braces are code, not structure.
+  const long = 'x'.repeat(MAX_SUMMARY_CHARS)
+  const cut = note(`- Pays now; then \`{ a; b }\` and ${long}. Next.`)
+  assert.equal(cut.summary, 'Pays now.')
+  const whole = note(`- Pays \`{ a; b }\` and ${long}. Next.`)
+  assert.equal(whole.summary, `Pays { a; b } and ${long}.`, 'no `;` outside the span, so served whole')
+  // A span counts at its RENDERED length, never as its one-character token:
+  // a next sentence that overflows only once its span is expanded is dropped…
+  const over = note(`- **Head.** ${'y'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - 10)} \`${'z'.repeat(20)}\`.`)
+  assert.equal(over.summary, 'Head.')
+  // …one that fits exactly is kept…
+  const exact = note(`- **Head.** ${'y'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - 22)} \`${'z'.repeat(20)}\`.`)
+  assert.equal(exact.summary.length, MAX_SUMMARY_CHARS)
+  // …and a clause boundary past the limit once a span is expanded is not a place to cut.
+  const clause = note(`- ${'a'.repeat(250)}; b \`${'c'.repeat(60)}\`; d ${'e'.repeat(100)}.`)
+  assert.equal(clause.summary, `${'a'.repeat(250)}.`)
+
+  // A blank span leaves nothing, not a double space.
+  assert.equal(note('- Uses `   ` now.').summary, 'Uses now.')
+  // The token range is reserved: a CHANGELOG carrying one is refused by name, never mis-rendered.
+  assert.throws(() => note('- Adds the \uE000 glyph.'), /private-use character U\+E000/)
+})
+
+test('client release data — a break is never hidden: a summary that omits it says so (#3393)', () => {
+  const note = (body) => noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n${body}\n`)[0])
+
+  // The marker in the headline already shows; nothing is appended.
+  assert.equal(note('- **BREAKING (#2).** A field was removed.').summary, 'Breaking change. A field was removed.')
+  // Mid-bullet, past the kept sentences: the notice is appended.
+  assert.equal(
+    note('- **Runtime moves.** It wires new packages. Two things: **BREAKING (#3)** — a key is gone.').summary,
+    `Runtime moves. It wires new packages. ${BREAK_NOTICE}`,
+  )
+  // In a bullet that is not the lead.
+  assert.equal(
+    note('- **Docs.** Words.\n- **BREAKING:** `x` is gone.').summary,
+    `Docs. Words. ${BREAK_NOTICE} (+1 more in the changelog)`,
+  )
+  // The notice outranks the next sentence for the budget.
+  const next = 'n'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - 2)
+  assert.equal(note(`- **Head.** ${next}.\n- **BREAKING.** Gone.`).summary, `Head. ${BREAK_NOTICE} (+1 more in the changelog)`)
+  // At exactly the limit, the next sentence and the notice both stay.
+  const exactNext = 'n'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - ` ${BREAK_NOTICE}`.length - 1) + '.'
+  assert.equal(note(`- **Head.** ${exactNext} **BREAKING** gone.`).summary, `Head. ${exactNext} ${BREAK_NOTICE}`)
+  assert.equal(`Head. ${exactNext} ${BREAK_NOTICE}`.length, MAX_SUMMARY_CHARS)
+  // With Update required, the marked bullet still leads and the break is still surfaced.
+  const both = note(`- **BREAKING.** A key is gone.\n- ${ACTION_REQUIRED_MARKER} **Signer v2.** Update it.`)
+  assert.equal(both.action_required, true)
+  assert.equal(both.summary, `Signer v2. Update it. ${BREAK_NOTICE} (+1 more in the changelog)`)
+
+  // Not the marker: prose, a word that is not bold, and the marker quoted in a code span.
+  for (const body of ['- A reshape, breaking for any reader of an old key.', '- BREAKING without bold.', '- Explains the `**BREAKING**` marker.']) {
+    assert.equal(carriesBreak(body), false, body)
+    assert.ok(!note(body).summary.includes(BREAK_NOTICE), body)
+  }
+  assert.equal(carriesBreak('- **BREAKING (#3306)** x'), true, 'positive control')
+})
+
+test('client release data — every REAL released section with a break shows it, connect 0.6.0-alpha.0 included (#3393)', async () => {
+  let breaks = 0
+  for (const name of CHANGELOG_PACKAGES) {
+    const source = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+    for (const section of releasedSections(source)) {
+      if (!carriesBreak(section.body)) continue
+      breaks++
+      assert.match(noteFromSection(section).summary, /breaking change/i, `packages/${name}/CHANGELOG.md ${section.version}`)
+    }
+  }
+  assert.ok(breaks >= 8, `expected the measured 8+ breaking sections, found ${breaks}`)
+  const connect = releasedSections(await readFile(join(ROOT, 'packages', 'connect', 'CHANGELOG.md'), 'utf8')).find(
+    (s) => s.version === '0.6.0-alpha.0',
+  )
+  assert.ok(noteFromSection(connect).summary.endsWith(BREAK_NOTICE), 'the one release #3393 measured hiding its break')
 })
 
 test(`client release data — at most ${MAX_NOTES_PER_PACKAGE} notes per package, newest first (#3305)`, () => {

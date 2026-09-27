@@ -33,6 +33,26 @@
  * them. It is "what changed, for deciding whether to
  * update", not the CHANGELOG; the CHANGELOG stays the record.
  *
+ * ## Code spans: `summary` plain, `summary_segments` marked (#3393)
+ *
+ * `summary` is plain text for the JSON consumers (`/discovery`,
+ * `haven.json`): backticks removed, content kept. `summary_segments` is the
+ * same text split into `{ text, code }` parts, so `/releases` can render code
+ * as code instead of as proportional body text; its texts join to exactly
+ * `summary`. A code span is opaque to every rewrite: while a note is built,
+ * each span stands in as ONE private-use character, so no sentence split,
+ * clause cut or `BREAKING` rewrite can reach inside it, and a kept sentence
+ * keeps its spans whole. (Stripping an issue reference still removes the
+ * whole parenthetical it sits in, spans included — as it always has.)
+ *
+ * ## A break is never hidden (#3393)
+ *
+ * A released section carrying a bold span that opens with `BREAKING`, outside
+ * code spans, always says so: when its summary does not already contain
+ * "Breaking change", {@link BREAK_NOTICE} is appended, ahead of the next
+ * sentence if both do not fit. Prose that merely says "breaking for any
+ * reader" is not the marker.
+ *
  * ## The action-required marker
  *
  * A bullet carrying {@link ACTION_REQUIRED_MARKER} (`**Update required**`)
@@ -66,6 +86,9 @@ export const MAX_NOTES_PER_PACKAGE = 2
  * shortened at a top-level `;`, otherwise served whole.
  */
 export const MAX_SUMMARY_CHARS = 300
+
+/** Appended to a summary whose section carries a break its text does not show (#3393). */
+export const BREAK_NOTICE = 'Includes a breaking change: see the changelog.'
 
 const RELEASE_HEADING = /^## (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?) — (\d{4}-\d{2}-\d{2})\s*$/
 
@@ -111,7 +134,60 @@ export function topLevelBullets(body) {
   return bullets
 }
 
-/** Markdown emphasis and code ticks removed — the summary is rendered as plain text. */
+/**
+ * Code spans as opaque tokens (#3393). Each `` `span` `` becomes ONE
+ * private-use character indexing `spans`; nothing a rewrite matches (spaces,
+ * punctuation, `#`, word characters) can occur inside a token, so no rewrite
+ * reaches a span's content. Content is whitespace-normalised, as prose is.
+ */
+const TOKEN_BASE = 0xe000
+const TOKEN = /[\ue000-\uf8ff]/g
+const TOKEN_LIMIT = 0xf8ff - TOKEN_BASE + 1
+
+function protectCode(text, spans = []) {
+  const stray = /[\ue000-\uf8ff]/.exec(text)
+  if (stray) {
+    throw new Error(
+      `carries the private-use character U+${stray[0].charCodeAt(0).toString(16).toUpperCase()}, ` +
+        'which the release-note generator reserves for code spans; remove it.',
+    )
+  }
+  const out = text.replace(/`([^`]+)`/g, (_, content) => {
+    const code = content.replace(/\s+/g, ' ').trim()
+    // A blank span is nothing to show; leave no token (and no double space).
+    if (code.length === 0) return ''
+    if (spans.length >= TOKEN_LIMIT) throw new Error(`has more than ${TOKEN_LIMIT} code spans in one bullet`)
+    spans.push(code)
+    return String.fromCharCode(TOKEN_BASE + spans.length - 1)
+  })
+  return { text: out, spans }
+}
+
+/** Tokenised text as `{ text, code }` segments, adjacent prose merged, empty code spans dropped. */
+function segmentsOf(text, spans) {
+  const segments = []
+  const push = (part, code) => {
+    if (part.length === 0) return
+    const last = segments[segments.length - 1]
+    if (last && !last.code && !code) last.text += part
+    else segments.push({ text: part, code })
+  }
+  let at = 0
+  for (const m of text.matchAll(TOKEN)) {
+    push(text.slice(at, m.index), false)
+    push(spans[m[0].charCodeAt(0) - TOKEN_BASE], true)
+    at = m.index + 1
+  }
+  push(text.slice(at), false)
+  return segments
+}
+
+/** Tokenised text with every span's content restored, ticks removed. */
+function expand(text, spans) {
+  return segmentsOf(text, spans).map((s) => s.text).join('')
+}
+
+/** Markdown emphasis removed — the summary is rendered as plain text. Code spans are tokens by now. */
 function plain(text) {
   return text.replace(/\*\*/g, '').replace(/`/g, '').replace(/\s+/g, ' ').trim()
 }
@@ -123,6 +199,12 @@ function plain(text) {
  * whether to update; issue numbers mean nothing to them.
  */
 export function publicText(text) {
+  const { text: tokenised, spans } = protectCode(text)
+  return expand(publicTokenText(tokenised), spans)
+}
+
+/** {@link publicText} over tokenised text: code spans are tokens, untouched. */
+function publicTokenText(text) {
   let out = plain(text.replace(new RegExp(ACTION_REQUIRED_SPAN.source, 'g'), ''))
   let prev
   do {
@@ -147,16 +229,22 @@ export function publicText(text) {
  * a code span (`{ source: 'wallet' }`) as it is punctuation.
  */
 export function bulletSentences(bullet) {
+  const { text, spans } = protectCode(bullet)
+  return tokenSentences(text).map((s) => expand(s, spans))
+}
+
+/** {@link bulletSentences} over tokenised text: a sentence never ends inside a code span. */
+function tokenSentences(bullet) {
   const trimmed = bullet.trim()
   const bold = /^\*\*(.+?)\*\*/.exec(trimmed)
   const sentences = []
   let rest = trimmed
   if (bold) {
-    const head = publicText(bold[1]).replace(/[:]$/, '')
+    const head = publicTokenText(bold[1]).replace(/[:]$/, '')
     if (head.length > 0) sentences.push(/[.!?]$/.test(head) ? head : `${head}.`)
     rest = trimmed.slice(bold[0].length)
   }
-  for (const s of splitSentences(publicText(rest))) {
+  for (const s of splitSentences(publicTokenText(rest))) {
     const clean = s.replace(/^(?:[.,;:](?=\s|$)|\s|—\s)+/, '')
     if (clean.length > 0) sentences.push(clean)
   }
@@ -182,14 +270,16 @@ function splitSentences(text) {
 
 /**
  * A sentence longer than {@link MAX_SUMMARY_CHARS}, shortened at a CLAUSE
- * boundary — a `;` outside brackets — never mid-clause. One with no such
- * boundary is served whole.
+ * boundary — a `;` outside brackets and outside code spans — never
+ * mid-clause. One with no such boundary is served whole. Lengths are of the
+ * expanded text, so a span counts as what a reader sees.
  */
-function fitSentence(sentence) {
-  if (sentence.length <= MAX_SUMMARY_CHARS) return sentence
+function fitSentence(sentence, spans) {
+  const lengthOf = (text) => expand(text, spans).length
+  if (lengthOf(sentence) <= MAX_SUMMARY_CHARS) return sentence
   let depth = 0
   let lastFit = -1
-  for (let i = 0; i < sentence.length && i < MAX_SUMMARY_CHARS; i++) {
+  for (let i = 0; i < sentence.length && lengthOf(sentence.slice(0, i)) < MAX_SUMMARY_CHARS; i++) {
     const c = sentence[i]
     if ('([{'.includes(c)) depth++
     else if (')]}'.includes(c)) depth = Math.max(0, depth - 1)
@@ -209,6 +299,18 @@ const ACTION_REQUIRED_SPAN = /\*\*Update\s+required[.:]?\*\*/
 
 function withoutCodeSpans(text) {
   return text.replace(/`[^`]*`/g, '')
+}
+
+/**
+ * The CHANGELOG's break marker: a bold span OPENING with `BREAKING`
+ * (`**BREAKING**`, `**BREAKING (#3306)**`, `**BREAKING: …`). Not prose that
+ * says "breaking", and not the marker quoted in a code span (#3393).
+ */
+const BREAKING_SPAN = /\*\*BREAKING\b/
+
+/** True when `text` carries a break marker outside a code span. */
+export function carriesBreak(text) {
+  return BREAKING_SPAN.test(withoutCodeSpans(text))
 }
 
 /** True when `text` carries the marker outside a code span. */
@@ -267,16 +369,40 @@ export function noteFromSection({ version, date, body }) {
     lead = proseLead(body)
   }
   if (lead === null || bulletSentences(lead).length === 0) {
-    return { version, date, summary: 'No changes to this package in this release.', action_required: actionRequired }
+    return withSegments({ version, date, text: 'No changes to this package in this release.', spans: [], actionRequired })
   }
-  const [rawHeadline, next] = bulletSentences(lead)
-  const headline = fitSentence(rawHeadline)
-  let summary = headline
+  const { text: tokenised, spans } = protectCode(lead)
+  const [rawHeadline, next] = tokenSentences(tokenised)
+  const headline = fitSentence(rawHeadline, spans)
+  const lengthOf = (text) => expand(text, spans).length
+  const shows = (text) => expand(text, spans).includes('Breaking change')
   // A shortened headline is not followed by its next sentence: that would read
   // as if it followed the clause kept, not the one dropped.
-  if (headline === rawHeadline && next !== undefined && `${headline} ${next}`.length <= MAX_SUMMARY_CHARS) summary = `${headline} ${next}`
-  if (bullets.length > 1) summary += ` (+${bullets.length - 1} more in the changelog)`
-  return { version, date, summary, action_required: actionRequired }
+  const withNext = headline === rawHeadline && next !== undefined ? `${headline} ${next}` : null
+  let text
+  if (!carriesBreak(body) || shows(headline) || (withNext !== null && shows(withNext) && lengthOf(withNext) <= MAX_SUMMARY_CHARS)) {
+    text = withNext !== null && lengthOf(withNext) <= MAX_SUMMARY_CHARS ? withNext : headline
+  } else {
+    // A break the kept text does not show is surfaced, never hidden (#3393).
+    // The notice outranks the next sentence for the budget, and is appended
+    // even past it: a long summary beats a hidden break.
+    const withNotice = withNext !== null ? `${withNext} ${BREAK_NOTICE}` : null
+    text = withNotice !== null && lengthOf(withNotice) <= MAX_SUMMARY_CHARS ? withNotice : `${headline} ${BREAK_NOTICE}`
+  }
+  if (bullets.length > 1) text += ` (+${bullets.length - 1} more in the changelog)`
+  return withSegments({ version, date, text, spans, actionRequired })
+}
+
+/** The note as served: plain `summary`, and the same text as `summary_segments`. */
+function withSegments({ version, date, text, spans, actionRequired }) {
+  const summary_segments = segmentsOf(text, spans)
+  return {
+    version,
+    date,
+    summary: summary_segments.map((s) => s.text).join(''),
+    summary_segments,
+    action_required: actionRequired,
+  }
 }
 
 /**

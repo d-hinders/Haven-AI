@@ -46,12 +46,27 @@ import { CLIENT_RELEASE_DATA } from './client-releases.data.js'
  */
 export const RELEASE_NOTES_PATH = '/releases'
 
+/** One part of a note's summary: prose, or what was a code span in the CHANGELOG. */
+export interface ClientReleaseSummarySegment {
+  text: string
+  code: boolean
+}
+
 export interface ClientReleaseNote {
   version: string
   /** ISO date, `YYYY-MM-DD`. */
   date: string
-  /** One or two sentences — what changed, for someone deciding whether to update. Not the CHANGELOG. */
+  /**
+   * One or two sentences — what changed, for someone deciding whether to
+   * update. Not the CHANGELOG. Plain text: code spans keep their content,
+   * without backticks.
+   */
   summary: string
+  /**
+   * `summary` split into parts, so a renderer can show code as code (#3393).
+   * The texts join to exactly `summary`.
+   */
+  summary_segments: readonly ClientReleaseSummarySegment[]
   /**
    * True when a client must update to keep paying. Not the same as a breaking
    * change: BREAKING means "updating may break you", this means "not updating

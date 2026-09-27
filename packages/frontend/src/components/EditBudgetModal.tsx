@@ -100,13 +100,6 @@ function editMerchantRefusalCopy(detail: string | undefined, merchantName: strin
     case 'no_verified_pay_to':
       return `${merchantName} does not have a confirmed payment address right now, so this budget can't be changed here. Stop it, then fund ${merchantName} again once it has one.`
     case 'not_erc7710':
-      // #3331 round 3, design D / code F5: `not_erc7710` means the payTo
-      // still matches — not every offer there accepts this kind of budget any
-      // more, not that the merchant as a whole stopped — so the build (and
-      // therefore an in-place edit) is refused, but the offers that still
-      // accept it keep using this budget. The fallback only applies "if it
-      // has one", the same accurate wording `MerchantBudgetsList`'s own
-      // helper uses.
       // The build checks ERC-7710 BEFORE comparing addresses, so this refusal
       // can also mean the merchant moved to a new address — say only what is
       // true in both cases, and point at the page that tells them apart.

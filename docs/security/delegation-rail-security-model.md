@@ -201,14 +201,27 @@ the retired session rail's (one period's budget per recipient) — with
 revocation one `disableDelegation` away.
 
 **Batch revocation (#1400):** `POST /agents/:id/delegations/revoke-all`
-prepares ONE UserOp batching a `disableDelegation` call per pending/active
+prepares ONE UserOp batching a `disableDelegation` call per still-enabled
 delegation (`prepareCalls`, `ExecutionMode.BatchDefault` — atomic: all
-disable or none do). The owner signs that UserOp exactly as a single revoke;
-Haven still cannot sign it (invariant 3 unchanged). Fail-closed ordering: the
-DB rows flip to `revoked` only AFTER the UserOp lands, so a crash window can
-leave on-chain-disabled rows still marked active (a directionally safe
-surplus — a later redemption attempt reverts on-chain), never the reverse.
-Because `disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
+disable or none do; "still enabled" spans `pending`, `active` AND `replaced`
+rows since #3343 — a replaced row's delegation is live until its own disable
+lands). The owner signs that UserOp exactly as a single revoke; Haven still
+cannot sign it (invariant 3 unchanged). Fail-closed ordering: the DB rows
+flip to `revoked` only AFTER the UserOp lands, so a crash window can leave
+on-chain-disabled rows still marked active (a directionally safe surplus — a
+later redemption attempt reverts on-chain), never the reverse. What makes
+that ordering honest is the CALldata binding (#3343): a submit route records
+`revoked` only after its server verifies the signed UserOp's calldata —
+decoded from the account's `execute` envelope, selector-checked — actually
+disables the delegation(s) it is about to mark, by `delegationIdentity`
+(signature excluded), against the set the SERVER derives (`pending`/`active`/
+`replaced`), not a client-supplied hash list. The per-hash route refuses an
+op that does not disable its one row (400, before submission); revoke-all and
+the re-key revoke refuse an op that does not disable exactly the server's
+whole still-enabled set (409 re-prepare — the re-key stays at `preflight`,
+its point of no return). The client pairing of a userop with delegation
+hashes, and any client-supplied hash list, are not trusted inputs. Because
+`disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
 the batch is atomic, the prepare step reconciles that window (#1423): it reads
 `disabledDelegations(hash)` for every candidate, heals already-disabled rows
 to `revoked`, and drops them from the batch — a failed read degrades to the

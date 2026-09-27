@@ -115,10 +115,11 @@ function refuseAgentKey(request: FastifyRequest, reply: FastifyReply, done: () =
  * `GATED` array reference: registering the limiter on `PUT`'s `config` alone
  * still pushed its rate-limit hook onto the same array `GET` (which has no
  * `config.rateLimit` at all) was ALSO registered with — so an unlimited GET
- * silently inherited PUT's limiter and bucket, and GET/PUT/POST all shared
- * ONE counter instead of each having its own. Each call below must return a
- * FRESH array so a hook pushed onto one route's hooks can never reach
- * another's.
+ * silently inherited PUT's limiter. Each call below must return a FRESH
+ * array so a hook pushed onto one route's hooks can never reach another's.
+ * (This keeps GET unlimited; it does NOT give PUT and POST separate counts —
+ * the production `SharedRateLimitStore` keys on the credential alone, so
+ * every rate-limited route a credential calls shares one count, #1680.)
  */
 const gatedHooks = () => [requireFeatureEnabled, refuseAgentKey, authMiddleware]
 const ungatedHooks = () => [refuseAgentKey, authMiddleware]

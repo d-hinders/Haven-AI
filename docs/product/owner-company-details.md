@@ -70,8 +70,11 @@ returns before the check completes. The check resolves to exactly one of:
   check", never "we checked and it failed". The same status covers a VAT
   number whose own prefix is not a VIES member country code (EU member states,
   Greece as `EL`, and Northern Ireland's `XI`) — VIES itself has no way to
-  confirm it, so no VIES call is made at all, and the outcome is recorded
-  immediately (captain's decision, #3332 review m1).
+  confirm it, so no VIES call is made at all. The outcome is recorded by the
+  same background check runner (the `PUT` response still shows `pending`
+  until it lands, usually at once), and `vies_checked_at` then records when
+  Haven recorded that outcome rather than a VIES answer (captain's decision,
+  #3332 review m1). A `GR…` prefix is not in this group: it is asked as `EL`.
 
 A row can never get stuck `pending` forever: `GET /user/company-details`
 re-triggers a check for its own row if it has been `pending` for more than a
@@ -100,9 +103,9 @@ exception (see its row below).
 | Route | Notes |
 |---|---|
 | `GET /user/company-details` | 404 when the flag is off. 404 if nothing is saved. Re-triggers a stale `pending` check (an atomic claim) as a side effect. |
-| `PUT /user/company-details` | 404 when the flag is off. Full replacement. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential. |
+| `PUT /user/company-details` | 404 when the flag is off. Full replacement. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
 | `DELETE /user/company-details` | **Works regardless of the flag** — the owner's erasure path always works, even after an operator turns the feature back off (owner-privacy default). `{ ok: true }` whether or not a row existed. |
-| `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential. |
+| `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
 
 An agent API key is refused with a named `403` on every route above,
 including `DELETE` — this is an owner-only surface (an API today; a dashboard
@@ -165,7 +168,7 @@ nothing else can read it through Haven's API.
 `parties.buyer` is additive on `GET /payments/:id/receipt` and the receipts
 list (`GET /machine-payments/receipts`, `haven_list_receipts`) only. Two other
 payment-status surfaces do NOT carry it, deliberately out of scope for #3332:
-`GET /payments/:id/status` (`routes/agent-payment-status.ts`,
+`GET /machine-payments/:id/status` (`modules/payments/agent-payment-status.ts`,
 `haven_get_payment_status`) and the `POST /machine-payments/evidence` 202
 echo — both report payment/settlement state, not the buyer's company
 details, and adding it there is a separate, unreviewed change. The OpenAPI

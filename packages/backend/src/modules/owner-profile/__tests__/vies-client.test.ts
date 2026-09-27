@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { PinnedRequest, PinnedResponse, PinnedTransport, ResolvedAddress } from '../../../infra/http/ssrf-guard.js'
-import { checkVatWithVies, viesRequestForVatNumber } from '../vies-client.js'
+import { isViesMemberPrefix, checkVatWithVies, viesRequestForVatNumber } from '../vies-client.js'
 
 const publicResolver = async (): Promise<ResolvedAddress[]> => [{ address: '93.184.216.34', family: 4 }]
 
@@ -251,3 +251,14 @@ describe('checkVatWithVies request body, for hand-derived VIES request values (#
   })
 })
 
+describe('isViesMemberPrefix (#3332 review m1 / round 3 nit-4)', () => {
+  it.each(['SE556703748501', 'DE811569869', 'EL094014201', 'GR094014201', 'XI123456789'])(
+    '%s is served by VIES (GR is asked as EL; XI is Northern Ireland)',
+    (vat) => {
+      expect(isViesMemberPrefix(vat)).toBe(true)
+    },
+  )
+  it.each(['GB123456789', 'NO123456789', 'CH123456789', 'US123456789'])('%s is not — no VIES call is made', (vat) => {
+    expect(isViesMemberPrefix(vat)).toBe(false)
+  })
+})

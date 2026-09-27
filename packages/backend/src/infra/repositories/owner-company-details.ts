@@ -175,7 +175,7 @@ export async function markViesPending(userId: string, db: Executor = pool): Prom
 }
 
 /**
- * #3332 review M3: the atomic counterpart to `findStalePendingForUser` — an
+ * #3332 review M3: an atomic stale-pending claim — an
  * UPDATE, not a SELECT, so two concurrent callers (two `GET
  * /user/company-details` requests racing) can never both claim the same
  * stale row. Bumping `updated_at` to `NOW()` in the SAME statement that reads
@@ -211,7 +211,7 @@ export async function claimStalePendingForUser(
 
 /**
  * The buyer-party fields joined by `user_id`, for the payment-evidence
- * `parties.buyer` block (#3332). Deliberately narrower than the settings row:
+ * `parties.buyer` block (#3332). Deliberately narrower than the stored row:
  * no timestamps but `created_at`/`updated_at`, since a receipt states what the
  * details ARE, not their record-keeping history.
  */
@@ -247,7 +247,7 @@ export interface BuyerJoinColumns {
 /**
  * `undefined` (never present on the wire) unless the LEFT JOIN matched AND
  * the caller says the feature is on — the flag gates the FIELD, not just the
- * settings form, so a caller must pass `enabled` explicitly rather than this
+ * company-details routes, so a caller must pass `enabled` explicitly rather than this
  * function reading `config` itself (this module has no business knowing
  * about `config.ts`, and a repository that reads config is untestable
  * without booting the whole app).

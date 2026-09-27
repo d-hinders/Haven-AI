@@ -3996,7 +3996,7 @@ export type components = {
             delegate_account: string | null;
             /** @description `payTo`. */
             merchant: string | null;
-            /** @description The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise. */
+            /** @description The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /machine-payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise. */
             buyer?: components["schemas"]["PartiesBuyer"];
         };
         PartiesBuyer: {
@@ -5747,7 +5747,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Rate limited (20/min per session credential, `ownerProfileRateLimit`, #3332 review M3). */
+            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5877,7 +5877,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Rate limited (20/min per session credential, `ownerProfileRateLimit`, #3332 review M3). */
+            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
             429: {
                 headers: {
                     [name: string]: unknown;

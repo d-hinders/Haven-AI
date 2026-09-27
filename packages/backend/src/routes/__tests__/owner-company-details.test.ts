@@ -269,16 +269,19 @@ describeDb('owner company details routes (#3332)', () => {
   })
 
   /**
-   * #3332 review round 2 (M-A): a real `@fastify/rate-limit` registration,
-   * the same shape `index.ts` registers it with (`global: false`,
-   * `rateLimitKeyFor` as the key generator) — not the plain `app` above,
+   * #3332 review round 2 (M-A): a real `@fastify/rate-limit` registration
+   * (`global: false`, `rateLimitKeyFor` as the key generator, as `index.ts`
+   * does — but on the plugin's in-memory store, not the production
+   * `SharedRateLimitStore`, which shares one count per credential across
+   * routes; the GET property below does not depend on the store) — not the
+   * plain `app` above,
    * which never loads the plugin at all and so could never have caught the
    * bug this guards: `GET`, `PUT` and `POST` used to share ONE `onRequest`
    * array object, so registering the limiter's `config.rateLimit` on `PUT`
    * pushed its hook onto the SAME array `GET` was registered with, and all
-   * three routes shared one counter. Mutation: reverting the route module's
-   * per-route `onRequest` arrays back to one shared array turns every
-   * assertion below red (GET starts 429ing, and PUT/POST's counts merge).
+   * three routes were limited. Mutation: reverting the route module's
+   * per-route `onRequest` arrays back to one shared array turns the GET
+   * assertion red (GET starts 429ing).
    */
   describe('rate limiting (#3332 review M-A)', () => {
     let limitedApp: FastifyInstance

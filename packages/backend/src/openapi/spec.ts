@@ -1124,7 +1124,7 @@ const partiesSchema = {
     buyer: {
       $ref: '#/components/schemas/PartiesBuyer',
       description:
-        "The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise.",
+        "The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /machine-payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise.",
     },
   },
   additionalProperties: false,
@@ -1715,7 +1715,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
-          '429': { ...errorResponse, description: 'Rate limited (20/min per session credential, `ownerProfileRateLimit`, #3332 review M3).' },
+          '429': { ...errorResponse, description: 'Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls.' },
         },
       },
       delete: {
@@ -1751,7 +1751,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
-          '429': { ...errorResponse, description: 'Rate limited (20/min per session credential, `ownerProfileRateLimit`, #3332 review M3).' },
+          '429': { ...errorResponse, description: 'Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls.' },
         },
       },
     },

@@ -345,7 +345,11 @@ describe('#3343 re-key revoke submit — calldata binding', () => {
       disableCall(JSON.stringify(storedDelegation('1'))),
       disableCall(JSON.stringify(storedDelegation('2'))),
     ])
-    const res = await submit({ signature, user_operation: { callData: op } })
+    const res = await submit({
+      signature,
+      user_operation: { callData: op },
+      delegation_hashes: [HASH, HASH2],
+    })
     expect(res.statusCode).toBe(200)
     expect(res.json().delegation_hashes).toEqual([HASH, HASH2])
   })
@@ -358,7 +362,11 @@ describe('#3343 re-key revoke submit — calldata binding', () => {
       disableCall(JSON.stringify(storedDelegation('1'))),
       disableCall(JSON.stringify(extra)),
     ])
-    const res = await submit({ signature, user_operation: { callData: op } })
+    const res = await submit({
+      signature,
+      user_operation: { callData: op },
+      delegation_hashes: [HASH],
+    })
     expect(res.statusCode).toBe(409)
     expect(mockTreasury).not.toHaveBeenCalled()
   })
@@ -390,14 +398,48 @@ describe('#3343 re-key revoke submit — calldata binding', () => {
 
   it('400s the request-shape failures before anything else', async () => {
     const cases = [
-      { signature: '0xzz', user_operation: { callData: '0x00' } },
-      { user_operation: { callData: '0x00' } },
+      { signature: '0xzz', user_operation: { callData: '0x00' }, delegation_hashes: [HASH] },
+      { signature, user_operation: { callData: '0x00' } },
       { signature, user_operation: { callData: '0x00' }, delegation_hashes: 'nope' },
+      { signature, user_operation: { callData: '0x00' }, delegation_hashes: [] },
     ]
     for (const payload of cases) {
       const res = await submit(payload)
       expect(res.statusCode).toBe(400)
     }
     expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  // #3032 reconciliation: the module is ENFORCED and the spec requires
+  // `delegation_hashes` (`required: ['signature','user_operation','delegation_hashes']`
+  // in openapi/spec.ts — untouched by #3343), so an omitted list can never
+  // reach this handler: the edge answers the 400 envelope before any handler
+  // code runs. The mirror pin lives in request-validation-3032.test.ts
+  // (revoke/submit + delegation_hashes). What the HANDLER keeps is the empty
+  // list (the schema's `items: delegationHash` admits []), and nothing else
+  // about the client list: #3343 derives the revoke set server-side and binds
+  // the signed calldata to it, so even a garbage list is inert — this bare
+  // harness (no request-validation installed) pins that inertness directly.
+  it('the handler refuses an EMPTY list; a malformed client list is inert — the server-derived set decides', async () => {
+    const op = singleEnvelope(disableCall(JSON.stringify(storedDelegation('1'))))
+    const empty = await submit({
+      signature,
+      user_operation: { callData: op },
+      delegation_hashes: [],
+    })
+    expect(empty.statusCode).toBe(400)
+    expect(empty.json().error).toBe('delegation_hashes (from the prepare step) is required')
+    expect(mockTreasury).not.toHaveBeenCalled()
+    // The schema's `type: array` would refuse 'nope' at the enforced edge
+    // (pinned in request-validation-3032.test.ts); here it reaches the
+    // handler and changes NOTHING — the outcome is the server's set.
+    const inert = await submit({
+      signature,
+      user_operation: { callData: op },
+      delegation_hashes: 'nope' as unknown as string[],
+    })
+    expect(inert.statusCode).toBe(200)
+    expect(inert.json().delegation_hashes).toEqual([HASH])
+    expect(mockRevokeByHashes).toHaveBeenCalledWith(AGENT_ID, [HASH])
   })
 })

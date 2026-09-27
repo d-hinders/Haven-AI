@@ -5962,7 +5962,7 @@ export const openapiSpec = {
             ...errorResponse,
             description:
               'Idempotency conflict: the key already belongs to a payment with a different token, ' +
-              'recipient or amount, or it replays an intent that is mid-flight ' +
+              'recipient, amount or task budget (#3392), or it replays an intent that is mid-flight ' +
               '(pending_signature / submitted). Only `payment_intents` carry the key — the ' +
               'approval-queue replay fallback is gone with the table (#2055).',
           },
@@ -8960,13 +8960,13 @@ export const openapiSpec = {
             minLength: 1,
             maxLength: 128,
             description:
-              'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send.',
+              'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer — token, recipient, amount or task budget (#3392) — is a 409.',
           },
           task_budget_id: {
             type: 'string',
             minLength: 1,
             description:
-              '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
+              '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
           },
         },
         additionalProperties: true,
@@ -9257,7 +9257,7 @@ export const openapiSpec = {
             type: 'string',
             minLength: 1,
             description:
-              '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
+              '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
           },
         },
         additionalProperties: false,

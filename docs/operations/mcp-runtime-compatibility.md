@@ -2317,6 +2317,19 @@ that still shows the double-child behaviour — recognisable by a second
 `payment_id` for the same key, with `haven_get_payment_status.idempotencyKey`
 reading `null`.
 
+> **Re-verified (#3392, 2026-09-27):** the replay recipes above gained one
+> refusal on every runtime: a keyed retry naming a DIFFERENT `task_budget_id`
+> / `taskBudgetId` than the stored intent was charged under — or none where
+> the row has one, or one where it has none — now answers 409
+> (`…different x402 task_budget` on `/x402`; the sibling wording on
+> `/payments`) instead of replaying the first payment charged to the other
+> budget. SDK `0.6.0-alpha.0` and later additionally refuse locally, before
+> any network call, when the client's own receipt cache or in-flight entry
+> was created under a different budget (`X402TaskBudgetMismatchError`);
+> published SDKs before that never send the budget, so their retries are
+> none-vs-none and replay exactly as before. No wire field moves and no
+> runtime needs an update for calls that never name a task budget.
+
 One more skew row since #1307, on the SETTLE leg rather than the sign leg:
 `haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /
 `tool_name` / `arguments` / `mcp_transport` as optional and rehydrate them by

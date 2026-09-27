@@ -173,6 +173,12 @@ export function buildAttestCall(chainId: number, claim: PassportClaim): { to: st
  *   attester must match it. On the direct-mint path EAS sets attester to
  *   `msg.sender`, so a mismatch means the log does not describe this mint.
  *
+ * Every field read happens INSIDE the parse guard: since #3342 moved them
+ * there, a lazily-failing log (ethers v6 defers decode errors to first arg
+ * access) is skipped as absence of evidence, not thrown past the caller's
+ * record close (#3395 names this — the mint path's reader semantics did
+ * change, they did not stay untouched).
+ *
  * A receipt with no such log returns null — ABSENCE OF EVIDENCE. Callers must
  * never fall back to a prediction on null; see `anchorOnChain`.
  */
@@ -186,17 +192,15 @@ export function readMinedAttestationUid(
   const iface = new Interface(EAS_ABI)
   for (const log of receipt.logs) {
     if (log.address.toLowerCase() !== eas.toLowerCase()) continue
-    let parsed
+    // Every field read is inside this guard: ethers v6 decodes lazily, so a
+    // malformed topic or data surfaces as a DEFERRED error on first arg
+    // access, not at parseLog. An unreadable log is ABSENCE OF EVIDENCE
+    // (#3294) — skipped, never a crash past the caller's record close or a
+    // partial answer. The #3342 fixture keeps its attester topic left-padded
+    // to 32 bytes so THIS guard, not the ABI decoder, refuses foreign logs.
     try {
-      parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
+      const parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
       if (parsed?.name !== 'Attested') continue
-      // ethers v6 decodes lazily: a malformed topic (e.g. an address topic
-      // without the zero high bytes real chain data always carries) surfaces
-      // as a DEFERRED error on first arg access, not at parseLog. Read every
-      // field inside this guard — an unreadable log is ABSENCE OF EVIDENCE
-      // (#3294), never a crash past the caller's record close or a partial
-      // answer. The #3342 fixture keeps its attester topic left-padded to
-      // 32 bytes so THIS guard, not the ABI decoder, refuses foreign logs.
       const eventSchema = String(parsed.args.schemaUID ?? '').toLowerCase()
       if (eventSchema !== schemaUid.toLowerCase()) continue
       if (opts.from) {
@@ -348,6 +352,11 @@ export const anchorOnChain: Anchor = async (
 /**
  * The outcome of the proven-ours anchor read (`readProvenAnchorUid`, #3342).
  *
+ * Chain reads when the receipt answers: TWO — the receipt, then the tx body
+ * for attribution (the pre-#3342 wording "one receipt read" undercounted;
+ * #3395). `no-receipt` answers after the receipt read alone; `no-candidate`
+ * after it too — no tx fetch is spent on absence of evidence.
+ *
  * Tagged rather than nullable so a caller cannot conflate "the chain has no
  * answer yet" (`no-receipt`, `no-candidate` — retryable silence) with "the
  * chain answered and the evidence failed the invariant" (`refused` — a
@@ -385,6 +394,11 @@ export type ProvenAnchorRead =
  *   a transaction fetch is spent at all: `no-candidate` answers without one,
  *   the same absence-of-evidence the mint path answers with. A receipt with
  *   logs from other contracts in the same tx is fine.
+ * - When a same-schema, foreign-attester log precedes ours, OURS is the one
+ *   returned (#3342's candidate-equality criterion — enforced by #3395): the
+ *   proven scan skips every log whose attester is not the tx's own sender,
+ *   exactly as it skips a foreign schema. The refusal left for this read is
+ *   the empty proven scan — every pinned-schema log attested by someone else.
  *
  * Returns the outcome tagged (`ProvenAnchorRead`); `refused` names the failed
  * guard. ABSENCE of evidence is never evidence of a UID — callers write only
@@ -408,6 +422,9 @@ export async function readProvenAnchorUid(chainId: number, txHash: string): Prom
   if (!tx.to || tx.to.toLowerCase() !== eas.toLowerCase()) {
     return {
       kind: 'refused',
+      // The candidate scan found a pinned-schema log, but THIS tx cannot have
+      // minted one (#3395: the reason now names that contradiction, not a
+      // wrong attester claim — the log may well be correctly attested).
       reason: `tx ${txHash} did not target the EAS contract — its Attested log is not ours`,
     }
   }
@@ -418,10 +435,26 @@ export async function readProvenAnchorUid(chainId: number, txHash: string): Prom
     }
   }
   const uid = readMinedAttestationUid(chainId, receipt, { from: tx.from })
-  if (!uid || uid.toLowerCase() !== candidate.toLowerCase()) {
+  if (!uid) {
+    // Candidate-equality refusal, restructured by #3395. Before #3342 the
+    // reader took the FIRST pinned-schema log; #3342 added the equality
+    // check `uid !== candidate → refused`, whose only reachable effect was
+    // to refuse a WHOLE tx when a same-schema, foreign-attester log precedes
+    // ours — contradicting #3342's own criterion ("ours must be chosen").
+    // The proven scan's filter is a strict subset of the candidate scan's,
+    // so a proven UID always equals a candidate; the equality half was dead.
+    // The behaviour now chosen, per that criterion: OURS is returned whenever
+    // the tx's own sender attested a pinned-schema log — the foreign log is
+    // skipped exactly as a foreign-SCHEMA log always was. What remains
+    // refused is a receipt whose proven read is EMPTY after a candidate
+    // existed: every pinned-schema log in this tx is attested by someone
+    // other than the transaction's own sender, so nothing here is provably
+    // ours. (Reachability is near zero — the pinned schema has no resolver,
+    // so no third party can mint under it — but the refusal keeps its
+    // accurate reason for the day one exists.)
     return {
       kind: 'refused',
-      reason: `tx ${txHash}'s Attested log fails the proven-ours invariant (attester is not the tx's own sender)`,
+      reason: `tx ${txHash}'s pinned-schema Attested log(s) are all attested by someone other than the transaction's own sender — no provably-ours UID`,
     }
   }
   return { kind: 'ours', uid }
@@ -512,10 +545,11 @@ export async function repairAnchorUidFromReceipt(
     // Already right. Record the confirmation so the row leaves the repair
     // queue — the pre-#3342 code returned here WITHOUT writing anything, and
     // the writeless outcome is exactly what re-queued the same oldest rows
-    // every tick. The guard (anchored, same tx, not already confirmed) can
+    // every tick. The guard (anchored, same tx, same stored UID — the CAS
+    // parity `repairAnchoredUid` has, #3395 — and not already confirmed) can
     // refuse: a row that moved mid-read is re-checked on a later pass, and
     // its non-confirmation is REPORTED, never folded into healthy.
-    const confirmed = await confirmAnchorUid(agentId, txHash)
+    const confirmed = await confirmAnchorUid(agentId, txHash, row.attestation_uid)
     if (!confirmed) {
       return {
         repaired: false,

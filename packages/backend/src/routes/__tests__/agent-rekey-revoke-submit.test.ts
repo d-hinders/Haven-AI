@@ -415,20 +415,13 @@ describe('#3343 re-key revoke submit — calldata binding', () => {
   // in openapi/spec.ts — untouched by #3343), so an omitted list can never
   // reach this handler: the edge answers the 400 envelope before any handler
   // code runs. The mirror pin lives in request-validation-3032.test.ts
-  // (revoke/submit + delegation_hashes); this bare harness (no
-  // request-validation installed) pins the route handler's own contract for
-  // the shape it is SPEC'd to receive: `isDelegationHashList`-malformed and
-  // empty lists — the two cases the schema admits but #3343's derived-set
-  // policy must still refuse with the prepare-step guidance.
-  it('the enforced edge owns omission; the handler owns malformed and empty lists', async () => {
+  // (revoke/submit + delegation_hashes). What the HANDLER keeps is the empty
+  // list (the schema's `items: delegationHash` admits []), and nothing else
+  // about the client list: #3343 derives the revoke set server-side and binds
+  // the signed calldata to it, so even a garbage list is inert — this bare
+  // harness (no request-validation installed) pins that inertness directly.
+  it('the handler refuses an EMPTY list; a malformed client list is inert — the server-derived set decides', async () => {
     const op = singleEnvelope(disableCall(JSON.stringify(storedDelegation('1'))))
-    const malformed = await submit({
-      signature,
-      user_operation: { callData: op },
-      delegation_hashes: 'nope' as unknown as string[],
-    })
-    expect(malformed.statusCode).toBe(400)
-    expect(malformed.json().error).toBe('delegation_hashes (from the prepare step) is required')
     const empty = await submit({
       signature,
       user_operation: { callData: op },
@@ -437,5 +430,16 @@ describe('#3343 re-key revoke submit — calldata binding', () => {
     expect(empty.statusCode).toBe(400)
     expect(empty.json().error).toBe('delegation_hashes (from the prepare step) is required')
     expect(mockTreasury).not.toHaveBeenCalled()
+    // The schema's `type: array` would refuse 'nope' at the enforced edge
+    // (pinned in request-validation-3032.test.ts); here it reaches the
+    // handler and changes NOTHING — the outcome is the server's set.
+    const inert = await submit({
+      signature,
+      user_operation: { callData: op },
+      delegation_hashes: 'nope' as unknown as string[],
+    })
+    expect(inert.statusCode).toBe(200)
+    expect(inert.json().delegation_hashes).toEqual([HASH])
+    expect(mockRevokeByHashes).toHaveBeenCalledWith(AGENT_ID, [HASH])
   })
 })

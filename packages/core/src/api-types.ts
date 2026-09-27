@@ -3798,8 +3798,6 @@ export type components = {
             idempotency_key?: string;
             /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             task_budget_id?: string;
-        } & {
-            [key: string]: unknown;
         };
         SignablePaymentIntent: {
             /** Format: uuid */
@@ -4385,7 +4383,6 @@ export type components = {
             paymentId: string;
             rail: string;
             txHash: string;
-            /** Format: uri */
             resourceUrl?: string;
             merchantStatus?: number;
             challengePayload?: {
@@ -16356,7 +16353,12 @@ export interface operations {
     };
     getMachinePaymentBalanceCoverage: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description The ERC-20 contract address to check holdings of. */
+                token: string;
+                /** @description The amount the coverage question is asked about, in ATOMIC units, as a decimal string. Zero passes the schema and is refused by the handler (a sufficiency question about nothing has no honest answer). */
+                amount_atomic: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

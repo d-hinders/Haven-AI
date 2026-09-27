@@ -2179,7 +2179,16 @@ export const openapiSpec = {
                 type: 'object',
                 required: ['signature'],
                 properties: {
-                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130,}$' },
+                  // #3031: the rung's TWO constraints, both expressible in
+                  // one pattern. `{130,}` was already here; the rung also
+                  // refused an ODD number of hex characters
+                  // (`signature.length % 2 !== 0` — hex travels as byte
+                  // pairs, so an odd tail cannot decode). `(?:[..]{2}){65,}`
+                  // says exactly that: 65+ whole bytes, 130+ hex chars, even
+                  // length. 65-byte ECDSA and longer WebAuthn assertions
+                  // both still pass; the EIP-1271 redemption check stays the
+                  // real validator.
+                  signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2}){65,}$' },
                 },
               },
             },
@@ -6076,7 +6085,17 @@ export const openapiSpec = {
                 type: 'object',
                 required: ['signature'],
                 properties: {
-                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+                  // #3031: the handler's floor, stated as it behaves. The
+                  // declared `{130}` was stricter than the route: 100–129 hex
+                  // characters are shape-accepted (the rung that stood in
+                  // `routes/payments.ts` was `^0x[0-9a-fA-F]{100,}$`) and the
+                  // existing suite exercises a 97-BYTE signature through this
+                  // route (`payments-session-rail.test.ts`), so enforcing the
+                  // old declaration would have refused accepted shapes. The
+                  // REAL validator is the account's own EIP-1271/4337 check at
+                  // submit — this is a shape check only, so it states only
+                  // what the shape check accepts.
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{100,}$' },
                 },
                 additionalProperties: false,
               },
@@ -6477,6 +6496,39 @@ export const openapiSpec = {
           'HELD funds. Rail-aware like every read: both retired rails answer 410. Reporting only — ' +
           'grants no authority, moves nothing; enforcement stays on-chain.',
         security: [{ AgentApiKey: [] }],
+        // #3031: the two query parameters declared. The route has required
+        // both since #3126 (`parseBalanceCoverageQuery` refuses their absence
+        // with a 400 naming the field) and no client calls the route without
+        // them — but the spec declared nothing, so enforcement would have
+        // answered a spec refusal only where the handler meant to answer its
+        // own 400. Declared as the handler parses them. `token` is an ADDRESS
+        // because that is the route's contract: the hosted MCP tool resolves
+        // a token SYMBOL against the agent's allowances FIRST (#3213,
+        // `state-direct-recovery.ts`) and calls this route with the address
+        // — the 2026-09-22 traffic drive's "symbol form" never reached this
+        // route as a symbol. A non-address value reaches the chain read today
+        // and is mislabelled `covered: null` (an RPC failure); under
+        // enforcement the schema refuses it as the caller error it is.
+        // `amount_atomic` is a decimal atomic string — the `^[0-9]+$` HALF of
+        // the handler's check is here; the `> 0` half JSON Schema does not
+        // express and the handler keeps (`must be a decimal atomic amount`).
+        parameters: [
+          {
+            name: 'token',
+            in: 'query',
+            required: true,
+            schema: address,
+            description: 'The ERC-20 contract address to check holdings of.',
+          },
+          {
+            name: 'amount_atomic',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', pattern: '^[0-9]+$' },
+            description:
+              'The amount the coverage question is asked about, in ATOMIC units, as a decimal string. Zero passes the schema and is refused by the handler (a sufficiency question about nothing has no honest answer).',
+          },
+        ],
         responses: {
           '200': {
             description: 'The coverage answer for the requested token and amount.',
@@ -6599,6 +6651,8 @@ export const openapiSpec = {
                   },
                   idempotency_key: {
                     type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
                     description:
                       'Validated (1–128 characters) and then IGNORED — nothing is deduplicated, ' +
                       'because every call refuses. Accepted only so an existing client is ' +
@@ -8983,7 +9037,15 @@ export const openapiSpec = {
               '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
           },
         },
-        additionalProperties: true,
+        // #3031: CLOSED. The shipped SDK sends exactly the four fields above
+        // (`createIntent`), and every field the handler used to rung out is
+        // declared. An undeclared field used to ride through to the handler,
+        // which ignored it — on a route that mints a payment intent that is
+        // silent-typo exposure (`idempotencyKey` instead of
+        // `idempotency_key` deduplicates nothing). `removeAdditional: false`
+        // means nothing is stripped either: an unknown field is REFUSED,
+        // never rerouted.
+        additionalProperties: false,
       },
       SignablePaymentIntent: {
         type: 'object',
@@ -9465,6 +9527,18 @@ export const openapiSpec = {
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
         },
         additionalProperties: false,
+        // #3031 round 2: the pre-#3031 declaration, RESTORED. Round 1 made
+        // this schema permissive so the handler's 410 would win over any
+        // body — but the owner decision (epic #3028, 2026-09-24T21:24:44Z,
+        // closing #3223) ordered the retirement answer moved to `onRequest`
+        // instead (the #3030 retired-tombstone pattern), and the move makes
+        // the strict schema SAFE again: the tombstone hook refuses at
+        // `onRequest`, which fastify runs BEFORE schema validation, so a
+        // body that misses the declared shape gets the honest 410, not a
+        // 400. What the schema then refuses (for a hypothetical future that
+        // lets the hook's answer lapse) is a body the tombstone would have
+        // refused anyway — no accepted shape narrows. `AuthorizeBody`
+        // remains the route's request TYPE for documentation.
       },
       MachinePaymentAuthorizeResponse: {
         oneOf: [
@@ -9779,7 +9853,15 @@ export const openapiSpec = {
           paymentId: uuid,
           rail: { type: 'string' },
           txHash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-          resourceUrl: { type: 'string', format: 'uri' },
+          // #3031: a plain string, not `format: uri`. The handler's guard was
+          // string-ness only, and the SEMANTIC check — the value must equal
+          // the settled payment's own resource URL — lives in
+          // `modules/mpp/evidence.ts` and refuses 409 `resourceUrl does not
+          // match payment intent`. The format would have refused any
+          // syntactically-non-URI string the semantic check was already going
+          // to answer 409, as a 400 naming a different rule; the shape check
+          // states only the shape.
+          resourceUrl: { type: 'string' },
           merchantStatus: { type: 'integer', minimum: 100, maximum: 599 },
           challengePayload: { type: 'object', additionalProperties: true },
           selectedPayment: { type: 'object', additionalProperties: true },
@@ -9827,7 +9909,11 @@ export const openapiSpec = {
           value: { type: 'string', description: 'Atomic USDC amount.' },
           validAfter: { type: 'string', description: 'Unix seconds the authorization becomes valid.' },
           validBefore: { type: 'string', description: 'Unix seconds the authorization expires.' },
-          nonce: { type: 'string', description: '0x-prefixed 32-byte hex nonce.' },
+          nonce: {
+            type: 'string',
+            description: '0x-prefixed 32-byte hex nonce.',
+            pattern: '^0x[0-9a-fA-F]{64}$',
+          },
           token: address,
           chainId: { type: 'integer', examples: [8453] },
         },
@@ -9864,7 +9950,11 @@ export const openapiSpec = {
         required: ['authorization', 'signature'],
         properties: {
           authorization: { $ref: '#/components/schemas/SweepAuthorization' },
-          signature: { type: 'string', description: 'Delegate EIP-712 signature over the authorization.' },
+          // #3031: the handler's rung stated the same pattern — a 0x-prefixed
+          // hex string of ANY length (the EIP-712 signature length is the
+          // chain's problem at recovery, and `recoverSweepSigner` refuses a
+          // bad one). Stated as the rung had it.
+          signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'Delegate EIP-712 signature over the authorization.' },
         },
         additionalProperties: false,
       },

@@ -70,6 +70,11 @@ import userAccountsRetiredRoutes from './routes/user-accounts-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
+// #3031 round 2: `POST /machine-payments/reconciliation-events` in its own
+// file so it can STAY SHADOWED while the rest of the machine-payments
+// surface is enforced (owner decision, epic #3028 2026-09-24) — see that
+// file's header.
+import machinePaymentsReconciliationEventsRoutes from './routes/machine-payments-reconciliation-events.js'
 import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
 import catalogRoutes from './routes/catalog.js'
@@ -186,15 +191,42 @@ installRequestValidation(app, {
     'routes/user.ts',
     'routes/user-accounts.ts',
     'routes/user-accounts-retired.ts',
-    // #3031 (epic #3028 slice 3): the FIRST money-path module to enforce.
-    // Its five operations are the only ones the 2026-09-22 shadow reading
-    // proved conformant end to end — 24.41 h, zero would_refuse, zero
-    // would_coerce, traffic on all five (57 `POST /x402`, 57 `/authorize`,
-    // 48 `/{id}/settle`, 31 sign-context, 12 merchant-call-context). The
-    // slice's other three modules (`payments`, `agent-delegations`,
-    // `machine-payments`) keep 15 operations with NO traffic in that window
-    // and stay shadowed by owner decision (2026-09-22): a route printed
-    // NOT PROVEN is not enforced on a guess.
+    // #3031 (epic #3028 slice 3): the four MONEY-PATH route modules, the
+    // remainder after #3221 flipped `x402.ts` (the only one the 2026-09-22
+    // shadow reading proved on traffic alone — 24.41 h, zero would_refuse,
+    // zero would_coerce). These three (#3031's other three modules) carried
+    // 15 operations with NO traffic in that window and stayed shadowed by
+    // owner decision (2026-09-22): a route printed NOT PROVEN is not
+    // enforced on a guess. Six of the fifteen were then driven through the
+    // hosted QA MCP the same day (read-only; the one spend-shaped call made
+    // a payment INTENT with the recipient pinned to the agent's own
+    // treasury and deliberately produced no signature — nothing moved;
+    // evidence on epic #3028, 2026-09-22 17:26/17:31/20:56), which leaves
+    // nine that no client calls at all (#3223 — three unreachable by any
+    // client, four owner-session writes not worth driving, reconciliation
+    // events that must not be forced). This slice's instrument for them is
+    // the one the epic's fallback already set for slice 2 (#3030): the
+    // route tests — off-spec → the 400 envelope, every accepted shape
+    // byte-identical — and the #3208 reading pasted on #3028 (2026-09-22
+    // 14:51Z, corrected same day) still holds: zero would_refuse and zero
+    // would_coerce across the whole 24.41 h window. The semantic money-path
+    // refusals (budget, rail, scheme agreement, expiry, the uint96 cap)
+    // stay in the handlers; the schema takes only the SHAPE checks the
+    // spec already declares — see the per-route notes in the four files.
+    //
+    // #3031 round 2 (owner decision, epic #3028 2026-09-24T21:24:44Z,
+    // closing #3223): `POST /machine-payments/reconciliation-events` is the
+    // rollout's NAMED RESIDUE and STAYS SHADOWED — driving it synthetically
+    // would write a false record into a payment's ledger. It moved to its
+    // own route file (`routes/machine-payments-reconciliation-events.ts`)
+    // because enforcement is keyed on the file and the plugin has no
+    // per-operation opt-out; that file is deliberately NOT listed here. It
+    // is enforced the day a real rejection (or a QA scenario that produces
+    // one) gives the shadow reading traffic to prove it — the promotion
+    // checklist carries the note.
+    'routes/payments.ts',
+    'routes/agent-delegations.ts',
+    'routes/machine-payments.ts',
     'routes/x402.ts',
     // #3032 (epic #3028 slice 4, the LAST slice): the remaining five modules
     // join, and the default mode flips to `enforce`. Evidence per the owner's
@@ -432,6 +464,10 @@ await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
+// #3031 round 2: the reconciliation-events route, split out of
+// `machine-payments.ts` so it stays SHADOWED while that module is enforced
+// (owner decision, epic #3028 2026-09-24). Same prefix, one route.
+await app.register(machinePaymentsReconciliationEventsRoutes, { prefix: '/machine-payments' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 // #3078: the merchant layer over the catalog — read-only, same auth door.

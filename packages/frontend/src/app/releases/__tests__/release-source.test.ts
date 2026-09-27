@@ -22,9 +22,11 @@ describe('releases fixture (#3393)', () => {
     expect(fixtureFile.releases).toEqual(clientReleasesFrom(fixtureFile.changelogs))
   })
 
-  it('reaches the states the live data does not: an update-required note and a set minimum', () => {
+  it('reaches the states the live data does not: an update-required note, a set minimum, code and a surfaced break', () => {
     const notes = PUBLISHED_CLIENT_PACKAGES.flatMap((pkg) => fixtureFile.releases[pkg].notes)
     expect(notes.some((n: { action_required: boolean }) => n.action_required)).toBe(true)
+    expect(notes.some((n: { summary_segments: { code: boolean }[] }) => n.summary_segments.some((s) => s.code))).toBe(true)
+    expect(notes.some((n: { summary: string }) => n.summary.includes('Includes a breaking change'))).toBe(true)
     expect(PUBLISHED_CLIENT_PACKAGES.some((pkg) => fixtureFile.compat[pkg].min_version !== null)).toBe(true)
   })
 })

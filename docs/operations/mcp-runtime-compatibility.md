@@ -64,7 +64,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-27"
 ---
 
 # MCP Runtime Compatibility
@@ -1062,6 +1062,21 @@ plus the read-only quote probe still gate any listing on the backend.
 The source of truth is `packages/connect/src/runtime-manifest.ts` (the SDK and
 signer versions are pinned there; `@haven_ai/mcp` tracks its own `MCP_VERSION`,
 and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
+
+> **Re-verification (#3393, 2026-09-27):** the generated
+> `packages/core/src/client-releases.data.ts` changed in two ways, neither a
+> runtime or compatibility change:
+> - each release note gains an additive `summary_segments` field, `summary`
+>   split into `{ text, code }` parts so `/releases` renders code as code. The
+>   texts join to exactly `summary`, which is unchanged for every note but one;
+> - that one is connect 0.6.0-alpha.0, whose summary omitted the break its
+>   bullet carries and now ends "Includes a breaking change: see the changelog."
+>
+> `GET /discovery` and `/.well-known/haven.json` serve the new field. It is
+> additive, so no client that parses these documents breaks, and no in-repo
+> client reads `summary`. No version constant, tool, schema, capability,
+> consent input or version-skew surface moved; `client-compat.ts` is untouched.
+> The Supported Runtime Manifest table and every claim below stand unchanged.
 
 > **Re-verification (#3305):** this doc's covered trees changed in four ways,
 > none of which is a runtime or compatibility change:

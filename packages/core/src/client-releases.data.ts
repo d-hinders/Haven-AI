@@ -21,12 +21,96 @@ export const CLIENT_RELEASE_DATA = {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
         "summary": "Breaking change — the four deprecated HavenPaymentReceipt twins are gone. mapPaymentReceipt no longer emits rail, proofStatus, resourceUrl or merchantAddress, and HavenPaymentReceipt no longer declares them. (+5 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "Breaking change — the four deprecated ",
+            "code": false
+          },
+          {
+            "text": "HavenPaymentReceipt",
+            "code": true
+          },
+          {
+            "text": " twins are gone. ",
+            "code": false
+          },
+          {
+            "text": "mapPaymentReceipt",
+            "code": true
+          },
+          {
+            "text": " no longer emits ",
+            "code": false
+          },
+          {
+            "text": "rail",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "proofStatus",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "resourceUrl",
+            "code": true
+          },
+          {
+            "text": " or ",
+            "code": false
+          },
+          {
+            "text": "merchantAddress",
+            "code": true
+          },
+          {
+            "text": ", and ",
+            "code": false
+          },
+          {
+            "text": "HavenPaymentReceipt",
+            "code": true
+          },
+          {
+            "text": " no longer declares them. (+5 more in the changelog)",
+            "code": false
+          }
+        ],
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity on Haven API requests. Every Haven API request now carries X-Haven-Client: <package>/<version>, @haven_ai/sdk/<version> by default.",
+        "summary_segments": [
+          {
+            "text": "Client identity on Haven API requests. Every Haven API request now carries ",
+            "code": false
+          },
+          {
+            "text": "X-Haven-Client: <package>/<version>",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/sdk/<version>",
+            "code": true
+          },
+          {
+            "text": " by default.",
+            "code": false
+          }
+        ],
         "action_required": false
       }
     ]
@@ -38,12 +122,92 @@ export const CLIENT_RELEASE_DATA = {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
         "summary": "haven_sign gains a task_budget_id form and two new signed shapes. { task_budget_id } alone (mutually exclusive with payment_id / payload_hash) fetches the pending task-budget open or close context and signs it, returning { signature, task_budget_id, purpose } instead of { signature, x402_binding }.",
+        "summary_segments": [
+          {
+            "text": "haven_sign",
+            "code": true
+          },
+          {
+            "text": " gains a ",
+            "code": false
+          },
+          {
+            "text": "task_budget_id",
+            "code": true
+          },
+          {
+            "text": " form and two new signed shapes. ",
+            "code": false
+          },
+          {
+            "text": "{ task_budget_id }",
+            "code": true
+          },
+          {
+            "text": " alone (mutually exclusive with ",
+            "code": false
+          },
+          {
+            "text": "payment_id",
+            "code": true
+          },
+          {
+            "text": " / ",
+            "code": false
+          },
+          {
+            "text": "payload_hash",
+            "code": true
+          },
+          {
+            "text": ") fetches the pending task-budget open or close context and signs it, returning ",
+            "code": false
+          },
+          {
+            "text": "{ signature, task_budget_id, purpose }",
+            "code": true
+          },
+          {
+            "text": " instead of ",
+            "code": false
+          },
+          {
+            "text": "{ signature, x402_binding }",
+            "code": true
+          },
+          {
+            "text": ".",
+            "code": false
+          }
+        ],
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity at sign-context; client_outdated refusal. Both sign-context reads send X-Haven-Client: @haven_ai/signer/<version>.",
+        "summary_segments": [
+          {
+            "text": "Client identity at sign-context; ",
+            "code": false
+          },
+          {
+            "text": "client_outdated",
+            "code": true
+          },
+          {
+            "text": " refusal. Both sign-context reads send ",
+            "code": false
+          },
+          {
+            "text": "X-Haven-Client: @haven_ai/signer/<version>",
+            "code": true
+          },
+          {
+            "text": ".",
+            "code": false
+          }
+        ],
         "action_required": false
       }
     ]
@@ -55,12 +219,120 @@ export const CLIENT_RELEASE_DATA = {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
         "summary": "Breaking change — haven_list_receipts rows lose four keys. rail, proofStatus, resourceUrl and merchantAddress, the deprecated twins kept for one full release since 0.5.0-alpha.0, are no longer emitted; read source, paymentProofStatus, x402ResourceUrl and x402MerchantAddress. (+3 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "Breaking change — ",
+            "code": false
+          },
+          {
+            "text": "haven_list_receipts",
+            "code": true
+          },
+          {
+            "text": " rows lose four keys. ",
+            "code": false
+          },
+          {
+            "text": "rail",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "proofStatus",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "resourceUrl",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "merchantAddress",
+            "code": true
+          },
+          {
+            "text": ", the deprecated twins kept for one full release since ",
+            "code": false
+          },
+          {
+            "text": "0.5.0-alpha.0",
+            "code": true
+          },
+          {
+            "text": ", are no longer emitted; read ",
+            "code": false
+          },
+          {
+            "text": "source",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "paymentProofStatus",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "x402ResourceUrl",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "x402MerchantAddress",
+            "code": true
+          },
+          {
+            "text": ". (+3 more in the changelog)",
+            "code": false
+          }
+        ],
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity and update hint. Haven API requests name @haven_ai/mcp/<version> in X-Haven-Client.",
+        "summary_segments": [
+          {
+            "text": "Client identity and update hint. Haven API requests name ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/mcp/<version>",
+            "code": true
+          },
+          {
+            "text": " in ",
+            "code": false
+          },
+          {
+            "text": "X-Haven-Client",
+            "code": true
+          },
+          {
+            "text": ".",
+            "code": false
+          }
+        ],
         "action_required": false
       }
     ]
@@ -71,13 +343,81 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
-        "summary": "The runtime this connector installs moves to 0.6.0-alpha.0 (no connector source change). A setup or re-run now wires @haven_ai/mcp, @haven_ai/sdk and @haven_ai/signer 0.6.0-alpha.0.",
+        "summary": "The runtime this connector installs moves to 0.6.0-alpha.0 (no connector source change). A setup or re-run now wires @haven_ai/mcp, @haven_ai/sdk and @haven_ai/signer 0.6.0-alpha.0. Includes a breaking change: see the changelog.",
+        "summary_segments": [
+          {
+            "text": "The runtime this connector installs moves to ",
+            "code": false
+          },
+          {
+            "text": "0.6.0-alpha.0",
+            "code": true
+          },
+          {
+            "text": " (no connector source change). A setup or re-run now wires ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/mcp",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/sdk",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/signer",
+            "code": true
+          },
+          {
+            "text": " ",
+            "code": false
+          },
+          {
+            "text": "0.6.0-alpha.0",
+            "code": true
+          },
+          {
+            "text": ". Includes a breaking change: see the changelog.",
+            "code": false
+          }
+        ],
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity. Every request the connector's API client makes (setup resolve/register, status reports, the agent identity read) carries X-Haven-Client: @haven_ai/connect/<version> (CONNECTOR_CLIENT_IDENTITY), so the backend can tell an outdated connector what to run.",
+        "summary_segments": [
+          {
+            "text": "Client identity. Every request the connector's API client makes (setup resolve/register, status reports, the agent identity read) carries ",
+            "code": false
+          },
+          {
+            "text": "X-Haven-Client: @haven_ai/connect/<version>",
+            "code": true
+          },
+          {
+            "text": " (",
+            "code": false
+          },
+          {
+            "text": "CONNECTOR_CLIENT_IDENTITY",
+            "code": true
+          },
+          {
+            "text": "), so the backend can tell an outdated connector what to run.",
+            "code": false
+          }
+        ],
         "action_required": false
       }
     ]
@@ -89,12 +429,68 @@ export const CLIENT_RELEASE_DATA = {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
         "summary": "haven guide: \"If something breaks\". The bundled agent runbook (a copy of @haven_ai/sdk's) gains the section that sends an agent to a result's client_update.upgrade_command and to the /releases page. (+1 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "haven guide",
+            "code": true
+          },
+          {
+            "text": ": \"If something breaks\". The bundled agent runbook (a copy of ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/sdk",
+            "code": true
+          },
+          {
+            "text": "'s) gains the section that sends an agent to a result's ",
+            "code": false
+          },
+          {
+            "text": "client_update.upgrade_command",
+            "code": true
+          },
+          {
+            "text": " and to the ",
+            "code": false
+          },
+          {
+            "text": "/releases",
+            "code": true
+          },
+          {
+            "text": " page. (+1 more in the changelog)",
+            "code": false
+          }
+        ],
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
         "summary": "Client identity. Every Haven API request the CLI makes carries X-Haven-Client: @haven_ai/cli/<version> (CLI_CLIENT_IDENTITY), so the backend can tell an outdated CLI what to run.",
+        "summary_segments": [
+          {
+            "text": "Client identity. Every Haven API request the CLI makes carries ",
+            "code": false
+          },
+          {
+            "text": "X-Haven-Client: @haven_ai/cli/<version>",
+            "code": true
+          },
+          {
+            "text": " (",
+            "code": false
+          },
+          {
+            "text": "CLI_CLIENT_IDENTITY",
+            "code": true
+          },
+          {
+            "text": "), so the backend can tell an outdated CLI what to run.",
+            "code": false
+          }
+        ],
         "action_required": false
       }
     ]

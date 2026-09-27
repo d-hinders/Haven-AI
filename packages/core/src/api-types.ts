@@ -3306,7 +3306,14 @@ export type components = {
                 version: string;
                 /** Format: date */
                 date: string;
+                /** @description Plain text: code spans keep their content, without backticks. */
                 summary: string;
+                /** @description #3393: `summary` split into parts, so a renderer can show code as code. The texts join to exactly `summary`. */
+                summary_segments: {
+                    text: string;
+                    /** @description True when the part was a code span in the CHANGELOG. */
+                    code: boolean;
+                }[];
                 /** @description True when a client must update to keep paying. Not the same as a breaking change. */
                 action_required: boolean;
             }[];

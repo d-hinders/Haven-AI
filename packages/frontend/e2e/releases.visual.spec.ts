@@ -18,8 +18,8 @@
  * `src/app/releases/release-source.ts`. The fixture's release data is exactly
  * what the release generator produces from its fixture CHANGELOGs (pinned by
  * `src/app/releases/__tests__/release-source.test.ts`), and it reaches states
- * the live data never shows: an update-required note and set minimum and
- * recommended versions. The sentinel assertions below fail if the server was
+ * the live data never shows: an update-required note, set minimum and
+ * recommended versions, code spans and a surfaced break. The sentinel assertions below fail if the server was
  * started without the variable, instead of capturing live data.
  *
  * Light only, desktop and mobile — a public marketing-shell page with no
@@ -65,6 +65,10 @@ test.describe('releases page visual regression', () => {
       await expect(page.getByText(FIXTURE_VERSION, { exact: true }).first()).toBeVisible()
       await expect(page.getByText('Update required', { exact: true })).toHaveCount(1)
       await expect(page.locator('dd', { hasText: FIXTURE_SIGNER_MIN })).toHaveCount(1)
+      // Code renders as code, never as body text; a break the headline omits
+      // is surfaced (#3393).
+      await expect(page.locator('code', { hasText: 'haven_list_task_budgets' })).toHaveCount(1)
+      await expect(page.getByText(/Includes a breaking change: see the changelog\./)).toHaveCount(1)
       // The deterministic state: no backend, so no channel, so no command —
       // and never a guessed `@alpha` (#2422).
       // One page-level note, never one per card (#3304 design review).

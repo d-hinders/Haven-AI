@@ -86,15 +86,17 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // the resolveTaskBudgetOrRefusal helper (now resolving the parent by
     // hash, review finding E), and the funding-leg/erc7710 task-budget
     // resolution blocks were inserted above/between these sites.
-    { line: 292, code: 403, ledger: 'row' }, // 3009 funding-leg pre-check: over budget (#2706)
-    { line: 377, code: 502, ledger: 'row' }, // 3009 prepare catch: classified caveat revert (slice 1's writer)
-    { line: 416, code: 403, ledger: 'row' }, // 3009 no open budget delegation (slice 1's writer)
-    { line: 565, code: 403, ledger: 'row' }, // erc7710 no active budget delegation (#2945)
-    { line: 666, code: 403, ledger: 'row' }, // erc7710 pre-check: over budget (#2082)
-    { line: 736, code: 400, ledger: 'skipped' }, // #3117 caller/challenge skew — malformed request, allowlisted
-    { line: 799, code: 502, ledger: 'skipped' }, // settlement-delegation build failure — infrastructure, allowlisted
-    { line: 836, code: 429, ledger: 'skipped' }, // relayer sponsorship budget exhausted — capacity, allowlisted
-    { line: 840, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
+    // #3392 shifted every line below by +3: the shared replayContext now
+    // carries `taskBudgetId` (two comment lines + the field).
+    { line: 295, code: 403, ledger: 'row' }, // 3009 funding-leg pre-check: over budget (#2706)
+    { line: 380, code: 502, ledger: 'row' }, // 3009 prepare catch: classified caveat revert (slice 1's writer)
+    { line: 419, code: 403, ledger: 'row' }, // 3009 no open budget delegation (slice 1's writer)
+    { line: 568, code: 403, ledger: 'row' }, // erc7710 no active budget delegation (#2945)
+    { line: 669, code: 403, ledger: 'row' }, // erc7710 pre-check: over budget (#2082)
+    { line: 739, code: 400, ledger: 'skipped' }, // #3117 caller/challenge skew — malformed request, allowlisted
+    { line: 802, code: 502, ledger: 'skipped' }, // settlement-delegation build failure — infrastructure, allowlisted
+    { line: 839, code: 429, ledger: 'skipped' }, // relayer sponsorship budget exhausted — capacity, allowlisted
+    { line: 843, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
   ],
   'src/routes/payments.ts': [
     // #3271 shifted every line below by +3: `replayIntentBody`'s delegation
@@ -106,13 +108,18 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // resolution block, then #3031's schema restructure — the hand-rolled
     // shape rungs in the prepare handler became the request schema's (−2 on
     // the 502/403 pair) and replayIntentBody collapsed the same way (+1 on
-    // the 429/skipped pair). Pins re-derived against the merged file; the
+    // the 429/skipped pair) — then #3392 shifted every line below by
+    // +12/+13: `mismatch()` gained the task_budget comparison (comment +
+    // widened signature + branch), the doc comment lost the stale
+    // same-contract sentence, both findPaymentReplay call sites gained the
+    // `taskBudgetId` line, and the second (23505-catch) site sits below the
+    // first two shifts. Pins re-derived against the merged file; the
     // census re-checks them against the live source, so a wrong pin reddens
     // here, not in production.
-    { line: 514, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 538, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 834, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 861, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    { line: 526, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
+    { line: 550, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 847, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 874, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
   ],
 }
 
@@ -131,7 +138,7 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
 const RAW_ALLOWLIST: Record<(typeof TARGET_FILES)[number], { line: number; code: number; reason: string }[]> = {
   'src/modules/x402/delegation-authorize.ts': [
     {
-      line: 206,
+      line: 209,
       code: 429,
       reason: 'per-agent hourly x402 cap — spend-velocity protection with its own retry_after_seconds contract; owner decision keeps it unrecorded (a rate_limited reason would be a migration-086 CHECK widening on its own)',
     },
@@ -141,14 +148,14 @@ const RAW_ALLOWLIST: Record<(typeof TARGET_FILES)[number], { line: number; code:
 
 const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; reason: string }[]> = {
   'src/modules/x402/delegation-authorize.ts': [
-    { line: 736, reason: '#3117 the caller\'s decomposed fields disagree with the paymentRequired it sent — a malformed request, not a guardrail refusal' },
-    { line: 799, reason: 'buildSettlementDelegation threw — child-construction infrastructure failure, not spend policy' },
-    { line: 836, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
-    { line: 840, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
+    { line: 739, reason: '#3117 the caller\'s decomposed fields disagree with the paymentRequired it sent — a malformed request, not a guardrail refusal' },
+    { line: 802, reason: 'buildSettlementDelegation threw — child-construction infrastructure failure, not spend policy' },
+    { line: 839, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
+    { line: 843, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
   ],
   'src/routes/payments.ts': [
     {
-      line: 861,
+      line: 874,
       reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
     },
   ],

@@ -170,8 +170,7 @@ function resolveToken(chainId: number, symbol: string) {
 // ── Routes ────────────────────────────────────────────────────────
 
 /**
- * Idempotent-replay lookup for POST /payments (#1207) — the same contract
- * /machine-payments/send carries on the same key column (migration 020).
+ * Idempotent-replay lookup for POST /payments (#1207).
  *
  * A key that matches an existing row returns the FIRST request's result:
  * a still-signable intent replays its original sign_data (delegation-rail
@@ -196,7 +195,7 @@ function resolveToken(chainId: number, symbol: string) {
 async function findPaymentReplay(
   agent: AgentContext,
   idempotencyKey: string,
-  requested: { tokenAddress: string; toAddress: string; amountRaw: string },
+  requested: { tokenAddress: string; toAddress: string; amountRaw: string; taskBudgetId: string | null },
 ): Promise<{ code: number; body: Record<string, unknown> } | null> {
   const statusReplay = async (paymentId: string) => {
     const status = await getAgentPaymentStatus(agent, paymentId)
@@ -208,10 +207,23 @@ async function findPaymentReplay(
       body: { payment_id: paymentId, error: 'Payment already exists but could not be loaded', idempotent_replay: true },
     }
   }
-  const mismatch = (row: { token_address: string; to_address: string; amount_raw: string }): string | null => {
+  const mismatch = (row: {
+    token_address: string
+    to_address: string
+    amount_raw: string
+    task_budget_id: string | null
+  }): string | null => {
     if (row.token_address.toLowerCase() !== requested.tokenAddress) return 'token'
     if (row.to_address.toLowerCase() !== requested.toAddress) return 'recipient'
     if (row.amount_raw !== requested.amountRaw) return 'amount'
+    // #3392: the task budget the payment was charged to is part of the pin,
+    // exactly like token/recipient/amount. Lower-case both ids and treat
+    // "absent" as a value, so A→B, A→none and none→A all refuse. This runs
+    // before any task-budget lookup: a replay naming an id the stored row
+    // does not carry gets this 409 even when the id is malformed.
+    if ((row.task_budget_id ?? null) !== (requested.taskBudgetId ? requested.taskBudgetId.toLowerCase() : null)) {
+      return 'task_budget'
+    }
     return null
   }
 
@@ -405,15 +417,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
     // 4a. Idempotent replay (#1207): a retried request must return the FIRST
     // request's result, never mint a second transfer or a second approval —
-    // the same contract /machine-payments/send has carried since migration
-    // 020, on the same key column, so agents get one mechanism, not a
-    // per-route dialect. Before any chain read: a replay costs two indexed
-    // lookups.
+    // the same key column migration 020 introduced, so agents get one
+    // mechanism, not a per-route dialect. Before any chain read: a replay
+    // costs two indexed lookups.
     if (idempotency_key) {
       const replay = await findPaymentReplay(agent, idempotency_key, {
         tokenAddress: tokenAddress.toLowerCase(),
         toAddress: to.toLowerCase(),
         amountRaw: amountRaw.toString(),
+        taskBudgetId: (task_budget_id as string | undefined) ?? null,
       })
       if (replay) return reply.code(replay.code).send(replay.body)
     }
@@ -591,6 +603,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           tokenAddress: tokenAddress.toLowerCase(),
           toAddress: to.toLowerCase(),
           amountRaw: amountRaw.toString(),
+          taskBudgetId: (task_budget_id as string | undefined) ?? null,
         })
         if (replay) return reply.code(replay.code).send(replay.body)
       }

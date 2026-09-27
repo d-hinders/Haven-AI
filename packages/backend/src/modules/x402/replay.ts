@@ -39,8 +39,38 @@ export async function delegationReplay(
     tokenSymbol: string
     network: string
     facilitatorAddresses?: string[]
+    taskBudgetId?: string
   },
 ): Promise<X402HandlerResult | null> {
+  // #3392: the task budget a payment was charged to is part of the replay
+  // pin, so its comparison runs on `pending_signature` (unexpired) AND
+  // `confirmed` rows — BEFORE the confirmed 200 branch that used to answer
+  // any request body. Lower-cased both sides; "absent" is a value. Expired
+  // rows are never compared: a lazily expired row frees the key exactly as
+  // before. Deliberately a BUDGET-ONLY check here — enforcing the other
+  // fields on confirmed rows is out of scope (a separate decision), so the
+  // full `existingX402IntentMismatch` below stays pending-only.
+  if (existing.status !== 'pending_signature' && existing.status !== 'confirmed') return null
+  if (existing.status === 'pending_signature' && new Date(existing.expires_at as string) < new Date()) {
+    // Lazy-expire: nothing else on the authorize path flips a stale
+    // pending row, and until its status changes the partial unique
+    // index still holds the idempotency key — every retry would loop
+    // on a bare 409 (found by review, #961 M2).
+    await expirePendingIntent(existing.id as string, agent.id)
+    return null
+  }
+  const existingTaskBudget = typeof existing.task_budget_id === 'string' ? existing.task_budget_id.toLowerCase() : null
+  const requestedTaskBudget = typeof request.taskBudgetId === 'string' ? request.taskBudgetId.toLowerCase() : null
+  if (existingTaskBudget !== requestedTaskBudget) {
+    return {
+      code: 409,
+      body: {
+        payment_id: existing.id,
+        status: existing.status,
+        error: 'idempotencyKey already belongs to a different x402 task_budget',
+      },
+    }
+  }
   if (existing.status === 'confirmed' && existing.tx_hash) {
     return {
       code: 200,
@@ -63,15 +93,10 @@ export async function delegationReplay(
       },
     }
   }
+  // Confirmed rows that do not match the 200 branch (no tx_hash) fall through
+  // to null exactly as before #3392 — the caller's insert conflicts and the
+  // request dead-ends on the bare replay-in-progress 409, unchanged.
   if (existing.status !== 'pending_signature') return null
-  if (new Date(existing.expires_at as string) < new Date()) {
-    // Lazy-expire: nothing else on the authorize path flips a stale
-    // pending row, and until its status changes the partial unique
-    // index still holds the idempotency key — every retry would loop
-    // on a bare 409 (found by review, #961 M2).
-    await expirePendingIntent(existing.id as string, agent.id)
-    return null
-  }
   const mismatch = existingX402IntentMismatch(existing, {
     resourceUrl: request.url,
     fundingTo: request.payTo,

@@ -26,7 +26,10 @@ describe('releases fixture (#3393)', () => {
     const notes = PUBLISHED_CLIENT_PACKAGES.flatMap((pkg) => fixtureFile.releases[pkg].notes)
     expect(notes.some((n: { action_required: boolean }) => n.action_required)).toBe(true)
     expect(notes.some((n: { summary_segments: { code: boolean }[] }) => n.summary_segments.some((s) => s.code))).toBe(true)
-    expect(notes.some((n: { summary: string }) => n.summary.includes('Includes a breaking change'))).toBe(true)
+    // Both break-notice forms: alone, and folded before the count (#3402).
+    const summaries = notes.map((n: { summary: string }) => n.summary)
+    expect(summaries.some((s: string) => s.endsWith('Includes a breaking change: see the changelog.'))).toBe(true)
+    expect(summaries.some((s: string) => s.endsWith('Includes a breaking change. (+1 more in the changelog)'))).toBe(true)
     expect(PUBLISHED_CLIENT_PACKAGES.some((pkg) => fixtureFile.compat[pkg].min_version !== null)).toBe(true)
   })
 })

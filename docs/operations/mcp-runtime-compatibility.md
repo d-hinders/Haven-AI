@@ -1034,6 +1034,14 @@ The source of truth is `packages/connect/src/runtime-manifest.ts` (the SDK and
 signer versions are pinned there; `@haven_ai/mcp` tracks its own `MCP_VERSION`,
 and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 
+> **Re-verification (#3402, 2026-09-27):** the release-note generator's
+> break notice gains a shorter form, "Includes a breaking change.", used only
+> when "(+N more in the changelog)" follows it, so a summary names the
+> changelog once. The covered `scripts/README.md` §7b and
+> `scripts/release-bump.test.mjs` change with it. No served note changes:
+> `client-releases.data.ts` is byte-identical, since the one real notice
+> (connect 0.6.0-alpha.0) has no count. Nothing below moves.
+
 > **Re-verification (#3393, 2026-09-27):** the generated
 > `packages/core/src/client-releases.data.ts` changed in two ways, neither a
 > runtime or compatibility change:

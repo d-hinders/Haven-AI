@@ -6,6 +6,7 @@ import {
   renameContactForUser,
 } from '../infra/repositories/contacts.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { isPg23505 } from '../infra/pg-errors.js'
 
 interface CreateContactBody {
   name: string
@@ -43,8 +44,8 @@ export default async function contactRoutes(app: FastifyInstance): Promise<void>
   // spec's `address` schema carries (core's own header says "a *format* check
   // only"), so the plugin refuses exactly what it refused and the duplicate
   // ladder would be dead weight. What remains is the one thing the spec does
-  // NOT express in schema: a name blank after trimming ("blank after trimming
-  // is a 400", spec.ts).
+  // NOT express in schema: a name blank after trimming — spec.ts states that
+  // rule once, and this handler's own 400 carries it.
   app.post<{ Body: CreateContactBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { name, address } = request.body
@@ -104,10 +105,10 @@ export default async function contactRoutes(app: FastifyInstance): Promise<void>
 /**
  * Postgres unique-violation (SQLSTATE 23505). The contacts table has a single
  * unique constraint — UNIQUE(user_id, address) — so the code alone unambiguously
- * means "duplicate address for this user". Matches the `err.code` pattern used
- * in routes/agents.ts; detecting by a message substring would mask any other
- * error whose text happens to contain "unique".
+ * means "duplicate address for this user"; the shared code-only narrow since
+ * #3032 (the constraint-keyed `isPgUniqueViolation` is for multi-unique-index
+ * tables). Matches the `err.code` pattern used in routes/agents.ts; detecting
+ * by a message substring would mask any other error whose text happens to
+ * contain "unique".
  */
-function isUniqueViolation(err: unknown): boolean {
-  return Boolean(err && typeof err === 'object' && 'code' in err && err.code === '23505')
-}
+const isUniqueViolation = (err: unknown): boolean => isPg23505(err)

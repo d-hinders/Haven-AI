@@ -109,9 +109,37 @@ export function rpcEndpoints(chainId: number): string[] {
  * here because `relayer.ts` already imports this file (`secondaryRpcUrl`) and
  * this file must stay below both in the provider graph — a third private copy
  * was one more place for the 12+ heuristic to drift.
+ *
+ * #3391: candidates come from a PARSED URL's path, query and hash only —
+ * never the host. #3387's whole-string split made the host a candidate
+ * (`sepolia.base.org` is 16 characters, `base-sepolia.g.alchemy.com` longer),
+ * which redacted the public node out of the very errors the qa-dev failure
+ * classifier keys on and left a public-only transport reporting
+ * `URL: https://<redacted>`. The whole-string split over `[/?&=#]` remains
+ * the fallback for strings `new URL` refuses, and the 12+-and-no-colon
+ * filter is unchanged — a key-shaped PATH segment (`/v3/<key>`, dRPC's
+ * `/base-sepolia/<key>`) is still derived, and basic-auth credentials still
+ * are not (`user:pass` carries a colon).
  */
 export function secretSegments(url: string): string[] {
-  return url.split(/[/?&=#]/).filter((part) => part.length >= 12 && !part.includes(':'))
+  let parsed: URL | null = null
+  try {
+    parsed = new URL(url)
+  } catch {
+    parsed = null
+  }
+  // Raw parts: `URL` does not decode percent-escapes in path/query/hash, so a
+  // key the vendor percent-encoded still surfaces as its raw candidate text.
+  // The leading `?` is stripped so the first query KEY is a candidate without
+  // it, exactly as the whole-string split (which delimited on `?`) produced.
+  const parts = parsed
+    ? [
+        ...parsed.pathname.split('/'),
+        ...parsed.search.replace(/^\?/, '').split(/[&=]/),
+        parsed.hash.slice(1),
+      ]
+    : url.split(/[/?&=#]/)
+  return parts.filter((part) => part.length >= 12 && !part.includes(':'))
 }
 
 const REDACTED = '<redacted>'
@@ -129,18 +157,33 @@ const REDACTED = '<redacted>'
  * retryable `UnknownRpcError`, so REBUILDING the error (the ethers-side
  * `scrubRpcUrlError` approach, #3365) would turn a terminal 401 into four
  * attempts and a terminal `eth_call` revert into a retried one.
+ *
+ * #3391 hardening: a value is written back only when the scrub changed it,
+ * every write is guarded individually, and nested objects carry a visited
+ * guard. A frozen error, a getter-only own property (a DOMException's
+ * `message` is one) or a cyclic nested value can no longer throw inside the
+ * caller's `catch` — the error surfaces exactly as it was, never broken.
  */
 export function scrubTransportErrorSecrets<E extends Error>(err: E, urls: string[]): E {
   const secrets = urls.flatMap(secretSegments)
   const scrub = (text: string): string =>
     secrets.reduce((acc, secret) => acc.split(secret).join(REDACTED), text)
 
+  const visited = new WeakSet<object>()
   const scrubValue = (value: unknown): unknown => {
     if (typeof value === 'string') return scrub(value)
     if (Array.isArray(value)) return value.map(scrubValue)
     if (value !== null && typeof value === 'object') {
-      for (const [key, member] of Object.entries(value as Record<string, unknown>)) {
-        ;(value as Record<string, unknown>)[key] = scrubValue(member)
+      if (visited.has(value)) return value
+      visited.add(value)
+      const record = value as Record<string, unknown>
+      for (const [key, member] of Object.entries(record)) {
+        try {
+          const scrubbed = scrubValue(member)
+          if (scrubbed !== member) record[key] = scrubbed
+        } catch {
+          // Unwritable member of a nested object: leave it as it is.
+        }
       }
     }
     return value
@@ -152,11 +195,23 @@ export function scrubTransportErrorSecrets<E extends Error>(err: E, urls: string
     causes.add(current)
     const target = current as unknown as Record<string, unknown>
     for (const prop of ['message', 'stack', 'shortMessage', 'details'] as const) {
-      if (typeof target[prop] === 'string') target[prop] = scrub(target[prop] as string)
+      if (typeof target[prop] !== 'string') continue
+      try {
+        const scrubbed = scrub(target[prop] as string)
+        if (scrubbed !== target[prop]) target[prop] = scrubbed
+      } catch {
+        // Getter-only (a DOMException's `message`) or a frozen target: leave
+        // it as it is — the scrub must never throw inside a `catch`.
+      }
     }
     for (const [key, value] of Object.entries(target)) {
       if (key === 'cause' || key === 'request' || key === 'response') continue
-      target[key] = scrubValue(value)
+      try {
+        const scrubbed = scrubValue(value)
+        if (scrubbed !== value) target[key] = scrubbed
+      } catch {
+        // Getter-only or otherwise unwritable own property: leave it as it is.
+      }
     }
     current = target.cause
   }

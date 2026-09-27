@@ -561,7 +561,10 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** Revoke step 2: submit the signed UserOp; the row flips only after it lands. */
+        /**
+         * Revoke step 2: submit the signed UserOp; the row flips only after it lands.
+         * @description The submitted user_operation is BOUND to the delegation being revoked (#3343): its calldata must disable THAT delegation on the pinned DelegationManager (identity comparison, signature excluded), checked before submission. A userop that disables something else — or nothing — is refused 400 and nothing is recorded. On success the delegation is disabled on-chain and the row is marked revoked.
+         */
         post: operations["submitDelegationRevocation"];
         delete?: never;
         options?: never;
@@ -640,7 +643,7 @@ export type paths = {
         put?: never;
         /**
          * Re-key steps 1b + 2: land the revoke, THEN read the now-frozen meter (#1698).
-         * @description Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe.
+         * @description Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe. The revoked set is derived SERVER-side (#3343): every delegation this agent still holds enabled on-chain (pending, active and replaced rows), and the signed calldata must disable exactly that set before anything is recorded — a subset or stale op answers 409 re-prepare, an unreadable one 400, and the stage stays preflight either way.
          */
         post: operations["submitRekeyRevocation"];
         delete?: never;
@@ -740,7 +743,7 @@ export type paths = {
         put?: never;
         /**
          * Batch revoke step 2: submit the signed batch; rows flip only after the UserOp lands.
-         * @description The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.
+         * @description The revoked set is derived SERVER-side (#3343) — every delegation this agent still holds enabled on-chain (pending, active and replaced rows); the request's delegation_hashes is accepted for compatibility but does not decide anything. The signed calldata must disable exactly that set (checked before submission): a subset or stale op answers 409 re-prepare, an unreadable op 400. The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.
          */
         post: operations["submitRevokeAllDelegations"];
         delete?: never;
@@ -3351,7 +3354,14 @@ export type components = {
                 version: string;
                 /** Format: date */
                 date: string;
+                /** @description Plain text: code spans keep their content, without backticks. */
                 summary: string;
+                /** @description #3393: `summary` split into parts, so a renderer can show code as code. The texts join to exactly `summary`. */
+                summary_segments: {
+                    text: string;
+                    /** @description True when the part was a code span in the CHANGELOG. */
+                    code: boolean;
+                }[];
                 /** @description True when a client must update to keep paying. Not the same as a breaking change. */
                 action_required: boolean;
             }[];
@@ -3858,12 +3868,10 @@ export type components = {
             amount: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             to: string;
-            /** @description Optional dedupe key (#1207): a retried request with the same key returns the first request's result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send. */
+            /** @description Optional dedupe key (#1207): a retried request with the same key returns the first request's result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer — token, recipient, amount or task budget (#3392) — is a 409. */
             idempotency_key?: string;
-            /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. */
+            /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             task_budget_id?: string;
-        } & {
-            [key: string]: unknown;
         };
         SignablePaymentIntent: {
             /** Format: uuid */
@@ -4141,7 +4149,7 @@ export type components = {
             paymentRequired?: {
                 [key: string]: unknown;
             };
-            /** @description #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget's signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent's delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. */
+            /** @description #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget's signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent's delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             taskBudgetId?: string;
         };
         X402MerchantCallContext: {
@@ -4462,7 +4470,6 @@ export type components = {
             paymentId: string;
             rail: string;
             txHash: string;
-            /** Format: uri */
             resourceUrl?: string;
             merchantStatus?: number;
             challengePayload?: {
@@ -7290,7 +7297,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Delegation disabled on-chain and marked revoked. */
+            /** @description Delegation disabled on-chain and marked revoked. The recorded revocation was verified against the signed calldata (#3343). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -15355,7 +15362,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Idempotency conflict: the key already belongs to a payment with a different token, recipient or amount, or it replays an intent that is mid-flight (pending_signature / submitted). Only `payment_intents` carry the key — the approval-queue replay fallback is gone with the table (#2055). */
+            /** @description Idempotency conflict: the key already belongs to a payment with a different token, recipient, amount or task budget (#3392), or it replays an intent that is mid-flight (pending_signature / submitted). Only `payment_intents` carry the key — the approval-queue replay fallback is gone with the table (#2055). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -16727,7 +16734,12 @@ export interface operations {
     };
     getMachinePaymentBalanceCoverage: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description The ERC-20 contract address to check holdings of. */
+                token: string;
+                /** @description The amount the coverage question is asked about, in ATOMIC units, as a decimal string. Zero passes the schema and is refused by the handler (a sufficiency question about nothing has no honest answer). */
+                amount_atomic: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

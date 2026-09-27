@@ -335,6 +335,10 @@ export interface X402AuthorizationOptions {
    * a task budget's recipient pin is compared with the agent's own delegate
    * wallet, so a merchant-pinned task budget is refused there
    * (`task_budget_recipient_mismatch`); it pays through erc7710 only (#3378).
+   * #3392: the receipt cache and in-flight map record this id per entry —
+   * reusing an idempotency key under a DIFFERENT budget throws
+   * `X402TaskBudgetMismatchError` before any network call; pay again under a
+   * new key instead.
    */
   taskBudgetId?: string
 }
@@ -2359,6 +2363,33 @@ export class HavenPaymentStateError extends HavenApiError {
 
   get nextAction(): PaymentNextAction {
     return this.state.nextAction
+  }
+}
+
+/**
+ * #3392: the SDK's x402 receipt cache and in-flight map record the
+ * `taskBudgetId` each entry was created under. A call reusing an idempotency
+ * key whose cached/in-flight entry was created under a DIFFERENT task budget
+ * is refused with this typed error BEFORE any network call — the alternative
+ * was silently returning (or joining) a payment charged to another budget.
+ * Typed rather than `HavenApiError`-shaped: no request was attempted, so
+ * there is no HTTP status or response body to carry (the
+ * `HavenZeroSettlementHashError` precedent). A caller that genuinely wants to
+ * pay again under a different budget passes a new `idempotencyKey`.
+ */
+export class X402TaskBudgetMismatchError extends HavenError {
+  readonly x402ErrorCode = 'task_budget_mismatch' as const
+  constructor(
+    message: string,
+    /** The idempotency key whose cached entry was created under another budget. */
+    public readonly idempotencyKey: string,
+    /** The budget the cached/in-flight entry was created under (undefined = none). */
+    public readonly entryTaskBudgetId: string | undefined,
+    /** The budget this call named (undefined = none). */
+    public readonly requestedTaskBudgetId: string | undefined,
+  ) {
+    super(message, 'X402_TASK_BUDGET_MISMATCH')
+    this.name = 'X402TaskBudgetMismatchError'
   }
 }
 

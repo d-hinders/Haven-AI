@@ -79,9 +79,11 @@ describeDb('organization routes (#3164)', () => {
     await app.register(fastifyJwt, { secret: 'test-secret' })
     // Born ENFORCED in `src/index.ts` (#3028 rollout); the suite runs every
     // case under enforcement. agents.ts is enforced since slice 2 —
-    // registration here covers the PUT /agents/:id org-move cases.
+    // registration here covers the PUT /agents/:id org-move cases. The
+    // production shape since the #3032 flip: mode `enforce` — the list
+    // decides only under it (`off` is now the global kill switch).
     installRequestValidation(app, {
-      mode: 'off',
+      mode: 'enforce',
       enforcedModules: ['routes/agents.ts', 'routes/agent-organizations.ts'],
     })
     await app.register(agentRoutes, { prefix: '/agents' })

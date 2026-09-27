@@ -180,6 +180,20 @@ The developer loop that *consumes* a snapshot — merge, wait for the run, poll 
      `## Unreleased` and at bump time for a release; reword to "no update needed"
      or quote it in a code span. `**BREAKING**` does not, because it means
      "updating may break you", not "you must update".
+   - **A break is never hidden** ([#3393](https://github.com/d-hinders/Haven-AI/issues/3393)).
+     A release section carrying a bold span that opens with `BREAKING` (outside a
+     code span; prose such as "breaking for any reader" does not count) always
+     says so. When its summary does not already contain "Breaking change",
+     `BREAK_NOTICE` ("Includes a breaking change: see the changelog.") is
+     appended, and it outranks the lead's next sentence for the length budget.
+     When "(+N more in the changelog)" follows, the notice is the shorter
+     `BREAK_NOTICE_BEFORE_COUNT` ("Includes a breaking change."), so the summary
+     names the changelog once ([#3402](https://github.com/d-hinders/Haven-AI/issues/3402)).
+   - **Code stays code** ([#3393](https://github.com/d-hinders/Haven-AI/issues/3393)).
+     `summary` is plain text; `summary_segments` is the same text as
+     `{ text, code }` parts, which `/releases` renders. While a note is built, a
+     code span is one opaque token, so no sentence split, clause cut or rewrite
+     reaches inside it, and a kept sentence keeps its spans whole.
    - **Never `client-compat.ts`.** The enforced minimums are hand-edited by owner
      decision, and a release must not raise one as a side effect.
    - **Skipped with the heading on `--snapshot`.** A snapshot is not a release.

@@ -80,6 +80,7 @@ import {
   HavenPaymentStateError,
   X402UnexpectedStatusError,
   X402AlreadySettledError,
+  X402TaskBudgetMismatchError,
   HavenSigningError,
   HavenTimeoutError,
   DEFAULT_CONFIRMATION_TIMEOUT_MS,
@@ -135,7 +136,7 @@ import {
   withX402Wallet,
   x402PayerAddress,
 } from './x402-protocol.js'
-import { X402FundingLeg, type FundingLegExpectation } from './x402-funding-leg.js'
+import { X402FundingLeg, sameX402TaskBudget, type FundingLegExpectation } from './x402-funding-leg.js'
 import { X402Erc7710 } from './x402-erc7710.js'
 import { toolError, toolX402PaymentRequired, x402ToolReceipt } from './tool-adapter.js'
 import { MerchantCompletion, isZeroSettlementTxHash, parseMerchantSettlement } from './merchant-completion.js'
@@ -219,6 +220,13 @@ export class HavenClient {
   private readonly pollingInterval: number
   private readonly chainRpcs: Record<number, string>
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
+  /**
+   * #3392: the task budget each in-flight x402 entry was created under
+   * (`undefined` = none). A call joining an in-flight entry under a
+   * different budget is refused before any network call — never silently
+   * charged to another budget's payment.
+   */
+  private readonly inFlightX402TaskBudget = new Map<string, string | undefined>()
   /**
    * The EIP-3009 funding-leg lifecycle (#1618). The facade holds a reference
    * and delegates; it does not reimplement any of it.
@@ -1149,14 +1157,31 @@ export class HavenClient {
     }
 
     const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
-    const cached = this.fundingLeg.cachedReceipt(idempotencyKey)
+    // #3392: the cache and the in-flight map record the taskBudgetId each
+    // entry was created under; a call naming a different one throws the typed
+    // error BEFORE any network call instead of returning (or joining) a
+    // receipt paid under another budget. Absent-vs-absent hits as before.
+    const cached = this.fundingLeg.cachedReceipt(idempotencyKey, options.taskBudgetId)
     if (cached) return cached
 
     const inFlight = this.inFlightX402.get(idempotencyKey)
-    if (inFlight) return inFlight
+    if (inFlight) {
+      if (!sameX402TaskBudget(this.inFlightX402TaskBudget.get(idempotencyKey), options.taskBudgetId)) {
+        throw new X402TaskBudgetMismatchError(
+          `The x402 idempotency key '${idempotencyKey}' has an in-flight payment created under a ` +
+            `different task budget ('${this.inFlightX402TaskBudget.get(idempotencyKey) ?? 'none'}' vs ` +
+            `'${options.taskBudgetId ?? 'none'}'). Pass a new idempotencyKey to pay under this budget.`,
+          idempotencyKey,
+          this.inFlightX402TaskBudget.get(idempotencyKey),
+          options.taskBudgetId,
+        )
+      }
+      return inFlight
+    }
 
     const promise = this.fundingLeg.authorize(paymentRequired, option, idempotencyKey, options.taskBudgetId)
     this.inFlightX402.set(idempotencyKey, promise)
+    this.inFlightX402TaskBudget.set(idempotencyKey, options.taskBudgetId)
 
     try {
       return await promise
@@ -1170,6 +1195,7 @@ export class HavenClient {
       throw err
     } finally {
       this.inFlightX402.delete(idempotencyKey)
+      this.inFlightX402TaskBudget.delete(idempotencyKey)
     }
   }
 
@@ -1387,7 +1413,11 @@ export class HavenClient {
     }
 
     const idempotencyKey = input.idempotencyKey ?? buildX402IdempotencyKey(input.paymentRequired, option)
-    const cached = this.fundingLeg.cachedReceipt(idempotencyKey)
+    // #3392: the caller-supplied taskBudgetId option (absent when none was
+    // given) is the attribution this resume is pinned to — a cache entry
+    // created under a different one throws the typed error before any
+    // network call, and the entry written below records it.
+    const cached = this.fundingLeg.cachedReceipt(idempotencyKey, input.taskBudgetId)
     if (cached) return cached
 
     const status = await this.getPaymentStatus(input.paymentId)
@@ -1414,7 +1444,7 @@ export class HavenClient {
 
     const paymentHeader = await this.fundingLeg.createPaymentHeader(input.paymentRequired, option)
     const receipt = this.fundingLeg.receiptFromStatus(input.paymentRequired, option, paymentHeader, status)
-    this.fundingLeg.cacheReceipt(idempotencyKey, paymentHeader, receipt)
+    this.fundingLeg.cacheReceipt(idempotencyKey, paymentHeader, receipt, input.taskBudgetId)
     return receipt
   }
 

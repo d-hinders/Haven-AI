@@ -160,6 +160,7 @@ export {
   MerchantTimeoutError,
   X402UnexpectedStatusError,
   X402AlreadySettledError,
+  X402TaskBudgetMismatchError,
   HavenPaymentStateError,
   HavenSigningError,
   HavenZeroSettlementHashError,

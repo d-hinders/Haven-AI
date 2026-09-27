@@ -55,7 +55,7 @@
  *
  * ## Positive control
  *
- * Proven for #3053 by mutation: remove the `payments.ts:781` wrapped
+ * Proven for #3053 by mutation: remove the `payments.ts:785` wrapped
  * allowlist entry AND unwrap that site's `refuse(..., null)` back to a bare
  * `reply.code(502).send(...)` → this suite reddens on both the raw-site and
  * the refuse-count direction; restoring the file returns it to green,
@@ -103,20 +103,23 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // branch now shares `buildDirectSignData` (`modules/payments/
     // direct-sign-context.ts`) with the new GET /:id/sign-context route,
     // and its doc comment grew by three lines to say so.
-    // #3307 shifted every line below by +1: the `toCanonicalAddress` import.
-    // #3329 shifted every line below: task-budget imports, refusal-status
-    // consts, and the task-budget resolution block ahead of
-    // prepareDelegationPayment (review finding E widened it further —
-    // 404/409 refusals now return directly instead of falling through).
-    // #3392 shifted every line below by +12/+13: `mismatch()` gained the
-    // task_budget comparison (comment + widened signature + branch), the
-    // doc comment lost the stale same-contract sentence, both
-    // findPaymentReplay call sites gained the `taskBudgetId` line, and the
-    // second (23505-catch) site sits below the first two shifts.
-    { line: 528, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 552, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 846, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 873, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    // Chronology of shifts in src/routes/payments.ts: #3307 +1 (the
+    // `toCanonicalAddress` import), #3329's task-budget imports/refusal-consts/
+    // resolution block, then #3031's schema restructure — the hand-rolled
+    // shape rungs in the prepare handler became the request schema's (−2 on
+    // the 502/403 pair) and replayIntentBody collapsed the same way (+1 on
+    // the 429/skipped pair) — then #3392 shifted every line below by
+    // +12/+13: `mismatch()` gained the task_budget comparison (comment +
+    // widened signature + branch), the doc comment lost the stale
+    // same-contract sentence, both findPaymentReplay call sites gained the
+    // `taskBudgetId` line, and the second (23505-catch) site sits below the
+    // first two shifts. Pins re-derived against the merged file; the
+    // census re-checks them against the live source, so a wrong pin reddens
+    // here, not in production.
+    { line: 526, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
+    { line: 550, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 847, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 874, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
   ],
 }
 
@@ -152,7 +155,7 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
   ],
   'src/routes/payments.ts': [
     {
-      line: 873,
+      line: 874,
       reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
     },
   ],

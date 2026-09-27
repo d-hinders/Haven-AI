@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
+// #3031: production wiring for the enforced module (see beforeAll).
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const { mockQuery, allowanceMocks, sweepMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -115,6 +117,12 @@ describe('machine payment sweep routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — `routes/machine-payments.ts` is in
+    // `enforcedModules`, so the request schema refuses off-spec shapes
+    // before the handler. (Round 2: `/reconciliation-events` split out of
+    // this module and stays SHADOWED — it is not part of this suite; the
+    // sweep routes are unaffected.)
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/machine-payments.ts'] })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
   })
   afterAll(async () => {
@@ -248,7 +256,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(200)
@@ -271,7 +279,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(409)
@@ -293,7 +301,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(200)
@@ -309,7 +317,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(403)
@@ -324,7 +332,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(404)
@@ -339,7 +347,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(409)
@@ -354,7 +362,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(200)
@@ -369,9 +377,13 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: '0xdead' }, signature: SIG },
+        payload: { authorization: { ...AUTHZ, nonce: '0xdead' }, signature: SIG },
       })
 
+      // #3031: the nonce's shape (0x-prefixed, 64 hex) is the request
+      // schema's (`SweepAuthorization.nonce` pattern) — the rung that stood
+      // in `modules/mpp/sweep.ts` is gone, and the refusal now comes from
+      // the enforced schema, before the handler and its mocks.
       expect(res.statusCode).toBe(400)
     })
 
@@ -394,7 +406,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(429)
@@ -420,7 +432,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(502)
@@ -445,7 +457,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(409)
@@ -469,7 +481,7 @@ describe('machine payment sweep routes', () => {
         method: 'POST',
         url: '/machine-payments/sweep/submit',
         headers,
-        payload: { authorization: { nonce: NONCE }, signature: SIG },
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
       })
 
       expect(res.statusCode).toBe(200)

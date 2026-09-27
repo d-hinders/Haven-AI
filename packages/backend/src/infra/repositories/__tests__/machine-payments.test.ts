@@ -28,6 +28,7 @@ import {
   upsertReconciliationEvent,
   type EvidenceBaseInput,
 } from '../machine-payments.js'
+import { upsertOwnerCompanyDetails, type BuyerJoinColumns } from '../owner-company-details.js'
 
 let seq = 0
 const ADDR = (n: string) => `0x${n.repeat(40).slice(0, 40)}`
@@ -523,5 +524,50 @@ describeDb('machine-payments repository (#1224)', () => {
     expect(await receiptCursorResolvesForAgent(agent.agentId, foreignId)).toBe(false)
     expect(await receiptCursorResolvesForAgent(other.agentId, foreignId)).toBe(true)
     expect(await receiptCursorResolvesForAgent(agent.agentId, '00000000-0000-4000-8000-000000000000')).toBe(false)
+  })
+
+  // ── #3332 review M2: the OWNER_COMPANY_DETAILS_JOIN_COLUMNS LEFT JOIN ────
+  it('#3332: listEvidenceReceiptsForAgent joins each row\'s OWN owner\'s company details — row count unchanged, no cross-owner mixing', async () => {
+    const ownerA = await seedAgent()
+    const ownerB = await seedAgent()
+    const intentA = await seedIntent(ownerA.agentId, ownerA.userId)
+    await upsertEvidenceBase(evidenceInput(ownerA, { paymentIntentId: intentA }))
+    const intentB = await seedIntent(ownerB.agentId, ownerB.userId)
+    await upsertEvidenceBase(evidenceInput(ownerB, { paymentIntentId: intentB, txHash: `0x${'7'.repeat(64)}` }))
+
+    // Row count BEFORE either owner has saved details — the baseline the
+    // join must not change once details exist (a mutated `ON true` would
+    // fan the LEFT JOIN out into one row per `owner_company_details` row).
+    expect(await listEvidenceReceiptsForAgent(ownerA.agentId, 10)).toHaveLength(1)
+    expect(await listEvidenceReceiptsForAgent(ownerB.agentId, 10)).toHaveLength(1)
+
+    await upsertOwnerCompanyDetails(ownerA.userId, {
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+    })
+    await upsertOwnerCompanyDetails(ownerB.userId, {
+      legal_name: 'Owner B GmbH',
+      country: 'DE',
+      org_number: '222',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+    })
+
+    const afterA = await listEvidenceReceiptsForAgent<BuyerJoinColumns & { id: string }>(ownerA.agentId, 10)
+    expect(afterA).toHaveLength(1)
+    expect(afterA[0].buyer_legal_name).toBe('Owner A AB')
+    expect(afterA[0].buyer_country).toBe('SE')
+
+    const afterB = await listEvidenceReceiptsForAgent<BuyerJoinColumns & { id: string }>(ownerB.agentId, 10)
+    expect(afterB).toHaveLength(1)
+    // Each agent's receipt carries its OWN owner's buyer details, never the
+    // other owner's — the join is on THIS row's `user_id`.
+    expect(afterB[0].buyer_legal_name).toBe('Owner B GmbH')
+    expect(afterB[0].buyer_country).toBe('DE')
   })
 })

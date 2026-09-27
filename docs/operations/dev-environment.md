@@ -214,7 +214,8 @@ never in code. **Every secret MUST differ from production.**
 **Boolean flags accept only lowercase `true` / `false` (#3015).** Every
 boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
 `HAVEN_FEE_ENABLED`, `HAVEN_LEGACY_BOOKKEEPING_ENABLED`, `HAVEN_HOSTED`,
-`HAVEN_ACCOUNTING_ENABLED` and the deprecated `HAVEN_REPORTING_FEED_ENABLED` —
+`HAVEN_ACCOUNTING_ENABLED`, `HAVEN_OWNER_COMPANY_DETAILS` and the deprecated
+`HAVEN_REPORTING_FEED_ENABLED` —
 goes through `parseBooleanFlag`: unset or blank means false; any other value
 (`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
 variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
@@ -291,6 +292,12 @@ Isolation rules that are non-negotiable for a payments product:
   `84532,8453`, the operator step after PR #3202) and never on prod. The route
   lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
   so a copied flag cannot publish them on prod, whose list is `8453`.
+- **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
+  boolean) gates `/user/company-details*` and the additive `parties.buyer`
+  field on payment evidence/receipts; there is no settings UI yet (that is
+  the #3332 frontend slice). Dark by default; GET/PUT/POST vies-check answer
+  404 when off — DELETE is the deliberate exception, so an owner can always
+  erase saved details. See [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
@@ -341,6 +348,7 @@ Isolation rules that are non-negotiable for a payments product:
   the request-validation plugin (#3029, epic #3028). Any other value refuses
   the boot.
 
+
   **The list, not the mode, names the enforced routes.** Since #3030 (epic
   #3028 slice 2) `index.ts` lists **every non-money route module** there —
   the four already-enforced ones (`contacts`, `merchants`, `labels`,
@@ -352,19 +360,36 @@ Isolation rules that are non-negotiable for a payments product:
   the bare `'index.ts'` for the inline `GET /` and `GET /chains`.
   `routes/x402.ts` joined them in slice 3 (#3031) — the first money-path
   module, and the only one the 2026-09-22 shadow reading proved conformant on
-  every operation. Slice 4 (#3032) added the last five (`agents`,
+  every operation. The slice-3/4 modules stayed shadowed until then because
+  the reading printed NOT PROVEN for 48 of their operations — 15 in slice 3's
+  three remaining modules, 33 in slice 4's five — and the owner ruled (#3223,
+  2026-09-24, on the epic) that routes a shadow reading can never prove are
+  enforced on TEST evidence (per-route off-spec → envelope, conformant →
+  unchanged), the same instrument decision 8 allowed slice 2. #3031 round 2
+  flipped the rest of the money path (`routes/payments.ts`,
+  `routes/agent-delegations.ts`, `routes/machine-payments.ts`) on those route
+  tests plus the fresh #3208 shadow reading pasted on the epic (2026-09-26:
+  28.46 h window, zero would_refuse and zero would_coerce). One money-path
+  operation is the rollout's NAMED RESIDUE and stays SHADOWED by owner
+  decision (epic #3028, 2026-09-24T21:24:44Z, closing #3223):
+  `POST /machine-payments/reconciliation-events` — it is only posted on a
+  genuine merchant rejection after a confirmed payment, and driving it
+  synthetically would write a false record into a payment's ledger. It lives
+  in its own file, `routes/machine-payments-reconciliation-events.ts`
+  (registered under the same `/machine-payments` prefix), because
+  enforcement is keyed on the route file and the plugin has no per-operation
+  opt-out — a per-file exemption inside `machine-payments.ts` would have been
+  invisible to the `lint:request-schemas` gauge. Its shadow residue is
+  baselined (`shadow: 1, typeof: 5`), and it is enforced the day a real
+  rejection (or a QA scenario that produces one) gives the shadow reading
+  traffic to prove it. Slice 4 (#3032) added the last five (`agents`,
   `agent-rekey`, `agent-connection-setups`, `agent-passports`,
   `hybrid-accounts`) and flipped the default: every constrained module is
-  listed and the mode defaults to `enforce`. The slice-3/4 modules stayed
-  shadowed until then because the reading printed NOT PROVEN for 48 of their
-  operations — 15 in slice 3's three remaining modules, 33 in slice 4's five —
-  and the owner then ruled (#3223, 2026-09-24, on the epic) that routes a
-  shadow reading can never prove are enforced on TEST evidence (per-route
-  off-spec → envelope, conformant → unchanged), the same instrument decision 8
-  allowed slice 2. Before the flip the list overrode every mode (the proof
-  module had to refuse while the world was still in shadow); since the flip
-  `off` and `shadow` are global — an entry in the list cannot escape either
-  kill switch, which is what makes them switches.
+  listed and the mode defaults to `enforce`. Before the flip the list
+  overrode every mode (the proof module had to refuse while the world was
+  still in shadow); since the flip `off` and `shadow` are global — an entry
+  in the list cannot escape either kill switch, which is what makes them
+  switches.
 
   **Keyed on the FILE, not the mount prefix, since #3135** (epic #3028
   decision 7). A prefix could not express the epic's slice partition:

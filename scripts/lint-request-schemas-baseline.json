@@ -1,15 +1,7 @@
 {
-  "routes/agent-delegations.ts": {
+  "routes/machine-payments-reconciliation-events.ts": {
     "shadow": 1,
-    "typeof": 8
-  },
-  "routes/machine-payments.ts": {
-    "shadow": 1,
-    "typeof": 19
-  },
-  "routes/payments.ts": {
-    "shadow": 1,
-    "typeof": 4
+    "typeof": 5
   },
   "routes/safe-deploy.ts": {
     "shadow": 0,

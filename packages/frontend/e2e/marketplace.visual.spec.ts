@@ -2,7 +2,13 @@
  * Visual regression for `/marketplace` and `/marketplace/<slug>` (#3079,
  * epic #3077).
  *
- * Five scenarios, each a distinct branch the merchant layer added:
+ * Five FULL-PAGE scenarios (the `SCENARIOS` loop below), each a distinct
+ * branch the merchant layer added, PLUS two element-scoped clips of the
+ * "Fund this merchant" modal (#3331 round 1/2 — the plain review step and
+ * the replace-warning review step) that run outside that loop, the same
+ * scoping `settings-accounting.visual.spec.ts` uses for its own dialog
+ * (design review round 2, finding 8 — this docstring used to name only the
+ * five full-page ones, undercounting the file's own coverage):
  *
  *   - `marketplace-grid`      — the grid with three merchants (live/verified,
  *     test, coming-soon), at desktop and mobile.
@@ -17,17 +23,24 @@
  *   - `merchant-not-found`    — an unknown slug (desktop only): the client
  *     `notFound()` must land on the segment's own `not-found.tsx` inside
  *     the shell, a join the unit tests cannot see.
+ *   - `merchant-page-fund-merchant-modal` (desktop only, element-scoped) —
+ *     the "Fund this merchant" modal's plain SELECT step (agent, amount,
+ *     token, period) — not the review step; that is the scenario just below.
+ *   - `merchant-page-fund-merchant-modal-review-warning` (desktop only,
+ *     element-scoped) — the same modal's review step with the
+ *     replace-warning seeded (an active budget already in the slot the new
+ *     grant would occupy).
  *
  * Same discipline as `analytics.visual.spec.ts`: the desktop shots of all
- * five ALSO run under `chromium-desktop-dark` (`<name>-dark.png`), no mobile
+ * seven ALSO run under `chromium-desktop-dark` (`<name>-dark.png`), no mobile
  * dark project exists, and every capture is preceded by a structural
  * assertion that runs under `VISUAL_STRUCTURE_ONLY=1` even when pixels are
  * not compared.
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
-import { ampersendDemoApi, bergetAi, havenDemoStore } from './fixtures/marketplace'
+import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testAgent } from './fixtures/haven-api'
+import { ampersendDemoApi, bergetAi, havenDemoStore, havenDemoStoreOffers } from './fixtures/marketplace'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
 import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
@@ -249,4 +262,192 @@ test.describe('marketplace visual regression', () => {
       })
     }
   }
+
+  /**
+   * "Fund this merchant" (#3331) — element-scoped, like the Settings →
+   * Accounting backfill dialog (`settings-accounting.visual.spec.ts`), not a
+   * full-page SCENARIOS entry: the dialog is the same size regardless of the
+   * page behind it. `havenDemoStore`'s one offer already advertises ERC-7710
+   * (`fixtures/marketplace.ts`), so only its `funding` and an eligible agent
+   * on its chain (84532) need overriding here — `testAgent` is chain 8453,
+   * i.e. ineligible, which is deliberate: this override adds a SECOND agent
+   * rather than reassigning the shared one every other spec pins its chain
+   * against. `/agents/:id/account-signers` already answers any agent id
+   * generically (`fixtures/haven-api.ts`); `/agents/:id/delegations` is
+   * overridden below (empty for the plain clip, one active budget in the
+   * SAME slot for the replace-warning clip), so nothing else needs
+   * overriding for the new agent to be `ready`.
+   *
+   * #3331 review finding design-1 (BLOCKING): this test runs under BOTH
+   * `chromium-desktop` and `chromium-desktop-dark` (the project's `testMatch`
+   * covers the whole file, `playwright.config.ts`), but its ORIGINAL
+   * `toHaveScreenshot` name carried no project segment — the dark run would
+   * have compared against (or silently written over) the light baseline. This
+   * follows the file's own `schemeOf`/`schemeSuffix` pattern from the
+   * `SCENARIOS` loop above. Declare BOTH names at baseline dispatch:
+   * `merchant-page-fund-merchant-modal-desktop.png` and
+   * `merchant-page-fund-merchant-modal-desktop-dark.png` (plus the two the
+   * review-step clip below adds).
+   */
+  const FUND_ELIGIBLE_AGENT_ID = 'agent-fund-e2e'
+  const FUND_PAY_TO = '0x' + 'f0'.repeat(20)
+  // Base Sepolia USDC — the same literal `FundMerchantModal.test.tsx` and
+  // `useDelegationBudget.test.tsx` pin for chain 84532, resolved through the
+  // shared chain registry rather than guessed.
+  const FUND_USDC_84532 = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+
+  async function routeFundMerchantScenario(
+    page: Page,
+    { existingDelegation = false }: { existingDelegation?: boolean } = {},
+  ) {
+    const fundEligibleAgent = {
+      ...testAgent,
+      id: FUND_ELIGIBLE_AGENT_ID,
+      name: 'Fund Agent',
+      account_chain_id: 84532,
+    }
+    const fundedHavenDemoStore = {
+      ...havenDemoStore,
+      networks: ['eip155:84532'],
+    }
+
+    await page.route('**/api/**', async (route) => {
+      const request = route.request()
+      const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+      if (request.method() === 'GET' && path === '/agents') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ agents: [testAgent, fundEligibleAgent] }),
+        })
+        return
+      }
+      if (request.method() === 'GET' && path === `/merchants/${havenDemoStore.slug}`) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            merchant: fundedHavenDemoStore,
+            offers: havenDemoStoreOffers,
+            funding: [
+              {
+                network: 'eip155:84532',
+                chain_id: 84532,
+                pay_to: FUND_PAY_TO,
+                pay_to_status: 'verified',
+                erc7710: true,
+              },
+            ],
+          }),
+        })
+        return
+      }
+      if (request.method() === 'GET' && path === `/merchants/${havenDemoStore.slug}/budgets`) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ budgets: [] }) })
+        return
+      }
+      // #3331 review finding design-10: seed the SAME (agent, token,
+      // recipient) slot the new grant would occupy, so the review step's
+      // replace-warning renders — the fixture default for any OTHER agent id
+      // is already an empty list (`fixtures/haven-api.ts`), so only the
+      // eligible agent's own delegations need overriding here.
+      const isFundEligibleAgentDelegations =
+        request.method() === 'GET' && path === `/agents/${FUND_ELIGIBLE_AGENT_ID}/delegations`
+      if (existingDelegation && isFundEligibleAgentDelegations) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            delegations: [
+              {
+                id: 'delegation-fund-e2e-existing',
+                chain_id: 84532,
+                token_address: FUND_USDC_84532,
+                recipient_address: FUND_PAY_TO,
+                delegation_hash: `0x${'5e'.repeat(32)}`,
+                version: 1,
+                status: 'active',
+                budget_atomic: '20000000',
+                period_seconds: 2_592_000,
+                start_date: '2026-05-02T10:00:00.000Z',
+                expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+                created_at: '2026-05-02T10:00:00.000Z',
+                merchant_id: null,
+                merchant_slug: null,
+                merchant_name: null,
+              },
+            ],
+          }),
+        })
+        return
+      }
+      await route.fallback()
+    })
+  }
+
+  test('merchant-page fund-merchant modal renders pixel-stable (desktop)', async ({ page }, testInfo) => {
+    const schemeSuffix = schemeOf(testInfo) === 'dark' ? '-dark' : ''
+    await routeFundMerchantScenario(page)
+
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.clock.setFixedTime(FROZEN_NOW)
+    await page.goto(`/marketplace/${havenDemoStore.slug}`)
+    await expect(page.getByRole('heading', { name: havenDemoStore.name, exact: true })).toBeVisible({
+      timeout: ANCHOR_TIMEOUT_MS,
+    })
+    await dismissMobileSidebar(page)
+
+    await page.getByRole('button', { name: 'Fund this merchant' }).click()
+    const dialog = page.getByTestId('fund-merchant-modal')
+    await expect(dialog).toHaveCount(1)
+    await expect(dialog.getByRole('heading', { name: `Fund ${havenDemoStore.name}` })).toHaveCount(1)
+    await expect(dialog.getByLabel('Agent')).toHaveCount(1)
+    await expect(dialog.getByText(`Pays only ${havenDemoStore.name}`)).toHaveCount(1)
+
+    await page.evaluate(() => document.fonts.ready)
+    await expect(dialog).toHaveScreenshot(`merchant-page-fund-merchant-modal-desktop${schemeSuffix}.png`, {
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixels: 50,
+      threshold: PIXEL_THRESHOLD,
+    })
+  })
+
+  /**
+   * Design review item 10: the review step with the replace-warning seeded —
+   * an /agents/:id/delegations override puts an active budget in the exact
+   * slot (agent, token, recipient) the new grant would occupy.
+   */
+  test('merchant-page fund-merchant modal review step (replace warning) renders pixel-stable (desktop)', async ({
+    page,
+  }, testInfo) => {
+    const schemeSuffix = schemeOf(testInfo) === 'dark' ? '-dark' : ''
+    await routeFundMerchantScenario(page, { existingDelegation: true })
+
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.clock.setFixedTime(FROZEN_NOW)
+    await page.goto(`/marketplace/${havenDemoStore.slug}`)
+    await expect(page.getByRole('heading', { name: havenDemoStore.name, exact: true })).toBeVisible({
+      timeout: ANCHOR_TIMEOUT_MS,
+    })
+    await dismissMobileSidebar(page)
+
+    await page.getByRole('button', { name: 'Fund this merchant' }).click()
+    const dialog = page.getByTestId('fund-merchant-modal')
+    await expect(dialog).toHaveCount(1)
+    await dialog.getByLabel('Budget amount').fill('5')
+    await dialog.getByRole('button', { name: 'Review' }).click()
+    await expect(dialog.getByText(/replaces this agent's current budget to the same address/)).toHaveCount(1)
+
+    await page.evaluate(() => document.fonts.ready)
+    await expect(dialog).toHaveScreenshot(
+      `merchant-page-fund-merchant-modal-review-warning-desktop${schemeSuffix}.png`,
+      {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: 50,
+        threshold: PIXEL_THRESHOLD,
+      },
+    )
+  })
 })

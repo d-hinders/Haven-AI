@@ -11,6 +11,8 @@ covers:
   - packages/backend/src/modules/payments/receipt.ts
   - packages/backend/src/modules/mpp/evidence.ts
   - packages/sdk/src/payment-mappers.ts
+  - packages/frontend/src/hooks/useCompanyDetails.ts
+  - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
 last-verified: "2026-09-27"
 ---
 
@@ -86,19 +88,19 @@ guarded on `vies_status = 'pending'` and staleness), not a plain read, so two
 concurrent `GET`s never both start a check for the same row.
 
 **Naming discipline:** wherever this reaches a person — the API's own
-responses today, and the settings screen once the #3332 frontend slice ships
-— the copy must say "VAT number checked against VIES on `<date>`", never
-"verified". `docs/product/agent-passport.md` reserves that word for a
-passport tier that does not exist yet, and the reasoning is identical here:
-`vies_status: valid` is a checked fact, not an identity claim.
+responses, and the Settings → Company details screen
+(`CompanyDetailsCard`) — the copy must say "VAT number checked against VIES
+on `<date>`", never "verified". `docs/product/agent-passport.md` reserves
+that word for a passport tier that does not exist yet, and the reasoning is
+identical here: `vies_status: valid` is a checked fact, not an identity
+claim.
 
 ## The API
 
-There is no settings UI for this yet — that is the #3332 FRONTEND slice, not
-built as of this writing. Everything below describes the API, which is live
-today behind the flag. `GET`/`PUT`/`POST .../vies-check` answer `404` when the
-flag is off, not just the future settings screen; `DELETE` is the one
-exception (see its row below).
+Everything below describes the API, which is live today behind the flag.
+`GET`/`PUT`/`POST .../vies-check` answer `404` when the flag is off, not
+just the settings screen built on top of it; `DELETE` is the one exception
+(see its row below).
 
 | Route | Notes |
 |---|---|
@@ -175,17 +177,44 @@ details, and adding it there is a separate, unreviewed change. The OpenAPI
 `Parties.buyer` field description is scoped to the receipt surfaces for the
 same reason.
 
+## The settings screen
+
+Settings → Company details (`CompanyDetailsCard`, `useCompanyDetails`) is the
+#3332 frontend slice on top of the API above. Two things worth naming about
+how it is built:
+
+- **Gating without a second flag.** The screen has no frontend-side feature
+  flag of its own; it renders only when `GET /user/company-details` does NOT
+  answer the feature-off `404` (`{ error: 'Not found' }`,
+  `requireFeatureEnabled` in `routes/owner-company-details.ts`). That route
+  answers `404` for two different reasons — the feature is off, or the flag
+  is on but the owner has never saved a row — with the SAME status code and
+  different error bodies (`'Not found'` vs. `'No company details saved'`);
+  the hook reads the body to tell them apart, so a first-time owner on a
+  flagged-on deployment sees an empty form rather than nothing.
+- **The purpose and retention text is shown above the form, always** — not
+  behind a tooltip or a second screen — because *Purpose, retention and GDPR
+  basis* below is what the owner is agreeing to by filling it in.
+
+The VIES status line polls `GET /user/company-details` every few seconds
+while `vies_status` is `pending`, bounded (a check that never resolves stops
+being polled rather than polling forever) and stopped on navigating away;
+"Check again" calls `POST /user/company-details/vies-check` on demand and
+surfaces its `429` in plain words. "Remove company details" asks for
+confirmation before calling `DELETE /user/company-details`, then resets the
+form to empty.
+
 ## Purpose, retention and GDPR basis
 
 This is the owner's own data, about themself, saved voluntarily to appear on
 receipts their own agents may hand to merchants. For a sole trader, the
 organisation number *is* the personal identity number — this document, and
-the future settings form (the #3332 frontend slice), state this plainly,
-alongside the VAT number's own SE-format personal-number encoding (`SE` +
-personal number + `01`) for the same reason.
+the settings form itself, state this plainly, alongside the VAT number's own
+SE-format personal-number encoding (`SE` + personal number + `01`) for the
+same reason.
 
 - **Basis**: consent — the owner opts in by calling `PUT
-  /user/company-details` (today) or filling in the future settings form;
+  /user/company-details` or filling in the Settings → Company details form;
   nothing here is required for an agent or a payment to work.
 - **Purpose**: stating the buyer on a payment receipt the owner's own agent may
   give to a merchant, and (asynchronously) validating the VAT number against

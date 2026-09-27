@@ -430,5 +430,84 @@ export const en = {
       privacyLabel: 'Privacy controls',
       privacyDetail: 'Manage analytics and product improvement preferences.',
     },
+
+    /**
+     * Owner company details + VIES (#3332). Behind `HAVEN_OWNER_COMPANY_DETAILS`
+     * — the section itself only renders when the backend answers something
+     * other than the flag-off 404 (`useCompanyDetails`'s `status !== 'off'`).
+     *
+     * Naming discipline (product doc, non-negotiable): the checked-VAT-number
+     * copy says "checked against VIES", never "verified" — that word is
+     * reserved for a passport tier that does not exist yet
+     * (`docs/product/agent-passport.md:71`).
+     */
+    companyDetails: {
+      title: 'Company details',
+      description:
+        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants.',
+      purpose:
+        'This is optional and never gates an agent or a payment. When you save details, Haven adds them to the receipts your own agents may hand to a merchant — the way an ordinary invoice states a buyer. For a sole trader, the organisation number is your personal identity number. These details are kept until you remove them here, or until your Haven account is deleted.',
+      loadError: 'We could not load your company details. Try again in a moment.',
+      retry: 'Try again',
+
+      fields: {
+        legalName: 'Legal name',
+        legalNamePlaceholder: 'e.g. Ada Lovelace AB',
+        country: 'Country',
+        countryPlaceholder: 'e.g. SE',
+        countryHelp: 'Two-letter country code (ISO 3166-1), e.g. "SE" for Sweden.',
+        orgNumber: 'Organisation number',
+        orgNumberPlaceholder: 'e.g. 556677-8899',
+        orgNumberHelp: 'For a sole trader, this is your personal identity number.',
+        vatNumber: 'VAT number (optional)',
+        vatNumberPlaceholder: 'e.g. SE556677889901',
+        vatNumberHelp: 'Include the two-letter country prefix, e.g. "SE556677889901".',
+      },
+
+      validation: {
+        legalNameRequired: 'Enter a legal name.',
+        legalNameTooLong: 'Enter a legal name using 200 characters or fewer.',
+        countryInvalid: 'Country must be a two-letter code, e.g. "SE".',
+        orgNumberRequired: 'Enter an organisation number.',
+        orgNumberTooLong: 'Enter an organisation number using 32 characters or fewer.',
+        vatNumberTooLong: 'Enter a VAT number using 32 characters or fewer.',
+      },
+
+      save: 'Save',
+      saving: 'Saving…',
+      saved: 'Saved.',
+      saveError: 'We could not save your company details. Check the fields and try again.',
+
+      remove: {
+        action: 'Remove company details',
+        confirmTitle: 'Remove your company details?',
+        confirmBody:
+          'This deletes your legal name, country, organisation number and VAT number from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
+        confirm: 'Remove',
+        cancel: 'Keep details',
+        error: 'We could not remove your company details. Try again in a moment.',
+      },
+
+      /**
+       * VIES states (product doc § "The VIES states, and why an outage is
+       * never invalid"). `not_verifiable` covers every failure to check —
+       * including a VAT prefix that is not a VIES member country — never
+       * read as "the number is wrong". The wire `CompanyDetails` shape
+       * carries no machine-readable reason for `not_verifiable` (the
+       * backend's `reason` is log-only, see `modules/owner-profile/service.ts`),
+       * so this stays one neutral line rather than a reason this screen
+       * cannot actually tell apart.
+       */
+      vies: {
+        pending: 'Checking the VAT number with VIES…',
+        valid: (date: string) => `VAT number checked against VIES on ${date}`,
+        invalid: 'VIES says this VAT number is not valid.',
+        notVerifiable: 'VIES could not check this number right now.',
+        checkAgain: 'Check again',
+        checking: 'Checking…',
+        checkError: 'We could not check the VAT number with VIES. Try again in a moment.',
+        rateLimited: "You've checked this VAT number too many times just now. Try again in a minute.",
+      },
+    },
   },
 }

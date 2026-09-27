@@ -319,10 +319,13 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], colorScheme: 'dark' },
       // #3079: marketplace.visual.spec.ts joins with five desktop `-dark`
       // baselines (grid, merchant page, coming-soon, test-merchant, not-found).
+      // #3332: settings-company-details.visual.spec.ts joins with two desktop
+      // `-dark` baselines (empty, filled).
       testMatch: [
         '**/design-system.visual.spec.ts',
         '**/analytics.visual.spec.ts',
         '**/marketplace.visual.spec.ts',
+        '**/settings-company-details.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

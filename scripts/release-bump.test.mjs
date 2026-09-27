@@ -2387,9 +2387,21 @@ test('client release data — code spans are opaque: marked in summary_segments,
   assert.equal(cut.summary, 'Pays now.')
   const whole = note(`- Pays \`{ a; b }\` and ${long}. Next.`)
   assert.equal(whole.summary, `Pays { a; b } and ${long}.`, 'no `;` outside the span, so served whole')
-  // A span counts at its rendered length, so its ticks never push a summary past the limit.
-  const fits = note(`- **Head.** ${'y'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - 3)} \`z\`.`)
-  assert.equal(fits.summary.length, MAX_SUMMARY_CHARS)
+  // A span counts at its RENDERED length, never as its one-character token:
+  // a next sentence that overflows only once its span is expanded is dropped…
+  const over = note(`- **Head.** ${'y'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - 10)} \`${'z'.repeat(20)}\`.`)
+  assert.equal(over.summary, 'Head.')
+  // …one that fits exactly is kept…
+  const exact = note(`- **Head.** ${'y'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - 22)} \`${'z'.repeat(20)}\`.`)
+  assert.equal(exact.summary.length, MAX_SUMMARY_CHARS)
+  // …and a clause boundary past the limit once a span is expanded is not a place to cut.
+  const clause = note(`- ${'a'.repeat(250)}; b \`${'c'.repeat(60)}\`; d ${'e'.repeat(100)}.`)
+  assert.equal(clause.summary, `${'a'.repeat(250)}.`)
+
+  // A blank span leaves nothing, not a double space.
+  assert.equal(note('- Uses `   ` now.').summary, 'Uses now.')
+  // The token range is reserved: a CHANGELOG carrying one is refused by name, never mis-rendered.
+  assert.throws(() => note('- Adds the \uE000 glyph.'), /private-use character U\+E000/)
 })
 
 test('client release data — a break is never hidden: a summary that omits it says so (#3393)', () => {
@@ -2410,6 +2422,10 @@ test('client release data — a break is never hidden: a summary that omits it s
   // The notice outranks the next sentence for the budget.
   const next = 'n'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - 2)
   assert.equal(note(`- **Head.** ${next}.\n- **BREAKING.** Gone.`).summary, `Head. ${BREAK_NOTICE} (+1 more in the changelog)`)
+  // At exactly the limit, the next sentence and the notice both stay.
+  const exactNext = 'n'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - ` ${BREAK_NOTICE}`.length - 1) + '.'
+  assert.equal(note(`- **Head.** ${exactNext} **BREAKING** gone.`).summary, `Head. ${exactNext} ${BREAK_NOTICE}`)
+  assert.equal(`Head. ${exactNext} ${BREAK_NOTICE}`.length, MAX_SUMMARY_CHARS)
   // With Update required, the marked bullet still leads and the break is still surfaced.
   const both = note(`- **BREAKING.** A key is gone.\n- ${ACTION_REQUIRED_MARKER} **Signer v2.** Update it.`)
   assert.equal(both.action_required, true)

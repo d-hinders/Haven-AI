@@ -41,8 +41,9 @@
  * as code instead of as proportional body text; its texts join to exactly
  * `summary`. A code span is opaque to every rewrite: while a note is built,
  * each span stands in as ONE private-use character, so no sentence split,
- * clause cut, issue-reference strip or `BREAKING` rewrite can reach inside it,
- * and its content is never dropped from a sentence that is kept.
+ * clause cut or `BREAKING` rewrite can reach inside it, and a kept sentence
+ * keeps its spans whole. (Stripping an issue reference still removes the
+ * whole parenthetical it sits in, spans included — as it always has.)
  *
  * ## A break is never hidden (#3393)
  *
@@ -141,10 +142,22 @@ export function topLevelBullets(body) {
  */
 const TOKEN_BASE = 0xe000
 const TOKEN = /[\ue000-\uf8ff]/g
+const TOKEN_LIMIT = 0xf8ff - TOKEN_BASE + 1
 
 function protectCode(text, spans = []) {
+  const stray = /[\ue000-\uf8ff]/.exec(text)
+  if (stray) {
+    throw new Error(
+      `carries the private-use character U+${stray[0].charCodeAt(0).toString(16).toUpperCase()}, ` +
+        'which the release-note generator reserves for code spans; remove it.',
+    )
+  }
   const out = text.replace(/`([^`]+)`/g, (_, content) => {
-    spans.push(content.replace(/\s+/g, ' ').trim())
+    const code = content.replace(/\s+/g, ' ').trim()
+    // A blank span is nothing to show; leave no token (and no double space).
+    if (code.length === 0) return ''
+    if (spans.length >= TOKEN_LIMIT) throw new Error(`has more than ${TOKEN_LIMIT} code spans in one bullet`)
+    spans.push(code)
     return String.fromCharCode(TOKEN_BASE + spans.length - 1)
   })
   return { text: out, spans }

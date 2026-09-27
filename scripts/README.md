@@ -190,7 +190,7 @@ The developer loop that *consumes* a snapshot — merge, wait for the run, poll 
      `summary` is plain text; `summary_segments` is the same text as
      `{ text, code }` parts, which `/releases` renders. While a note is built, a
      code span is one opaque token, so no sentence split, clause cut or rewrite
-     reaches inside it, and its content is never dropped.
+     reaches inside it, and a kept sentence keeps its spans whole.
    - **Never `client-compat.ts`.** The enforced minimums are hand-edited by owner
      decision, and a release must not raise one as a side effect.
    - **Skipped with the heading on `--snapshot`.** A snapshot is not a release.

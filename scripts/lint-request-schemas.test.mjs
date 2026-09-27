@@ -284,6 +284,13 @@ describe('index.ts readers', () => {
       'routes/agent-delegations.ts',
       'routes/machine-payments.ts',
       'routes/x402.ts',
+      // Slice 4 (#3032): the LAST five modules, and the default mode flips to
+      // `enforce` — from this slice on the list is the per-module rollback.
+      'routes/agents.ts',
+      'routes/agent-rekey.ts',
+      'routes/agent-connection-setups.ts',
+      'routes/agent-passports.ts',
+      'routes/hybrid-accounts.ts',
     ])
   })
 })

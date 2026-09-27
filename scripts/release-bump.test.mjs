@@ -27,6 +27,7 @@ import {
 import {
   ACTION_REQUIRED_MARKER,
   BREAK_NOTICE,
+  BREAK_NOTICE_BEFORE_COUNT,
   CLIENT_RELEASE_DATA_FILE,
   MAX_NOTES_PER_PACKAGE,
   MAX_SUMMARY_CHARS,
@@ -2417,24 +2418,38 @@ test('client release data — a break is never hidden: a summary that omits it s
   // In a bullet that is not the lead.
   assert.equal(
     note('- **Docs.** Words.\n- **BREAKING:** `x` is gone.').summary,
-    `Docs. Words. ${BREAK_NOTICE} (+1 more in the changelog)`,
+    `Docs. Words. ${BREAK_NOTICE_BEFORE_COUNT} (+1 more in the changelog)`,
   )
   // The notice outranks the next sentence for the budget.
   const next = 'n'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - 2)
-  assert.equal(note(`- **Head.** ${next}.\n- **BREAKING.** Gone.`).summary, `Head. ${BREAK_NOTICE} (+1 more in the changelog)`)
+  assert.equal(note(`- **Head.** ${next}.\n- **BREAKING.** Gone.`).summary, `Head. ${BREAK_NOTICE_BEFORE_COUNT} (+1 more in the changelog)`)
   // At exactly the limit, the next sentence and the notice both stay.
   const exactNext = 'n'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - ` ${BREAK_NOTICE}`.length - 1) + '.'
   assert.equal(note(`- **Head.** ${exactNext} **BREAKING** gone.`).summary, `Head. ${exactNext} ${BREAK_NOTICE}`)
   assert.equal(`Head. ${exactNext} ${BREAK_NOTICE}`.length, MAX_SUMMARY_CHARS)
+  // With a count after it, the notice is the short form: one changelog pointer,
+  // the count and its N kept (#3402). Budgeted on the short form: exactly at
+  // the limit keeps the next sentence, one over drops it.
+  const foldedNext = (extra) =>
+    'n'.repeat(MAX_SUMMARY_CHARS - 'Head. '.length - ` ${BREAK_NOTICE_BEFORE_COUNT}`.length - 1 + extra) + '.'
+  const atLimit = note(`- **Head.** ${foldedNext(0)}\n- **BREAKING.** Gone.\n- More.`).summary
+  assert.equal(atLimit, `Head. ${foldedNext(0)} ${BREAK_NOTICE_BEFORE_COUNT} (+2 more in the changelog)`)
+  assert.equal(atLimit.length - ' (+2 more in the changelog)'.length, MAX_SUMMARY_CHARS, 'the count is outside the budget')
+  assert.equal(atLimit.match(/changelog/g).length, 1, 'one changelog pointer')
+  assert.match(atLimit, /breaking change/i)
+  assert.equal(
+    note(`- **Head.** ${foldedNext(1)}\n- **BREAKING.** Gone.\n- More.`).summary,
+    `Head. ${BREAK_NOTICE_BEFORE_COUNT} (+2 more in the changelog)`,
+  )
   // With Update required, the marked bullet still leads and the break is still surfaced.
   const both = note(`- **BREAKING.** A key is gone.\n- ${ACTION_REQUIRED_MARKER} **Signer v2.** Update it.`)
   assert.equal(both.action_required, true)
-  assert.equal(both.summary, `Signer v2. Update it. ${BREAK_NOTICE} (+1 more in the changelog)`)
+  assert.equal(both.summary, `Signer v2. Update it. ${BREAK_NOTICE_BEFORE_COUNT} (+1 more in the changelog)`)
 
   // Not the marker: prose, a word that is not bold, and the marker quoted in a code span.
   for (const body of ['- A reshape, breaking for any reader of an old key.', '- BREAKING without bold.', '- Explains the `**BREAKING**` marker.']) {
     assert.equal(carriesBreak(body), false, body)
-    assert.ok(!note(body).summary.includes(BREAK_NOTICE), body)
+    assert.doesNotMatch(note(body).summary, /includes a breaking change/i, body)
   }
   assert.equal(carriesBreak('- **BREAKING (#3306)** x'), true, 'positive control')
 })

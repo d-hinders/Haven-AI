@@ -117,6 +117,31 @@ export function viesRequestForVatNumber(vatNumber: string): { countryCode: strin
 }
 
 /**
+ * VIES's own member-state country codes (#3332 review m1, captain's
+ * decision): the 27 EU member states' own 2-letter codes, Greece as `EL`
+ * (never `GR` — see `viesRequestForVatNumber`'s own doc), and Northern
+ * Ireland's `XI` (a VIES-recognised code with no EU member state behind it,
+ * carried over from the UK's post-Brexit Windsor Framework arrangement).
+ * A VAT number whose prefix is not one of these is well-formed
+ * (`service.ts`'s `VAT_NUMBER_RE`) but is not a number VIES itself can ever
+ * confirm — asking anyway would either be refused by VIES as `INVALID_INPUT`
+ * (read back here as an ordinary outage, `not_verifiable`) or, worse, risk a
+ * false negative if some future country code collided with a member state's.
+ * `runViesCheck` checks membership BEFORE calling `checkVatWithVies` and
+ * skips the network call entirely for a non-member prefix.
+ */
+const VIES_MEMBER_COUNTRY_CODES: ReadonlySet<string> = new Set([
+  'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR',
+  'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO',
+  'SE', 'SI', 'SK', 'XI',
+])
+
+/** True when a normalised Haven VAT number's own prefix (GR mapped to EL, same as `viesRequestForVatNumber`) is a VIES member country code. */
+export function isViesMemberPrefix(vatNumber: string): boolean {
+  return VIES_MEMBER_COUNTRY_CODES.has(viesRequestForVatNumber(vatNumber).countryCode)
+}
+
+/**
  * Checks one VAT number. Never throws — every failure mode (network, SSRF
  * refusal, timeout, non-200, malformed body) resolves to `not_verifiable`.
  *

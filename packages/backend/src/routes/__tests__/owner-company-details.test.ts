@@ -12,11 +12,13 @@
  */
 import Fastify, { FastifyError, FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
+import rateLimit from '@fastify/rate-limit'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import db from '../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
+import { rateLimitKeyFor } from '../../middleware/rate-limit.js'
 import { config } from '../../config.js'
 import * as viesClient from '../../modules/owner-profile/vies-client.js'
 
@@ -263,6 +265,115 @@ describeDb('owner company details routes (#3332)', () => {
       expect(recheck.statusCode).toBe(200)
       expect(recheck.json()).toMatchObject({ vies_status: 'pending' })
       expectMatchesSpec('POST', '/user/company-details/vies-check', recheck.json())
+    })
+  })
+
+  /**
+   * #3332 review round 2 (M-A): a real `@fastify/rate-limit` registration,
+   * the same shape `index.ts` registers it with (`global: false`,
+   * `rateLimitKeyFor` as the key generator) — not the plain `app` above,
+   * which never loads the plugin at all and so could never have caught the
+   * bug this guards: `GET`, `PUT` and `POST` used to share ONE `onRequest`
+   * array object, so registering the limiter's `config.rateLimit` on `PUT`
+   * pushed its hook onto the SAME array `GET` was registered with, and all
+   * three routes shared one counter. Mutation: reverting the route module's
+   * per-route `onRequest` arrays back to one shared array turns every
+   * assertion below red (GET starts 429ing, and PUT/POST's counts merge).
+   */
+  describe('rate limiting (#3332 review M-A)', () => {
+    let limitedApp: FastifyInstance
+
+    beforeAll(async () => {
+      limitedApp = Fastify({ logger: false })
+      limitedApp.setErrorHandler((error: FastifyError, _request, reply) => {
+        void reply.status(error.statusCode ?? 500).send({ error: error.message })
+      })
+      await limitedApp.register(fastifyJwt, { secret: 'test-secret' })
+      await limitedApp.register(rateLimit, {
+        global: false,
+        keyGenerator: (request: { headers: Record<string, string | string[] | undefined>; ip: string }) =>
+          rateLimitKeyFor(request),
+      })
+      installRequestValidation(limitedApp, {
+        mode: 'off',
+        enforcedModules: ['routes/owner-company-details.ts'],
+      })
+      const ownerCompanyDetailsRoutes = (await import('../owner-company-details.js')).default
+      await limitedApp.register(ownerCompanyDetailsRoutes, { prefix: '/user' })
+      await limitedApp.ready()
+    })
+
+    afterAll(async () => {
+      await limitedApp.close()
+    })
+
+    beforeEach(() => {
+      (config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
+    })
+
+    function limitedAuth(userId: string): { headers: { authorization: string } } {
+      const token = limitedApp.jwt.sign({ sub: userId, email: 'ocd-limited@test.example' })
+      return { headers: { authorization: `Bearer ${token}` } }
+    }
+
+    it('GET carries no x-ratelimit-* headers and is never 429, even after far more than PUT/POST\'s 20/min cap', async () => {
+      const userId = await seedUser()
+      // Signed ONCE and reused: `rateLimitKeyFor` keys on the exact
+      // `Authorization` header value, so a fresh `jwt.sign` per request could
+      // (rarely, across a second boundary) mint a different token/`iat` and
+      // silently spread these across buckets instead of proving one bucket
+      // never 429s.
+      const auth = limitedAuth(userId)
+      let sawRateLimitHeader = false
+      for (let i = 0; i < 30; i += 1) {
+        const res = await limitedApp.inject({ method: 'GET', url: '/user/company-details', ...auth })
+        expect(res.statusCode).not.toBe(429)
+        if (
+          res.headers['x-ratelimit-limit'] !== undefined ||
+          res.headers['x-ratelimit-remaining'] !== undefined ||
+          res.headers['x-ratelimit-reset'] !== undefined
+        ) {
+          sawRateLimitHeader = true
+        }
+      }
+      expect(sawRateLimitHeader).toBe(false)
+    })
+
+    it('the 21st PUT in a window is 429', async () => {
+      const userId = await seedUser()
+      const auth = limitedAuth(userId)
+      let last: number | undefined
+      for (let i = 0; i < 21; i += 1) {
+        const res = await limitedApp.inject({
+          method: 'PUT',
+          url: '/user/company-details',
+          ...auth,
+          payload: VALID_BODY,
+        })
+        last = res.statusCode
+      }
+      expect(last).toBe(429)
+    })
+
+    it('POST vies-check is limited too', async () => {
+      const userId = await seedUser()
+      const auth = limitedAuth(userId)
+      await limitedApp.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...auth,
+        payload: { ...VALID_BODY, vat_number: 'SE556677889901' },
+      })
+      let last: number | undefined
+      for (let i = 0; i < 21; i += 1) {
+        const res = await limitedApp.inject({
+          method: 'POST',
+          url: '/user/company-details/vies-check',
+          ...auth,
+        })
+        last = res.statusCode
+      }
+      expect(last).toBe(429)
     })
   })
 })

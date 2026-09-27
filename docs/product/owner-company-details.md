@@ -44,7 +44,7 @@ One row per owner, keyed on `user_id` (migration `098_owner_company_details`):
 | `legal_name` | 1–200 characters. |
 | `country` | Two uppercase letters (ISO 3166-1 alpha-2 SHAPE — `^[A-Z]{2}$` — not checked against the actual ISO 3166-1 list; a well-formed but non-existent code is accepted). |
 | `org_number` | For a company, its registration number. **For a sole trader, this IS the personal identity number** — see *Purpose, retention and GDPR basis* below. |
-| `vat_number` | Optional. Normalised on write: uppercase, no spaces (`SE556677889901`, not `se 556677889901`). Its own 2-letter prefix may legitimately differ from `country` (an EU group can register for VAT in a member state that is not its seat of incorporation) — VIES is always asked using the VAT NUMBER's own prefix, never `country` (mapped to VIES's own country code where the two differ, e.g. a `GR…` prefix asks VIES as `EL`; see below). |
+| `vat_number` | Optional. Normalised on write: uppercase, no spaces (`SE556677889901`, not `se 556677889901`). Its own 2-letter prefix may legitimately differ from `country` (an EU group can register for VAT in a member state that is not its seat of incorporation) — VIES is always asked using the VAT NUMBER's own prefix, never `country` (Greece is the one case: a `GR…` prefix asks VIES as `EL`; see below). A prefix that is not itself a VIES member country code is still accepted and stored, but starts no VIES call at all — see *The VIES states* below. |
 | `vies_status` | `null` (no VAT number submitted), `pending`, `valid`, `invalid`, or `not_verifiable`. |
 | `vies_checked_at` | When the last VIES check COMPLETED — never set while `vies_status` is `pending` (a check in flight has no completion time yet), and cleared to `null` whenever the VAT number itself is cleared, alongside `vies_status`. |
 
@@ -67,7 +67,11 @@ returns before the check completes. The check resolves to exactly one of:
   unavailable, or any other failure. **This is deliberate and load-bearing**: a
   busy VIES endpoint must never be read as "this VAT number is wrong" (owner
   decision recorded on #3332). `not_verifiable` is Haven saying "we could not
-  check", never "we checked and it failed".
+  check", never "we checked and it failed". The same status covers a VAT
+  number whose own prefix is not a VIES member country code (EU member states,
+  Greece as `EL`, and Northern Ireland's `XI`) — VIES itself has no way to
+  confirm it, so no VIES call is made at all, and the outcome is recorded
+  immediately (captain's decision, #3332 review m1).
 
 A row can never get stuck `pending` forever: `GET /user/company-details`
 re-triggers a check for its own row if it has been `pending` for more than a
@@ -96,9 +100,9 @@ exception (see its row below).
 | Route | Notes |
 |---|---|
 | `GET /user/company-details` | 404 when the flag is off. 404 if nothing is saved. Re-triggers a stale `pending` check (an atomic claim) as a side effect. |
-| `PUT /user/company-details` | 404 when the flag is off. Full replacement. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per owner. |
+| `PUT /user/company-details` | 404 when the flag is off. Full replacement. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential. |
 | `DELETE /user/company-details` | **Works regardless of the flag** — the owner's erasure path always works, even after an operator turns the feature back off (owner-privacy default). `{ ok: true }` whether or not a row existed. |
-| `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per owner. |
+| `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential. |
 
 An agent API key is refused with a named `403` on every route above,
 including `DELETE` — this is an owner-only surface (an API today; a dashboard

@@ -247,7 +247,7 @@ export type paths = {
         get: operations["getCompanyDetails"];
         /**
          * Create or replace the company details.
-         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per signed-in owner (`ownerProfileRateLimit`).
+         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (`ownerProfileRateLimit`).
          */
         put: operations["putCompanyDetails"];
         post?: never;
@@ -272,7 +272,7 @@ export type paths = {
         put?: never;
         /**
          * Re-run the VIES check for the saved VAT number.
-         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per signed-in owner (`ownerProfileRateLimit`).
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per session credential (`ownerProfileRateLimit`).
          */
         post: operations["recheckCompanyDetailsVies"];
         delete?: never;
@@ -3511,7 +3511,7 @@ export type components = {
             legal_name: string;
             /** @description ISO 3166-1 alpha-2. */
             country: string;
-            /** @description For a sole trader this is the personal identity number — see the settings copy and docs/product/owner-company-details.md. */
+            /** @description For a sole trader this is the personal identity number — see docs/product/owner-company-details.md. */
             org_number: string;
             /** @description Normalised: uppercase, no spaces. */
             vat_number: string | null;
@@ -3996,7 +3996,7 @@ export type components = {
             delegate_account: string | null;
             /** @description `payTo`. */
             merchant: string | null;
-            /** @description The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Absent otherwise. */
+            /** @description The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise. */
             buyer?: components["schemas"]["PartiesBuyer"];
         };
         PartiesBuyer: {
@@ -5747,6 +5747,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description Rate limited (20/min per session credential, `ownerProfileRateLimit`, #3332 review M3). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
         };
     };
     deleteCompanyDetails: {
@@ -5849,6 +5864,21 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Rate limited (20/min per session credential, `ownerProfileRateLimit`, #3332 review M3). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

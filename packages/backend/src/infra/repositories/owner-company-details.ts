@@ -2,7 +2,7 @@
  * Data access for owner company details (#3332) — the `owner_company_details`
  * table behind `HAVEN_OWNER_COMPANY_DETAILS`. One row per owner (`user_id` is
  * the PK), read additively into Haven's payment-evidence `parties` block
- * (`openapi/party-model.ts`) and into the settings form.
+ * (`openapi/party-model.ts`) and returned by `/user/company-details`.
  *
  * Every function takes the owner's `userId` and filters on it — there is no
  * other user's row a caller can reach through this module, by construction of
@@ -143,14 +143,23 @@ export async function setViesResult(
 }
 
 /**
- * Rows stuck `pending` for longer than `olderThanMinutes` — a VIES check that
- * crashed or was killed mid-flight before it could ever record an outcome.
- * `GET /user/company-details` re-triggers a check for exactly these rows
- * (#3332 acceptance: never stuck `pending` forever).
+ * Marks a row `pending` ahead of an explicit re-check (`POST
+ * /user/company-details/vies-check`) — also used to mark a row that crashed
+ * or was killed mid-flight before it could ever record an outcome, so `GET
+ * /user/company-details` can re-trigger it (#3332 acceptance: never stuck
+ * `pending` forever).
+ *
+ * `vies_checked_at = NULL` (#3332 review N1): a check that is currently
+ * `pending` has no completion time yet — the doc's own invariant
+ * ("`vies_checked_at` … never set while `vies_status` is `pending`") was
+ * false for this path before this line existed, because a re-check left the
+ * PREVIOUS check's `vies_checked_at` sitting on the row all the way through
+ * the new `pending` window. Cleared here the same way `writeCompanyDetails`
+ * already clears it when a write starts a fresh check.
  */
 export const MARK_VIES_PENDING_SQL = `
   UPDATE owner_company_details
-  SET vies_status = 'pending', updated_at = NOW()
+  SET vies_status = 'pending', vies_checked_at = NULL, updated_at = NOW()
   WHERE user_id = $1 AND vat_number IS NOT NULL
   RETURNING user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
 `
@@ -162,26 +171,6 @@ export const MARK_VIES_PENDING_SQL = `
  */
 export async function markViesPending(userId: string, db: Executor = pool): Promise<OwnerCompanyDetailsRow | null> {
   const result = await db.query<OwnerCompanyDetailsRow>(MARK_VIES_PENDING_SQL, [userId])
-  return result.rows[0] ?? null
-}
-
-export const FIND_STALE_PENDING_SQL = `
-  SELECT user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
-  FROM owner_company_details
-  WHERE user_id = $1
-    AND vies_status = 'pending'
-    AND updated_at < NOW() - ($2 || ' minutes')::INTERVAL
-`
-
-export async function findStalePendingForUser(
-  userId: string,
-  olderThanMinutes: number,
-  db: Executor = pool,
-): Promise<OwnerCompanyDetailsRow | null> {
-  const result = await db.query<OwnerCompanyDetailsRow>(FIND_STALE_PENDING_SQL, [
-    userId,
-    String(olderThanMinutes),
-  ])
   return result.rows[0] ?? null
 }
 

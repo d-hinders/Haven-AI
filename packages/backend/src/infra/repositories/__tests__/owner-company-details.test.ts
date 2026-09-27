@@ -11,7 +11,6 @@ import {
   type BuyerJoinColumns,
   claimStalePendingForUser,
   deleteOwnerCompanyDetails,
-  findStalePendingForUser,
   getOwnerCompanyDetails,
   markViesPending,
   setViesResult,
@@ -185,33 +184,24 @@ describeDb('owner-company-details repository (#3332)', () => {
     expect(pending?.vies_status).toBe('pending')
   })
 
-  it('findStalePendingForUser: only a pending row older than the cutoff', async () => {
+  it('markViesPending: clears vies_checked_at (#3332 review N1) — a pending row never carries a stale completion time', async () => {
     const userId = await seedUser()
     await upsertOwnerCompanyDetails(userId, {
       legal_name: 'Acme AB',
       country: 'SE',
       org_number: '556677-8899',
       vat_number: 'SE556677889901',
-      vies_status: 'pending',
-      vies_checked_at: null,
+      vies_status: 'valid',
+      vies_checked_at: new Date().toISOString(),
     })
-    // Freshly written: not stale against any positive cutoff.
-    expect(await findStalePendingForUser(userId, 5)).toBeNull()
-
-    // Backdate `updated_at` directly — the repository has no "age" writer,
-    // this is the DB fact the read is proving.
-    await db.query(`UPDATE owner_company_details SET updated_at = NOW() - INTERVAL '10 minutes' WHERE user_id = $1`, [
-      userId,
-    ])
-    const stale = await findStalePendingForUser(userId, 5)
-    expect(stale?.vies_status).toBe('pending')
-
-    await setViesResult(userId, 'valid', new Date().toISOString(), 'SE556677889901')
-    expect(await findStalePendingForUser(userId, 0)).toBeNull()
+    const pending = await markViesPending(userId)
+    expect(pending).toMatchObject({ vies_status: 'pending', vies_checked_at: null })
+    // Not just the returned row — the write itself, read back independently.
+    expect(await getOwnerCompanyDetails(userId)).toMatchObject({ vies_status: 'pending', vies_checked_at: null })
   })
 
   describe('claimStalePendingForUser (#3332 review M3)', () => {
-    it('claims a stale pending row and bumps updated_at, same shape as findStalePendingForUser', async () => {
+    it('claims a stale pending row and bumps updated_at', async () => {
       const userId = await seedUser()
       await upsertOwnerCompanyDetails(userId, {
         legal_name: 'Acme AB',

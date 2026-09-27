@@ -53,9 +53,9 @@ function toWireRow(row: OwnerCompanyDetailsRow) {
 }
 
 /**
- * Behind the flag, GET/PUT/POST all answer 404 — not just the dashboard form.
- * #3332 gates the feature, not only its UI: a deployment with the flag off
- * must behave as though `parties.buyer` and this whole surface do not exist.
+ * Behind the flag, GET/PUT/POST all answer 404 — not just a future settings
+ * UI. #3332 gates the feature itself: a deployment with the flag off must
+ * behave as though `parties.buyer` and this whole surface do not exist.
  *
  * DELETE is the one exception (#3332 review, owner-privacy default): erasure
  * must work regardless of the flag, so an owner who saved details while the
@@ -72,8 +72,8 @@ function requireFeatureEnabled(request: FastifyRequest, reply: FastifyReply, don
 }
 
 /**
- * This is a dashboard-only settings surface: an agent's own API key must
- * never manage its owner's company details. `authMiddleware` already refuses
+ * This is an owner-only API surface: an agent's own API key must never
+ * manage its owner's company details. `authMiddleware` already refuses
  * a non-JWT bearer token with 401 (the same body a bad session token gets),
  * which conflates "wrong kind of credential" with "no credential at all".
  * An agent key is a RECOGNISABLE kind of wrong credential, so this route
@@ -105,13 +105,27 @@ function refuseAgentKey(request: FastifyRequest, reply: FastifyReply, done: () =
  * with the flag off. `refuseAgentKey` and `authMiddleware` still run on every
  * route including DELETE: an agent key must never manage (or erase) its
  * owner's details, flag or no flag.
+ *
+ * #3332 review round 2 (M-A): a FACTORY, not a shared constant array. Fastify
+ * route options are mutated in place by plugins that hook onto them —
+ * `@fastify/rate-limit`'s `onRoute` listener (`addRouteRateHook` in
+ * `@fastify/rate-limit`) does `routeOptions.onRequest.push(hookHandler)` on
+ * the EXACT array object a route was registered with, when that route's
+ * `config.rateLimit` is set. `GET`, `PUT` and `POST` used to share one
+ * `GATED` array reference: registering the limiter on `PUT`'s `config` alone
+ * still pushed its rate-limit hook onto the same array `GET` (which has no
+ * `config.rateLimit` at all) was ALSO registered with — so an unlimited GET
+ * silently inherited PUT's limiter and bucket, and GET/PUT/POST all shared
+ * ONE counter instead of each having its own. Each call below must return a
+ * FRESH array so a hook pushed onto one route's hooks can never reach
+ * another's.
  */
-const GATED = [requireFeatureEnabled, refuseAgentKey, authMiddleware]
-const UNGATED = [refuseAgentKey, authMiddleware]
+const gatedHooks = () => [requireFeatureEnabled, refuseAgentKey, authMiddleware]
+const ungatedHooks = () => [refuseAgentKey, authMiddleware]
 
 export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): Promise<void> {
   // GET /user/company-details
-  app.get('/company-details', { onRequest: GATED }, async (request, reply) => {
+  app.get('/company-details', { onRequest: gatedHooks() }, async (request, reply) => {
     const { sub } = request.user as { sub: string }
     // Re-trigger a stuck `pending` check as a side effect of the read (see
     // the route's own OpenAPI description for the tradeoff against a
@@ -125,7 +139,7 @@ export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): P
   // PUT /user/company-details
   app.put<{ Body: UpsertBody }>(
     '/company-details',
-    { onRequest: GATED, config: { ...ownerProfileRateLimit } },
+    { onRequest: gatedHooks(), config: { ...ownerProfileRateLimit } },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const result = await writeCompanyDetails(sub, {
@@ -142,12 +156,12 @@ export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): P
   )
 
   // DELETE /user/company-details — deliberately NOT gated by the flag
-  // (`UNGATED`, no `requireFeatureEnabled`): erasure is the owner's, always,
-  // regardless of whether the feature is currently on (#3332 review, owner-
-  // privacy default). `removeCompanyDetails`'s `DELETE ... WHERE user_id`
-  // has nothing else to gate on either way — it is a no-op when there is no
-  // row, on or off.
-  app.delete('/company-details', { onRequest: UNGATED }, async (request) => {
+  // (`ungatedHooks()`, no `requireFeatureEnabled`): erasure is the owner's,
+  // always, regardless of whether the feature is currently on (#3332 review,
+  // owner-privacy default). `removeCompanyDetails`'s `DELETE ... WHERE
+  // user_id` has nothing else to gate on either way — it is a no-op when
+  // there is no row, on or off.
+  app.delete('/company-details', { onRequest: ungatedHooks() }, async (request) => {
     const { sub } = request.user as { sub: string }
     await removeCompanyDetails(sub)
     return { ok: true }
@@ -156,7 +170,7 @@ export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): P
   // POST /user/company-details/vies-check
   app.post(
     '/company-details/vies-check',
-    { onRequest: GATED, config: { ...ownerProfileRateLimit } },
+    { onRequest: gatedHooks(), config: { ...ownerProfileRateLimit } },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const pending = await triggerManualRecheck(sub)

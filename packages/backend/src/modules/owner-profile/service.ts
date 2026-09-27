@@ -18,7 +18,7 @@ import {
   type OwnerCompanyDetailsRow,
   type ViesStatus,
 } from '../../infra/repositories/owner-company-details.js'
-import { checkVatWithVies, viesRequestForVatNumber } from './vies-client.js'
+import { checkVatWithVies, isViesMemberPrefix, viesRequestForVatNumber } from './vies-client.js'
 
 export const MAX_LEGAL_NAME_LENGTH = 200
 export const MAX_ORG_NUMBER_LENGTH = 32
@@ -38,8 +38,8 @@ const VAT_NUMBER_RE = /^[A-Z]{2}[A-Z0-9]{2,20}$/
 /**
  * Re-check cadence for a `pending` row that never resolved (a crash or a
  * timed-out worker between the write and the async check completing). Chosen
- * short enough that an owner watching the settings page after a page reload
- * sees it move within the session, long enough that a normal in-flight check
+ * short enough that an owner reloading `GET /user/company-details` sees it
+ * move within the session, long enough that a normal in-flight check
  * (bounded by `VIES_REQUEST_TIMEOUT_MS`, single-digit seconds) is never
  * mistaken for stuck.
  */
@@ -141,9 +141,6 @@ export function nextViesStatus(
  * locally-assigned one, see `ViesCheckResult.reason`), never the input.
  */
 function logViesOutcome(status: ViesStatus, reason: string | null, recorded: boolean): void {
-  // eslint-disable-next-line no-console -- no app logger is threaded through
-  // this detached async task (see the comment above); this is the one place
-  // in the module that logs anything, so it stays a single, greppable line.
   console.log(
     JSON.stringify({ level: 'info', event: 'owner_profile.vies_check_result', status, reason, recorded }),
   )
@@ -168,18 +165,32 @@ function logViesOutcome(status: ViesStatus, reason: string | null, recorded: boo
  * match; the `catch` below is for a genuine DB failure (a lost connection),
  * not for "the row moved on" — that case is the expected, silent no-op the
  * guard exists to produce.
+ *
+ * #3332 review m1 (captain's decision): a VAT number whose prefix is not a
+ * VIES member country code (`isViesMemberPrefix`) is still accepted and
+ * stored (`service.ts`'s `VAT_NUMBER_RE` only bounds the SHAPE) — but VIES
+ * itself can never confirm it, so no VIES call is made at all. The result is
+ * recorded immediately as `not_verifiable` with reason `non_member_prefix`,
+ * never `invalid`: this is Haven saying "not a number VIES can check", the
+ * same never-invalid discipline an outage gets, not a statement that the
+ * number is wrong.
  */
 export async function runViesCheck(userId: string, vatNumber: string): Promise<void> {
   let status: ViesStatus = 'not_verifiable'
   let reason: string | null = null
-  try {
-    const { countryCode, vatNumber: bareNumber } = viesRequestForVatNumber(vatNumber)
-    const result = await checkVatWithVies(countryCode, bareNumber)
-    status = result.status
-    reason = result.reason
-  } catch {
+  if (!isViesMemberPrefix(vatNumber)) {
     status = 'not_verifiable'
-    reason = 'runner_threw'
+    reason = 'non_member_prefix'
+  } else {
+    try {
+      const { countryCode, vatNumber: bareNumber } = viesRequestForVatNumber(vatNumber)
+      const result = await checkVatWithVies(countryCode, bareNumber)
+      status = result.status
+      reason = result.reason
+    } catch {
+      status = 'not_verifiable'
+      reason = 'runner_threw'
+    }
   }
   let recorded = false
   try {

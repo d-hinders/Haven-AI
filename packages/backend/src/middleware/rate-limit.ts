@@ -73,8 +73,12 @@ export const demoRateLimit = {
 /**
  * Owner company details writes (#3332 review M3): `PUT /user/company-details`
  * and `POST /user/company-details/vies-check`, both dashboard-JWT-authenticated
- * so the shared credential key generator buckets per signed-in owner, never
- * per shared proxy IP. Each write can start a VIES check against the EU
+ * so the shared credential key generator buckets per SESSION CREDENTIAL (the
+ * presented JWT), never per shared proxy IP — and, precisely, per credential
+ * rather than per owner: two sessions for the same owner (two open tabs, a
+ * second device) get two separate buckets, since the key is a hash of the
+ * bearer token itself, not the JWT's `sub`. Each write can start a VIES check
+ * against the EU
  * Commission's endpoint — the ceiling here is about being a considerate
  * caller of THAT external service (and giving the async
  * `recheckIfStalePending`/atomic-claim guard less to race against), not about

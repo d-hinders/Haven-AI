@@ -186,10 +186,15 @@ describe('checkVatWithVies (#3332)', () => {
  * INSIDE `vatNumber` (and/or the company's `country` instead of that prefix)
  * makes VIES answer `valid:false`/`INVALID_INPUT` for numbers that answer
  * `valid:true` in the correct shape. `viesRequestForVatNumber` is the fix;
- * these tests pin its pure derivation AND capture the actual transport
- * request body a real service-path call (`checkVatWithVies` fed the derived
- * values) produces — the same seam `modules/owner-profile/service.ts`'s
- * `runViesCheck` calls through.
+ * these tests pin its pure derivation and the wire body `checkVatWithVies`
+ * sends for hand-derived `{countryCode, vatNumber}` values.
+ *
+ * These do NOT go through `modules/owner-profile/service.ts`'s
+ * `runViesCheck` — the actual call site that derives those values FROM a
+ * stored VAT number — so they cannot catch a regression in `runViesCheck`
+ * itself (e.g. reverting to the pre-B1 shape there). `service.test.ts`'s
+ * "runViesCheck derives the VIES request from the call site (#3332 review
+ * M-B)" is the test that pins the call site.
  */
 describe('viesRequestForVatNumber (#3332 review B1)', () => {
   it('a Swedish number: countryCode from the prefix, vatNumber without it', () => {
@@ -212,7 +217,7 @@ describe('viesRequestForVatNumber (#3332 review B1)', () => {
   })
 })
 
-describe('checkVatWithVies request body, through the real service path (#3332 review B1)', () => {
+describe('checkVatWithVies request body, for hand-derived VIES request values (#3332 review B1)', () => {
   function capturingTransport(): { transport: PinnedTransport; requests: PinnedRequest[] } {
     const requests: PinnedRequest[] = []
     const transport: PinnedTransport = async (req) => {

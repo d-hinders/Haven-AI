@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { nextViesStatus, shouldTriggerViesCheck, validateCompanyDetailsInput } from '../service.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { nextViesStatus, runViesCheck, shouldTriggerViesCheck, validateCompanyDetailsInput } from '../service.js'
 import type { OwnerCompanyDetailsRow } from '../../../infra/repositories/owner-company-details.js'
+import * as viesClientModule from '../vies-client.js'
+import * as ownerCompanyDetailsRepo from '../../../infra/repositories/owner-company-details.js'
 
 function row(overrides: Partial<OwnerCompanyDetailsRow> = {}): OwnerCompanyDetailsRow {
   return {
@@ -147,5 +149,73 @@ describe('shouldTriggerViesCheck / nextViesStatus', () => {
     const next = { legal_name: 'Acme AB Updated', country: 'SE', org_number: '556677-8899', vat_number: 'SE556677889901' }
     expect(shouldTriggerViesCheck(previous, next)).toBe(false)
     expect(nextViesStatus(previous, next)).toBe('valid')
+  })
+})
+
+/**
+ * #3332 review M-B: pins the B1 fix at the ACTUAL call site — through
+ * `runViesCheck` itself, the function `writeCompanyDetails` and
+ * `triggerManualRecheck` both call — rather than through a hand-derived
+ * `viesRequestForVatNumber(...)` result fed straight to `checkVatWithVies`
+ * (that only proves the two functions agree with each other, not that
+ * `runViesCheck` actually calls `viesRequestForVatNumber` at all).
+ *
+ * Mutation: replacing `viesRequestForVatNumber(vatNumber)` in `service.ts`'s
+ * `runViesCheck` with the pre-B1 shape (`{ countryCode: vatNumber.slice(0, 2),
+ * vatNumber }`, prefix left inside `vatNumber` and never mapped GR→EL) turns
+ * every assertion below red.
+ */
+describe('runViesCheck derives the VIES request from the call site (#3332 review M-B)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it.each([
+    ['SE556703748501', 'SE', '556703748501'],
+    ['GR094014201', 'EL', '094014201'],
+  ])('%s → checkVatWithVies(%j, %j)', async (vatNumber, expectedCountryCode, expectedBareNumber) => {
+    const checkSpy = vi
+      .spyOn(viesClientModule, 'checkVatWithVies')
+      .mockResolvedValue({ status: 'valid', reason: null })
+    vi.spyOn(ownerCompanyDetailsRepo, 'setViesResult').mockResolvedValue(null)
+
+    await runViesCheck('user-1', vatNumber)
+
+    expect(checkSpy).toHaveBeenCalledExactlyOnceWith(expectedCountryCode, expectedBareNumber)
+  })
+})
+
+/**
+ * #3332 review m1 (captain's decision): a VAT number whose own prefix is not
+ * a VIES member country code is accepted and stored (unchanged — this only
+ * covers the async CHECK), but `runViesCheck` must never call VIES for it:
+ * the result is recorded immediately as `not_verifiable` /
+ * `non_member_prefix`, with no transport call at all.
+ */
+describe('runViesCheck: a non-member VAT prefix skips VIES entirely (#3332 review m1)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('US123456789: no VIES call, recorded not_verifiable/non_member_prefix', async () => {
+    const checkSpy = vi.spyOn(viesClientModule, 'checkVatWithVies')
+    const setResultSpy = vi.spyOn(ownerCompanyDetailsRepo, 'setViesResult').mockResolvedValue(null)
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await runViesCheck('user-1', 'US123456789')
+
+    expect(checkSpy).not.toHaveBeenCalled()
+    expect(setResultSpy).toHaveBeenCalledExactlyOnceWith('user-1', 'not_verifiable', expect.any(String), 'US123456789')
+    const logged = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(logged).toMatchObject({ status: 'not_verifiable', reason: 'non_member_prefix' })
+  })
+
+  it('a member prefix (SE) still calls VIES', async () => {
+    const checkSpy = vi.spyOn(viesClientModule, 'checkVatWithVies').mockResolvedValue({ status: 'valid', reason: null })
+    vi.spyOn(ownerCompanyDetailsRepo, 'setViesResult').mockResolvedValue(null)
+
+    await runViesCheck('user-1', 'SE556703748501')
+
+    expect(checkSpy).toHaveBeenCalledOnce()
   })
 })

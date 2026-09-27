@@ -1030,6 +1030,14 @@ export interface PaymentParties {
    * otherwise. `viesStatus: 'valid'` means VIES accepted the VAT number —
    * never render that as "verified" (see Haven's agent-passport docs on the
    * same naming discipline).
+   *
+   * Present only on the receipt surfaces — `GET /payments/:id/receipt` and
+   * `GET /machine-payments/receipts` (`HavenClient.getReceipt()`,
+   * `listReceipts()`/`listReceiptsPage()`) — never on `GET
+   * /payments/:id/status` (`getPaymentStatus`) or the evidence-attach echo,
+   * even with the feature on: those report payment/settlement state, not the
+   * buyer's company details (out of scope for #3332, see
+   * docs/product/owner-company-details.md).
    */
   buyer?: PaymentPartiesBuyer
 }

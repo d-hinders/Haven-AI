@@ -1124,7 +1124,7 @@ const partiesSchema = {
     buyer: {
       $ref: '#/components/schemas/PartiesBuyer',
       description:
-        "The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Absent otherwise.",
+        "The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise.",
     },
   },
   additionalProperties: false,
@@ -1700,7 +1700,7 @@ export const openapiSpec = {
         operationId: 'putCompanyDetails',
         summary: 'Create or replace the company details.',
         description:
-          "Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per signed-in owner (`ownerProfileRateLimit`).",
+          "Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (`ownerProfileRateLimit`).",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -1715,6 +1715,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
+          '429': { ...errorResponse, description: 'Rate limited (20/min per session credential, `ownerProfileRateLimit`, #3332 review M3).' },
         },
       },
       delete: {
@@ -1740,7 +1741,7 @@ export const openapiSpec = {
         operationId: 'recheckCompanyDetailsVies',
         summary: 'Re-run the VIES check for the saved VAT number.',
         description:
-          "Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per signed-in owner (`ownerProfileRateLimit`).",
+          "Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per session credential (`ownerProfileRateLimit`).",
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -1750,6 +1751,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
+          '429': { ...errorResponse, description: 'Rate limited (20/min per session credential, `ownerProfileRateLimit`, #3332 review M3).' },
         },
       },
     },
@@ -8417,7 +8419,7 @@ export const openapiSpec = {
             type: 'string',
             minLength: 1,
             maxLength: 32,
-            description: 'For a sole trader this is the personal identity number — see the settings copy and docs/product/owner-company-details.md.',
+            description: 'For a sole trader this is the personal identity number — see docs/product/owner-company-details.md.',
           },
           vat_number: { type: ['string', 'null'], description: 'Normalised: uppercase, no spaces.' },
           vies_status: {

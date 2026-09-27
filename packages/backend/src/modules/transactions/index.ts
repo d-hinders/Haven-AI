@@ -44,6 +44,18 @@ export { fetchAccountTransactions } from './aggregate.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
 export { enrichTransactionsWithAccounting } from './accounting.js'
 export { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
+export {
+  ingestInboundTransfers,
+  matchInboundTransferForAccount,
+  findX402PaytoSettlement,
+  type InboundMatchResult,
+} from './receive.js'
+export {
+  findOffRampDestination,
+  setOffRampDestination,
+  usdcAddressForChain,
+  type OffRampDestinationRow,
+} from './off-ramp.js'
 
 export {
   aggregateAccountTransactions,

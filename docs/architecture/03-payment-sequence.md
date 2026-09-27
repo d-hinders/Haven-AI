@@ -14,7 +14,11 @@ covers:
   - packages/backend/src/rails/delegation-authorization.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/domain/chains.ts
-last-verified: "2026-09-11"
+  - packages/backend/src/routes/receive.ts
+  - packages/backend/src/modules/transactions/receive.ts
+  - packages/backend/src/modules/transactions/off-ramp.ts
+  - packages/backend/src/infra/repositories/inbound-transfers.ts
+last-verified: "2026-09-27"
 ---
 
 # Haven — Payment Execution Sequence
@@ -265,3 +269,78 @@ rail — on the delegation rail it runs before any sponsored bundler prepare
 the merchant's own receipt via `POST /machine-payments/:id/merchant-receipt`
 (#956) — best-effort, first write wins, attached as a second file in the
 reporting feed.
+
+## The Receive Side (#3333, epic #3328)
+
+Everything above describes money LEAVING a Haven account. The receive side is
+the mirror: the owner's account as `payTo` for THEIR OWN sales — a merchant
+receiving USDC into their own self-custody smart account. Three pieces, none
+of which moves a key or grants an agent authority:
+
+### 1. The persisted inbound index
+
+`GET /transactions` rows are read LIVE from the explorers (`aggregate.ts`)
+and stay that way — the wire shape (`direction: 'in' | 'out'`) is unchanged
+for the CLI and dashboard. What is NEW is that the same explorer read feeds a
+persisted index (`inbound_transfers`, migration 097): every USDC transfer
+inbound to the account's address is upserted idempotently per
+(chain, tx hash) with payer, raw amount and block time. The live read remains
+the feed's source; the index is the matching substrate — and it costs no
+second explorer call.
+
+The dashboard's receive panel (`GET /receive/{accountAddress}`) reads the
+index directly: the receiving address per chain, the running USDC balance
+(sum of MATCHED rows only), and the inbound rows with their match state.
+
+### 2. Matching — the row is unearned until it is linked
+
+An inbound row starts UNMATCHED, which the ledger serves as `earned: false`.
+Nothing is delivered on an unmatched row. Exactly two things can link it,
+both keyed on the transaction hash:
+
+- **x402 payTo** (`match_kind: 'x402_payto'`): a CONFIRMED x402 settlement
+  intent whose `payTo`/merchant address is THIS account and whose tx hash is
+  the row's. The intent belongs to the PAYER — the match is cross-user by
+  construction and deliberately read-only: the matched intent id is stored on
+  the row for audit and is never served to the receiver.
+- **A supplied receipt** (`match_kind: 'receipt'`): a merchant receipt
+  document the paying agent captured (#956), or a receipt the PAYER drops on
+  `POST /receive/{accountAddress}/receipt-drop`.
+
+The receipt-drop route is **unauthenticated but payer-signed** — the slice's
+recorded decision between the two mechanisms the issue named. A receipt URL
+carried in the 402/response would put a merchant-graded fetch obligation on
+the paying agent and widen the #956 endpoint's agent-auth contract; instead
+the payer signs the exact drop payload with the key that made the transfer,
+the route recovers the signer, and the drop is accepted only when the
+recovered address IS the payer the transfer names and the amount matches the
+persisted row. A payer has no Haven account, so the route carries no auth
+middleware; its authority is nil — it can only flip an inbound row's earned
+flag, never move funds.
+
+The match is one-way and set exactly once (repository WHERE
+`match_kind IS NULL`); the balance counts a row only from the moment its
+match lands (`balance_consumed`).
+
+### 3. The off-ramp hand-off — the OWNER's own transfer
+
+This is deliberately NOT called a sweep: "sweep" is the stranded-delegate-
+funds machinery (`modules/mpp/sweep.ts`), agent-keyed. The off-ramp hand-off
+is the owner moving their OWN USDC from their OWN self-custody account to
+their OWN saved deposit address at an off-ramp venue (Safello, Coinbase):
+
+- the destination is saved once per account+chain by the OWNER
+  (`PUT /receive/{accountAddress}/off-ramp-destination`, dashboard JWT only —
+  no agent route exists for it, and no agent can set or change it);
+- `POST /receive/{accountAddress}/off-ramp/prepare` builds the UserOperation
+  through the same `prepareTransfer` the owner send uses (#1083): the token
+  is the chain registry's USDC and the recipient is the SAVED destination —
+  neither comes from the request body. The OWNER signs with the account's
+  own signer; Haven relays. Submission goes through the existing
+  `/hybrid/{accountAddress}/transfers/submit`, which re-derives the calldata
+  and refuses a user_operation that does not contain it — what lands on-chain
+  is what the owner signed.
+
+Haven never holds the settlement key, never off-ramps, and never settles for
+third parties — the position recorded with counsel in
+[docs/regulatory/casp-risk-guardrails.md](../regulatory/casp-risk-guardrails.md).

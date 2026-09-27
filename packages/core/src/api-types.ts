@@ -2830,6 +2830,103 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/receive/{accountAddress}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receive ledger for one account: address, matched USDC balance, inbound rows. */
+        get: operations["getReceiveLedger"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/receive/{accountAddress}/off-ramp-destination": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save (or replace) the owner off-ramp destination for one account+chain.
+         * @description Owner-only by topology: the route sits behind the dashboard JWT and no agent route wraps it. One destination per account+chain; a PUT replaces it. This address is the ONLY recipient the off-ramp hand-off can prepare a transfer to.
+         */
+        put: operations["setOffRampDestination"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/receive/{accountAddress}/off-ramp/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepare the owner-signed USDC transfer to the saved off-ramp destination.
+         * @description Builds the UserOperation through the same prepareTransfer the owner send uses (#1083): Haven prepares, the OWNER signs with the account own signer, Haven relays. The token is the chain registry USDC and the recipient is the SAVED destination — neither comes from the request body. Submit goes through `/hybrid/{accountAddress}/transfers/submit`, which re-derives the calldata and refuses a user_operation that does not contain it. Not a sweep: the sweep is the agent-keyed stranded-delegate machinery.
+         */
+        post: operations["prepareOffRampHandoff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/receive/{accountAddress}/receipt-drop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A payer-signed receipt document for one inbound transfer (no authentication; signature IS the auth).
+         * @description A payer has no Haven account, so this route carries no auth middleware. The signer is RECOVERED from the EIP-191 signature over the exact drop payload (`haven:receipt-drop\ntx:<hash>\namount_raw:<atomic>`) and the drop is accepted only when the recovered address IS the payer the inbound transfer names, the amount matches the persisted transfer, and the transfer is still unmatched. The stored document is a reference that flips the row earned flag — it grants nothing and moves nothing.
+         */
+        post: operations["dropReceiptForTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/receive/{accountAddress}/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record one inbound USDC transfer in the account receive index.
+         * @description Owner-scoped ingestion hook (tests and the eventual indexer tick; the production indexer feeds the same repository). Idempotent per (chain, tx hash): a re-ingest returns `ingested: false` rather than double-counting.
+         */
+        post: operations["ingestInboundTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dashboard/overview": {
         parameters: {
             query?: never;
@@ -5048,6 +5145,145 @@ export type components = {
                 recoverable?: boolean;
                 note?: string;
             };
+        };
+        /** @description The account receive ledger (#3333): the persisted inbound index, the matched balance, and the saved off-ramp destination. */
+        ReceiveLedgerResponse: {
+            /**
+             * @description The receiving account address.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            account_address: string;
+            chain_id: number;
+            /** @description The chain registry USDC contract, or null when the chain has none. */
+            usdc_address: string | null;
+            /** @description SUM of matched (balance_consumed) inbound rows, atomic units, as a numeric string. Unmatched rows are unearned and never counted. */
+            balance_atomic: string;
+            /** @description The balance in USDC human decimals (6). */
+            balance_formatted: string;
+            /** @description The owner-saved off-ramp destination, or null when none is saved yet. */
+            off_ramp_destination: components["schemas"]["OffRampDestination"] | null;
+            transfers: components["schemas"]["ReceiveLedgerTransfer"][];
+        };
+        ReceiveLedgerTransfer: {
+            tx_hash: string;
+            payer_address: string;
+            /** @description Atomic units, numeric string. */
+            amount_raw: string;
+            /** @description USDC human decimals (6). */
+            amount_formatted: string;
+            /** Format: date-time */
+            block_time: string;
+            /** @description How the row is linked to evidence: an x402 settlement the account was payTo for, or a supplied receipt. Null = unmatched = unearned. */
+            match_kind: ("x402_payto" | "receipt") | null;
+            /** @description The x402 settlement intent id, present only for x402_payto. Stored for audit; never a grant. */
+            matched_payment_intent_id: string | null;
+            /** @description The linked receipt document id, present only for the receipt kind. */
+            matched_receipt_id: string | null;
+            /** @description True once the row counts in balance_atomic. */
+            balance_consumed: boolean;
+            /** @description match_kind !== null. Unmatched = unearned; nothing is delivered on an unearned row. */
+            earned: boolean;
+        };
+        OffRampDestination: {
+            /**
+             * @description The deposit address at the venue (Safello, Coinbase, or a custody account).
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            destination_address: string;
+            /** @enum {string} */
+            destination_kind: "safello" | "coinbase" | "custody_deposit";
+            label: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        OffRampDestinationInput: {
+            /**
+             * @description The deposit address. The zero address is refused.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            destination_address: string;
+            /**
+             * @default custody_deposit
+             * @enum {string}
+             */
+            destination_kind: "safello" | "coinbase" | "custody_deposit";
+        };
+        OffRampPrepareInput: {
+            /** @description The amount to move, atomic units. The recipient and token are NOT in the request: they are the saved destination and the chain registry USDC. */
+            amount_atomic: string;
+        };
+        OffRampPrepareResponse: {
+            /** @description The prepared UserOperation (same shape the owner send prepare returns) — what the OWNER signs with the account own signer. */
+            prepared: {
+                [key: string]: unknown;
+            };
+            submit: components["schemas"]["OffRampSubmitInstructions"];
+        };
+        OffRampSubmitInstructions: {
+            /** @description The submit route; it re-derives the calldata and refuses a user_operation that does not contain it. */
+            endpoint: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            token_address: string;
+            /**
+             * @description The saved destination — echoed so the owner signs what they verified.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            to: string;
+            destination_kind: string;
+            amount_atomic: string;
+            /**
+             * @description Only the account owner signs; no agent key can authorize this transfer.
+             * @enum {string}
+             */
+            signature_required_from: "owner";
+        };
+        ReceiptDropInput: {
+            /** @description The on-chain transfer the receipt is for — the match key. */
+            tx_hash: string;
+            /** @description Atomic units; must equal the persisted transfer amount. */
+            amount_raw: string;
+            /**
+             * @description The payer the transfer names; the signature must recover to it.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            payer_address: string;
+            /** @description EIP-191 personal signature over `haven:receipt-drop\ntx:<tx_hash>\namount_raw:<amount_raw>`. */
+            signature: string;
+        };
+        ReceiptDropResponse: {
+            /** @enum {boolean} */
+            matched: true;
+            /** @enum {string} */
+            match_kind: "x402_payto" | "receipt";
+            /** Format: uuid */
+            transfer_id: string;
+        };
+        InboundIngestInput: {
+            tx_hash: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            payer_address: string;
+            /** @description Atomic units. */
+            amount_raw: string;
+            /**
+             * @description Optional; defaults to the chain registry USDC — the receive index tracks USDC only.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            token_address?: string;
+            /**
+             * Format: date-time
+             * @description Defaults to now.
+             */
+            block_time?: string;
+            block_number?: string;
+        };
+        InboundIngestResponse: {
+            /** @description false when the (chain, tx hash) was already indexed — idempotent re-ingest. */
+            ingested: boolean;
+            /**
+             * Format: uuid
+             * @description The row id, or null when it already existed.
+             */
+            id: string | null;
         };
         TransactionsResponse: {
             transactions: components["schemas"]["Transaction"][];
@@ -17925,6 +18161,382 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TransactionsPageResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getReceiveLedger: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account receive ledger. `earned: false` rows are unmatched = unearned; nothing is delivered on them. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiveLedgerResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    setOffRampDestination: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OffRampDestinationInput"];
+            };
+        };
+        responses: {
+            /** @description The saved destination. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffRampDestination"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    prepareOffRampHandoff: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OffRampPrepareInput"];
+            };
+        };
+        responses: {
+            /** @description The prepared UserOperation plus the submit instructions the owner signs into. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffRampPrepareResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    dropReceiptForTransfer: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReceiptDropInput"];
+            };
+        };
+        responses: {
+            /** @description The transfer is matched and now earned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptDropResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    ingestInboundTransfer: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboundIngestInput"];
+            };
+        };
+        responses: {
+            /** @description Recorded (`ingested: false` when the hash was already indexed). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundIngestResponse"];
                 };
             };
             /** @description Error response */

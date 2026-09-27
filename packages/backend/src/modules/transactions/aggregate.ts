@@ -53,6 +53,8 @@ import { createCache } from '../../platform/cache.js'
 import { toBlockNumber, toCanonicalAddress, toUnixSeconds } from './normalize.js'
 import { buildTransactionCacheKey } from './cache-key.js'
 import { compareTransactions, transactionDedupKey } from './ordering.js'
+import { ingestInboundTransfers } from './receive.js'
+import { findOwnerUserIdForAccount } from '../../infra/repositories/inbound-transfers.js'
 import type {
   FetchAccountTransactionsParams,
   FetchAccountTransactionsResult,
@@ -72,6 +74,20 @@ interface CachedRead {
 
 const txCache = createCache<CachedRead>(30_000)
 const txInflight = new Map<string, Promise<FetchAccountTransactionsResult>>()
+
+/**
+ * The ingest pass needs the account's owner (the index is user-scoped).
+ * Resolved outside the ingest loop — one query per account read, cached with
+ * the read itself. Unknown id → null, and the pass is skipped: an account id
+ * that resolves to nothing has no owner to scope rows to.
+ */
+async function findInboundOwnerUserId(accountId: string): Promise<string | null> {
+  try {
+    return await findOwnerUserIdForAccount(accountId)
+  } catch {
+    return null
+  }
+}
 
 export async function fetchAccountTransactions({
   accountId,
@@ -120,6 +136,26 @@ export async function fetchAccountTransactions({
     const erc20 = await fetchERC20Transfers(chainId, accountAddress).catch(
       logFail<RawERC20Transfer>('erc20'),
     )
+
+    // #3333: the persisted receive index is fed by the SAME read the feed
+    // serves from — the raw ERC-20 leg rows, before normalization — so the
+    // index costs no second explorer call. Ingestion is best-effort and
+    // non-blocking for the read (errors are logged inside); a USDC transfer
+    // inbound to the account's address is upserted idempotently on
+    // (chain, hash). The live explorer read stays the wire's source; the
+    // index is the matching substrate.
+    void ingestInboundTransfers(
+      {
+        id: accountId,
+        userId: (await findInboundOwnerUserId(accountId)) ?? '',
+        accountAddress,
+        chainId,
+      },
+      erc20.rows,
+      log,
+    ).catch((err: unknown) => {
+      log.warn({ err, accountId, chainId }, 'Inbound transfer ingest pass failed')
+    })
 
     const normalTxs = normal.rows
     const internalTxs = internal.rows

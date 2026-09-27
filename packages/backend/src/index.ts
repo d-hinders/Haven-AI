@@ -25,6 +25,7 @@ import userRoutes from './routes/user.js'
 import ownerCompanyDetailsRoutes from './routes/owner-company-details.js'
 import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
+import receiveRoutes from './routes/receive.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import agentRoutes from './routes/agents.js'
@@ -251,6 +252,13 @@ installRequestValidation(app, {
     'routes/agent-connection-setups.ts',
     'routes/agent-passports.ts',
     'routes/hybrid-accounts.ts',
+    // #3333: routes/receive.ts is born ENFORCED — the rule a genuinely new
+    // module never enters shadow (there is no existing caller a stricter
+    // schema could break). The file carries the receive side's owner surface
+    // (authMiddleware) and the payer's unauthenticated-but-signed receipt
+    // drop; the drop's body shape is exactly the enforced schema's, so a
+    // malformed drop is refused before any DB read.
+    'routes/receive.ts',
   ],
 })
 
@@ -428,6 +436,10 @@ await app.register(userRoutes, { prefix: '/user' })
 await app.register(ownerCompanyDetailsRoutes, { prefix: '/user' })
 await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
+// #3333: the receive side — persisted inbound index, receipt matching and the
+// owner-signed off-ramp hand-off. Owner-scoped (authMiddleware inside the
+// file); no agent-auth route reaches it.
+await app.register(receiveRoutes, { prefix: '/receive' })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 // #2847 (epic #1440): `GET /safe/:addr/details` and `POST /safe/exec` are

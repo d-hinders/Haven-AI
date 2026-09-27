@@ -23,7 +23,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-27"
 ---
 
 # Dev environment
@@ -813,3 +813,14 @@ project owner — collaborators have Viewer access, not env-var write access.
 > RPC hiccup". Triggers, gating, the retry count and the freshness gate
 > described above are unchanged. Nothing else in this file's coverage was
 > touched; this note is the only edit.
+
+> **Re-verified #3333 (2026-09-27):** `index.ts`'s `enforcedModules` grew by
+> exactly one entry — `routes/receive.ts`, born ENFORCED per the rule above
+> (a genuinely new module with no existing caller). The generated map
+> (`route-modules.generated.ts`) was regenerated in the same commit and
+> `lint:request-schemas` stayed green with no baseline bump: the module
+> carries a spec operation for every registered route, including the
+> unauthenticated-but-signed receipt drop (whose body shape is the enforced
+> schema's). The shadow/enforce semantics this document describes are
+> unchanged. Nothing else in this file's coverage was touched; the note and
+> the `last-verified` date are the only edits.

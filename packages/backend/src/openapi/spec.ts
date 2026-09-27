@@ -7988,11 +7988,25 @@ export const openapiSpec = {
             description: 'Newest first. What changed, for deciding whether to update — not the full CHANGELOG.',
             items: {
               type: 'object',
-              required: ['version', 'date', 'summary', 'action_required'],
+              required: ['version', 'date', 'summary', 'summary_segments', 'action_required'],
               properties: {
                 version: { type: 'string' },
                 date: { type: 'string', format: 'date' },
-                summary: { type: 'string' },
+                summary: { type: 'string', description: 'Plain text: code spans keep their content, without backticks.' },
+                summary_segments: {
+                  type: 'array',
+                  description:
+                    '#3393: `summary` split into parts, so a renderer can show code as code. The texts join to exactly `summary`.',
+                  items: {
+                    type: 'object',
+                    required: ['text', 'code'],
+                    properties: {
+                      text: { type: 'string' },
+                      code: { type: 'boolean', description: 'True when the part was a code span in the CHANGELOG.' },
+                    },
+                    additionalProperties: false,
+                  },
+                },
                 action_required: {
                   type: 'boolean',
                   description: 'True when a client must update to keep paying. Not the same as a breaking change.',

@@ -90,7 +90,18 @@ function PackageCard({ entry }: { entry: ManifestPackageEntry }) {
               </p>
               {note.action_required ? <StatusBadge tone="warning">Update required</StatusBadge> : null}
             </div>
-            <p className="mt-1 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">{note.summary}</p>
+            {/* Segments, not `summary`: code renders as code, never as body text (#3393). */}
+            <p className="mt-1 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              {note.summary_segments.map((segment, i) =>
+                segment.code ? (
+                  <code key={i} className="font-mono text-[12px] text-[var(--v2-ink)]">
+                    {segment.text}
+                  </code>
+                ) : (
+                  <span key={i}>{segment.text}</span>
+                ),
+              )}
+            </p>
           </div>
         ))}
       </Card.Section>

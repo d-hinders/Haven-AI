@@ -325,7 +325,7 @@ export function useDelegationBudget(
   // AGENT changes — while the hook stays enabled (a caller that switches
   // agent mid-flow inside one mounted hook, e.g. `FundMerchantModal`'s agent
   // picker). Without this, the previous agent's budgets/signer set (and
-  // therefore `ready`/`signingPath`) remain readable — and actionable — for
+  // therefore `ready`/`signingPath`) stay loaded — and actionable — for
   // the whole round trip of the new read, which is exactly the "signs with
   // the wrong agent's data" risk on a money path. `reload`/`reloadSigners`
   // above already refetch on this same change (their identity depends on

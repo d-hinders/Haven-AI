@@ -281,6 +281,29 @@ describeDb('payment-intents repository (#1223)', () => {
     expect(await findSendIntentByIdempotencyKey(agentId, 'send-1')).not.toBeNull()
   })
 
+  it('FIND_SEND_INTENT_BY_KEY_SQL returns task_budget_id — the #3392 replay pin reads it from the lookup', async () => {
+    // The route's replay comparison never issues a second query: the pin's
+    // budget value must come back on the SAME row the lookup already
+    // returns. Null (no budget) and set (charging a task budget) are both
+    // values the comparison has to see verbatim.
+    const { agentId, userId } = await seedAgent()
+    const bare = await insertDelegationIntent(delegationInput(agentId, userId, { sendIdempotencyKey: 'send-bare' }))
+    expect((await findSendIntentByIdempotencyKey(agentId, 'send-bare'))?.task_budget_id).toBeNull()
+
+    const budget = await db.query<{ id: string }>(
+      `INSERT INTO agent_task_budgets
+         (agent_id, chain_id, token_address, recipient_address, parent_delegation_hash,
+          delegation_hash, delegation_json, max_atomic, status, expires_at)
+       VALUES ($1, 84532, '0x036cbd53842c5426634e7929541ec2318f3dcf7e', NULL,
+               '0x02', '0x03', '{}', '1000000', 'open', 9999999999)
+       RETURNING id`,
+      [agentId],
+    )
+    await insertDelegationIntent(delegationInput(agentId, userId, { sendIdempotencyKey: 'send-budgeted', taskBudgetId: budget.rows[0].id }))
+    expect((await findSendIntentByIdempotencyKey(agentId, 'send-budgeted'))?.task_budget_id).toBe(budget.rows[0].id)
+    expect(bare.id).not.toBe(await findSendIntentByIdempotencyKey(agentId, 'send-budgeted').then((r) => r?.id))
+  })
+
   it('insertMachineIntent honours an EXPLICIT id — the erc7710 child is salted from it (#2094)', async () => {
     // The wiring the whole of #2094 rests on. The settlement child's salt is
     // derived from the intent id BEFORE the row exists, so the id the caller

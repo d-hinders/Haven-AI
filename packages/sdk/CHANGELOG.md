@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Fixed
+
+- **Idempotent replay refuses a task-budget mismatch (#3392).** An idempotency key already pinned a payment's token, recipient and amount; the task budget the payment was charged to was not part of that pin. The x402 receipt cache and the in-flight map now record the `taskBudgetId` each entry was created under, and `authorizeX402()`, `fetch()`, `payX402Quote()` and `resumeAuthorizedX402()` throw the new typed `X402TaskBudgetMismatchError` (exported, `x402ErrorCode: 'task_budget_mismatch'`) BEFORE any network call instead of silently returning or joining a receipt paid under another budget. `resumeAuthorizedX402` pins the caller-supplied `taskBudgetId` option (absent when none is given). The backend answers the same refusal with a 409 on both payment routes. A caller that wants to pay again under a different budget passes a new `idempotencyKey`. The erc7710 path still has no receipt cache. No update needed: retries that never named a `taskBudgetId` replay exactly as before.
+
 ## 0.6.0-alpha.0 — 2026-09-26
 
 ### Removed

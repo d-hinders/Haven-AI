@@ -1555,6 +1555,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > #3375 recipient pin, whichever delegation the backend redeems under. The rest
 > of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified (#3392, 2026-09-27):** the idempotent replay on both payment
+> routes now refuses a `task_budget` mismatch with a 409 instead of silently
+> replaying onto another budget: `POST /payments` compares `task_budget_id`
+> alongside token/recipient/amount (`mismatch()`, lower-cased, "absent" is a
+> value), and `POST /x402`'s `delegationReplay` compares it on
+> `pending_signature` (unexpired) and `confirmed` rows BEFORE the
+> confirmed-200 branch — a budget-only check there; enforcing the other
+> fields on confirmed rows is out of scope. The SDK's x402 receipt cache and
+> in-flight map record the `taskBudgetId` each entry was created under and
+> `authorizeX402`/`fetch`/`payX402Quote`/`resumeAuthorizedX402` throw the new
+> typed `X402TaskBudgetMismatchError` before any network call. No authority
+> moves: the comparison only reports an attribution mismatch the replay used
+> to hide — the caller, Haven and the enforcers keep exactly their previous
+> powers, and no signature, key role or on-chain surface changes. The rest of
+> this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this diff renames backend-internal identifiers to account vocabulary in the
 > files this document spans: `userSafeId` → `accountId`

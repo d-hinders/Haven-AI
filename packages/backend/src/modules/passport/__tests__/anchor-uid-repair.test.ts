@@ -476,7 +476,8 @@ describe('#3342 — steady state: healthy rows leave the queue', () => {
     expect(result.rows).toEqual([
       { agent_id: AGENT, outcome: 'confirmed', reason: 'stored UID already matches the anchor receipt' },
     ])
-    expect(confirmAnchorUid).toHaveBeenCalledWith(AGENT, TX)
+    // #3395: the confirm is a CAS on the stored UID, same as repairAnchoredUid.
+    expect(confirmAnchorUid).toHaveBeenCalledWith(AGENT, TX, REAL_UID)
   })
 
   it('a CAS-refused confirmation (row moved) is not counted healthy', async () => {

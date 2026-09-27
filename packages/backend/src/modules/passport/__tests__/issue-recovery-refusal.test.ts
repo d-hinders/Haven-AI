@@ -249,9 +249,10 @@ describeDb('#3395 — a refused recovery is recorded as the refusal, not a liven
     // Control: the SAME stuck state with a receipt whose log IS proven ours
     // recovers (the #1043 behaviour must not regress under #3395).
     const { agentId, userId } = await seedStuckMinedPassport({ shape: 'foreign-attester' })
+    const controlUid = '0x' + 'c'.repeat(64)
     getTransactionReceipt.mockResolvedValue({
       status: 1,
-      logs: [attestedLog('0x' + 'c'.repeat(32), PINNED_SCHEMA, RELAYER)],
+      logs: [attestedLog(controlUid, PINNED_SCHEMA, RELAYER)],
     })
     getTransaction.mockResolvedValue({
       data: attestCalldata(),
@@ -268,7 +269,7 @@ describeDb('#3395 — a refused recovery is recorded as the refusal, not a liven
     expect(anchor).not.toHaveBeenCalled()
     const row = await readPassport(agentId)
     expect(row.status).toBe('anchored')
-    expect(row.attestation_uid).toBe('0x' + 'c'.repeat(32))
+    expect(row.attestation_uid?.toLowerCase()).toBe(controlUid)
     expect(row.tx_hash).toBe(BROADCAST_TX)
   })
 

@@ -50,6 +50,9 @@ const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
   },
 }))
 
+// db-mock-exempt: route-level shadow-posture test (202/401/refusal-counting) —
+// no database behaviour is under test here; the reconciliation-event write is
+// proven on the real-DB harness in `infra/repositories/__tests__/machine-payments.test.ts`.
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),

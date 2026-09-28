@@ -319,8 +319,8 @@ export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
 export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName, (input: unknown) => Promise<ToolPayload>> {
   return {
     haven_send: async (input) => {
-      // #2366/#3411: resolved OUTSIDE the payload so its warnings can ride on
-      // the success, and BEFORE anything is contacted so a legacy
+      // #2366/#3411: resolved OUTSIDE the payload so any `preflight` warning
+      // can ride on the success, and BEFORE anything is contacted so a legacy
       // `idempotencyKey` refuses without spending.
       const pf = preflight('haven_send', input)
       if ('success' in pf) return pf

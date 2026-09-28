@@ -509,6 +509,17 @@ describe('delegation lifecycle API (#828)', () => {
         expect(insertCall()).toBeUndefined()
       })
 
+      // The enforced shape check on a money-path body: this describe's app runs
+      // `mode: 'enforce'` with the module listed, so the spec's slug pattern
+      // refuses a malformed slug (400) before the handler looks anything up.
+      it('refuses a malformed merchant_slug with 400 before the handler (enforced)', async () => {
+        mockDb({})
+        const res = await build({ ...base, merchant_slug: 'Not A Slug' })
+        expect(res.statusCode).toBe(400)
+        expect(mockMerchantBySlug).not.toHaveBeenCalled()
+        expect(insertCall()).toBeUndefined()
+      })
+
       it('treats merchant_slug: null as absent — a plain build, no lookup', async () => {
         mockDb({})
         const res = await build({ ...base, merchant_slug: null })
@@ -2128,9 +2139,10 @@ describe('POST /:id/delegations/build — OPEN budget through request validation
         // enforcement needs `mode: 'enforce'` AND the module listed. In this
         // SETUPS loop that combination does not exist (all four take the
         // shadow branch or no layer at all), so the handler's 404 is the
-        // answer everywhere; the 400-before-handler half is pinned in the
-        // lifecycle describe, whose app runs `mode: 'enforce'` with this
-        // module listed.
+        // answer everywhere; the 400-before-handler half is pinned by
+        // "refuses a malformed merchant_slug with 400 before the handler
+        // (enforced)" in the lifecycle describe, whose app runs
+        // `mode: 'enforce'` with this module listed.
         const enforced =
           options.mode === 'enforce' &&
           (options.enforcedModules as readonly string[] | undefined)?.includes('routes/agent-delegations.ts')

@@ -305,8 +305,13 @@ it (409 otherwise). No merchant-locked budget is issued when:
 - the offers disagree, or one of them names no payTo;
 - another merchant's non-delisted offer on that network names the same
   address (`shared`);
-- any of the offers lacks ERC-7710. A pinned budget cannot pay an EIP-3009
-  merchant, per the rule in §8 below;
+- any of the offers lacks ERC-7710, read per the offer's own RECORDED
+  network — `merchant_catalog.asset_transfer_methods` reflects only the
+  `accepts[]` options on that row's `accepts[0]` network (#3386, the same
+  scoping `pay_to` already used), so an offer probed on a network where the
+  merchant only accepts EIP-3009 counts as lacking ERC-7710 there even if a
+  DIFFERENT network's challenge names it. A pinned budget cannot pay an
+  EIP-3009 merchant, per the rule in §8 below;
 - the payTo is one of the agent's own addresses: its delegate key, its
   delegate account or its treasury.
 
@@ -323,10 +328,6 @@ Two limits are deliberate:
 - **Rotation.** A later payTo rotation never re-points a signed grant. The
   budget stays pinned to the address the owner signed for, and the merchant
   page reports it `stale`.
-
-A re-key (§6a) carries the recipient pin to the replacement grant but not
-the merchant label, so the budget keeps its authority and loses only its
-place on the merchant page (#3386).
 
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:

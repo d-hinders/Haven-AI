@@ -244,12 +244,6 @@ for the modal's own shape.
   `merchant_id`, `merchant_slug` and `merchant_name`, so a budget card can
   name its merchant. A deleted merchant leaves the budget pinned and drops
   only the label.
-- **Known gap: a re-key drops the label.** The replacement grant a re-key
-  issues keeps the recipient pin but not the merchant. After a re-key, the
-  budget still pays only the merchant, but it no longer appears in
-  `GET /merchants/{slug}/budgets` or carries the merchant's name. Tracked in
-  #3386.
-
 ## Prospects
 
 A `coming_soon` merchant is a company Haven is in conversation with — migration
@@ -475,5 +469,6 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   names a merchant-locked budget's merchant ("pays `<merchant>` only") instead
   of its raw recipient address, reading the `merchant_name` `GET
   /agents/{id}/delegations` now carries (#3331). A budget whose merchant was
-  since deleted, or that lost its label to a re-key (#3386), falls back to the
-  address.
+  since deleted falls back to the address. A re-key carries the merchant
+  label to every replacement piece (carry, steady, reanchor, #3386), so an
+  ordinary re-key does not fall back here.

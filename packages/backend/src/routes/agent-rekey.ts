@@ -774,6 +774,9 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         expires_at: Number(terms.expires_at),
         remaining_atomic: meter.remainingAtomic,
         from_chain: meter.fromChain,
+        // #3386: carried so the merchant page still finds this budget after
+        // a re-key. A label only — never read by payment selection.
+        merchant_id: terms.merchant_id,
       })
     }
 
@@ -919,6 +922,22 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
           }
         }
 
+        // #3386: the merchant label, carried from the old delegation. Most
+        // snapshots already carry it (written at revoke/submit, above). A
+        // snapshot persisted before that field existed — reachable only
+        // through `adoptAbandonedCarry`'s wholesale copy of a predecessor's
+        // `carry_snapshot` — has `merchant_id` absent rather than `null`, so
+        // it is distinguished from "no merchant" and re-read from the old
+        // row by hash here instead. The old row survives the revoke (it is
+        // marked `revoked`, never deleted), so the read still resolves after
+        // the point of no return.
+        const merchantId =
+          pieces.length === 0
+            ? null
+            : entry.merchant_id !== undefined
+              ? entry.merchant_id
+              : ((await findDelegationTerms(request.params.id, entry.delegation_hash))?.merchant_id ?? null)
+
         for (const piece of pieces) {
           const version = await nextDelegationVersion(
             request.params.id,
@@ -962,6 +981,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
             expiresAt: piece.terms.expiresAt,
             rekeyId: rekey.id,
             carryRole: piece.role,
+            merchantId,
           })
           if (inserted === false) {
             return reply.code(409).send({ error: 'Unlinked agents cannot receive new budget delegations' })

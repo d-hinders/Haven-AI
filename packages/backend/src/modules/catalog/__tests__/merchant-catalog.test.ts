@@ -106,6 +106,47 @@ describe('probeCatalogEntry', () => {
     expect(result.assetTransferMethods).toEqual(['erc7710'])
   })
 
+  it('#3386 scopes assetTransferMethods to the recorded network — the accepts[0] network', async () => {
+    // A challenge naming EIP-3009 on 84532 (accepts[0], the recorded network)
+    // and ERC-7710 only on 8453: before #3386 this recorded the union
+    // (['eip3009', 'erc7710']) on the 84532 row, which could issue a
+    // merchant-locked budget for a network the merchant never accepts
+    // ERC-7710 on.
+    const body = {
+      x402Version: 2,
+      accepts: [
+        { ...X402_BODY.accepts[0], network: 'eip155:84532' },
+        { ...X402_BODY.accepts[0], network: 'eip155:8453', extra: { assetTransferMethod: 'erc7710' } },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'PAYMENT-REQUIRED': b64(body) },
+    }))
+
+    const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(result.network).toBe('eip155:84532')
+    expect(result.assetTransferMethods).toEqual(['eip3009'])
+  })
+
+  it('#3386 still scans every option ON the recorded network, not just accepts[0]', async () => {
+    const body = {
+      x402Version: 2,
+      accepts: [
+        { ...X402_BODY.accepts[0], network: 'eip155:84532' },
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', extra: { assetTransferMethod: 'erc7710' } },
+        { ...X402_BODY.accepts[0], network: 'eip155:8453', extra: { assetTransferMethod: 'erc7710' } },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'PAYMENT-REQUIRED': b64(body) },
+    }))
+
+    const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(result.assetTransferMethods).toEqual(['eip3009', 'erc7710'])
+  })
+
   it('does not report transfer methods for an MPP merchant', async () => {
     const challenge = {
       amount: { display: '0.01', atomic: '10000' },

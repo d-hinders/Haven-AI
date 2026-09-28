@@ -55,6 +55,16 @@ export interface CarrySnapshotEntry {
   remaining_atomic: string
   /** False means the read fell back; the carry refuses these (see rekey-carry). */
   from_chain: boolean
+  /**
+   * The merchant a merchant-locked budget was issued for (#3386). A LABEL
+   * only — never a caveat, and never read by payment selection — carried so
+   * every replacement piece (carry/steady/reanchor) keeps its place on
+   * `GET /merchants/{slug}/budgets`. Optional because a snapshot persisted
+   * before this field existed (an old `carry_snapshot` row, including one
+   * adopted from an abandoned predecessor via `adoptAbandonedCarry`) has none
+   * — the issue step falls back to a by-hash read of the old row for those.
+   */
+  merchant_id?: string | null
 }
 
 // ── Reads the re-key route needs, kept out of the route (#1698 review) ────
@@ -123,10 +133,12 @@ export interface DelegationTermsRow {
   period_seconds: number
   start_date: string
   expires_at: string
+  /** The merchant this delegation was issued for, if any (#3386). */
+  merchant_id: string | null
 }
 
 export const FIND_DELEGATION_TERMS_SQL = `SELECT token_address, recipient_address, budget_atomic, period_seconds,
-            start_date, expires_at
+            start_date, expires_at, merchant_id
        FROM agent_delegations WHERE agent_id = $1 AND delegation_hash = $2`
 
 export async function findDelegationTerms(
@@ -164,8 +176,8 @@ export async function nextDelegationVersion(
 export const INSERT_REKEY_DELEGATION_SQL = `INSERT INTO agent_delegations (
          agent_id, chain_id, token_address, recipient_address, delegation_hash,
          delegation_json, version, status, budget_atomic, period_seconds,
-         start_date, expires_at, rekey_id, carry_role
-       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13)
+         start_date, expires_at, rekey_id, carry_role, merchant_id
+       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (delegation_hash) DO NOTHING`
 
 export async function insertRekeyDelegation(
@@ -184,6 +196,14 @@ export async function insertRekeyDelegation(
     expiresAt: number
     rekeyId: string
     carryRole: string
+    /**
+     * The merchant this replacement is FOR, carried from the delegation it
+     * replaces (#3386). A label only — the recipient pin is unchanged, and
+     * the migration 101 CHECK (`merchant_id IS NULL OR recipient_address IS
+     * NOT NULL`) is satisfied the same way the original grant satisfied it:
+     * every merchant-locked delegation carries a recipient.
+     */
+    merchantId: string | null
   },
   db: Executor = pool,
 ): Promise<boolean> {
@@ -207,6 +227,7 @@ export async function insertRekeyDelegation(
       row.expiresAt,
       row.rekeyId,
       row.carryRole,
+      row.merchantId,
     ])
     return true
   })

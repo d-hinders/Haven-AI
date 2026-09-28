@@ -73,12 +73,15 @@ export interface BuiltSubBudgetDelegation {
 /**
  * The parent budget delegation's own period scope, decoded from its caveat
  * stack — `createDelegation` compiles a `erc20PeriodTransfer` scope into an
- * `ERC20PeriodTransferEnforcer` caveat whose terms are
- * `abi.encode(address token, uint256 periodAmount, uint256 periodDuration,
- * uint256 startDate)`. A sub-budget can only be carved from a SINGLE-token
- * PERIOD delegation; multi-token parents (`buildMultiTokenBudgetDelegation`'s
- * functionCall scope) are out of scope for v1 (#3330 open question, answered
- * in the slice).
+ * `ERC20PeriodTransferEnforcer` caveat whose terms are the kit's
+ * TIGHT-PACKED `abi.encodePacked(address token, uint256 periodAmount,
+ * uint256 periodDuration, uint256 startDate)` — 116 bytes (20 + 32×3), NOT
+ * the head/tail `abi.encode` layout `decodeAbiParameters` expects (the
+ * address is not padded to a word). Decoded by explicit slicing for that
+ * reason (verified against the kit's own output, 2026-09-28). A sub-budget
+ * can only be carved from a SINGLE-token PERIOD delegation; multi-token
+ * parents (`buildMultiTokenBudgetDelegation`'s functionCall scope) are out
+ * of scope for v1 (#3330 open question, answered in the slice).
  */
 export function readParentPeriodScope(
   budgetDelegation: Delegation,
@@ -88,16 +91,15 @@ export function readParentPeriodScope(
   )
   if (!periodCaveat) return null
   try {
-    const [token, periodAmount, periodDuration, startDate] = decodeAbiParameters(
-      [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
-      periodCaveat.terms as Hex,
-    )
-    return {
-      token,
-      periodAmount,
-      periodDuration: Number(periodDuration),
-      startDate: Number(startDate),
-    }
+    const body = (periodCaveat.terms as string).slice(2)
+    // TIGHT packing: 20-byte address, then three 32-byte uint256s.
+    if (body.length !== (20 + 32 * 3) * 2) return null
+    const token = `0x${body.slice(0, 40)}` as Address
+    const periodAmount = BigInt(`0x${body.slice(40, 104)}`)
+    const periodDuration = Number(BigInt(`0x${body.slice(104, 168)}`))
+    const startDate = Number(BigInt(`0x${body.slice(168, 232)}`))
+    if (!Number.isFinite(periodDuration) || !Number.isFinite(startDate)) return null
+    return { token, periodAmount, periodDuration, startDate }
   } catch {
     return null
   }
@@ -110,7 +112,13 @@ export function readParentExpiry(budgetDelegation: Delegation): number | null {
     (c) => c.enforcer.toLowerCase() === PINS.timestamp.toLowerCase(),
   )
   if (!ts) return null
-  const [after, before] = decodeAbiParameters([{ type: 'uint128' }, { type: 'uint128' }], ts.terms as Hex)
+  // The kit's terms are TIGHT-PACKED `abi.encodePacked(uint128 after,
+  // uint128 before)` — 32 bytes, no head/tail padding (verified against the
+  // kit, 2026-09-28) — so they are decoded by explicit slicing, not
+  // `decodeAbiParameters` (whose head/tail layout expects 64 bytes).
+  const body = (ts.terms as string).slice(2)
+  if (body.length !== 64) return null
+  const before = BigInt(`0x${body.slice(32, 64)}`)
   if (before === 0n) return null
   return Number(before)
 }

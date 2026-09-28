@@ -562,9 +562,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // E rule applies twice: the grant's `parent_delegation_hash` names A's
     // parent-child row (read by hash, never re-derived), and that row's own
     // `parent_delegation_hash` names A's budget delegation (read by hash
-    // again). Both parent rows must still be open — revoking A's budget
-    // delegation closes A's parent-child row, which strands B's child here
-    // (and on-chain, once the disable lands).
+    // again, and it must still resolve ACTIVE: revoking A's budget
+    // delegation flips that row to `revoked`, so this lookup answers null
+    // and B's child is stranded here — and reverts on-chain once the
+    // owner's disableDelegation UserOp lands).
     let subBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetForPayment>>['childDelegation']
     let subBudgetParentChildDelegation: Delegation | undefined
     let subBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null

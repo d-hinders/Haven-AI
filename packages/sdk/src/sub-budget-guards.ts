@@ -236,24 +236,24 @@ export function assertOwnSubBudgetChild(
       'Without it the child is not bounded to a per-period amount.',
     )
   }
-  // terms = abi.encode(address token, uint256 periodAmount, uint256 periodDuration, uint256 startDate)
-  const wordSize = 32
-  const words: string[] = []
-  for (let i = 0; i < 4; i++) {
-    words.push(sliceTerms(period.terms, i * wordSize, (i + 1) * wordSize))
-  }
-  const token = `0x${words[0].slice(24)}`
+  // terms = abi.encodePacked(address token, uint256 periodAmount,
+  // uint256 periodDuration, uint256 startDate) — the kit's TIGHT packing
+  // (20 + 32×3 = 116 bytes, verified against `createDelegation`'s own
+  // output), the same layout `task-budget-guards.ts` decodes for the
+  // ERC20TransferAmountEnforcer. NOT head/tail-padded words: the address
+  // occupies bytes [0,20) and the amount starts at byte 20.
+  const token = `0x${sliceTerms(period.terms, 0, 20)}`
   if (!same(token, expected.tokenAddress)) {
     refuseSubBudgetChild('it spends a different token', `Expected ${expected.tokenAddress}, child pins ${token}.`)
   }
-  const periodAmount = BigInt(`0x${words[1]}`)
+  const periodAmount = BigInt(`0x${sliceTerms(period.terms, 20, 52)}`)
   if (periodAmount !== BigInt(expected.periodAmountAtomic)) {
     refuseSubBudgetChild(
       'the period amount does not match',
       `Expected ${expected.periodAmountAtomic}; the child allows ${periodAmount.toString()}.`,
     )
   }
-  const periodDuration = Number(BigInt(`0x${words[2]}`))
+  const periodDuration = Number(BigInt(`0x${sliceTerms(period.terms, 52, 84)}`))
   if (periodDuration !== expected.periodDurationSeconds) {
     refuseSubBudgetChild(
       'its period duration does not match the parent window Haven declared',
@@ -261,7 +261,7 @@ export function assertOwnSubBudgetChild(
         'slice of the parent period meter — same window, smaller amount — never a different clock.',
     )
   }
-  const startDate = Number(BigInt(`0x${words[3]}`))
+  const startDate = Number(BigInt(`0x${sliceTerms(period.terms, 84, 116)}`))
   if (startDate !== expected.startDate) {
     refuseSubBudgetChild(
       'its period start does not match the parent anchor Haven declared',

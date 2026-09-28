@@ -164,8 +164,10 @@ export interface SubBudgetPaymentResolution {
  * (the same #3329 review finding E rule: a sub-budget can only ever spend
  * through the exact parent it was carved from), AND the parent-child row
  * that hash names must itself still be OPEN and unexpired — revoking A's
- * budget delegation closes A's parent-child row, which must make B's child
- * unredeemable even while B's own row still says `open`.
+ * budget delegation makes A's parent-child unresolvable at payment time
+ * (the active-by-hash lookup in `routes/payments.ts` answers null) and
+ * strands B's child on-chain once the owner's disable lands, even while
+ * B's own row still says `open`.
  */
 export function checkSubBudgetForPayment(
   row: SubBudgetRow | null,
@@ -185,9 +187,6 @@ export function checkSubBudgetForPayment(
   if (row.recipient_address && row.recipient_address.toLowerCase() !== toAddress.toLowerCase()) {
     return { ok: false, refusal: 'sub_budget_recipient_mismatch' }
   }
-  if (row.parent_delegation_hash.toLowerCase() !== selectedParentDelegationHash.toLowerCase()) {
-    return { ok: false, refusal: 'sub_budget_parent_mismatch' }
-  }
   if (
     !parentChildRow ||
     parentChildRow.status !== 'open' ||
@@ -195,6 +194,21 @@ export function checkSubBudgetForPayment(
   ) {
     // The middle link of the chain is dead on the storage side — the on-chain
     // disable (whenever it lands) only confirms what the row already says.
+    return { ok: false, refusal: 'sub_budget_parent_mismatch' }
+  }
+  // BOTH edges of the two-hop tree must bind, or the chain is broken. Edge 1:
+  // the grant hangs from the parent-child row — its parent_delegation_hash
+  // names the parent-child's OWN delegation_hash. Edge 2: the parent-child
+  // hangs from the budget delegation selected for this payment (its OWN
+  // parent_delegation_hash names that budget's hash — the #3329
+  // review-finding-E rule twice over: the budget is used VERBATIM by hash,
+  // never re-selected). A grant naming a parent-child that is not the row
+  // resolved by hash, or a parent-child carved from a different budget than
+  // the one selected, is a broken chain refused here.
+  if (row.parent_delegation_hash.toLowerCase() !== parentChildRow.delegation_hash.toLowerCase()) {
+    return { ok: false, refusal: 'sub_budget_parent_mismatch' }
+  }
+  if (parentChildRow.parent_delegation_hash.toLowerCase() !== selectedParentDelegationHash.toLowerCase()) {
     return { ok: false, refusal: 'sub_budget_parent_mismatch' }
   }
   return { ok: true, row }

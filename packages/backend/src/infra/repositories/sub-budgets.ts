@@ -194,6 +194,58 @@ export async function listForAgent(
   return result.rows
 }
 
+export interface AgentParentSubBudget {
+  sub_budget_id: string
+  parent_agent_id: string
+  parent_agent_name: string
+  token_address: string
+  recipient_address: string | null
+  period_amount_atomic: string
+  expires_at: string
+  status: SubBudgetRow['status']
+  is_expired: boolean
+}
+
+/**
+ * #3330 `haven_get_agent` — agent B's OPEN sub-budget grants (this agent is
+ * the sub-agent), each naming its parent agent and the effective (narrower)
+ * limits. ADDITIVE ONLY: nothing existing on the `GET /agent` response moves,
+ * and the array is empty unless this agent actually holds grants. Expired is
+ * derived here (`expires_at <= now`), mirroring every other read — a row
+ * past its expiry is reported `is_expired: true` rather than hidden, so a
+ * consumer can tell "no budget" from "budget aged out".
+ */
+export async function findOpenGrantsForAgent(
+  agentId: string,
+  nowSec: number = Math.floor(Date.now() / 1000),
+  executor: Executor = pool,
+): Promise<AgentParentSubBudget[]> {
+  const result = await executor.query<SubBudgetRow & { parent_agent_name: string }>(
+    `SELECT b.id, b.agent_id, b.parent_agent_id, b.parent_sub_budget_id, b.chain_id,
+       b.token_address, b.recipient_address, b.parent_delegation_hash, b.delegation_hash,
+       b.delegation_json, b.label, b.period_amount_atomic, b.status, b.expires_at,
+       b.prepared_user_op, b.close_tx_hash, b.created_at, b.updated_at, b.opened_at,
+       b.closed_at, a.name AS parent_agent_name
+     FROM agent_sub_budgets b
+     JOIN agents a ON a.id = b.parent_agent_id
+     WHERE b.agent_id = $1 AND b.parent_sub_budget_id IS NOT NULL
+       AND b.status IN ('open', 'closing')
+     ORDER BY b.created_at DESC`,
+    [agentId],
+  )
+  return result.rows.map((r) => ({
+    sub_budget_id: r.id,
+    parent_agent_id: r.parent_agent_id,
+    parent_agent_name: r.parent_agent_name,
+    token_address: r.token_address,
+    recipient_address: r.recipient_address,
+    period_amount_atomic: r.period_amount_atomic,
+    expires_at: r.expires_at,
+    status: r.status,
+    is_expired: Number(r.expires_at) <= nowSec,
+  }))
+}
+
 /** Owner-facing read (#3330): joins through `agents.user_id`, scoped both ways. */
 export async function listForOwner(
   agentId: string,

@@ -14,6 +14,7 @@ covers:
   - packages/sdk/src/direct-payment-guard.ts
   - packages/sdk/src/settlement-child.ts
   - packages/sdk/src/task-budget-guards.ts
+  - packages/sdk/src/sub-budget-guards.ts
   - packages/sdk/src/userop-binding.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-erc7710.ts
@@ -1507,7 +1508,10 @@ signer imports:
     `redeemDelegations` with exactly one permission context holding either a
     single grant made to this account by a different account, or — since
     #3329 — a two-link chain whose leaf is a task-budget child this account
-    delegated to itself under that grant; in `SingleDefault` mode,
+    delegated to itself under that grant, or — since #3330 — a three-link
+    chain whose leaf is a sub-budget grant TO this account from a different
+    account (the delegating agent A) standing under A's own self-delegated
+    parent-child of A's budget; in `SingleDefault` mode,
     canonically encoded at every level;
   - **on an x402 funding leg**, its single execution is a `transfer` of the
     quoted amount of the quoted token to this key's own delegate EOA. That
@@ -1549,11 +1553,47 @@ signer imports:
   at a different delegation.
   Authority-reducing only: it cannot disable the owner's budget delegation
   (a different delegator) or anything not self-granted.
-- **The redemption allowlist admits one more chain (#3329):** exactly two
-  links where the leaf is a self-delegation by this account and the parent is
-  a grant to this account from a different account — the task-budget shape —
-  in addition to the single grant. An empty chain, a longer chain, a leaf
-  delegated by anyone else and a leaf delegated *to* anyone else stay refused.
+- **The redemption allowlist admits one more chain (#3330):** exactly three
+  links — `[sub grant, parent child, budget]`, leaf first — where the leaf is
+  a grant made TO this account by the delegating agent's account (a real
+  grant from elsewhere, never self), the middle link is the delegating
+  agent's SELF-delegation (its delegate and delegator are both its own
+  account, the task-child shape class), and the budget link keeps the
+  one-link shape (a grant to the delegating agent's account from a different
+  account). An empty chain, a chain of four or more links, a three-link chain
+  whose leaf is self-delegated (a task child never chains two deep), a
+  three-link chain whose middle link is not the delegating agent
+  self-delegated, or a budget link whose delegator/delegate do not name the
+  delegating agent and its own granter stay refused — every case pinned by
+  `redemption-guard.test.ts`. The AND-only caveat property again makes the
+  three-link chain AS OR MORE restrictive than the two-hop task chain: every
+  caveat of all three hops runs in one redemption, so A's period budget binds
+  any spend B makes even within B's own allowance (the chain is the
+  enforcement). Alongside it, **a sub-budget child `Delegation` (#3330)** —
+  the delegating agent's signed narrowing of its own budget (`A`'s
+  parent-child, the self-delegated shape) or the grant to agent B's account —
+  is verified by `assertOwnSubBudgetChild` (`sub-budget-guards.ts`): pinned
+  Delegation/Caveat types and domain, the period-scoped
+  `erc20PeriodTransfer` scope (token, periodAmount, the SAME periodDuration
+  and startDate as the parent — a slice of the same window, never a different
+  clock), a `timestamp` caveat never outliving the parent budget, an
+  `allowedCalldata` recipient pin exactly when the parent pins, and
+  `delegator` = this signer's own account with `delegate` = the DECLARED child
+  delegate (A's own account on the parent-child row, B's on the grant row).
+  It refuses the task-budget hard-cap `erc20TransferAmount` shape, the same
+  way the task child refuses the period scope. As with #3329, this is the
+  AMENDMENT of the §10 one-delegation-per-redeem invariant — never a silent
+  loosening: the allowlist grows from "exactly one or two links" (#3329) to
+  "exactly one, two or three" with every link's shape pinned, issuance stays
+  owner-governed (decision log 2026-09-27: the owner co-signs each sub-budget;
+  A's delegate key only signs within the owner-approved envelope), and a
+  sub-budget child can only **narrow** what its parent's caveats already
+  allow — periodAmount ≤ the parent's on the same window, expiry ≤ the
+  parent's, recipient pin never unpinned — so the three-link chain is never
+  wider than the budget it hangs from. The close path gains the same
+  authority-reducing `disableDelegation` UserOp for a sub-budget child
+  (`assertOwnSubBudgetCloseUserOp`), byte-shape-identical to the task
+  budget's.
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
 Haven's binding key declared anything else. Every refusal on the shape checks,
@@ -1619,10 +1659,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   The allowlist therefore decodes the redemption. It must carry exactly one
   permission context holding either exactly one delegation — a grant to this
   signer's own account from a different account — or, since #3329, that
-  grant with a single self-delegated task-budget child in front of it, in
+  grant with a single self-delegated task-budget child in front of it, or,
+  since #3330, the three-link sub-budget chain `[sub grant, parent child,
+  budget]` (the leaf a grant TO this account from the delegating agent, the
+  middle link that agent's self-delegated narrowing of its own budget), in
   `SingleDefault` mode, with every level canonically encoded. An empty chain,
-  a chain of three or more links, a two-link chain whose leaf is not
-  delegated by this account to itself, a self-granted delegation standing
+  a chain of four or more links, a two-link chain whose leaf is not
+  delegated by this account to itself, a three-link chain whose leaf is
+  self-delegated or whose middle link is not the delegating agent
+  self-delegated, a self-granted delegation standing
   alone and a delegation to another account are each refused, and each case
   is pinned by a test. The
   treasury was never exposed beyond the caveats either way: budget, recipient
@@ -1675,6 +1720,30 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > powers, and no signature, key role or on-chain surface changes. The rest of
 > this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified (#3330, 2026-09-28):** §10 is AMENDED, not loosened: the
+> redemption allowlist admits exactly one more chain shape — the three-link
+> sub-budget chain `[sub grant, parent child, budget]` (leaf a real grant TO
+> this signer's account from the delegating agent A, middle link A's
+> self-delegated narrowing of its own budget, budget link unchanged) — and a
+> new typed-data class, the sub-budget child, joins the task child as a
+> flow-keyed `haven_sign` signable (`sub_budget_id`), verified by
+> `assertOwnSubBudgetChild`/`assertOwnSubBudgetCloseUserOp`
+> (`sub-budget-guards.ts`, now in `covers:`). A sub-budget child can only
+> NARROW its parent (periodAmount ≤ the parent's on the SAME
+> periodDuration/startDate window, expiry ≤ the parent's, a recipient pin
+> never unpinned), so the chain B redeems is as or more restrictive than the
+> two-hop task chain and every hop's caveats still AND into the one
+> redemption — the DelegationManager, not Haven, meters the spend. Issuance
+> is owner-governed (decision log 2026-09-27: owner co-signs each sub-budget;
+> A's delegate key only signs within the owner-approved envelope), so an
+> agent still never signs authority for another account's delegator side. The
+> signer's x402 arm is unchanged: a three-link redemption moves through
+> `haven_sign`'s flow-keyed channel, and the settlement-child verifier's
+> shape routing (never a self-delegation, never a root) is untouched. Every
+> refusal case is pinned in `redemption-guard.test.ts`. Scope of this note:
+> `redemption-guard.ts`, `sub-budget-guards.ts`, `settlement-child.ts`'s
+> shape predicates, `signer/tools.ts`'s new `sub_budget_id` channel, and the
+> allowlist bullets above. Nothing else in this document was re-read for it,
 > **Re-verified (#3417, 2026-09-28):** the SDK's erc7710 `prepare()` now
 > recognises `delegationReplay`'s confirmed-200 answer (`status: 'confirmed'`
 > with a `tx_hash` and no `sign_data`) before its scheme check. It used to throw
@@ -1692,6 +1761,32 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > No authority moves: the
 > backend is untouched, and no signature, key role, delegation, caveat or
 > on-chain surface changes. The rest of this document was not re-read for it,
+=======
+> **Re-verified (#3330, 2026-09-28):** §10 is AMENDED, not loosened: the
+> redemption allowlist admits exactly one more chain shape — the three-link
+> sub-budget chain `[sub grant, parent child, budget]` (leaf a real grant TO
+> this signer's account from the delegating agent A, middle link A's
+> self-delegated narrowing of its own budget, budget link unchanged) — and a
+> new typed-data class, the sub-budget child, joins the task child as a
+> flow-keyed `haven_sign` signable (`sub_budget_id`), verified by
+> `assertOwnSubBudgetChild`/`assertOwnSubBudgetCloseUserOp`
+> (`sub-budget-guards.ts`, now in `covers:`). A sub-budget child can only
+> NARROW its parent (periodAmount ≤ the parent's on the SAME
+> periodDuration/startDate window, expiry ≤ the parent's, a recipient pin
+> never unpinned), so the chain B redeems is as or more restrictive than the
+> two-hop task chain and every hop's caveats still AND into the one
+> redemption — the DelegationManager, not Haven, meters the spend. Issuance
+> is owner-governed (decision log 2026-09-27: owner co-signs each sub-budget;
+> A's delegate key only signs within the owner-approved envelope), so an
+> agent still never signs authority for another account's delegator side. The
+> signer's x402 arm is unchanged: a three-link redemption moves through
+> `haven_sign`'s flow-keyed channel, and the settlement-child verifier's
+> shape routing (never a self-delegation, never a root) is untouched. Every
+> refusal case is pinned in `redemption-guard.test.ts`. Scope of this note:
+> `redemption-guard.ts`, `sub-budget-guards.ts`, `settlement-child.ts`'s
+> shape predicates, `signer/tools.ts`'s new `sub_budget_id` channel, and the
+> allowlist bullets above. Nothing else in this document was re-read for it,
+>>>>>>> fa6ab2e5 (wip(#3330): run-578 checkpoint — sdk guards, tests, openapi, frontend tree)
 > and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**

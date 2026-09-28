@@ -45,7 +45,14 @@
 //
 // The scanned sources are therefore every place whose text can reach `dev`:
 //
-//   * the pull-request **body** — GitHub's own `closingIssuesReferences`;
+//   * the pull-request **body** — read locally, and via GitHub's own
+//     `closingIssuesReferences`. That field is NOT only a parse of the body: it
+//     also carries **manual connections** — a branch linked to the issue with
+//     `gh issue develop` or the Development sidebar, which GitHub converts into
+//     a `ConnectedEvent` when the pull request opens. PR #3414 had no closing
+//     keyword anywhere and `closingIssuesReferences: [3412]` all the same, and
+//     no public API removes the connection (#3425). A reference found there and
+//     in no scanned text is reported as exactly that;
 //   * every **commit message** on the pull request. Both merge routes this
 //     repository allows carry them to `dev`: a merge commit lands them verbatim,
 //     and a squash lands them concatenated, because
@@ -357,10 +364,22 @@ export function pullRequestSources({ body, title, commits = [] }) {
  *   closingRefs?: number[],
  *   labelsByIssue?: Record<number, string[]>,
  * }} input
- * @returns {{issue: number, signal: 'label'|'self-contradiction', evidence: string}[]}
+ * @returns {{issue: number, signal: 'label'|'self-contradiction', evidence: string, manual?: true}[]}
  */
 export function findViolations({ body, title, commits = [], closingRefs, labelsByIssue = {} }) {
   const sources = pullRequestSources({ body, title, commits })
+  // References GitHub reports that no scanned text carries: a manual connection
+  // (a linked branch or the Development sidebar), not a keyword (#3425).
+  const inText = allClosingRefs({ body, title, commits })
+  const manualNote = (issue) =>
+    inText.includes(issue)
+      ? {}
+      : {
+          manual: true,
+          suffix:
+            '; no keyword this guard recognises names it, so it is most likely a manual connection ' +
+            '(linked branch or Development sidebar): close and reopen from an unlinked branch',
+        }
 
   // The union across every emitter, plus whatever GitHub's own parse supplied.
   // A closing reference is a closing reference wherever it is written; the
@@ -370,11 +389,13 @@ export function findViolations({ body, title, commits = [], closingRefs, labelsB
   const violations = []
   for (const issue of refs) {
     const labels = labelsByIssue[issue] ?? []
+    const { manual, suffix = '' } = manualNote(issue)
     if (labels.includes(OPERATOR_VERIFY_LABEL)) {
       violations.push({
         issue,
         signal: 'label',
-        evidence: `issue #${issue} carries the \`${OPERATOR_VERIFY_LABEL}\` label`,
+        evidence: `issue #${issue} carries the \`${OPERATOR_VERIFY_LABEL}\` label${suffix}`,
+        ...(manual ? { manual } : {}),
       })
       continue
     }
@@ -393,7 +414,8 @@ export function findViolations({ body, title, commits = [], closingRefs, labelsB
       violations.push({
         issue,
         signal: 'self-contradiction',
-        evidence: `${found.source.describe} says: "${found.line}"`,
+        evidence: `${found.source.describe} says: "${found.line}"${suffix}`,
+        ...(manual ? { manual } : {}),
       })
     }
   }
@@ -413,7 +435,8 @@ export function renderReport(violations) {
     'that reaches the default branch, and — via the squash subject — in the title.',
     'Reference it without a closing keyword instead:',
     '',
-    ...violations.map((v) => `  Closes #${v.issue}  ->  Refs #${v.issue}`),
+    // A manual connection is in no text, so there is no keyword to reword.
+    ...violations.filter((v) => !v.manual).map((v) => `  Closes #${v.issue}  ->  Refs #${v.issue}`),
     '',
     'To write ABOUT the keyword without emitting it, use a form GitHub does not',
     'parse: `Refs #<n>`, a non-numeric placeholder (`Closes #<n>`), or the number',
@@ -421,6 +444,16 @@ export function renderReport(violations) {
     'in a commit message is how #2268 was closed a second time, and this check',
     'reads a fenced keyword in the body the same way (#2320).',
     '',
+    ...(violations.some((v) => v.manual)
+      ? [
+          'A MANUAL CONNECTION is not in any text, so rewording fixes nothing: a branch',
+          'linked to the issue (`gh issue develop`, or the Development sidebar) became a',
+          'closing connection when this pull request opened, and no API removes it.',
+          'Close this pull request and open the same commits from an unlinked branch',
+          '(#3425).',
+          '',
+        ]
+      : []),
     'See .agents/skills/ship-next/SKILL.md § Commit And Pull Request, step 7.',
     'If the issue is NOT in operator-verify mode, remove the `operator-verify`',
     'label (or the sentence quoted above) rather than silencing this check.',
@@ -542,9 +575,11 @@ function isPromotion({ headRefName, baseRefName, defaultBranch }) {
 }
 
 function readPullRequest(pr) {
-  // `closingIssuesReferences` is GitHub's OWN parse of the body — the same
-  // computation that will run at merge time. Preferring it over the local regex
-  // means the guard is asking the mechanism, not re-implementing it; the regex
+  // `closingIssuesReferences` is GitHub's OWN computation of what the merge will
+  // close: its parse of the body PLUS any manual connection (a linked branch or
+  // the Development sidebar, #3425), which no text on the pull request shows.
+  // Preferring it over the local regex means the guard is asking the
+  // mechanism, not re-implementing it; the regex
   // stays as the offline path, as a cross-check, and as the ONLY reading
   // available for the commit and title sources, which that field does not cover.
   const view = JSON.parse(

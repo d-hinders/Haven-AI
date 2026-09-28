@@ -83,6 +83,9 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     expiresAt: raw.expires_at,
     chainId: raw.chain_id,
     message: raw.message,
+    // #3420: the delivered half of the settle vocabulary, additive — absent
+    // from the raw payload (older backend) stays absent here.
+    ...(raw.delivered === true ? { delivered: true as const } : {}),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

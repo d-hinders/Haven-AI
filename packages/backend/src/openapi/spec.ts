@@ -1181,6 +1181,11 @@ const agentPaymentStatus = {
     expires_at: isoDateTime,
     chain_id: { type: 'integer' },
     message: { type: 'string' },
+    // #3420: the delivered half of the settle vocabulary, additive alongside
+    // `delivered: true` on the settle/complete tool answers. Present (true)
+    // only when a machine_payment_evidence row records the merchant's
+    // response; omitted — never false — when the backend does not know.
+    delivered: { type: 'boolean', description: 'True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown.' },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
     fee: {

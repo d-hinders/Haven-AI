@@ -1129,7 +1129,11 @@ describe('machine payment routes', () => {
   // #2970: a submitted erc7710 intent past its settlement window with no
   // verified evidence answers awaiting_settlement_evidence, not
   // check_status_later, which promised a resolution nothing would produce.
-  it('returns awaiting_settlement_evidence for a submitted erc7710 intent past its settlement window', async () => {
+  // #3420: that answer is now bounded — INSIDE the sweep's last attribution
+  // chance (window + the verifier's clock-skew allowance) it still reads
+  // awaiting_settlement_evidence, with expiry-bounded wording instead of the
+  // old fixed "about two minutes".
+  it('returns awaiting_settlement_evidence for a submitted erc7710 intent past its settlement window but inside the attribution horizon', async () => {
     primeDb(
       AUTH,
       intentStatusRow({
@@ -1137,7 +1141,9 @@ describe('machine payment routes', () => {
         status: 'submitted',
         tx_hash: null,
         confirmed_at: null,
-        created_at: '2020-01-01T00:00:00.000Z',
+        // Past the settlement window (600s) but inside the verifier's last
+        // attribution instant (600s + 120s skew): 660s ago.
+        created_at: new Date(Date.now() - 660_000).toISOString(),
         payment_rail: 'x402',
         source: 'x402',
         machine_metadata: JSON.stringify({ settlement_scheme: 'erc7710' }),
@@ -1159,10 +1165,56 @@ describe('machine payment routes', () => {
     // this scheme (`haven_report_x402_outcome` takes no hash).
     expect(body.message).toMatch(/settlement sweep/i)
     expect(body.message).not.toMatch(/haven_report_x402_outcome/)
+    // #3420: the residual patience is stated as expiry-bounded, never the
+    // fixed "about two minutes" that read identically at 3 minutes and at 3
+    // hours.
+    expect(body.message).toMatch(/expiry/)
+    expect(body.message).not.toMatch(/about two minutes/)
     // #2970 review: expectMatchesSpec('GET', '/machine-payments/{id}/status', body)
     // surfaces a PRE-EXISTING spec drift unrelated to this change (the route's
     // real response carries `fee` and `mpp.challenge_id`, which openapi/spec.ts
     // does not declare) — reported, not silently fixed here; see the final report.
+  })
+
+  // #3420: PAST the sweep's last attribution chance the same read goes
+  // TERMINAL — polling cannot change the outcome at any age, so the answer
+  // must stop asking the agent to poll.
+  it('returns the terminal delivered_unverified shape for a submitted erc7710 intent past the attribution horizon', async () => {
+    primeDb(
+      AUTH,
+      intentStatusRow({
+        ...confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' }),
+        status: 'submitted',
+        tx_hash: null,
+        confirmed_at: null,
+        // Years past the horizon: nothing — reported hash or sweep tick —
+        // can confirm this settlement anymore.
+        created_at: '2020-01-01T00:00:00.000Z',
+        payment_rail: 'x402',
+        source: 'x402',
+        machine_metadata: JSON.stringify({ settlement_scheme: 'erc7710' }),
+      }),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    // The terminal triple: terminal phase, tool-less stop, stored row
+    // untouched (the late-reported-hash confirm seam stays open).
+    expect(body.phase).toBe('delivered_unverified')
+    expect(body.next_action).toBe('stop_and_tell_user')
+    expect(body.status).toBe('submitted')
+    expect(body.message).toMatch(/delivered/i)
+    expect(body.message).toMatch(/cannot change this|Polling cannot/)
+    expect(body.message).toMatch(/haven_report_settlement_evidence/)
+    expect(body.message).not.toMatch(/poll haven_get_payment_status/i)
+    expect(body.message).not.toMatch(/may still attribute|can still attribute/)
+    expect(body.message).not.toMatch(/haven_report_x402_outcome/)
   })
 
   // Inside the window the same shape still answers check_status_later — the

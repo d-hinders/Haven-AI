@@ -76,8 +76,9 @@ export class DelegationRailChainUnavailableError extends Error {
  * `DelegationRailChainUnavailableError` (#3416): a machine-readable
  * `error_code`, so a client can tell "this deployment cannot serve this chain
  * until an operator provisions it" from a transient bundler failure. The
- * operator detail (which variable to set) stays in the thrown error for the
- * server's own logs; the agent-facing body carries only the chain.
+ * operator detail (which variable to set) stays on the thrown error: neither
+ * route logs it, and `ops:check-bundler` prints it (exit 2). The agent-facing
+ * body carries only the chain.
  */
 export function railUnavailableRefusalBody(err: DelegationRailChainUnavailableError) {
   return {

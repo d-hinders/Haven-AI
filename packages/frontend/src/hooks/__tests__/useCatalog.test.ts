@@ -138,6 +138,27 @@ describe('useMerchant (#3078)', () => {
     expect(result.current.offers).toEqual([])
   })
 
+  it('carries the funding array (#3331)', async () => {
+    const funding = [
+      { network: 'eip155:84532', chain_id: 84532, pay_to: '0x' + 'f0'.repeat(20), pay_to_status: 'verified', erc7710: true },
+    ]
+    mockApiGet.mockResolvedValue({
+      merchant: { id: 'm-1', slug: 'ampersend', name: 'Ampersend' },
+      offers: [],
+      funding,
+    })
+    const { result } = renderHook(() => useMerchant('ampersend'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.funding).toEqual(funding)
+  })
+
+  it('defaults an absent funding key to [] (#3093, #3331)', async () => {
+    mockApiGet.mockResolvedValue({ merchant: { id: 'm-1', slug: 'ampersend', name: 'Ampersend' }, offers: [] })
+    const { result } = renderHook(() => useMerchant('ampersend'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.funding).toEqual([])
+  })
+
   it('sets notFound (not error) on a 404, and error on anything else', async () => {
     mockApiGet.mockRejectedValueOnce(new ApiRequestError('Merchant not found', 404))
     const { result, rerender } = renderHook(({ slug }) => useMerchant(slug), {

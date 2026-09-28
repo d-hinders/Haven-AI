@@ -57,6 +57,7 @@ describe('probeCatalogEntry', () => {
       network: 'eip155:8453',
       // A plain merchant omits assetTransferMethod → EIP-3009 by the exact-EVM default.
       assetTransferMethods: ['eip3009'],
+      payTo: '0x' + '11'.repeat(20),
     })
     expect(fetchMock).toHaveBeenCalledWith(X402_ENTRY.resource_url, { method: 'GET' })
   })
@@ -190,6 +191,55 @@ describe('probeCatalogEntry', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://services.sandbox.ampersend.ai/api/joke', { method: 'GET' })
   })
 
+  describe('payTo (#3331)', () => {
+    const A = '0x' + 'aB'.repeat(20)
+    const B = '0x' + 'cd'.repeat(20)
+    async function probeWith(accepts: Array<Record<string, unknown>>) {
+      const body = { x402Version: 2, accepts }
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }),
+      )
+      return probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    }
+    const option = (payTo: unknown, extra?: Record<string, unknown>) => ({
+      scheme: 'exact', network: 'eip155:84532', amount: '1000', payTo, ...(extra ? { extra } : {}),
+    })
+
+    it('records the one payTo every option names, lowercased', async () => {
+      const result = await probeWith([option(A), option(A.toLowerCase(), { assetTransferMethod: 'erc7710' })])
+      expect(result.ok).toBe(true)
+      expect(result.payTo).toBe(A.toLowerCase())
+    })
+
+    it('records none when two options name different addresses', async () => {
+      const result = await probeWith([option(A), option(B, { assetTransferMethod: 'erc7710' })])
+      expect(result.ok).toBe(true)
+      expect(result.payTo).toBeUndefined()
+    })
+
+    it('records none when any option names none, even if the others agree', async () => {
+      expect((await probeWith([option(A), option(undefined)])).payTo).toBeUndefined()
+      expect((await probeWith([option(undefined), option(A)])).payTo).toBeUndefined()
+    })
+
+    it('agrees only across options on the recorded network (the first option\'s)', async () => {
+      // A Base + Solana merchant: the Solana option's base58 payTo is not a
+      // disagreement about where it is paid on Base.
+      const solana = { scheme: 'exact', network: 'solana:mainnet', amount: '1000', payTo: 'So1anaPayToBase58xxxxxxxxxxxxxxxxxxxxxxxx' }
+      expect((await probeWith([option(A), solana])).payTo).toBe(A.toLowerCase())
+      // A different EVM chain's different address is not a disagreement either…
+      expect((await probeWith([option(A), { ...option(B), network: 'eip155:8453' }])).payTo).toBe(A.toLowerCase())
+      // …but two addresses on the recorded network still are.
+      expect((await probeWith([option(A), { ...option(B), network: 'eip155:8453' }, option(B)])).payTo).toBeUndefined()
+    })
+
+    it('records none for a malformed address', async () => {
+      expect((await probeWith([option('0x1234')])).payTo).toBeUndefined()
+      expect((await probeWith([option(A + '00')])).payTo).toBeUndefined()
+      expect((await probeWith([option(42)])).payTo).toBeUndefined()
+    })
+  })
+
   it('fails when the merchant does not answer 402', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }))
     expect((await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)).ok).toBe(false)
@@ -215,7 +265,7 @@ describe('refreshCatalog', () => {
       rail: 'x402', protocol: 'http', tool_name: null,
       tool_arguments: null,
       price_display: null, price_atomic: null, asset: null, network: null,
-      asset_transfer_methods: null,
+      asset_transfer_methods: null, pay_to: null,
       status: 'active', verified_at: null, consecutive_failures: 0,
       created_at: '', updated_at: '',
       ...overrides,
@@ -243,7 +293,33 @@ describe('refreshCatalog', () => {
     const liveUpdate = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-live')
     expect(liveUpdate?.[0]).toContain('consecutive_failures = 0')
     expect(liveUpdate?.[0]).toContain('asset_transfer_methods = COALESCE($6, asset_transfer_methods)')
-    expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '0.02 USDC', 'USDC', 'eip155:8453', 'eip3009'])
+    expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '0.02 USDC', 'USDC', 'eip155:8453', 'eip3009', '0x' + '11'.repeat(20)])
+  })
+
+  // #3331: pay_to is written AS SEEN — never COALESCEd — so a merchant that
+  // stops naming one payTo loses the stored one instead of keeping it.
+  it('clears a stored pay_to when the challenge no longer names one', async () => {
+    const queries: Array<[string, unknown[] | undefined]> = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        queries.push([sql, values])
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-rotated', pay_to: '0x' + '11'.repeat(20) })] }
+        }
+        return { rows: [] }
+      },
+    }
+    const { payTo: _dropped, ...acceptWithoutPayTo } = X402_BODY.accepts[0]
+    const body = { ...X402_BODY, accepts: [acceptWithoutPayTo] }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }),
+    )
+
+    await refreshCatalog(db, fetchMock as typeof fetch)
+    const update = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-rotated')
+    expect(update?.[0]).toContain('pay_to = $7,')
+    expect(update?.[0]).not.toContain('COALESCE($7')
+    expect(update?.[1]?.[6]).toBeNull()
   })
 
   it('does not degrade an entry on a single transient miss (hysteresis)', async () => {

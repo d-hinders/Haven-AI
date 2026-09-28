@@ -143,6 +143,116 @@ describe('EditBudgetModal (#3166) — review', () => {
   })
 })
 
+describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
+  function merchantLockedBudget(overrides: Record<string, unknown> = {}) {
+    return budget({
+      recipient_address: RECIPIENT,
+      merchant_id: 'm-1',
+      merchant_slug: 'ampersend-demo-api',
+      merchant_name: 'Ampersend Demo API',
+      ...overrides,
+    })
+  }
+
+  it('shows the recipient read-only, naming the merchant, and never renders an editable Recipient field', () => {
+    renderModal({ budget: merchantLockedBudget() })
+    expect(screen.getByText(/Pays Ampersend Demo API only/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Recipient')).toBeNull()
+  })
+
+  it('the build body carries merchant_slug and the STORED recipient, never a retargeted or blank one', async () => {
+    renderModal({ budget: merchantLockedBudget() })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
+    expect(mockEditBudget.mock.calls[0][1]).toMatchObject({
+      recipientAddress: RECIPIENT,
+      merchantSlug: 'ampersend-demo-api',
+    })
+  })
+
+  it('names the merchant and truncated address in the read-only row (design review round 2, finding 6)', () => {
+    renderModal({ budget: merchantLockedBudget() })
+    expect(
+      screen.getByText(new RegExp(`Pays Ampersend Demo API only · ${RECIPIENT.slice(0, 6)}`)),
+    ).toBeInTheDocument()
+  })
+
+  it('the form intro does not say "for its recipient" for a merchant-locked budget (design review round 2, finding 1)', () => {
+    renderModal({ budget: merchantLockedBudget() })
+    expect(screen.queryByText(/budget for its recipient/)).toBeNull()
+  })
+
+  it('review step: names the merchant and truncated address in Now/After, never "one recipient" (design review round 2, finding 1)', () => {
+    renderModal({ budget: merchantLockedBudget() })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    expect(screen.queryByText(/one recipient/)).toBeNull()
+    const nowAndAfter = screen.getAllByText(
+      new RegExp(`Ampersend Demo API only · ${RECIPIENT.slice(0, 6)}`),
+    )
+    expect(nowAndAfter).toHaveLength(2)
+  })
+
+  // ── R2-2: the merchant-STALE build refusals get plain copy with a way out ──
+  it.each([
+    [
+      "recipient_address does not match the merchant's current verified payTo; reload the merchant page",
+      /Ampersend Demo API now uses a different payment address, so this budget can't be changed here\. Stop it, then fund Ampersend Demo API again/,
+    ],
+    [
+      'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet',
+      /Ampersend Demo API does not have a confirmed payment address right now, so this budget can't be changed here/,
+    ],
+    [
+      'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget',
+      /Not every offer from Ampersend Demo API accepts this kind of budget now, so it can't be changed here\. This budget keeps paying only the address it was set up with — Ampersend Demo API's page shows whether that is still where it is paid\./,
+    ],
+    ['Merchant not found', /Ampersend Demo API could not be found, so this budget can't be changed here\. Close this and use Stop on the budget\./],
+  ])('maps the merchant-stale refusal ("%s") to plain copy with a way out, and offers only Close', async (detail, expected) => {
+    mockEditBudget.mockResolvedValue({ ok: false, reason: 'refused', detail })
+    renderModal({ budget: merchantLockedBudget() })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(screen.getByText(/The budget could not be changed/)).toBeInTheDocument())
+    expect(screen.getByText(expected)).toBeInTheDocument()
+    // Never the raw backend sentence verbatim.
+    expect(screen.queryByText(detail)).toBeNull()
+    // No jargon (delegation, recipient_address, payTo, ERC-7710).
+    expect(document.body.textContent).not.toMatch(/delegation|recipient_address|payTo|erc-?7710/i)
+    // A same-input retry cannot fix this — no "Try again".
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(screen.getByText('Close').closest('button')).toBeInTheDocument()
+  })
+
+  it('keeps the raw backend sentence and Try again for a NON-merchant refusal (re-key in flight) even on a merchant-locked budget', async () => {
+    mockEditBudget.mockResolvedValue({
+      ok: false,
+      reason: 'refused',
+      detail: 'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget',
+    })
+    renderModal({ budget: merchantLockedBudget() })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(screen.getByText(/The budget could not be changed/)).toBeInTheDocument())
+    expect(screen.getByText(/A key rotation is in flight for this agent/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
+  it('an ordinary (non-merchant-locked) budget is completely unaffected — no merchantSlug, recipient stays editable', async () => {
+    renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
+    expect(screen.getByLabelText('Recipient')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
+    expect(mockEditBudget.mock.calls[0][1]).not.toHaveProperty('merchantSlug')
+  })
+})
+
 describe('EditBudgetModal (#3166) — outcomes', () => {
   it('a CANCELLED signature reopens the review — nothing changed, no error', async () => {
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'cancelled' })

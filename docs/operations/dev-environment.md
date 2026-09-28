@@ -4,6 +4,8 @@ status: current
 contract: true
 covers:
   - scripts/ci/rpc-conformance.mjs
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/infra/repositories/merchants.ts
   - .github/workflows/dev-gate.yml
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
@@ -292,6 +294,15 @@ Isolation rules that are non-negotiable for a payments product:
   `84532,8453`, the operator step after PR #3202) and never on prod. The route
   lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
   so a copied flag cannot publish them on prod, whose list is `8453`.
+  The same list scopes a merchant page's `funding` (#3331) — where the
+  merchant is paid on each listed chain, the verified payTo a merchant-locked
+  budget pins to. That needs every active offer on the chain to advertise
+  ERC-7710, so the dev demo-merchant, which advertises EIP-3009 only until its
+  ERC-7710 rail is enabled ([below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant)),
+  reports `erc7710: false` and the build refuses a merchant-locked budget for
+  it. The payTo itself arrives with the next catalog refresh after migration
+  101 deploys (see `docs/product/marketplace.md`); until then every offer
+  reads `unstated`.
 - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*` and the additive `parties.buyer`
   field on payment evidence/receipts; there is no settings UI yet (that is

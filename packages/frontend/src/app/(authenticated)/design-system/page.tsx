@@ -1579,12 +1579,18 @@ export default function DesignSystemPage() {
 
       <Section
         title="CodeBlock"
-        description="Dark monospace block for terminal commands and credential snippets. Optional filename header row with a check-pop copy button; onCopy fires only when the clipboard write succeeded (used for handoff telemetry)."
+        description="Dark monospace block for terminal commands and credential snippets. Optional filename header row with a check-pop copy button; onCopy fires only when the clipboard write succeeded (used for handoff telemetry). Long lines scroll sideways by default; pass wrap for a single-line copy command whose tail matters, so it wraps at phone width instead of hiding it (the /releases update command). Never wrap multi-line code: it breaks the indentation."
       >
-        <div className="max-w-xl">
+        <div className="max-w-xl space-y-4">
           <CodeBlock filename="Terminal" onCopy={() => toast.success('Command copied')}>
             npx @haven_ai/connect@alpha
           </CodeBlock>
+          {/* Card width on a phone: the tail wraps instead of scrolling out of view. */}
+          <div className="max-w-[300px]">
+            <CodeBlock filename="Update command" onCopy={() => toast.success('Command copied')} wrap>
+              npx -y @haven_ai/connect@alpha --doctor
+            </CodeBlock>
+          </div>
         </div>
       </Section>
 

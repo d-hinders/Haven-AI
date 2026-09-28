@@ -10,7 +10,7 @@ import { CodeBlock } from '@/components/ui/CodeBlock'
  */
 export function UpdateCommand({ command }: { command: string }) {
   return (
-    <CodeBlock filename="Update command" onCopy={() => undefined}>
+    <CodeBlock filename="Update command" onCopy={() => undefined} wrap>
       {command}
     </CodeBlock>
   )

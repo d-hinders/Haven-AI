@@ -56,3 +56,13 @@ describe('PackageCard update note (#3424)', () => {
     expect(screen.queryByText(/update the connector to update it/)).toBeNull()
   })
 })
+
+describe('UpdateCommand wrap classes (#3434)', () => {
+  it('renders the update command with the wrap classes', () => {
+    const { container } = render(<PackageCard entry={withChannel('signer')} />)
+    const pre = container.querySelector('pre')
+    expect(pre?.textContent).toBe('npx -y @haven_ai/connect@alpha --doctor')
+    expect(pre?.className).toContain('whitespace-pre-wrap')
+    expect(pre?.className).not.toContain('overflow-x-auto')
+  })
+})

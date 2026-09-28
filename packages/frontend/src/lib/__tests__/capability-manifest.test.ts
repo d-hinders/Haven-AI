@@ -383,7 +383,9 @@ describe('capability manifest', () => {
     // Mutates the SOURCE table the backend enforces (client-compat.ts), not a
     // copy, so this fails if the manifest ever stops reading it.
     it('follows a min_version change in CLIENT_COMPAT', () => {
-      expect(buildManifestFrom(ORIGIN, FACTS).packages.signer.min_version).toBeNull()
+      // Starts at the live decision (#3302: 0.6.0-alpha.0); the mutation below differs from it.
+      expect(buildManifestFrom(ORIGIN, FACTS).packages.signer.min_version).toBe(CLIENT_COMPAT['@haven_ai/signer'].min_version)
+      expect(CLIENT_COMPAT['@haven_ai/signer'].min_version).not.toBe('0.5.0-alpha.1')
       ;(CLIENT_COMPAT['@haven_ai/signer'] as { min_version: string | null }).min_version = '0.5.0-alpha.1'
       expect(buildManifestFrom(ORIGIN, FACTS).packages.signer.min_version).toBe('0.5.0-alpha.1')
     })

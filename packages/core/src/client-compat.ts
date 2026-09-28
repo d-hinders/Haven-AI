@@ -54,13 +54,20 @@ export interface ClientCompatEntry {
 }
 
 /**
- * The compatibility table. Both columns start `null`: #3303 ships the
- * mechanism, and the first real value is an owner decision (the epic's
- * promotion checklist carries it).
+ * The compatibility table. #3303 shipped the mechanism with every column
+ * `null`; each real value is an owner decision, recorded where it is made.
+ *
+ * - `@haven_ai/signer` `min_version` = `0.6.0-alpha.0` — owner decision
+ *   2026-09-28 on epic #3302 (option A). Clients send `X-Haven-Client` only
+ *   from `0.5.0-alpha.1`, and a missing header or a `0.0.0-dev.*` snapshot is
+ *   never refused, so this is the smallest minimum that refuses anything: it
+ *   refuses `0.5.0-alpha.1` signers at sign-context (nothing signed or
+ *   submitted) until they run the upgrade command, which since #3412 is the
+ *   connector doctor plus the repair line it prints.
  */
 export const CLIENT_COMPAT: Readonly<Record<PublishedClientPackage, ClientCompatEntry>> = {
   '@haven_ai/sdk': { recommended_version: null, min_version: null },
-  '@haven_ai/signer': { recommended_version: null, min_version: null },
+  '@haven_ai/signer': { recommended_version: null, min_version: '0.6.0-alpha.0' },
   '@haven_ai/mcp': { recommended_version: null, min_version: null },
   '@haven_ai/connect': { recommended_version: null, min_version: null },
   '@haven_ai/cli': { recommended_version: null, min_version: null },

@@ -263,7 +263,7 @@ describe('never refused (owner decision 2026-09-25)', () => {
 })
 
 describe('hint', () => {
-  it('is absent for a current client and for the shipped all-null table', async () => {
+  it('is absent for a current client and for an all-null table', async () => {
     const { app } = await harness(table())
     const res = await app.inject({ method: 'GET', url: '/payments/pi-1', headers: { 'x-haven-client': MCP_OLD } })
     expect(res.json()).toEqual({ ok: true, handled: 'GET /payments/:id' })

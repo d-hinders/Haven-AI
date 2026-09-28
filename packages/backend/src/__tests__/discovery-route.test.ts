@@ -145,7 +145,9 @@ describe('GET /discovery', () => {
     // copy — so this fails if the document ever stops reading it, and a
     // published minimum can never disagree with an enforced one.
     it('follows a min_version change in CLIENT_COMPAT', () => {
-      expect(buildDiscoveryDocument(req()).client_releases.packages['@haven_ai/signer'].min_version).toBeNull()
+      // Starts at the live decision (#3302: 0.6.0-alpha.0); the mutation below differs from it.
+      expect(buildDiscoveryDocument(req()).client_releases.packages['@haven_ai/signer'].min_version).toBe(CLIENT_COMPAT['@haven_ai/signer'].min_version)
+      expect(CLIENT_COMPAT['@haven_ai/signer'].min_version).not.toBe('0.5.0-alpha.1')
       ;(CLIENT_COMPAT['@haven_ai/signer'] as { min_version: string | null }).min_version = '0.5.0-alpha.1'
       expect(buildDiscoveryDocument(req()).client_releases.packages['@haven_ai/signer'].min_version).toBe('0.5.0-alpha.1')
     })

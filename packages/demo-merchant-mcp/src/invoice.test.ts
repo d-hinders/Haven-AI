@@ -137,10 +137,10 @@ describe('invoice numbering across restarts (#2988)', () => {
 })
 
 /**
- * #3422: every OCR the merchant issued failed Luhn validation — the check
- * digit was computed with the VALIDATING form of the algorithm (doubling from
- * the second-to-last digit) instead of the generating form (doubling from the
- * last digit of the base). These assertions validate the OCR the executed
+ * #3422: about nine in ten OCRs the merchant issued failed Luhn validation —
+ * the check digit was computed with the VALIDATING form of the algorithm
+ * (doubling from the second-to-last digit) instead of the generating form
+ * (doubling from the last digit of the base). These assertions validate the OCR the executed
  * `generateInvoice` emitted, with an independent validator, not the helper's
  * own arithmetic.
  */

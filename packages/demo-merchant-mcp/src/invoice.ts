@@ -45,14 +45,14 @@ export function createInvoiceNumberer(seedMs: number = Date.now()): () => string
 const nextInvoiceNumber = createInvoiceNumberer()
 
 /**
- * Luhn (modulus 10) check digit to APPEND to `base` — the rule Bankgirot OCR
- * references are validated with.
+ * Luhn (modulus 10) check digit to APPEND to `base`.
  *
  * #3422: the digit is computed before it exists, so the RIGHTMOST digit of
  * the base is the first one doubled. The validating form of the same
  * algorithm starts one position further left, because there the rightmost
- * digit is the check digit itself; using that form here produced a wrong
- * digit on every OCR this merchant issued.
+ * digit is the check digit itself. Using that form here produced a wrong
+ * digit whenever the two forms' sums differ mod 10, which is about nine OCRs
+ * in ten.
  */
 function luhnCheckDigit(base: string): number {
   let sum = 0

@@ -92,8 +92,8 @@ export const toolSchemas = {
     recipient: z.string().min(1),
     amount: z.string().min(1),
     idempotency_key: z.string().optional(),
-    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
-    idempotencyKey: z.string().optional(),
+    /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
   },
@@ -102,8 +102,8 @@ export const toolSchemas = {
     tool_name: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()).optional(),
     idempotency_key: z.string().optional(),
-    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
-    idempotencyKey: z.string().optional(),
+    /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
   },
   haven_quote_x402: {
     url: z.string().url(),
@@ -111,14 +111,14 @@ export const toolSchemas = {
     headers: headersSchema,
     body: z.string().optional(),
     idempotency_key: z.string().optional(),
-    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
-    idempotencyKey: z.string().optional(),
+    /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
   },
   haven_pay_x402_quote: {
     quote: z.unknown(),
     idempotency_key: z.string().optional(),
-    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
-    idempotencyKey: z.string().optional(),
+    /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
   },
@@ -128,8 +128,8 @@ export const toolSchemas = {
     headers: headersSchema,
     body: z.string().optional(),
     idempotency_key: z.string().optional(),
-    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
-    idempotencyKey: z.string().optional(),
+    /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
   },
@@ -319,9 +319,9 @@ export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
 export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName, (input: unknown) => Promise<ToolPayload>> {
   return {
     haven_send: async (input) => {
-      // #2366: resolved OUTSIDE the payload so its warnings can ride on the
-      // success, and BEFORE anything is contacted so an ambiguous pair refuses
-      // without spending.
+      // #2366/#3411: resolved OUTSIDE the payload so any `preflight` warning
+      // can ride on the success, and BEFORE anything is contacted so a legacy
+      // `idempotencyKey` refuses without spending.
       const pf = preflight('haven_send', input)
       if ('success' in pf) return pf
       const { args, warnings } = pf
@@ -331,9 +331,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
             token: args.asset,
             amount: args.amount,
             to: args.recipient,
-            // #1207: was accepted by the schema but silently dropped — now
-            // carried to the backend's replay contract.
-            idempotencyKey: args.idempotencyKey,
+            // #1207/#3411: was accepted by the schema but silently dropped — now
+            // carried to the backend's replay contract via the resolved carrier.
+            idempotencyKey: args.resolvedIdempotencyKey,
             // #3329: spend against an open task budget instead of the
             // agent's period budget, when the caller names one.
             ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
@@ -374,8 +374,10 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
     haven_pay_mcp_tool: async (input) => {
       // #2366: hoisted out of `runTool` so a refusal is a refusal rather than
-      // a success carrying one as its payload, and so the warning can ride on
-      // the result.
+      // a success carrying one as its payload. (`warnings` no longer fires for
+      // idempotency-key spelling since #3411 — the legacy spelling is refused,
+      // not warned on — but the field stays hoisted here for any future
+      // non-fatal notice `preflight` needs to attach to a success.)
       const pf = preflight('haven_pay_mcp_tool', input)
       if ('success' in pf) return pf
       const { args, warnings } = pf
@@ -399,7 +401,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
         // `X402UnexpectedStatusError` (#1300): "this URL isn't the MCP
         // endpoint," expressed as a Response instead of a thrown error.
         let merchantUrl = args.merchant_url as string
-        const idempotencyKey = args.idempotencyKey
+        const idempotencyKey = args.resolvedIdempotencyKey
         const attempt = () => haven.fetch(merchantUrl, init, { idempotencyKey })
 
         let response = await attempt()
@@ -446,7 +448,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       if ('success' in pf) return pf
       const { args, warnings } = pf
       try {
-        const data = await haven.quoteX402(args.url, requestInit(args), { idempotencyKey: args.idempotencyKey })
+        const data = await haven.quoteX402(args.url, requestInit(args), { idempotencyKey: args.resolvedIdempotencyKey })
         return warnings.length > 0 ? { success: true, data, warnings } : { success: true, data }
       } catch (err) {
         // #1328: quoteX402 still refuses a MACHINE-PAYMENT-CHALLENGE response as
@@ -480,7 +482,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       }
       return runTool(async () => {
         const response = await haven.payX402Quote(args.quote as X402Quote, {
-          idempotencyKey: args.idempotencyKey,
+          idempotencyKey: args.resolvedIdempotencyKey,
           ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
         })
         return responsePayload(response)
@@ -493,7 +495,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       const { args, warnings } = pf
       return runTool(async () => {
         const response = await haven.fetch(args.url, requestInit(args), {
-          idempotencyKey: args.idempotencyKey,
+          idempotencyKey: args.resolvedIdempotencyKey,
           ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
         })
         return responsePayload(response)
@@ -745,19 +747,25 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
 }
 
 /**
- * The one spelling, and the window that gets us there (#2366).
+ * The one spelling — the #2366 window is over (#3411).
  *
  * Haven's wire convention is snake_case, and the hosted MCP surface already
  * follows it. This package shipped `idempotencyKey` and is PUBLISHED, so the
- * rename cannot be a single release: an installed caller passing the old name
- * must keep working, and must be told. Owner decision 2026-09-06 — accept both,
- * warn on the old, drop it later.
+ * rename could not be a single release: an installed caller passing the old
+ * name had to keep working for a window, and be told to move. Owner decision
+ * 2026-09-06 — accept both, warn on the old, drop it later. The removal
+ * condition: the warning first shipped on the `alpha`/`latest` channel in
+ * `0.1.35-alpha.0` (npm, published 2026-09-07); `latest` is many releases
+ * past it. The window is closed.
  *
- * Both present with DIFFERENT values is refused rather than resolved. Picking
- * either would be Haven deciding which replay scope the caller meant, and on a
- * payment argument a wrong guess turns a retry into a second spend — the exact
- * failure #2348 measured when the hosted surface dropped the key. Both present
- * and EQUAL is not ambiguous and is accepted.
+ * `idempotencyKey` stays DECLARED in every schema above and is now REFUSED by
+ * name with `IDEMPOTENCY_KEY_RENAMED`, rather than simply deleted from the
+ * schema. Deleting it would let the MCP SDK's default `z.object` strip mode
+ * silently drop an undeclared key before the handler ever ran — the exact
+ * #2348 failure this refusal exists to prevent, since a dropped idempotency
+ * key turns a retry into a second spend. Sending BOTH spellings is refused
+ * the same way, because the legacy name being present at all is the refusal
+ * condition — there is no longer a "resolve the disagreement" step.
  */
 /**
  * Parse the input and resolve the idempotency-key spelling, in one step (#2366).
@@ -781,7 +789,11 @@ function preflight<TName extends HavenMcpToolName>(
   }
   const idem = resolveIdempotencyKey(args)
   if ('success' in idem) return idem
-  if (idem.key !== undefined) args = { ...args, idempotencyKey: idem.key }
+  // #3411: carried under a name distinct from the refused `idempotencyKey`
+  // input field, so it cannot be confused with — or accidentally re-trigger
+  // — the refusal in `resolveIdempotencyKey` below. The snake_case key still
+  // reaches the SDK from here.
+  if (idem.key !== undefined) args = { ...args, resolvedIdempotencyKey: idem.key }
   return { args, warnings: idem.warnings }
 }
 
@@ -791,27 +803,21 @@ export function resolveIdempotencyKey(
   const modern = typeof args.idempotency_key === 'string' ? args.idempotency_key : undefined
   const legacy = typeof args.idempotencyKey === 'string' ? args.idempotencyKey : undefined
 
-  if (modern !== undefined && legacy !== undefined && modern !== legacy) {
+  // #3411: the #2366 window is over. `idempotencyKey` is refused by NAME,
+  // whether or not `idempotency_key` was also sent — the schema still
+  // DECLARES it (see toolSchemas above) so the MCP SDK does not silently
+  // strip it before this code runs (the #2348 failure); it is refused here
+  // instead, before anything is contacted or spent.
+  if (legacy !== undefined) {
     return {
       success: false,
-      code: 'AMBIGUOUS_IDEMPOTENCY_KEY',
+      code: 'IDEMPOTENCY_KEY_RENAMED',
       message:
-        'Both idempotency_key and idempotencyKey were sent with different values. ' +
-        'Nothing was contacted or spent. Send exactly one — idempotency_key is the ' +
-        'current spelling; idempotencyKey is deprecated and will be removed.',
+        'idempotencyKey has been renamed to idempotency_key and is no longer accepted. ' +
+        'Send idempotency_key instead. Nothing was contacted or spent.',
     }
   }
   if (modern !== undefined) return { key: modern, warnings: [] }
-  if (legacy !== undefined) {
-    return {
-      key: legacy,
-      warnings: [
-        'idempotencyKey is deprecated and will be removed in a future release of ' +
-          '@haven_ai/mcp. Send idempotency_key instead — it is the spelling the hosted ' +
-          'Haven MCP surface and every other Haven wire contract use.',
-      ],
-    }
-  }
   return { warnings: [] }
 }
 

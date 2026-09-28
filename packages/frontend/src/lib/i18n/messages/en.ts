@@ -448,13 +448,21 @@ export const en = {
       // D3/design 9 (#3332 review): "gates" replaced with plain words; VIES
       // named as the EU's VAT number register, not left unexplained; the
       // Swedish sole-trader VAT-encodes-the-personal-number fact stated
-      // alongside the org-number one, not only in the field helper; the
-      // receipts sentence lives in `description` above ONLY — repeating it
-      // here read as the same claim twice (D3). The erasure sentence is the
-      // captain's decision on M3: true whether the flag is on or off, since
-      // this text is only ever shown WHILE the section itself is shown.
+      // alongside the org-number one, not only in the field helper. The
+      // erasure sentence is the captain's decision on M3: true whether the
+      // flag is on or off, since this text is only ever shown WHILE the
+      // section itself is shown.
+      //
+      // #3332 review round 2, design 6: trimmed to ~80 words / 11 lines at a
+      // 390px viewport, but keeps every required fact — including WHY Haven
+      // asks (receipts), which round 1 left to `description` alone and this
+      // round restores here too, briefly, since this paragraph is meant to
+      // stand on its own. "while this section is shown" read like a stage
+      // direction from OUTSIDE the section it is written inside of — reworded
+      // to name the one case removal is not self-serve (the flag going off)
+      // without describing the reader's own vantage point.
       purpose:
-        "This is optional — saving it is never required for an agent or a payment to work. For a sole trader, the organisation number is your personal identity number, and Sweden's own SE-format VAT number encodes that same personal number (SE + personal number + 01). If you add a VAT number, Haven checks it against VIES, the EU's VAT number register. You can remove these details here at any time while this section is shown; otherwise ask Haven support to remove them.",
+        "Optional — saving these never blocks an agent or a payment. Haven asks so they can appear on receipts your agents hand to merchants. For a sole trader, the organisation number is your personal identity number, and Sweden's SE-format VAT number encodes that same number (SE + personal number + 01). Adding a VAT number gets it checked against VIES, the EU's VAT number register. You can remove them here at any time; if this section is ever unavailable, Haven support can remove them.",
       loadError: 'We could not load your company details. Try again in a moment.',
       retry: 'Try again',
 
@@ -495,6 +503,10 @@ export const en = {
       // was wrong. A 400 always surfaces the backend's own field-specific
       // message instead (see `save`'s `validation` result).
       saveError: 'We could not save your company details. Try again in a moment.',
+      // #3332 review round 2, m-r2a: a save that is itself rate-limited is a
+      // different event than the VIES check being rate-limited (`vies.rateLimited`
+      // below) — naming VIES here would blame the wrong request.
+      saveRateLimited: 'Too many requests just now — try again in a minute.',
       // #3332 review m2: a 404 on PUT/POST means the flag went off mid-
       // session (an operator action, or a stale tab) — distinct from both
       // the network line above and a field-specific validation message.
@@ -524,11 +536,20 @@ export const en = {
        */
       vies: {
         pending: 'Checking the VAT number with VIES…',
+        // #3332 review round 2, design 4: once the poll's bound has elapsed,
+        // "Checking…" next to a "Check again" button read as still in
+        // progress — this names the actual state (VIES has not answered in
+        // the time this screen waits) instead.
+        pendingTimedOut: 'VIES has not answered yet.',
         valid: (date: string) => `VAT number checked against VIES on ${date}`,
-        // #3332 review m1: a `valid` row with no `vies_checked_at` (the
-        // stale-pending re-trigger landing an outcome with no VIES-answer
-        // timestamp) never renders a dangling "on" with nothing after it.
-        validNoDate: 'VIES confirmed this VAT number.',
+        // #3332 review round 2, n1: the backend always writes a `checked_at`
+        // timestamp alongside any result (`setViesResult` in
+        // `infra/repositories/owner-company-details.ts` is always called with
+        // `new Date().toISOString()`), so a `valid` row with no
+        // `vies_checked_at` should not occur in practice. This stays only as
+        // a defensive fallback for a row shape this screen cannot otherwise
+        // rule out, and never claims a specific date it does not have.
+        validNoDate: 'VAT number checked against VIES.',
         // Design review 8: names the next step rather than leaving the owner
         // to guess one.
         invalid: 'VIES says this VAT number is not valid. Check the number and save it again.',
@@ -538,6 +559,11 @@ export const en = {
         checkError: 'We could not check the VAT number with VIES. Try again in a moment.',
         rateLimited: "You've checked this VAT number too many times just now. Try again in a minute.",
         featureOff: 'This setting is no longer available.',
+        // #3332 review round 2, n3: a 404 from vies-check can also mean the
+        // VAT number was removed elsewhere (another tab, an operator) since
+        // this screen last loaded — distinct from the feature flag going
+        // off. Reload picks up the current row.
+        noVatNumber: 'This VAT number is no longer saved. Reload to see the current details.',
       },
     },
   },

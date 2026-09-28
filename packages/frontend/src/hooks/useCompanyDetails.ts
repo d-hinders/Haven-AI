@@ -54,7 +54,11 @@ export type SaveResult =
   | { code: 'rate_limited' }
   | { code: 'feature_off' }
   | { code: 'unknown' }
-export type ViesCheckResult = { code: 'rate_limited' } | { code: 'feature_off' } | { code: 'unknown' }
+export type ViesCheckResult =
+  | { code: 'rate_limited' }
+  | { code: 'feature_off' }
+  | { code: 'no_vat_number' }
+  | { code: 'unknown' }
 
 export const VIES_POLL_INTERVAL_MS = 4000
 export const VIES_POLL_MAX_MS = 60_000
@@ -145,7 +149,22 @@ export function useCompanyDetails() {
       const requestGeneration = generationRef.current
       try {
         const row = await api.get<CompanyDetails>(PATH)
-        if (cancelled || generationRef.current !== requestGeneration) return
+        if (cancelled) return
+        if (generationRef.current !== requestGeneration) {
+          // A save, remove, or recheck bumped the generation while this GET
+          // was in flight. If that operation FAILED (429/5xx/network/400, or
+          // a remove the owner cancelled), `details` never changes and this
+          // effect never re-runs — so the stale response is dropped, but the
+          // bounded schedule keeps going exactly like the catch branch below,
+          // instead of leaving the row on "Checking…" forever with no way to
+          // reschedule (#3332 review round 2, M1).
+          if (Date.now() - startedAt < VIES_POLL_MAX_MS) {
+            timeout = setTimeout(() => void tick(), VIES_POLL_INTERVAL_MS)
+          } else {
+            setPollTimedOut(true)
+          }
+          return
+        }
         if (row === null) {
           // The row was removed elsewhere (another tab, an operator) while
           // this tab was polling — never read a property of `null`.
@@ -164,8 +183,10 @@ export function useCompanyDetails() {
       } catch {
         // A flaky poll tick is not evidence the check failed — try again
         // until the bound runs out, silently (the same convention
-        // `useAgentConnectionSetupStatus` follows).
-        if (cancelled || generationRef.current !== requestGeneration) return
+        // `useAgentConnectionSetupStatus` follows). A stale generation here
+        // keeps the same bounded schedule too — a failed save/remove/recheck
+        // must not strand the row on "Checking…" (#3332 review round 2, M1).
+        if (cancelled) return
         if (Date.now() - startedAt < VIES_POLL_MAX_MS) {
           timeout = setTimeout(() => void tick(), VIES_POLL_INTERVAL_MS)
         } else {
@@ -229,6 +250,12 @@ export function useCompanyDetails() {
     }
   }, [])
 
+  // Component-owned dialog lifecycle, not a new attempt: `remove` itself
+  // already clears `deleteError` when a NEW delete starts, but a dialog that
+  // is closed (cancel) and reopened without a fresh attempt must not still
+  // show the previous attempt's failure (#3332 review round 2, design 3).
+  const resetDeleteError = useCallback(() => setDeleteError(false), [])
+
   const recheckVies = useCallback(async () => {
     generationRef.current += 1
     setCheckingVies(true)
@@ -242,7 +269,15 @@ export function useCompanyDetails() {
       if (err instanceof ApiRequestError && err.status === 429) {
         result = { code: 'rate_limited' }
       } else if (err instanceof ApiRequestError && err.status === 404) {
-        result = { code: 'feature_off' }
+        // A 404 here means one of two different things — the route's own
+        // body text tells them apart (#3332 review round 2, n3):
+        // `'No VAT number saved to check'` (`routes/owner-company-details.ts`
+        // POST /vies-check) is cross-tab, not the feature going off — the VAT
+        // field was cleared/removed elsewhere while this tab still shows a
+        // stale one. Anything else on a 404 (chiefly `'Not found'`) is
+        // `requireFeatureEnabled` refusing because the flag went off.
+        const bodyError = (err.body as { error?: string } | undefined)?.error
+        result = bodyError === 'No VAT number saved to check' ? { code: 'no_vat_number' } : { code: 'feature_off' }
       } else {
         result = { code: 'unknown' }
       }
@@ -264,6 +299,7 @@ export function useCompanyDetails() {
     remove,
     deleting,
     deleteError,
+    resetDeleteError,
     recheckVies,
     checkingVies,
     viesCheckError,

@@ -93,6 +93,7 @@ function formatCheckedDate(iso: string): string {
 export function viesStatusLine(
   copy: {
     pending: string
+    pendingTimedOut: string
     valid: (date: string) => string
     validNoDate: string
     invalid: string
@@ -100,11 +101,16 @@ export function viesStatusLine(
   },
   status: ViesStatus | null,
   checkedAt: string | null,
+  // #3332 review round 2, design 4: once the poll's bound elapses, "Checking…"
+  // next to a "Check again" button reads as still in progress — this swaps
+  // in the actual state.
+  pollTimedOut = false,
 ): string | null {
-  if (status === 'pending') return copy.pending
-  // A `valid` row with no `checkedAt` (e.g. #3332 review m1's stale-pending
-  // re-trigger path landing the outcome without a VIES-answer timestamp)
-  // never renders a dangling "on" with nothing after it.
+  if (status === 'pending') return pollTimedOut ? copy.pendingTimedOut : copy.pending
+  // A `valid` row with no `checkedAt` never renders a dangling "on" with
+  // nothing after it. The backend always writes `checked_at` alongside any
+  // VIES result, so this branch is a defensive fallback, not a path this
+  // screen expects to hit (#3332 review round 2, n1).
   if (status === 'valid') return checkedAt ? copy.valid(formatCheckedDate(checkedAt)) : copy.validNoDate
   if (status === 'invalid') return copy.invalid
   if (status === 'not_verifiable') return copy.notVerifiable
@@ -170,6 +176,7 @@ export function CompanyDetailsCard() {
     remove,
     deleting,
     deleteError,
+    resetDeleteError,
     recheckVies,
     checkingVies,
     viesCheckError,
@@ -208,7 +215,11 @@ export function CompanyDetailsCard() {
       <SettingsSection title={copy.title} description={copy.description}>
         <div className="space-y-3 px-6 py-4">
           <InlineAlert>{copy.loadError}</InlineAlert>
-          <Button variant="tertiary" size="sm" onClick={() => void reload()}>
+          {/* `variant="ghost" size="sm"` matches the other retry buttons in
+              Settings (e.g. `AccountSignersCard`) and across the app — not
+              `tertiary`, which reads as a secondary CTA rather than a plain
+              retry (#3332 review round 2, design 5). */}
+          <Button variant="ghost" size="sm" onClick={() => void reload()}>
             {copy.retry}
           </Button>
         </div>
@@ -220,10 +231,20 @@ export function CompanyDetailsCard() {
     return touched ? (fieldErrors[field] ?? null) : null
   }
 
-  function fieldDescribedBy(field: FieldKey, helpId: string): string | undefined {
-    const errorId = `${FIELD_ID[field]}-error`
-    return fieldError(field) ? `${helpId} ${errorId}` : helpId
-  }
+  // #3332 review round 2, design 2: a field error REPLACES its helper text
+  // IN THE SAME PARAGRAPH — never a helper line plus a separate error line
+  // both in red, which read as the same point made twice. The three fields
+  // below pass `helperText={fieldError(field) ?? copy.fields.xHelp}` for
+  // exactly this reason, always a truthy string, so `Input`'s conditional
+  // `if (!helperText) return inputEl` branch never flips: the helper
+  // paragraph — and the `<input>` beside it — stay the same element across
+  // the invalid/valid transition instead of a structural change React
+  // reconciles as a different subtree, which was unmounting and
+  // recreating the `<input>` DOM node on that transition and silently
+  // dropping the focus this same code path sets right after (caught by the
+  // round-2 fix pass, not by design review 2 itself — a mutation of the
+  // "focuses it" assertion in the VAT-shape-400 test would have caught it
+  // too, and does now).
 
   function onFieldChange(mutate: (draft: Draft) => Draft) {
     setDraft(mutate)
@@ -268,7 +289,7 @@ export function CompanyDetailsCard() {
       return
     }
     if (result.code === 'rate_limited') {
-      setFormError(copy.vies.rateLimited)
+      setFormError(copy.saveRateLimited)
       return
     }
     if (result.code === 'feature_off') {
@@ -283,7 +304,9 @@ export function CompanyDetailsCard() {
   // both rather than let the status read as being about the box on screen.
   const savedVatNumber = details?.vat_number ?? ''
   const vatEdited = draft.vatNumber.trim().toUpperCase() !== savedVatNumber
-  const viesLine = vatEdited ? null : viesStatusLine(copy.vies, details?.vies_status ?? null, details?.vies_checked_at ?? null)
+  const viesLine = vatEdited
+    ? null
+    : viesStatusLine(copy.vies, details?.vies_status ?? null, details?.vies_checked_at ?? null, pollTimedOut)
   const hasVatNumber = Boolean(details?.vat_number)
   const viesPending = details?.vies_status === 'pending' && !vatEdited
   // #3332 review M1: once the poll's 60s bound elapses a still-pending check
@@ -341,14 +364,11 @@ export function CompanyDetailsCard() {
                 placeholder={copy.fields.countryPlaceholder}
                 invalid={Boolean(fieldError('country'))}
                 maxLength={2}
-                helperText={copy.fields.countryHelp}
+                helperText={fieldError('country') ?? copy.fields.countryHelp}
                 helperTextId={`${FIELD_ID.country}-help`}
                 className="mt-1"
-                aria-describedby={fieldDescribedBy('country', `${FIELD_ID.country}-help`)}
+                aria-describedby={`${FIELD_ID.country}-help`}
               />
-              {fieldError('country') ? (
-                <InlineAlert id={`${FIELD_ID.country}-error`}>{fieldError('country')}</InlineAlert>
-              ) : null}
             </div>
 
             <div>
@@ -362,15 +382,12 @@ export function CompanyDetailsCard() {
                 placeholder={copy.fields.orgNumberPlaceholder}
                 invalid={Boolean(fieldError('orgNumber'))}
                 maxLength={32}
-                helperText={copy.fields.orgNumberHelp}
+                helperText={fieldError('orgNumber') ?? copy.fields.orgNumberHelp}
                 helperTextId={`${FIELD_ID.orgNumber}-help`}
                 className="mt-1"
                 autoComplete="off"
-                aria-describedby={fieldDescribedBy('orgNumber', `${FIELD_ID.orgNumber}-help`)}
+                aria-describedby={`${FIELD_ID.orgNumber}-help`}
               />
-              {fieldError('orgNumber') ? (
-                <InlineAlert id={`${FIELD_ID.orgNumber}-error`}>{fieldError('orgNumber')}</InlineAlert>
-              ) : null}
             </div>
 
             <div>
@@ -384,15 +401,12 @@ export function CompanyDetailsCard() {
                 placeholder={copy.fields.vatNumberPlaceholder}
                 invalid={Boolean(fieldError('vatNumber'))}
                 maxLength={32}
-                helperText={copy.fields.vatNumberHelp}
+                helperText={fieldError('vatNumber') ?? copy.fields.vatNumberHelp}
                 helperTextId={`${FIELD_ID.vatNumber}-help`}
                 className="mt-1"
                 autoComplete="off"
-                aria-describedby={fieldDescribedBy('vatNumber', `${FIELD_ID.vatNumber}-help`)}
+                aria-describedby={`${FIELD_ID.vatNumber}-help`}
               />
-              {fieldError('vatNumber') ? (
-                <InlineAlert id={`${FIELD_ID.vatNumber}-error`}>{fieldError('vatNumber')}</InlineAlert>
-              ) : null}
             </div>
           </div>
 
@@ -421,7 +435,9 @@ export function CompanyDetailsCard() {
                 ? copy.vies.rateLimited
                 : viesCheckError.code === 'feature_off'
                   ? copy.vies.featureOff
-                  : copy.vies.checkError}
+                  : viesCheckError.code === 'no_vat_number'
+                    ? copy.vies.noVatNumber
+                    : copy.vies.checkError}
             </InlineAlert>
           ) : null}
 
@@ -440,7 +456,14 @@ export function CompanyDetailsCard() {
 
         {status === 'ready' ? (
           <div className="border-t border-[var(--v2-border)] pt-4">
-            <Button variant="ghost" size="sm" onClick={() => setConfirmingDelete(true)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                resetDeleteError()
+                setConfirmingDelete(true)
+              }}
+            >
               {copy.remove.action}
             </Button>
           </div>
@@ -450,13 +473,23 @@ export function CompanyDetailsCard() {
       {confirmingDelete ? (
         <Modal
           open
-          onClose={() => setConfirmingDelete(false)}
+          onClose={() => {
+            setConfirmingDelete(false)
+            resetDeleteError()
+          }}
           title={copy.remove.confirmTitle}
           closeOnBackdrop={!deleting}
           closeOnEscape={!deleting}
           footer={
             <>
-              <Button variant="ghost" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setConfirmingDelete(false)
+                  resetDeleteError()
+                }}
+                disabled={deleting}
+              >
                 {copy.remove.cancel}
               </Button>
               <Button
@@ -478,8 +511,10 @@ export function CompanyDetailsCard() {
             </>
           }
         >
-          <p>{copy.remove.confirmBody}</p>
-          {deleteError ? <InlineAlert>{copy.remove.error}</InlineAlert> : null}
+          <div className="space-y-3">
+            <p>{copy.remove.confirmBody}</p>
+            {deleteError ? <InlineAlert>{copy.remove.error}</InlineAlert> : null}
+          </div>
         </Modal>
       ) : null}
     </SettingsSection>

@@ -8,7 +8,7 @@
  * with a VIES-`valid` VAT number (the "checked against VIES on <date>" line,
  * never "verified").
  */
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -26,22 +26,39 @@ const SNAPSHOT_OPTIONS = {
 } as const
 
 /**
- * The mobile clip's own height (#3332 design review 1). The form stacks all
- * four fields at 390px width (below the `sm:grid-cols-2` breakpoint), which
- * makes the card taller than the committed 844px mobile viewport. Capturing
- * an element taller than the viewport at the committed height forced Chromium
- * to paint the fixed mobile tab bar (`Sidebar`'s `fixed bottom-…`) into the
- * capture surface, over the bottom of the card, the same class of bug
- * `scripts/full-page-capture.mjs` documents for full-page captures of this
- * same `#main-content` shell (`h-screen overflow-hidden` outer, `overflow-y-
- * auto` inner) — a cut-off card under fixed chrome. The width stays the
- * committed 390 (this IS the 390px render); only the browser viewport's
- * HEIGHT grows here, tall enough that the whole card sits inside one
- * viewport and nothing needs to be painted beyond it, so the fixed tab bar
- * never gets baked into the crop. The clip filenames are unchanged — height
- * is not part of their identity, only the width class (`-mobile`) is.
+ * The mobile clip's own height (#3332 design review 1, round 2 fix). The
+ * form stacks all four fields at 390px width (below the `sm:grid-cols-2`
+ * breakpoint), which makes the card taller than the committed 844px mobile
+ * viewport, so a TALL viewport is still needed: tall enough that the whole
+ * card fits inside one viewport with nothing left to scroll to, so the fixed
+ * mobile tab bar (`Sidebar`'s `fixed bottom-…`) never has anything left
+ * below the fold to paint over.
+ *
+ * The height alone is NOT sufficient, though (round 1's mistake): Settings
+ * renders several cards above this one, so the PAGE is taller than
+ * `MOBILE_CAPTURE_HEIGHT` even though the CARD on its own is not, and
+ * Playwright's element-screenshot scroll (`scrollIntoViewIfNeeded`, run
+ * before every actionability-gated call, including `toHaveScreenshot`)
+ * aligns to whichever edge needs the LEAST scrolling — here, the bottom edge
+ * — which lands the card's bottom flush with the bottom of the viewport,
+ * exactly where the fixed tab bar sits, painting over Save/Remove. `card`
+ * below is explicitly scrolled to the TOP of the scroll area first, so the
+ * whole card (which fits inside `MOBILE_CAPTURE_HEIGHT`) renders above the
+ * tab bar instead. The clip filenames are unchanged — height is not part of
+ * their identity, only the width class (`-mobile`) is.
  */
 const MOBILE_CAPTURE_HEIGHT = 2000
+
+/**
+ * #3332 review round 2, design 1: scrolls `card` to the TOP of its scroll
+ * area (`#main-content`, `AuthenticatedShell`'s `overflow-y-auto` region) —
+ * not merely "into view", which `scrollIntoViewIfNeeded` already does and
+ * bottom-aligns when that is the shorter scroll, landing the card under the
+ * fixed mobile tab bar. `block: 'start'` forces the far edge instead.
+ */
+async function scrollCardToTop(card: Locator) {
+  await card.evaluate((el) => el.scrollIntoView({ block: 'start' }))
+}
 
 const EMPTY_DETAILS = null
 
@@ -105,6 +122,7 @@ test.describe('settings company details', () => {
       const card = await openSettings(page)
       await expect(card.getByLabel('Legal name')).toHaveValue('')
       await expect(card.getByTestId('company-details-purpose')).toContainText('personal identity number')
+      await scrollCardToTop(card)
       await expect(card).toHaveScreenshot(
         `settings-company-details-empty-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,
@@ -121,6 +139,7 @@ test.describe('settings company details', () => {
       await expect(card.getByText('VAT number checked against VIES on 20 September 2026')).toHaveCount(1)
       await expect(card.getByText(/verified/i)).toHaveCount(0)
       await expect(card.getByRole('button', { name: 'Remove company details' })).toHaveCount(1)
+      await scrollCardToTop(card)
       await expect(card).toHaveScreenshot(
         `settings-company-details-filled-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,

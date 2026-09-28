@@ -13,7 +13,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/frontend/src/hooks/useCompanyDetails.ts
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
-last-verified: "2026-09-27"
+last-verified: "2026-09-28"
 ---
 
 # Owner company details
@@ -110,9 +110,9 @@ just the settings screen built on top of it; `DELETE` is the one exception
 | `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
 
 An agent API key is refused with a named `403` on every route above,
-including `DELETE` — this is an owner-only surface (an API today; a dashboard
-settings screen once the frontend slice ships), and an agent must never
-manage — or erase — its own owner's company details.
+including `DELETE` — this is an owner-only surface (Settings → Company
+details in the dashboard, on top of the same owner-scoped routes), and an
+agent must never manage — or erase — its own owner's company details.
 
 ## Where it surfaces: `parties.buyer`
 
@@ -219,8 +219,12 @@ same reason.
   give to a merchant, and (asynchronously) validating the VAT number against
   VIES.
 - **Retention**: kept until the owner deletes it. `DELETE
-  /user/company-details` is the owner's actual erasure path today, and it
-  works regardless of the feature flag. Deleting the Haven account WOULD also
+  /user/company-details` works regardless of the feature flag, and with the
+  flag ON the owner calls it themselves from Settings → Company details. With
+  the flag OFF, though, that screen renders nothing at all (#3332 review round
+  2, M3) — so erasure is not self-serve in that state: the owner asks Haven
+  support, who calls the ungated `DELETE` route (or acts directly on the
+  table) on their behalf. Deleting the Haven account WOULD also
   remove these details (`user_id` is `ON DELETE CASCADE`), but account
   deletion is an operator action today — there is no self-serve
   delete-my-account route — so that cascade is not itself something an owner

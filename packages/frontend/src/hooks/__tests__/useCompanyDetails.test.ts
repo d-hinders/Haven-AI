@@ -14,9 +14,17 @@
  *   RESTARTS (a fresh bound, `pollTimedOut` cleared) when `updated_at`
  *   moves while `vies_status` stays `pending` — a re-save landing back on
  *   `pending` must not inherit an already-elapsed bound.
- * - M2: `save`/`remove`/`recheckVies` bump a shared generation counter that
- *   a poll tick (and `load`) check before applying their own response, so a
- *   slow poll or load in flight can never clobber a newer one.
+ * - M1 round 2: a poll tick that sees a STALE generation (save/remove
+ *   bumped it, but then FAILED so `details` never changed) drops the
+ *   response yet keeps the bounded schedule going — reschedules under the
+ *   bound, or sets `pollTimedOut` at it — the same branch the catch path
+ *   takes, so a failed save/remove never strands the row on "Checking…"
+ *   with no way to reach "Check again".
+ * - M2: `save`/`remove`/`recheckVies` each bump a shared generation counter
+ *   that a poll tick (and `load`) check before applying their own response,
+ *   so a slow poll or load in flight can never clobber a newer one —
+ *   covered for all three of `save`, `remove`, and `recheckVies`, not just
+ *   `save`.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -30,6 +38,7 @@ vi.mock('@/lib/api', async () => {
   return { ApiRequestError: actual.ApiRequestError, api: mockApi }
 })
 
+import { ApiRequestError } from '@/lib/api'
 import {
   useCompanyDetails,
   VIES_POLL_INTERVAL_MS,
@@ -214,5 +223,165 @@ describe('useCompanyDetails — poll/save generation race (M2)', () => {
     })
     expect(result.current.details?.legal_name).toBe('Ada Lovelace AB')
     expect(result.current.status).toBe('ready')
+  })
+
+  it('discards an in-flight poll response that resolves after remove() has started', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mockApi.get.mockImplementation(() => Promise.resolve(row()))
+    const { result } = renderHook(() => useCompanyDetails())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.status).toBe('ready')
+
+    let resolvePoll!: (value: CompanyDetailsRow) => void
+    const pending = new Promise<CompanyDetailsRow>((resolve) => {
+      resolvePoll = resolve
+    })
+    mockApi.get.mockImplementation(() => pending)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_INTERVAL_MS)
+    })
+
+    mockApi.delete.mockResolvedValue({ ok: true })
+    await act(async () => {
+      await result.current.remove()
+    })
+    expect(result.current.status).toBe('empty')
+    expect(result.current.details).toBeNull()
+
+    // The stale poll response lands late — it must not resurrect the row.
+    await act(async () => {
+      resolvePoll(row({ legal_name: 'STALE FROM POLL' }))
+      await Promise.resolve()
+    })
+    expect(result.current.status).toBe('empty')
+    expect(result.current.details).toBeNull()
+  })
+
+  it('discards an in-flight poll response that resolves after recheckVies() has started', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mockApi.get.mockImplementation(() => Promise.resolve(row()))
+    const { result } = renderHook(() => useCompanyDetails())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.status).toBe('ready')
+
+    let resolvePoll!: (value: CompanyDetailsRow) => void
+    const pending = new Promise<CompanyDetailsRow>((resolve) => {
+      resolvePoll = resolve
+    })
+    mockApi.get.mockImplementation(() => pending)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_INTERVAL_MS)
+    })
+
+    mockApi.post.mockResolvedValue(row({ legal_name: 'Rechecked AB' }))
+    await act(async () => {
+      await result.current.recheckVies()
+    })
+    expect(result.current.details?.legal_name).toBe('Rechecked AB')
+
+    // The stale poll response lands late — it must not clobber the recheck.
+    await act(async () => {
+      resolvePoll(row({ legal_name: 'STALE FROM POLL' }))
+      await Promise.resolve()
+    })
+    expect(result.current.details?.legal_name).toBe('Rechecked AB')
+  })
+})
+
+describe('useCompanyDetails — stale-generation poll keeps its bounded schedule (M1 round 2)', () => {
+  it('a save that fails (429) while a poll GET is in flight keeps polling, and still times out to "Check again"', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mockApi.get.mockImplementation(() => Promise.resolve(row()))
+    const { result } = renderHook(() => useCompanyDetails())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.status).toBe('ready')
+
+    // Arm a poll tick that will not resolve until told to.
+    let resolvePoll!: (value: CompanyDetailsRow) => void
+    const pending = new Promise<CompanyDetailsRow>((resolve) => {
+      resolvePoll = resolve
+    })
+    mockApi.get.mockImplementation(() => pending)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_INTERVAL_MS)
+    })
+
+    // The save fails — the generation bumps, but `details` never changes.
+    mockApi.put.mockRejectedValue(new ApiRequestError('Too many requests', 429))
+    await act(async () => {
+      await result.current.save(SAVE_BODY)
+    })
+    expect(result.current.saveError).toEqual({ code: 'rate_limited' })
+
+    // The stale poll response lands late — it must be dropped, but the poll
+    // must reschedule rather than going quiet forever.
+    mockApi.get.mockImplementation(() => Promise.resolve(row()))
+    await act(async () => {
+      resolvePoll(row())
+      await Promise.resolve()
+    })
+
+    const callsBeforeBound = mockApi.get.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_INTERVAL_MS)
+    })
+    expect(mockApi.get.mock.calls.length).toBeGreaterThan(callsBeforeBound)
+
+    // It still reaches the bound and offers "Check again" (pollTimedOut).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_MAX_MS)
+    })
+    expect(result.current.pollTimedOut).toBe(true)
+  })
+
+  it('a remove that fails while a poll GET is in flight keeps polling, and still times out to "Check again"', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mockApi.get.mockImplementation(() => Promise.resolve(row()))
+    const { result } = renderHook(() => useCompanyDetails())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.status).toBe('ready')
+
+    let resolvePoll!: (value: CompanyDetailsRow) => void
+    const pending = new Promise<CompanyDetailsRow>((resolve) => {
+      resolvePoll = resolve
+    })
+    mockApi.get.mockImplementation(() => pending)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_INTERVAL_MS)
+    })
+
+    // The remove fails (e.g. the confirm dialog's request 500s) — the
+    // generation bumps, but `details` never changes; the row stays put.
+    mockApi.delete.mockRejectedValue(new ApiRequestError('Server error', 500))
+    await act(async () => {
+      await result.current.remove()
+    })
+    expect(result.current.deleteError).toBe(true)
+    expect(result.current.status).toBe('ready')
+
+    mockApi.get.mockImplementation(() => Promise.resolve(row()))
+    await act(async () => {
+      resolvePoll(row())
+      await Promise.resolve()
+    })
+
+    const callsBeforeBound = mockApi.get.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_INTERVAL_MS)
+    })
+    expect(mockApi.get.mock.calls.length).toBeGreaterThan(callsBeforeBound)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_MAX_MS)
+    })
+    expect(result.current.pollTimedOut).toBe(true)
   })
 })

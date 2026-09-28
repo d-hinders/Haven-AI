@@ -23,7 +23,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-27"
+last-verified: "2026-09-28"
 ---
 
 # Dev environment
@@ -295,9 +295,15 @@ Isolation rules that are non-negotiable for a payments product:
 - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details
-  screen. Dark by default; GET/PUT/POST vies-check answer
-  404 when off — DELETE is the deliberate exception, so an owner can always
-  erase saved details. See [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
+  screen. Dark by default; GET/PUT/POST/vies-check answer 404 when off, and
+  the Settings screen itself renders nothing (no title, no form) while off —
+  so the DELETE route staying ungated does not mean an owner can self-serve
+  erase with the flag off: there is no UI affordance to reach it. Erasure
+  then goes through Haven support, who calls the ungated `DELETE
+  /user/company-details` (or the DB directly) on the owner's behalf — the
+  M3 decision, #3332 review round 2. With the flag on, the owner erases it
+  themselves from Settings. See
+  [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A

@@ -191,7 +191,7 @@ describe('CompanyDetailsCard — validation and save', () => {
     expect(await screen.findByText('Enter an organisation number using 32 characters or fewer.')).toBeInTheDocument()
   })
 
-  it('shows a plain rate-limit message on 429', async () => {
+  it('shows a save-specific rate-limit message on 429, not the VIES rate-limit sentence', async () => {
     mockApi.get.mockImplementation(() => noRow())
     mockApi.put.mockImplementation(() => Promise.reject(new ApiRequestError('Too many requests', 429, { error: 'Too many requests' })))
     renderCard()
@@ -200,7 +200,11 @@ describe('CompanyDetailsCard — validation and save', () => {
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(await screen.findByText(/too many times just now/)).toBeInTheDocument()
+    expect(await screen.findByText('Too many requests just now — try again in a minute.')).toBeInTheDocument()
+    // The VIES-specific sentence ("checked this VAT number too many times")
+    // must not appear here — a save being rate-limited names the save, not
+    // the VIES check (#3332 review round 2, m-r2a).
+    expect(screen.queryByText(/checked this VAT number too many times/)).not.toBeInTheDocument()
   })
 
   it('shows "This setting is no longer available." on a 404 from PUT (flag went off mid-session)', async () => {
@@ -275,9 +279,15 @@ describe('CompanyDetailsCard — validation and save', () => {
     )
     expect(message).toBeInTheDocument()
     await waitFor(() => expect(screen.getByLabelText('VAT number (optional)')).toHaveFocus())
+    // #3332 review round 2, design 2: the error REPLACES the helper text in
+    // the same paragraph (`company-vat-number-help`) rather than adding a
+    // second, differently-id'd error line — keeps the `<input>` DOM node
+    // stable across the transition (see the fix's own comment on
+    // `fieldError`'s callers), which is also what keeps the focus this
+    // assertion checks for.
     expect(screen.getByLabelText('VAT number (optional)')).toHaveAttribute(
       'aria-describedby',
-      expect.stringContaining('company-vat-number-error'),
+      expect.stringContaining('company-vat-number-help'),
     )
   })
 
@@ -296,6 +306,23 @@ describe('CompanyDetailsCard — validation and save', () => {
     await waitFor(() => screen.getByTestId('company-details-form'))
     expect(screen.getByLabelText('Organisation number')).toHaveAttribute('autoComplete', 'off')
     expect(screen.getByLabelText('VAT number (optional)')).toHaveAttribute('autoComplete', 'off')
+  })
+
+  it('an invalid country shows the error in place of the helper text, not both (design review 2)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    renderCard()
+    await waitFor(() => screen.getByTestId('company-details-form'))
+    expect(screen.getByText('Two-letter country code (ISO 3166-1), e.g. "SE" for Sweden.')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SWE' } })
+    fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Country must be a two-letter code, e.g. "SE".')).toBeInTheDocument()
+    // The neutral helper text is GONE, not shown alongside the error.
+    expect(screen.queryByText('Two-letter country code (ISO 3166-1), e.g. "SE" for Sweden.')).not.toBeInTheDocument()
+    // And there is only ONE description under the field, not two.
+    const describedBy = screen.getByLabelText('Country').getAttribute('aria-describedby')
+    expect(describedBy?.trim().split(/\s+/)).toHaveLength(1)
   })
 })
 
@@ -363,10 +390,22 @@ describe('CompanyDetailsCard — VIES status copy', () => {
     expect(await screen.findByText('This setting is no longer available.')).toBeInTheDocument()
   })
 
+  it('shows a "no longer saved" message, not the feature-off one, on a 404 whose body names a missing VAT number (#3332 review round 2, n3)', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'invalid' })))
+    mockApi.post.mockImplementation(() =>
+      Promise.reject(new ApiRequestError('No VAT number saved to check', 404, { error: 'No VAT number saved to check' })),
+    )
+    renderCard()
+    await waitFor(() => screen.getByText('VIES says this VAT number is not valid. Check the number and save it again.'))
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(await screen.findByText('This VAT number is no longer saved. Reload to see the current details.')).toBeInTheDocument()
+    expect(screen.queryByText('This setting is no longer available.')).not.toBeInTheDocument()
+  })
+
   it('renders "valid" with no dangling "on" when vies_checked_at is null (nit)', async () => {
     mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'valid', vies_checked_at: null })))
     renderCard()
-    expect(await screen.findByText('VIES confirmed this VAT number.')).toBeInTheDocument()
+    expect(await screen.findByText('VAT number checked against VIES.')).toBeInTheDocument()
     expect(screen.queryByText(/checked against VIES on\s*$/)).not.toBeInTheDocument()
   })
 
@@ -439,11 +478,13 @@ describe('CompanyDetailsCard — VIES polling', () => {
     expect(screen.queryByRole('button', { name: 'Check again' })).not.toBeInTheDocument()
 
     // Once the bound elapses, a still-pending check gets an action instead
-    // of being stuck on "Checking…" forever.
+    // of being stuck on "Checking…" forever — and the line itself stops
+    // claiming to still be checking (#3332 review round 2, design 4).
     await act(async () => {
       await vi.advanceTimersByTimeAsync(VIES_POLL_MAX_MS + VIES_POLL_INTERVAL_MS)
     })
-    expect(screen.getByText('Checking the VAT number with VIES…')).toBeInTheDocument()
+    expect(screen.getByText('VIES has not answered yet.')).toBeInTheDocument()
+    expect(screen.queryByText('Checking the VAT number with VIES…')).not.toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Check again' })).toBeInTheDocument()
   })
 })
@@ -499,6 +540,29 @@ describe('CompanyDetailsCard — delete', () => {
 
     expect(screen.queryByText('Saved.')).not.toBeInTheDocument()
     expect(await screen.findByText('Company details removed.')).toBeInTheDocument()
+  })
+
+  it('does not carry a failed delete\'s error into a freshly reopened dialog (design review 3)', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details()))
+    mockApi.delete.mockImplementation(() => Promise.reject(new ApiRequestError('nope', 500)))
+    renderCard()
+    await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveValue('Ada Lovelace AB'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove company details' }))
+    let dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    expect(await screen.findByText('We could not remove your company details. Try again in a moment.')).toBeInTheDocument()
+
+    // Cancel out of the dialog with the error still showing.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep details' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Reopen without a new attempt — the previous failure must not still show.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove company details' }))
+    dialog = await screen.findByRole('dialog')
+    expect(
+      within(dialog).queryByText('We could not remove your company details. Try again in a moment.'),
+    ).not.toBeInTheDocument()
   })
 
   it('blocks Escape and backdrop close while a delete is in flight (nit)', async () => {

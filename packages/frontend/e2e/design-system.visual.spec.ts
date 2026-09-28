@@ -517,6 +517,10 @@ test.describe('design-system visual regression', () => {
 
       await assertFitsViewport(wide, vp.height, 'the wide sample')
 
+      // #3441: bring the clip to a whole-pixel position — see the doc comment
+      // on `snapToWholePixel` for why this, and not scroll or transform, holds.
+      await snapToWholePixel(wide)
+
       await expect(wide).toHaveScreenshot(`design-system-stacked-bar-chart-${vp.name}${schemeSuffix}.png`, {
         animations: 'disabled',
         caret: 'hide',
@@ -550,6 +554,9 @@ test.describe('design-system visual regression', () => {
 
       await assertFitsViewport(narrow, vp.height, 'the narrow sample')
 
+      // #3441: see `snapToWholePixel`'s doc comment.
+      await snapToWholePixel(narrow)
+
       await expect(narrow).toHaveScreenshot(`design-system-stacked-bar-chart-narrow-${vp.name}${schemeSuffix}.png`, {
         animations: 'disabled',
         caret: 'hide',
@@ -577,12 +584,68 @@ test.describe('design-system visual regression', () => {
 
       await assertFitsViewport(swatchList, vp.height, 'the swatch list')
 
+      // #3441: see `snapToWholePixel`'s doc comment.
+      await snapToWholePixel(swatchList)
+
       await expect(swatchList).toHaveScreenshot(`design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, {
         animations: 'disabled',
         caret: 'hide',
         maxDiffPixels: STACKED_BAR_MAX_DIFF_PIXELS,
         threshold: PIXEL_THRESHOLD,
       })
+    })
+  }
+
+  /**
+   * ── Snapping a clip to a whole pixel before capture (#3441) ─────────────────
+   *
+   * These three clips moved by a pure 1px vertical shift three times
+   * (#3198, #3312, #3437) whenever unrelated content ABOVE the showcase on
+   * `/design-system` changed height by a fraction of a pixel — the showcase
+   * itself never changed. The showcase sits below the fold at both viewports
+   * (see the split rationale above), so it renders inside the shell's inner
+   * scroll root (`#main-content`, `overflow-y-auto`) at whatever fractional
+   * CSS position the page's cumulative height puts it at; Playwright's
+   * element clip then rounds that fraction to a whole pixel, and which way it
+   * rounds flips with the fraction.
+   *
+   * Fixing this by SCROLLING was tried and measured to fail: `#main-content
+   * .scrollTop` is a `long` in Chromium — reading it back after assigning a
+   * fractional value always returns an integer (`0.25` read back as `0`,
+   * `0.5` as `1`, `0.75` as `2` in a repeated-delta probe), so a scroll
+   * adjustment can only ever move a clipped element by a WHOLE number of
+   * pixels. It can change WHICH whole pixel a fractional position rounds to;
+   * it cannot cancel the fraction itself. (This is the "does Chromium keep a
+   * fractional scroll offset" question the issue flagged as unverified — it
+   * does not, at least not through `scrollTop`.)
+   *
+   * A CSS `transform` was tried next and also measured to fail, in a more
+   * interesting way: `translateY(-fracPart)` DOES move `getBoundingClientRect()`
+   * to a whole pixel (transforms paint with full float precision), but the
+   * capture still moved under a page-height perturbation, because `transform`
+   * is a PAINT-time operation — the HTML tick labels' subpixel text hinting is
+   * decided at LAYOUT time, against the element's PRE-transform fractional
+   * position, so shifting the already-hinted text a second time at paint time
+   * re-introduces a fraction instead of removing one. This is the concrete
+   * shape of the doc comment above the clips: "the HTML tick labels ... do
+   * not move in lockstep with the SVG" — because text hinting and SVG
+   * geometry resolve their subpixel position at different times.
+   *
+   * `margin-top` is what worked, measured stable (byte-identical clip PNGs)
+   * across a 0/.25/.5/.75px sweep on both viewports: it is a LAYOUT property,
+   * so setting it triggers reflow and the element's descendants — the tick
+   * labels included — get their final position, and therefore their text
+   * hinting, computed AFTER the correction rather than before it.
+   */
+  async function snapToWholePixel(locator: Locator): Promise<void> {
+    await locator.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      const fracPart = rect.top - Math.floor(rect.top)
+      // Epsilon guards a rect that is already whole (or float noise close
+      // enough to it) from picking up a no-op negative margin.
+      if (fracPart > 1e-3 && fracPart < 1 - 1e-3) {
+        ;(el as HTMLElement).style.marginTop = `${-fracPart}px`
+      }
     })
   }
 

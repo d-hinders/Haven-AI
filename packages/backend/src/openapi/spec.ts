@@ -7211,6 +7211,174 @@ export const openapiSpec = {
         },
       },
     },
+    // ── The receive side (#3333, epic #3328) ────────────────────────────────
+    //
+    // The owner's persisted inbound index, the matching state, and the
+    // owner-signed off-ramp hand-off. The receipt drop is deliberately
+    // UNAUTHENTICATED (a payer has no Haven account): its authentication is
+    // the ECDSA signature over the drop payload, recovered and checked
+    // against the payer the inbound transfer names. It can only add a
+    // receipt document and flip an inbound row's earned flag — never move
+    // funds or authority.
+    '/receive/{accountAddress}': {
+      get: {
+        tags: ['Transactions'],
+        operationId: 'getReceiveLedger',
+        summary: 'The receive ledger for one account: address, matched USDC balance, inbound rows.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        responses: {
+          '200': {
+            description: 'The account receive ledger. `earned: false` rows are unmatched = unearned; nothing is delivered on them.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ReceiveLedgerResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/off-ramp-destination': {
+      put: {
+        tags: ['Transactions'],
+        operationId: 'setOffRampDestination',
+        summary: 'Save (or replace) the owner off-ramp destination for one account+chain.',
+        description:
+          'Owner-only by topology: the route sits behind the dashboard JWT and no agent route wraps it. ' +
+          'One destination per account+chain; a PUT replaces it. This address is the ONLY recipient the ' +
+          'off-ramp hand-off can prepare a transfer to.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/OffRampDestinationInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The saved destination.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OffRampDestination' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/off-ramp/prepare': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'prepareOffRampHandoff',
+        summary: 'Prepare the owner-signed USDC transfer to the saved off-ramp destination.',
+        description:
+          'Builds the UserOperation through the same prepareTransfer the owner send uses (#1083): Haven ' +
+          'prepares, the OWNER signs with the account own signer, Haven relays. The token is the chain ' +
+          'registry USDC and the recipient is the SAVED destination — neither comes from the request ' +
+          'body. Submit goes through `/hybrid/{accountAddress}/transfers/submit`, which re-derives the ' +
+          'calldata and refuses a user_operation that does not contain it. Not a sweep: the sweep is ' +
+          'the agent-keyed stranded-delegate machinery.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/OffRampPrepareInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The prepared UserOperation plus the submit instructions the owner signs into.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OffRampPrepareResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/receipt-drop': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'dropReceiptForTransfer',
+        summary: 'A payer-signed receipt document for one inbound transfer (no authentication; signature IS the auth).',
+        description:
+          'A payer has no Haven account, so this route carries no auth middleware. The signer is ' +
+          'RECOVERED from the EIP-191 signature over the exact drop payload ' +
+          '(`haven:receipt-drop\\ntx:<hash>\\namount_raw:<atomic>`) and the drop is accepted only when ' +
+          'the recovered address IS the payer the inbound transfer names, the amount matches the ' +
+          'persisted transfer, and the transfer is still unmatched. The stored document is a reference ' +
+          'that flips the row earned flag — it grants nothing and moves nothing.',
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReceiptDropInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The transfer is matched and now earned.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ReceiptDropResponse' } } },
+          },
+          '400': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/ingest': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'ingestInboundTransfer',
+        summary: 'Record one inbound USDC transfer in the account receive index.',
+        description:
+          'Owner-scoped ingestion hook (tests and the eventual indexer tick; the production indexer ' +
+          'feeds the same repository). Idempotent per (chain, tx hash): a re-ingest returns ' +
+          '`ingested: false` rather than double-counting.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/InboundIngestInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Recorded (`ingested: false` when the hash was already indexed).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/InboundIngestResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
     '/dashboard/overview': {
       get: {
         tags: ['Dashboard'],
@@ -10664,6 +10832,145 @@ export const openapiSpec = {
             },
           },
         },
+      },
+      ReceiveLedgerResponse: {
+        type: 'object',
+        description: 'The account receive ledger (#3333): the persisted inbound index, the matched balance, and the saved off-ramp destination.',
+        required: ['account_address', 'chain_id', 'usdc_address', 'balance_atomic', 'balance_formatted', 'off_ramp_destination', 'transfers'],
+        properties: {
+          account_address: { ...address, description: 'The receiving account address.' },
+          chain_id: { type: 'integer' },
+          usdc_address: { type: ['string', 'null'], description: 'The chain registry USDC contract, or null when the chain has none.' },
+          balance_atomic: { type: 'string', description: 'SUM of matched (balance_consumed) inbound rows, atomic units, as a numeric string. Unmatched rows are unearned and never counted.' },
+          balance_formatted: { type: 'string', description: 'The balance in USDC human decimals (6).' },
+          off_ramp_destination: {
+            oneOf: [{ $ref: '#/components/schemas/OffRampDestination' }, { type: 'null' }],
+            description: 'The owner-saved off-ramp destination, or null when none is saved yet.',
+          },
+          transfers: { type: 'array', items: { $ref: '#/components/schemas/ReceiveLedgerTransfer' } },
+        },
+        additionalProperties: false,
+      },
+      ReceiveLedgerTransfer: {
+        type: 'object',
+        required: ['tx_hash', 'payer_address', 'amount_raw', 'amount_formatted', 'block_time', 'match_kind', 'matched_payment_intent_id', 'matched_receipt_id', 'balance_consumed', 'earned'],
+        properties: {
+          tx_hash: { type: 'string' },
+          payer_address: { type: 'string' },
+          amount_raw: { type: 'string', description: 'Atomic units, numeric string.' },
+          amount_formatted: { type: 'string', description: 'USDC human decimals (6).' },
+          block_time: { type: 'string', format: 'date-time' },
+          match_kind: {
+            oneOf: [{ type: 'string', enum: ['x402_payto', 'receipt'] }, { type: 'null' }],
+            description: 'How the row is linked to evidence: an x402 settlement the account was payTo for, or a supplied receipt. Null = unmatched = unearned.',
+          },
+          matched_payment_intent_id: { type: ['string', 'null'], description: 'The x402 settlement intent id, present only for x402_payto. Stored for audit; never a grant.' },
+          matched_receipt_id: { type: ['string', 'null'], description: 'The linked receipt document id, present only for the receipt kind.' },
+          balance_consumed: { type: 'boolean', description: 'True once the row counts in balance_atomic.' },
+          earned: { type: 'boolean', description: 'match_kind !== null. Unmatched = unearned; nothing is delivered on an unearned row.' },
+        },
+        additionalProperties: false,
+      },
+      OffRampDestination: {
+        type: 'object',
+        required: ['destination_address', 'destination_kind', 'label', 'updated_at'],
+        properties: {
+          destination_address: { ...address, description: 'The deposit address at the venue (Safello, Coinbase, or a custody account).' },
+          destination_kind: { type: 'string', enum: ['safello', 'coinbase', 'custody_deposit'] },
+          label: { type: ['string', 'null'] },
+          updated_at: { type: 'string', format: 'date-time' },
+        },
+        additionalProperties: false,
+      },
+      OffRampDestinationInput: {
+        type: 'object',
+        required: ['destination_address'],
+        properties: {
+          destination_address: { ...address, description: 'The deposit address. The zero address is refused.' },
+          // No schema-side default: a request-body default would let ajv
+          // inject the value into payloads (shadow invariant, #3135 S5) and
+          // read as a server-coerced field. The handler falls back to
+          // custody_deposit when the field is absent.
+          destination_kind: { type: 'string', enum: ['safello', 'coinbase', 'custody_deposit'], description: 'Defaults to custody_deposit when omitted (handler fallback).' },
+        },
+        additionalProperties: false,
+      },
+      OffRampPrepareInput: {
+        type: 'object',
+        required: ['amount_atomic'],
+        properties: {
+          amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'The amount to move, atomic units. The recipient and token are NOT in the request: they are the saved destination and the chain registry USDC.' },
+        },
+        additionalProperties: false,
+      },
+      OffRampPrepareResponse: {
+        type: 'object',
+        required: ['prepared', 'submit'],
+        properties: {
+          prepared: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'The prepared UserOperation (same shape the owner send prepare returns) — what the OWNER signs with the account own signer.',
+          },
+          submit: { $ref: '#/components/schemas/OffRampSubmitInstructions' },
+        },
+        additionalProperties: false,
+      },
+      OffRampSubmitInstructions: {
+        type: 'object',
+        required: ['endpoint', 'token_address', 'to', 'destination_kind', 'amount_atomic', 'signature_required_from'],
+        properties: {
+          endpoint: { type: 'string', description: 'The submit route; it re-derives the calldata and refuses a user_operation that does not contain it.' },
+          token_address: { ...address },
+          to: { ...address, description: 'The saved destination — echoed so the owner signs what they verified.' },
+          destination_kind: { type: 'string' },
+          amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          signature_required_from: { type: 'string', enum: ['owner'], description: 'Only the account owner signs; no agent key can authorize this transfer.' },
+        },
+        additionalProperties: false,
+      },
+      ReceiptDropInput: {
+        type: 'object',
+        required: ['tx_hash', 'amount_raw', 'payer_address', 'signature'],
+        properties: {
+          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: 'The on-chain transfer the receipt is for — the match key.' },
+          amount_raw: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units; must equal the persisted transfer amount.' },
+          payer_address: { ...address, description: 'The payer the transfer names; the signature must recover to it.' },
+          signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'EIP-191 personal signature over `haven:receipt-drop\\ntx:<tx_hash>\\namount_raw:<amount_raw>`.' },
+        },
+        additionalProperties: false,
+      },
+      ReceiptDropResponse: {
+        type: 'object',
+        required: ['matched', 'match_kind', 'transfer_id'],
+        properties: {
+          matched: { type: 'boolean', enum: [true] },
+          match_kind: { type: 'string', enum: ['x402_payto', 'receipt'] },
+          transfer_id: { type: 'string', format: 'uuid' },
+        },
+        additionalProperties: false,
+      },
+      InboundIngestInput: {
+        type: 'object',
+        required: ['tx_hash', 'payer_address', 'amount_raw'],
+        properties: {
+          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          payer_address: { ...address },
+          amount_raw: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+          token_address: { ...address, description: 'Optional; defaults to the chain registry USDC — the receive index tracks USDC only.' },
+          block_time: { type: 'string', format: 'date-time', description: 'Defaults to now.' },
+          block_number: { type: 'string', pattern: '^[0-9]+$' },
+        },
+        additionalProperties: false,
+      },
+      InboundIngestResponse: {
+        type: 'object',
+        required: ['ingested', 'id'],
+        properties: {
+          ingested: { type: 'boolean', description: 'false when the (chain, tx hash) was already indexed — idempotent re-ingest.' },
+          id: { type: ['string', 'null'], format: 'uuid', description: 'The row id, or null when it already existed.' },
+        },
+        additionalProperties: false,
       },
       TransactionsResponse: {
         type: 'object',

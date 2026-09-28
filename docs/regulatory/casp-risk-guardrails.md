@@ -28,6 +28,10 @@ covers:
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
   - packages/backend/src/infra/repositories/smart-accounts.ts
+  - packages/backend/src/infra/repositories/inbound-transfers.ts
+  - packages/backend/src/modules/transactions/receive.ts
+  - packages/backend/src/modules/transactions/off-ramp.ts
+  - packages/backend/src/routes/receive.ts
   - packages/backend/src/infra/repositories/payment-refusals.ts
   - packages/backend/src/modules/payments/refusal-ledger.ts
   - packages/backend/src/modules/accounting/entry.ts
@@ -72,7 +76,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-22"
+last-verified: "2026-09-27"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -843,6 +847,16 @@ Escalate for legal and product review if a proposal or PR introduces any of the 
 - Any ability for Haven to expand, override, or bypass on-chain delegation constraints.
 - Any user lock-in that prevents account access outside Haven.
 - Any growth of the disclosed #1985 relayer-owned Safe set — a new relayer-owned account, or funding an existing one.
+
+> **Receive-side counsel note (#3333, epic #3328).** The receive slice touches
+> three items on this list — merchant payment acceptance, payment settlement
+> for third parties, and on/off-ramp — and RECORDS (not asserts) the position
+> that receiving into one's own self-custody account for one's own sales is
+> not a service to others, and that the off-ramp hand-off is the owner's own
+> transfer to their own saved venue deposit address. The full entry,
+> including the authority invariants the build holds, is
+> [docs/regulatory/casp-changelog/2026-09-27-3333.md](casp-changelog/2026-09-27-3333.md).
+> The position is recorded by counsel, not asserted by the slice.
 
 ## Third-Party On-Ramp Integration
 

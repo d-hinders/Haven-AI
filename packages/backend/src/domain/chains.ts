@@ -146,6 +146,25 @@ export function getChain(chainId: number): ChainConfig {
   return chain
 }
 
+/**
+ * The receive side's settlement asset on a chain: the registry's USDC asset,
+ * resolved by the token's own registry data, never by a symbol string. The
+ * dot-stripped symbol test this replaces (`symbol.replace('.', '') === 'USDC'`)
+ * silently excluded Gnosis's bridged USDC — registry symbol 'USDC.e' — so
+ * every inbound Gnosis leg was skipped and `usdcAddressForChain(100)` was null
+ * (#3333 round-2 finding F-1). The registry marks the USDC asset on every
+ * chain with the same CoinGecko id — native USDC on Base, bridged USDC.e on
+ * Gnosis — which is exactly the "settlement asset" predicate; EURe
+ * ('monerium-eur-money') and the native tokens never match. Undefined when
+ * the chain carries no USDC asset.
+ */
+export function settlementTokenForChain(chainId: number): TokenConfig | undefined {
+  const chain = getChain(chainId)
+  return Object.values(chain.tokens).find(
+    (candidate) => candidate.address !== null && candidate.coingeckoId === 'usd-coin',
+  )
+}
+
 export function getExplorerUrl(
   chainId: number,
   type: 'tx' | 'address',

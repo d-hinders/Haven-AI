@@ -237,6 +237,35 @@ export function authRateLimit(
 }
 
 /**
+ * The payer's signed receipt drop (`POST /receive/:addr/receipt-drop`, #3333).
+ * The receive side's ONLY unauthenticated route, so like signup/login and the
+ * catalog submit it follows the self-disarming pattern: a per-IP ceiling whose
+ * "IP" is one shared proxy address (no `trustProxy` on the instance) is a
+ * cheap global denial-of-service on the drop, so the tier refuses to arm
+ * itself unless the operator trusts the proxy (`TRUST_PROXY_HOPS > 0`).
+ *
+ * Tighter than the passport tiers on purpose: the drop's authentication is the
+ * payload's own ECDSA signature, and a signature that fails verification has
+ * already cost the caller nothing but a 400 — without a limiter the route is
+ * the repo's only unauthenticated surface a flood could hammer for free (round-
+ * 2 finding F-3). 20/min per client IP is far above any legitimate payer (a
+ * payer drops one receipt per transfer) and below any meaningful flood. The
+ * handler's own 404 on an unknown receiving address is the resilient second
+ * layer, and a forged signature never reaches a match write regardless.
+ */
+export function receiptDropRateLimit(
+  trustProxyHops: number,
+): { rateLimit?: { max: number; timeWindow: string } } {
+  if (trustProxyHops <= 0) return {}
+  return {
+    rateLimit: {
+      max: 20,
+      timeWindow: '1 minute',
+    },
+  }
+}
+
+/**
  * Public `POST /catalog/submit` (epic #1717, #1711). Unauthenticated, so the
  * shared key generator falls back to `ip:` — the same untrusted-proxy trap as
  * `authRateLimit`, and the same answer: a per-IP ceiling whose "IP" is one

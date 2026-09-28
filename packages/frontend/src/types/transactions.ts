@@ -114,5 +114,14 @@ export type TransactionFilterTokenOption = TransactionFilterOptionsResponse['tok
 export type BalanceItem = ApiSchema<'BalanceItem'> & { chainId?: number }
 
 export type BalancesResponse = ApiSchema<'BalancesResponse'>
+
+/** The receive ledger row (`GET /receive/{accountAddress}`, #3333). */
+export type ReceiveLedgerTransfer = ApiSchema<'ReceiveLedgerTransfer'>
+
+export type ReceiveLedgerResponse = ApiSchema<'ReceiveLedgerResponse'>
+
+export type OffRampDestination = ApiSchema<'OffRampDestination'>
+
+export type OffRampPrepareResponse = ApiSchema<'OffRampPrepareResponse'>
 export type PortfolioBreakdown = ApiSchema<'PortfolioBreakdown'>
 export type PortfolioResponse = ApiSchema<'PortfolioResponse'>

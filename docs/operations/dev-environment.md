@@ -826,3 +826,14 @@ project owner — collaborators have Viewer access, not env-var write access.
 > moved, `enforcedModules` is untouched, and the shadow/enforce semantics this
 > document describes are unchanged. Nothing else in this file's coverage was
 > touched; this note and the `last-verified` date are the only edits.
+
+> **Re-verified #3333 (2026-09-27):** `index.ts`'s `enforcedModules` grew by
+> exactly one entry — `routes/receive.ts`, born ENFORCED per the rule above
+> (a genuinely new module with no existing caller). The generated map
+> (`route-modules.generated.ts`) was regenerated in the same commit and
+> `lint:request-schemas` stayed green with no baseline bump: the module
+> carries a spec operation for every registered route, including the
+> unauthenticated-but-signed receipt drop (whose body shape is the enforced
+> schema's). The shadow/enforce semantics this document describes are
+> unchanged. Nothing else in this file's coverage was touched; the note and
+> the `last-verified` date are the only edits.

@@ -36,10 +36,9 @@ import {
   classifyMerchantBudgetRefusal,
   isPermanentMerchantBudgetRefusal,
 } from '@/lib/merchantBudgetRefusal'
-import { truncateAddress } from '@/components/haven'
+import { truncateAddress, BudgetAmountRow } from '@/components/haven'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -419,67 +418,39 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   </p>
                 ) : (
                   <>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <div className="sm:w-32">
-                        <label className="mb-1 block text-xs font-medium text-[var(--v2-ink-3)]" htmlFor="fund-merchant-amount">
-                          Amount
-                        </label>
-                        <Input
-                          id="fund-merchant-amount"
-                          value={amount}
-                          onChange={(e) => setAmount(e.target.value)}
-                          placeholder="Amount"
-                          inputMode="decimal"
-                          aria-label="Budget amount"
-                          invalid={!!amountFormatError}
-                          // Design review round 2, finding 7: the error text
-                          // below is linked to the field it describes, and
-                          // announced (role="alert" on that paragraph) rather
-                          // than relying on sight alone.
-                          aria-describedby={amountFormatError ? 'fund-merchant-amount-error' : undefined}
-                        />
-                      </div>
-                      {tokenOptions.length > 1 ? (
-                        <Select
-                          value={tokenAddress}
-                          onChange={(e) => setTokenAddress(e.target.value)}
-                          aria-label="Token"
-                          className="sm:w-28 sm:self-end"
-                        >
-                          {tokenOptions.map((t) => (
-                            <option key={t.address} value={t.address}>
-                              {t.symbol}
-                            </option>
-                          ))}
-                        </Select>
-                      ) : (
-                        // Design review round 2, finding 7: an invisible label
-                        // spacer, sm+ only, so the symbol's text baseline lines
-                        // up with the Amount input's on desktop (a real fix on
-                        // mobile — the stacked "USDC" orphan, design finding
-                        // 14 — is left to the captain's follow-up).
-                        <div className="flex flex-col sm:self-end">
-                          <span aria-hidden="true" className="mb-1 hidden text-xs sm:block">
-                            &nbsp;
-                          </span>
-                          <span className="flex h-9 items-center pb-2 text-sm text-[var(--v2-ink-muted)] sm:h-10 sm:pb-0">
-                            {token?.symbol}
-                          </span>
-                        </div>
-                      )}
-                      <Select
-                        value={String(period)}
-                        onChange={(e) => setPeriod(Number(e.target.value))}
-                        aria-label="Period"
-                        className="sm:w-36 sm:self-end"
-                      >
-                        {PERIODS.map((p) => (
-                          <option key={p.seconds} value={p.seconds}>
-                            {p.label}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
+                    {/* #3398: the amount row is the shared `BudgetAmountRow` —
+                        one markup for both branches below. The token symbol
+                        rides inside the amount input as a suffix (no more
+                        stacked "USDC" orphan line, design finding 14), and a
+                        multi-token offer keeps a real token Select beside the
+                        amount on the same line. The row is `sm:items-end`, so
+                        the label wrapper keeps the input's bottom edge as the
+                        row's reference line — the symbol text shares the
+                        input's box instead of hanging below its baseline (the
+                        ~9 px desktop offset the #3331 design review measured). */}
+                    <BudgetAmountRow
+                      amount={amount}
+                      onAmountChange={setAmount}
+                      tokens={tokenOptions}
+                      selectedTokenAddress={token?.address ?? null}
+                      onTokenChange={setTokenAddress}
+                      period={period}
+                      onPeriodChange={setPeriod}
+                      periods={PERIODS}
+                      amountLabel="Amount"
+                      amountLabelHtmlFor="fund-merchant-amount"
+                      inputId="fund-merchant-amount"
+                      amountAriaLabel="Budget amount"
+                      amountInvalid={!!amountFormatError}
+                      amountAriaDescribedBy={amountFormatError ? 'fund-merchant-amount-error' : undefined}
+                      // w-40, not w-32: the symbol now lives INSIDE the input,
+                      // and a 128px box (minus padding and the suffix
+                      // reservation) cannot hold the "Amount" placeholder
+                      // beside it — it truncated to "Amo". 160px keeps
+                      // placeholder and symbol in one box.
+                      inputClassName="sm:w-40"
+                      periodSelectClassName="sm:w-36"
+                    />
                     <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
                       Pays only {merchant.name}
                       {payTo ? ` (${truncateAddress(payTo)})` : ''}.

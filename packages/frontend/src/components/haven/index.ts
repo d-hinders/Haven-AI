@@ -1,5 +1,9 @@
 export { AgentBudgetCard } from './AgentBudgetCard'
 export { Amount, type AmountDirection } from './Amount'
+export {
+  default as BudgetAmountRow,
+  type BudgetAmountTokenOption,
+} from './BudgetAmountRow'
 export { Address, truncateAddress } from './Address'
 export {
   ExternalDetailsLink,

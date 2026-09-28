@@ -40,11 +40,10 @@ import {
   classifyMerchantBudgetRefusal,
   isPermanentMerchantBudgetRefusal,
 } from '@/lib/merchantBudgetRefusal'
-import { truncateAddress } from './haven'
+import { truncateAddress, BudgetAmountRow } from './haven'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
-import { Select } from './ui/Select'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
@@ -340,30 +339,28 @@ export default function EditBudgetModal({
                 {!isMerchantLocked && budget.recipient_address ? ' for its recipient' : ''}. Your current
                 budget keeps working until the new one is signed.
               </p>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="Amount"
-                  className="sm:w-32"
-                  aria-label="Budget amount"
-                />
-                <span className="self-center text-sm text-[var(--v2-ink-muted)]">
-                  {token?.symbol}
-                </span>
-                <Select
-                  value={String(period)}
-                  onChange={(e) => setPeriod(Number(e.target.value))}
-                  aria-label="Period"
-                  className="sm:w-36"
-                >
-                  {periodOptions.map((p) => (
-                    <option key={p.seconds} value={p.seconds}>
-                      {p.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              {/* #3398: the amount row is the shared `BudgetAmountRow` — the
+                  token symbol rides inside the amount input as a suffix, so
+                  below `sm` no line holds only the token label (it used to
+                  orphan on its own stacked line, `self-center`). The budget
+                  being edited has ONE token — its (token, recipient) slot is
+                  fixed — so exactly that token is passed, never a picker. */}
+              <BudgetAmountRow
+                amount={amount}
+                onAmountChange={setAmount}
+                tokens={token ? [token] : []}
+                selectedTokenAddress={token?.address ?? null}
+                onTokenChange={() => undefined}
+                period={period}
+                onPeriodChange={setPeriod}
+                periods={periodOptions}
+                // w-40, not w-32: the symbol now lives INSIDE the input, and a
+                // 128px box (minus padding and the suffix reservation) cannot
+                // hold the "Amount" placeholder beside it. 160px keeps
+                // placeholder and symbol in one box.
+                inputClassName="sm:w-40"
+                periodSelectClassName="sm:w-36"
+              />
               {isMerchantLocked ? (
                 // #3331 review finding F3: read-only — never a retarget or a
                 // clear-to-open for a budget that pays exactly one merchant.

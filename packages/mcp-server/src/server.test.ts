@@ -146,7 +146,7 @@ describe('buildHostedMcpServer', () => {
     // repeat it, and must never regress to the inspect-initialize advice.
     expect(HOSTED_INSTRUCTIONS).toContain('version-mismatch')
     expect(HOSTED_INSTRUCTIONS).toContain('supported_versions')
-    expect(HOSTED_INSTRUCTIONS).toContain('npx @haven_ai/connect@alpha')
+    expect(HOSTED_INSTRUCTIONS).toContain('npx -y @haven_ai/connect@alpha --doctor')
     expect(HOSTED_INSTRUCTIONS).not.toMatch(/advertises at initialize/)
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })

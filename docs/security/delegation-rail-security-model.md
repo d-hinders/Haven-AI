@@ -1618,8 +1618,12 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   it is upgraded. Haven cannot gate that: the attack never passes through
   Haven, and the hosted MCP cannot see the signer's handshake. Credential
   rotation does not help, because the new key lands in the same old signer. The
-  remedy is the signer upgrade (a connector re-run), carried by the release
-  notes (`packages/signer/CHANGELOG.md`).
+  remedy is the signer upgrade, carried by the release notes
+  (`packages/signer/CHANGELOG.md`). How an installed machine performs that
+  upgrade — the command every update hint names, and which older signers it
+  cannot reach — is maintained in
+  [`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md)
+  § *Client-version signal*.
 
 > **Scope of this section:** written for #3272 and rewritten once for epic
 > #3284 (#3283, #3281) against the signer and SDK at those changes; #3375

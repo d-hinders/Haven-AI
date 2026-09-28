@@ -265,7 +265,9 @@ export interface ToolSuccess<T> {
   /**
    * #3303: the backend's `client_update` hint when this package is behind the
    * version the deployment recommends (`required: false`) or below its
-   * minimum (`required: true`). Carries the exact command that updates it.
+   * minimum (`required: true`). `upgrade_command` starts the update: for the
+   * connector-installed packages it is the connector doctor, which prints the
+   * repair line to run next (#3412).
    */
   client_update?: HavenClientUpdate
 }

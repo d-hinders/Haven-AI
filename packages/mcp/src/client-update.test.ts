@@ -17,7 +17,7 @@ const HINT = {
   recommended: '9.0.0',
   min_version: null,
   required: false,
-  upgrade_command: 'npx -y @haven_ai/connect@alpha',
+  upgrade_command: 'npx -y @haven_ai/connect@alpha --doctor',
   notes_url: null,
 }
 

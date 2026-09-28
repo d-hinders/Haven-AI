@@ -1,4 +1,4 @@
-import { HAVEN_CONNECTOR_CHANNEL, connectorRerunCommand } from './connector-channel.js'
+import { HAVEN_CONNECTOR_CHANNEL, connectorUpgradeCommand } from './connector-channel.js'
 
 // ── Client Configuration ─────────────────────────────────────────
 
@@ -2454,8 +2454,8 @@ export type SignerRefusalCode = (typeof SignerRefusalCode)[keyof typeof SignerRe
  */
 export function signerUpdateFallback(channel: string = HAVEN_CONNECTOR_CHANNEL): string {
   return (
-    `Update @haven_ai/signer by rerunning \`${connectorRerunCommand(undefined, { channel })}\`, which reinstalls the ` +
-    'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
+    `Update @haven_ai/signer: run \`${connectorUpgradeCommand({ channel })}\` and then the repair line it prints, ` +
+    'which reinstalls the pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
     'quote or payment this version came from is unaffected and does not need to be re-quoted.'
   )
 }

@@ -10,7 +10,7 @@
  * Never imports a capability module.
  */
 import { DIRECT_SIGN_CONTEXT_VERSION, signerUpdateFallback } from '@haven_ai/sdk'
-import { HOSTED_CONNECTOR_CHANNEL, hostedConnectorRerunCommand } from '../../connector-channel.js'
+import { HOSTED_CONNECTOR_CHANNEL, hostedConnectorUpgradeCommand } from '../../connector-channel.js'
 
 /**
  * The `capabilities.experimental` key the local signer advertises its supported
@@ -80,7 +80,7 @@ export function signerCompatibilityNotice(emittedVersion: number) {
     check:
       'The signer enforces this version itself (#1547): on its version-mismatch refusal ' +
       '(code/supported_versions/fallback), STOP before signing again and update @haven_ai/signer ' +
-      `by rerunning \`${hostedConnectorRerunCommand()}\`. Never edit the version — it is Haven-signed, ` +
+      `by running \`${hostedConnectorUpgradeCommand()}\`, then the repair line it prints. Never edit the version — it is Haven-signed, ` +
       'so changing it invalidates the signature. Nothing has been spent at this point.',
     // #1309: the SAME recovery guidance as `check` above, as structured data
     // instead of prose to parse — and the SAME string
@@ -125,12 +125,12 @@ export function directSignerCompatibilityNotice() {
       'by payment_id. If haven_sign refuses with code SIGN_CONTEXT_REFUSED and backend_error_code ' +
       "'sign_context_unavailable' (a pre-#3271 signer: it signed nothing), sign through the relay " +
       'instead: call haven_sign with { payload_hash, typed_data_b64 } from THIS result, passed ' +
-      `through unchanged, then update the connector by rerunning \`${hostedConnectorRerunCommand()}\`.`,
+      `through unchanged, then update the connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair line it prints.`,
     // The same recovery sentence as structured data, mirroring the #1309
     // pattern on the x402 notice above: prose to read, data to route on.
     fallback:
       'haven_sign refused SIGN_CONTEXT_REFUSED / sign_context_unavailable and signed nothing: call ' +
       'haven_sign again with { payload_hash, typed_data_b64 } from the payment result, unchanged, ' +
-      `then update the connector by rerunning \`${hostedConnectorRerunCommand()}\`.`,
+      `then update the connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair line it prints.`,
   }
 }

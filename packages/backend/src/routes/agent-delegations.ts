@@ -128,6 +128,13 @@ export const UNAVAILABLE_AGENT_REFUSAL =
   'Agent cannot receive a budget while its account or re-key is unavailable'
 /** #2331's rotated-delegate-key refusal; #2415 kept the wording byte-identical. */
 export const ROTATED_DELEGATE_KEY_REFUSAL = 'Delegation was built for a previous delegate key'
+// #3439: a re-key's own replacement row is activated only by that re-key's
+// own completion (`ACTIVATE_REKEY_DELEGATION_SQL` inside `completeRekey`) —
+// never by the ordinary owner-signature activate route, however the row got
+// its `delegate` field to match the agent's current key (see the route
+// comment below for how that can happen after an abandoned re-key).
+export const REKEY_DELEGATION_NOT_ACTIVATABLE_REFUSAL =
+  "This delegation belongs to a re-key and can only be activated by that re-key's own completion"
 /** #3331: the merchant-locked build's refusals (see the build route). */
 export const MERCHANT_PAY_TO_UNVERIFIED_REFUSAL =
   'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet'
@@ -566,8 +573,15 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         return reply.code(400).send({ error: 'Invalid delegation hash' })
       }
 
-      const row = await pool.query<{ id: string; delegation_json: string; status: string; token_address: string; recipient_address: string | null }>(
-        `SELECT id, delegation_json, status, token_address, recipient_address
+      const row = await pool.query<{
+        id: string
+        delegation_json: string
+        status: string
+        token_address: string
+        recipient_address: string | null
+        rekey_id: string | null
+      }>(
+        `SELECT id, delegation_json, status, token_address, recipient_address, rekey_id
          FROM agent_delegations
          WHERE agent_id = $1 AND delegation_hash = $2`,
         [request.params.id, request.params.hash],
@@ -576,6 +590,24 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if (!pending) return reply.code(404).send({ error: 'Delegation not found' })
       if (pending.status !== 'pending') {
         return reply.code(409).send({ error: `Delegation is ${pending.status}, not pending` })
+      }
+      // #3439: refuse a re-key's own replacement row BEFORE the slot sweep —
+      // a filter only in `ACTIVATE_PENDING_DELEGATION_SQL` would surface here
+      // as the misleading `Delegation is no longer pending` after the sweep
+      // already ran and had to be rolled back. This is the primary guard; the
+      // SQL's `rekey_id IS NULL` clause is kept as a backstop (defense in
+      // depth, same posture as every other guard on this route). An
+      // abandoned re-key's row can otherwise reach this point: a later re-key
+      // may reuse the abandoned one's parked delegate address, which makes
+      // `signed.delegate` match the agent's CURRENT key even though the row
+      // itself was never revoked (traced in #3439 — the row survives only
+      // through the stalled-issue race the re-key lock now closes, but this
+      // check does not rely on that race being impossible).
+      if (pending.rekey_id !== null) {
+        return reply.code(409).send({
+          error: REKEY_DELEGATION_NOT_ACTIVATABLE_REFUSAL,
+          error_code: 'REKEY_DELEGATION_NOT_ACTIVATABLE',
+        })
       }
 
       // ── Deploy the delegator account if still counterfactual (#860) ──

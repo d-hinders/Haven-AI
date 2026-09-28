@@ -225,6 +225,32 @@ export async function insertRekeyDelegation(
     // pending replacement exists and unlink refuses, or the unlinked agent
     // fails the delegation-rail eligibility check and no row is created.
     if (!(await lockOwnedAgentForRekeyDelegation(row.agentId, row.userId, tx))) return false
+    // #3439: `lockOwnedAgentForRekeyDelegation` only proves that SOME re-key
+    // of this agent is in flight — not THIS one. Without this re-check, a
+    // stalled issue request for an abandoned re-key R1 can resume while a
+    // successor R2 is in flight past its own revoke step: R2 satisfies the
+    // agent-level lock, so R1's insert proceeds and lands `pending` rows
+    // under R2's eventual delegate key, which `markIssued` (stage `metered`
+    // → `issued`) then refuses too late to undo. Locking THIS re-key's own
+    // row and requiring it still be `metered` — the stage the issue route
+    // checked before building these rows, and the only stage `markIssued`
+    // itself expects — closes the window: an abandon moves R1's own row to
+    // `abandoned` and fails this check; no other re-key's progress can move
+    // R1's row, so a sibling's stage never satisfies it. Locking the specific
+    // `agent_rekeys` row (not just the agent row) means a concurrent abandon
+    // of THIS re-key serializes against this transaction rather than racing
+    // it. The alternative is one transaction around the issue route's whole
+    // piece loop plus `markIssued` (the delegate-account RPC runs before the
+    // loop, so that is feasible). It would also stop two CONCURRENT issue
+    // calls on one re-key from both inserting, which this re-check does not:
+    // the stage stays `metered` until one of them reaches `markIssued`. This
+    // smaller change meets #3439's criterion; the concurrent-issue case is a
+    // tracked follow-up (#3450).
+    const rekeyLock = await tx.query<{ id: string }>(
+      `SELECT id FROM agent_rekeys WHERE id = $1 AND agent_id = $2 AND stage = 'metered' FOR UPDATE`,
+      [row.rekeyId, row.agentId],
+    )
+    if (rekeyLock.rowCount === 0) return false
     await tx.query(INSERT_REKEY_DELEGATION_SQL, [
       row.agentId,
       row.chainId,

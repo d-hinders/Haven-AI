@@ -982,7 +982,15 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
             merchantId,
           })
           if (inserted === false) {
-            return reply.code(409).send({ error: 'Unlinked agents cannot receive new budget delegations' })
+            // #3439: `insertRekeyDelegation` returns false for either of two
+            // reasons — the agent is no longer eligible (unlinked, revoked)
+            // or THIS re-key is no longer `metered` (abandoned, or overtaken
+            // by a stalled/duplicate issue call). Both are "this issue
+            // request can no longer place new budget delegations", so one
+            // message covers both honestly without over-claiming a cause.
+            return reply
+              .code(409)
+              .send({ error: 'This re-key can no longer receive new budget delegations' })
           }
           built.push({
             delegation_hash: hash,

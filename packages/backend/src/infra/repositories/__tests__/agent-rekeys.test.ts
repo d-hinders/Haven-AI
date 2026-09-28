@@ -722,6 +722,11 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     const seeded = await seedAgent()
     const merchantId = await seedMerchant()
     const rekey = await open(seeded)
+    // #3439: insertRekeyDelegation now re-checks the re-key's OWN stage
+    // under the lock — it must be `metered`, the stage the issue route
+    // checks before building rows.
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
     const recipient = '0x' + 'c0'.repeat(20)
 
     const inserted = await insertRekeyDelegation({
@@ -754,6 +759,8 @@ describeDb('agent_rekeys ledger (#1698)', () => {
   it('MUTATION TARGET — insertRekeyDelegation with merchantId: null writes no label', async () => {
     const seeded = await seedAgent()
     const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
     await insertRekeyDelegation({
       agentId: seeded.agentId,
       userId: seeded.userId,
@@ -791,6 +798,8 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     const seeded = await seedAgent()
     const merchantId = await seedMerchant()
     const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
     const recipient = '0x' + 'c0'.repeat(20)
 
     await db.query(`DELETE FROM merchants WHERE id = $1`, [merchantId])
@@ -827,6 +836,8 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     const seeded = await seedAgent()
     const merchantId = await seedMerchant()
     const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
     const recipient = '0x' + 'c0'.repeat(20)
 
     const inserted = await insertRekeyDelegation({
@@ -859,9 +870,11 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     const seeded = await seedAgent()
     const merchantId = await seedMerchant()
     const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
     const recipient = '0x' + 'c0'.repeat(20)
 
-    await insertRekeyDelegation({
+    const inserted = await insertRekeyDelegation({
       agentId: seeded.agentId,
       userId: seeded.userId,
       chainId: 84532,
@@ -878,6 +891,10 @@ describeDb('agent_rekeys ledger (#1698)', () => {
       carryRole: 'carry',
       merchantId,
     })
+    // The row must genuinely exist before "abandoned rows are never reused"
+    // means anything — without this, the test would still pass on a row
+    // that silently never got inserted.
+    expect(inserted).toBe(true)
     // Abandon the re-key — the row stays `pending` forever (completion
     // requires `stage = 'issued'`, and `abandoned` is terminal).
     await abandonRekey(rekey.id, seeded.agentId, 'stopped')
@@ -898,6 +915,117 @@ describeDb('agent_rekeys ledger (#1698)', () => {
       merchantId,
     )
     expect(reusable).toBeNull()
+  })
+})
+
+/**
+ * #3439 — the stalled-issue race. `lockOwnedAgentForRekeyDelegation` only
+ * proves that SOME re-key of the agent is in flight, not that it is the one
+ * calling `insertRekeyDelegation`. The interleaving from the (corrected)
+ * issue body:
+ *
+ * 1. R1 reaches `metered`. Its issue request passes the (route-level) stage
+ *    check and stalls before it inserts anything.
+ * 2. The owner abandons R1 and opens R2 with a fresh candidate key.
+ * 3. R2 moves past its own revoke step (`revoked` → `metered`, here) —
+ *    R2 is now in flight.
+ * 4. R1's stalled issue resumes. Before #3439, `insertRekeyDelegation`
+ *    re-checked only that *some* re-key of the agent was in flight — R2
+ *    satisfies that — so R1's rows were inserted for an abandoned re-key
+ *    while a DIFFERENT re-key was the one actually in flight.
+ *
+ * This block calls `insertRekeyDelegation` directly with R1's id while R2 is
+ * `metered`, which is exactly step 4 — the route-level stage check in step 1
+ * is out of scope for a repository test and is exercised at the route level
+ * (`agent-rekey-issue-clock.test.ts` et al.); what this proves is that the
+ * REPOSITORY function itself refuses once R1 stops being R1's own `metered`.
+ */
+describeDb('insertRekeyDelegation refuses a stalled re-key while a successor is in flight (#3439)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it("R1's stalled insert is refused once R1 is abandoned, even though R2 (a different re-key) is in flight", async () => {
+    const seeded = await seedAgent()
+
+    // R1 reaches metered — the stage its issue request checked before
+    // "stalling".
+    const r1 = await open(seeded)
+    await markRevoked(r1.id, seeded.agentId, '0xr1revoke')
+    await markMetered(r1.id, seeded.agentId, snapshot())
+
+    // Owner abandons R1 — frees the one-in-flight slot.
+    const abandoned = await abandonRekey(r1.id, seeded.agentId, 'stalled, owner abandoned')
+    expect(abandoned?.stage).toBe('abandoned')
+
+    // R2 opens with a fresh candidate key and moves past its own revoke —
+    // R2 is the re-key actually in flight when R1's stalled insert resumes.
+    const r2NewDelegate = '0x00000000000000000000000000000000000000d3'
+    const r2 = await open(seeded, { newDelegateAddress: r2NewDelegate })
+    await markRevoked(r2.id, seeded.agentId, '0xr2revoke')
+    await markMetered(r2.id, seeded.agentId, snapshot())
+    expect((await findRekey(r2.id, seeded.agentId))?.stage).toBe('metered')
+
+    // R1's stalled issue resumes and tries to insert. `lockOwnedAgentForRekeyDelegation`
+    // alone would pass (R2 satisfies "some re-key in flight") — the guard
+    // under test is the re-check of R1's OWN stage.
+    const hash = `0x${String(++seq).padStart(64, '0')}`
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: null,
+      delegationHash: hash,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: r1.id,
+      carryRole: 'steady',
+      merchantId: null,
+    })
+
+    // MUTATION TARGET: without the stage re-check, this is `true` and the
+    // row below exists under R1 while R2 is still in flight — surviving R2's
+    // eventual completion as a `pending` row nothing else in the re-key
+    // lifecycle ever revisits.
+    expect(inserted).toBe(false)
+    const row = await db.query(`SELECT 1 FROM agent_delegations WHERE delegation_hash = $1`, [hash])
+    expect(row.rowCount).toBe(0)
+  })
+
+  it("control: R1's insert still succeeds while R1 ITSELF is the metered re-key in flight — the guard is scoped to R1, not a blanket refusal", async () => {
+    const seeded = await seedAgent()
+    const r1 = await open(seeded)
+    await markRevoked(r1.id, seeded.agentId, '0xr1revoke')
+    await markMetered(r1.id, seeded.agentId, snapshot())
+
+    const hash = `0x${String(++seq).padStart(64, '0')}`
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: null,
+      delegationHash: hash,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: r1.id,
+      carryRole: 'steady',
+      merchantId: null,
+    })
+
+    expect(inserted).toBe(true)
   })
 })
 

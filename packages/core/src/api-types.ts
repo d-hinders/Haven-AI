@@ -7356,7 +7356,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. */
+            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key's own completion (#3439). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8191,7 +8191,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain. */
+            /** @description Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain. Also returned if this re-key stopped being `metered` between the stage check and an individual delegation insert — an abandon, or another issue call for the same re-key that already reached `issued` (#3439). */
             409: {
                 headers: {
                     [name: string]: unknown;

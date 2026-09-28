@@ -361,9 +361,15 @@ export async function selectDelegationRowForAgentByHash(
  * lifecycle route cannot add another inline write while preserving the
  * transaction executor supplied by its dedicated client.
  */
+// #3439: `AND rekey_id IS NULL` is a backstop, not the primary guard — the
+// primary refusal is in the route, before the slot sweep runs (a filter here
+// alone would surface as the misleading "Delegation is no longer pending"
+// after the sweep already ran and had to be rolled back). Re-key rows are
+// activated only through `ACTIVATE_REKEY_DELEGATION_SQL` inside
+// `completeRekey`, which this statement must never touch.
 export const ACTIVATE_PENDING_DELEGATION_SQL = `UPDATE agent_delegations
        SET status = 'active', delegation_json = $1, updated_at = NOW()
-       WHERE id = $2 AND status = 'pending'
+       WHERE id = $2 AND status = 'pending' AND rekey_id IS NULL
        RETURNING id`
 
 export async function activatePendingDelegation(

@@ -32,7 +32,7 @@ covers:
   - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-28"
+last-verified: "2026-09-27"
 ---
 
 # Marketplace

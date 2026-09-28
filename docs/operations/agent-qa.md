@@ -28,7 +28,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-09-28"
+last-verified: "2026-09-26"
 ---
 
 # Agent QA — run the automated QA layers against dev

@@ -459,4 +459,53 @@ describeDb('payment-intents repository (#1223)', () => {
     expect(afterB?.id).toBe(intentB)
     expect(afterB?.buyer_legal_name).toBe('Owner B GmbH')
   })
+
+  // ── #3418: the receipt SQL returns the two scheme columns ────────────────────
+  it('#3418: findSettledPaymentReceiptRow returns execution_rail and machine_metadata settlement_scheme', async () => {
+    const { agentId, userId } = await seedAgent()
+
+    async function seedConfirmedIntent(columns: Record<string, unknown>): Promise<string> {
+      const r = await db.query<{ id: string }>(
+        `INSERT INTO payment_intents
+           (agent_id, user_id, account_address, token_symbol, token_address, to_address,
+            amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+            status, expires_at${columns.execution_rail !== undefined ? ', execution_rail' : ''}${columns.settlement_scheme !== undefined ? ", machine_metadata" : ''})
+         VALUES ($1, $2, '0x00000000000000000000000000000000000001', 'USDC',
+                 '0x00000000000000000000000000000000000002', '0x00000000000000000000000000000000000003',
+                 '100000', '0.10', '0x00000000000000000000000000000000000004', 1,
+                 '0x${'ab'.repeat(31)}01',
+                 'confirmed', NOW() + interval '10 minutes'${columns.execution_rail !== undefined ? ', $3' : ''}${columns.settlement_scheme !== undefined ? ", $4::jsonb" : ''})
+         RETURNING id`,
+        [
+          agentId,
+          userId,
+          ...(columns.execution_rail !== undefined ? [columns.execution_rail] : []),
+          ...(columns.settlement_scheme !== undefined
+            ? [JSON.stringify({ settlement_scheme: columns.settlement_scheme })]
+            : []),
+        ],
+      )
+      return r.rows[0].id
+    }
+
+    // The erc7710 shape: delegation rail + settlement_scheme metadata.
+    const erc7710 = await seedConfirmedIntent({ execution_rail: 'delegation', settlement_scheme: 'erc7710' })
+    const erc7710Row = await findSettledPaymentReceiptRow(erc7710, agentId)
+    expect(erc7710Row?.execution_rail).toBe('delegation')
+    expect(erc7710Row?.settlement_scheme).toBe('erc7710')
+
+    // The eip3009 funding leg: delegation rail, eip3009 metadata.
+    const eip3009 = await seedConfirmedIntent({ execution_rail: 'delegation', settlement_scheme: 'eip3009' })
+    const eip3009Row = await findSettledPaymentReceiptRow(eip3009, agentId)
+    expect(eip3009Row?.execution_rail).toBe('delegation')
+    expect(eip3009Row?.settlement_scheme).toBe('eip3009')
+
+    // A row without the metadata (older intent): rail still returned,
+    // settlement_scheme null — buildPaymentReceipt then leaves the scheme
+    // absent on eip712_delegation for it, and the verifier falls back to raw.
+    const bare = await seedConfirmedIntent({ execution_rail: 'delegation' })
+    const bareRow = await findSettledPaymentReceiptRow(bare, agentId)
+    expect(bareRow?.execution_rail).toBe('delegation')
+    expect(bareRow?.settlement_scheme).toBeNull()
+  })
 })

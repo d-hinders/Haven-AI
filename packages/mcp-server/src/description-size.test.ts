@@ -123,8 +123,20 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * to 852.81 would make it one, and would tighten nothing the ceiling
  * does not already enforce), and only the absolute pin moves, to the
  * exact measured value of the composed surface, shrink-only from here.
+ *
+ * **Re-derived — round 6, #3418 (2026-09-28).** `haven_verify_receipt`'s
+ * shared description was rewritten to stop telling agents to fetch receipts
+ * with the history tool (the exact defect #3418 fixes — it sent every agent
+ * down the crash path) and to carry the corrected honesty contract instead:
+ * the signed-bundle source, the `not_a_signed_receipt` answer for a list
+ * row, the `not_verifiable_offline` branch, and the
+ * settlement-not-proven rule. Hand-trimming further would cut the exact
+ * text the issue mandates agents read (the same call as rounds 4-5), so
+ * the absolute pin moves to the exact measured value of this surface,
+ * 22,340 UTF-8 bytes across 26 tools, shrink-only from here. The mean
+ * pin stays HELD at 875: 22,340 / 26 = 859.23, still below the ceiling.
  */
-const MAX_TOTAL_BYTES = 22_173
+const MAX_TOTAL_BYTES = 22_340
 // Mean pin: HELD at the #3329 ceiling (21,000 / 24 = 875.0), not re-derived —
 // the composed surface's actual mean (22,173 / 26 = 852.81) already sits
 // BELOW the ceiling, so the held value is the stricter pin, and re-deriving

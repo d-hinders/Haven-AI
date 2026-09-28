@@ -76,6 +76,30 @@ last-verified: "2026-09-27"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified #3418 (2026-09-28, the receipt verifier stops throwing and
+> verifies the delegation digest):** this diff touches three surfaces this
+> document covers. `packages/sdk/src/tool-descriptions.ts` `verifyReceipt` —
+> composed verbatim by the local stdio surface and the hosted `contracts.ts`
+> module alike — no longer tells agents to fetch receipts with the history
+> tool (it sent every agent down the crash the issue reproduces); it now names
+> the signed-bundle source (`GET /payments/:id/receipt`), the
+> `not_a_signed_receipt` answer for a `haven_list_receipts` row, the
+> `not_verifiable_offline` branch and the settlement-not-proven rule. The
+> `haven_verify_receipt` HANDLER on both runtimes is a pass-through of
+> `verifyPaymentReceipt` (`packages/mcp/src/tools.ts`,
+> `packages/mcp-server/src/tools/state-direct-recovery.ts`) and its input
+> schema stays `z.unknown()`; what changes on the wire is the tool OUTPUT for
+> a non-bundle input — a structured
+> `{ verified: false, reason: 'not_a_signed_receipt' }` success where both
+> runtimes escaped `UNKNOWN_ERROR` with a raw TypeError before — plus the
+> erc7710 verify-over-delegation-digest correction on signed bundles. The
+> hosted `STRICT_INPUT_TOOLS` rationale for `haven_verify_receipt`
+> (`packages/mcp-server/src/tools/contracts.ts`) is reworded text only: no
+> tool is added, renamed or re-shaped, no schema or argument change, and the
+> version-skew and consent-hash contracts do not move. `last-verified` is not
+> re-stamped: this block is the scope. Nothing else in this document was
+> re-verified.
+>
 > **Re-verified unchanged (#3279, 2026-09-25, Safe-vocabulary copy):** copy-only
 > edits on two surfaces this document covers. The local signer's first-launch
 > consent block (`packages/signer/src/consent.ts`) now names the agent's signed

@@ -145,11 +145,11 @@ export const toolDescriptions = {
   },
   verifyReceipt: {
     summary:
-      'Verify a payment receipt offline — confirm the agent authorised the transfer.',
+      'Verify a signed payment receipt offline — confirm the agent delegate signed its authorisation.',
     selectionGuidance:
-      'Use this to check a receipt you already hold; it needs no network and does not trust Haven. Use the history tool to fetch receipts in the first place.',
+      'Takes the signed bundle from GET /payments/{id}/receipt, not a haven_list_receipts row — a row carries no signature and returns not_a_signed_receipt. No network.',
     behavior:
-      'Recovers the signer from the receipt authorisation and confirms it matches the agent delegate. Returns verified true/false with the recovered signer or a reason. Pure and local — no backend call.',
+      'Never throws. An erc7710 bundle verifies over the delegation digest the delegate signed; a direct or eip3009 bundle returns not_verifiable_offline. verified true means only that the delegate signed the hash named by verifiedOver — payment facts are Haven-asserted and settlement is not proven; check settlementTxHash on an explorer.',
     nextActionGuidance: '',
   },
   payMcpTool: {

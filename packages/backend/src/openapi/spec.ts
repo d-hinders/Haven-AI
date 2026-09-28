@@ -6257,7 +6257,7 @@ export const openapiSpec = {
         operationId: 'getPaymentReceipt',
         summary: 'Fetch a verifiable receipt for a settled payment.',
         description:
-          'Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. The bundle is verifiable independently of Haven by recovering the signer from the authorization and confirming it is the agent delegate.',
+          'Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. verification checks the delegate signature over the hash named by its verifiedOver field: on erc7710 payments the EIP-712 delegation digest (verifiedOver delegation_digest), on retired-rail history the raw sign_hash. verification is NOT proof the payment settled and does not bind the payment block: amount and recipient are Haven-asserted, and settlement is proven only by the on-chain transaction (settlementTxHash / onChain.txHash, check on an explorer). Direct-payment and eip3009-funding bundles carry authorization.signatureScheme eip712_userop and their verification returns not_verifiable_offline — the signed user operation is not part of the bundle.',
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {

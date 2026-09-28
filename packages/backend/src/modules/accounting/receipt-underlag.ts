@@ -126,9 +126,12 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     `Sign hash      ${data.signHash ?? 'n/a'}`,
     `Signature      ${data.signature ?? 'n/a'}`,
     '',
-    'This document renders the verifiable Haven payment receipt. Anyone can',
-    'verify it independently of Haven: fetch the receipt JSON from the Haven',
-    'API and check it with verifyPaymentReceipt in the @haven_ai/sdk package.',
+    'This document renders the Haven payment receipt. The agent authorisation',
+    'signature can be checked independently of Haven: fetch the receipt JSON',
+    'from the Haven API and check it with verifyPaymentReceipt in the',
+    '@haven_ai/sdk package. That confirms the delegate signature (verifiedOver',
+    'names which hash was signed) — the payment facts stay Haven-asserted and',
+    'settlement is proven only by the on-chain transaction above.',
   ]
   return {
     // ASCII-only filename; Fortnox rejects exotic characters in metadata too.

@@ -1,18 +1,41 @@
 import { ethers } from 'ethers'
+import { concatHex, encodeAbiParameters, keccak256, toBytes, type Hex } from 'viem'
+import { DELEGATION_MANAGER } from './settlement-child.js'
 import type { RawPaymentParties } from './types.js'
 
 /**
  * Verifiable payment receipts.
  *
- * A self-contained proof bundle for a settled Haven payment that anyone can
- * verify **independently of Haven**. The anchor is the agent delegate's
- * signature over the on-chain transfer hash: recover the signer and confirm it
- * is the agent's delegate, and you have cryptographic proof the agent authorised
- * exactly this transfer — no need to trust Haven's backend. The on-chain
- * `txHash` is the settlement source of truth (verify on any explorer).
+ * A self-contained bundle for a settled Haven payment whose agent
+ * authorisation can be checked offline. What `verifyPaymentReceipt` proves is
+ * deliberately narrow: the `payment` block (amount, recipient) is
+ * Haven-asserted and is NOT bound by the signature, and `verified: true` never
+ * proves the payment settled on-chain — settlement stays an explorer check on
+ * `onChain.txHash` / `settlementTxHash`.
  *
- * This lives in the SDK so agents and users can verify receipts client-side
- * with zero Haven trust.
+ * What `verified: true` means, per scheme:
+ *
+ * - erc7710 (`authorization.signatureScheme: 'eip712_delegation'`): the bundle
+ *   carries the settlement child's EIP-712 struct hash as `signHash`. The
+ *   verifier rebuilds the digest the delegate actually signed —
+ *   `keccak256(0x1901 ‖ domainSeparator(DelegationManager, chainId) ‖ signHash)`
+ *   — from the DelegationManager address the SDK pins and the bundle's
+ *   `onChain.chainId`, never from a value the receipt itself vouches for.
+ *   `verified: true` means the delegate key signed that settlement delegation
+ *   (`verifiedOver: 'delegation_digest'`).
+ * - direct payments and the eip3009 funding leg
+ *   (`signatureScheme: 'eip712_userop'`) sign an ERC-4337 user operation the
+ *   bundle does not carry: they return `not_verifiable_offline` rather than a
+ *   false accusation.
+ * - retired-rail bundles (no scheme) carry a raw-signed `signHash`; the
+ *   verifier recovers over it directly, then over the delegation digest when
+ *   the chain allows rebuilding it.
+ *
+ * Anything that is not a signed bundle — including a `haven_list_receipts`
+ * history row, which carries no signature at all — returns
+ * `not_a_signed_receipt`. Verification never throws.
+ *
+ * This lives in the SDK so agents and users can verify receipts client-side.
  */
 export const RECEIPT_VERSION = 'haven-receipt-1'
 
@@ -43,6 +66,17 @@ export interface PaymentReceipt {
     delegate: string
     signHash: string
     signature: string | null
+    /**
+     * #3418: which digest the delegate signed — selects what offline
+     * verification rebuilds. `'eip712_delegation'`: the settlement
+     * delegation's EIP-712 digest (erc7710). `'eip712_userop'`: an ERC-4337
+     * user-operation digest the bundle does not carry (direct payments, the
+     * eip3009 funding leg) — not verifiable offline. Absent on retired-rail
+     * bundles and on backends older than #3418, whose `signHash` was signed
+     * raw. The value is only a selector: a lying one cannot make a forged
+     * signature verify, because recovery must still return `delegate`.
+     */
+    signatureScheme?: 'eip712_delegation' | 'eip712_userop'
   }
   onChain: {
     txHash: string | null
@@ -51,39 +85,166 @@ export interface PaymentReceipt {
 }
 
 export type ReceiptVerification =
-  | { verified: true; recoveredSigner: string }
+  | { verified: true; recoveredSigner: string; verifiedOver: 'sign_hash' | 'delegation_digest' }
   | {
       verified: false
-      reason: 'missing_signature' | 'bad_signature' | 'signer_mismatch'
+      reason:
+        /** #3418: the input is not a haven-receipt-1 bundle (a haven_list_receipts row, null, undefined, a non-object). */
+        | 'not_a_signed_receipt'
+        /** #3418: eip712_userop bundle; or a delegation bundle on a chain the SDK pins no DelegationManager for. */
+        | 'not_verifiable_offline'
+        | 'missing_signature'
+        | 'bad_signature'
+        | 'signer_mismatch'
       recoveredSigner?: string
     }
+
+/** Chains whose DelegationManager the SDK pins (same address on both — rails/delegation-contracts.ts). */
+const DELEGATION_MANAGER_CHAIN_IDS: ReadonlySet<number> = new Set([8453, 84532])
+
+const EIP712_DOMAIN_TYPEHASH = keccak256(
+  toBytes('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'),
+)
+
+/**
+ * The EIP-712 domain separator of the DelegationManager on `chainId`, rebuilt
+ * from the manager's own constants (name/version, fixed in the contract) and
+ * the address the SDK pins — never from a value the receipt vouches for.
+ */
+function delegationDomainSeparator(chainId: number): Hex {
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }, { type: 'uint256' }, { type: 'address' }],
+      [
+        EIP712_DOMAIN_TYPEHASH,
+        keccak256(toBytes('DelegationManager')),
+        keccak256(toBytes('1')),
+        BigInt(chainId),
+        DELEGATION_MANAGER as Hex,
+      ],
+    ),
+  )
+}
+
+/** The EIP-712 digest over a delegation struct hash (what the delegate signs). */
+function delegationDigest(structHash: string, chainId: number): Hex {
+  return keccak256(concatHex(['0x1901', delegationDomainSeparator(chainId), structHash as Hex]))
+}
 
 /** Default ECDSA recovery (raw ecrecover over the hash, no message prefix). */
 function defaultRecover(hash: string, signature: string): string {
   return ethers.recoverAddress(hash, signature)
 }
 
-/**
- * Verify a receipt independently: recover the signer from the authorisation and
- * confirm it is the agent's delegate. Pure — `recover` is injectable but
- * defaults to standard ECDSA recovery, so this runs anywhere (no Haven backend).
- */
-export function verifyPaymentReceipt(
-  receipt: PaymentReceipt,
-  recover: (hash: string, signature: string) => string = defaultRecover,
-): ReceiptVerification {
-  const { delegate, signHash, signature } = receipt.authorization
-  if (!signature) return { verified: false, reason: 'missing_signature' }
+const NOT_A_SIGNED_RECEIPT = { verified: false, reason: 'not_a_signed_receipt' } as const
 
+type RecoverFn = (hash: string, signature: string) => string
+
+type MatchResult =
+  | { ok: true; recoveredSigner: string }
+  | { ok: false; reason: 'bad_signature' | 'signer_mismatch'; recoveredSigner?: string }
+
+/** Recover over one candidate hash and compare the signer with the named delegate. */
+function match(delegate: string, hash: string, signature: string, recover: RecoverFn): MatchResult {
   let recovered: string
   try {
-    recovered = recover(signHash, signature)
+    recovered = recover(hash, signature)
   } catch {
-    return { verified: false, reason: 'bad_signature' }
+    return { ok: false, reason: 'bad_signature' }
+  }
+  if (recovered.toLowerCase() !== delegate.toLowerCase()) {
+    return { ok: false, reason: 'signer_mismatch', recoveredSigner: recovered }
+  }
+  return { ok: true, recoveredSigner: recovered }
+}
+
+function finish(result: MatchResult, verifiedOver: 'sign_hash' | 'delegation_digest'): ReceiptVerification {
+  if (result.ok) {
+    return { verified: true, recoveredSigner: result.recoveredSigner, verifiedOver }
+  }
+  return result.recoveredSigner !== undefined
+    ? { verified: false, reason: result.reason, recoveredSigner: result.recoveredSigner }
+    : { verified: false, reason: result.reason }
+}
+
+/**
+ * Verify a receipt's agent authorisation offline: recover the signer and
+ * confirm it is the agent delegate, over whichever digest the bundle's scheme
+ * names (see the module doc for what that proves — and what it does not).
+ * Never throws: anything that is not a signed receipt — a
+ * `haven_list_receipts` history row, null, undefined, a non-object — returns
+ * `not_a_signed_receipt`. Pure — `recover` is injectable but defaults to
+ * standard ECDSA recovery, so this runs anywhere (no Haven backend).
+ */
+export function verifyPaymentReceipt(
+  receipt: unknown,
+  recover: RecoverFn = defaultRecover,
+): ReceiptVerification {
+  // #3418 rule 1: a list row (or any non-bundle) has no authorization object
+  // holding string delegate/signHash — answer, never throw.
+  if (typeof receipt !== 'object' || receipt === null) return NOT_A_SIGNED_RECEIPT
+  const source = receipt as {
+    authorization?: unknown
+    onChain?: { chainId?: unknown }
+  }
+  if (typeof source.authorization !== 'object' || source.authorization === null) {
+    return NOT_A_SIGNED_RECEIPT
+  }
+  const auth = source.authorization as {
+    delegate?: unknown
+    signHash?: unknown
+    signature?: unknown
+    signatureScheme?: unknown
+  }
+  const { delegate, signHash, signature, signatureScheme } = auth
+  if (typeof delegate !== 'string' || delegate === '' || typeof signHash !== 'string' || signHash === '') {
+    return NOT_A_SIGNED_RECEIPT
+  }
+  if (typeof signature !== 'string' || signature === '') {
+    return { verified: false, reason: 'missing_signature' }
   }
 
-  if (recovered.toLowerCase() !== delegate.toLowerCase()) {
-    return { verified: false, reason: 'signer_mismatch', recoveredSigner: recovered }
+  const chainId =
+    typeof source.onChain?.chainId === 'number' ? source.onChain.chainId : undefined
+  const digestVerifiable = chainId !== undefined && DELEGATION_MANAGER_CHAIN_IDS.has(chainId)
+
+  // #3418 rule 4: a userop digest needs the full UserOperation, which the
+  // bundle does not carry. Return not_verifiable_offline — never
+  // signer_mismatch, which would accuse a genuine payment.
+  if (signatureScheme === 'eip712_userop') {
+    return { verified: false, reason: 'not_verifiable_offline' }
   }
-  return { verified: true, recoveredSigner: recovered }
+
+  // #3418 rule 3: rebuild the delegation digest from the pinned manager and
+  // the bundle's chain id, then recover over it.
+  if (signatureScheme === 'eip712_delegation') {
+    if (!digestVerifiable) {
+      return { verified: false, reason: 'not_verifiable_offline' }
+    }
+    let digest: string
+    try {
+      digest = delegationDigest(signHash, chainId as number)
+    } catch {
+      return { verified: false, reason: 'bad_signature' }
+    }
+    return finish(match(delegate, digest, signature, recover), 'delegation_digest')
+  }
+
+  // #3418 rule 5: absent or unknown scheme — retired-rail history (signed raw
+  // over signHash) or a backend older than this change. Raw recovery first,
+  // then the delegation digest when the chain allows rebuilding it. This is
+  // the one remaining ambiguous case, limited to old bundles.
+  const raw = match(delegate, signHash, signature, recover)
+  if (raw.ok) return finish(raw, 'sign_hash')
+  if (digestVerifiable) {
+    let digest: string
+    try {
+      digest = delegationDigest(signHash, chainId as number)
+    } catch {
+      return finish(raw, 'sign_hash')
+    }
+    const delegated = match(delegate, digest, signature, recover)
+    if (delegated.ok) return finish(delegated, 'delegation_digest')
+  }
+  return finish(raw, 'sign_hash')
 }

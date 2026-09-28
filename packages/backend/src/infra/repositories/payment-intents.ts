@@ -753,6 +753,8 @@ export async function findIntentStatusRow(
 export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_address, pi.chain_id, pi.token_symbol, pi.token_address,
             pi.to_address, pi.amount_human, pi.delegate_address, pi.sign_hash,
             pi.signature, pi.tx_hash, pi.confirmed_at,
+            pi.execution_rail,
+            pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
             pi.machine_metadata->>'delegate_account_address' AS delegate_account_address,
             mpe.resource_url AS resource_url,
             mpe.amount_sek AS amount_sek,
@@ -779,6 +781,17 @@ export interface PaymentReceiptRow extends BuyerJoinColumns {
   amount_sek: string | null
   /** #2960: from `machine_metadata`; null on rows authorized before #2960. */
   delegate_account_address: string | null
+  /**
+   * #3418: the rail the intent ran on — `delegation` (erc7710 or the eip3009
+   * funding leg), `direct`, or null (legacy AllowanceModule / rows read by
+   * older callers).
+   */
+  execution_rail?: string | null
+  /**
+   * #3418: `machine_metadata.settlement_scheme` — `erc7710`, `eip3009`, or
+   * null (direct / retired rails / rows without the metadata).
+   */
+  settlement_scheme?: string | null
 }
 
 export async function findSettledPaymentReceiptRow(

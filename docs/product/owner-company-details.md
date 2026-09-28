@@ -160,7 +160,10 @@ is not a type/runtime mismatch, just a different surface than the mapped one).
 
 This block is **not** part of the receipt's signed payload —
 `verifyPaymentReceipt` reads only `receipt.authorization`, so a merchant that
-verifies a receipt is verifying the transfer, not the buyer's company details.
+verifies a receipt is checking the delegate's authorisation signature, not the
+buyer's company details. It is not checking Haven's payment facts either: the
+signature binds only the hash named by `verifiedOver`, so amount and recipient
+stay Haven-asserted and settlement stays an on-chain check.
 A merchant only ever sees `parties.buyer` on a receipt the agent chose to hand
 over; `GET /payments/:id/receipt` and the receipts list are agent-scoped, so
 nothing else can read it through Haven's API.

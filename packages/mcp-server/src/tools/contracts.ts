@@ -817,8 +817,10 @@ export const STRICT_INPUT_TOOLS = {
   haven_verify_receipt:
     'Verification is offline and reads only the receipt object itself: the signer is ' +
     'recovered from receipt.authorization and compared with the delegate the receipt names. ' +
-    'An expected signer, delegate or payment_id sent alongside used to be dropped in silence ' +
-    '— a caller cannot pin what the receipt must say, only ask what it does say.',
+    'The input must be the signed bundle from GET /payments/{id}/receipt — a ' +
+    'haven_list_receipts history row carries no signature and answers ' +
+    'not_a_signed_receipt. An expected signer, delegate or payment_id sent alongside used to ' +
+    'be dropped in silence — a caller cannot pin what the receipt must say, only ask what it does say.',
   haven_discover_tools:
     'The catalog filters are category, search, rail and verified. A query, name, merchant, ' +
     'chain or limit sent here used to be dropped in silence and the FULL catalog came back ' +

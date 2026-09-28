@@ -453,12 +453,12 @@ export const en = {
       // flag is on or off, since this text is only ever shown WHILE the
       // section itself is shown.
       //
-      // #3332 review round 2, design 6: trimmed to ~80 words / 11 lines at a
-      // 390px viewport, but keeps every required fact — including WHY Haven
-      // asks (receipts), which round 1 left to `description` alone and this
-      // round restores here too, briefly, since this paragraph is meant to
-      // stand on its own. "while this section is shown" read like a stage
-      // direction from OUTSIDE the section it is written inside of — reworded
+      // #3332 review round 2, design 6: trimmed for a 390px viewport while
+      // keeping every required fact. Round 3 dropped the receipts sentence
+      // (WHY Haven asks) again as a duplicate: `description`, which renders
+      // directly above this paragraph, already says it. "while this section
+      // is shown" read like a stage direction from OUTSIDE the section it is
+      // written inside of — reworded
       // to name the one case removal is not self-serve (the flag going off)
       // without describing the reader's own vantage point.
       purpose:

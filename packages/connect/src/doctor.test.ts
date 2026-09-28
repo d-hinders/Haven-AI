@@ -2439,8 +2439,8 @@ describe('multi-agent repair targeting (#3412)', () => {
     expect(await readFile(configPath, 'utf8')).toBe(before)
   })
 
-  it('with --credentials-dir named, the same machine repairs exactly that agent', async () => {
-    const { homeDir, wiredDir } = await wiredPlusNewerUnwired()
+  it('with --credentials-dir named, the same machine repairs exactly that agent (positive control)', async () => {
+    const { homeDir, wiredDir, newerDir } = await wiredPlusNewerUnwired()
     const repair = await runRepair(
       { runtime: 'codex-cli', credentialsDir: wiredDir },
       { homeDir, runCommand: vi.fn() },
@@ -2448,5 +2448,52 @@ describe('multi-agent repair targeting (#3412)', () => {
     expect(repair.messages.join('\n')).not.toMatch(/agent credential directories exist on this machine, and a repair/)
     const config = await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8')
     expect(config).toContain(join(wiredDir, 'bin', 'haven-signer.mjs'))
+    // The sibling is untouched: nothing of it reaches the config, and no
+    // signer wrapper is prepared inside it.
+    expect(config).not.toContain(newerDir)
+    await expect(readFile(join(newerDir, 'signer-runtime.json'), 'utf8')).rejects.toThrow()
+  })
+
+  it('two directories and no runtime config: every repair line still names its directory', async () => {
+    const { homeDir, runtimeDirectory } = await healthyHome()
+    await seedCredentials(homeDir, 'agent-newer')
+    await stampAgentMtimes(homeDir, ['agent-1', 'agent-newer'])
+    await rm(join(homeDir, '.codex', 'config.toml'))
+    await rm(runtimeDirectory, { recursive: true, force: true })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const withRepair = report.checks.filter((c) => typeof c.repair === 'string' && c.repair.includes('--repair'))
+    expect(withRepair.length).toBeGreaterThan(0)
+    for (const check of withRepair) expect(check.repair).toContain('--credentials-dir ')
+  })
+
+  it('--credentials-dir naming an UNWIRED directory: its repair lines name that directory', async () => {
+    // The unwired-primary branch: the runtime is wired to agent-1, and the
+    // caller points the doctor at the newer, unwired agent-newer.
+    const { homeDir, newerDir, wiredDir } = await wiredPlusNewerUnwired()
+    const report = await runDoctor({ runtime: 'codex-cli', credentialsDir: newerDir }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(check?.ok).toBe(false)
+    expect(check?.repair).toContain(`--credentials-dir ${newerDir}`)
+    expect(check?.repair).not.toContain(wiredDir)
+  })
+
+  it('an explicit --credentials-dir with no siblings is carried into the repair line', async () => {
+    const { homeDir, dir, runtimeDirectory } = await healthyHome()
+    await rm(runtimeDirectory, { recursive: true, force: true })
+    const report = await runDoctor({ runtime: 'codex-cli', credentialsDir: dir }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(check?.repair).toContain(`--credentials-dir ${dir}`)
+  })
+
+  it('a retired directory counts toward the refusal but is never offered as a repair target', async () => {
+    const { homeDir, wiredDir } = await wiredPlusNewerUnwired()
+    const retiredDir = join(homeDir, '.haven', 'agents', 'agent-newer')
+    await writeFile(join(retiredDir, 'TOMBSTONE.json'), JSON.stringify({ retired_at: '2026-09-28T00:00:00Z' }))
+    const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir, runCommand: vi.fn() })
+    expect(repair.ok).toBe(false)
+    const text = repair.messages.join('\n')
+    expect(text).toContain(`--credentials-dir ${wiredDir}`)
+    expect(text).not.toContain(`--credentials-dir ${retiredDir}`)
+    expect(text).toContain(`${retiredDir}): retired — not a repair target`)
   })
 })

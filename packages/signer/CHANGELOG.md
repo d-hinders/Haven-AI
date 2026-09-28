@@ -17,7 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Fixed
 
-- **Update hints name the connector doctor, not a bare re-run (#3412).** The `initialize` instructions and the out-of-date version refusal now tell the user to run `npx -y @haven_ai/connect@<channel> --doctor` and then the repair line it prints. The previous bare `npx @haven_ai/connect@<channel>` is a setup command that stops at "Missing --setup" on an existing install. Identity-restore hints still name the setup command, which is the fix there.
+- **Update hints name the connector doctor, not a bare re-run (#3412).** The `initialize` instructions, the out-of-date version refusal (its message and its `next_tool_omitted_reason`) and the `client_outdated` refusal's relay of `upgrade_command` now tell the user to run `npx -y @haven_ai/connect@<channel> --doctor` and then the repair line it prints. The previous bare `npx @haven_ai/connect@<channel>` is a setup command that stops at "Missing --setup" on an existing install. Identity-restore hints still name the setup command, which is the fix there.
 
 ## 0.6.0-alpha.0 — 2026-09-26
 

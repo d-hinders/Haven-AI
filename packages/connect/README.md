@@ -708,7 +708,8 @@ from ONE agent's stored credentials. With more than one agent credential
 directory under `~/.haven/agents`, every repair line the doctor prints names
 the agent it is about with `--credentials-dir <dir>`, and a `--repair` without
 `--credentials-dir` is refused — nothing is changed — with one exact command
-per agent (its agent id beside it). Without that, "the newest directory" was a
+per live agent (its agent id beside it); a retired directory is listed as
+"retired — not a repair target" and never offered. Without that, "the newest directory" was a
 guess, and it re-wired a different agent than the one the doctor described.
 Every "update your signer" hint Haven emits names the flagless
 `npx -y @haven_ai/connect@<channel> --doctor`, which then prints that line.

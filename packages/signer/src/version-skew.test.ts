@@ -377,7 +377,9 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
     expect(result.code).toBe('UNSUPPORTED_EXPECTED_CONTEXT_VERSION')
     // #3103: the refusal names no tool and says why (update the signer).
     expect(result.next_tool).toBeUndefined()
-    expect(result.next_tool_omitted_reason).toMatch(/re-running the connector/)
+    // #3412: names the upgrade command and its repair step, not "re-run the connector".
+    expect(result.next_tool_omitted_reason).toContain('npx -y @haven_ai/connect@alpha --doctor and the repair line it prints')
+    expect(result.next_tool_omitted_reason).not.toMatch(/re-running the connector/)
     expect(result.code).not.toBe('INVALID_INPUT')
     expect(result.code).not.toBe('SIGNING_ERROR')
     expect(result.message).toMatch(/out of date/)

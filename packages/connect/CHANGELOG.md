@@ -17,7 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Fixed
 
-- **`--repair` cannot land on a different agent (#3412).** With more than one agent credential directory under `~/.haven/agents`, every repair line `--doctor` prints now names its agent with `--credentials-dir <dir>`, and a `--repair` without `--credentials-dir` is refused — nothing changed — with one exact command per agent and its agent id. Previously it repaired the newest directory by mtime, which is not necessarily the agent the doctor described, and re-wired the runtime to that agent's credentials. **Behaviour change:** scripts that ran a flagless `--repair` on a multi-agent machine must now pass `--credentials-dir`. A single-agent install is unchanged.
+- **`--repair` cannot land on a different agent (#3412).** With more than one agent credential directory under `~/.haven/agents`, every repair line `--doctor` prints now names its agent with `--credentials-dir <dir>` (also whenever `--doctor` itself was given `--credentials-dir`), and a `--repair` without `--credentials-dir` is refused — nothing changed — with one exact command per live agent and its agent id; a retired directory (tombstoned, or its key stripped) is listed as "retired — not a repair target" and never offered. Previously it repaired the newest directory by mtime, which is not necessarily the agent the doctor described, and re-wired the runtime to that agent's credentials. **Behaviour change:** scripts that ran a flagless `--repair` on a multi-agent machine must now pass `--credentials-dir`. A single-agent install is unchanged.
 
 ## 0.6.0-alpha.0 — 2026-09-26
 

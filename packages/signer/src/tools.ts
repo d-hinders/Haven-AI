@@ -8,6 +8,7 @@ import {
   HavenUserOpBindingError,
   assertUserOpTypedDataBinding,
   connectorRerunCommand,
+  connectorUpgradeCommand,
   isPackedUserOperationTypedData,
   HavenTypedDataRefusedError,
   TYPED_DATA_NOT_ALLOWED,
@@ -1099,7 +1100,9 @@ function normalizeError(err: unknown): ToolFailure {
       ...nextStepWireFields(signerRefusalStep({
         nextAction: AgentPaymentNextAction.StopAndTellUser,
         nextTool: null,
-        nextToolOmittedReason: 'update @haven_ai/signer by re-running the connector, then repeat the same call',
+        // #3412: the upgrade command, not "re-run the connector" — a bare re-run
+        // stops at "Missing --setup" on an existing install.
+        nextToolOmittedReason: `update @haven_ai/signer: run ${connectorUpgradeCommand()} and the repair line it prints, then repeat the same call`,
       })),
     }
   }

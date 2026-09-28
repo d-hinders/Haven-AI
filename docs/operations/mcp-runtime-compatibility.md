@@ -2673,9 +2673,8 @@ owner sets one the only observable change is the header itself.
   (`signerUpdateFallback`) and the hosted MCP (signer-compat notices, server
   instructions) emit, from `connectorUpgradeCommand` in `@haven_ai/sdk`;
   core carries a copy, pinned by
-  `packages/backend/src/__tests__/connector-upgrade-command-parity.test.ts`,
-  and `scripts/ci/upgrade-hint-guard.test.mjs` fails on a bare re-run in an
-  upgrade hint. Setup-time hints (identity restore, mid-setup retry) keep the
+  a backend parity test, and a CI guard fails on a bare re-run in an upgrade
+  hint. Setup-time hints (identity restore, mid-setup retry) keep the
   bare form. **Not covered:** `--local` installs — `--repair` refuses that
   topology and asks for the original `--local` setup command — and signers
   from 0.4 and older, whose baked-in hints still name the bare re-run (they

@@ -1578,8 +1578,11 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   it is upgraded. Haven cannot gate that: the attack never passes through
   Haven, and the hosted MCP cannot see the signer's handshake. Credential
   rotation does not help, because the new key lands in the same old signer. The
-  remedy is the signer upgrade (a connector re-run), carried by the release
-  notes (`packages/signer/CHANGELOG.md`).
+  remedy is the signer upgrade, carried by the release notes
+  (`packages/signer/CHANGELOG.md`). Since #3412 every update hint names the
+  connector doctor (`npx -y @haven_ai/connect@<channel> --doctor`, then the
+  repair line it prints) rather than a bare connector re-run, which stops at
+  "Missing --setup" on an installed machine; the upgrade itself is unchanged.
 
 > **Scope of this section:** written for #3272 and rewritten once for epic
 > #3284 (#3283, #3281) against the signer and SDK at those changes; #3375

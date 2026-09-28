@@ -583,8 +583,9 @@ throughout.
    `--doctor --repair --runtime <runtime>` to catch up when you want the newer
    snapshot. Its hosted MCP row proves endpoint reachability; the
    `identity_match` row is the authenticated stored-credential check. Every
-   "re-run `npx @haven_ai/connect@<tag>`" hint the
-   snapshot's packages print names **`@dev`**, because the tag is a build-time
+   connector hint the snapshot's packages print — the setup re-run
+   `npx @haven_ai/connect@<tag>` and, since #3412, the upgrade command
+   `npx -y @haven_ai/connect@<tag> --doctor` — names **`@dev`**, because the tag is a build-time
    constant (`HAVEN_CONNECTOR_CHANNEL` in `packages/sdk/src/connector-channel.ts`)
    that the snapshot bump rewrote from the version — a snapshot telling its
    tester to re-run `@alpha` would silently replace the build under test (#2423).

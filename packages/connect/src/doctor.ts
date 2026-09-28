@@ -171,6 +171,15 @@ function runtimeFlagFor(runtime: string): string {
  * directory whenever more than one agent lives here. Quoted for a POSIX shell
  * only when it needs to be, so the common `~/.haven/agents/<id>` prints unquoted.
  */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function credentialsDirFlagFor(credentialsDir?: string): string {
   if (!credentialsDir) return ''
   const quoted = /^[\w@%+=:,./~-]+$/.test(credentialsDir)
@@ -958,9 +967,11 @@ export async function runDoctor(
   let signerCapabilities: Record<string, unknown> | undefined
 
   const { directory, others, parkedOnly, identityDirectories } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
-  // #3412: with several agents on the machine, every repair line names the
-  // directory it is about — see `credentialsDirFlagFor`.
-  const multiAgent = identityDirectories.length > 1
+  // #3412: with several agents on the machine — or when the caller already
+  // named the directory with --credentials-dir — every repair line names the
+  // directory it is about, so the pasted repair cannot fall back to a scan of
+  // ~/.haven/agents and land on a different agent. See `credentialsDirFlagFor`.
+  const nameRepairDir = identityDirectories.length > 1 || Boolean(input.credentialsDir)
 
   // ── #3120: resolve the runtime BEFORE anything judges it ──────────────────
   // An absent flag used to flow through as '' and earn a fabricated green
@@ -1045,7 +1056,7 @@ export async function runDoctor(
     if (wired) {
       const result = await checksForAgent(
         { directory: dir, identity, sidecar },
-        { ...input2, ...(multiAgent ? { repairDir: dir } : {}) },
+        { ...input2, ...(nameRepairDir ? { repairDir: dir } : {}) },
         deps,
       )
       entry.checks = result.checks
@@ -1101,7 +1112,9 @@ export async function runDoctor(
       // anyway — the user pointed the doctor at this machine, and silence
       // about the selected directory would be the old heuristic's failure.
       const result = await checksForAgent(
-        { directory: primaryDirectory, identity: primaryIdentity, sidecar: primarySidecar }, input2, deps,
+        { directory: primaryDirectory, identity: primaryIdentity, sidecar: primarySidecar },
+        { ...input2, ...(nameRepairDir ? { repairDir: primaryDirectory } : {}) },
+        deps,
       )
       signerCapabilities = result.signerCapabilities
       for (const check of result.checks) primaryChecksById.set(check.id, check)
@@ -1166,7 +1179,7 @@ export async function runDoctor(
       label: 'Runtime MCP config',
       level: 'failed',
       detail: `No runtime config at ${configPath}.`,
-      repair: repairCommandFor(input2.runtime, '', multiAgent ? primaryDirectory : undefined),
+      repair: repairCommandFor(input2.runtime, '', nameRepairDir ? primaryDirectory : undefined),
     })
   } else {
     const primaryIdentity = await readIdentity(primaryDirectory ?? '')
@@ -1188,7 +1201,7 @@ export async function runDoctor(
         : signerViaNpx
           ? `Config at ${configPath} still launches the signer via npx — the pre-#1586 shape that cannot start under a 120s startup timeout.`
           : `Config at ${configPath} is missing the Haven entries${primarySidecar && !wrapperReferenced ? ' (or references a different signer wrapper)' : ''}.`,
-      ...(ok ? {} : { repair: repairCommandFor(input2.runtime, '', multiAgent ? primaryDirectory : undefined) }),
+      ...(ok ? {} : { repair: repairCommandFor(input2.runtime, '', nameRepairDir ? primaryDirectory : undefined) }),
     })
   }
 
@@ -1545,7 +1558,15 @@ export async function runRepair(
       identityDirectories.map(async (dir) => {
         const identity = await readIdentity(dir)
         const who = identity?.agent_id ? `agent ${identity.agent_id}` : 'agent (no agent_id recorded)'
-        return `  • ${who}: ${repairCommandFor(input.runtime, '', dir).replace(/^Run: /, '')}`
+        // A retired directory (tombstoned, or its key stripped by --unwire /
+        // --replace) still COUNTS — otherwise one live agent beside a newer
+        // retired directory would fall back to the mtime guess — but it is
+        // never offered as a target: repairing it would re-wire a retired
+        // agent's credentials over its tombstone.
+        const retired = !identity?.api_key || (await pathExists(join(dir, TOMBSTONE_FILENAME)))
+        return retired
+          ? `  • ${who} (${dir}): retired — not a repair target`
+          : `  • ${who}: ${repairCommandFor(input.runtime, '', dir).replace(/^Run: /, '')}`
       }),
     )
     return {

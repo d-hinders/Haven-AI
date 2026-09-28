@@ -347,8 +347,10 @@ describe('capability manifest', () => {
         expect(entry.name).toBe(pkg)
         expect(entry.released_version).toBe(CLIENT_RELEASES[pkg].released_version)
         expect(entry.notes).toEqual(CLIENT_RELEASES[pkg].notes)
-        // #3412: the connector-installed packages carry the doctor suffix.
-        expect(entry.upgrade_command).toMatch(/@dev( --doctor)?$/)
+        // #3412: the connector-installed packages carry the doctor suffix; the
+        // SDK and CLI update themselves and do not.
+        const viaConnector = ['@haven_ai/signer', '@haven_ai/mcp', '@haven_ai/connect'].includes(pkg)
+        expect(entry.upgrade_command).toMatch(viaConnector ? /@dev --doctor$/ : /@dev$/)
       }
       expect(manifest.packages.connect.channel).toBe('@haven_ai/connect@dev')
       expect(manifest.release_notes_url).toBe('/releases')

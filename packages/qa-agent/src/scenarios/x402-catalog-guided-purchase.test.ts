@@ -24,8 +24,8 @@ const FUNDING_TX = '0x' + 'f1'.repeat(32)
 const MERCHANT_TX = '0x' + 'f2'.repeat(32)
 const CATALOG_ID = 'cat_nordshield_vpn_basic'
 
-const { mockCallTool, mockGetAgent, mockGetCatalog, mockBalanceOf, mockGetReceipt, mockSignX402, mockSign } = vi.hoisted(
-  () => ({
+const { mockCallTool, mockGetAgent, mockGetCatalog, mockBalanceOf, mockGetReceipt, mockSignX402, mockSign, mockFetch } =
+  vi.hoisted(() => ({
     mockCallTool: vi.fn(),
     mockGetAgent: vi.fn(),
     mockGetCatalog: vi.fn(),
@@ -33,8 +33,8 @@ const { mockCallTool, mockGetAgent, mockGetCatalog, mockBalanceOf, mockGetReceip
     mockGetReceipt: vi.fn(),
     mockSignX402: vi.fn(),
     mockSign: vi.fn(),
-  }),
-)
+    mockFetch: vi.fn(),
+  }))
 
 vi.mock('@haven_ai/signer', () => ({
   createEdgeSigner: () => ({ delegateAddress: DELEGATE }),
@@ -82,6 +82,11 @@ const { x402CatalogGuidedPurchase, TIMING } = await import('./x402-catalog-guide
 TIMING.receiptWaitMs = 60
 TIMING.balanceWaitMs = 60
 TIMING.pollIntervalMs = 20
+
+/** A discovery document with no `qa_fixture` products — the ordinary case. */
+function discoveryDoc(products: Record<string, unknown>[] = []) {
+  return new Response(JSON.stringify({ products }), { status: 200 })
+}
 
 /** The catalog row a real `GET /catalog` would return for NordShield VPN Basic. */
 const catalogEntry = (over: Record<string, unknown> = {}) => ({
@@ -183,6 +188,8 @@ function balances(treasuryBefore = 1_000_000n, delegateBefore = 0n, treasuryAfte
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.stubGlobal('fetch', mockFetch)
+  mockFetch.mockResolvedValue(discoveryDoc())
   mockGetAgent.mockResolvedValue({ ok: true, data: { account_address: TREASURY, delegate_address: DELEGATE } })
   mockGetCatalog.mockResolvedValue({ ok: true, status: 200, data: { entries: [catalogEntry()] } })
   mockCallTool.mockImplementation(async (tool: string) =>
@@ -254,6 +261,80 @@ describe('the catalog entry is resolved, never hardcoded', () => {
     await x402CatalogGuidedPurchase.run(ctx())
     const call = mockCallTool.mock.calls.find(([tool]) => tool === 'haven_prepare_catalog_purchase')
     expect(call?.[1]).toMatchObject({ catalog_id: CATALOG_ID })
+  })
+})
+
+describe('the #3421 qa_fixture tripwire', () => {
+  const FIXTURE_ENTRY = catalogEntry({
+    id: 'cat_storage_50gb',
+    name: 'CloudNest 50 GB — demo merchant (Base Sepolia)',
+    tool_name: 'buy_cloud_storage',
+    tool_arguments: { tier: '50gb' },
+  })
+  const FIXTURE_PRODUCT = {
+    id: 'storage_50gb',
+    category: 'storage',
+    tools: ['buy_cloud_storage'],
+    qa_fixture: { kind: 'skip_settle', settles_on_chain: false },
+  }
+
+  it('fails when a qa_fixture product has a LISTED catalog row on this host', async () => {
+    mockFetch.mockResolvedValue(discoveryDoc([FIXTURE_PRODUCT]))
+    mockGetCatalog.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { entries: [catalogEntry(), FIXTURE_ENTRY] },
+    })
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.skipped).toBeFalsy()
+    expect(r.detail).toMatch(/qa_fixture product storage_50gb/)
+    expect(r.detail).toMatch(/LISTED catalog row/)
+    expect(r.detail).toMatch(/#3421/)
+    // Never proceeds to spend money once the tripwire fires.
+    expect(mockCallTool).not.toHaveBeenCalled()
+  })
+
+  it('passes the tripwire (and continues) when the fixture product has NO catalog row', async () => {
+    mockFetch.mockResolvedValue(discoveryDoc([FIXTURE_PRODUCT]))
+    // Only the settling VPN row is listed — the fixture was delisted (migration 102).
+    mockGetCatalog.mockResolvedValue({ ok: true, status: 200, data: { entries: [catalogEntry()] } })
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(mockCallTool).toHaveBeenCalled()
+  })
+
+  it('passes the tripwire when the discovery document has no qa_fixture products at all', async () => {
+    mockFetch.mockResolvedValue(discoveryDoc([{ id: 'vpn_basic', category: 'vpn', tools: ['buy_vpn'] }]))
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(true)
+  })
+
+  it('fails when the discovery document itself is unreachable', async () => {
+    mockFetch.mockResolvedValue(new Response('not found', { status: 404 }))
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/well-known\/haven-demo-merchant returned HTTP 404/)
+    expect(mockCallTool).not.toHaveBeenCalled()
+  })
+
+  it('does not flag a matching (tool_name, tool_arguments) row on a DIFFERENT host', async () => {
+    mockFetch.mockResolvedValue(discoveryDoc([FIXTURE_PRODUCT]))
+    mockGetCatalog.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        entries: [
+          catalogEntry(),
+          catalogEntry({
+            ...FIXTURE_ENTRY,
+            resource_url: 'https://a-different-merchant.example/mcp',
+          }),
+        ],
+      },
+    })
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(true)
   })
 })
 

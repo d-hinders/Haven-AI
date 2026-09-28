@@ -28,7 +28,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-28"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -165,6 +165,19 @@ document (`GET /` / `GET /.well-known/haven-demo-merchant`) all carry it on
 `storage_50gb` only, so a cold agent sees at quote time — before signing — that
 this specific purchase settles nothing on-chain and its receipt will read
 "Delivered — not confirmed on-chain".
+
+Since #3421, the Sepolia `storage_50gb` catalog row is **delisted** (migration
+`102_delist_skip_settle_catalog_row`) — an agent reaching this fixture through
+`GET /catalog` would have no way to know, before spending, that its purchase
+never settles; the QA hook now stays reachable only by calling the merchant
+directly (as the sweep and guided-purchase scenarios already do), never
+through catalog discovery. `x402-catalog-guided-purchase` carries the
+tripwire that keeps it that way — see below.
+
+**Rule:** the product named in `MERCHANT_SKIP_SETTLE_PRODUCT` must have no
+non-delisted `merchant_catalog` row on the dev host. Moving the env var to a
+different product needs a delisting migration FIRST, and
+`x402-catalog-guided-purchase`'s tripwire enforces it on every qa-dev run.
 
 ### Preflight: resources every run consumes (#1530)
 
@@ -568,6 +581,22 @@ the same settling product `x402-hosted-mcp-signer` uses — **never** CloudNest
 `MERCHANT_SKIP_SETTLE_PRODUCT` verify-without-settle fixture on dev
 (`x402-delegation-3009-sweep`'s fixture): funds would strand on the delegate by
 design, and this leg's zero-residual assertion would be asserting a lie.
+
+**#3421 — the qa_fixture tripwire.** Before any money moves, this leg reads
+the demo merchant's own `/.well-known/haven-demo-merchant` discovery document
+and fails if ANY product it marks `qa_fixture` (today, only `storage_50gb` on
+Sepolia) has a listed (non-delisted) `merchant_catalog` row on that same host.
+The Sepolia CloudNest 50 GB row was itself the fixture that had drifted this
+way — catalog-discoverable while also being the merchant's skip-settle
+fixture — and migration `102_delist_skip_settle_catalog_row` delisted it (the
+owner's decision: delist, not relabel in the style of migration 064's
+Minifetch precedent). This tripwire is what keeps it delisted: it fails the
+moment a re-seed, a hand-edit, or a future `MERCHANT_SKIP_SETTLE_PRODUCT`
+reassignment lists a `qa_fixture` product again, rather than relying on
+someone noticing. On prod the fixture is irrelevant — `MERCHANT_SKIP_SETTLE_
+PRODUCT` is chain-gated to Base Sepolia (84532) and the prod merchant sets no
+such env var — but the tripwire is unconditional so it also catches a
+misconfigured prod deploy.
 
 **#2970 — the skip-settle fixture's new observable.** Buying the fixture
 through the hosted erc7710 settle/complete tools no longer reads as a normal

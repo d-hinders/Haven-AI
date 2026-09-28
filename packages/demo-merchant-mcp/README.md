@@ -365,6 +365,20 @@ that product:
 Absent (not `null` or `undefined`-valued) on every other product and on every
 other chain, so the prod shape this fixture is inert on is unchanged.
 
+**Delisted from Haven's catalog, not just disclosed (#3421).** The Sepolia
+`storage_50gb` product was ALSO a seeded Haven `merchant_catalog` row —
+`GET /catalog` could hand it to an agent that never read this merchant's
+discovery document or its `qa_fixture` marker, funding a purchase that then
+never settles. Migration `102_delist_skip_settle_catalog_row` delisted that
+one row (the owner's call: delist, not relabel — it stays reachable only by
+calling this merchant directly, never through catalog discovery), and Haven's
+`x402-catalog-guided-purchase` QA leg carries a tripwire that fails if any
+`qa_fixture` product this discovery document names ever gets a listed catalog
+row again. **Rule:** the product named in `MERCHANT_SKIP_SETTLE_PRODUCT` must
+have no non-delisted `merchant_catalog` row on the dev host; moving the env
+var to a different product needs a delisting migration first. See
+`docs/operations/agent-qa.md`.
+
 ## ERC-7710 Smart-Account Payments
 
 ERC-7710 is the preferred smart-account demo flow when the required

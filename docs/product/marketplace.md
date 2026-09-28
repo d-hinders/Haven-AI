@@ -32,7 +32,7 @@ covers:
   - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-27"
+last-verified: "2026-09-28"
 ---
 
 # Marketplace
@@ -59,7 +59,14 @@ country when known, and two flags that decide how it is shown:
   real payments, demo goods) and the **Minifetch stranded-funds fixture**
   (its funding leg succeeds and it never settles; listed so clients can prove
   they survive that). This flag is the structural signal a pre-filtering
-  client uses; the older `category: 'test-fixture'` stays as data.
+  client uses; the older `category: 'test-fixture'` stays as data. Not every
+  demo-store offer is listed, though: the Sepolia CloudNest 50 GB offer is the
+  dev demo merchant's `MERCHANT_SKIP_SETTLE_PRODUCT` verify-without-settle QA
+  fixture (`storage_50gb`, chain-gated to 84532), and #3421 delisted it
+  (migration `102_delist_skip_settle_catalog_row`) rather than relabeling it
+  the way Minifetch is labeled — unlike Minifetch, this fixture is not meant
+  to be catalog-reachable, only callable on the merchant directly. Its
+  Base-mainnet sibling settles normally and stays listed.
 
 An **offer** is a catalog row. Every operator row has a `merchant_id` (NOT
 NULL after 088) and every self-submitted row gets one the moment it is

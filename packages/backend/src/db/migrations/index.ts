@@ -99,6 +99,7 @@ import * as inboundTransfers from './097_inbound_transfers.js'
 import * as ownerCompanyDetails from './098_owner_company_details.js'
 import * as agentPassportsUidRepairNextAt from './099_agent_passports_uid_repair_next_at.js'
 import * as merchantPayTo from './101_merchant_pay_to.js'
+import * as delistSkipSettleCatalogRow from './102_delist_skip_settle_catalog_row.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -257,4 +258,5 @@ export const migrations: Migration[] = [
   ownerCompanyDetails,
   agentPassportsUidRepairNextAt,
   merchantPayTo,
+  delistSkipSettleCatalogRow,
 ]

@@ -229,6 +229,56 @@ function findCatalogEntry(
   )
 }
 
+// ── #3421 qa_fixture tripwire ────────────────────────────────────────────────
+//
+// The spec review on #3421 found the merchant's `/.well-known/haven-demo-
+// merchant` discovery document marks a product `qa_fixture` (verify-without-
+// settle, `MERCHANT_SKIP_SETTLE_PRODUCT`) whenever it is configured — and
+// that nothing had ever checked whether that same product ALSO had a listed
+// (non-delisted) `merchant_catalog` row. Migration 102 delists the one row
+// that drifted that way (Sepolia `storage_50gb`); this tripwire is what keeps
+// it delisted: it fails the moment a re-seed, a hand-edit, or a future
+// `MERCHANT_SKIP_SETTLE_PRODUCT` reassignment lists a `qa_fixture` product
+// again, instead of relying on someone noticing.
+//
+// `GET /catalog` (routes/catalog.ts) already filters `status != 'delisted'`,
+// so — exactly like `findCatalogEntry` above — a match anywhere in
+// `catalogRes.data.entries` means the row is LISTED. No second status check
+// is needed.
+
+/** One product entry from the merchant's discovery document, narrowed to what this tripwire reads. */
+interface DiscoveryProduct {
+  id?: string
+  category?: string
+  tools?: string[]
+  qa_fixture?: { kind?: string; settles_on_chain?: boolean }
+}
+
+interface DiscoveryDocument {
+  products?: DiscoveryProduct[]
+}
+
+/**
+ * Derive the same {toolName, toolArguments} pair migration 058 seeded for a
+ * product, from the discovery document's own `id`/`category`/`tools` fields —
+ * never hardcoded, for the same #1 discriminator reason `findCatalogEntry`'s
+ * caller resolves its own product this way. Product ids follow `<category>_
+ * <variant>` (`storage_50gb`, `vpn_basic` — `packages/demo-merchant-mcp/src/
+ * products.ts`), and the variant is exactly the `tier`/`plan` argument the
+ * catalog seed used. `undefined` when the document does not carry enough to
+ * derive a call — a malformed/future discovery shape is not this tripwire's
+ * failure to report.
+ */
+function deriveFixtureToolCall(
+  product: DiscoveryProduct,
+): { toolName: string; toolArguments: Record<string, unknown> } | undefined {
+  const toolName = product.tools?.[0]
+  const variant = product.id?.replace(/^(vpn|storage)_/, '')
+  if (!toolName || !variant || variant === product.id) return undefined
+  const argKey = product.category === 'vpn' ? 'plan' : 'tier'
+  return { toolName, toolArguments: { [argKey]: variant } }
+}
+
 export const x402CatalogGuidedPurchase: Scenario = {
   name: 'x402-catalog-guided-purchase',
   invariant:
@@ -294,6 +344,32 @@ export const x402CatalogGuidedPurchase: Scenario = {
           "agent — the #1299 demo-merchant catalog seed migration (058_demo_merchant_catalog) may not be " +
           'applied on dev yet, or this agent is scoped to a different chain.',
       )
+    }
+
+    // ── 0.5 #3421 qa_fixture tripwire — before any money moves ───────────────
+    //      A product the merchant's own discovery document marks qa_fixture
+    //      must never have a LISTED catalog row on this host (see the
+    //      module-doc-comment above `deriveFixtureToolCall`).
+    const discoveryRes = await fetch(`${ctx.cfg.demoMerchantUrl}/.well-known/haven-demo-merchant`)
+    if (!discoveryRes.ok) {
+      return fail(
+        `GET /.well-known/haven-demo-merchant returned HTTP ${discoveryRes.status} — could not run the ` +
+          '#3421 qa_fixture tripwire',
+      )
+    }
+    const discovery = (await discoveryRes.json()) as DiscoveryDocument
+    for (const product of discovery.products ?? []) {
+      if (!product.qa_fixture) continue
+      const call = deriveFixtureToolCall(product)
+      if (!call) continue
+      const listed = findCatalogEntry(catalogRes.data.entries ?? [], mcpUrl, call.toolName, call.toolArguments)
+      if (listed) {
+        return fail(
+          `qa_fixture product ${product.id} (${JSON.stringify(product.qa_fixture)}) has a LISTED catalog row ` +
+            `${listed.id} (${call.toolName} ${JSON.stringify(call.toolArguments)}) on ${mcpUrl} (#3421) — ` +
+            'delist it in a migration before moving MERCHANT_SKIP_SETTLE_PRODUCT.',
+        )
+      }
     }
 
     // The signer that a connect-flow user runs locally: holds the delegate

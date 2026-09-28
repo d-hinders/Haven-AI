@@ -26,15 +26,18 @@ function captureWriter() {
 }
 
 const input: ConsentInput = {
-  apiKeyPrefix: 'sk_agent_ab',
+  apiKeyPrefix: 'sk_agent_abc',
   apiUrl: 'https://haven.example',
   agentId: 'agt_test',
   accountAddress: '0xSafe',
   delegateAddress: '0xDelegate',
-  chainId: 100,
+  chainId: 84532,
   toolNames: ['haven_get_agent', 'haven_pay_x402_quote'],
+  // #3410: fixtures carry ATOMIC amounts, like both real producers — the
+  // live read (`onchain.amount`) and the credential seed (`allowance_amount`).
+  // Earner's actual first-launch shape: 1 USDC/day = 1000000 atomic.
   allowanceSummary: [
-    { token: 'USDC', amount: '50.000000', resetMinutes: 1440 },
+    { token: 'USDC', amount: '1000000', resetMinutes: 1440 },
   ],
 }
 
@@ -55,7 +58,7 @@ describe('consent gate', () => {
     expect(
       computeConsentHash({
         ...input,
-        allowanceSummary: [{ token: 'USDC', amount: '999.000000', resetMinutes: 1440 }],
+        allowanceSummary: [{ token: 'USDC', amount: '999000000', resetMinutes: 1440 }],
       }),
     ).not.toBe(baseHash)
     expect(
@@ -89,7 +92,7 @@ describe('consent gate', () => {
     const block = renderConsentBlock(input, hash)
     expect(block).toContain('Haven wallet: 0xSafe')
     expect(block).toContain('Delegate (local signer): 0xDelegate')
-    expect(block).toContain('Chain ID:  100')
+    expect(block).toContain('Chain ID:  84532')
     expect(block).toContain('Haven API: https://haven.example')
     expect(block).toContain('Agent ID:  agt_test')
   })
@@ -417,7 +420,9 @@ describe('consent gate', () => {
         allowances: [
           {
             tokenSymbol: 'USDC',
-            configuredAmount: '25000000',
+            // #3410: configuredAmount is the HUMAN decimal figure (per the
+            // corrected doc comment); the atomic budget rides in onchain.
+            configuredAmount: '25.00',
             resetPeriodMin: 1440,
             onchain: {
               amount: '5000000',
@@ -443,6 +448,126 @@ describe('consent gate', () => {
     expect(built.allowanceSummary).toEqual([
       { token: 'USDC', amount: '5000000', resetMinutes: 60 },
     ])
+  })
+})
+
+describe('#3410 whole-token budget display', () => {
+  /** Seed shaped like Earner's credential file: 1 USDC/day = 1000000 atomic. */
+  const seed = {
+    apiKey: 'ack_test_prefix_00',
+    agentId: 'agt_test',
+    accountAddress: '0xSafe',
+    delegateAddress: '0xDelegate',
+    chainId: 84532,
+    allowanceSummary: [{ token: 'USDC', amount: '1000000', resetMinutes: 1440 }],
+  }
+
+  /** Live read fails → the seed path (credential file) is what renders. */
+  const seedClient = {
+    getAllowances: async () => {
+      throw new Error('not active yet')
+    },
+  }
+
+  /** Live read succeeds and carries the same budget atomically. */
+  const liveClient = {
+    getAllowances: async () => ({
+      accountAddress: '0xSafe',
+      delegateAddress: '0xDelegate',
+      chainId: 84532,
+      allowances: [
+        {
+          tokenSymbol: 'USDC',
+          configuredAmount: '1.00',
+          resetPeriodMin: 1440,
+          onchain: { amount: '1000000', resetTimeMin: 1440 },
+        },
+      ],
+    }),
+  }
+
+  it('renders the live-path budget in whole tokens (Earner shape)', async () => {
+    const built = await consentInputFromClient(liveClient as never, seed, ['haven_get_agent'])
+    const block = renderConsentBlock(built, computeConsentHash(built))
+    expect(block).toContain('up to 1 USDC per 1440 min')
+    expect(block).not.toContain('up to 1000000 USDC')
+  })
+
+  it('renders the seed-path budget in whole tokens (live read failed)', async () => {
+    const built = await consentInputFromClient(seedClient as never, seed, ['haven_get_agent'])
+    const block = renderConsentBlock(built, computeConsentHash(built))
+    expect(block).toContain('up to 1 USDC per 1440 min')
+    expect(block).not.toContain('up to 1000000 USDC')
+  })
+
+  it('labels an unresolvable token explicitly instead of printing atomic as whole tokens', () => {
+    // Unknown symbol on a known chain, and a known symbol with no chain in
+    // the credential: both fall back to connect's `(atomic units)` style,
+    // never a bare atomic number an operator reads as whole tokens.
+    const unknownToken = renderConsentBlock(
+      { ...input, allowanceSummary: [{ token: 'FOO', amount: '25000000', resetMinutes: 1440 }] },
+      'irrelevant',
+    )
+    expect(unknownToken).toContain('up to 25000000 FOO (atomic units) per 1440 min')
+    const noChain = renderConsentBlock(
+      { ...input, chainId: undefined, allowanceSummary: [{ token: 'USDC', amount: '1000000', resetMinutes: 1440 }] },
+      'irrelevant',
+    )
+    expect(noChain).toContain('up to 1000000 USDC (atomic units) per 1440 min')
+  })
+
+  it('resolves decimals per chain through the same registry the SDK reads', () => {
+    // 18-decimals ETH on Base mainnet proves this is a real conversion, not a
+    // USDC-only special case; Gnosis registers USDC.e, not USDC, so a plain
+    // USDC budget on Gnosis must NOT be silently converted with guessed decimals.
+    const eth = renderConsentBlock(
+      { ...input, chainId: 8453, allowanceSummary: [{ token: 'ETH', amount: '500000000000000000', resetMinutes: 10080 }] },
+      'irrelevant',
+    )
+    expect(eth).toContain('up to 0.5 ETH per 10080 min')
+    const gnosisUsdc = renderConsentBlock(
+      { ...input, chainId: 100, allowanceSummary: [{ token: 'USDC', amount: '1000000', resetMinutes: 1440 }] },
+      'irrelevant',
+    )
+    expect(gnosisUsdc).toContain('up to 1000000 USDC (atomic units) per 1440 min')
+  })
+
+  it('pins the consent hash literally — the hash keeps covering the ATOMIC string', () => {
+    // Pinned BEFORE the #3410 display change (origin/dev @ 705f4364), for
+    // exactly the `input` fixture above. The fix converts for DISPLAY only;
+    // if this literal ever moves, the hashed surface changed and every
+    // installed sidecar .ack.json re-prompts its operator.
+    expect(computeConsentHash(input)).toBe('f91aa898426206cb')
+  })
+
+  it('live path and seed path hash the same atomic string for one budget', async () => {
+    const seedBuilt = await consentInputFromClient(seedClient as never, seed, ['haven_get_agent'])
+    const liveBuilt = await consentInputFromClient(liveClient as never, seed, ['haven_get_agent'])
+    // Same budget through both producers → byte-identical hashed strings, so
+    // a sidecar acknowledged on one path is valid on the other.
+    expect(computeConsentHash(seedBuilt)).toBe(computeConsentHash(liveBuilt))
+    // …and the render shows whole tokens on both while the hash stays atomic.
+    expect(renderConsentBlock(seedBuilt, 'x')).toContain('up to 1 USDC per 1440 min')
+    expect(renderConsentBlock(liveBuilt, 'x')).toContain('up to 1 USDC per 1440 min')
+  })
+
+  it('never reads the human configured_amount into the atomic field', async () => {
+    // The old `?? a.configuredAmount` fallback was unreachable from a current
+    // backend AND was the one human-decimal value in the chain. Pinned so a
+    // human number can never reach the atomic field again: a malformed
+    // response without `onchain` degrades to atomic '0', not '1.00'.
+    const malformed = {
+      getAllowances: async () => ({
+        accountAddress: '0xSafe',
+        delegateAddress: '0xDelegate',
+        chainId: 84532,
+        allowances: [
+          { tokenSymbol: 'USDC', configuredAmount: '1.00', resetPeriodMin: 1440 },
+        ],
+      }),
+    }
+    const built = await consentInputFromClient(malformed as never, seed, ['haven_get_agent'])
+    expect(built.allowanceSummary).toEqual([{ token: 'USDC', amount: '0', resetMinutes: 1440 }])
   })
 })
 

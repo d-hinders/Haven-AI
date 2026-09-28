@@ -154,7 +154,7 @@ Tools this server will expose to your agent runtime:
 
 On-chain budget (the real spend gate — enforced by the agent's
 signed delegation, not by Haven):
-  • up to 50.000000 USDC per 1440 min
+  • up to 25 USDC per 1440 min
 
 Anything above the on-chain budget is declined before any money
 moves — it is not queued, and no one is asked to review it. If the

@@ -825,7 +825,7 @@ export interface HavenAgentAllowanceSummary {
   remainingAtomic: string
   /** Human-readable remaining, e.g. "4.96 USDC". */
   remainingDisplay: string
-  /** Configured allowance amount (atomic) the owner granted. */
+  /** Configured allowance amount in whole token units (human decimal, e.g. "1.00" — NOT atomic; on-chain.amount is the atomic figure). */
   configuredAmount: string
   resetPeriodMin: number
   isResetPending: boolean

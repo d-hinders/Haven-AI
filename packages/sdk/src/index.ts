@@ -202,7 +202,17 @@ export {
   // Exported so a consumer holding only a payment OPTION (not a built quote)
   // resolves decimals through exactly the same table the quote used.
   resolveTokenFromAddress,
+  // #3410: symbol+chain decimals from the SAME registry, for the surfaces
+  // that carry no token address (the consent seed path). Null outside the
+  // registry — callers fall back to an explicit atomic label.
+  resolveTokenBySymbol,
 } from './x402.js'
+
+export {
+  // #3410: the one atomic→human formatter for consent-surface renders, so
+  // the consent block and the allowance reads cannot disagree.
+  formatTokenAmount,
+} from './account-reads.js'
 
 export type { X402PaymentHeaderContext, X402SchemeSelection } from './x402.js'
 export type { X402Erc7710Settlement } from './types.js'

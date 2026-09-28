@@ -3469,6 +3469,18 @@ to call next in structured fields, and those fields are typed end to end
 > shapes before the change, plus the per-branch ratchet cases. Scope of this
 > note: those fields. Nothing else in this document was re-verified.
 
+> **Re-verification (#3416, 2026-09-28):** `normalizeError` gains one branch
+> ahead of the generic `HavenApiError` pair. A `HavenApiError` whose body
+> carries `error_code: 'rail_unavailable_for_chain'`, the backend's typed 503
+> for a chain the deployment has no bundler credential for, becomes
+> `code: RAIL_UNAVAILABLE_FOR_CHAIN` with `next_action: stop_and_tell_user`
+> and a `next_tool_omitted_reason`. Without the branch it would fall into the
+> 5xx "retry once" step above, and the retry cannot succeed until an operator
+> provisions the chain. Hosted-only: no signer, connector or SDK version is
+> involved, and every other branch is unchanged. It is pinned by one new
+> refusal fixture (the census moves to 37 fixtures and 46 `refusalNextStep`
+> calls). Nothing else in this document was re-verified.
+
 > **Re-verification (#3230, the next-step ratchet refuses an empty scan,
 > 2026-09-23):** this diff touches `scripts/lint-next-steps.mjs` (listed in
 > `covers:` above). The gate's NUMERATOR is untouched — what counts as an

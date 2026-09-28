@@ -2300,10 +2300,12 @@ export class MerchantTimeoutError extends HavenApiError {
  *
  * Only thrown when the confirmed row pays the merchant this request names, for
  * the resource it asked for. The backend's replay lookup is keyed on the
- * idempotency key alone, so a key reused for another purchase — or first spent
- * on an EIP-3009 funding leg, whose confirmed `tx_hash` proves only that the
- * delegate was funded — is refused as a 409 collision instead of read as this
- * settlement. A `HavenError`, not a `HavenApiError`: nothing failed upstream.
+ * idempotency key alone, so a key reused for another payee or resource — or
+ * first spent on an EIP-3009 funding leg, whose confirmed `tx_hash` proves only
+ * that the delegate was funded — is refused as a 409 collision instead of read
+ * as this settlement. Amount and the MCP tool call are not compared: on an MCP
+ * merchant the resource is its endpoint, so a key reused for another tool
+ * there is answered as that merchant's earlier payment. A `HavenError`, not a `HavenApiError`: nothing failed upstream.
  */
 export class X402Erc7710AlreadySettledError extends HavenError {
   readonly x402ErrorCode = 'payment_already_settled' as const

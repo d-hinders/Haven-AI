@@ -260,7 +260,9 @@ function settledReplayResponse(err: X402Erc7710AlreadySettledError) {
         'the payment settled on-chain. Nothing was signed and nothing new was charged. Haven cannot ' +
         "re-deliver the merchant's result: if you received it earlier, report that purchase from " +
         "payment_id and settlement_tx_hash; if you did not, tell the user it was paid but the result " +
-        'was not received. To buy again, use a new idempotency_key.',
+        'was not received. Amount and tool are not compared: if you reused this key for a different ' +
+        'tool or price at the same merchant, this is that earlier payment, not the new purchase. To ' +
+        'buy again, use a new idempotency_key.',
       summary: {
         payment_id: err.paymentId,
         status: 'confirmed',

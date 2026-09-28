@@ -985,7 +985,7 @@ them is a string a caller supplies:
   page at the time, so it cannot be proven after the fact: its only observed
   row, `2026-09-18T21:18:20Z`, was over nine days old against the 4-day
   budget, and a correct, newest-first, paged read could not have opened there.
-  `observe()` runs four checks. (1) page 1's newest row was near "now" (inside
+  `observe()` runs five checks. (1) page 1's newest row was near "now" (inside
   the guard's own `maxAgeDays` budget); (2) a later page's newest row was not
   newer than the previous page's oldest (contiguous, newest-first); (3) every
   in-window Railway deployment in the index has a matching run somewhere in

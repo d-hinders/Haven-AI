@@ -384,7 +384,8 @@ const DISTRUST_REASONS = {
  * pointer, and no dead-trigger sentence — `observe()` itself never returns
  * `searchComplete: false` without recording at least one reason, so this
  * shape is reachable only from a hand-built `observations` object (as the
- * `evaluate()` unit tests above do), never from a real `observe()` call.
+ * `evaluate()` unit tests in guard-freshness.test.mjs do), never from a real
+ * `observe()` call.
  */
 export function renderUnconfirmedDetail(guard, seen) {
   const reasons = Array.isArray(seen.incompleteReasons) ? seen.incompleteReasons : []

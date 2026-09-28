@@ -722,6 +722,7 @@ test('observe(): when the lookup budget runs out first, the finding says unconfi
   const seen = observe(QA, { gh, now: OBS_NOW })
   assert.equal(seen.lastSuccessAt, null)
   assert.equal(seen.searchComplete, false)
+  assert.deepEqual(seen.incompleteReasons, ['lookup-budget'])
   const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
   assert.equal(result.findings[0].kind, 'unconfirmed')
   assert.doesNotMatch(result.findings[0].detail, /never completed successfully/)
@@ -814,6 +815,7 @@ test('observe(): the page cap stops the search and the result reads unconfirmed,
   const seen = observe(QA, { gh, now: OBS_NOW })
   assert.equal(calls.filter((c) => c.includes('/runs') && c.includes('page=')).length, RUN_PAGE_CAP)
   assert.equal(seen.searchComplete, false)
+  assert.deepEqual(seen.incompleteReasons, ['page-cap'])
   const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
   assert.equal(result.findings[0].kind, 'unconfirmed')
   assert.doesNotMatch(result.findings[0].detail, /never completed successfully/)
@@ -849,6 +851,7 @@ test('observe(): a full Deployments index that does not reach the horizon makes 
   const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments })
   const seen = observe(QA, { gh, now: OBS_NOW })
   assert.equal(seen.searchComplete, false)
+  assert.deepEqual(seen.incompleteReasons, ['index-reach', 'listing-missing-run'])
   assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0].kind, 'unconfirmed')
   // Control: a short index page is the whole history, never "too short" — the
   // in-window `created_at` values are what makes this a real control against
@@ -856,8 +859,8 @@ test('observe(): a full Deployments index that does not reach the horizon makes 
   // gate must turn this red — proven by mutation). Every filler sha also gets a
   // matching (non-qualifying, `in_progress`) run row on the page, so #3409's
   // listing-coherence check 3 — a genuinely different check, covered on its
-  // own below — does not independently flag them as missing and mask M1's
-  // effect on THIS gate.
+  // own below — does not independently flag them as missing and mask the short-page gate's
+  // own effect.
   const shortDeployments = [
     deployments[0],
     ...Array.from({ length: 49 }, (_, j) => ({
@@ -951,6 +954,9 @@ test('observe(): a page of old rows like the 07:42 incident reads unconfirmed, w
   assert.ok(warnings.some((l) => l.includes('listing-coherence') && l.includes('opens at')), 'no page-1-not-near-now warning')
   assert.ok(warnings.some((l) => l.includes('listing-coherence') && l.includes('no matching run')), 'no missing-deployment warning')
   assert.deepEqual(seen.incompleteReasons, ['listing-missing-run', 'listing-not-near-now'])
+  // evaluate() must render the detail from those reasons, not a static text.
+  assert.match(result.findings[0].detail, /#2268/)
+  assert.doesNotMatch(result.findings[0].detail, /further back/)
 })
 
 test('observe(): a stale page 1 with NO in-window deploy reads as a quiet week, not distrust (#3409)', () => {
@@ -1133,13 +1139,14 @@ function qaRunLike(sha) {
 }
 
 // ---------------------------------------------------------------------------
-// renderUnconfirmedDetail (#3409) — had NO direct test, so mutations survived
-// the whole suite: a static "further back" claim regardless of which reasons
-// tripped, swapping which reason code `markIncomplete` records at a call
-// site, and "further back" appearing for every reason instead of only the
-// boundedness ones. A table over the function itself, independent of
-// `observe()`'s fixtures, is what catches all
-// three at once.
+// renderUnconfirmedDetail (#3409). This table pins the RENDERING: which
+// sentence each reason produces, and that "further back" appears only for the
+// boundedness reasons. It cannot see which code `observe()` records at a call
+// site. That is pinned by the `deepEqual(seen.incompleteReasons, …)` lines in
+// the observe tests (07:42, contiguity, thrown lookup, malformed index, lookup
+// budget, page cap, index reach). The 07:42 test also checks that
+// `evaluate()` renders its detail through this function rather than a static
+// string.
 // ---------------------------------------------------------------------------
 
 const FURTHER_BACK = /A success may exist further back/

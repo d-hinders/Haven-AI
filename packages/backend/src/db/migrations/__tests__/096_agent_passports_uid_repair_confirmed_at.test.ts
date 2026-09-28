@@ -155,23 +155,32 @@ describeDb('migration 096_agent_passports_uid_repair_confirmed_at', () => {
   it('confirmAnchorUid stamps the marker without touching attestation_uid; refusal leaves it NULL', async () => {
     const agentId = await seedAnchoredRow()
     const before = await repo.findByAgent(agentId)
-    const stamped = await repo.confirmAnchorUid(agentId, before!.tx_hash!)
+    const stamped = await repo.confirmAnchorUid(agentId, before!.tx_hash!, before!.attestation_uid)
     expect(stamped).toBe(true)
     expect(await readMarker(agentId)).not.toBeNull()
     // Idempotent: already marked refuses.
-    expect(await repo.confirmAnchorUid(agentId, before!.tx_hash!)).toBe(false)
+    expect(await repo.confirmAnchorUid(agentId, before!.tx_hash!, before!.attestation_uid)).toBe(false)
     // A row that moved (tx changed) refuses and stays unmarked.
     const other = await seedAnchoredRow()
-    expect(await repo.confirmAnchorUid(other, '0x' + 'ff'.repeat(32))).toBe(false)
+    const otherRow = await repo.findByAgent(other)
+    expect(
+      await repo.confirmAnchorUid(other, '0x' + 'ff'.repeat(32), otherRow!.attestation_uid),
+    ).toBe(false)
     expect(await readMarker(other)).toBeNull()
+    // The CAS parity (#3395): a mismatched expectedUid refuses even when the
+    // row itself has not moved — the marker must describe THIS stored UID.
+    const third = await seedAnchoredRow()
+    const thirdRow = await repo.findByAgent(third)
+    expect(
+      await repo.confirmAnchorUid(third, thirdRow!.tx_hash!, '0x' + 'ff'.repeat(32)),
+    ).toBe(false)
+    expect(await readMarker(third)).toBeNull()
   })
 
   it('a new anchor cancels the marker — the row is re-checked from scratch', async () => {
     const agentId = await seedAnchoredRow()
-    await repo.confirmAnchorUid(
-      agentId,
-      '0x' + (200 + seq).toString(16).padStart(2, '0').repeat(32),
-    )
+    const row = await repo.findByAgent(agentId)
+    await repo.confirmAnchorUid(agentId, row!.tx_hash!, row!.attestation_uid)
     expect(await readMarker(agentId)).not.toBeNull()
     await repo.markAnchored(agentId, {
       attestationUid: '0x' + 'ee'.repeat(32),
@@ -184,10 +193,8 @@ describeDb('migration 096_agent_passports_uid_repair_confirmed_at', () => {
 
   it('a re-anchor reset cancels the marker', async () => {
     const agentId = await seedAnchoredRow()
-    await repo.confirmAnchorUid(
-      agentId,
-      '0x' + (200 + seq).toString(16).padStart(2, '0').repeat(32),
-    )
+    const row = await repo.findByAgent(agentId)
+    await repo.confirmAnchorUid(agentId, row!.tx_hash!, row!.attestation_uid)
     expect(await readMarker(agentId)).not.toBeNull()
     // The reset is only reachable through the real lifecycle: revoke,
     // confirm the revoke, then reset for re-anchor.
@@ -201,12 +208,36 @@ describeDb('migration 096_agent_passports_uid_repair_confirmed_at', () => {
     expect(await readMarker(agentId)).toBeNull()
   })
 
-  it('deferAnchorRepair bumps updated_at without stamping the marker', async () => {
+  it('deferAnchorRepair stamps uid_repair_next_at without touching updated_at or the marker (#3395)', async () => {
     const agentId = await seedAnchoredRow()
-    await repo.deferAnchorRepair(agentId)
+    const row = await repo.findByAgent(agentId)
+    const updatedAtOf = async (id: string): Promise<Date> => {
+      const { rows } = await db.query<{ updated_at: Date }>(
+        `SELECT updated_at FROM agent_passports WHERE agent_id = $1`,
+        [id],
+      )
+      return rows[0].updated_at
+    }
+    const updatedBefore = await updatedAtOf(agentId)
+    await repo.deferAnchorRepair(agentId, row!.tx_hash!, 3600)
     expect(await readMarker(agentId)).toBeNull()
-    // Bumped past the freshness guard: not due again this hour (#3342).
-    const due = await repo.listAnchorRepairsDue(10)
-    expect(due.map((r) => r.agent_id)).not.toContain(agentId)
+    // Paced out of the head: NOT due again inside the pacing window (#3395).
+    const duePaced = await repo.listAnchorRepairsDue(10)
+    expect(duePaced.map((r) => r.agent_id)).not.toContain(agentId)
+    // The pacing stamp is a dedicated column — `updated_at` (the receipt's
+    // monotonic epoch, the verifier's tie-break) is untouched (#3342/#3395).
+    expect((await updatedAtOf(agentId)).getTime()).toBe(updatedBefore.getTime())
+    // The guard: a defer naming a foreign tx hash must NOT pace the row.
+    const guarded = await seedAnchoredRow()
+    await repo.deferAnchorRepair(guarded, '0x' + 'ff'.repeat(32), 3600)
+    const dueGuarded = await repo.listAnchorRepairsDue(10)
+    expect(dueGuarded.map((r) => r.agent_id)).toContain(guarded)
+    // ...and once the window elapses the row is due again.
+    await db.query(
+      `UPDATE agent_passports SET uid_repair_next_at = NOW() - INTERVAL '1 second' WHERE agent_id = $1`,
+      [agentId],
+    )
+    const dueAfter = await repo.listAnchorRepairsDue(10)
+    expect(dueAfter.map((r) => r.agent_id)).toContain(agentId)
   })
 })

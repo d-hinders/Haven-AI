@@ -833,3 +833,11 @@ The production path (bump PR → `dev → main` promotion → `publish.yml` on
 `--snapshot` mode, and why a snapshot is not a release). The runtime
 compatibility contract — the manifest table, version skew, `--doctor`'s checks:
 [`mcp-runtime-compatibility.md`](mcp-runtime-compatibility.md).
+
+> **Re-verification (#3332, unrelated `config.ts` addition, 2026-09-27):** this
+> diff adds one new field to `config.ts` — `ownerCompanyDetailsEnabled`
+> (`HAVEN_OWNER_COMPANY_DETAILS`), a strict boolean flag for an unrelated
+> settings feature. It does not touch `HAVEN_CONNECTOR_CHANNEL`, the channel
+> validation regex, or any field this document names; nothing about channel
+> selection, dist-tag resolution, or the snapshot path moves. Scope of this
+> note: confirming that. Nothing else in this document was re-verified.

@@ -22,8 +22,10 @@ import discoveryRoutes from './routes/discovery.js'
 import { buildApiRootDocument } from './routes/root-document.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
+import ownerCompanyDetailsRoutes from './routes/owner-company-details.js'
 import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
+import receiveRoutes from './routes/receive.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import agentRoutes from './routes/agents.js'
@@ -147,6 +149,9 @@ installRequestValidation(app, {
     // #3329: the owner-facing task-budget READ is non-money-path (GET only)
     // and born ENFORCED, same precedent as agent-organizations.ts above.
     'routes/agent-task-budgets.ts',
+    // #3332: a brand new module with no live caller yet, same reasoning as
+    // task-budgets.ts below — born ENFORCED, never shadow.
+    'routes/owner-company-details.ts',
     // #3329: `routes/task-budgets.ts` is a BRAND NEW module with no live
     // caller yet (unlike `routes/payments.ts` / `routes/agent-delegations.ts`
     // / `routes/machine-payments.ts`, which predate the request-validation
@@ -247,6 +252,13 @@ installRequestValidation(app, {
     'routes/agent-connection-setups.ts',
     'routes/agent-passports.ts',
     'routes/hybrid-accounts.ts',
+    // #3333: routes/receive.ts is born ENFORCED — the rule a genuinely new
+    // module never enters shadow (there is no existing caller a stricter
+    // schema could break). The file carries the receive side's owner surface
+    // (authMiddleware) and the payer's unauthenticated-but-signed receipt
+    // drop; the drop's body shape is exactly the enforced schema's, so a
+    // malformed drop is refused before any DB read.
+    'routes/receive.ts',
   ],
 })
 
@@ -418,8 +430,17 @@ logPassportReadiness(app.log)
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })
+// #3332: rides the /user prefix as its own route FILE, same reasoning as
+// agent-labels.ts on /agents — the request-validation rollout keys
+// enforcedModules on the file, not the mount prefix.
+await app.register(ownerCompanyDetailsRoutes, { prefix: '/user' })
 await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
+// #3333: the receive side — persisted inbound index, receipt matching and the
+// owner-signed off-ramp hand-off. Owner-scoped (authMiddleware inside the
+// file); no agent-auth route reaches it. `trustProxyHops` arms the receipt
+// drop's limiter — the receive side's one unauthenticated route (#794 tiers).
+await app.register(receiveRoutes, { prefix: '/receive', trustProxyHops: config.trustProxyHops })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 // #2847 (epic #1440): `GET /safe/:addr/details` and `POST /safe/exec` are
@@ -787,8 +808,15 @@ const start = async () => {
             // are the lines an operator checks first when a row refuses to
             // converge (see docs/operations/stuck-revoke-alarm.md).
             if (repairs.unrepairable) {
+              // #3395: a REPAIRED row is an answer, not a question — it left
+              // the queue on the same write (its marker is stamped), so it
+              // does not belong in the operator's unanswered set. Only
+              // `unrepairable` and `deferred` do.
               app.log.warn(
-                { unrepairable: repairs.unrepairable, rows: repairs.rows.filter((r) => r.outcome !== 'confirmed') },
+                {
+                  unrepairable: repairs.unrepairable,
+                  rows: repairs.rows.filter((r) => r.outcome !== 'confirmed' && r.outcome !== 'repaired'),
+                },
                 'Passport anchor UID repairs left rows unanswered — investigate the reasons',
               )
             }

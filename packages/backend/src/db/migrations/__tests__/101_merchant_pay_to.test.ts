@@ -1,5 +1,5 @@
 /**
- * Real-Postgres proof for migration 097 — merchant-locked budgets (#3331).
+ * Real-Postgres proof for migration 101 — merchant-locked budgets (#3331).
  * No mocks — #1219's rule.
  *
  * Pins the schema half of the issue: `merchant_catalog.pay_to` holds only a
@@ -18,7 +18,7 @@ import {
   resetDb,
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
-import { down, up, version } from '../097_merchant_pay_to.js'
+import { down, up, version } from '../101_merchant_pay_to.js'
 
 async function runUp(): Promise<void> {
   const client = await db.connect()
@@ -45,7 +45,7 @@ async function seedMerchant(): Promise<string> {
   seq += 1
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO merchants (slug, name) VALUES ($1, $1) RETURNING id`,
-    [`m096-${seq}-${Date.now()}`],
+    [`m101-${seq}-${Date.now()}`],
   )
   return rows[0].id
 }
@@ -54,7 +54,7 @@ async function seedAgent(): Promise<string> {
   seq += 1
   const user = await db.query<{ id: string }>(
     `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
-    [`m096-${seq}-${Date.now()}@test.example`],
+    [`m101-${seq}-${Date.now()}@test.example`],
   )
   const agent = await db.query<{ id: string }>(
     `INSERT INTO agents (user_id, name, delegate_address, status)
@@ -83,7 +83,7 @@ async function insertCatalogRow(merchantId: string, payTo: string | null): Promi
   await db.query(
     `INSERT INTO merchant_catalog (name, description, category, resource_url, rail, protocol, merchant_id, pay_to)
      VALUES ($1, 'x', 'api', $2, 'x402', 'http', $3, $4)`,
-    [`o-${seq}`, `https://m096-${seq}.example/paid`, merchantId, payTo],
+    [`o-${seq}`, `https://m101-${seq}.example/paid`, merchantId, payTo],
   )
 }
 
@@ -97,7 +97,7 @@ async function columnCount(): Promise<string> {
   return rows[0].count
 }
 
-describeDb('migration 097_merchant_pay_to', () => {
+describeDb('migration 101_merchant_pay_to', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
@@ -109,7 +109,7 @@ describeDb('migration 097_merchant_pay_to', () => {
   })
 
   it('names itself', () => {
-    expect(version).toBe('097_merchant_pay_to')
+    expect(version).toBe('101_merchant_pay_to')
   })
 
   it('adds both columns and down() drops them', async () => {

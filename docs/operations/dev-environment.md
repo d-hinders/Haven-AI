@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-27"
 ---
 
 # Dev environment
@@ -216,7 +216,8 @@ never in code. **Every secret MUST differ from production.**
 **Boolean flags accept only lowercase `true` / `false` (#3015).** Every
 boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
 `HAVEN_FEE_ENABLED`, `HAVEN_LEGACY_BOOKKEEPING_ENABLED`, `HAVEN_HOSTED`,
-`HAVEN_ACCOUNTING_ENABLED` and the deprecated `HAVEN_REPORTING_FEED_ENABLED` —
+`HAVEN_ACCOUNTING_ENABLED`, `HAVEN_OWNER_COMPANY_DETAILS` and the deprecated
+`HAVEN_REPORTING_FEED_ENABLED` —
 goes through `parseBooleanFlag`: unset or blank means false; any other value
 (`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
 variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
@@ -300,8 +301,14 @@ Isolation rules that are non-negotiable for a payments product:
   ERC-7710 rail is enabled ([below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant)),
   reports `erc7710: false` and the build refuses a merchant-locked budget for
   it. The payTo itself arrives with the next catalog refresh after migration
-  097 deploys (see `docs/product/marketplace.md`); until then every offer
+  101 deploys (see `docs/product/marketplace.md`); until then every offer
   reads `unstated`.
+- **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
+  boolean) gates `/user/company-details*` and the additive `parties.buyer`
+  field on payment evidence/receipts; there is no settings UI yet (that is
+  the #3332 frontend slice). Dark by default; GET/PUT/POST vies-check answer
+  404 when off — DELETE is the deliberate exception, so an owner can always
+  erase saved details. See [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
@@ -817,3 +824,27 @@ project owner — collaborators have Viewer access, not env-var write access.
 > RPC hiccup". Triggers, gating, the retry count and the freshness gate
 > described above are unchanged. Nothing else in this file's coverage was
 > touched; this note is the only edit.
+
+> **Re-verified #3395 (2026-09-27):** `index.ts`'s `anchor-repair` phase warn
+> report ("left rows unanswered") now excludes `repaired` rows alongside
+> `confirmed` ones — a repair is an answer, and the row left the queue on the
+> same write — so the operator's report carries only `unrepairable` and
+> `deferred` outcomes. The phase itself is unchanged: same position in the
+> sweep, same `repairAnchoredUids()` call with the same default limit; the
+> pacing this issue added (`uid_repair_next_at`, migration 099) lives in the
+> repository and the sweep's own per-row handling, and the selector still
+> skips whatever the phase's batch cannot reach. No route file is added or
+> moved, `enforcedModules` is untouched, and the shadow/enforce semantics this
+> document describes are unchanged. Nothing else in this file's coverage was
+> touched; this note and the `last-verified` date are the only edits.
+
+> **Re-verified #3333 (2026-09-27):** `index.ts`'s `enforcedModules` grew by
+> exactly one entry — `routes/receive.ts`, born ENFORCED per the rule above
+> (a genuinely new module with no existing caller). The generated map
+> (`route-modules.generated.ts`) was regenerated in the same commit and
+> `lint:request-schemas` stayed green with no baseline bump: the module
+> carries a spec operation for every registered route, including the
+> unauthenticated-but-signed receipt drop (whose body shape is the enforced
+> schema's). The shadow/enforce semantics this document describes are
+> unchanged. Nothing else in this file's coverage was touched; the note and
+> the `last-verified` date are the only edits.

@@ -9,6 +9,12 @@
  *   3 ticks, `{"attempted":10,"repaired":0,"unrepairable":10}`) is gone — the
  *   phantom is repaired within `ceil(N/limit)+1` ticks and the healthy rows
  *   leave the queue instead of heading it forever;
+ * - DRAIN (#3395): the same criterion for rows the sweep can never ANSWER
+ *   (`refused`, `no-receipt`) — they are paced out of the head
+ *   (`uid_repair_next_at`, migration 099) so a newest phantom is reached
+ *   within `ceil(N/limit)+1` ticks too;
+ * - PACING (#3395): inside the pacing window the deferred rows cost ZERO
+ *   provider reads (asserted per tx hash);
  * - STEADY STATE: a confirmed row is not re-read — reads per tick are bounded
  *   independent of how many healthy rows precede a phantom (the acceptance
  *   criterion `updated_at` churn cannot meet);
@@ -58,7 +64,17 @@ const { getEasDeployment } = await import('../schema.js')
 const { Interface } = await import('ethers')
 
 let seq = 0
-type ReceiptSpec = { uid: string; schemaUid?: string; attester?: string; txFrom?: string; to?: string }
+type ReceiptSpec = {
+  uid: string
+  schemaUid?: string
+  attester?: string
+  txFrom?: string
+  to?: string
+  /** Receipt read answers null — a tx the node has no receipt for (#3395). */
+  noReceipt?: boolean
+  /** Tx-body read answers null — a pruned node's receipt-only answer (#3395). */
+  noBody?: boolean
+}
 let receipts: Map<string, ReceiptSpec>
 
 const iface = new Interface([
@@ -100,16 +116,21 @@ function stageReceipts(specs: Record<string, ReceiptSpec>) {
   receipts = new Map(Object.entries(specs))
   getTransaction.mockImplementation(async (hash: string) => {
     const spec = receipts.get(hash)
-    return spec ? txBodyFor(spec) : null
+    return spec && !spec.noBody ? txBodyFor(spec) : null
   })
   getTransactionReceipt.mockImplementation(async (hash: string) => {
     const spec = receipts.get(hash)
-    if (!spec) return null
+    if (!spec || spec.noReceipt) return null
     return {
       status: 1,
       logs: [attestedLog(spec.uid, spec.schemaUid ?? PINNED_SCHEMA, spec.attester ?? RELAYER)],
     }
   })
+}
+
+/** How many provider calls a given tx hash has absorbed so far. */
+function callsFor(fn: ReturnType<typeof vi.fn>, hash: string): number {
+  return fn.mock.calls.filter((call: unknown[]) => call[0] === hash).length
 }
 
 /** One anchored passport row, aged past the selector's freshness guard. */
@@ -173,8 +194,11 @@ describeDb('#3342 — the repair sweep drains (real DB)', () => {
 
   it('STALL: N = limit healthy older rows + one phantom — the phantom is repaired within ceil(N/limit)+1 ticks and healthy rows stop being read', async () => {
     const limit = 4
-    // The phantom is the OLDEST row (anchored_at furthest back), like the
-    // issue's probe where it sits behind the correct rows.
+    // The phantom is the OLDEST row here, so the first batch reaches it
+    // immediately — this test pins the #3342 steady state (one-tick repair,
+    // durable confirmation, bounded reads), NOT the reach behind a full
+    // batch of unanswerable rows; that shape (phantom NEWEST behind N ≥
+    // limit unanswerable older rows) is the DRAIN test below (#3395).
     const phantom = await seedAnchoredRow({ storedUid: phantomUid(1), txHash: txOf(1), older: true })
     const healthy: string[] = []
     const specs: Record<string, ReceiptSpec> = {
@@ -213,6 +237,97 @@ describeDb('#3342 — the repair sweep drains (real DB)', () => {
     )
     const tick3 = await repairAnchoredUids(limit)
     expect(tick3.attempted).toBe(0)
+  })
+
+  it('DRAIN (#3395): N = limit UNANSWERABLE older rows (refused, no-receipt) + one NEWEST phantom — the phantom is repaired within ceil(N/limit)+1 ticks', async () => {
+    // The stall the issue reproduced with a real-DB probe: every row the
+    // sweep cannot ANSWER (here: refused foreign-attester rows and no-receipt
+    // rows) writes nothing, so the oldest-first batch is the same N rows on
+    // every tick and the live phantom behind them is never reached — 5 ticks
+    // of `{"attempted":4,"repaired":0,"unrepairable":4}` in the probe. The
+    // phantom here is the NEWEST row, exactly the shape the pre-#3395 stall
+    // test got wrong (it seeded the phantom oldest, proving nothing).
+    const limit = 4
+    const specs: Record<string, ReceiptSpec> = {}
+    const unanswerable: string[] = []
+    for (let i = 0; i < limit; i += 1) {
+      unanswerable.push(
+        await seedAnchoredRow({ storedUid: phantomUid(i + 1), txHash: txOf(i + 1), older: true }),
+      )
+      // Alternate three persistent classes: a foreign attester → `refused`
+      // (after the tx-body read), a receipt the node never had →
+      // `no-receipt`, and a pruned node that holds the receipt but not the
+      // body → `tx-body-unavailable`.
+      if (i % 3 === 0) {
+        specs[txOf(i + 1)] = { uid: realUid(i + 1), attester: FOREIGN_ATTESTER }
+      } else if (i % 3 === 1) {
+        specs[txOf(i + 1)] = { uid: realUid(i + 1), noReceipt: true }
+      } else {
+        specs[txOf(i + 1)] = { uid: realUid(i + 1), noBody: true }
+      }
+    }
+    // The phantom is the NEWEST row (90 minutes old, behind 4 older ones).
+    const phantom = await seedAnchoredRow({ storedUid: phantomUid(9), txHash: txOf(9) })
+    specs[txOf(9)] = { uid: realUid(9) }
+    stageReceipts(specs)
+
+    // Pre-#3395 this loop ran forever: every tick re-took the 4 unanswerable
+    // rows. With pacing, each unanswerable row is stamped out of the head on
+    // its first attempt, so the batch reaches the phantom on tick
+    // ceil(N/limit)+1 = 2.
+    const tick1 = await repairAnchoredUids(limit)
+    expect(tick1.repaired).toBe(0)
+    expect(tick1.unrepairable).toBe(limit)
+    expect(tick1.rows.every((r) => r.outcome === 'unrepairable')).toBe(true)
+
+    const tick2 = await repairAnchoredUids(limit)
+    expect(tick2.repaired).toBe(1)
+    expect(tick2.rows.find((r) => r.agent_id === phantom)?.outcome).toBe('repaired')
+    const phantomRow = await repo.findByAgent(phantom)
+    expect(phantomRow?.attestation_uid?.toLowerCase()).toBe(realUid(9))
+
+    // The unanswerable rows are NOT marked confirmed — their damage is
+    // unresolved and reported — but they are out of the head.
+    const due = await repo.listAnchorRepairsDue(limit)
+    for (const id of unanswerable) expect(due.map((r) => r.agent_id)).not.toContain(id)
+  })
+
+  it('PACING (#3395): inside the pacing window the next tick makes NO provider call for the deferred rows', async () => {
+    // A pacing test that only raised `limit` would still pass this suite's
+    // drain test — so this pins the mechanism itself: the stamped rows are
+    // not selected, and the selector's skip is billed at zero chain reads.
+    const limit = 3
+    const specs: Record<string, ReceiptSpec> = {}
+    for (let i = 0; i < limit; i += 1) {
+      await seedAnchoredRow({ storedUid: phantomUid(i + 1), txHash: txOf(i + 1) })
+      // All foreign-attester rows: answered (refused), never repairable.
+      specs[txOf(i + 1)] = { uid: realUid(i + 1), attester: FOREIGN_ATTESTER }
+    }
+    stageReceipts(specs)
+
+    const tick1 = await repairAnchoredUids(limit)
+    expect(tick1.unrepairable).toBe(limit)
+    const receiptsAfterTick1 = getTransactionReceipt.mock.calls.length
+    const bodiesAfterTick1 = getTransaction.mock.calls.length
+
+    // Tick 2, immediately: the rows are paced out. The selector returns
+    // nothing for them — and no receipt or tx read happens at all.
+    const tick2 = await repairAnchoredUids(limit)
+    expect(tick2.attempted).toBe(0)
+    expect(getTransactionReceipt.mock.calls.length).toBe(receiptsAfterTick1)
+    expect(getTransaction.mock.calls.length).toBe(bodiesAfterTick1)
+    for (let i = 0; i < limit; i += 1) {
+      expect(callsFor(getTransactionReceipt, txOf(i + 1))).toBe(1)
+      expect(callsFor(getTransaction, txOf(i + 1))).toBe(1)
+    }
+
+    // Once the window elapses the row is due again — paced, not dropped.
+    await db.query(
+      `UPDATE agent_passports SET uid_repair_next_at = NOW() - INTERVAL '1 second'`,
+    )
+    const tick3 = await repairAnchoredUids(limit)
+    expect(tick3.attempted).toBe(limit)
+    expect(tick3.unrepairable).toBe(limit)
   })
 
   it('STEADY STATE: reads per tick stay bounded as confirmed rows accumulate — the queue drains instead of round-robining', async () => {
@@ -254,14 +369,15 @@ describeDb('#3342 — the repair sweep drains (real DB)', () => {
     void healthy
 
     const tick1 = await repairAnchoredUids(10)
-    expect(tick1.repaired).toBe(1) // the healthy row
-    expect(tick1.healthy).toBe(1) // the collision holder (matches its receipt)
-    expect(tick1.unrepairable).toBe(1) // the poison row
+    expect(tick1.repaired).toBe(1) // the collision holder: stored realUid(1), receipt says realUid(2)
+    expect(tick1.healthy).toBe(1) // the healthy row: stored UID already matches its receipt
+    expect(tick1.unrepairable).toBe(1) // the poison row (its repair threw)
     const deferred = tick1.rows.find((r) => r.outcome === 'deferred')
     expect(deferred?.agent_id).toBe(poison)
     expect(deferred?.reason).toMatch(/duplicate key|agent_passports_uid_idx/)
 
-    // The defer bumped updated_at: the poison row is NOT due again within 1h.
+    // The defer stamped the pacing column (#3395): the poison row is NOT due
+    // again inside the window.
     const due = await repo.listAnchorRepairsDue(10)
     expect(due.map((r) => r.agent_id)).not.toContain(poison)
   })
@@ -278,7 +394,9 @@ describeDb('#3342 — the repair sweep drains (real DB)', () => {
     expect(result.reason).toMatch(/no Attested log yet/)
     const row = await repo.findByAgent(agentId)
     expect(row?.attestation_uid?.toLowerCase()).toBe(phantomUid(1))
-    // Still due — never marked, never guessed.
+    // Still due AT THIS LEVEL — the reader never marks a row it could not
+    // answer. (The SWEEP paces such a row out of the head on its own stamp —
+    // see the DRAIN and PACING tests below.)
     const due = await repo.listAnchorRepairsDue(10)
     expect(due.map((r) => r.agent_id)).toContain(agentId)
   })
@@ -292,7 +410,7 @@ describeDb('#3342 — the repair sweep drains (real DB)', () => {
       tx_hash: txOf(1),
     })
     expect(refused.repaired).toBe(false)
-    expect(refused.reason).toMatch(/proven-ours invariant/)
+    expect(refused.reason).toMatch(/all attested by someone other than the transaction's own sender/)
     const refusedRow = await repo.findByAgent(foreignAgent)
     expect(refusedRow?.attestation_uid?.toLowerCase()).toBe(phantomUid(1))
 

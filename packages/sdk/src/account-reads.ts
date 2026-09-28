@@ -69,6 +69,24 @@ export function formatRemainingDisplay(tokenAddress: string, tokenSymbol: string
     : `${remainingAtomic} ${tokenSymbol} (atomic; unknown decimals)`
 }
 
+/**
+ * #3410: atomic → human token amount, ONE formatter for every consent-surface
+ * render (the same role `formatRemainingDisplay` plays for allowance reads).
+ * `decimals` must come from `resolveTokenBySymbol` or
+ * `resolveTokenFromAddress`; with neither resolving, the caller labels the
+ * atomic string explicitly instead of guessing. A whole number carries no
+ * trailing `.0` (`1000000` USDC atomic → `1`, matching connect's budget
+ * phrasing, not `1.0`); a fraction keeps its significant digits (`0.5`).
+ */
+export function formatTokenAmount(atomic: string, decimals: number): string {
+  const value = safeBigInt(atomic)
+  if (value < 0n) return '0' // same guard formatAtomicAmount applies; budgets are never negative
+  const digits = value.toString().padStart(decimals + 1, '0')
+  const intPart = digits.slice(0, digits.length - decimals) || '0'
+  const fracPart = digits.slice(digits.length - decimals).replace(/0+$/, '')
+  return fracPart ? `${intPart}.${fracPart}` : intPart
+}
+
 /** #3329: `RawTaskBudget` (snake_case wire) → `HavenTaskBudget` (camelCase). */
 export function mapTaskBudget(raw: RawTaskBudget): HavenTaskBudget {
   return {

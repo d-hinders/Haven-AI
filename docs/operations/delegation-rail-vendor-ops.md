@@ -102,8 +102,9 @@ run no estimation, so recovery retries cost nothing.
 
 ## 2. Credentials & policies
 
-- `DELEGATION_RAIL_BUNDLER_URL` — SECRET (embeds the API key). REQUIRED and
-  fail-closed: the legacy `SESSION_RAIL_BUNDLER_URL` fallback was **removed**
+- `DELEGATION_RAIL_BUNDLER_URL` (and its per-chain form
+  `DELEGATION_RAIL_BUNDLER_URL_<chainId>`, below) — SECRET (embeds the API
+  key). REQUIRED and fail-closed: the legacy `SESSION_RAIL_BUNDLER_URL` fallback was **removed**
   once both deployed envs migrated (#882), so an unset var throws
   ("delegation rail unavailable") instead of silently borrowing the retired
   rail's credential. The `SESSION_RAIL_*` variables and
@@ -119,14 +120,31 @@ run no estimation, so recovery retries cost nothing.
   request**, not per API key (#738): an unset id means unrestricted
   sponsorship against the key's account. Set it in every deployed env.
 - Key rotation: new key in the vendor dashboard → update env → redeploy →
-  delete old key (the #738 procedure). One credential, one env var — and
-  `ops:check-bundler` reads that same var through the rail's resolver, so the
-  probe verifies the rotation rather than a stale copy of it.
-- **The URL is chain-scoped by its path** (`…/v2/<chainId>/rpc?...`): one
-  deployed environment serves exactly one chain's bundler. The resolver
-  refuses a chain the URL does not target (a config error at first use, the
-  #1053 guard) — so enabling a second chain means provisioning that chain's
-  credential, not just flipping the chain list.
+  delete old key (the #738 procedure). One credential per chain — and
+  `ops:check-bundler` reads it through the rail's resolver, so the probe
+  verifies the rotation rather than a stale copy of it.
+- **The URL is chain-scoped by its path** (`…/v2/<chainId>/rpc?...`), and every
+  deployment enables both chains. So the credential resolves **per chain**
+  (#3416): `DELEGATION_RAIL_BUNDLER_URL_<chainId>` first (for example
+  `DELEGATION_RAIL_BUNDLER_URL_84532`), then the unsuffixed
+  `DELEGATION_RAIL_BUNDLER_URL` as the fallback. Serving a second chain means
+  setting that chain's variable, not just flipping the chain list.
+  - The resolver refuses a URL that does not target the requested chain (a
+    config error at first use, the #1053 guard), including a per-chain variable
+    holding another chain's URL.
+  - A chain with no usable credential throws `DelegationRailChainUnavailableError`.
+    The x402 funding leg and `POST /payments` answer it as a typed, non-retryable
+    **503 `rail_unavailable_for_chain`** (with `chain_id`, never the URL), not
+    the generic "authorization failed" 502. The hosted MCP turns it into
+    `RAIL_UNAVAILABLE_FOR_CHAIN` / `stop_and_tell_user`. Other bundler
+    consumers (task budgets, grant activation, re-key, hybrid transfers) still
+    surface it through their own error paths.
+  - `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` is still ONE value for every chain.
+    A Pimlico API key is account-wide (the same key works under
+    `/v2/<chainId>/`), so the second chain's URL should come from the same
+    Pimlico account, and the sponsorship policy must cover that chain.
+    Otherwise sponsorship is declined for it, and the payment pauses per §3;
+    policy never weakens.
 
 ## 3. Failure modes & the degradation contract
 

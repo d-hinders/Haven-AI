@@ -46,6 +46,11 @@ import {
   isRetiredAllowanceIntent,
 } from '../rails/execution-rail.js'
 import {
+  DelegationRailChainUnavailableError,
+  RAIL_UNAVAILABLE_STATUS,
+  railUnavailableRefusalBody,
+} from '../rails/delegation-rail.js'
+import {
   prepareDelegationPayment,
   submitDelegationPayment,
 } from '../rails/delegation-authorization.js'
@@ -520,6 +525,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // failure is NOT a refusal (the guardrails refused nothing); the
       // classifier returns null for it and nothing is written. The
       // 502 the caller receives is unchanged either way.
+      // #3416: no bundler credential for this chain on this deployment — a
+      // typed, non-retryable 503, and nothing booked (nothing was refused).
+      if (err instanceof DelegationRailChainUnavailableError) {
+        return refuse(reply.code(RAIL_UNAVAILABLE_STATUS).send(railUnavailableRefusalBody(err)), null)
+      }
       const refusalReason = classifyRevertForLedger(err)
       // #3053: through the shared choke point; the ledger input is null when
       // the classification says NOT a refusal.

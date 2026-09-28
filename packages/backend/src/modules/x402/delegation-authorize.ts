@@ -13,6 +13,11 @@ import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } 
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { redactVendorSecrets } from '../../rails/execution-rail.js'
+import {
+  DelegationRailChainUnavailableError,
+  RAIL_UNAVAILABLE_STATUS,
+  railUnavailableRefusalBody,
+} from '../../rails/delegation-rail.js'
 import { selectDelegation, selectDelegationByHash, prepareDelegationPayment } from '../../rails/delegation-authorization.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../../rails/hybrid-provisioning.js'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
@@ -370,6 +375,13 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // synchronously and swallows its own failures (see refusal-ledger.ts).
       // #3053 (slice 2 of epic #3056) migrates this call site behind the
       // shared choke point that slice introduces.
+      // #3416: no bundler credential for this chain on this deployment is a
+      // configuration state, not a failed authorization — a typed,
+      // non-retryable 503. Not a policy refusal either (nothing was
+      // refused), so nothing is booked, exactly like the outage case below.
+      if (err instanceof DelegationRailChainUnavailableError) {
+        return refuse({ code: RAIL_UNAVAILABLE_STATUS, body: railUnavailableRefusalBody(err) }, null)
+      }
       const fundingRefusalReason = classifyRevertForLedger(err)
       // #3053: through the shared choke point. The ledger input is null when
       // the classification says NOT a refusal (an outage is not a refusal):

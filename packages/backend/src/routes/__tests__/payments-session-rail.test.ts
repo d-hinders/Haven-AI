@@ -341,6 +341,26 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })
 
+  it('POST /payments: a chain with no bundler credential on this deployment is a typed, non-retryable 503 (#3416)', async () => {
+    const { DelegationRailChainUnavailableError } = await import('../../rails/delegation-rail.js')
+    delegationMocks.prepareDelegationPayment.mockRejectedValueOnce(
+      new DelegationRailChainUnavailableError(84532, 'DELEGATION_RAIL_BUNDLER_URL is not configured for chain 84532'),
+    )
+    primeDb(AUTH, railState({ execution_rail: 'delegation' }))
+    mockRecordRefusal.mockClear()
+
+    const response = await app.inject({
+      method: 'POST', url: '/payments',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+    })
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error_code: 'rail_unavailable_for_chain', chain_id: 84532 })
+    expect(response.json().error).not.toMatch(/authorization failed/)
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+    expect(mockRecordRefusal).not.toHaveBeenCalled()
+  })
+
   it('POST /payments: caveat rejection fails BEFORE any write, credential redacted (#829)', async () => {
     delegationMocks.prepareDelegationPayment.mockRejectedValueOnce(
       new Error('ERC20PeriodTransferEnforcer:transfer-amount-exceeded at https://api.pimlico.io/v2?apikey=pim_SECRET'),

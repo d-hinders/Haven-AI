@@ -30,10 +30,12 @@ operator-configured `HAVEN_OPS_TOKEN`, in addition to the prod API URL; it
 does not require any signing key or wallet credential.
 
 1. **Bundler credential targets 8453.**
-   `DELEGATION_RAIL_BUNDLER_URL` is chain-scoped by its URL path
-   (`…/v2/8453/rpc?...`) — a Sepolia credential cannot serve mainnet, and the
-   runtime assertion (#1053) only fires when someone tries to pay. Check it
-   BEFORE the first payment:
+   The credential for chain 8453 is `DELEGATION_RAIL_BUNDLER_URL_8453` if set,
+   else the unsuffixed `DELEGATION_RAIL_BUNDLER_URL` (#3416). Either is
+   chain-scoped by its URL path (`…/v2/8453/rpc?...`): a Sepolia credential
+   cannot serve mainnet, and the runtime assertion (#1053) only fires when
+   someone tries to pay. Check it BEFORE the first payment (the probe resolves
+   through the same per-chain resolver):
 
    ```bash
    CHECK_BUNDLER_CHAIN_ID=8453 npm run ops:check-bundler -w packages/backend

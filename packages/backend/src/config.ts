@@ -47,7 +47,7 @@ function optionalEnv(key: string, fallback: string): string {
  *
  * #2630 found `TRUST_PROXY_HOPS` unset on the production backend: every other
  * required piece of payment infrastructure is fail-closed
- * (`DELEGATION_RAIL_BUNDLER_URL` throws at startup when unset), but this
+ * (an unset `DELEGATION_RAIL_BUNDLER_URL` fails closed at first use), but this
  * variable was fail-open AND silent — production had booted without it for an
  * unknown length of time with nothing anywhere saying so. The owner decision
  * (folded into #2630 rather than filed separately) is: stay fail-open, but

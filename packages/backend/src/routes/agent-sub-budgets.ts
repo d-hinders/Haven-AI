@@ -46,7 +46,7 @@ import {
   sumOpenReservedForParent,
   type SubBudgetRow,
 } from '../infra/repositories/sub-budgets.js'
-import type { Delegation } from '@metamask/smart-accounts-kit'
+import type { Delegation } from '../rails/delegation-policy.js'
 import {
   buildSubBudgetChildren,
   checkNarrowingRefusal,

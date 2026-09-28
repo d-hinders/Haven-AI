@@ -57,7 +57,7 @@ import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
 import { findForAgent as findTaskBudgetForAgent } from '../infra/repositories/task-budgets.js'
-import type { Delegation } from '@metamask/smart-accounts-kit'
+import type { Delegation } from '../rails/delegation-policy.js'
 import {
   findForAgent as findSubBudgetForAgent,
   findOpenParentChildByHash,

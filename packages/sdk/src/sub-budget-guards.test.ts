@@ -317,7 +317,7 @@ describe('assertOwnSubBudgetChild', () => {
       delegate: ownAccount,
       delegator: OTHER_ADDRESS,
       authority: PARENT_HASH,
-      caveats: [] as { enforcer: Address; terms: Hex }[],
+      caveats: [] as { enforcer: Address; terms: Hex; args: Hex }[],
       salt: 1n,
       signature: `0x${'ab'.repeat(65)}` as Hex,
     }
@@ -379,7 +379,7 @@ describe('assertOwnSubBudgetChild', () => {
       startDate: 1_700_000_000,
       recipientAddress: null,
       expiresAt,
-      parentDelegationHash: kitHashDelegation(parent),
+      parentDelegationHash: kitHashDelegation(parent as never),
       delegateAccount: ownAccount,
       childDelegateAccount: ownAccount,
     }

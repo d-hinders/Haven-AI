@@ -2005,6 +2005,17 @@ same reason it was written: the caller named the payment, so refusing on
 `chainRpcs` entry — a money-safety fix turned into an availability regression.
 This is a funding-leg concern only; erc7710 has no delegate balance to exhaust.
 
+> **erc7710 (#3417, 2026-09-28):** the same replayed `confirmed` answer reaches
+> `prepareX402Erc7710()` with no `sign_data`. It is not ambiguous there, because
+> an erc7710 row's payee (`to`) is the merchant and its `tx_hash` is the
+> settlement itself. So when `to` is this request's merchant and `resource_url`
+> its resource, the SDK throws `X402Erc7710AlreadySettledError`. The three
+> hosted erc7710 prepare tools answer it as a done state (`settled: true`,
+> `idempotent_replay: true`, `next_action: none`, no `next_tool`). Any other
+> confirmed row under the key, such as an EIP-3009 funding leg whose payee is
+> the delegate, is refused as a 409 key collision. The rest of this document
+> was not re-read for it, and `last-verified` is not bumped.
+
 Further hardening with #1061: a non-numeric `maxTimeoutSeconds` is a `400`
 rather than a `NaN` that clamps through into a `502` — since #3031 that refusal
 is the request schema's, and with ajv coercion on, a numeric STRING (`"300"`)

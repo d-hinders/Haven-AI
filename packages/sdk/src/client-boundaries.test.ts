@@ -492,6 +492,7 @@ describe('HavenClient structural boundary', () => {
       'TRANSFER_WITH_AUTHORIZATION_TYPES',
       'TYPED_DATA_NOT_ALLOWED', // #3283
       'X402AlreadySettledError',
+      'X402Erc7710AlreadySettledError', // #3417
       'X402PaymentHeaderValidationError',
       'X402TaskBudgetMismatchError', // #3392
       'X402UnexpectedStatusError',
@@ -525,6 +526,7 @@ describe('HavenClient structural boundary', () => {
       'encodeBase64Json',
       'encodeBase64Utf8',
       'encodePaymentProof',
+      'formatTokenAmount', // #3410
       'hashDelegation', // #3329
       'havenClientIdentity', // #3303
       'havenTools',
@@ -545,6 +547,7 @@ describe('HavenClient structural boundary', () => {
       'readX402ReceiptPayer',
       'renderNextTool', // #3101
       'resolveConnectorChannel',
+      'resolveTokenBySymbol', // #3410
       'resolveTokenFromAddress',
       'resolveX402RetryTarget', // #3097
       'sameUrl',

@@ -28,7 +28,7 @@ export {
   paymentWindowExpiredErrorFor,
   runTool,
 } from './errors.js'
-export { buildAgentGuidance, buildPurchaseSummary } from './guidance.js'
+export { buildAgentGuidance, buildPurchaseSummary, catchSettledReplay } from './guidance.js'
 export {
   buildX402SigningContext,
   coerceJsonField,

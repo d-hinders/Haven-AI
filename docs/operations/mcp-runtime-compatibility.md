@@ -11,6 +11,7 @@ covers:
   - packages/backend/src/__tests__/connector-upgrade-command-parity.test.ts
   - scripts/ci/upgrade-hint-guard.test.mjs
   - packages/mcp-server/src/tools/**
+  - packages/sdk/src/x402-erc7710.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/x402/sign-context.ts
   - packages/sdk/src/userop-binding.ts
@@ -67,7 +68,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-27"
+last-verified: "2026-09-28"
 ---
 
 # MCP Runtime Compatibility
@@ -99,6 +100,29 @@ last-verified: "2026-09-27"
 > version-skew and consent-hash contracts do not move. `last-verified` is not
 > re-stamped: this block is the scope. Nothing else in this document was
 > re-verified.
+>
+> **Re-verified unchanged (#3410, 2026-09-28, consent display):** the local
+> MCP server's first-launch consent screen now renders the budget in whole
+> tokens instead of atomic units (`packages/mcp/src/consent.ts`,
+> `renderConsentBlock` → `describeBudgetAmount`), with an explicit
+> `(atomic units)` label when the token's decimals cannot be resolved through
+> the SDK registry. Display only — this document's consent-hash contract
+> holds unchanged: `computeConsentHash` (`packages/mcp/src/consent.ts:96-119`)
+> still hashes identity, tool names and the RAW ATOMIC allowance strings, so
+> no installed sidecar `.ack.json` or `HAVEN_MCP_ACK` value is invalidated,
+> and the live path (`onchain.amount`) and the credential seed
+> (`allowance_amount`) hash byte-identical strings (pinned by a literal-hash
+> test and a live≡seed equality test in `packages/mcp/src/consent.test.ts`).
+> The unreachable human-decimal `configuredAmount` fallback in the live-read
+> mapping was removed (`onchain.amount ?? '0'`), so no human-decimal value can
+> reach the atomic field the hash covers. New SDK surface consumed here:
+> `resolveTokenBySymbol` and `formatTokenAmount` (`@haven_ai/sdk`, additive
+> exports). No tool added, renamed or re-shaped, no schema or argument change,
+> no version-skew axis moves. Scope of this note: the consent screen's
+> rendering path and the two stale line citations below (the consent-hash
+> function moved from `consent.ts:81-103` to `:96-119` under this change;
+> both now read `:96-119`). Nothing else in this document was re-verified in
+> this pass.
 >
 > **Re-verified unchanged (#3279, 2026-09-25, Safe-vocabulary copy):** copy-only
 > edits on two surfaces this document covers. The local signer's first-launch
@@ -182,7 +206,7 @@ last-verified: "2026-09-27"
 > older than #3128 the SDK maps the three page fields to `null` ("unknown"),
 > never a fabricated `0` / `false`. The strict/permissive split, the tool-NAME
 > set and the consent hash do not move (the hash covers identity, tool names
-> and allowances, not schemas — `packages/mcp/src/consent.ts:81-103`). The
+> and allowances, not schemas — `packages/mcp/src/consent.ts:96-119`). The
 > two allowance reads are reconciled additively: `HavenAllowance` gains
 > `remainingDisplay` (derived client-side by the same function the bootstrap
 > summary uses) and `HavenAgentAllowanceSummary` gains `id` and
@@ -524,7 +548,7 @@ last-verified: "2026-09-27"
 > registered tool-NAME set are untouched, so the version-skew and consent-hash
 > contracts do not move (descriptions are not a skew axis — #2330 precedent —
 > and `computeConsentHash` hashes identity, tool names and allowances only, not
-> description text, verified at `packages/mcp/src/consent.ts:81-103`; an older
+> description text, verified at `packages/mcp/src/consent.ts:96-119`; an older
 > runtime simply serves the older guidance text from the `@haven_ai/sdk` it
 > bundles). The fragment was sized to keep the hosted description mean under
 > the #1591 per-tool cap (873.04 ≤ 874 bytes measured at the delivered head),
@@ -2410,6 +2434,31 @@ reading `null`.
 > published SDKs before that never send the budget, so their retries are
 > none-vs-none and replay exactly as before. No wire field moves and no
 > runtime needs an update for calls that never name a task budget.
+
+> **Re-verified (#3417, 2026-09-28):** the `confirmed` arm of the replay
+> recipe above did not reach the agent as described. The backend answers with
+> the `tx_hash` and no `sign_data`, but the SDK's erc7710 path read the
+> missing `sign_data` as a scheme mismatch, so all three hosted entry points
+> returned a 500 with "retry once". That is a deterministic dead end: the
+> retry gets the same answer. The hosted entry points now answer a settled key
+> with a done state instead: `settled: true`, `idempotent_replay: true`,
+> `settlement_tx_hash`, `next_action: none`, and no `next_tool`. That holds only
+> when the confirmed row pays the merchant this call names (`to`) for the
+> resource it names (`resource_url`). The backend's lookup is keyed on the
+> idempotency key alone, so a key reused for another payee or resource, or
+> first spent on an EIP-3009 funding leg (whose payee is the delegate), answers
+> a 409 "use a new idempotency key" refusal instead. Amount and the MCP tool
+> call are not compared, so a key reused for a different tool at the same MCP
+> merchant endpoint answers with that merchant's original settlement. This is
+> hosted-only; no signer
+> or connector version is involved. An SDK consumer calling
+> `prepareX402Erc7710()` with an `idempotencyKey` gets the typed
+> `X402Erc7710AlreadySettledError` (or the 409 `HavenApiError`) from the first
+> SDK built with this change. (`settleX402Erc7710()` shares the check, but its
+> typed options carry no idempotency key, so it does not reach a replay.)
+> Every SDK published before it (`alpha`/`latest` `0.6.0-alpha.0` and the `dev`
+> snapshots before it) still throws the scheme-mismatch `HavenApiError` for
+> that answer.
 
 One more skew row since #1307, on the SETTLE leg rather than the sign leg:
 `haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /

@@ -19,6 +19,16 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 - **`haven_verify_receipt` no longer throws on a `haven_list_receipts` row (#3418).** The two receipt tools now work together: passing a history row — which carries no signature — returns `{ verified: false, reason: 'not_a_signed_receipt' }` instead of `UNKNOWN_ERROR` with a raw `TypeError`. The tool takes the signed receipt bundle from `GET /payments/:id/receipt`; on erc7710 payments it now verifies (`verifiedOver: 'delegation_digest'`) where it previously reported `signer_mismatch` for genuine payments, and a direct or eip3009 bundle returns `not_verifiable_offline`. `verified: true` means only that the agent delegate signed the hash named by `verifiedOver` — the payment block is Haven-asserted and settlement is not proven; check `settlementTxHash` on an explorer.
 
+- The first-launch consent screen printed the agent's budget in atomic units
+  labelled as whole tokens (`up to 1000000 USDC` for a 1 USDC/day agent).
+  Budgets now render in whole tokens through the SDK token registry, and carry
+  an explicit `(atomic units)` label when the token's decimals cannot be
+  resolved. Display only: the consent hash still covers the atomic string, so
+  no installed sidecar acknowledgement is invalidated. (#3410)
+  Known limitation: the setup-time budget in the credential file is a
+  snapshot. If the wallet owner edits the budget after setup and the live
+  read then fails, the screen shows the old budget as current. (#3410)
+
 ## 0.6.0-alpha.0 — 2026-09-26
 
 ### Removed

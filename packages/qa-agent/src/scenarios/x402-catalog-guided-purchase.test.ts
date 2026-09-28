@@ -336,6 +336,53 @@ describe('the #3421 qa_fixture tripwire', () => {
     const r = await x402CatalogGuidedPurchase.run(ctx())
     expect(r.pass).toBe(true)
   })
+
+  it('FAILS (never skips) when GET /catalog has no VPN Basic row AND a qa_fixture product is listed — the tripwire runs before that skip', async () => {
+    mockFetch.mockResolvedValue(discoveryDoc([FIXTURE_PRODUCT]))
+    // No VPN Basic row at all — on its own this would SKIP (see "the catalog
+    // entry is resolved" describe block below) — but the listed fixture row
+    // must still fail the run, so the tripwire cannot be starved by a
+    // precondition skip that runs after it.
+    mockGetCatalog.mockResolvedValue({ ok: true, status: 200, data: { entries: [FIXTURE_ENTRY] } })
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.skipped).toBeFalsy()
+    expect(r.detail).toMatch(/LISTED catalog row/)
+    expect(mockCallTool).not.toHaveBeenCalled()
+  })
+
+  it('FAILS (never silently skips) when a qa_fixture product cannot be mapped to a (tool_name, tool_arguments) pair', async () => {
+    mockFetch.mockResolvedValue(
+      discoveryDoc([
+        {
+          // Neither a `storage_` nor a `vpn_` prefix — deriveFixtureToolCall
+          // cannot derive a variant from this id.
+          id: 'unknown_fixture',
+          category: 'storage',
+          tools: ['buy_cloud_storage'],
+          qa_fixture: { kind: 'skip_settle', settles_on_chain: false },
+        },
+      ]),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.skipped).toBeFalsy()
+    expect(r.detail).toMatch(/could not be mapped/)
+    expect(r.detail).toMatch(/unknown_fixture/)
+    expect(r.detail).toMatch(/#3421/)
+    expect(mockCallTool).not.toHaveBeenCalled()
+  })
+
+  it('FAILS when a qa_fixture product carries no tools array at all', async () => {
+    mockFetch.mockResolvedValue(
+      discoveryDoc([
+        { id: 'storage_50gb', category: 'storage', qa_fixture: { kind: 'skip_settle', settles_on_chain: false } },
+      ]),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/could not be mapped/)
+  })
 })
 
 describe('deploy skew: the hosted MCP has not picked up #1306 yet', () => {

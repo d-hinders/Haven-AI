@@ -33,8 +33,17 @@ export const version = '102_delist_skip_settle_catalog_row'
  * PLUS `network`, so this can only ever touch the one Sepolia row — never the
  * Base-mainnet CloudNest 50 GB row, which settles normally and is not this
  * hook's fixture, and never a hand-edited row with a different `tool_
- * arguments`. `status != 'delisted'` keeps a re-run idempotent (see `down`
- * for the read-only verification query in the CASP shard).
+ * arguments`. `status != 'delisted'` keeps a re-run idempotent (the read-only
+ * verification query is below and in the CASP shard).
+ *
+ * `down()` always restores `status = 'active'` with a fresh `updated_at` —
+ * the same unconditional restore 059's `down()` uses, not a lookup of
+ * whatever status the row held before `up()` ran. It leaves `verified_at`
+ * alone (the next probe refreshes it) and does NOT restore a prior
+ * `degraded` status: a row this migration delisted was `active` (058 seeds
+ * it that way and nothing else in this migration's own history changes it),
+ * so `down()`'s job is symmetry with `up()`, not a general-purpose undo for
+ * every possible prior state.
  *
  * The `network` predicate is redundant TODAY against 058's own unique index
  * (`resource_url`, `tool_name`, `md5(tool_arguments::text)` — no `network`
@@ -55,8 +64,9 @@ export const version = '102_delist_skip_settle_catalog_row'
  *      AND tool_arguments = '{"tier":"50gb"}'::jsonb
  *      AND network = 'eip155:84532';
  *
- * Expected before: one row, status = 'active'. Expected after: the same row,
- * status = 'delisted'. Every other `merchant_catalog` row is untouched.
+ * Expected before: one row, status = 'active' (or 'degraded' if the probe has
+ * recently failed). Expected after: the same row, status = 'delisted'. Every
+ * other `merchant_catalog` row is untouched.
  */
 const RESOURCE_URL = 'https://demo-merchant-dev-84e4.up.railway.app/mcp'
 const TOOL_NAME = 'buy_cloud_storage'

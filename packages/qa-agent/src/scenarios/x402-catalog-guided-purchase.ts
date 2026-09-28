@@ -331,25 +331,24 @@ export const x402CatalogGuidedPurchase: Scenario = {
       }
     }
 
-    // ── 0. Resolve the catalog entry via the agent's own chain-scoped ────────
-    //      GET /catalog — never a hardcoded id (discriminator #1).
+    // ── 0. Resolve the catalog itself — GET /catalog, once, reused by both ───
+    //      the #3421 tripwire below (0.5) and the entry resolution after it
+    //      (discriminator #1: never a hardcoded id).
     const catalogRes = await api.getCatalog()
     if (!catalogRes.ok) {
       return fail(`GET /catalog returned HTTP ${catalogRes.status} — could not resolve the catalog entry`)
     }
-    const entry = findCatalogEntry(catalogRes.data.entries ?? [], mcpUrl, PRODUCT_TOOL, PRODUCT_ARGS)
-    if (!entry) {
-      return skip(
-        `No catalog entry for ${PRODUCT_TOOL} ${JSON.stringify(PRODUCT_ARGS)} at ${mcpUrl} is visible to this ` +
-          "agent — the #1299 demo-merchant catalog seed migration (058_demo_merchant_catalog) may not be " +
-          'applied on dev yet, or this agent is scoped to a different chain.',
-      )
-    }
 
-    // ── 0.5 #3421 qa_fixture tripwire — before any money moves ───────────────
-    //      A product the merchant's own discovery document marks qa_fixture
-    //      must never have a LISTED catalog row on this host (see the
-    //      module-doc-comment above `deriveFixtureToolCall`).
+    // ── 0.5 #3421 qa_fixture tripwire — before any money moves, and before ───
+    //      the VPN-Basic lookup below so a missing settling row can never
+    //      SKIP the scenario ahead of this FAILING check running. A product
+    //      the merchant's own discovery document marks qa_fixture must never
+    //      have a LISTED catalog row on this host (see the module-doc-comment
+    //      above `deriveFixtureToolCall`), and a qa_fixture product this
+    //      tripwire cannot even MAP is itself a failure (#3421 round-1
+    //      review, fix 11) — silently skipping an unmappable product is
+    //      exactly the kind of drift (an id or a `tools` shape the mapping
+    //      does not expect) the tripwire exists to catch, not wave through.
     const discoveryRes = await fetch(`${ctx.cfg.demoMerchantUrl}/.well-known/haven-demo-merchant`)
     if (!discoveryRes.ok) {
       return fail(
@@ -361,7 +360,15 @@ export const x402CatalogGuidedPurchase: Scenario = {
     for (const product of discovery.products ?? []) {
       if (!product.qa_fixture) continue
       const call = deriveFixtureToolCall(product)
-      if (!call) continue
+      if (!call) {
+        return fail(
+          `qa_fixture product ${JSON.stringify(product.id)} (${JSON.stringify(product.qa_fixture)}) could not ` +
+            `be mapped to a (tool_name, tool_arguments) pair — id ${JSON.stringify(product.id)}, category ` +
+            `${JSON.stringify(product.category)}, tools ${JSON.stringify(product.tools)} (#3421). A qa_fixture ` +
+            'the tripwire cannot check is exactly the drift it exists to catch: fix the mapping in ' +
+            'deriveFixtureToolCall, or the discovery document, before this can pass.',
+        )
+      }
       const listed = findCatalogEntry(catalogRes.data.entries ?? [], mcpUrl, call.toolName, call.toolArguments)
       if (listed) {
         return fail(
@@ -370,6 +377,16 @@ export const x402CatalogGuidedPurchase: Scenario = {
             'delist it in a migration before moving MERCHANT_SKIP_SETTLE_PRODUCT.',
         )
       }
+    }
+
+    // ── 1. Resolve the VPN Basic catalog entry — never a hardcoded id ────────
+    const entry = findCatalogEntry(catalogRes.data.entries ?? [], mcpUrl, PRODUCT_TOOL, PRODUCT_ARGS)
+    if (!entry) {
+      return skip(
+        `No catalog entry for ${PRODUCT_TOOL} ${JSON.stringify(PRODUCT_ARGS)} at ${mcpUrl} is visible to this ` +
+          "agent — the #1299 demo-merchant catalog seed migration (058_demo_merchant_catalog) may not be " +
+          'applied on dev yet, or this agent is scoped to a different chain.',
+      )
     }
 
     // The signer that a connect-flow user runs locally: holds the delegate

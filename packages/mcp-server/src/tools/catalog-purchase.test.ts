@@ -395,6 +395,29 @@ describe('haven_quote_catalog_purchase', () => {
     expect(payload.suggested_tool).toBe('haven_discover_tools')
     expect(recordedCalls()).toHaveLength(1)
   })
+
+  // #3423 item 1: an http row (a plain-HTTP x402 paywall, no MCP tool_name)
+  // used to be refused with the mcp-only haven_pay_mcp_tool fallback, which
+  // an http row cannot follow (it has no tool_name). Discovery already names
+  // the right tool for the same row shape (discoveryHintFor).
+  it('hands off an http catalog row to haven_quote_x402, not haven_pay_mcp_tool', async () => {
+    stubFetch({
+      'GET /catalog/cat_http': {
+        status: 200,
+        body: { ...catalogEntry, id: 'cat_http', protocol: 'http', tool_name: null, resource_url: 'https://merchant.test/paid' },
+      },
+    })
+
+    const payload = await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_http' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    expect(payload.next_tool_name).toBe('haven_quote_x402')
+    expect(payload.next_arguments).toEqual({ url: 'https://merchant.test/paid' })
+    expect(payload.suggested_tool).toBe('haven_quote_x402')
+    // Exactly one network call: the catalog lookup. Nothing was contacted or reserved.
+    expect(recordedCalls()).toHaveLength(1)
+  })
 })
 
 describe('haven_prepare_catalog_purchase', () => {
@@ -746,6 +769,32 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
     expect(payload.message).toMatch(/tool metadata/)
+  })
+
+  // #3423 item 1: same hand-off correction as haven_quote_catalog_purchase
+  // above — both tools share getUsableCatalogMcpEntry.
+  it('hands off an http catalog row to haven_quote_x402, not haven_pay_mcp_tool', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': {
+        status: 200,
+        body: { ...CATALOG_ENTRY_RESPONSE, protocol: 'http', tool_name: null, resource_url: 'https://merchant.test/paid' },
+      },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    expect(payload.next_tool_name).toBe('haven_quote_x402')
+    expect(payload.next_arguments).toEqual({ url: 'https://merchant.test/paid' })
+    expect(payload.suggested_tool).toBe('haven_quote_x402')
+    // Exactly one network call: the catalog lookup.
+    expect(recordedCalls()).toHaveLength(1)
   })
 
   it('warns CATALOG_PRICE_DIFFERS when the catalog price is stale relative to the live quote', async () => {
@@ -2252,7 +2301,8 @@ describe('#2054 — erc7710-only merchants', () => {
       )
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
-      expect((res as { message?: string }).message).toContain('max_amount_human 1 USDC')
+      // #3423 item 3: both sides in whole tokens, atomic in parentheses.
+      expect((res as { message?: string }).message).toContain('your cap 1 USDC (1000000 atomic)')
       expect(x402Body()).toBeUndefined()
     })
 

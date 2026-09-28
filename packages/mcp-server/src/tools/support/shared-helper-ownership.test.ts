@@ -991,8 +991,9 @@ describe('MUTATION (a): selecting the wrong quoted option fails the cap', () => 
     // entries at the helper level either. 1.5 USDC quoted against a 1 USDC
     // cap refuses; the same helper pricing the 0.5 entry passes.
     const option = PAYMENT_REQUIRED.accepts[0]
+    // #3423 item 3: both sides in whole tokens, atomic in parentheses.
     expect(() => capPrice.priceSelectedOption({ kind: 'human', value: '1' }, option)).toThrow(
-      /exceeds max_amount_human 1 USDC/,
+      /exceeds your cap 1 USDC \(1000000 atomic\)/,
     )
     const cheap = { ...option, amount: '500000', maxAmountRequired: '500000' }
     const priced = capPrice.priceSelectedOption({ kind: 'human', value: '1' }, cheap)

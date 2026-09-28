@@ -103,6 +103,28 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toMatch(/both or\s+none/)
   })
 
+  // #3423 item 5: the catalog-path Signing/Settle prose used to describe only
+  // the EIP-3009 shape. erc7710 (chosen per merchant, not a blanket default)
+  // signs with haven_sign and settles with NO payment_header; EIP-3009 signs
+  // with haven_sign_x402 and settles WITH payment_header. Both must be named.
+  it('describes both settlement shapes in the catalog Signing/Settle paragraphs (#3423)', () => {
+    const settle = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('**Settle:**'),
+      HAVEN_SKILL_MD.indexOf('Step-by-step alternative'),
+    )
+    expect(settle).toMatch(/erc7710[\s\S]*?no\s+`payment_header`/i)
+    expect(settle).toMatch(/EIP-3009[\s\S]*?payment_header/)
+    expect(settle).not.toMatch(/live default/i)
+
+    const signing = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('**Signing:**'),
+      HAVEN_SKILL_MD.indexOf('**Settle:**'),
+    )
+    expect(signing).toContain('mcp__haven-signer__haven_sign`')
+    expect(signing).toContain('mcp__haven-signer__haven_sign_x402')
+    expect(signing).toMatch(/chosen per merchant/i)
+  })
+
   it('never tells the agent to pass haven_complete_mcp_tool a `payment_required` (#2353)', () => {
     // The tool has never declared `payment_required`; since #1307 the 402 is
     // read from the stored record by payment_id. This skill told agents to

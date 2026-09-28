@@ -42,7 +42,31 @@ export async function getUsableCatalogMcpEntry(
     throw err
   }
 
-  if (entry.status === 'degraded' || entry.protocol !== 'mcp' || !entry.toolName) {
+  // #3423 item 1: check the PROTOCOL first, the same order `discoveryHintFor`
+  // (`catalog-purchase.ts`) already uses. An http row has no `tool_name` at
+  // all, so the mcp-row fallback below (`haven_pay_mcp_tool`, which needs a
+  // tool name) cannot be followed — this is a plain-HTTP x402 paywall, and
+  // the right next call is the same one discovery already names for it.
+  // Precedent for a refusal that names a DIFFERENT tool: task-budgets.ts's
+  // unresolved-token refusal (#3213).
+  if (entry.protocol !== 'mcp') {
+    throw new HostedToolError({
+      code: 'CATALOG_ENTRY_UNUSABLE',
+      message:
+        `Catalog entry "${entry.id}" (${entry.name}) is a plain-HTTP x402 paywall, not an MCP ` +
+        'tool — this guided preflight only handles MCP catalog rows. Nothing was contacted and ' +
+        'nothing was reserved. Call haven_quote_x402 with the entry\'s resource URL instead.',
+      statusCode: 409,
+      nextStep: refusalNextStep({
+        nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+        nextTool: 'haven_quote_x402',
+        nextArguments: { url: entry.resourceUrl },
+      }),
+      suggestedTool: 'haven_quote_x402',
+    })
+  }
+
+  if (entry.status === 'degraded' || !entry.toolName) {
     throw new HostedToolError({
       code: 'CATALOG_ENTRY_UNUSABLE',
       message:

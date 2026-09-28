@@ -59,6 +59,49 @@ export type MaxAmountCap =
  * this is an extra agent affordance against surprise overcharges within budget.
  * Compared in atomic BigInt units.
  */
+/**
+ * #3423 item 3: the PRICE_EXCEEDS_MAX message used to mix units — the
+ * authorized side was atomic-only, the cap side was half human (the cap
+ * label), and a single trailing "(TOKEN, atomic units)" was stapled onto a
+ * sentence that was not atomic-only. When `decimals` is known (the real
+ * callers always resolve it before pricing), state BOTH sides in whole
+ * tokens, with the atomic figure in parentheses, and never say "atomic
+ * units" at all. When `decimals` is unknown, fall back to the old atomic-only
+ * phrasing, with "atomic units" appearing exactly once.
+ */
+function priceExceedsMaxMessage(input: {
+  authorizedAtomic: string
+  maxAmount: string
+  token: string | undefined
+  capLabel: string | undefined
+  decimals: number | null
+}): string {
+  const { authorizedAtomic, maxAmount, token, capLabel, decimals } = input
+  if (decimals === null) {
+    const unit = token ? `${token}, atomic units` : 'atomic units'
+    const capText = capLabel ? `${capLabel} (= ${maxAmount} atomic)` : `max_amount ${maxAmount}`
+    return (
+      `Authorized amount ${authorizedAtomic} exceeds ${capText} (${unit}); ` +
+      `this is the ceiling the merchant can settle at. No funds were moved. ` +
+      `Confirm the higher amount with the user before retrying with a larger cap.`
+    )
+  }
+  const tokenLabel = token ?? 'the merchant asset'
+  const priceHuman = atomicToDisplay(authorizedAtomic, decimals)
+  const capHuman = atomicToDisplay(maxAmount, decimals)
+  // A human-spelled cap (max_amount_human) states the cap in tokens first,
+  // with the atomic figure as the parenthetical; a bare max_amount (atomic)
+  // cap states the atomic figure the caller actually sent first instead.
+  const capText = capLabel
+    ? `your cap ${capHuman} ${tokenLabel} (${maxAmount} atomic)`
+    : `your cap max_amount ${maxAmount} (${capHuman} ${tokenLabel})`
+  return (
+    `Price ${priceHuman} ${tokenLabel} (${authorizedAtomic} atomic) exceeds ${capText}; ` +
+    `this is the ceiling the merchant can settle at. No funds were moved. ` +
+    `Confirm the higher amount with the user before retrying with a larger cap.`
+  )
+}
+
 export function assertWithinMaxAmount(
   authorizedAtomic: string,
   maxAmount: string | undefined,
@@ -67,6 +110,10 @@ export function assertWithinMaxAmount(
   // comparison is always atomic-vs-atomic; echoing "1 USDC" back at an agent
   // that wrote `max_amount_human: "1"` beats echoing 1000000 it never typed.
   capLabel?: string,
+  // #3423 item 3: the selected option's decimals, so the message can state
+  // both sides in whole tokens. Undefined/null keeps the atomic-only
+  // fallback — callers that have not resolved an asset cannot convert.
+  decimals?: number | null,
 ): void {
   if (maxAmount === undefined) return
   let authorized: bigint
@@ -86,16 +133,11 @@ export function assertWithinMaxAmount(
     })
   }
   if (authorized > cap) {
-    const unit = token ? `${token}, atomic units` : 'atomic units'
-    const capText = capLabel ? `${capLabel} (= ${maxAmount} atomic)` : `max_amount ${maxAmount}`
     // #2975: the documented remedy is re-quote → confirm with the user →
     // retry with a larger cap, so say so in the machine-readable fields too.
     throw new HostedToolError({
       code: AgentPaymentFailureCode.PriceExceedsMax,
-      message:
-        `Authorized amount ${authorizedAtomic} exceeds ${capText} (${unit}); ` +
-        `this is the ceiling the merchant can settle at. No funds were moved. ` +
-        `Confirm the higher amount with the user before retrying with a larger cap.`,
+      message: priceExceedsMaxMessage({ authorizedAtomic, maxAmount, token, capLabel, decimals: decimals ?? null }),
       statusCode: 400,
       nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again' }),
       retryWithNewQuote: true,
@@ -367,7 +409,7 @@ export function priceSelectedOption(
     asset: option.asset,
     network: option.network,
   })
-  assertWithinMaxAmount(amountAtomic, capAtomic.atomic, token?.symbol, capAtomic.label)
+  assertWithinMaxAmount(amountAtomic, capAtomic.atomic, token?.symbol, capAtomic.label, decimals)
   return {
     amountAtomic,
     // `decimals === null` means Haven does not recognise the asset. A human

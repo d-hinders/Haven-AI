@@ -177,11 +177,19 @@ the budget in the Haven dashboard, or wait for the period reset.
 4. Then FOLLOW THE RESPONSE'S GUIDANCE FIELDS: \`next_action\`, \`next_tool\`,
    and \`next_arguments\` name the exact next call — act on those first; the
    prose in this section is fallback and debugging detail. If the catalog
-   entry is missing or degraded, the response instead names
-   \`mcp__haven__haven_pay_mcp_tool\` (merchant URL, tool name, arguments) as
-   the manual fallback.
+   row is a plain-HTTP x402 paywall (no MCP tool metadata), the response
+   instead names \`mcp__haven__haven_quote_x402\` with the entry's resource
+   URL as \`url\`. If an MCP row is missing or degraded, the response instead
+   names \`mcp__haven__haven_pay_mcp_tool\` (merchant URL, tool name,
+   arguments) as the manual fallback.
 
-**Signing:** \`mcp__haven-signer__haven_sign_x402\` with \`payment_id\` ONLY —
+**Signing:** which signer tool to call depends on the settlement scheme the
+prepare/pay response already named as \`next_tool\` — follow that field, never
+hard-code a choice. **erc7710** (direct settlement — chosen per merchant when
+its 402 advertises \`assetTransferMethod: "erc7710"\`, never a blanket
+default): \`mcp__haven-signer__haven_sign\` with \`payment_id\` ONLY; the
+signer fetches the settlement child itself. **EIP-3009** (the bridge, used
+otherwise): \`mcp__haven-signer__haven_sign_x402\` with \`payment_id\` ONLY —
 the local signer fetches the exact signing bytes AND \`payment_required\`
 itself, so never relay \`typed_data\` or the 402 blob yourself. If the signer
 reports its fetched context carried no \`payment_required\` (older backend),
@@ -191,8 +199,11 @@ plus \`include_signing_payload=true\`, then pass \`payload_hash\`,
 \`x402_expected\` (the nested \`x402.expected\` object), and
 \`typed_data\`/\`typed_data_b64\` through unchanged.
 
-**Settle:** \`mcp__haven__haven_settle_mcp_tool\` with \`payment_id\`,
-\`signature\`, and \`payment_header\` ONLY — Haven rehydrates the merchant call
+**Settle:** \`mcp__haven__haven_settle_mcp_tool\` with \`payment_id\` and
+\`signature\` always. On **erc7710**, pass no \`payment_header\` — Haven
+assembles it at settle, so there is nothing to build locally and no funding
+transaction to wait for. On **EIP-3009**, also pass \`payment_header\` (from
+\`haven_sign_x402\`) ONLY. Either way Haven rehydrates the merchant call
 context (\`merchant_url\`, \`tool_name\`, \`arguments\`, \`mcp_transport\`)
 server-side from \`payment_id\`. Pass those four fields explicitly only as a
 version-skew fallback when Haven has no stored context for the id — both or

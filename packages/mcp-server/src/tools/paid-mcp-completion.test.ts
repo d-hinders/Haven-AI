@@ -506,6 +506,84 @@ describe('haven_settle_mcp_tool', () => {
     expect(data.reason).not.toMatch(/nothing to sweep/)
   })
 
+  /**
+   * #3423 item 4: the erc7710 settled branch used to omit
+   * `agent_summary.purchase_summary` — only the EIP-3009 branch built one,
+   * even though the skill tells every agent to report from it. The stubbed
+   * payment status here deliberately carries a (settlement) `txHash`, to pin
+   * the #3423 trap: `funding_tx_hash` must stay `null`, never back-filled
+   * from it (`buildPurchaseSummary`'s `hasFundingLeg: false`).
+   */
+  it('reports agent_summary.purchase_summary on a settled erc7710 settle, with funding_tx_hash null even though payment carries a tx_hash', async () => {
+    stubFetch({})
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    // No payment_header => erc7710 branch: the signature IS the settlement child.
+    vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue('HEADER_FROM_HAVEN')
+    const SETTLE_HASH = '0x' + 'ab'.repeat(32)
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: {
+        content: [{ type: 'text', text: 'storage unlocked' }],
+        structuredContent: { summary: { product_name: 'CloudNest 50GB', invoice_id: 'inv_1' } },
+      },
+      settlementTxHash: SETTLE_HASH,
+      evidenceOutcome: { outcome: 'confirmed' },
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: {
+        rail: 'delegation',
+        remaining_atomic: '4500000',
+        remaining_display: '4.5 USDC',
+        token_symbol: 'USDC',
+        source: 'active_delegations',
+      },
+      warnings: [],
+      payment: {
+        paymentId: 'pay_7710_settled',
+        kind: 'payment_intent',
+        rail: 'erc7710',
+        status: 'confirmed',
+        phase: AgentPaymentPhase.PaymentConfirmed,
+        nextAction: AgentPaymentNextAction.None,
+        amount: '500',
+        token: 'USDC',
+        resourceUrl: 'http://merchant.test/mcp',
+        merchantAddress: '0x0000000000000000000000000000000000000001',
+        // Deliberately non-null: this is the SETTLEMENT hash on erc7710, and
+        // the trap the review flagged is treating it as a funding hash.
+        txHash: SETTLE_HASH,
+        expiresAt: '2026-09-28T12:00:00.000Z',
+        chainId: 84532,
+        message: 'The payment settled.',
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710_settled',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_cloud_storage',
+        arguments: { tier: '50gb' },
+      }),
+    )
+    const data = result.data as Record<string, any>
+
+    expect(data.settled).toBe(true)
+    expect(data.agent_summary.purchase_summary).toBeDefined()
+    const summary = data.agent_summary.purchase_summary as Record<string, unknown>
+    expect(summary.status).toBe('settled')
+    expect(summary.settlement_tx_hash).toBe(SETTLE_HASH)
+    // THE trap: funding_tx_hash must be null, never back-filled from the
+    // payment's txHash (which is the settlement hash on this scheme).
+    expect(summary.funding_tx_hash).toBeNull()
+    expect(summary.product).toBe('CloudNest 50GB')
+  })
+
   // The zero-hash ban lives at the SHARED response boundary
   // (deliverMerchantPayment), not in the erc7710 branch: a facilitator that
   // accepts but does not settle produces the same sentinel on the eip3009 arm

@@ -294,8 +294,19 @@ export function buildPurchaseSummary(input: {
   fundingTxHash: string | null
   settlementTxHash: string | null
   allowance: AgentPurchaseSummary['allowance']
+  /**
+   * #3423 item 4: erc7710 has NO funding leg — the signature IS the
+   * settlement child, and `payment.txHash` (when present) is the SETTLEMENT
+   * transaction, not a funding one. Without this flag, the `?? input.payment
+   * ?.txHash` fallback below would back-fill that settlement hash into
+   * `funding_tx_hash`, mislabeling it. Defaults to `true` (the EIP-3009
+   * shape every existing caller has) so this is additive, not a silent
+   * behavior change for the bridge.
+   */
+  hasFundingLeg?: boolean
 }): AgentPurchaseSummary {
   const merchantSummary = merchantPurchaseMetadata(input.merchantResult)
+  const hasFundingLeg = input.hasFundingLeg ?? true
   return {
     status: 'settled',
     product: merchantSummary.product,
@@ -308,7 +319,7 @@ export function buildPurchaseSummary(input: {
       resource_url: input.payment?.resourceUrl ?? null,
     },
     invoice_id: merchantSummary.invoiceId,
-    funding_tx_hash: input.fundingTxHash ?? input.payment?.txHash ?? null,
+    funding_tx_hash: hasFundingLeg ? (input.fundingTxHash ?? input.payment?.txHash ?? null) : null,
     // The merchant's optional PAYMENT-RESPONSE receipt can name its own tx.
     // Preserve it as evidence, never as the source of the settled status.
     settlement_tx_hash: input.settlementTxHash,

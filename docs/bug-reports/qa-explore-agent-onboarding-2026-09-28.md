@@ -11,7 +11,10 @@ last-verified: "2026-09-28"
 
 # agent-onboarding-cold — run 2 (2026-09-28)
 
-Second run of the `qa-explore-agent-onboarding` scenario, plus a focused run for
+Second run of the `qa-explore-agent-onboarding` scenario (rubric:
+[`.claude/commands/qa-explore-agent-onboarding.md`](../../.claude/commands/qa-explore-agent-onboarding.md);
+previous run: [`qa-explore-agent-onboarding-2026-09-06.md`](qa-explore-agent-onboarding-2026-09-06.md),
+which also carries the A0 baseline), plus a focused run for
 **epic #3302 box 4** (can a cold agent find the release/compat page from
 `/for-agents.md`?). Target: the dev frontend
 `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`. The
@@ -30,23 +33,44 @@ not a different agent.
 | Score | Run 2 (this) | Run 1 (2026-09-06) | A0 baseline | Moved |
 |---|---|---|---|---|
 | **1. Discovery** | **3** — landing → `/llms.txt` → `/for-agents.md`, nothing guessed | 3 | 1 | held |
-| **2. First reply** | **3 of 4**: account + passkey, funding, budget approval. Credential rotation is not named. | 3 of 3 (scored on three steps) | 2 of 3 | rubric widened to four; see finding 5 |
-| **3. Tool calls to the login wall** | **8** | 7 | ~10 | +1 (one extra call: a text re-extract of `/releases`) |
-| **4a. `haven login`** | **correct** | not attempted | n/a | new pass |
-| **4b. `agents connect`** | **not attempted**: blocked at the device login, which is the human's step. The command it drafted is correct. | blocked | n/a | — |
+| **2. First reply** | **3 of 4** on the literal rubric: account + passkey, funding, budget approval. Credential rotation is not named. | 3 of 3 (run 1 scored the three setup steps) | 2 of 3 | **held**: the same three setup steps. See finding 5 on rubric drift. |
+| **3. Tool calls to the login wall** | **8** (the wall is the first hand-off, sent after call 8, which is the login start that produced the device link) | 7 | ~10 | +1: this run read `/releases` twice (fetch, then a text re-extract); run 1 ended on `whoami` calls instead of the device-login start |
+| **4a. `haven login`** | **correct**: verbatim commands below | not attempted | n/a | new pass |
+| **4b. `agents connect`** | **not attempted**: blocked at the device login, which is the human's step. Drafted verbatim below. | blocked | n/a | — |
 
 ## Score 1 — request sequence (run 2a, landing URL only)
 
-| # | Request | Status | Why |
+These are the agent's tool calls up to the login wall (score 3 counts them):
+
+| # | Call | Status | Why |
 |---|---|---|---|
-| 1 | `GET /` | 200 | The given URL. The hero text says "start at /llms.txt"; a Dev marker is shown. |
+| 1 | `GET /` | 200 | The given URL. The landing HTML carries `<link rel="alternate" … href="/llms.txt">` and the hero sentence "If you are an AI agent reading this for your user, start at /llms.txt". A Dev marker is shown. |
 | 2 | `GET /llms.txt` | 200 | Advertised on the landing page |
 | 3 | `GET /for-agents.md` | 200 | The llms.txt "Start here" link |
 | 4 | `GET /.well-known/haven.json` | 200 | Named by llms.txt and for-agents.md: `environment: dev`, CLI channel `@haven_ai/cli@dev` |
 | 5 | `GET /releases` | 200 | The llms.txt link "Something broke — an update may be needed" |
-| 6 | `npx -y @haven_ai/cli@dev --help` | ok | Named by for-agents.md |
-| 7 | `haven login --api <dev api> --json --no-wait` | `ok: true` | for-agents.md step 1 |
-| 8 | `haven login --poll <device_code> --api <dev api> --json` | `status: pending` | One poll round |
+| 6 | (text re-extract of `/releases`) | — | The agent re-read the same page as text |
+| 7 | `npx -y @haven_ai/cli@dev --help` | ok | Named by for-agents.md |
+| 8 | `npx -y @haven_ai/cli@dev login --api https://havenbackend-dev-8b95.up.railway.app --json --no-wait` | `ok: true` | for-agents.md step 1: returns the device link and code |
+
+After the wall (not counted): one poll, `npx -y @haven_ai/cli@dev login --poll <device_code> --api https://havenbackend-dev-8b95.up.railway.app --json` → `status: pending`, `retry_after: 5`. The agent stopped there, as instructed.
+
+## Score 4 — the commands, verbatim
+
+**4a, correct.** The agent read the manifest's channel (`@haven_ai/cli@dev`), passed `--api` to stay off the production default, used the non-blocking sequence, and relayed the link and code with "It can't sign anything, approve a budget or move funds":
+
+```
+npx -y @haven_ai/cli@dev login --api https://havenbackend-dev-8b95.up.railway.app --json --no-wait
+npx -y @haven_ai/cli@dev login --poll <device_code> --api https://havenbackend-dev-8b95.up.railway.app --json
+```
+
+**4b, not attempted.** This is the command it drafted to run once the human approved the login, as written:
+
+```
+haven agents connect --name <n> --budget 25 --token USDC --period 1440 --run --json
+```
+
+The flags are right (`--name`, `--budget`, `--token USDC`, `--period` in minutes). It is written with the bare `haven` binary name instead of the `npx -y @haven_ai/cli@dev` prefix used for login, so pasted as-is it would need the CLI on `PATH`. It was never run, so it is not scored.
 
 ## Epic #3302 box 4 — release/compat page from `/for-agents.md` (run 2b)
 
@@ -81,10 +105,17 @@ First reply (message 1):
 (The user code and expiry were live values; they are replaced here because they
 are a short-lived login credential.)
 
-Message 2 (passkey fallback), message 3 (funding) and message 4 (budget
-approval) follow the runbook's scripts. Message 3 says it will confirm the
-address **and chain** with `haven wallets funding` before the user sends
-anything. Message 4 relays `<approval.url>` rather than building a link.
+Message 2, at the passkey step, sent only if the browser can't make one:
+
+> The passkey must be made on your own device. It is what keeps the account yours, so nobody, Haven included, can move your funds without you. If this browser can't do it, open `<host>/onboarding?next=/agents` on your phone and finish there.
+
+Message 3, at funding (drafted; not reached):
+
+> Your Haven account needs USDC before I can pay for anything. USDC only, no ETH: Haven sponsors the gas. This is a test deployment, so it's testnet USDC (Base Sepolia per the manifest; I'll confirm the exact address and chain with `haven wallets funding` before you send). Please don't send to an address or a chain I haven't confirmed with you. A small amount first is fine.
+
+Message 4, at budget approval (drafted; not reached; relays the link the connector returns and does not build one):
+
+> Setup is done on my side. Approve the budget here: `<approval.url>`. Approve it with your passkey; nothing can be spent until you do.
 
 ## Findings
 
@@ -104,8 +135,18 @@ anything. Message 4 relays `<approval.url>` rather than building a link.
    - The `/releases` notes reference "the changelog" and "(+N more in the changelog)", but neither `/releases` nor the manifest links one.
    - The mcp and sdk 0.6.0 notes say "breaking" with `action_required: false` and no minimum. Only the signer has one, and nothing on the page explains why.
    - Not filed; noted for the #3302 owner.
-5. **First reply says "four things need you" and lists three (minor).** It also never names credential rotation, which is the fourth human step in this scenario's rubric. Rotation is not needed for first setup, so this is a rubric question as much as a finding. Not filed.
-6. **`haven login --poll --json` echoes `device_code` (minor).** The device code is a short-lived secret that finishes the login. Echoing it on every poll makes it easy to leak into agent transcripts: run 2a's own redaction missed it once. `--no-wait` must return it once; the poll output need not repeat it. Not filed yet: check whether the poll echo is load-bearing for a client before changing it.
+5. **The rubric drifted, so score 2's denominator is ambiguous (minor, worth deciding).**
+   - The rubric has named four human steps, including "rotate a credential", since it was created (#2592, `b8bdb791b`).
+   - Run 1's report records a correction to three setup steps, but that edit never landed.
+   - The live manifest's `human_only_steps` lists three: `signup_and_passkey`, `fund`, `approve_budget`.
+   - So the rubric, run 1's recorded correction and the product disagree. The next scorer inherits the ambiguity.
+   - Separately, this run's first reply says "four things need you" and then lists three.
+   - Not filed here; noted for the rubric's owner.
+6. **`haven login --poll --json` echoes `device_code` (minor, secret hygiene).**
+   - The device code is a short-lived secret that finishes the login. Echoing it on every poll makes it easy to leak into agent transcripts: run 2a's own redaction missed it once.
+   - `--no-wait` must return it once; the poll output need not repeat it.
+   - Open action, check whether any client relies on the poll echo before changing it. Not filed here; it is listed for triage, and no live risk remains because the login expired unapproved.
+7. **The 0.6.0 release notes say "breaking" for connect as well** as for mcp and sdk, all with `action_required: false` (see finding 4).
 
 ## Guardrails
 

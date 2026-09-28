@@ -774,6 +774,9 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         expires_at: Number(terms.expires_at),
         remaining_atomic: meter.remainingAtomic,
         from_chain: meter.fromChain,
+        // #3386: no longer written here — the issue step resolves the
+        // merchant label unconditionally off the old row by hash, which
+        // stays current (via `ON DELETE SET NULL`) all the way to issue.
       })
     }
 
@@ -919,6 +922,20 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
           }
         }
 
+        // #3386: the merchant label, read unconditionally off the old row by
+        // hash — never trusted from the snapshot. The old row survives the
+        // revoke (it is marked `revoked`, never deleted) and its FK is kept
+        // current by `ON DELETE SET NULL`, so this resolves the CURRENT
+        // state of the merchant even if it was deleted between metering and
+        // this request, rather than replaying a value frozen at metering
+        // time that could point at a merchant no longer there. Read once per
+        // entry, and only when the entry actually produced a piece to insert
+        // — an entry with nothing to carry has no label to resolve.
+        const merchantId =
+          pieces.length === 0
+            ? null
+            : ((await findDelegationTerms(request.params.id, entry.delegation_hash))?.merchant_id ?? null)
+
         for (const piece of pieces) {
           const version = await nextDelegationVersion(
             request.params.id,
@@ -962,6 +979,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
             expiresAt: piece.terms.expiresAt,
             rekeyId: rekey.id,
             carryRole: piece.role,
+            merchantId,
           })
           if (inserted === false) {
             return reply.code(409).send({ error: 'Unlinked agents cannot receive new budget delegations' })

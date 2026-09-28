@@ -712,6 +712,19 @@ tool for a one-off check against an arbitrary merchant (see its header for the
 Reference: `packages/demo-merchant-mcp/README.md` § *ERC-7710 Smart-Account
 Payments*.
 
+> **Re-verified #3386 (2026-09-28):** `merchant-catalog.ts`'s
+> `collectAssetTransferMethods` now scopes to the offer's recorded network
+> (`accepts[0]`'s), the same scoping `collectPayTo` already used, instead of
+> scanning every `accepts[]` option regardless of network. This is a CATALOG
+> READ-SIDE change — what `merchant_catalog.asset_transfer_methods` records
+> for the marketplace and merchant-locked-budget build gate — and does not
+> touch this section's claims. Scheme SELECTION on a live payment
+> (`selectStandardPaymentOption`, `selectX402SettlementScheme`,
+> `routes/x402.ts`) does not read that column at all, so the erc7710/EIP-3009
+> dispatch described above, the QA scenario that proves it, and the ordering
+> footgun analysis are unaffected. Nothing else in this section's covered
+> claims was re-read, so `last-verified` is deliberately not bumped.
+
 ### The `DEV` badge
 
 `NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip in the app

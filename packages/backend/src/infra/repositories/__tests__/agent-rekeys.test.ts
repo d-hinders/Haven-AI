@@ -19,8 +19,10 @@ import {
   abandonRekey,
   adoptAbandonedCarry,
   completeRekey,
+  findDelegationTerms,
   findInFlightRekey,
   findRekey,
+  insertRekeyDelegation,
   invalidateOldPayerIntents,
   markCompleted,
   markIssued,
@@ -30,6 +32,7 @@ import {
   rotateAgentCredentials,
   type CarrySnapshotEntry,
 } from '../agent-rekeys.js'
+import { findReusablePendingDelegation } from '../delegation-budgets.js'
 
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const OLD_DELEGATE = '0x00000000000000000000000000000000000000d1'
@@ -668,6 +671,233 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     )
     expect(row.rows[0].rekey_id).toBeNull()
     expect(row.rows[0].carry_role).toBeNull()
+  })
+
+  // ── #3386: the merchant label carries onto every replacement piece ─────
+
+  async function seedMerchant(): Promise<string> {
+    const n = ++seq
+    const row = await db.query<{ id: string }>(
+      `INSERT INTO merchants (slug, name, description, listing_status)
+       VALUES ($1, $2, 'x', 'live') RETURNING id`,
+      [`rekey-merchant-${n}`, `Rekey merchant ${n}`],
+    )
+    return row.rows[0].id
+  }
+
+  /** A merchant-locked ACTIVE grant — the old row a re-key replaces. */
+  async function seedMerchantLockedDelegation(
+    agentId: string,
+    merchantId: string,
+    recipient = '0x' + 'c0'.repeat(20),
+  ): Promise<string> {
+    const hash = `0x${String(++seq).padStart(64, '0')}`
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds, start_date,
+          expires_at, merchant_id)
+       VALUES ($1, 84532, $2, $3, $4, '{"signed":"capability"}', 1, 'active', '1000000',
+               86400, 0, 9999999999, $5)`,
+      [agentId, USDC, recipient, hash, merchantId],
+    )
+    return hash
+  }
+
+  it('findDelegationTerms reads the merchant_id off the old row', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const hash = await seedMerchantLockedDelegation(seeded.agentId, merchantId)
+
+    const terms = await findDelegationTerms(seeded.agentId, hash)
+    expect(terms?.merchant_id).toBe(merchantId)
+
+    // MUTATION TARGET — an ordinary (unlocked) delegation reads null, not the
+    // column being silently dropped from the SELECT.
+    const plainHash = await seedPlainDelegation(seeded.agentId)
+    expect((await findDelegationTerms(seeded.agentId, plainHash))?.merchant_id).toBeNull()
+  })
+
+  it('insertRekeyDelegation writes the carried merchant_id, and the CHECK holds because the recipient survives', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId,
+    })
+    expect(inserted).toBe(true)
+
+    const row = await db.query<{ merchant_id: string; recipient_address: string }>(
+      `SELECT merchant_id, recipient_address FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBe(merchantId)
+    expect(row.rows[0].recipient_address).toBe(recipient.toLowerCase())
+  })
+
+  it('MUTATION TARGET — insertRekeyDelegation with merchantId: null writes no label', async () => {
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: null,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId: null,
+    })
+    const row = await db.query<{ merchant_id: string | null }>(
+      `SELECT merchant_id FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBeNull()
+  })
+
+  it('a merchant deleted between metering and issue does not block issuance — the insert writes merchant_id: null', async () => {
+    // #3386 review finding: the route resolves `merchant_id` by a by-hash
+    // read of the old row moments before this insert, but the merchant can
+    // be deleted in that window. The FK is `ON DELETE SET NULL`, so the OLD
+    // row's read already comes back null once the merchant is gone — but
+    // proving the INSERT itself survives a merchant id resolved a moment
+    // earlier and since deleted (a race the by-hash read alone cannot rule
+    // out under concurrency) is the point of this test: the subselect in
+    // `INSERT_REKEY_DELEGATION_SQL` resolves any non-existent merchant id to
+    // NULL rather than throwing 23503.
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    await db.query(`DELETE FROM merchants WHERE id = $1`, [merchantId])
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      // The value resolved a moment before the merchant vanished — exactly
+      // what the route would still be holding.
+      merchantId,
+    })
+    expect(inserted).toBe(true)
+
+    const row = await db.query<{ merchant_id: string | null }>(
+      `SELECT merchant_id FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBeNull()
+  })
+
+  it('MUTATION TARGET — a present merchant is still carried through the same subselect (the guard above is not a blanket null)', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId,
+    })
+    expect(inserted).toBe(true)
+
+    const row = await db.query<{ merchant_id: string | null }>(
+      `SELECT merchant_id FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBe(merchantId)
+  })
+
+  it('#3386 reuse decision — a re-key\'s own pending replacement is never handed out by build reuse', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId,
+    })
+    // Abandon the re-key — the row stays `pending` forever (completion
+    // requires `stage = 'issued'`, and `abandoned` is terminal).
+    await abandonRekey(rekey.id, seeded.agentId, 'stopped')
+
+    // MUTATION TARGET — without `rekey_id IS NULL`, carrying merchant_id onto
+    // this dead row would make it eligible here: a later merchant-locked
+    // build for the SAME (agent, token, recipient, budget, period, merchant)
+    // slot must build a fresh row, not hand out the abandoned re-key's inert
+    // pending one.
+    const reusable = await findReusablePendingDelegation(
+      seeded.agentId,
+      USDC,
+      recipient,
+      '1000000',
+      86_400,
+      9_999_999_999,
+      db,
+      merchantId,
+    )
+    expect(reusable).toBeNull()
   })
 })
 

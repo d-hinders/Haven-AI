@@ -40,6 +40,7 @@ const {
   mockInsertRekeyDelegation,
   mockMarkIssued,
   mockComputeAddress,
+  mockFindDelegationTerms,
 } = vi.hoisted(() => ({
   mockFindOwnedRekeyAgent: vi.fn(),
   mockFindRekey: vi.fn(),
@@ -47,6 +48,7 @@ const {
   mockInsertRekeyDelegation: vi.fn(),
   mockMarkIssued: vi.fn(),
   mockComputeAddress: vi.fn(),
+  mockFindDelegationTerms: vi.fn(),
 }))
 
 // The pool is deliberately not stubbed — every query is behind a repository
@@ -66,6 +68,9 @@ vi.mock('../../infra/repositories/agent-rekeys.js', async (importOriginal) => {
     nextDelegationVersion: (...a: unknown[]) => mockNextVersion(...a),
     insertRekeyDelegation: (...a: unknown[]) => mockInsertRekeyDelegation(...a),
     markIssued: (...a: unknown[]) => mockMarkIssued(...a),
+    // #3386: issue reads the merchant label off the old row; these tests
+    // exercise the clock, not the label, so the old row carries none.
+    findDelegationTerms: (...a: unknown[]) => mockFindDelegationTerms(...a),
   }
 })
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
@@ -171,6 +176,7 @@ describe('#1849 re-key issue — the carry is planned on the metering clock', ()
     mockNextVersion.mockResolvedValue(2)
     mockInsertRekeyDelegation.mockResolvedValue(undefined)
     mockMarkIssued.mockResolvedValue({ stage: 'issued' })
+    mockFindDelegationTerms.mockResolvedValue({ merchant_id: null })
     mockComputeAddress.mockResolvedValue(DELEGATE_ACCOUNT)
   })
 

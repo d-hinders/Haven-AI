@@ -55,6 +55,15 @@ export interface CarrySnapshotEntry {
   remaining_atomic: string
   /** False means the read fell back; the carry refuses these (see rekey-carry). */
   from_chain: boolean
+  /**
+   * @deprecated (#3386) No longer written into new snapshots — the issue
+   * step now reads the merchant label unconditionally off the old row by
+   * hash (`findDelegationTerms`), which stays current under `ON DELETE SET
+   * NULL` even if the merchant vanishes between metering and issue. Kept
+   * optional only so a `carry_snapshot` persisted before this deprecation
+   * still parses; nothing reads it any more — it is carried through as JSON.
+   */
+  merchant_id?: string | null
 }
 
 // ── Reads the re-key route needs, kept out of the route (#1698 review) ────
@@ -123,10 +132,12 @@ export interface DelegationTermsRow {
   period_seconds: number
   start_date: string
   expires_at: string
+  /** The merchant this delegation was issued for, if any (#3386). */
+  merchant_id: string | null
 }
 
 export const FIND_DELEGATION_TERMS_SQL = `SELECT token_address, recipient_address, budget_atomic, period_seconds,
-            start_date, expires_at
+            start_date, expires_at, merchant_id
        FROM agent_delegations WHERE agent_id = $1 AND delegation_hash = $2`
 
 export async function findDelegationTerms(
@@ -161,11 +172,21 @@ export async function nextDelegationVersion(
   return result.rows[0].next_version
 }
 
+// merchant_id is written via a subselect rather than the raw parameter
+// (#3386): the label is resolved from the OLD row moments before this insert
+// runs, and the merchant can be deleted in that window. `ON DELETE SET NULL`
+// keeps the FK satisfied for an existing row, but a raw INSERT referencing a
+// merchant id that no longer exists at insert time would still violate the
+// FK (23503) and fail that issue request, after the revoke (a retry would
+// re-read the old row, by then NULL). The subselect resolves to NULL instead
+// whenever the merchant is gone by the time this statement runs, so no issue
+// request fails on that race.
 export const INSERT_REKEY_DELEGATION_SQL = `INSERT INTO agent_delegations (
          agent_id, chain_id, token_address, recipient_address, delegation_hash,
          delegation_json, version, status, budget_atomic, period_seconds,
-         start_date, expires_at, rekey_id, carry_role
-       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13)
+         start_date, expires_at, rekey_id, carry_role, merchant_id
+       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13,
+         (SELECT m.id FROM merchants m WHERE m.id = $14))
        ON CONFLICT (delegation_hash) DO NOTHING`
 
 export async function insertRekeyDelegation(
@@ -184,6 +205,17 @@ export async function insertRekeyDelegation(
     expiresAt: number
     rekeyId: string
     carryRole: string
+    /**
+     * The merchant this replacement is FOR, resolved from the delegation it
+     * replaces (#3386). A label only — the recipient pin is unchanged, and
+     * the migration 101 CHECK (`merchant_id IS NULL OR recipient_address IS
+     * NOT NULL`) is satisfied the same way the original grant satisfied it:
+     * every merchant-locked delegation carries a recipient. Written through a
+     * subselect (see `INSERT_REKEY_DELEGATION_SQL`) so a merchant deleted
+     * between resolution and this insert resolves to NULL instead of
+     * throwing an FK violation.
+     */
+    merchantId: string | null
   },
   db: Executor = pool,
 ): Promise<boolean> {
@@ -207,6 +239,7 @@ export async function insertRekeyDelegation(
       row.expiresAt,
       row.rekeyId,
       row.carryRole,
+      row.merchantId,
     ])
     return true
   })

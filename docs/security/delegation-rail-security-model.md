@@ -294,6 +294,20 @@ The chain round trip that derives the delegate account address is taken
 *before* the lock — a slot held across an RPC turns a slow node into a stalled
 slot, which would trade a duplicate-offer defect for an availability one.
 
+An abandoned re-key can still leave a slot holding two pending rows at once —
+its own inert re-key replacement plus a later ordinary build's row — because
+re-key rows are excluded from reuse (#3386) rather than merged with it. No
+Haven flow presents that re-key row for signing again, so it is a leftover,
+not a second live offer, and a later re-key revokes it along with every
+other non-revoked row (`pending` included) before it can complete. The raw
+activate route (`POST /agents/:id/delegations/:hash/activate`) does not
+filter on `rekey_id`, though, which leaves a narrow race open: an issue
+request stalled across an abandon can still insert its rows while a
+successor re-key on the same key is in flight past its revoke step — the
+insert's lock requires only that some re-key of the agent be in flight, not
+that one — and those rows are left `pending` under the key the successor
+installs (#3439).
+
 **Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
 ordinary recipient-pinned budget whose pin the server fills with the
 merchant's verified payTo on the agent's chain. That is the one address every
@@ -305,8 +319,13 @@ it (409 otherwise). No merchant-locked budget is issued when:
 - the offers disagree, or one of them names no payTo;
 - another merchant's non-delisted offer on that network names the same
   address (`shared`);
-- any of the offers lacks ERC-7710. A pinned budget cannot pay an EIP-3009
-  merchant, per the rule in §8 below;
+- any of the offers lacks ERC-7710, read per the offer's own RECORDED
+  network — `merchant_catalog.asset_transfer_methods` reflects only the
+  `accepts[]` options on that row's `accepts[0]` network (#3386, the same
+  scoping `pay_to` already used), so an offer probed on a network where the
+  merchant only accepts EIP-3009 counts as lacking ERC-7710 there even if a
+  DIFFERENT network's challenge names it. A pinned budget cannot pay an
+  EIP-3009 merchant, per the rule in §8 below;
 - the payTo is one of the agent's own addresses: its delegate key, its
   delegate account or its treasury.
 
@@ -323,10 +342,6 @@ Two limits are deliberate:
 - **Rotation.** A later payTo rotation never re-points a signed grant. The
   budget stays pinned to the address the owner signed for, and the merchant
   page reports it `stale`.
-
-A re-key (§6a) carries the recipient pin to the replacement grant but not
-the merchant label, so the budget keeps its authority and loses only its
-place on the merchant page (#3386).
 
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:

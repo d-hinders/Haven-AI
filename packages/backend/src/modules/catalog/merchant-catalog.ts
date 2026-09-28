@@ -64,8 +64,9 @@ export interface ProbeResult {
   network?: string
   /**
    * Distinct x402 `assetTransferMethod`s advertised across all `accepts[]`
-   * options, in first-seen order (e.g. `['eip3009', 'erc7710']`). Undefined for
-   * non-x402 rails (MPP) and when the challenge carries no `accepts[]`.
+   * options on the recorded network, in first-seen order (e.g. `['eip3009',
+   * 'erc7710']`). Undefined for non-x402 rails (MPP) and when the challenge
+   * carries no `accepts[]`.
    */
   assetTransferMethods?: string[]
   /**
@@ -88,18 +89,28 @@ interface X402Accept {
 const DEFAULT_ASSET_TRANSFER_METHOD = 'eip3009'
 
 /**
- * The distinct `assetTransferMethod`s a merchant advertises across every
- * `accepts[]` option, in first-seen order. Per the x402 exact-EVM spec an
- * omitted method means EIP-3009, so a plain merchant reports `['eip3009']` and
- * an ERC-7710-capable one that lists both reports `['eip3009', 'erc7710']`.
- * Scanning all options (not just the first) matters because merchants keep the
- * EIP-3009 option first for compatibility and add `erc7710` alongside it.
+ * The distinct `assetTransferMethod`s a merchant advertises on the RECORDED
+ * network (#3386) — `accepts[0]`'s, the same scoping `collectPayTo` already
+ * uses and the one the row's own `network`/price columns are read from. Per
+ * the x402 exact-EVM spec an omitted method means EIP-3009, so a plain
+ * merchant reports `['eip3009']` and an ERC-7710-capable one that lists both
+ * on that network reports `['eip3009', 'erc7710']`. Scanning every option ON
+ * THAT NETWORK (not just the first) still matters — merchants keep the
+ * EIP-3009 option first for compatibility and add `erc7710` alongside it —
+ * but an option on a DIFFERENT network says nothing about what this row's
+ * network accepts. Before this, a challenge listing EIP-3009 on one network
+ * and ERC-7710 on another recorded the union on whichever network happened to
+ * be `accepts[0]`'s, so a merchant-locked budget could be built for a network
+ * the merchant never accepts ERC-7710 on there — stranding the budget, never
+ * misdirecting money.
  */
 function collectAssetTransferMethods(payload: unknown): string[] | undefined {
   const accepts = (payload as { accepts?: unknown[] })?.accepts
   if (!Array.isArray(accepts) || accepts.length === 0) return undefined
+  const network = (accepts[0] as X402Accept | null)?.network
   const methods: string[] = []
   for (const entry of accepts) {
+    if ((entry as X402Accept | null)?.network !== network) continue
     const method = (entry as X402Accept).extra?.assetTransferMethod ?? DEFAULT_ASSET_TRANSFER_METHOD
     if (!methods.includes(method)) methods.push(method)
   }

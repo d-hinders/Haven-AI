@@ -3342,7 +3342,7 @@ export type components = {
             price_atomic: string | null;
             asset: string | null;
             network: string | null;
-            /** @description Comma-separated set of x402 assetTransferMethods the merchant advertises (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null. */
+            /** @description Comma-separated set of x402 assetTransferMethods the merchant advertises on the recorded network (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null. */
             asset_transfer_methods: string | null;
             /** @enum {string} */
             status: "active" | "degraded" | "delisted";

@@ -67,7 +67,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-27"
+last-verified: "2026-09-28"
 ---
 
 # MCP Runtime Compatibility
@@ -75,6 +75,29 @@ last-verified: "2026-09-27"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Re-verified unchanged (#3410, 2026-09-28, consent display):** the local
+> MCP server's first-launch consent screen now renders the budget in whole
+> tokens instead of atomic units (`packages/mcp/src/consent.ts`,
+> `renderConsentBlock` → `describeBudgetAmount`), with an explicit
+> `(atomic units)` label when the token's decimals cannot be resolved through
+> the SDK registry. Display only — this document's consent-hash contract
+> holds unchanged: `computeConsentHash` (`packages/mcp/src/consent.ts:96-119`)
+> still hashes identity, tool names and the RAW ATOMIC allowance strings, so
+> no installed sidecar `.ack.json` or `HAVEN_MCP_ACK` value is invalidated,
+> and the live path (`onchain.amount`) and the credential seed
+> (`allowance_amount`) hash byte-identical strings (pinned by a literal-hash
+> test and a live≡seed equality test in `packages/mcp/src/consent.test.ts`).
+> The unreachable human-decimal `configuredAmount` fallback in the live-read
+> mapping was removed (`onchain.amount ?? '0'`), so no human-decimal value can
+> reach the atomic field the hash covers. New SDK surface consumed here:
+> `resolveTokenBySymbol` and `formatTokenAmount` (`@haven_ai/sdk`, additive
+> exports). No tool added, renamed or re-shaped, no schema or argument change,
+> no version-skew axis moves. Scope of this note: the consent screen's
+> rendering path and the two stale line citations below (the consent-hash
+> function moved from `consent.ts:81-103` to `:96-119` under this change;
+> both now read `:96-119`). Nothing else in this document was re-verified in
+> this pass.
 >
 > **Re-verified unchanged (#3279, 2026-09-25, Safe-vocabulary copy):** copy-only
 > edits on two surfaces this document covers. The local signer's first-launch
@@ -158,7 +181,7 @@ last-verified: "2026-09-27"
 > older than #3128 the SDK maps the three page fields to `null` ("unknown"),
 > never a fabricated `0` / `false`. The strict/permissive split, the tool-NAME
 > set and the consent hash do not move (the hash covers identity, tool names
-> and allowances, not schemas — `packages/mcp/src/consent.ts:81-103`). The
+> and allowances, not schemas — `packages/mcp/src/consent.ts:96-119`). The
 > two allowance reads are reconciled additively: `HavenAllowance` gains
 > `remainingDisplay` (derived client-side by the same function the bootstrap
 > summary uses) and `HavenAgentAllowanceSummary` gains `id` and
@@ -500,7 +523,7 @@ last-verified: "2026-09-27"
 > registered tool-NAME set are untouched, so the version-skew and consent-hash
 > contracts do not move (descriptions are not a skew axis — #2330 precedent —
 > and `computeConsentHash` hashes identity, tool names and allowances only, not
-> description text, verified at `packages/mcp/src/consent.ts:81-103`; an older
+> description text, verified at `packages/mcp/src/consent.ts:96-119`; an older
 > runtime simply serves the older guidance text from the `@haven_ai/sdk` it
 > bundles). The fragment was sized to keep the hosted description mean under
 > the #1591 per-tool cap (873.04 ≤ 874 bytes measured at the delivered head),

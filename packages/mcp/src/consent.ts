@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { HavenAllowance, HavenAllowanceSummary, HavenClient } from '@haven_ai/sdk'
+import { formatTokenAmount, resolveTokenBySymbol } from '@haven_ai/sdk'
 import { toolDescriptions, toolSchemas, type HavenMcpToolName } from './tools.js'
 
 /**
@@ -49,6 +50,20 @@ export interface ConsentInput {
   /** Chain the agent operates on. */
   chainId?: number
   toolNames: readonly HavenMcpToolName[]
+  /**
+   * #3410: every amount here is ATOMIC (smallest on-chain units, e.g. 6
+   * decimals for USDC — `1000000` is one USDC, never "1000000 tokens"). Both
+   * producers agree: the live read takes `onchain.amount`, and the seed takes
+   * the credential file's `allowance_amount` — both atomic. `renderConsentBlock`
+   * converts for display through the token registry and falls back to an
+   * explicit `(atomic units)` label when the token is unknown; the consent
+   * hash deliberately covers the atomic string, so a display change alone
+   * never re-prompts the operator.
+   *
+   * Known limitation (#3410, stated not fixed): the seed is setup-time data.
+   * If the wallet owner edits the budget after setup AND the live read then
+   * fails, the screen shows the stale seed budget as if it were current.
+   */
   allowanceSummary: readonly { token: string; amount: string; resetMinutes: number | null }[]
 }
 
@@ -137,7 +152,7 @@ export function renderConsentBlock(input: ConsentInput, hash: string): string {
     lines.push('signed delegation, not by Haven):')
     for (const a of input.allowanceSummary) {
       const reset = a.resetMinutes ? ` per ${a.resetMinutes} min` : ' (no reset)'
-      lines.push(`  • up to ${a.amount} ${a.token}${reset}`)
+      lines.push(`  • up to ${describeBudgetAmount(a, input.chainId)}${reset}`)
     }
   }
   lines.push('')
@@ -244,7 +259,12 @@ export interface CredentialIdentitySeed {
   delegateAddress?: string
   /** Chain from the credential file, used as a fallback. */
   chainId?: number
-  /** Intended agent budget from the setup flow, used before on-chain approval is visible. */
+  /**
+   * Intended agent budget from the setup flow, used before on-chain approval
+   * is visible. #3410: every amount is ATOMIC — the connector writes the
+   * credential file's `allowance_amount` straight from the setup response's
+   * `agent_budget`, and the backend puts `budget_atomic` there.
+   */
   allowanceSummary?: readonly { token: string; amount: string; resetMinutes: number | null }[]
 }
 
@@ -283,7 +303,14 @@ export async function consentInputFromClient(
     }
     const liveAllowanceSummary = list.map((a) => ({
       token: a.tokenSymbol ?? 'UNKNOWN',
-      amount: a.onchain?.amount ?? a.configuredAmount ?? '0',
+      // #3410: `onchain.amount` is the atomic budget (`budget_atomic` on the
+      // backend). The old `a.configuredAmount` fallback here was unreachable
+      // — `onchain` is required in the SDK types and dereferenced
+      // unconditionally, so a response without it throws into the seed path —
+      // and it was the one HUMAN-decimal value in this chain; a human number
+      // must never reach an atomic field. '0' keeps the (defensive) shape for
+      // a malformed onchain object without inventing a unit.
+      amount: a.onchain?.amount ?? '0',
       resetMinutes:
         typeof a.onchain?.resetTimeMin === 'number'
           ? a.onchain.resetTimeMin
@@ -325,6 +352,23 @@ function isAllowanceSummary(value: unknown): value is HavenAllowanceSummary {
  */
 function derivePrefix(apiKey: string): string {
   return apiKey.slice(0, 12)
+}
+
+/**
+ * #3410: one budget, one display form. The consent screen is the surface
+ * whose job is informed consent — an atomic number printed as whole tokens
+ * overstates the budget a millionfold — so every amount is rendered in whole
+ * tokens when the token is known (`resolveTokenBySymbol` over the same
+ * registry the SDK's address-based reads use) and carries an explicit
+ * `(atomic units)` label when it is not, mirroring connect's
+ * `describeApprovedBudget` fallback. This is DISPLAY ONLY: the consent hash
+ * keeps covering the raw atomic string, byte-identical to what every
+ * installed sidecar acknowledged before this change.
+ */
+function describeBudgetAmount(a: { token: string; amount: string }, chainId: number | undefined): string {
+  const token = chainId === undefined ? null : resolveTokenBySymbol(chainId, a.token)
+  if (!token) return `${a.amount} ${a.token} (atomic units)`
+  return `${formatTokenAmount(a.amount, token.decimals)} ${a.token}`
 }
 
 /** Convenience: the canonical tool list registered by the server. */

@@ -525,6 +525,7 @@ describe('HavenClient structural boundary', () => {
       'encodeBase64Json',
       'encodeBase64Utf8',
       'encodePaymentProof',
+      'formatTokenAmount', // #3410
       'hashDelegation', // #3329
       'havenClientIdentity', // #3303
       'havenTools',
@@ -545,6 +546,7 @@ describe('HavenClient structural boundary', () => {
       'readX402ReceiptPayer',
       'renderNextTool', // #3101
       'resolveConnectorChannel',
+      'resolveTokenBySymbol', // #3410
       'resolveTokenFromAddress',
       'resolveX402RetryTarget', // #3097
       'sameUrl',

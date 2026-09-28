@@ -1033,6 +1033,22 @@ export function resolveTokenFromAddress(
   return ALL_TOKENS[lower] ?? null
 }
 
+/**
+ * #3410: token decimals from a SYMBOL + CHAIN — the same registry
+ * `resolveTokenFromAddress` reads, keyed the other way. The address-based
+ * resolver needs the token's contract address, which the consent seed path
+ * (setup-time credential files) does not carry; the symbol and chain it does
+ * carry. Null when the symbol is not registered on that chain (unknown or
+ * custom tokens) — callers must fall back to an explicit atomic label rather
+ * than reading an atomic amount as whole tokens.
+ */
+export function resolveTokenBySymbol(chainId: number, symbol: string): { symbol: string; decimals: number } | null {
+  const table = NETWORK_TOKENS[`eip155:${chainId}`]
+  if (!table) return null
+  const hit = Object.entries(table).find(([, token]) => token.symbol === symbol)
+  return hit ? { ...hit[1] } : null
+}
+
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
     const primitive = JSON.stringify(value)

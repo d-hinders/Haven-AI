@@ -9,15 +9,18 @@
 // with flags — those sites are the allowlist below, with EXACT counts, so a new
 // bare call anywhere (including a new one inside an allowlisted file) fails.
 //
-// Before #3412 this guard would have failed on eight sites: the signer's
-// initialize instructions and out-of-date refusal, the SDK's
-// signerUpdateFallback, and five hosted-MCP hints.
+// Before #3412 this guard would have failed on seven sites: the signer's
+// initialize instructions (capabilities.ts) and out-of-date refusal (core.ts),
+// the SDK's signerUpdateFallback (types.ts, the `undefined` form), the hosted
+// MCP's three signer-compat hints and its server instructions.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-const BARE = /\b(?:hosted)?[cC]onnectorRerunCommand\(\)/g
+// Zero arguments, or an explicit `undefined` first argument (the form
+// `signerUpdateFallback` used before #3412: `connectorRerunCommand(undefined, { channel })`).
+const BARE = /\b(?:hosted)?[cC]onnectorRerunCommand\((?:\)|\s*undefined\b)/g
 
 // file → [allowed count, why the bare form is right there]
 const ALLOWLIST = {
@@ -45,6 +48,7 @@ function bareCounts() {
 
 test('the pattern matches a bare call and not an upgrade or flagged call (positive + negative control)', () => {
   assert.equal('x ${connectorRerunCommand()} y'.match(BARE)?.length, 1)
+  assert.equal('x ${connectorRerunCommand(undefined, { channel })} y'.match(BARE)?.length, 1)
   assert.equal('x ${hostedConnectorRerunCommand()} y'.match(BARE)?.length, 1)
   assert.equal("connectorRerunCommand('--doctor')".match(BARE), null)
   assert.equal('connectorUpgradeCommand()'.match(BARE), null)

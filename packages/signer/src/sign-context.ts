@@ -124,7 +124,7 @@ export class HavenSignContextError extends HavenSigningError {
   /**
    * #3303: on a 426 `client_outdated` refusal, the backend's update hint —
    * this signer is below the minimum the deployment set, and
-   * `client_update.upgrade_command` is what updates it.
+   * `client_update.upgrade_command` starts the update (#3412: for the signer, the doctor, then its repair line).
    */
   readonly client_update?: HavenClientUpdate
 

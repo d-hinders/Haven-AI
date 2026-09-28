@@ -7,6 +7,9 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
+  - packages/mcp-server/src/connector-channel.ts
+  - packages/backend/src/__tests__/connector-upgrade-command-parity.test.ts
+  - scripts/ci/upgrade-hint-guard.test.mjs
   - packages/mcp-server/src/tools/**
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/x402/sign-context.ts
@@ -1407,10 +1410,12 @@ out `@dev` are in [`package-dev-channel.md`](package-dev-channel.md): this doc
 is the contract, that one is the runbook.
 ### The connector channel is a fifth bump-managed constant (#2423)
 
-Every "re-run `npx @haven_ai/connect@<tag>`" hint the published packages emit —
-in `@haven_ai/connect`'s doctor, repair, re-key and tombstone messages, in the
-signer's capability text and its version-skew refusal, and in the SDK's shared
-`SIGNER_UPDATE_FALLBACK` — renders from a single build-time constant,
+Every connector hint the published packages emit — the setup re-run
+`npx @haven_ai/connect@<tag>` in `@haven_ai/connect`'s doctor, repair, re-key
+and tombstone messages, and, since #3412, the upgrade command
+`npx -y @haven_ai/connect@<tag> --doctor` in the signer's capability text and
+its version-skew refusal and in the SDK's shared `SIGNER_UPDATE_FALLBACK` —
+renders from a single build-time constant,
 `HAVEN_CONNECTOR_CHANNEL` in `packages/sdk/src/connector-channel.ts`.
 
 **Do not hand-edit it either.** `npm run release:bump` writes it from the
@@ -2817,8 +2822,10 @@ to call next in structured fields, and those fields are typed end to end
 - **Signer exits at import with `ERR_PACKAGE_PATH_NOT_EXPORTED` (`Package
   subpath './edge' is not defined by "exports"`, #3173):** a hand-installed
   `@haven_ai/sdk` older than the signer's exact pin sits beside a signer that
-  imports `@haven_ai/sdk/edge`. No key is read on this path. Re-run the
-  connector command to reinstall the pinned pair.
+  imports `@haven_ai/sdk/edge`. No key is read on this path. Run
+  `npx -y @haven_ai/connect@<channel> --doctor`, then the `--doctor --repair`
+  line it prints: repair reinstalls the pinned pair from the stored credentials
+  (a bare connector re-run is a setup command and stops at "Missing --setup").
 - **Local MCP runtime install failed:** rerun the connector command. It will reuse
   local credentials and install the pinned runtime into `~/.haven/mcp-runtime`,
   falling back from the user's default npm cache to `~/.haven/npm-cache` if the
@@ -2835,9 +2842,11 @@ to call next in structured fields, and those fields are typed end to end
 - **Claude Code does not show Haven:** run `claude mcp get haven` and confirm
   it points at the wrapper path. If `add-json` is unavailable, the connector
   falls back to `claude mcp add --scope user -- <wrapper>`.
-- **Tools missing after restart:** rerun the connector. It will reuse the
-  existing local credentials, reinstall or reuse the pinned MCP runtime, and
-  fail loudly if the wrapper handshake cannot list the required Haven tools.
+- **Tools missing after restart:** run `npx -y @haven_ai/connect@<channel> --doctor`,
+  then the `--doctor --repair` line it prints. Repair reuses the stored
+  credentials, reinstalls or reuses the pinned runtime, rewrites the wrapper and
+  runtime config, and re-diagnoses. With several agents on the machine the line
+  names `--credentials-dir <dir>` (#3412).
 - **Tool naming across runtimes (#1588, corrected by #2550):** guidance
   responses — since #3102 every hosted refusal, and since #3103 the edge
   signer's refusals, which name hosted tools through the role fields for the

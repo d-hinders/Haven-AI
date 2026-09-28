@@ -91,7 +91,7 @@ export interface ClientRelease {
 export const CLIENT_RELEASES: Readonly<Record<PublishedClientPackage, ClientRelease>> = CLIENT_RELEASE_DATA
 
 /**
- * The command that updates `pkg` on the given connector channel (the npm
+ * The command that starts updating `pkg` on the given connector channel (the npm
  * dist-tag a deployment hands out). Moved here from the backend's
  * `client-compat` middleware (#3303) so the update hint and the public release
  * documents print one command, not two copies.

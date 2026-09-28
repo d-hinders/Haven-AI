@@ -315,6 +315,9 @@ describeDb('client-version refusal on the real payment routes (#3303)', () => {
     expectMatchesSpec('GET', '/payments/{id}/sign-context', res.json(), '426')
     // #3412: the doctor form — a bare connector re-run stops at "Missing --setup".
     expect(res.json().client_update.upgrade_command).toMatch(/^npx -y @haven_ai\/connect@\S+ --doctor$/)
+    // The doctor alone changes nothing: the refusal names the repair step too.
+    expect(res.json().error).toContain('then the repair line it prints')
+    expect(res.json().next_tool_omitted_reason).toContain('then the repair line it prints')
     expect(await intentRow(id)).toEqual(before)
     expect(await tableCounts()).toEqual(counts)
   })

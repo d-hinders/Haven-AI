@@ -521,7 +521,7 @@ export interface ToolFailure {
   http_status?: number
   /** #3001: the backend's own `error_code` on `SIGN_CONTEXT_REFUSED` (`expired`, `already_executed`, `not_signable`, `sign_context_unavailable`, and since #3303 `client_outdated`). */
   backend_error_code?: string
-  /** #3303: on `client_outdated`, the backend's update hint — `upgrade_command` is what updates this signer. */
+  /** #3303: on `client_outdated`, the backend's update hint — `upgrade_command` starts the update (the doctor, then its repair line — #3412). */
   client_update?: HavenClientUpdate
 }
 

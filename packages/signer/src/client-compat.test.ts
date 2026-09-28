@@ -38,7 +38,7 @@ const OUTDATED = {
     recommended: '9.1.0',
     min_version: '9.0.0',
     required: true,
-    upgrade_command: 'npx -y @haven_ai/connect@alpha',
+    upgrade_command: 'npx -y @haven_ai/connect@alpha --doctor',
     notes_url: null,
   },
   next_action: 'stop_and_tell_user',
@@ -137,7 +137,8 @@ describe('client_outdated at sign-context (#3303)', () => {
     // No bytes to relay and no tool to call can help: only an update.
     expect(failure.fallback).toBeUndefined()
     expect(failure.next_tool).toBeUndefined()
-    expect(failure.next_tool_omitted_reason).toContain('npx -y @haven_ai/connect@alpha')
+    // #3412: the doctor alone changes nothing — the repair step is named.
+    expect(failure.next_tool_omitted_reason).toContain('npx -y @haven_ai/connect@alpha --doctor and the repair line it prints')
   })
 })
 

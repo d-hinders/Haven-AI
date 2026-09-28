@@ -22,6 +22,7 @@ import {
   HAVEN_CLIENT_HEADER,
   HavenSigningError,
   readClientUpdate,
+  connectorUpgradeCommand,
 } from '@haven_ai/sdk/edge'
 import type { HavenClientUpdate, NextStep } from '@haven_ai/sdk/edge'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
@@ -123,7 +124,7 @@ export class HavenSignContextError extends HavenSigningError {
   /**
    * #3303: on a 426 `client_outdated` refusal, the backend's update hint —
    * this signer is below the minimum the deployment set, and
-   * `client_update.upgrade_command` is what updates it.
+   * `client_update.upgrade_command` starts the update (#3412: for the signer, the doctor, then its repair line).
    */
   readonly client_update?: HavenClientUpdate
 
@@ -162,8 +163,10 @@ export class HavenSignContextError extends HavenSigningError {
           nextTool: null,
           nextToolOmittedReason:
             'this signer is below the minimum version Haven accepts — tell the user to run ' +
-            `${refusal.clientUpdate?.upgrade_command ?? 'the connector again'}, restart the agent runtime, ` +
-            'then retry the same haven_sign / haven_sign_x402 call',
+            // #3412: the doctor diagnoses and prints the repair line; running
+            // the doctor alone changes nothing, so the repair step is named.
+            `${refusal.clientUpdate?.upgrade_command ?? connectorUpgradeCommand()} and the repair line it prints, ` +
+            'restart the agent runtime, then retry the same haven_sign / haven_sign_x402 call',
         })
       } else if (flow === 'direct' && refusal?.httpStatus === 404) {
         // Either the payment is not this agent's, or the backend predates

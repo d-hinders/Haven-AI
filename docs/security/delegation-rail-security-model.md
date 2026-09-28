@@ -4,6 +4,11 @@ status: current
 contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
+  - packages/backend/src/infra/repositories/merchants.ts
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/db/migrations/101_merchant_pay_to.ts
+  - packages/backend/src/routes/merchants.ts
+  - packages/backend/src/infra/repositories/delegation-budgets.ts
   - packages/sdk/src/delegate-account.ts
   - packages/sdk/src/redemption-guard.ts
   - packages/sdk/src/direct-payment-guard.ts
@@ -22,6 +27,7 @@ covers:
   - packages/backend/src/db/migrations/078_device_authorizations.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
+  - packages/backend/src/infra/repositories/agent-rekeys.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/infra/repositories/agent-organizations.ts
   - packages/backend/src/db/migrations/094_agent_organizations.ts
@@ -287,6 +293,40 @@ the first commits and returns that row instead of building a competitor to it.
 The chain round trip that derives the delegate account address is taken
 *before* the lock — a slot held across an RPC turns a slow node into a stalled
 slot, which would trade a duplicate-offer defect for an availability one.
+
+**Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
+ordinary recipient-pinned budget whose pin the server fills with the
+merchant's verified payTo on the agent's chain. That is the one address every
+active, verified x402 operator offer of the merchant there names in its own
+402 challenge (`merchant_catalog.pay_to`, recorded by the read-only catalog
+probe). The client does not choose it: a sent `recipient_address` must equal
+it (409 otherwise). No merchant-locked budget is issued when:
+- the merchant has no such offer on the agent's chain;
+- the offers disagree, or one of them names no payTo;
+- another merchant's non-delisted offer on that network names the same
+  address (`shared`);
+- any of the offers lacks ERC-7710. A pinned budget cannot pay an EIP-3009
+  merchant, per the rule in §8 below;
+- the payTo is one of the agent's own addresses: its delegate key, its
+  delegate account or its treasury.
+
+The payTo is the merchant's word, not the owner's. A payTo equal to the
+delegate key would pin the grant to the EIP-3009 funding leg's recipient,
+which the bridge selects before the open budget. The budget would then fund
+payments to any merchant. `agent_delegations.merchant_id` is a label, not a
+caveat, so the authority is still the signed caveat stack and nothing else.
+
+Two limits are deliberate:
+- **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
+  same address share one `(agent, token, recipient)` slot. Activating either
+  replaces the other; both carry the same on-chain authority.
+- **Rotation.** A later payTo rotation never re-points a signed grant. The
+  budget stays pinned to the address the owner signed for, and the merchant
+  page reports it `stale`.
+
+A re-key (§6a) carries the recipient pin to the replacement grant but not
+the merchant label, so the budget keeps its authority and loses only its
+place on the merchant page (#3386).
 
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:
@@ -1578,8 +1618,12 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   it is upgraded. Haven cannot gate that: the attack never passes through
   Haven, and the hosted MCP cannot see the signer's handshake. Credential
   rotation does not help, because the new key lands in the same old signer. The
-  remedy is the signer upgrade (a connector re-run), carried by the release
-  notes (`packages/signer/CHANGELOG.md`).
+  remedy is the signer upgrade, carried by the release notes
+  (`packages/signer/CHANGELOG.md`). How an installed machine performs that
+  upgrade — the command every update hint names, and which older signers it
+  cannot reach — is maintained in
+  [`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md)
+  § *Client-version signal*.
 
 > **Scope of this section:** written for #3272 and rewritten once for epic
 > #3284 (#3283, #3281) against the signer and SDK at those changes; #3375
@@ -1702,4 +1746,38 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > expiry remain enforced on-chain by the caveat enforcers. Nothing this
 > document claims about authority, custody or signing changes. Scope of this
 > note: which dashboard load writes the daily row. Nothing else in this
+> document was re-verified.
+
+> **Re-verified #3331 frontend (2026-09-27, round 2 review fixes):** this diff
+> touches `hooks/useDelegationBudget.ts` only. `reload`/`reloadSigners` read
+> `/agents/{id}/delegations` and `/agents/{id}/account-signers`, neither
+> chain-scoped, so the hook's own reset effect now clears state on an
+> `agentId` change only — not a `chainId`-only rerender, which used to blank a
+> still-valid signer set for no data reason. `editBudget`'s build call already
+> forwarded `merchant_slug` (#3331 round 1); this diff adds a doc-accurate
+> JSDoc only, no behaviour change: an edit sends the STORED recipient (the
+> row's own `recipient_address`, never re-derived client-side), which the
+> server compares against the merchant's CURRENT verified payTo and refuses
+> (409) on a mismatch, keeping the merchant label on success — on a refusal
+> the old budget stays live and untouched, exactly as the REPLACE composition
+> above already guarantees. Nothing here changes which signature authorises
+> what: the owner still signs the new grant, then the stop, and the delegate
+> key and local signer are never touched. Scope of this note:
+> `useDelegationBudget.ts`'s reset effect and JSDoc. Nothing else in this
+> document was re-verified.
+>
+> **Re-verified #3331 frontend (2026-09-27, round 3 review fixes):** this diff
+> touches one file in this document's coverage list, `hooks/useDelegationBudget.ts`,
+> plus non-authority UI changes in `FundMerchantModal.tsx`, `EditBudgetModal.tsx`,
+> `MerchantBudgetsList.tsx` and the merchant page that carry no authority and
+> are out of this document's scope. In the covered file: `reload`'s in-flight
+> guard (`manualBudgetsReloadInFlight`) changes from a boolean to a counter so
+> two overlapping MANUAL reloads (e.g. a fast double click on "Try again")
+> both have to finish before a background poll tick can run again — this is
+> the reload() manual-vs-poll guard from the round 2 note above, on the READ
+> path only: it decides whether a `GET /agents/{id}/delegations` poll fires,
+> never whether a build, activation or revoke is authorised. No handler,
+> query, signing path or refusal moves; budget, recipient and expiry remain
+> enforced on-chain by the caveat enforcers exactly as before. Scope of this
+> note: `useDelegationBudget.ts`'s manual-reload counter. Nothing else in this
 > document was re-verified.

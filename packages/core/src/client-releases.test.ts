@@ -40,11 +40,14 @@ describe('CLIENT_RELEASES (#3304)', () => {
 })
 
 describe('upgradeCommandFor', () => {
-  it('prints the connector for the signer, MCP and connector, and each package for itself otherwise', () => {
+  it('prints the connector doctor for the signer, MCP and connector, and each package for itself otherwise', () => {
     expect(upgradeCommandFor('@haven_ai/sdk', 'alpha')).toBe('npm install @haven_ai/sdk@alpha')
     expect(upgradeCommandFor('@haven_ai/cli', 'dev')).toBe('npx -y @haven_ai/cli@dev')
     for (const pkg of ['@haven_ai/signer', '@haven_ai/mcp', '@haven_ai/connect'] as const) {
-      expect(upgradeCommandFor(pkg, 'alpha')).toBe('npx -y @haven_ai/connect@alpha')
+      // #3412: a bare connector re-run is a setup command that stops at
+      // "Missing --setup" on an existing install; the flagless doctor works as
+      // pasted and prints the targeted repair line.
+      expect(upgradeCommandFor(pkg, 'alpha')).toBe('npx -y @haven_ai/connect@alpha --doctor')
     }
   })
 })

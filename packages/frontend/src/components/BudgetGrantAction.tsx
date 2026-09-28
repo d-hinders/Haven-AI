@@ -85,9 +85,13 @@ export default function BudgetGrantAction({
       return
     }
     // `too_many` is a revoke-ALL refusal (#1437) and cannot arise from a
-    // grant; this surface has no batch. Fold it into the generic failure
-    // rather than teaching a grant screen a word it can never mean.
-    setOutcome(result.reason === 'too_many' ? 'failed' : result.reason)
+    // grant; this surface has no batch. `refused` (#3331) is a NAMED build
+    // refusal with its own `detail` sentence — a caller that wants to show it
+    // (the fund-merchant modal) reads `grant()`'s result itself rather than
+    // going through this generic control. Both fold into the generic failure
+    // here rather than teaching this shared control a word it cannot yet
+    // display.
+    setOutcome(result.reason === 'too_many' || result.reason === 'refused' ? 'failed' : result.reason)
   }
 
   // Explanations come BEFORE the action row — the same order the legacy

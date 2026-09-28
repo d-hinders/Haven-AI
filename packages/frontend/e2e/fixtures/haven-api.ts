@@ -494,6 +494,13 @@ export async function mockHavenApi(page: Page) {
       await fulfillJson(route, { merchant: bergetAi, offers: [] })
       return
     }
+    // #3331: the owner's merchant-locked budgets for a merchant page. Empty by
+    // default — without this the catch-all below 404s it and every merchant
+    // page renders the budgets-read error row.
+    if (method === 'GET' && /^\/merchants\/[^/]+\/budgets$/.test(path)) {
+      await fulfillJson(route, { budgets: [] })
+      return
+    }
     if (method === 'GET' && path.startsWith('/merchants/')) {
       await fulfillJson(route, { error: 'Merchant not found' }, 404)
       return

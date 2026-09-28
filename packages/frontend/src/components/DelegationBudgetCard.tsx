@@ -403,7 +403,13 @@ function BudgetRow({
           {amount} {t?.symbol ?? ''} {periodLabel}
         </p>
         <p className="truncate text-xs text-[var(--v2-ink-muted)]">
-          {budget.recipient_address ? `to ${truncateAddress(budget.recipient_address)}` : 'to any recipient'}
+          {/* #3331: a merchant-locked budget names the merchant it pays,
+              rather than only the address it happens to be pinned to. */}
+          {budget.merchant_name
+            ? `pays ${budget.merchant_name} only`
+            : budget.recipient_address
+              ? `to ${truncateAddress(budget.recipient_address)}`
+              : 'to any recipient'}
         </p>
         {reservedAtomic > 0n ? (
           <p className="text-xs text-[var(--v2-ink-3)]">

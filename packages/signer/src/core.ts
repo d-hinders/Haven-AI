@@ -28,7 +28,7 @@ import {
   HavenUnsupportedSignerVersionError,
   SignerRefusalCode,
   SIGNER_UPDATE_FALLBACK,
-  connectorRerunCommand,
+  connectorUpgradeCommand,
   type SweepAuthorization,
   type SweepExpectedAuth,
   type X402ExpectedAuth,
@@ -671,8 +671,8 @@ export function assertSupportedBindingVersion(
       : SignerRefusalCode.UnsupportedSweepBindingVersion
   const ceiling = outOfDate
     ? `This signer is out of date: it supports ${context} versions up to ${highest}, ` +
-      `and Haven sent version ${received}. Update @haven_ai/signer — rerun the Haven ` +
-      `connector (\`${connectorRerunCommand()}\`), which reinstalls the pinned MCP runtime.`
+      `and Haven sent version ${received}. Update @haven_ai/signer — run ` +
+      `\`${connectorUpgradeCommand()}\`, then the repair line it prints, which reinstalls the pinned MCP runtime.`
     : `Unsupported ${context} version ${received}: this signer supports ` +
       `${supported.join(', ')}.`
   // Below-floor is the opposite skew (this signer is NEWER than what sent the

@@ -51,7 +51,7 @@ for the wire contract and the custody invariant.
    - `HAVEN_MCP_PATH` = `/v1` (default — only change if you need a different
      mount path).
    - `HAVEN_CONNECTOR_CHANNEL` (optional, #2423) = the npm dist-tag this
-     deployment's "re-run `npx @haven_ai/connect@<tag>`" hints should name.
+     deployment's connector hints (since #3412, `npx -y @haven_ai/connect@<tag> --doctor`) should name.
      **Unset is `alpha`**, the production channel, which is what production
      wants — leave it unset there. A deployment paired with a non-production
      package channel sets it to that tag so the hints it emits install the

@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { HavenClient, havenClientIdentity } from '@haven_ai/sdk'
-import { hostedConnectorRerunCommand } from './connector-channel.js'
+import { hostedConnectorUpgradeCommand } from './connector-channel.js'
 import {
   assertHostedToolRegistry,
   createToolHandlers,
@@ -101,8 +101,8 @@ export const HOSTED_INSTRUCTIONS = [
   'A quote expires at expires_at: re-run the same tool with the SAME',
   'idempotency_key before signing again. An out-of-date signer refuses to sign',
   'with a machine-readable version-mismatch error (code, supported_versions,',
-  'received_version) — stop, tell the user to re-run',
-  `${hostedConnectorRerunCommand()}; nothing has been spent at that point.`,
+  'received_version) — stop, tell the user to run',
+  `${hostedConnectorUpgradeCommand()} and the repair line it prints; nothing has been spent at that point.`,
   'If a merchant rejects AFTER funding, the delegate holds stranded funds —',
   'recover them with haven_sweep_delegate. (erc7710 has no funding leg: a',
   'merchant refusal there moves nothing — ignore the sweep for it.)',

@@ -8,6 +8,7 @@ import {
   HavenUserOpBindingError,
   assertUserOpTypedDataBinding,
   connectorRerunCommand,
+  connectorUpgradeCommand,
   isPackedUserOperationTypedData,
   HavenTypedDataRefusedError,
   TYPED_DATA_NOT_ALLOWED,
@@ -520,7 +521,7 @@ export interface ToolFailure {
   http_status?: number
   /** #3001: the backend's own `error_code` on `SIGN_CONTEXT_REFUSED` (`expired`, `already_executed`, `not_signable`, `sign_context_unavailable`, and since #3303 `client_outdated`). */
   backend_error_code?: string
-  /** #3303: on `client_outdated`, the backend's update hint — `upgrade_command` is what updates this signer. */
+  /** #3303: on `client_outdated`, the backend's update hint — `upgrade_command` starts the update (the doctor, then its repair line — #3412). */
   client_update?: HavenClientUpdate
 }
 
@@ -1099,7 +1100,9 @@ function normalizeError(err: unknown): ToolFailure {
       ...nextStepWireFields(signerRefusalStep({
         nextAction: AgentPaymentNextAction.StopAndTellUser,
         nextTool: null,
-        nextToolOmittedReason: 'update @haven_ai/signer by re-running the connector, then repeat the same call',
+        // #3412: the upgrade command, not "re-run the connector" — a bare re-run
+        // stops at "Missing --setup" on an existing install.
+        nextToolOmittedReason: `update @haven_ai/signer: run ${connectorUpgradeCommand()} and the repair line it prints, then repeat the same call`,
       })),
     }
   }

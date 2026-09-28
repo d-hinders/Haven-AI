@@ -56,8 +56,14 @@ describe('haven guide text (#2525)', () => {
     // #3304: +270 bytes, the "If something breaks" section — a `client_update`
     // on a result means update that client, and the release notes live at
     // /releases.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10877)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10790)
+    //
+    // #3412: +2 bytes / +6 UTF-16 units — that sentence now says to run
+    // `upgrade_command` as given and then any repair line it prints (the
+    // connector-installed packages' command became the connector doctor). The
+    // units move more than the bytes because the two em-dashes it replaced
+    // are 3 bytes but 1 unit each.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10879)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10796)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

@@ -503,7 +503,7 @@ export type paths = {
         put?: never;
         /**
          * Grant step 1: build an unsigned budget delegation for the owner to sign.
-         * @description Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.
+         * @description Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period, merchant) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.
          */
         post: operations["buildAgentDelegation"];
         delete?: never;
@@ -3143,11 +3143,31 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchants/{slug}/budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dashboard user's merchant-locked budgets for one merchant.
+         * @description Every ACTIVE, unexpired budget delegation the user issued for this merchant (#3331) on an agent that is not revoked, with what is left this period — read from the ERC20PeriodTransferEnforcer's storage, the same read GET /allowances makes (remaining_is_from_chain false = that read failed and remaining_atomic is the full budget) — and the pin against the merchant's current verified payTo. Dashboard session only: an agent key gets 403. 404 for an unknown or non-live merchant.
+         */
+        get: operations["listMerchantBudgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 };
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
-        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the exact command that updates it, on this deployment's channel. */
+        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. */
         ClientUpdate: {
             /** @example @haven_ai/mcp */
             package: string;
@@ -3156,7 +3176,7 @@ export type components = {
             recommended: string | null;
             min_version: string | null;
             required: boolean;
-            /** @example npx -y @haven_ai/connect@alpha */
+            /** @example npx -y @haven_ai/connect@alpha --doctor */
             upgrade_command: string;
             /** @description #3304: the public release notes page. Nullable for clients built before it existed. */
             notes_url: string | null;
@@ -3199,6 +3219,26 @@ export type components = {
             expires_at: string;
             /** Format: date-time */
             created_at: string;
+            /** @description The merchant a merchant-locked budget was issued for (#3331); null for every other row, and after that merchant is deleted. */
+            merchant_id: string | null;
+            /** @description That merchant’s slug, or null. */
+            merchant_slug: string | null;
+            /** @description That merchant’s display name, or null. */
+            merchant_name: string | null;
+        };
+        MerchantFundingTarget: {
+            /** @description CAIP-2, e.g. "eip155:84532". */
+            network: string;
+            chain_id: number;
+            /** @description The lowercased payTo every active, verified x402 offer of the merchant on this network names — non-null only when pay_to_status is `verified`. A merchant-locked budget pins its recipient here. */
+            pay_to: string | null;
+            /**
+             * @description `conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant’s non-delisted offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.
+             * @enum {string}
+             */
+            pay_to_status: "verified" | "conflicting" | "unstated" | "shared";
+            /** @description Every one of those offers advertises the ERC-7710 transfer method — the rail a pinned budget pays through. False: payments to this merchant use the open budget, so no merchant-locked budget is offered. */
+            erc7710: boolean;
         };
         TaskBudget: {
             /** Format: uuid */
@@ -3444,7 +3484,7 @@ export type components = {
             recommended_version: string | null;
             /** @description Below this, the package's refusal points answer `client_outdated`. Null = never refused. */
             min_version: string | null;
-            /** @example npx -y @haven_ai/connect@alpha */
+            /** @example npx -y @haven_ai/connect@alpha --doctor */
             upgrade_command: string | null;
             /** @description Newest first. What changed, for deciding whether to update — not the full CHANGELOG. */
             notes: {
@@ -7117,7 +7157,7 @@ export interface operations {
                     /** @example 0x1111111111111111111111111111111111111111 */
                     token_address: string;
                     /**
-                     * @description Optional recipient pin. Omit (or null) for an open budget.
+                     * @description Optional recipient pin. Omit (or null) for an open budget — unless merchant_slug is set, in which case the server pins it to the merchant's verified payTo.
                      * @example 0x1111111111111111111111111111111111111111
                      */
                     recipient_address?: string | null;
@@ -7127,6 +7167,8 @@ export interface operations {
                     period_seconds: number;
                     /** @description Unix seconds, must be in the future. Default: now + 90 days. */
                     expires_at?: number;
+                    /** @description A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury). */
+                    merchant_slug?: string | null;
                 };
             };
         };
@@ -7205,7 +7247,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409. */
+            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent’s own addresses, recipient_address differs from the current payTo). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15628,7 +15670,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -15866,7 +15908,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -16307,7 +16349,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -16455,7 +16497,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -16681,7 +16723,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -17301,7 +17343,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -19336,6 +19378,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         merchant: components["schemas"]["Merchant"];
+                        /** @description Where the merchant is paid on each listed chain that has an active, verified x402 offer (#3331). Empty when none does. */
+                        funding: components["schemas"]["MerchantFundingTarget"][];
                         offers: components["schemas"]["CatalogEntry"][];
                     };
                 };
@@ -19364,6 +19408,94 @@ export interface operations {
                     "application/json": {
                         error: string;
                         detail?: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchantBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Budgets, by agent name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        budgets: {
+                            /** Format: uuid */
+                            agent_id: string;
+                            agent_name: string;
+                            chain_id: number;
+                            token_address: string;
+                            recipient_address: string;
+                            delegation_hash: string;
+                            budget_atomic: string;
+                            period_seconds: number;
+                            /** @description Unix seconds as a string (BIGINT). */
+                            expires_at: string;
+                            remaining_atomic: string;
+                            remaining_is_from_chain: boolean;
+                            /**
+                             * @description `stale`: the merchant now names a different payTo (a rotation) — this budget pays only the old address, and payments to the new one use the open budget, if the agent has one. `unverified`: the merchant names no single payTo on that chain now (including a `shared` one). `not_erc7710`: the payTo still matches but not every offer there advertises ERC-7710, and a pinned budget pays only through ERC-7710.
+                             * @enum {string}
+                             */
+                            pin_status: "current" | "stale" | "unverified" | "not_erc7710";
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };

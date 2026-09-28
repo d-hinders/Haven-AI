@@ -4,6 +4,10 @@ status: current
 covers:
   - packages/backend/src/db/migrations/088_merchants.ts
   - packages/backend/src/db/migrations/089_marketplace_prospects.ts
+  - packages/backend/src/db/migrations/101_merchant_pay_to.ts
+  - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/infra/repositories/delegation-budgets.ts
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/modules/catalog/marketplace-scope.ts
   - packages/backend/src/modules/catalog/prospect-copy.ts
@@ -18,10 +22,17 @@ covers:
   - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/marketplace/OfferRow.tsx
   - packages/frontend/src/components/marketplace/PayWithHavenBlock.tsx
+  - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
+  - packages/frontend/src/components/marketplace/MerchantBudgetsList.tsx
+  - packages/frontend/src/components/DelegationBudgetCard.tsx
+  - packages/frontend/src/components/EditBudgetModal.tsx
+  - packages/frontend/src/hooks/useDelegationBudget.ts
+  - packages/frontend/src/hooks/useMerchantBudgets.ts
   - packages/frontend/src/lib/marketplace.ts
+  - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-20"
+last-verified: "2026-09-27"
 ---
 
 # Marketplace
@@ -98,6 +109,146 @@ callable URL, no prices): the marketplace is a discovery surface and must not
 require the onboarding it leads to (#2530). Every catalog entry now carries
 `merchant { id, slug, name, listing_status, is_test_merchant }` for every
 caller, including `haven_discover_tools`.
+
+## Merchant-locked budgets (#3331)
+
+An owner can give an agent a budget that pays **one merchant only**. It is an
+ordinary recipient-pinned budget delegation, and its pin is the merchant's
+verified payTo on the agent's chain. This section covers the backend slice
+and the "Fund this merchant" modal, the frontend slice — see *Screens* below
+for the modal's own shape.
+
+- **Where a merchant is paid.** The catalog refresh probe (at backend boot,
+  then hourly) already reads each offer's 402 challenge for its price. It now
+  also records the challenge's `payTo` (`merchant_catalog.pay_to`,
+  lowercased). It records one only when every `accepts[]` option on the
+  offer's recorded network names the same well-formed address; options on
+  other networks do not count. A merchant's **verified payTo** on a chain is
+  derived, never stored: it is the one address all its active, verified x402
+  operator offers on that network agree on. Self-submitted offers do not
+  count, because they carry no network.
+- **`GET /merchants/{slug}`** carries `funding`, one entry per listed chain
+  with such an offer:
+  `{ network, chain_id, pay_to, pay_to_status, erc7710 }`. The chain scope is
+  the same one the offers use, and the field is public like the rest of the
+  page, since the merchant's own 402 hands the payTo to every caller.
+  - `pay_to_status` is `verified` (`pay_to` set), `conflicting` (two offers
+    name different addresses), `unstated` (some offer names none, including
+    every offer before its first probe after the migration) or `shared`
+    (another merchant's offer on that network names the same address, so a
+    pin would pay that merchant too; a degraded or not-yet-verified offer
+    counts, since it can recover without anyone re-issuing the budget, and
+    only a delisted one does not).
+  - `erc7710` is true only when **every** such offer advertises the ERC-7710
+    transfer method. A pinned budget cannot fund an EIP-3009 payment, because
+    that leg pays the agent's own wallet first, so an EIP-3009 merchant is paid
+    from the open budget, if the agent has one.
+- **Issuing one.** `POST /agents/{id}/delegations/build` with `merchant_slug`.
+  The server fills the recipient from the merchant's verified payTo on the
+  agent's chain and records the merchant on the row. It returns 404 for an
+  unknown or non-live merchant. It returns 409 when:
+  - there is no verified payTo;
+  - not every offer there is ERC-7710;
+  - the payTo is one of the agent's own addresses (delegate key, delegate
+    account or treasury). A pin to the delegate key would let the EIP-3009
+    funding leg spend it on any merchant;
+  - a sent `recipient_address` differs from the payTo.
+
+  Signing and activation are the ordinary grant flow.
+- **Which budget pays — selection keys on the payment's recipient, no
+  fallback.** `selectDelegationForPayment`'s own SQL
+  (`SELECT_DELEGATION_FOR_PAYMENT_SQL`, `infra/repositories/delegation-budgets.ts`)
+  orders the row pinned to the payee FIRST and picks it whenever it matches —
+  there is no second query that falls back to the open budget once the pinned
+  one exists. A **direct (ERC-7710) settlement**, and a plain `POST /payments`
+  sent straight to the merchant's own address, both select on that recipient:
+  while a merchant-locked budget is active, every such payment to that
+  merchant in that token draws on it alone, and once it is exhausted those
+  payments are refused until the next period, never falling back to the
+  agent's open budget even if it has one. A payment to anyone else still uses
+  the open budget, if there is one; only payments to the LOCKED merchant are
+  affected. Two kinds of payment do not follow this rule:
+  - a checkout payment that passes through the **agent's own delegate
+    first** — the EIP-3009 funding leg a plain-HTTP x402 checkout takes —
+    because the on-chain selection key is the redemption's `to`, which is the
+    agent's own address there, never the merchant's;
+  - a payment made **under a task budget**, which redeems the budget
+    delegation it was carved from at creation (`routes/task-budgets.ts` picks
+    the parent with the same pinned-first selection), regardless of any
+    merchant-locked row: a task opened for this merchant's address while this
+    budget is active is carved from THIS budget; a task opened with no
+    recipient, or before this budget existed, is carved from the open budget.
+
+  The fund-merchant modal states the rule and both exceptions once, on its
+  review step.
+- **One address, one slot.** A merchant-locked budget and a plain budget
+  pinned to the same address share one `(agent, token, recipient)` slot —
+  and so does a merchant-locked budget pinned to a DIFFERENT merchant's payTo
+  that happens to land in the same slot (a shared address, or an address a
+  merchant later stops using and another later takes up). Activating any
+  grant in that slot replaces whichever ACTIVE row is already there: they
+  carry the same on-chain authority, and two live grants in one slot would
+  make selection ambiguous. Activating a plain pinned budget to a merchant's
+  payTo therefore replaces that merchant's budget, and drops its merchant
+  label. The fund-merchant modal's review step warns about this before the
+  owner signs — a warning fires whichever kind of active row already occupies
+  the slot (plain, locked to this merchant, or locked to another merchant),
+  naming whichever one it is. A budget for THIS merchant in a *different*
+  token, or one still pinned to a payTo the merchant has since rotated away
+  from (`stale`, below), is a *different* slot and survives with no warning.
+- **Editing one in place (#3166's REPLACE composition) — only a `current`
+  row.** `EditBudgetModal`'s Edit on a merchant-locked row keeps the recipient
+  READ-ONLY (shown as "pays `<merchant>` only") and forwards the row's own
+  `merchant_slug` on the replacement grant, so the edit cannot silently
+  downgrade it to a plain pinned budget by retargeting or clearing the
+  recipient — the row keeps its merchant label and stays listed on
+  `GET /merchants/{slug}/budgets` and the merchant page after the edit lands.
+  This only ever reaches activation for a `current` row: a `stale`,
+  `unverified` or `not_erc7710` row's build is refused with a 409 naming the
+  reason (the 409s listed under *Issuing one*, above; an unlisted merchant is a
+  404, not a 409), so nothing changes and the old budget keeps working exactly
+  as before the edit was attempted (round 2 review finding R2-2). The way
+  forward is named per status, matching `editMerchantRefusalCopy` exactly: a
+  `stale` row's way out is **Stop**, then fund the merchant again from its
+  page, which derives a fresh recipient; an `unverified` row's is the same
+  **Stop**, then fund again, but only once the merchant confirms an address —
+  there is nothing to fund yet. A `not_erc7710` refusal names no single step:
+  the build checks ERC-7710 before it compares addresses, so the same refusal
+  also comes back when the merchant has BOTH moved to a new address and lost
+  ERC-7710 on an offer. The modal therefore says only what holds in both
+  cases — the budget keeps paying only the address it was set up with — and
+  points at the merchant page, whose row status (`merchantPinStatus` checks
+  the address first) tells "Old address" apart from "Not every offer". An ordinary
+  (non-merchant-locked) budget is unaffected: its recipient stays editable
+  exactly as before.
+- **`GET /merchants/{slug}/budgets`** is dashboard-session only (an agent key
+  gets 403). It lists the owner's active, unexpired merchant-locked budgets
+  for the merchant on agents that are not revoked, each with:
+  - `remaining_atomic`, read from the period enforcer, the same read
+    `GET /allowances` makes; `remaining_is_from_chain: false` means that read
+    failed and the figure is the full budget;
+  - `pin_status`, which is one of:
+    - `current`;
+    - `stale`: the merchant now names a different payTo. The signed budget
+      still pays only the old address, and payments to the new one fall to
+      the open budget, if there is one;
+    - `unverified`: the merchant names no single payTo there now, including
+      a `shared` one;
+    - `not_erc7710`: the payTo still matches, but not every offer there
+      advertises ERC-7710 any more. A pinned budget pays only through
+      ERC-7710, so it cannot pay the offers that dropped it.
+
+  A budget on a chain this deployment no longer lists is still judged against
+  that chain's payTo.
+- **The agent page.** `GET /agents/{id}/delegations` rows carry
+  `merchant_id`, `merchant_slug` and `merchant_name`, so a budget card can
+  name its merchant. A deleted merchant leaves the budget pinned and drops
+  only the label.
+- **Known gap: a re-key drops the label.** The replacement grant a re-key
+  issues keeps the recipient pin but not the merchant. After a re-key, the
+  budget still pays only the merchant, but it no longer appears in
+  `GET /merchants/{slug}/budgets` or carries the merchant's name. Tracked in
+  #3386.
 
 ## Prospects
 
@@ -267,4 +418,62 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   `Date.now()`-relative and the fixtures carry fixed `verified_at` values.
 - `CatalogPanel.tsx` and `app/(authenticated)/catalog/page.tsx` are deleted;
   `CatalogCard` is now `components/marketplace/OfferRow.tsx`;
-  `hooks/useCatalog.ts` gains `useMerchants()` / `useMerchant(slug)`.
+  `hooks/useCatalog.ts` gains `useMerchants()` / `useMerchant(slug)`, and
+  `useMerchant`'s response now also carries `funding` (#3331).
+- **"Fund this merchant"** (`components/marketplace/FundMerchantModal.tsx`,
+  #3331) — the action shows on the merchant page ONLY when ALL of these hold:
+  the merchant is live, AT LEAST ONE listed chain's `funding` entry is
+  `verified` and `erc7710`, AND the owner has at least one ELIGIBLE agent for
+  one of those chains (`eligibleFundingAgents`) — a qualifying chain with no
+  eligible agent hides the action too, rather than opening a modal that can
+  only ever say "no eligible agent". The open-budget note shows instead ONLY
+  when no chain qualifies (no verified+`erc7710` funding entry) but at least
+  one chain has a verified payTo that is not `erc7710`; neither the action nor
+  the note shows when no chain has a verified payTo at all. The modal: pick
+  one of the eligible agents, an amount in whichever token the merchant
+  actually sells in on that chain (`merchantTokenOptions`, restricted to its
+  ERC-7710 offers) and a period, a review step naming the agent, the budget
+  (the SIGNED atomic amount, not the typed string), and the merchant's payTo
+  (shortened, never editable in the UI — but SENT as `recipientAddress`
+  alongside `merchant_slug`, so the server's own comparison catches a payTo
+  that rotated between page load and Sign as a 409 rather than resolving
+  silently), then ONE signature through `useDelegationBudget`'s own `grant()`
+  — the same build → sign → activate composition the agent page's budget form
+  uses, extended with `merchant_slug` rather than forked. The review step
+  states which payments this budget pays and which still use the open budget
+  (see "Which budget pays" above) and, if an ACTIVE row already occupies the same
+  `(agent, token, recipient)` slot — plain, locked to this merchant, or locked
+  to a DIFFERENT merchant — warns that signing replaces it, naming whichever
+  one it is; a budget for this merchant in another token, or one pinned to a
+  payTo the merchant has rotated away from, is a different slot and survives
+  with no warning. `grant()`'s build-step refusals — the four merchant-locked
+  409s AND the ordinary grant refusals any caller can hit (revoked agent, off
+  the delegation rail, chain not enabled, re-key in flight) — each surface
+  their own plain sentence; anything else falls to one generic sentence
+  ("Haven could not set up this budget."), always followed by "Nothing
+  changed." Copy never says "delegation", "recipient pin" or "ERC-7710" —
+  outcome language only, per `EditBudgetModal.tsx`'s established shape
+  (asserted directly against the error-state copy, not only the happy path).
+- **Merchant-locked budgets on the merchant page**
+  (`components/marketplace/MerchantBudgetsList.tsx`, reading
+  `useMerchantBudgets` → `GET /merchants/{slug}/budgets`) — one row per
+  BUDGET (an agent with more than one merchant-locked budget for this
+  merchant — different tokens, or one `stale` and a newer replacement — gets
+  one row each, not one row per agent): remaining vs. total this period, the
+  agent name linking to its page, and `pin_status` as a plain label with one
+  outcome sentence each — `current` shows the "Current" badge with no
+  further explanation, `stale` ("Old address"), `unverified` ("Address
+  unconfirmed" — it still pays the pinned address on-chain; Haven just cannot
+  confirm it is still the merchant's), `not_erc7710` ("Not every offer" — offers that no longer accept this kind of budget are paid from the open budget, if any; any that still accept it keep using this one; this holds whether some or all offers dropped it) — plus
+  the #1319 provenance note when `remaining_is_from_chain` is false. An
+  unknown token shows the raw atomic amounts labelled "unknown token" rather
+  than guessing 18 decimals. Renders nothing when the merchant has none — the
+  same "nothing yet" absence `DelegationBudgetCard` uses for a fresh agent,
+  not an empty section; a failed read is a retryable one-line error instead
+  (`page.tsx`).
+- **The agent page's budget card** (`components/DelegationBudgetCard.tsx`)
+  names a merchant-locked budget's merchant ("pays `<merchant>` only") instead
+  of its raw recipient address, reading the `merchant_name` `GET
+  /agents/{id}/delegations` now carries (#3331). A budget whose merchant was
+  since deleted, or that lost its label to a re-key (#3386), falls back to the
+  address.

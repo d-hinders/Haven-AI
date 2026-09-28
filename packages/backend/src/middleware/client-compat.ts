@@ -131,7 +131,7 @@ export function findRefusalPoint(method: string, url: string | undefined): Clien
 }
 
 /**
- * The command that updates `pkg`, on THIS deployment's channel. Derived from
+ * The command that starts updating `pkg`, on THIS deployment's channel. Derived from
  * `config.connectorChannel` — the same value `CONNECTOR_PACKAGE` in the setup
  * handout uses — never from a client's build-time channel, which would tell a
  * dev deployment's clients to install the production package. The command
@@ -173,14 +173,16 @@ export function clientOutdatedBody(verdict: ActionableVerdict): Record<string, u
   return {
     error:
       `${hint.package} ${hint.current} is below the minimum version this Haven deployment accepts ` +
-      `here (${hint.min_version}). Nothing was written or signed. Update with \`${hint.upgrade_command}\`, ` +
-      'restart the agent runtime, then retry the same request.',
+      `here (${hint.min_version}). Nothing was written or signed. Run \`${hint.upgrade_command}\` ` +
+      '(for a connector-installed package, then the repair line it prints), restart the agent runtime, ' +
+      'then retry the same request.',
     error_code: CLIENT_OUTDATED_ERROR_CODE,
     client_update: hint,
     next_action: AgentPaymentNextAction.StopAndTellUser,
     next_tool_omitted_reason:
-      `the client must be updated before any tool can succeed — tell the user to run ${hint.upgrade_command}, ` +
-      'restart the agent runtime, then retry the same request',
+      `the client must be updated before any tool can succeed — tell the user to run ${hint.upgrade_command} ` +
+      '(for a connector-installed package, then the repair line it prints), restart the agent runtime, ' +
+      'then retry the same request',
   }
 }
 

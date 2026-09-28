@@ -591,12 +591,14 @@ throughout.
    compat versions. On the dev channel the pinned build moves often: an install
    that is intact but behind the connector's current pin is reported as an
    **advisory** (`!` marker, "intact, but outdated", both versions named) and
-   exits 0 — only a real failure exits 1 (#3121). Run
-   `--doctor --repair --runtime <runtime>` to catch up when you want the newer
-   snapshot. Its hosted MCP row proves endpoint reachability; the
+   exits 0 — only a real failure exits 1 (#3121). Run the `--doctor --repair`
+   line the doctor prints to catch up when you want the newer snapshot — with
+   several agents on the machine (a dev and a prod agent, typically) it names
+   `--credentials-dir <dir>`, and a `--repair` without it is refused (#3412). Its hosted MCP row proves endpoint reachability; the
    `identity_match` row is the authenticated stored-credential check. Every
-   "re-run `npx @haven_ai/connect@<tag>`" hint the
-   snapshot's packages print names **`@dev`**, because the tag is a build-time
+   connector hint the snapshot's packages print — the setup re-run
+   `npx @haven_ai/connect@<tag>` and, since #3412, the upgrade command
+   `npx -y @haven_ai/connect@<tag> --doctor` — names **`@dev`**, because the tag is a build-time
    constant (`HAVEN_CONNECTOR_CHANNEL` in `packages/sdk/src/connector-channel.ts`)
    that the snapshot bump rewrote from the version — a snapshot telling its
    tester to re-run `@alpha` would silently replace the build under test (#2423).
@@ -636,7 +638,8 @@ the pinned directory) and is never reused between runs; and `--doctor` reports
 a **failing** `runtime_spec_override` check — that is the record of the override,
 not a defect. A malformed value is refused before npm runs. To return to the
 pinned manifest, unset the variables and run
-`--doctor --repair --runtime <runtime>`. The full contract — the three
+`--doctor --repair --runtime <runtime>` (adding `--credentials-dir <dir>` when
+several agents share the machine — #3412). The full contract — the three
 variables, what each replaces, the sidecar and wrapper records — is in the
 connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).

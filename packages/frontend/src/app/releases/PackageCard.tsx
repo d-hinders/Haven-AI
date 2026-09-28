@@ -12,14 +12,15 @@ const INSTALLED_BY_CONNECTOR: ReadonlySet<string> = new Set(['@haven_ai/signer',
 
 /**
  * The line above a package's update command, or null. The connector's command
- * is its doctor (`upgradeCommandFor`, #3412): run alone it only diagnoses, then
- * prints the `--doctor --repair` line that does the update — so every card that
- * shows it names that second step (#3424). The SDK and CLI commands update on
- * their own and get no line.
+ * is its doctor (`upgradeCommandFor`, #3412): run alone it only diagnoses, and
+ * prints a `--doctor --repair` line when something needs updating — so every
+ * card that shows it names that second step (#3424), in the words the agent
+ * texts use ("any repair line it prints": none prints when all is current).
+ * The SDK and CLI commands update on their own and get no line.
  */
 export function updateNoteFor(name: string): string | null {
-  if (INSTALLED_BY_CONNECTOR.has(name)) return 'Installed by the connector: run this, then the repair command it prints.'
-  if (name === '@haven_ai/connect') return 'Run this, then the repair command it prints.'
+  if (INSTALLED_BY_CONNECTOR.has(name)) return 'Installed by the connector: run this, then any repair line it prints.'
+  if (name === '@haven_ai/connect') return 'Run this, then any repair line it prints.'
   return null
 }
 
@@ -43,7 +44,7 @@ function Thresholds({ entry }: { entry: ManifestPackageEntry }) {
 }
 
 export function PackageCard({ entry }: { entry: ManifestPackageEntry }) {
-  const note = updateNoteFor(entry.name)
+  const updateNote = updateNoteFor(entry.name)
   return (
     <Card hover={false} className="overflow-hidden">
       <Card.Header
@@ -55,7 +56,7 @@ export function PackageCard({ entry }: { entry: ManifestPackageEntry }) {
         <Thresholds entry={entry} />
         {entry.upgrade_command ? (
           <div className="space-y-2">
-            {note ? <p className="text-[13px] text-[var(--v2-ink-2)]">{note}</p> : null}
+            {updateNote ? <p className="text-[13px] text-[var(--v2-ink-2)]">{updateNote}</p> : null}
             <UpdateCommand command={entry.upgrade_command} />
           </div>
         ) : null}

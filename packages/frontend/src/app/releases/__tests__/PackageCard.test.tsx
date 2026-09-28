@@ -6,7 +6,7 @@ import { PackageCard } from '../PackageCard'
 
 /**
  * #3424: the connector's update command is its doctor, which only diagnoses
- * and prints the `--doctor --repair` line that updates. Every card showing it
+ * and prints a `--doctor --repair` line when something needs it. Every card showing it
  * names that second step; the SDK and CLI commands update on their own.
  *
  * The visual spec cannot pin this: it runs with no backend, so no channel and
@@ -14,7 +14,7 @@ import { PackageCard } from '../PackageCard'
  * the entries carry a real channel's commands, built by the same
  * `buildReleaseCompat` the page's manifest uses.
  */
-const REPAIR_STEP = /then the repair command it prints/
+const REPAIR_STEP = /then any repair line it prints/
 const releases = buildReleaseCompat('alpha')
 const withChannel = (key: string): ManifestPackageEntry => {
   const entry = buildManifestFrom('', null).packages[key]
@@ -26,14 +26,14 @@ describe('PackageCard update note (#3424)', () => {
     const entry = withChannel(key)
     expect(entry.upgrade_command).toBe('npx -y @haven_ai/connect@alpha --doctor')
     render(<PackageCard entry={entry} />)
-    expect(screen.getByText('Installed by the connector: run this, then the repair command it prints.')).toBeTruthy()
+    expect(screen.getByText('Installed by the connector: run this, then any repair line it prints.')).toBeTruthy()
   })
 
   it('names the repair step on the connector card itself', () => {
     const entry = withChannel('connect')
     expect(entry.upgrade_command).toBe('npx -y @haven_ai/connect@alpha --doctor')
     render(<PackageCard entry={entry} />)
-    expect(screen.getByText('Run this, then the repair command it prints.')).toBeTruthy()
+    expect(screen.getByText('Run this, then any repair line it prints.')).toBeTruthy()
     expect(screen.queryByText(/Installed by the connector/)).toBeNull()
   })
 

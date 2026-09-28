@@ -6,7 +6,8 @@
  * (every table in the worker schema is counted before and after), the replay
  * exemption reads the handlers' own idempotency lookups, and the retired-rail
  * exemption reads the handlers' own rail seam. The shipped `CLIENT_COMPAT`
- * table is all-null, so a minimum is flagged through `clientCompatDeps(table)`,
+ * table sets only a signer minimum (#3302), so each case flags its own
+ * minimum through `clientCompatDeps(table)`,
  * which keeps the production collaborators and swaps only the table.
  *
  * One mock, copied from `payments-direct-sign-context.test.ts` for the same

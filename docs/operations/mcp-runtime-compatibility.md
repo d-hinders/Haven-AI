@@ -2629,9 +2629,9 @@ The backend reads the header against one hand-edited table, `CLIENT_COMPAT` in
 `packages/core/src/client-compat.ts`. Its values are owner decisions, each recorded where it is made. The first
 real one: **`@haven_ai/signer` `min_version` = `0.6.0-alpha.0`** (epic #3302,
 owner decision 2026-09-28, option A). Because signers send the header only from
-`0.5.0-alpha.1`, this refuses exactly the `0.5.0-alpha.1` signers, at
-sign-context, until they run the upgrade command. Older signers send no header
-and are never refused. Two things can happen:
+`0.5.0-alpha.1`, this refuses `0.5.0-alpha.1` (the only published signer below
+it) on the sign-context path until it runs the upgrade command. Older signers
+send no header and are never refused. Two things can happen:
 
 | Client is… | Effect | Where |
 |---|---|---|
@@ -2653,8 +2653,8 @@ read, which is where the refusal lives. A signer handed `typed_data_b64` or
 `x402_expected` directly never contacts the backend before signing, and the
 sign and settle legs are never refused. A signer minimum therefore stops the
 default path and tells the agent what to run, but it does not guarantee that no
-older signer ever signs. The table ships with every threshold `null`, so until an
-owner sets one the only observable change is the header itself.
+older signer ever signs. The table shipped with every threshold `null` (#3303);
+the only threshold set so far is the signer minimum recorded above (#3302).
 
 **How each runtime surfaces it.**
 - `@haven_ai/mcp` attaches the hint its own dispatch received as `client_update`

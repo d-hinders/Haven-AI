@@ -171,11 +171,11 @@ describe('the live CLIENT_COMPAT table (owner decisions, #3302)', () => {
     // 0.5.0-alpha.1 is the first signer that sends X-Haven-Client: below the minimum.
     expect(evaluateClient('@haven_ai/signer/0.5.0-alpha.1')).toMatchObject({ kind: 'below_min' })
     // At the minimum, and a dev snapshot, are served.
-    expect(evaluateClient('@haven_ai/signer/0.6.0-alpha.0').kind).not.toBe('below_min')
+    expect(evaluateClient('@haven_ai/signer/0.6.0-alpha.0')).toMatchObject({ kind: 'current' })
     expect(evaluateClient('@haven_ai/signer/0.0.0-dev.202609281335.705f436')).toMatchObject({ kind: 'exempt', reason: 'snapshot' })
     // No header (a pre-0.5.0-alpha.1 signer) is never refused.
     expect(evaluateClient(undefined)).toEqual({ kind: 'unidentified' })
     // The other packages keep no minimum.
-    expect(evaluateClient('@haven_ai/sdk/0.5.0-alpha.1').kind).not.toBe('below_min')
+    expect(evaluateClient('@haven_ai/sdk/0.5.0-alpha.1')).toMatchObject({ kind: 'current' })
   })
 })

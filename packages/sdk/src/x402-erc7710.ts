@@ -182,6 +182,13 @@ export class X402Erc7710 {
        * `[settlement, task, budget]`.
        */
       taskBudgetId?: string
+      /**
+       * #3330: build the settlement chain under this open sub-budget's grant
+       * instead of the agent's budget delegation directly —
+       * `[settlement, grant, parent-child, budget]`. Agent B pays through the
+       * sub-budget agent A granted it. Mutually exclusive with `taskBudgetId`.
+       */
+      subBudgetId?: string
     } = {},
   ): Promise<{
     paymentId: string
@@ -268,6 +275,9 @@ export class X402Erc7710 {
       // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest`) — do not
       // switch this to `task_budget_id`, which is only the `POST /payments` key.
       ...(options.taskBudgetId ? { taskBudgetId: options.taskBudgetId } : {}),
+      // #3330: same camelCase channel one level deeper; mutually exclusive
+      // with `taskBudgetId` server-side.
+      ...(options.subBudgetId ? { subBudgetId: options.subBudgetId } : {}),
     })
 
     if (!raw.payment_id) {

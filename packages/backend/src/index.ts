@@ -67,6 +67,8 @@ import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import taskBudgetRoutes from './routes/task-budgets.js'
 import agentTaskBudgetsOwnerRoutes from './routes/agent-task-budgets.js'
+import subBudgetRoutes from './routes/sub-budgets.js'
+import agentSubBudgetsOwnerRoutes from './routes/agent-sub-budgets.js'
 import userAccountsRoutes from './routes/user-accounts.js'
 import userAccountsRetiredRoutes from './routes/user-accounts-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
@@ -149,6 +151,15 @@ installRequestValidation(app, {
     // #3329: the owner-facing task-budget READ is non-money-path (GET only)
     // and born ENFORCED, same precedent as agent-organizations.ts above.
     'routes/agent-task-budgets.ts',
+    // #3330: sub-budgets — the owner-facing issuance/read routes are
+    // money-path-adjacent (they create the rows payments later redeem
+    // through) but carry no spend authority themselves (nothing is signed
+    // by Haven, nothing is redeemed here); born ENFORCED like the
+    // task-budget reads above. The agent-facing lifecycle in
+    // `routes/sub-budgets.ts` IS money-path-adjacent and born ENFORCED
+    // under the same brand-new-module rule as `routes/task-budgets.ts`.
+    'routes/agent-sub-budgets.ts',
+    'routes/sub-budgets.ts',
     // #3332: a brand new module with no live caller yet, same reasoning as
     // task-budgets.ts below — born ENFORCED, never shadow.
     'routes/owner-company-details.ts',
@@ -475,6 +486,10 @@ await app.register(x402Routes, { prefix: '/x402' })
 // read at /agents/:id/task-budgets (same prefix as agent-delegations.ts).
 await app.register(taskBudgetRoutes, { prefix: '/task-budgets' })
 await app.register(agentTaskBudgetsOwnerRoutes, { prefix: '/agents' })
+// #3330: sub-budgets — agent-auth lifecycle at /sub-budgets, owner-auth
+// issue/sign/list/tree/revoke at /agents/:id/sub-budgets.
+await app.register(subBudgetRoutes, { prefix: '/sub-budgets' })
+await app.register(agentSubBudgetsOwnerRoutes, { prefix: '/agents' })
 // #2914 (naming P5, the contraction): the `/user/safes*` prefix stops
 // serving and answers 410 with the replacement path. It is registered as a
 // TOMBSTONE module rather than dropped, because an absent registration is a

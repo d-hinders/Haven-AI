@@ -97,3 +97,11 @@ export {
   type TaskBudgetCloseExpectation,
   type DelegationForHashing,
 } from './task-budget-guards.js'
+export {
+  ERC20_PERIOD_TRANSFER_ENFORCER,
+  assertOwnSubBudgetChild,
+  assertOwnSubBudgetCloseUserOp,
+  hashSubBudgetDelegation,
+  type SubBudgetChildTypedData,
+  type SubBudgetChildExpectation,
+} from './sub-budget-guards.js'

@@ -1295,6 +1295,11 @@ export const openapiSpec = {
     { name: 'Transactions' },
     { name: 'Delegations' },
     {
+      name: 'SubBudgets',
+      description:
+        'Sub-budgets (#3330): a budget one agent re-delegates to another agent in the same account, as an ERC-7710 child of the delegating agent\'s own budget delegation. Payments authorized through one redeem the three-link chain [grant, parent child, budget].',
+    },
+    {
       name: 'Webhooks',
       description:
         'Inbound provider callbacks (#3019). Authenticated by a per-connection capability URL token plus the provider HMAC signature — never a session.',
@@ -6011,6 +6016,192 @@ export const openapiSpec = {
                   required: ['task_budget'],
                   properties: {
                     task_budget: { $ref: '#/components/schemas/TaskBudget' },
+                    status: { type: 'string', enum: ['closed'], description: 'Present on a trivial close.' },
+                    sign_data: {
+                      type: 'object',
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        typed_data: { type: 'object', additionalProperties: true },
+                        user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' },
+                      },
+                      description: 'Present when a live child needs a revocation signature.',
+                    },
+                    next_action: { type: 'string', enum: ['sign_then_submit'] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'Already closed.' },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'listSubBudgets',
+        summary: 'List sub-budgets this agent holds (it is the sub-agent).',
+        description:
+          "Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.",
+        security: [{ AgentApiKey: *** }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['open', 'all'] },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Sub-budgets held by this agent.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budgets'],
+                  properties: {
+                    sub_budgets: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'getSubBudget',
+        summary: 'Fetch one sub-budget this agent holds.',
+        security: [{ AgentApiKey: *** }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The sub-budget.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget'],
+                  properties: { sub_budget: { $ref: '#/components/schemas/SubBudget' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}/sign-context': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'getSubBudgetSignContext',
+        summary: 'Re-servable, byte-free signing handoff for a pending or closing sub-budget row.',
+        description:
+          "DELEGATOR-scoped: both children of a tree (the parent-child narrowing AND the grant to the sub-agent) are signed by the DELEGATING agent's delegate key, so only the delegating agent authenticates here. purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for that row's child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.",
+        security: [{ AgentApiKey: *** }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The sign context for whichever signature is currently pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget_id', 'purpose', 'sub_budget_sign_context_version', 'typed_data', 'expected'],
+                  properties: {
+                    sub_budget_id: uuid,
+                    purpose: { type: 'string', enum: ['open', 'close'] },
+                    sub_budget_sign_context_version: { type: 'integer', enum: [1] },
+                    typed_data: { type: 'object', additionalProperties: true },
+                    user_operation: { type: 'object', additionalProperties: true, description: 'purpose=close only.' },
+                    user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'purpose=close only.' },
+                    expected: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'sign_context_unavailable — the sub-budget has no signature currently pending.' },
+        },
+      },
+    },
+    '/sub-budgets/{id}/submit': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'submitSubBudget',
+        summary: 'Submit the delegating agent signature — opens a pending child, or relays the signed close operation.',
+        description:
+          "status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409.",
+        security: [{ AgentApiKey: *** }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: { signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Opened (from pending) or closed (from closing).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'status'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['open', 'closed'] },
+                    close_tx_hash: { type: 'string', description: 'Present when status=closed.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'signature_mismatch, or a malformed signature.' },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}/close': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'closeSubBudget',
+        summary: 'Close a sub-budget row — trivially if never signed or already expired, otherwise prepares the revocation.',
+        description:
+          "DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.",
+        security: [{ AgentApiKey: *** }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'Closed trivially, or a close signature is now pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
                     status: { type: 'string', enum: ['closed'], description: 'Present on a trivial close.' },
                     sign_data: {
                       type: 'object',

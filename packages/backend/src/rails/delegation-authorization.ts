@@ -53,10 +53,28 @@ export interface TaskBudgetForPayment {
   childDelegation: Delegation
   /**
    * #3329 review finding E: the EXACT parent delegation the task budget was
-   * carved from (selected by hash by the caller) — used verbatim instead of
-   * re-selecting by (token, to), which can pick a DIFFERENT active grant
-   * than the one the task child's `authority` names.
+   * carved from (selected by hash — never re-derived by (token, to), which
+   * can name a DIFFERENT active grant than the one the task child's
+   * `authority` names.
    */
+  parentDelegation: DelegationForPaymentRow
+}
+
+/**
+ * A sub-budget (#3330) authorizing this payment: agent B spends through the
+ * THREE-link chain `[B grant, A parent-child, A budget]` (leaf first, each
+ * link's `authority` naming the next). `grantDelegation` is B's signed
+ * child (`agent_sub_budgets.delegation_json` once `status='open'`),
+ * `parentChildDelegation` is A's signed self-delegated narrowing (the
+ * middle link — read from A's row by the grant's `parent_delegation_hash`),
+ * and the budget delegation row is A's EXACT parent grant (selected by
+ * hash, the same #3329 review finding E rule). Callers are responsible for
+ * the pre-sign checks in `modules/sub-budgets/sub-budget-service.ts` —
+ * this module only builds the chain and lets the chain rule.
+ */
+export interface SubBudgetForPayment {
+  grantDelegation: Delegation
+  parentChildDelegation: Delegation
   parentDelegation: DelegationForPaymentRow
 }
 
@@ -96,13 +114,16 @@ export async function prepareDelegationPayment(
   tokenAddress: string,
   toAddress: string,
   amountRaw: bigint,
-  options?: { taskBudget?: TaskBudgetForPayment },
+  options?: { taskBudget?: TaskBudgetForPayment; subBudget?: SubBudgetForPayment },
 ): Promise<DelegationAuthorization | null> {
-  // #3329 review finding E: a task budget's parent is used VERBATIM — never
-  // re-selected by (token, to), which can name a different active grant.
-  const delegation = options?.taskBudget
-    ? options.taskBudget.parentDelegation
-    : await selectDelegation(agent.id, tokenAddress, toAddress)
+  // #3329 review finding E: a task budget's or sub-budget's parent is used
+  // VERBATIM — never re-selected by (token, to), which can name a different
+  // active grant.
+  const delegation = options?.subBudget
+    ? options.subBudget.parentDelegation
+    : options?.taskBudget
+      ? options.taskBudget.parentDelegation
+      : await selectDelegation(agent.id, tokenAddress, toAddress)
   if (!delegation) return null
 
   const delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
@@ -120,11 +141,16 @@ export async function prepareDelegationPayment(
   }
 
   const budgetDelegation = JSON.parse(delegation.delegation_json) as Delegation
-  // #3329: [taskChild, budget] when a task budget authorizes this payment —
-  // leaf first, the same order the x402 erc7710 settlement chain redeems.
-  const chain: Delegation[] = options?.taskBudget
-    ? [options.taskBudget.childDelegation, budgetDelegation]
-    : [budgetDelegation]
+  // #3329: [taskChild, budget] when a task budget authorizes this payment.
+  // #3330: [grant, parentChild, budget] when a sub-budget does — three
+  // links, leaf first; the parent-child link's `authority` names the budget
+  // and the grant's names the parent-child, so redeeming with any link
+  // missing (or reordered) reverts.
+  const chain: Delegation[] = options?.subBudget
+    ? [options.subBudget.grantDelegation, options.subBudget.parentChildDelegation, budgetDelegation]
+    : options?.taskBudget
+      ? [options.taskBudget.childDelegation, budgetDelegation]
+      : [budgetDelegation]
 
   const prepared = await rail.prepareRedemption(
     chain,

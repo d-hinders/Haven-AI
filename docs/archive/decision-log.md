@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-09-27 | Sub-agent budgets: sub-budget issuance is owner-governed; the delegating agent's delegate key only signs within the owner-approved envelope | #3330, epic #3328 |
 | 2026-09-26 | Promotions merge behind by the owner; the post-promotion sync-back is dropped | PR #3325 |
 | 2026-09-25 | Request validation enforces by default; `off`/`shadow` are global kill switches, `enforcedModules` is the per-module rollback | #3032, #3028, #3223 |
 | 2026-09-19 | The fix→review loop gets a fourth exit: a prose-only round cannot loop forever | #3158, PR #3156 |
@@ -53,6 +54,28 @@ named where they belong below.
 | — | Historical: POC scope and phased roadmap | — |
 
 ---
+
+## 2026-09-27 — sub-agent budgets: issuance is owner-governed; the delegate key only signs (#3330)
+
+Issue #3330's "Rule conflict to resolve first". CLAUDE.md § Agent Model makes an
+agent editing its own authority owner-authorised (rekey is owner-only) and
+treats an agent granting authority to another agent as the same class, while
+the ERC-7710 mechanics want the child delegation signed by agent A's delegate
+key. The conflict is resolved in favour of the SAFER of the two options the
+issue offered: **owner co-signs each sub-budget** — sub-budget issuance is
+owner-governed like budget grant/activation itself, and A's delegate key only
+SIGNS the already-built child within the owner-approved envelope (`POST
+/agents/:id/sub-budgets/:id/sign`, mirroring how the dashboard signs a budget
+grant). The alternative — a standing, dashboard-granted "may re-delegate up to
+X" right A could exercise without the owner each time — is deferred: it trades
+an owner approval per sub-budget for a standing authority that itself needs
+revocation machinery, expiry semantics and an audit surface of its own, none
+of which exists today. No agent ever signs a delegation naming a different
+delegator (A's key never produces authority for B's account directly); A's key
+signs only the child whose `delegator` is A's own delegate account, exactly as
+#3329's task-budget child already does — the owner-governed issuance step is
+what makes that signature an agent acting within an owner-approved envelope
+rather than an agent editing its own authority.
 
 ## 2026-09-26 — promotions merge behind; no sync-back (#3325)
 

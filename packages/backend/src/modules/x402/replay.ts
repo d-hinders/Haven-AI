@@ -40,6 +40,8 @@ export async function delegationReplay(
     network: string
     facilitatorAddresses?: string[]
     taskBudgetId?: string
+    /** #3330: same pin as taskBudgetId — the authorizing child is part of the identity. */
+    subBudgetId?: string
   },
 ): Promise<X402HandlerResult | null> {
   // #3392: the task budget a payment was charged to is part of the replay
@@ -68,6 +70,19 @@ export async function delegationReplay(
         payment_id: existing.id,
         status: existing.status,
         error: 'idempotencyKey already belongs to a different x402 task_budget',
+      },
+    }
+  }
+  // #3330: the same pin for a sub-budget-authorized intent.
+  const existingSubBudget = typeof existing.sub_budget_id === 'string' ? existing.sub_budget_id.toLowerCase() : null
+  const requestedSubBudget = typeof request.subBudgetId === 'string' ? request.subBudgetId.toLowerCase() : null
+  if (existingSubBudget !== requestedSubBudget) {
+    return {
+      code: 409,
+      body: {
+        payment_id: existing.id,
+        status: existing.status,
+        error: 'idempotencyKey already belongs to a different x402 sub_budget',
       },
     }
   }

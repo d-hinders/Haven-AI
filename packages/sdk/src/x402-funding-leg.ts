@@ -106,7 +106,10 @@ export class X402FundingLeg {
    * than to the facade because its expiry is read out of the authorization
    * header itself — a 3009 artifact.
    */
-  private readonly receiptCache = new Map<string, { expiresAt: number; taskBudgetId?: string; receipt: X402Receipt }>()
+  private readonly receiptCache = new Map<
+    string,
+    { expiresAt: number; taskBudgetId?: string; subBudgetId?: string; receipt: X402Receipt }
+  >()
 
   constructor(options: X402FundingLegOptions) {
     this.delegateKey = options.delegateKey
@@ -121,19 +124,21 @@ export class X402FundingLeg {
   // ── Receipt cache ────────────────────────────────────────────────
 
   /**
-   * #3392: each cached receipt records the `taskBudgetId` it was created
-   * under (absent when none). A call naming a DIFFERENT one is refused here —
-   * before any network call — instead of silently returning a receipt paid
-   * under another budget. Absent-vs-absent and equal ids (case-insensitive)
-   * hit as before.
+   * #3392: each cached receipt records the authorizing budget id(s) it was
+   * created under (absent when none) — `taskBudgetId` since #3329, and since
+   * #3330 `subBudgetId` (agent B's grant). A call naming a DIFFERENT
+   * combination is refused here — before any network call — instead of
+   * silently returning a receipt paid under another budget. Absent-vs-absent
+   * and equal ids (case-insensitive) hit as before.
    */
-  cachedReceipt(idempotencyKey: string, taskBudgetId?: string): X402Receipt | undefined {
+  cachedReceipt(idempotencyKey: string, taskBudgetId?: string, subBudgetId?: string): X402Receipt | undefined {
     const cached = this.receiptCache.get(idempotencyKey)
     if (!cached || cached.expiresAt <= Date.now()) return undefined
-    if (!sameX402TaskBudget(cached.taskBudgetId, taskBudgetId)) {
+    if (!sameX402TaskBudget(cached.taskBudgetId, taskBudgetId) || !sameX402TaskBudget(cached.subBudgetId, subBudgetId)) {
       throw new X402TaskBudgetMismatchError(
-        `The x402 idempotency key '${idempotencyKey}' was already used under a different task budget` +
-          ` ('${cached.taskBudgetId ?? 'none'}' vs '${taskBudgetId ?? 'none'}').` +
+        `The x402 idempotency key '${idempotencyKey}' was already used under a different authorizing budget` +
+          ` (task '${cached.taskBudgetId ?? 'none'}' vs '${taskBudgetId ?? 'none'}', sub ` +
+          `'${cached.subBudgetId ?? 'none'}' vs '${subBudgetId ?? 'none'}').` +
           ' Pass a new idempotencyKey to pay under this budget.',
         idempotencyKey,
         cached.taskBudgetId,
@@ -143,10 +148,16 @@ export class X402FundingLeg {
     return cached.receipt
   }
 
-  cacheReceipt(idempotencyKey: string, paymentHeader: string, receipt: X402Receipt, taskBudgetId?: string): void {
+  cacheReceipt(
+    idempotencyKey: string,
+    paymentHeader: string,
+    receipt: X402Receipt,
+    taskBudgetId?: string,
+    subBudgetId?: string,
+  ): void {
     const expiresAt = getPaymentHeaderValidBefore(paymentHeader)
     if (expiresAt > Date.now()) {
-      this.receiptCache.set(idempotencyKey, { expiresAt, taskBudgetId, receipt })
+      this.receiptCache.set(idempotencyKey, { expiresAt, taskBudgetId, subBudgetId, receipt })
     }
   }
 
@@ -157,6 +168,7 @@ export class X402FundingLeg {
     option: X402PaymentOption,
     idempotencyKey: string,
     taskBudgetId?: string,
+    subBudgetId?: string,
   ): Promise<X402Receipt> {
     // 2. Standard x402 settles from an EOA, so the SDK uses the agent-owned
     // delegate EOA for the merchant-facing EIP-3009 authorization. Haven does
@@ -191,6 +203,11 @@ export class X402FundingLeg {
       // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest`) — do not
       // switch this to `task_budget_id`, which is only the `POST /payments` key.
       ...(taskBudgetId ? { taskBudgetId } : {}),
+      // #3330: same camelCase channel one level deeper — agent B pays through
+      // the sub-budget agent A granted it (`[funding, B grant, A parent-child,
+      // A budget]`). Mutually exclusive with `taskBudgetId` server-side; the
+      // backend refuses a body naming both.
+      ...(subBudgetId ? { subBudgetId } : {}),
     })
 
     // The backend can report an ALREADY-EXECUTED payment in two different
@@ -266,13 +283,13 @@ export class X402FundingLeg {
 
     if (raw.success && raw.tx_hash) {
       const receipt = this.receiptFromAuthorization(paymentRequired, option, paymentHeader, raw)
-      this.cacheReceipt(idempotencyKey, paymentHeader, receipt, taskBudgetId)
+      this.cacheReceipt(idempotencyKey, paymentHeader, receipt, taskBudgetId, subBudgetId)
       return receipt
     }
 
     if (state?.nextAction === AgentPaymentNextAction.RetryOriginalX402Request) {
       const receipt = this.receiptFromStatus(paymentRequired, option, paymentHeader, state)
-      this.cacheReceipt(idempotencyKey, paymentHeader, receipt, taskBudgetId)
+      this.cacheReceipt(idempotencyKey, paymentHeader, receipt, taskBudgetId, subBudgetId)
       return receipt
     }
 
@@ -308,7 +325,7 @@ export class X402FundingLeg {
     )
 
     const receipt = this.receiptFromAuthorization(paymentRequired, option, paymentHeader, raw, execResult)
-    this.cacheReceipt(idempotencyKey, paymentHeader, receipt, taskBudgetId)
+    this.cacheReceipt(idempotencyKey, paymentHeader, receipt, taskBudgetId, subBudgetId)
     return receipt
   }
 

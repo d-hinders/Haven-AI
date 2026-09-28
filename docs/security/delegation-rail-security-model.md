@@ -60,7 +60,7 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/issuance.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
-last-verified: "2026-09-28"
+last-verified: "2026-09-27"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)

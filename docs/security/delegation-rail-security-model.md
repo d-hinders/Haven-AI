@@ -1762,32 +1762,6 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > No authority moves: the
 > backend is untouched, and no signature, key role, delegation, caveat or
 > on-chain surface changes. The rest of this document was not re-read for it,
-=======
-> **Re-verified (#3330, 2026-09-28):** §10 is AMENDED, not loosened: the
-> redemption allowlist admits exactly one more chain shape — the three-link
-> sub-budget chain `[sub grant, parent child, budget]` (leaf a real grant TO
-> this signer's account from the delegating agent A, middle link A's
-> self-delegated narrowing of its own budget, budget link unchanged) — and a
-> new typed-data class, the sub-budget child, joins the task child as a
-> flow-keyed `haven_sign` signable (`sub_budget_id`), verified by
-> `assertOwnSubBudgetChild`/`assertOwnSubBudgetCloseUserOp`
-> (`sub-budget-guards.ts`, now in `covers:`). A sub-budget child can only
-> NARROW its parent (periodAmount ≤ the parent's on the SAME
-> periodDuration/startDate window, expiry ≤ the parent's, a recipient pin
-> never unpinned), so the chain B redeems is as or more restrictive than the
-> two-hop task chain and every hop's caveats still AND into the one
-> redemption — the DelegationManager, not Haven, meters the spend. Issuance
-> is owner-governed (decision log 2026-09-27: owner co-signs each sub-budget;
-> A's delegate key only signs within the owner-approved envelope), so an
-> agent still never signs authority for another account's delegator side. The
-> signer's x402 arm is unchanged: a three-link redemption moves through
-> `haven_sign`'s flow-keyed channel, and the settlement-child verifier's
-> shape routing (never a self-delegation, never a root) is untouched. Every
-> refusal case is pinned in `redemption-guard.test.ts`. Scope of this note:
-> `redemption-guard.ts`, `sub-budget-guards.ts`, `settlement-child.ts`'s
-> shape predicates, `signer/tools.ts`'s new `sub_budget_id` channel, and the
-> allowlist bullets above. Nothing else in this document was re-read for it,
->>>>>>> fa6ab2e5 (wip(#3330): run-578 checkpoint — sdk guards, tests, openapi, frontend tree)
 > and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**

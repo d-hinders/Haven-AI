@@ -93,7 +93,7 @@ export const toolSchemas = {
     amount: z.string().min(1),
     idempotency_key: z.string().optional(),
     /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
-    idempotencyKey: z.string().optional(),
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
   },
@@ -103,7 +103,7 @@ export const toolSchemas = {
     arguments: z.record(z.string(), z.unknown()).optional(),
     idempotency_key: z.string().optional(),
     /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
-    idempotencyKey: z.string().optional(),
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
   },
   haven_quote_x402: {
     url: z.string().url(),
@@ -112,13 +112,13 @@ export const toolSchemas = {
     body: z.string().optional(),
     idempotency_key: z.string().optional(),
     /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
-    idempotencyKey: z.string().optional(),
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
   },
   haven_pay_x402_quote: {
     quote: z.unknown(),
     idempotency_key: z.string().optional(),
     /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
-    idempotencyKey: z.string().optional(),
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
   },
@@ -129,7 +129,7 @@ export const toolSchemas = {
     body: z.string().optional(),
     idempotency_key: z.string().optional(),
     /** REMOVED (#3411): declared only so the resolver can refuse it by name, never accepted. */
-    idempotencyKey: z.string().optional(),
+    idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
   },
@@ -319,9 +319,9 @@ export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
 export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName, (input: unknown) => Promise<ToolPayload>> {
   return {
     haven_send: async (input) => {
-      // #2366: resolved OUTSIDE the payload so its warnings can ride on the
-      // success, and BEFORE anything is contacted so an ambiguous pair refuses
-      // without spending.
+      // #2366/#3411: resolved OUTSIDE the payload so its warnings can ride on
+      // the success, and BEFORE anything is contacted so a legacy
+      // `idempotencyKey` refuses without spending.
       const pf = preflight('haven_send', input)
       if ('success' in pf) return pf
       const { args, warnings } = pf
@@ -374,8 +374,10 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
     haven_pay_mcp_tool: async (input) => {
       // #2366: hoisted out of `runTool` so a refusal is a refusal rather than
-      // a success carrying one as its payload, and so the warning can ride on
-      // the result.
+      // a success carrying one as its payload. (`warnings` no longer fires for
+      // idempotency-key spelling since #3411 — the legacy spelling is refused,
+      // not warned on — but the field stays hoisted here for any future
+      // non-fatal notice `preflight` needs to attach to a success.)
       const pf = preflight('haven_pay_mcp_tool', input)
       if ('success' in pf) return pf
       const { args, warnings } = pf
@@ -752,8 +754,9 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
  * rename could not be a single release: an installed caller passing the old
  * name had to keep working for a window, and be told to move. Owner decision
  * 2026-09-06 — accept both, warn on the old, drop it later. The removal
- * condition: the warning first shipped in `0.1.35-alpha.0` (npm, published
- * 2026-09-07); `latest` is many releases past it. The window is closed.
+ * condition: the warning first shipped on the `alpha`/`latest` channel in
+ * `0.1.35-alpha.0` (npm, published 2026-09-07); `latest` is many releases
+ * past it. The window is closed.
  *
  * `idempotencyKey` stays DECLARED in every schema above and is now REFUSED by
  * name with `IDEMPOTENCY_KEY_RENAMED`, rather than simply deleted from the
@@ -788,7 +791,8 @@ function preflight<TName extends HavenMcpToolName>(
   if ('success' in idem) return idem
   // #3411: carried under a name distinct from the refused `idempotencyKey`
   // input field, so it cannot be confused with — or accidentally re-trigger
-  // — the refusal above. The snake_case key still reaches the SDK from here.
+  // — the refusal in `resolveIdempotencyKey` below. The snake_case key still
+  // reaches the SDK from here.
   if (idem.key !== undefined) args = { ...args, resolvedIdempotencyKey: idem.key }
   return { args, warnings: idem.warnings }
 }

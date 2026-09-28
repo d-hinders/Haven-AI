@@ -229,11 +229,11 @@ and the divergence table alone reads as though they were:
 |---|---|---|
 | `haven_send` | `idempotencyKey` | Total loss. `POST /payments` went out as `{token, amount, to}` with **no** `idempotency_key` field, so the backend's replay contract never engaged and a retry was a second spend. |
 | `haven_pay_mcp_tool` | `idempotencyKey` | Replay scope **replaced**, not merely lost: the SDK fell back to `buildX402IdempotencyKey`, a hash of the merchant quote over a 300 s bucket. It de-dupes two genuinely distinct purchases inside one bucket and fails to de-dupe a retry that crosses a bucket boundary. |
-| `haven_quote_x402` | `body` (and `idempotencyKey`) | The hosted probe fired with an **empty** body, so the quote described a request the caller never made. A quote creates no payment, so the `idempotencyKey` half cost nothing directly. **`body` is converged since #2366**; `idempotencyKey` is the divergence that remains on this tool. |
+| `haven_quote_x402` | `body` (and `idempotencyKey`) | The hosted probe fired with an **empty** body, so the quote described a request the caller never made. A quote creates no payment, so the `idempotencyKey` half cost nothing directly. **`body` is converged since #2366**; `idempotencyKey` converged by #3411. |
 | `haven_pay_x402_quote` | `idempotencyKey` only | Its headline crossover, `quote` for `payment_required`, **always failed loudly** — `payment_required` is required, so the call was refused with `-32602 … Required` and made zero Haven calls. Only `idempotencyKey` was silent. |
 
 Refusing is the on-ramp, not the destination, and **#2366 has now walked half of
-it.** The hosted `haven_quote_x402` takes a `body`, threaded verbatim into the
+it, and #3411 the other half.** The hosted `haven_quote_x402` takes a `body`, threaded verbatim into the
 probe's `RequestInit` and distinguished from *no* body by `!== undefined` rather
 than truthiness — an empty-string body is a body, and a paywall that varies on a
 payloadless `POST` is a different request from one with no body at all. The two
@@ -248,9 +248,11 @@ avoid committing. That divergence is gone rather than mitigated: one field, one 
 both surfaces.
 
 **The spelling half's window is now CLOSED** (owner decision 2026-09-06 opened it;
-#3411 closed it). The removal condition — the warning shipping in a real release,
-with `latest` several releases past it — was met by `0.1.35-alpha.0`
-(published 2026-09-07). The local surface now takes only `idempotency_key`.
+#3411 closed it). The removal condition — the warning shipping in a real
+release, with `latest` several releases past it — was met by `0.1.35-alpha.0`,
+the first `alpha`/`latest`-channel release carrying it (published 2026-09-07;
+one day behind the `dev`-channel build that carried it first,
+`0.0.0-dev.202609061923.f3d53db`). The local surface now takes only `idempotency_key`.
 `idempotencyKey` stays **declared** in each tool's schema (so the MCP SDK's
 default `z.object` strip mode cannot silently drop it before the handler runs —
 the exact #2348 failure the refusal exists to prevent) but is **refused by
@@ -290,10 +292,10 @@ accept `payment_required` means the caller must know which field of its own
 quote to send, and gains a second deprecation to run for no behavioural benefit.
 Both trade a real guard for a cosmetic symmetry.
 
-**The removal has happened (#3411).** The window closed once its written
-condition was met — see above — rather than staying open indefinitely for lack
-of a release-train decision to shut it. `idempotencyKey` no longer works; it is
-refused.
+**The removal has happened (#3411).** #3411 wrote down a removal condition and
+found it already met — see above — rather than the window staying open
+indefinitely for lack of a release-train decision to shut it. `idempotencyKey`
+no longer works; it is refused.
 
 Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools/contracts.ts` (re-exported by

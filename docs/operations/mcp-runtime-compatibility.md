@@ -2245,8 +2245,9 @@ worth knowing before you reach for an upgrade:
   client). A tool on neither list does not compile.
 - **The most likely cause is the local-vs-hosted argument spelling**, not a
   typo: `idempotencyKey` where the hosted surface takes `idempotency_key`,
-  `quote` where it takes `payment_required`, and a `body` on
-  `haven_quote_x402` that only the local surface declares. Since #2348 those
+  and `quote` where it takes `payment_required`. (A third crossover, `body` on
+  `haven_quote_x402` declared only on the local surface, converged by #2366 —
+  the hosted schema takes `body` too now.) Since #2348 those
   four tools say so in the refusal itself — the message names the hosted
   spelling to send instead, so the refusal is actionable without leaving the
   terminal. See
@@ -2258,10 +2259,10 @@ worth knowing before you reach for an upgrade:
   > **Re-verified #3411 (2026-09-28), idempotency spelling only:** the local
   > `@haven_ai/mcp` now refuses `idempotencyKey` too
   > (`IDEMPOTENCY_KEY_RENAMED`), so both surfaces take `idempotency_key`. An
-  > `idempotencyKey` in a hosted refusal now means a caller still on the
-  > pre-#3411 local spelling, not a live local-vs-hosted difference; the #2366
-  > spelling half of that convergence is done. The `quote` / `body` crossovers
-  > above are unchanged. Nothing else in this document was re-verified.
+  > `idempotencyKey` in a hosted refusal usually means a pre-#3411 local
+  > caller, or one copying the SDK's camelCase spelling; the #2366 spelling
+  > half of that convergence is done. The `quote` crossover above is
+  > unchanged. Nothing else in this document was re-verified.
 
 **Server-side runtime requirement.** A strict tool registers a `ZodObject`
 rather than a raw shape, which the deprecated `McpServer.tool(name, description,

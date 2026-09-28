@@ -208,6 +208,12 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #2908: EDITED, scope = the credential-file example (`account_address`,
     // with the permanent `safe_address`/`safeAddress` read and the env-name
     // window stated beneath it). Rest of the README NOT re-verified.
+    // #3411: EDITED, scope = the same idempotency-key subsection, closing the
+    // window it opened: `idempotencyKey` is now refused, not accepted-and-warned,
+    // and the "every other Haven wire contract" claim is removed as false (the
+    // SDK's own LLM tool schemas and REST /x402/authorize still spell it
+    // `idempotencyKey`). Written against `packages/mcp/src/tools.ts` on this
+    // branch. Rest of the README NOT re-verified.
     'last-verified': '2026-09-12',
   },
   {

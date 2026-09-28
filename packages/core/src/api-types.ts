@@ -327,6 +327,30 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agents/{id}/tax-declaration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the unsigned buyer-side tax declaration content for this agent.
+         * @description The AGENT's own read (#3426, wg-tax #5 §2.1) — authenticated by this agent's API key. Answers 200 with the UNSIGNED §2.1 content when the deployment flag is on, this agent is opted in, and the owner's VAT number is VIES `valid` AT READ TIME: `version` (`x402-tax-1`), `jurisdiction` (the owner's saved country — never derived from the VAT number's prefix; a `GR…` VAT number with country `GR` declares `GR`, and Northern Ireland's `XI…` prefix declares the saved country), `taxableStatus` (`TAXABLE_PERSON`), `taxId` (the saved VAT number) and `validUntil` (integer MILLISECONDS, the lesser of now + 24h and the VIES check's completion time + 24h — the check's own freshness caps the declaration). Answers 200 with `{ available: false, reason }` otherwise — `feature_disabled` (flag off), `disabled` (this agent not opted in, or a foreign agent id), `no_company_details` (no VAT number saved) or `vies_not_valid` (VIES anything-but-valid right now, `pending` included). Availability is the body, not the status code: a temporarily unavailable declaration is a state to poll, not an error. The response is NEVER signed and carries no `signature`, `principalId` or `principalAttributionHash` — the SDK computes those locally (#3427) — and none of the company-details fields the declaration does not state. This slice sends nothing; the declaration is only ever carried on EIP-3009 payments (#3427).
+         */
+        get: operations["getAgentTaxDeclaration"];
+        /**
+         * Opt this agent in or out of the buyer-side x402 tax declaration.
+         * @description The OWNER's per-agent opt-in (#3426, wg-tax #5 §2.1). Opting IN is refused with a structured 409 unless the deployment has `HAVEN_OWNER_COMPANY_DETAILS` on and the owner's saved company details carry a VAT number whose VIES status is `valid` AT THE MOMENT of the write — the refusal names the reason (`feature_disabled`, `no_company_details` or `vies_not_valid`) and writes nothing. Opting OUT always succeeds: an owner whose VIES result dropped is exactly the owner who needs to withdraw the opt-in. The toggle changes only this agent's own opt-in bit — it grants no spending authority and sends nothing; the declaration itself is only ever carried on EIP-3009 payments (#3427). An agent API key is refused with a named 403: this is an owner-session surface, the same as the company-details routes.
+         */
+        put: operations["putAgentTaxDeclaration"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/{id}/delegate-balance": {
         parameters: {
             query?: never;
@@ -3680,6 +3704,44 @@ export type components = {
         DeleteCompanyDetailsResponse: {
             ok: boolean;
         };
+        UpsertAgentTaxDeclarationRequest: {
+            /** @description True opts THIS agent in; false withdraws the opt-in (never refused). */
+            tax_declaration_enabled: boolean;
+        };
+        AgentTaxDeclarationState: {
+            /** Format: uuid */
+            id: string;
+            tax_declaration_enabled: boolean;
+        };
+        /**
+         * @description Why no declaration content is available: the deployment flag is off, the agent is not opted in, no VAT number is saved, or VIES is anything-but-valid at read time.
+         * @enum {string}
+         */
+        AgentTaxDeclarationUnavailableReason: "feature_disabled" | "disabled" | "no_company_details" | "vies_not_valid";
+        AgentTaxDeclaration: {
+            /**
+             * @description The §2.1 version discriminator of the first profile.
+             * @enum {string}
+             */
+            version: "x402-tax-1";
+            /** @description ISO 3166-1 alpha-2 — the owner's saved country. Never derived from the VAT number's prefix. */
+            jurisdiction: string;
+            /** @enum {string} */
+            taxableStatus: "TAXABLE_PERSON";
+            /** @description The owner's saved VAT number, normalised (uppercase, no spaces). */
+            taxId: string;
+            /** @description Integer MILLISECONDS. The lesser of now + 24h and the VIES check's completion time + 24h — the check's own freshness caps the declaration. */
+            validUntil: number;
+        };
+        AgentTaxDeclarationContent: {
+            /** @enum {boolean} */
+            available: true;
+            declaration: components["schemas"]["AgentTaxDeclaration"];
+        } | {
+            /** @enum {boolean} */
+            available: false;
+            reason: components["schemas"]["AgentTaxDeclarationUnavailableReason"];
+        };
         ReplaceAgentLabelsRequest: {
             label_ids: string[];
         };
@@ -3951,6 +4013,7 @@ export type components = {
             allowances: components["schemas"]["AgentAllowance"][];
             labels: components["schemas"]["Label"][];
             organization_id: string | null;
+            tax_declaration_enabled: boolean;
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
@@ -6443,6 +6506,159 @@ export interface operations {
         responses: {
             /** @description Always. The message names the archive route to use instead. */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentTaxDeclaration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The declaration content, or the structured not-available answer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTaxDeclarationContent"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    putAgentTaxDeclaration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertAgentTaxDeclarationRequest"];
+            };
+        };
+        responses: {
+            /** @description The new state of the opt-in. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTaxDeclarationState"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The opt-in is not currently possible. The body carries `reason` (`feature_disabled`, `no_company_details` or `vies_not_valid`) and `available: false`; nothing was written. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

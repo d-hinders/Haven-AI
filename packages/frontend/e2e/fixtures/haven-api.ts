@@ -100,6 +100,11 @@ export const testAgent = {
   // #3164: placement on the agents read. The default agent sits at the top
   // level, outside every organization.
   organization_id: null,
+  // #3426: the owner's per-agent x402 tax declaration opt-in, default OFF —
+  // the same fact the e2e default agent must carry (the fixture is
+  // schema-checked against `ApiSchema<'Agent'>`, so the new required boolean
+  // cannot be dropped silently here).
+  tax_declaration_enabled: false,
   // #2264: the DERIVED delegation-budget projection, which is what fills this
   // array on the live rail (`rails/delegation-budget-view.ts`): 250 USDC per
   // 30 days, `allowance_amount` HUMAN-formatted and `reset_period_min` in

@@ -1914,6 +1914,65 @@ export const openapiSpec = {
         },
       },
     },
+    '/agents/{id}/tax-declaration': {
+      put: {
+        tags: ['Agents'],
+        operationId: 'putAgentTaxDeclaration',
+        summary: "Opt this agent in or out of the buyer-side x402 tax declaration.",
+        description:
+          "The OWNER's per-agent opt-in (#3426, wg-tax #5 §2.1). Opting IN is refused with a structured 409 unless the deployment has `HAVEN_OWNER_COMPANY_DETAILS` on and the owner's saved company details carry a VAT number whose VIES status is `valid` AT THE MOMENT of the write — the refusal names the reason (`feature_disabled`, `no_company_details` or `vies_not_valid`) and writes nothing. Opting OUT always succeeds: an owner whose VIES result dropped is exactly the owner who needs to withdraw the opt-in. The toggle changes only this agent's own opt-in bit — it grants no spending authority and sends nothing; the declaration itself is only ever carried on EIP-3009 payments (#3427). An agent API key is refused with a named 403: this is an owner-session surface, the same as the company-details routes.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpsertAgentTaxDeclarationRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The new state of the opt-in.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentTaxDeclarationState' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'The opt-in is not currently possible. The body carries `reason` (`feature_disabled`, `no_company_details` or `vies_not_valid`) and `available: false`; nothing was written.',
+          },
+        },
+      },
+      get: {
+        tags: ['Agents'],
+        operationId: 'getAgentTaxDeclaration',
+        summary: 'Read the unsigned buyer-side tax declaration content for this agent.',
+        description:
+          "The AGENT's own read (#3426, wg-tax #5 §2.1) — authenticated by this agent's API key. Answers 200 with the UNSIGNED §2.1 content when the deployment flag is on, this agent is opted in, and the owner's VAT number is VIES `valid` AT READ TIME: `version` (`x402-tax-1`), `jurisdiction` (the owner's saved country — never derived from the VAT number's prefix; a `GR…` VAT number with country `GR` declares `GR`, and Northern Ireland's `XI…` prefix declares the saved country), `taxableStatus` (`TAXABLE_PERSON`), `taxId` (the saved VAT number) and `validUntil` (integer MILLISECONDS, the lesser of now + 24h and the VIES check's completion time + 24h — the check's own freshness caps the declaration). Answers 200 with `{ available: false, reason }` otherwise — `feature_disabled` (flag off), `disabled` (this agent not opted in, or a foreign agent id), `no_company_details` (no VAT number saved) or `vies_not_valid` (VIES anything-but-valid right now, `pending` included). Availability is the body, not the status code: a temporarily unavailable declaration is a state to poll, not an error. The response is NEVER signed and carries no `signature`, `principalId` or `principalAttributionHash` — the SDK computes those locally (#3427) — and none of the company-details fields the declaration does not state. This slice sends nothing; the declaration is only ever carried on EIP-3009 payments (#3427).",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The declaration content, or the structured not-available answer.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentTaxDeclarationContent' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
     '/agents/{id}/delegate-balance': {
       get: {
         tags: ['Agents'],
@@ -8828,6 +8887,94 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       /**
+       * Per-agent x402 tax declaration opt-in (#3426, wg-tax #5 §2.1). The
+       * toggle changes one agent's own opt-in bit and nothing else — it
+       * grants no spending authority. The declaration content schema is the
+       * UNSIGNED §2.1 subset, deliberately closed: no `signature` (this
+       * slice signs nothing, #3427 signs), no `principalId` /
+       * `principalAttributionHash` (the SDK computes those locally), and no
+       * company-details fields the declaration does not state.
+       */
+      UpsertAgentTaxDeclarationRequest: {
+        type: 'object',
+        required: ['tax_declaration_enabled'],
+        properties: {
+          tax_declaration_enabled: {
+            type: 'boolean',
+            description: 'True opts THIS agent in; false withdraws the opt-in (never refused).',
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentTaxDeclarationState: {
+        type: 'object',
+        required: ['id', 'tax_declaration_enabled'],
+        properties: {
+          id: uuid,
+          tax_declaration_enabled: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+      AgentTaxDeclarationUnavailableReason: {
+        type: 'string',
+        enum: ['feature_disabled', 'disabled', 'no_company_details', 'vies_not_valid'],
+        description:
+          'Why no declaration content is available: the deployment flag is off, the agent is not opted in, no VAT number is saved, or VIES is anything-but-valid at read time.',
+      },
+      AgentTaxDeclaration: {
+        type: 'object',
+        required: ['version', 'jurisdiction', 'taxableStatus', 'taxId', 'validUntil'],
+        properties: {
+          version: {
+            type: 'string',
+            enum: ['x402-tax-1'],
+            description: 'The §2.1 version discriminator of the first profile.',
+          },
+          jurisdiction: {
+            type: 'string',
+            pattern: '^[A-Z]{2}$',
+            description:
+              'ISO 3166-1 alpha-2 — the owner\'s saved country. Never derived from the VAT number\'s prefix.',
+          },
+          taxableStatus: {
+            type: 'string',
+            enum: ['TAXABLE_PERSON'],
+          },
+          taxId: {
+            type: 'string',
+            description: 'The owner\'s saved VAT number, normalised (uppercase, no spaces).',
+          },
+          validUntil: {
+            type: 'integer',
+            description:
+              'Integer MILLISECONDS. The lesser of now + 24h and the VIES check\'s completion time + 24h — the check\'s own freshness caps the declaration.',
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentTaxDeclarationContent: {
+        oneOf: [
+          {
+            type: 'object',
+            required: ['available', 'declaration'],
+            properties: {
+              available: { type: 'boolean', enum: [true] },
+              declaration: { $ref: '#/components/schemas/AgentTaxDeclaration' },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['available', 'reason'],
+            properties: {
+              available: { type: 'boolean', enum: [false] },
+              reason: { $ref: '#/components/schemas/AgentTaxDeclarationUnavailableReason' },
+            },
+            additionalProperties: false,
+          },
+        ],
+      },
+      /**
        * FULL REPLACEMENT is the mutation: the agent ends up carrying exactly
        * this set. An empty array clears the agent's labels — that is the
        * editor's "remove every chip", not a refused no-op.
@@ -9341,7 +9488,7 @@ export const openapiSpec = {
           'id', 'name', 'delegate_address',
           'account_id', 'account_address', 'account_name', 'account_chain_id',
           'api_key_prefix', 'status', 'created_at', 'allowances', 'labels',
-          'organization_id',
+          'organization_id', 'tax_declaration_enabled',
         ],
         properties: {
           id: uuid,
@@ -9381,6 +9528,15 @@ export const openapiSpec = {
            * may read it.
            */
           organization_id: { anyOf: [uuid, { type: 'null' }] },
+          /**
+           * #3426: the owner's per-agent opt-in to the buyer-side x402 tax
+           * declaration (wg-tax #5 §2.1). SETTINGS ONLY — the same boundary
+           * as `labels`/`organization_id`: nothing in the delegation,
+           * budget, or enforcement path may read it. The toggle that writes
+           * it is PUT /agents/{id}/tax-declaration; the agent's own content
+           * read is GET /agents/{id}/tax-declaration.
+           */
+          tax_declaration_enabled: { type: 'boolean' },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**

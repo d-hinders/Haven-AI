@@ -57,6 +57,13 @@ export interface AgentRow {
    * path never reads it.
    */
   organization_id: string | null
+  /**
+   * #3426: the owner's per-agent opt-in to the buyer-side x402 tax
+   * declaration (wg-tax #5 §2.1). SETTINGS ONLY — the same boundary as
+   * `organization_id` above; the delegation, budget, and enforcement
+   * path never reads it.
+   */
+  tax_declaration_enabled: boolean
   has_stranded_funds: boolean
 }
 
@@ -268,6 +275,11 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
               -- #3164: the organization the agent files under (NULL = top
               -- level). Display/categorization only, like labels below it.
               a.organization_id,
+              -- #3426: the owner's per-agent x402 tax declaration opt-in.
+              -- DISPLAY/SETTINGS only — the agent-side content endpoint reads
+              -- the column itself; nothing in the delegation, budget, or
+              -- enforcement path may read it.
+              a.tax_declaration_enabled,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -300,6 +312,8 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
               us.account_type,
               a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
               a.organization_id,
+              -- #3426: same display/settings-only field as the list read above.
+              a.tax_declaration_enabled,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -867,3 +881,103 @@ export async function touchAgentLastSeenRow(agentId: string, db: Executor = pool
 // every query here feeds an agent API payload the dashboard branches on
 // (#1069/#1071). Those two reads return no payload, so they don't belong
 // under that pin.
+
+// ── x402 tax declaration opt-in (#3426, wg-tax #5 §2.1) ─────────────────────
+
+/**
+ * The OWNER's toggle write. Gated IN SQL, not in the route: a concurrent VIES
+ * transition between the route's eligibility read and this write cannot flip
+ * the bit that read said no to. The gate is DIRECTIONAL — `NOT $3 OR (...)`:
+ * switching ON requires the feature flag (read as a parameter) and a
+ * company-details row with a VAT number whose VIES status is `valid`, while
+ * switching OFF is never gated. Withdrawing the opt-in must always work — the
+ * same reasoning that keeps `DELETE /user/company-details` ungated (#3332
+ * review, owner-privacy default): an owner whose VIES result dropped is
+ * exactly the owner who needs to switch this off, and trapping the OFF
+ * switch behind the very fact that made it urgent would be hostile. Zero
+ * rows updated is the structured refusal the route maps to a reason — the
+ * route never writes on a false WHERE. `updated_at` moves with the write,
+ * matching every other agents UPDATE in this file.
+ */
+export const SET_AGENT_TAX_DECLARATION_ENABLED_SQL = `
+  UPDATE agents
+  SET tax_declaration_enabled = $3, updated_at = NOW()
+  WHERE id = $1 AND user_id = $2
+    AND (
+      NOT $3::boolean
+      OR (
+        $4::boolean
+        AND EXISTS (
+          SELECT 1 FROM owner_company_details ocd
+          WHERE ocd.user_id = $2
+            AND ocd.vat_number IS NOT NULL
+            AND ocd.vies_status = 'valid'
+        )
+      )
+    )
+  RETURNING id, tax_declaration_enabled
+`
+
+export interface TaxDeclarationToggleRow {
+  id: string
+  tax_declaration_enabled: boolean
+}
+
+/**
+ * Owner-scoped toggle. Pass `enabled: false` to switch OFF (never gated on
+ * VIES — switching off must always work, mirroring
+ * `DELETE /user/company-details`' ungated-erasure reasoning). Returns null
+ * when the agent is not this user's, or — switching ON — when VIES is not
+ * `valid` (or the feature flag is off, passed in by the route).
+ */
+export async function setAgentTaxDeclarationEnabled(
+  agentId: string,
+  userId: string,
+  enabled: boolean,
+  featureEnabled: boolean,
+  db: Executor = pool,
+): Promise<TaxDeclarationToggleRow | null> {
+  const result = await db.query<TaxDeclarationToggleRow>(SET_AGENT_TAX_DECLARATION_ENABLED_SQL, [
+    agentId,
+    userId,
+    enabled,
+    featureEnabled,
+  ])
+  return result.rows[0] ?? null
+}
+
+/**
+ * One agent's tax-declaration eligibility, read by the AGENT's own content
+ * endpoint. Joins the owner's company-details row so the route can decide
+ * everything from one round trip: the opt-in bit, the VAT number the
+ * declaration would state, and the VIES facts that bound `validUntil`.
+ * Nothing here is authority — the declaration content is read-only data;
+ * the VAT number reaching the owning agent is not a new exposure (the
+ * agent key already reads it via the flag-gated receipt `parties.buyer`).
+ */
+export interface AgentTaxDeclarationRow {
+  tax_declaration_enabled: boolean
+  country: string | null
+  vat_number: string | null
+  vies_status: string | null
+  vies_checked_at: string | null
+}
+
+export const GET_AGENT_TAX_DECLARATION_SQL = `
+  SELECT a.tax_declaration_enabled,
+         ocd.country,
+         ocd.vat_number,
+         ocd.vies_status,
+         ocd.vies_checked_at
+  FROM agents a
+  LEFT JOIN owner_company_details ocd ON ocd.user_id = a.user_id
+  WHERE a.id = $1
+`
+
+export async function getAgentTaxDeclarationRow(
+  agentId: string,
+  db: Executor = pool,
+): Promise<AgentTaxDeclarationRow | null> {
+  const result = await db.query<AgentTaxDeclarationRow>(GET_AGENT_TAX_DECLARATION_SQL, [agentId])
+  return result.rows[0] ?? null
+}

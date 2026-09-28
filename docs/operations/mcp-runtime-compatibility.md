@@ -67,7 +67,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-28"
+last-verified: "2026-09-27"
 ---
 
 # MCP Runtime Compatibility
@@ -2254,6 +2254,14 @@ worth knowing before you reach for an upgrade:
   which also records what each crossover cost while it was silent, and
   [#2366](https://github.com/d-hinders/Haven-AI/issues/2366) for the
   convergence that would remove the skew rather than report it.
+
+  > **Re-verified #3411 (2026-09-28), idempotency spelling only:** the local
+  > `@haven_ai/mcp` now refuses `idempotencyKey` too
+  > (`IDEMPOTENCY_KEY_RENAMED`), so both surfaces take `idempotency_key`. An
+  > `idempotencyKey` in a hosted refusal now means a caller still on the
+  > pre-#3411 local spelling, not a live local-vs-hosted difference; the #2366
+  > spelling half of that convergence is done. The `quote` / `body` crossovers
+  > above are unchanged. Nothing else in this document was re-verified.
 
 **Server-side runtime requirement.** A strict tool registers a `ZodObject`
 rather than a raw shape, which the deprecated `McpServer.tool(name, description,

@@ -60,8 +60,8 @@ export interface CarrySnapshotEntry {
    * step now reads the merchant label unconditionally off the old row by
    * hash (`findDelegationTerms`), which stays current under `ON DELETE SET
    * NULL` even if the merchant vanishes between metering and issue. Kept
-   * optional, and still read, only so a `carry_snapshot` persisted before
-   * this deprecation is not treated as a schema break.
+   * optional only so a `carry_snapshot` persisted before this deprecation
+   * still parses; nothing reads it any more — it is carried through as JSON.
    */
   merchant_id?: string | null
 }
@@ -177,9 +177,10 @@ export async function nextDelegationVersion(
 // runs, and the merchant can be deleted in that window. `ON DELETE SET NULL`
 // keeps the FK satisfied for an existing row, but a raw INSERT referencing a
 // merchant id that no longer exists at insert time would still violate the
-// FK (23503) and wedge the agent with no authority, after the revoke. The
-// subselect resolves to NULL instead whenever the merchant is gone by the
-// time this statement runs, so issuance can never be blocked by that race.
+// FK (23503) and fail that issue request, after the revoke (a retry would
+// re-read the old row, by then NULL). The subselect resolves to NULL instead
+// whenever the merchant is gone by the time this statement runs, so no issue
+// request fails on that race.
 export const INSERT_REKEY_DELEGATION_SQL = `INSERT INTO agent_delegations (
          agent_id, chain_id, token_address, recipient_address, delegation_hash,
          delegation_json, version, status, budget_atomic, period_seconds,

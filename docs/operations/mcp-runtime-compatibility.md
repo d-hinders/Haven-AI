@@ -67,7 +67,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-27"
+last-verified: "2026-09-28"
 ---
 
 # MCP Runtime Compatibility

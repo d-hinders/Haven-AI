@@ -849,8 +849,18 @@ test('observe(): a full Deployments index that does not reach the horizon makes 
   const seen = observe(QA, { gh, now: OBS_NOW })
   assert.equal(seen.searchComplete, false)
   assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0].kind, 'unconfirmed')
-  // Control: a short index page is the whole history, never "too short".
-  const { gh: gh2 } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments: deployments.slice(0, 50) })
+  // Control: a short index page is the whole history, never "too short". The
+  // out-of-window entries are dated well outside the 4-day budget (#3409's
+  // listing-coherence check 3 would otherwise read them as in-window Railway
+  // deployments with no matching run, which is not what this fixture is
+  // testing — see the dedicated coherence tests below for that check).
+  const shortDeployments = [
+    deployments[0],
+    ...Array.from({ length: 49 }, (_, j) => ({
+      sha: shaN(61000 + j), created_at: at(24 * 10 + j), creator: { login: RAILWAY_DEPLOY_CREATOR },
+    })),
+  ]
+  const { gh: gh2 } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments: shortDeployments })
   assert.equal(observe(QA, { gh: gh2, now: OBS_NOW }).searchComplete, true)
 })
 
@@ -877,3 +887,181 @@ test('the duration floor applies only to guards judged by a job — a short nigh
     runStartedAt: new Date(Date.parse(t) - 5000).toISOString() }
   assert.equal(selectQualifyingRuns([short], GUARD, undefined, undefined).length, 1)
 })
+
+// ---------------------------------------------------------------------------
+// #3409 — the 07:42 false `never-run`. The captured evidence (spec-review
+// verdict on this issue) is an anomalous LISTING page, not a failed lookup: a
+// correct, event-filtered, newest-first, paged read of qa-dev.yml's
+// deployment_status runs cannot return a page whose oldest row is 8-10 days
+// back while the API's own cap and this guard's own page cap both stop far
+// short of that. These tests cover the three listing-coherence checks, the
+// lookup-failure path (kept as a narrower, still-reachable defect), the
+// malformed-index warning, and the new diagnostics.
+// ---------------------------------------------------------------------------
+
+/** Captures every `console.error` call made inside `fn`, restoring after. */
+function captureConsoleError(fn) {
+  const original = console.error
+  const lines = []
+  console.error = (...args) => { lines.push(args.join(' ')) }
+  try {
+    fn()
+  } finally {
+    console.error = original
+  }
+  return lines
+}
+
+test('observe(): a page of old rows like the 07:42 incident reads unconfirmed, with a warning naming the check (#3409)', () => {
+  // The incident shape: a single page whose rows are all ~8-10 days old (the
+  // 09-18..09-20 window measured in the spec review) against a 4-day budget,
+  // while the deployment index holds a Railway deploy INSIDE the window
+  // (`679e7971`, analogue here) whose sha never appears in the page read.
+  const OLD_SHAS = Array.from({ length: 9 }, (_, i) => shaN(90000 + i))
+  const page1 = OLD_SHAS.map((sha, i) => rest(90000 + i, DEV_TITLE(sha), at(24 * 9 + i), 'success', sha))
+  const gh = (args) => {
+    if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) {
+      return JSON.stringify([{ sha: DEPLOYED_SHA, created_at: at(20), creator: { login: RAILWAY_DEPLOY_CREATOR } }])
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      return JSON.stringify(page === 1 ? page1 : [])
+    }
+    throw new Error(`unexpected gh call in the 07:42 replica: ${args.join(' ')}`)
+  }
+  let seen
+  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW }) })
+  assert.equal(seen.lastSuccessAt, null)
+  assert.equal(seen.searchComplete, false)
+  const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
+  // The bug this closes: the unmodified guard reports `never-run` here.
+  assert.equal(result.findings[0].kind, 'unconfirmed')
+  const warnings = errors.filter((l) => l.startsWith('::warning::'))
+  assert.ok(warnings.some((l) => l.includes('listing-coherence') && l.includes('opens at')), 'no page-1-not-near-now warning')
+  assert.ok(warnings.some((l) => l.includes('listing-coherence') && l.includes('no matching run')), 'no missing-deployment warning')
+})
+
+test('observe(): a page whose newest row is newer than the previous page\'s oldest is not contiguous (#3409)', () => {
+  // Paging only continues past page 1 when it comes back FULL (100 rows) —
+  // so page 1 must be a full, otherwise-ordinary page to reach page 2 at all.
+  // Page 2 then arrives with a newest row AFTER page 1's oldest — out of
+  // order for a newest-first, non-overlapping pagination.
+  const page1 = Array.from({ length: 100 }, (_, i) =>
+    rest(91000 + i, DEV_TITLE(shaN(91000 + i)), at(2 + i * 0.01), 'failure', shaN(91000 + i)))
+  const page2 = [rest(91200, DEV_TITLE(shaN(91200)), at(1), 'failure', shaN(91200))] // newer than page1's oldest (~at(2.99))
+  const { gh } = fakeGh({ pages: [page1, page2], jobs: () => JOBS_HARNESS_FAILED[1] })
+  const errors = captureConsoleError(() => {
+    const seen = observe(QA, { gh, now: OBS_NOW })
+    assert.equal(seen.searchComplete, false)
+  })
+  assert.ok(
+    errors.some((l) => l.startsWith('::warning::') && l.includes('listing-coherence') && l.includes('not contiguous')),
+    'no non-contiguous-pages warning',
+  )
+})
+
+test('observe(): a thrown check-runs lookup for the only candidate SHA reads unconfirmed, never never-run (#3409)', () => {
+  const page1 = [rest(92000, DEV_TITLE(DEPLOYED_SHA), at(1))]
+  const gh = (args) => {
+    if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) {
+      return JSON.stringify([{ sha: DEPLOYED_SHA, created_at: at(1), creator: { login: RAILWAY_DEPLOY_CREATOR } }])
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/check-runs'))) {
+      throw new Error('rate limited')
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      return JSON.stringify(page === 1 ? page1 : [])
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`)
+  }
+  let seen
+  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW }) })
+  assert.equal(seen.lastSuccessAt, null)
+  assert.equal(seen.searchComplete, false)
+  const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
+  // The bug this closes: the unmodified guard reports `never-run` here too,
+  // because the thrown lookup is swallowed with no trace that it ever failed.
+  assert.equal(result.findings[0].kind, 'unconfirmed')
+  assert.ok(
+    errors.some((l) => l.startsWith('::warning::') && l.includes('lookup-failure')),
+    'no lookup-failure warning',
+  )
+})
+
+test('observe(): a thrown lookup is NOT cached — the same sha is re-attempted on a later page, never permanently refused (#3409 cache decision)', () => {
+  // Refuted hypothesis on this issue: caching the failure. A transient blip
+  // must not poison the sha for the rest of the evaluation. `selectQualifyingRuns`
+  // re-runs over the FULL accumulated run list on every page, so a candidate
+  // whose lookup failed on page 1 gets a fresh (uncached) attempt once page 2
+  // is read — this fixture forces that second pass by making page 1 a full
+  // 100-row page so pagination continues.
+  let calls = 0
+  const filler = (i) => rest(97000 + i, DEV_TITLE(shaN(97000 + i)), at(2 + i * 0.01), 'failure', shaN(97000 + i))
+  const candidate = rest(97900, DEV_TITLE(DEPLOYED_SHA), at(0.5), 'success', DEPLOYED_SHA)
+  const page1 = [...Array.from({ length: 99 }, (_, i) => filler(i)), candidate]
+  const page2 = [rest(97999, DEV_TITLE(shaN(97999)), at(3.5), 'failure', shaN(97999))]
+  const gh = (args) => {
+    if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) {
+      const shas = [...new Set([...page1, ...page2].map((r) => r.head_sha))]
+      return JSON.stringify(shas.map((sha) => ({ sha, creator: { login: RAILWAY_DEPLOY_CREATOR } })))
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/check-runs'))) {
+      calls += 1
+      if (calls === 1) throw new Error('rate limited')
+      return JSON.stringify([
+        { name: MONEY_FLOW_JOB, conclusion: 'success', details_url: `https://github.com/o/r/actions/runs/${candidate.id}/job/1` },
+      ])
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      return JSON.stringify(page === 1 ? page1 : page === 2 ? page2 : [])
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`)
+  }
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  // The retry on the page-2 pass finds the success, proving the sha was not
+  // stuck refused by the page-1 failure.
+  assert.equal(seen.lastSuccessAt, at(0.5))
+  assert.equal(calls, 2)
+})
+
+test('observe(): a non-array deployment index body warns and marks the search incomplete (#3409)', () => {
+  const page1 = [rest(94000, DEV_TITLE(DEPLOYED_SHA), at(1), 'failure')]
+  const gh = (args) => {
+    if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) {
+      return JSON.stringify({}) // a non-array 200
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      return JSON.stringify(page === 1 ? page1 : [])
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`)
+  }
+  let seen
+  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW }) })
+  assert.equal(seen.searchComplete, false)
+  assert.ok(
+    errors.some((l) => l.startsWith('::warning::') && l.includes('listing-coherence') && l.includes('not a list')),
+    'no malformed-index warning',
+  )
+})
+
+test('observe(): diagnostics (per-page counts, index size, lookup accounting) are printed on every non-fresh verdict (#3409)', () => {
+  const page1 = [rest(95000, DEV_TITLE(DEPLOYED_SHA), at(1), 'failure')]
+  const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1] })
+  const errors = captureConsoleError(() => observe(QA, { gh, now: OBS_NOW }))
+  const text = errors.join('\n')
+  assert.match(text, /diagnostics for qa-dev\.yml/)
+  assert.match(text, /page 1 \(deployment_status\): 1 rows, newest=.+, oldest=.+/)
+  assert.match(text, /deployment index: \d+ shas, oldest=/)
+  assert.match(text, /lookups: attempted=\d+, failed=\d+, cached=\d+/)
+})
+
+test('observe(): a healthy fresh push prints no diagnostics and no warnings (quiet on the common case)', () => {
+  const errors = captureConsoleError(() => observe(QA, { gh: fakeGh({ pages: [[qaRunLike(DEPLOYED_SHA)]], jobs: () => JOBS_HARNESS_RAN[1] }).gh, now: OBS_NOW }))
+  assert.deepEqual(errors, [])
+})
+function qaRunLike(sha) {
+  return rest(96000, DEV_TITLE(sha), at(0.2), 'success', sha)
+}

@@ -544,18 +544,35 @@ function readDeploymentIndex({ environment, creator }, gh = defaultGh) {
     '-F', 'per_page=100',
   ]))
   const index = {}
-  const list = Array.isArray(deployments) ? deployments : []
+  // #3409: a non-array 200 (empty `{}`, or any other unparseable-as-a-list
+  // body) used to fall through to an empty `list` in total silence — read as
+  // "Railway has deployed nothing", not "this response could not be trusted".
+  // Recorded so `observe()` can warn and mark the search incomplete instead.
+  const malformed = !Array.isArray(deployments)
+  const list = malformed ? [] : deployments
   const created = list.map((d) => d?.created_at).filter(Boolean).sort()
   // Non-enumerable: the oldest deployment a FULL index page reaches (#3340
   // review N2). A short page is the whole history, so it cannot be "too short".
   Object.defineProperty(index, '__oldest', { value: list.length >= 100 ? (created[0] ?? null) : null, enumerable: false })
-  for (const d of Array.isArray(deployments) ? deployments : []) {
+  Object.defineProperty(index, '__malformed', { value: malformed, enumerable: false })
+  // #3409: `{ sha, created_at }` for every Railway-created deployment, kept
+  // alongside the sha→creator map so `observe()` can ask "is there an
+  // in-window dev deployment whose sha never showed up in the run listing" —
+  // the third listing-coherence check. Non-enumerable for the same reason as
+  // `__oldest`: existing callers construct plain `{ [sha]: creator }` fixtures
+  // and must keep working unchanged.
+  const deploymentsSeen = []
+  for (const d of list) {
     if (typeof d?.sha !== 'string' || typeof d?.creator?.login !== 'string') continue
     // "A Railway-created deployment of this SHA exists" — so once the expected
     // creator is recorded for a SHA it sticks, whatever else deployed the same
     // commit before or after it.
     if (index[d.sha] !== creator) index[d.sha] = d.creator.login
+    if (d.creator.login === creator && typeof d.created_at === 'string') {
+      deploymentsSeen.push({ sha: d.sha, created_at: d.created_at })
+    }
   }
+  Object.defineProperty(index, '__deployments', { value: deploymentsSeen, enumerable: false })
   return index
 }
 
@@ -590,21 +607,41 @@ function boundedCheckRunReader(budget, jobName, shaOfRun, gh = defaultGh) {
         return null
       }
       left -= 1
-      const checks = JSON.parse(gh([
-        'api', '-X', 'GET', `repos/${repo}/commits/${sha}/check-runs`,
-        '-f', `check_name=${jobName}`, '-F', 'per_page=100',
-        '--jq', '[.check_runs[] | {name, conclusion, details_url}]',
-      ]))
+      read.attempted += 1
+      // #3409: cache decision — a thrown/unreadable lookup is NOT cached for
+      // its sha. It is caught HERE (rather than left to propagate, as before)
+      // so `observe()` can count it, but `bySha` stays unset on failure, so a
+      // later run at the same sha re-attempts the call — spending budget again
+      // — exactly as an uncaught throw already did before this change. A
+      // measured refutation (#3409 spec-review) ruled out caching the failure:
+      // that would leave a transient blip permanently unresolved for the rest
+      // of the evaluation instead of retried on the next page.
+      let checks
+      try {
+        checks = JSON.parse(gh([
+          'api', '-X', 'GET', `repos/${repo}/commits/${sha}/check-runs`,
+          '-f', `check_name=${jobName}`, '-F', 'per_page=100',
+          '--jq', '[.check_runs[] | {name, conclusion, details_url}]',
+        ]))
+      } catch (err) {
+        read.failed += 1
+        read.lastError = err
+        return null
+      }
       const runs = new Map()
       for (const c of Array.isArray(checks) ? checks : []) {
         const m = /\/actions\/runs\/(\d+)\//.exec(String(c?.details_url ?? ''))
         if (m) runs.set(Number(m[1]), [{ name: c.name, conclusion: c.conclusion }])
       }
       bySha.set(sha, runs)
+      read.cached = bySha.size
     }
     return bySha.get(sha).get(Number(databaseId)) ?? null
   }
   read.exhausted = false
+  read.attempted = 0
+  read.failed = 0
+  read.cached = 0
   return read
 }
 
@@ -671,7 +708,17 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     const runs = []
     let searchComplete = true
     let qualifying = []
+    // #3409: the evidence for the false `never-run` at 07:42 was an anomalous
+    // *listing*, not a failed lookup — a page of old rows that a correct,
+    // event-filtered, newest-first, paged read could not have produced. These
+    // three checks catch that shape directly, on the pages actually read,
+    // rather than trusting the API's pagination to be internally consistent.
+    // `warnings` collects the `::warning::` lines named by the acceptance
+    // criteria; `pageStats` feeds the per-page diagnostics printed below.
+    const warnings = []
+    const pageStats = []
     for (const event of guard.countedEvents) {
+      let prevPageOldest = null // reset per event: each stream paginates independently
       for (let page = 1; ; page += 1) {
         if (page > RUN_PAGE_CAP) {
           searchComplete = false
@@ -680,7 +727,36 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
         const batch = readRunPage(guard, event, page, gh)
         for (const r of batch) shaOfRun.set(r.databaseId, r.headSha)
         runs.push(...batch)
-        const oldest = batch.map((r) => r.createdAt).filter(Boolean).sort()[0]
+        const dates = batch.map((r) => r.createdAt).filter(Boolean).sort()
+        const oldest = dates[0]
+        const newest = dates.at(-1)
+        pageStats.push({ event, page, count: batch.length, newest: newest ?? null, oldest: oldest ?? null })
+
+        // Coherence check 1: page 1, newest-first, should open near "now" — a
+        // page whose newest row already predates the guard's own maxAgeDays
+        // budget cannot be trusted to be the actual head of the listing (the
+        // 07:42 page's newest row was ~8 days old against a 4-day budget).
+        if (page === 1 && newest && newest < horizon) {
+          searchComplete = false
+          warnings.push(
+            `guard-freshness: listing-coherence — page 1 of ${guard.workflow}'s ${event} runs opens at ` +
+              `${newest}, already past its ${guard.maxAgeDays}-day budget; not trusted as "near now".`,
+          )
+        }
+        // Coherence check 2: contiguous and newest-first. Page N's newest row
+        // must not be newer than page N-1's oldest — otherwise the pages
+        // overlap or arrived out of order, and paging-until-horizon can stop
+        // having skipped real rows in between (exactly how the 07:42 page,
+        // read alone, was not provably the true head of the list).
+        if (prevPageOldest && newest && newest > prevPageOldest) {
+          searchComplete = false
+          warnings.push(
+            `guard-freshness: listing-coherence — ${guard.workflow}'s ${event} page ${page} is not contiguous ` +
+              `with page ${page - 1} (newest ${newest} is after the previous page's oldest ${prevPageOldest}).`,
+          )
+        }
+        if (oldest) prevPageOldest = oldest
+
         // Newest first, so the bounded job-list reader spends its budget on the
         // runs that can actually change the answer.
         qualifying = selectQualifyingRuns(
@@ -698,14 +774,76 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
         }
       }
     }
-    if (jobsFor?.exhausted && !qualifying.some((r) => r.conclusion === 'success')) searchComplete = false
-    if (indexShort && !qualifying.some((r) => r.conclusion === 'success')) searchComplete = false
+    const foundSuccess = () => qualifying.some((r) => r.conclusion === 'success')
+    if (jobsFor?.exhausted && !foundSuccess()) searchComplete = false
+    if (indexShort && !foundSuccess()) searchComplete = false
+    // #3409 criterion 3: a non-array Deployments body used to read as "Railway
+    // deployed nothing", indistinguishable from a genuinely empty history.
+    if (index?.__malformed && !foundSuccess()) {
+      searchComplete = false
+      warnings.push(
+        `guard-freshness: listing-coherence — the deployment index for ${guard.workflow} was not a list ` +
+          '(empty or unparseable response body); not trusted.',
+      )
+    }
+    // #3409 criterion 2: a thrown/unreadable check-runs lookup. Not cached
+    // (see boundedCheckRunReader) — a later run at the same sha re-attempts it
+    // — but a failure that occurred while no qualifying success has been found
+    // must not read as a confident "never", because the lookup that could have
+    // supplied the success is exactly the one that failed.
+    if (jobsFor?.failed > 0 && !foundSuccess()) {
+      searchComplete = false
+      warnings.push(
+        `guard-freshness: lookup-failure — ${jobsFor.failed} check-runs lookup(s) for ${guard.workflow} ` +
+          `threw and no qualifying success was found among the ${runs.length} runs read.`,
+      )
+    }
+    // Coherence check 3: a Railway dev deployment inside the window whose sha
+    // never showed up anywhere in the listing we read. At 07:42 the index held
+    // `679e7971`, deployed inside the 4-day window, with no matching run in
+    // the page the guard trusted.
+    if (index?.__deployments && !foundSuccess()) {
+      const seenShas = new Set(runs.map((r) => r.headSha))
+      const missing = index.__deployments.filter((d) => d.created_at >= horizon && !seenShas.has(d.sha))
+      if (missing.length > 0) {
+        searchComplete = false
+        warnings.push(
+          `guard-freshness: listing-coherence — the deployment index has ${missing.length} in-window Railway ` +
+            `deployment(s) to ${guard.workflow} with no matching run in the listing (e.g. sha ${missing[0].sha} ` +
+            `deployed ${missing[0].created_at}).`,
+        )
+      }
+    }
+
+    for (const w of warnings) console.error(`::warning::${w}`)
+
     const readDates = runs.map((r) => r.createdAt).filter(Boolean).sort()
     const success = qualifying.filter((r) => r.conclusion === 'success')
+    const lastSuccessAt = newestTimestamp(success)
+    // #3409 criterion 4: diagnostics on every non-fresh verdict — the two
+    // hypotheses at 07:42 (an anomalous page vs. a failed lookup) were
+    // indistinguishable after the fact because nothing logged what either page
+    // held. Printed only when the observation is not a clean success inside
+    // budget, so the common healthy push stays quiet (per the module's own
+    // "stays green, low-noise" design).
+    const ageMs = lastSuccessAt ? nowMs - Date.parse(lastSuccessAt) : null
+    const nonFresh = !lastSuccessAt || !searchComplete || (ageMs !== null && ageMs > guard.maxAgeDays * DAY_MS)
+    if (nonFresh) {
+      console.error(`guard-freshness diagnostics for ${guard.workflow}:`)
+      for (const p of pageStats) {
+        console.error(`  page ${p.page} (${p.event}): ${p.count} rows, newest=${p.newest}, oldest=${p.oldest}`)
+      }
+      console.error(
+        `  deployment index: ${index ? `${Object.keys(index).length} shas, oldest=${index.__oldest ?? 'n/a (short page)'}` : 'n/a (no provenance)'}`,
+      )
+      console.error(
+        `  lookups: attempted=${jobsFor?.attempted ?? 0}, failed=${jobsFor?.failed ?? 0}, cached=${jobsFor?.cached ?? 0}`,
+      )
+    }
     return {
       fileExists: true,
       triggerPresent,
-      lastSuccessAt: newestTimestamp(success),
+      lastSuccessAt,
       lastRunAt: newestTimestamp(qualifying),
       searchComplete,
       examined: runs.length,

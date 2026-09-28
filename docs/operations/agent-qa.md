@@ -978,6 +978,24 @@ them is a string a caller supplies:
   with the same title instead of filing another, re-asserting `ci-health` and
   `code-quality`; if the reopen fails, it files a new one rather than editing a
   closed issue.
+  **Listing coherence (#3409).** A page cap or lookup budget stopping the
+  search is not the only way `unconfirmed` fires. A false `never-run` on
+  2026-09-28 traced to an anomalous *listing* page — one whose rows predated
+  the 4-day budget by over a week, which a correct, newest-first, paged read
+  cannot produce. `observe()` now checks, on every page it reads: (1) page 1's
+  newest row is near "now" (inside the guard's own `maxAgeDays` budget); (2) a
+  later page's newest row is not newer than the previous page's oldest
+  (contiguous, newest-first); (3) every in-window Railway deployment in the
+  index has a matching run somewhere in the listing. A trip on any of these,
+  or a check-runs lookup that threw with no qualifying success yet found (kept
+  uncached — a failed sha is re-attempted, never permanently refused), or a
+  non-array Deployments response body, downgrades the search to `unconfirmed`
+  and prints a `::warning::` naming the check. Every non-`fresh` verdict also
+  logs per-page row counts and newest/oldest `createdAt`, the deployment
+  index's size and oldest entry, and the lookup accounting
+  (attempted/failed/cached) — the diagnostics that would have told the true
+  cause from a failed-lookup hypothesis apart at the time, rather than only
+  after the fact.
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

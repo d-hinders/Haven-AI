@@ -2650,7 +2650,7 @@ export const openapiSpec = {
           '409': {
             ...errorResponse,
             description:
-              'Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain. Also returned if this re-key stopped being `metered` between the stage check and an individual delegation insert — an abandon, or a duplicate/stalled issue call for the same re-key (#3439).',
+              'Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain. Also returned if this re-key stopped being `metered` between the stage check and an individual delegation insert — an abandon, or another issue call for the same re-key that already reached `issued` (#3439).',
           },
           '502': errorResponse,
         },

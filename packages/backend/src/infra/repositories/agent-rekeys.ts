@@ -234,17 +234,18 @@ export async function insertRekeyDelegation(
     // → `issued`) then refuses too late to undo. Locking THIS re-key's own
     // row and requiring it still be `metered` — the stage the issue route
     // checked before building these rows, and the only stage `markIssued`
-    // itself expects — closes the window: an abandon (`stage = 'abandoned'`)
-    // or any other re-key's progress cannot advance R1's own row, so this
-    // check is unaffected by a sibling re-key's stage. Locking the specific
+    // itself expects — closes the window: an abandon moves R1's own row to
+    // `abandoned` and fails this check; no other re-key's progress can move
+    // R1's row, so a sibling's stage never satisfies it. Locking the specific
     // `agent_rekeys` row (not just the agent row) means a concurrent abandon
     // of THIS re-key serializes against this transaction rather than racing
-    // it. Chosen over folding `markIssued` into this same transaction because
-    // the issue route inserts N rows (one per carried/steady/reanchored
-    // piece) across a loop and calls `markIssued` once after all of them
-    // succeed; recombining that into one transaction per insert would flip
-    // the stage to `issued` after the FIRST piece, before the rest exist —
-    // a bigger behavioral change for the same guarantee.
+    // it. The alternative is one transaction around the issue route's whole
+    // piece loop plus `markIssued` (the delegate-account RPC runs before the
+    // loop, so that is feasible). It would also stop two CONCURRENT issue
+    // calls on one re-key from both inserting, which this re-check does not:
+    // the stage stays `metered` until one of them reaches `markIssued`. This
+    // smaller change meets #3439's criterion; the concurrent-issue case is a
+    // tracked follow-up (#3450).
     const rekeyLock = await tx.query<{ id: string }>(
       `SELECT id FROM agent_rekeys WHERE id = $1 AND agent_id = $2 AND stage = 'metered' FOR UPDATE`,
       [row.rekeyId, row.agentId],

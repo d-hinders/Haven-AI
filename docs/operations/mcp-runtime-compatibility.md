@@ -777,6 +777,26 @@ last-verified: "2026-09-28"
 > from the #2807 contracts module, and the version-skew and consent-hash
 > contracts do not move because the registered tool-NAME set does not.
 >
+> **Recent re-verification (#3330, sub-agent budgets):** the local runtime
+> gained one new flow-keyed signable and one additive response field. The
+> signer's `haven_sign` accepts `sub_budget_id` (an agent-issued sub-budget's
+> open or close typed data, fetched from `GET /sub-budgets/:id/sign-context`
+> and verified by `assertOwnSubBudgetChild` / `assertOwnSubBudgetCloseUserOp`
+> before the key signs — the same fetch-then-verify discipline as the
+> #3329 task-budget arm, byte-for-byte the same auth/timeout/refusal
+> structuring). `haven_get_agent`'s response grew `parent_sub_budgets`
+> (additive: the agent's open sub-budget grants naming the parent agent and
+> the narrower effective limits; empty when it holds none — an older backend
+> that omits the key still parses). The pay tools accept an optional
+> `sub_budget_id` that routes the payment through the three-link
+> `[grant, parent-child, budget]` chain and is mutually exclusive with
+> `task_budget_id`. No tool was removed or renamed, the strict/permissive
+> split is untouched, schemas stay in the contracts module, and the
+> consent-hash and version-skew contracts do not move: `SUPPORTED_X402_EXPECTED_VERSIONS`
+> is still `[1, 2, 3]` and the registered tool-NAME set grew only by the
+> existing tools' optional field. The Supported Runtime Manifest table below
+> stands.
+>
 > **Recent re-verification (#2912, naming epic #2906 phase 3b):** a **data**
 > migration renamed the `account_type` VALUE `'safe'` to `'legacy_safe'` on
 > `smart_accounts` and tightened its CHECK — schema/data only, no wire

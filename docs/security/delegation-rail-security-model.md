@@ -1728,7 +1728,8 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > new typed-data class, the sub-budget child, joins the task child as a
 > flow-keyed `haven_sign` signable (`sub_budget_id`), verified by
 > `assertOwnSubBudgetChild`/`assertOwnSubBudgetCloseUserOp`
-> (`sub-budget-guards.ts`, now in `covers:`). A sub-budget child can only
+> (`sub-budget-guards.ts`, now named in this document's coverage list). A
+> sub-budget child can only
 > NARROW its parent (periodAmount ≤ the parent's on the SAME
 > periodDuration/startDate window, expiry ≤ the parent's, a recipient pin
 > never unpinned), so the chain B redeems is as or more restrictive than the

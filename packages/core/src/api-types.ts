@@ -3484,6 +3484,11 @@ export type components = {
             closed_at: string | null;
             close_tx_hash: string | null;
         };
+        /** @description One parent→child tree (#3330): the delegating agent's parent-child narrowing with its grants nested. */
+        SubBudgetTree: {
+            parent_child_sub_budget: components["schemas"]["SubBudget"];
+            grants: components["schemas"]["SubBudget"][];
+        };
         Contact: {
             /** Format: uuid */
             id: string;

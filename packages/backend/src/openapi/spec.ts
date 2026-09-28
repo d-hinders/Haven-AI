@@ -8534,6 +8534,23 @@ export const openapiSpec = {
         },
       },
       /**
+       * #3330: one parent→child tree from `GET /agents/{id}/sub-budgets/tree`
+       * — A's parent-child narrowing with B's grants nested under it. Named
+       * here (not hand-written in the hook) so the frontend imports the wire
+       * shape instead of restating it (#1447 wire-type gauge).
+       */
+      SubBudgetTree: {
+        type: 'object',
+        description:
+          "One parent→child tree (#3330): the delegating agent's parent-child narrowing with its grants nested.",
+        required: ['parent_child_sub_budget', 'grants'],
+        properties: {
+          parent_child_sub_budget: { $ref: '#/components/schemas/SubBudget' },
+          grants: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+        },
+        additionalProperties: false,
+      },
+      /**
        * #1446: an address-book label. `LIST_CONTACTS_FOR_USER_SQL` and both
        * RETURNING clauses in `infra/repositories/contacts.ts` select exactly
        * these five columns, so every one is required.

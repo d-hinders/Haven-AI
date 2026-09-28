@@ -7,11 +7,8 @@ import type { ApiSchema } from '@haven_ai/core'
 /** Wire shape of one sub-budget row (#3330): `components.schemas.SubBudget` in `openapi/spec.ts`. */
 export type SubBudget = ApiSchema<'SubBudget'>
 
-/** One parent→child tree (#3330): A's parent-child narrowing with its grants nested. */
-export interface SubBudgetTree {
-  parent_child_sub_budget: SubBudget
-  grants: SubBudget[]
-}
+/** One parent→child tree (#3330): A's parent-child narrowing with its grants nested — `components.schemas.SubBudgetTree` in `openapi/spec.ts`. */
+export type SubBudgetTree = ApiSchema<'SubBudgetTree'>
 
 /**
  * The owner-facing read of the sub-budget trees an agent ISSUES (#3330,

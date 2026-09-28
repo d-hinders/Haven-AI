@@ -808,8 +808,15 @@ const start = async () => {
             // are the lines an operator checks first when a row refuses to
             // converge (see docs/operations/stuck-revoke-alarm.md).
             if (repairs.unrepairable) {
+              // #3395: a REPAIRED row is an answer, not a question — it left
+              // the queue on the same write (its marker is stamped), so it
+              // does not belong in the operator's unanswered set. Only
+              // `unrepairable` and `deferred` do.
               app.log.warn(
-                { unrepairable: repairs.unrepairable, rows: repairs.rows.filter((r) => r.outcome !== 'confirmed') },
+                {
+                  unrepairable: repairs.unrepairable,
+                  rows: repairs.rows.filter((r) => r.outcome !== 'confirmed' && r.outcome !== 'repaired'),
+                },
                 'Passport anchor UID repairs left rows unanswered — investigate the reasons',
               )
             }

@@ -37,6 +37,7 @@ export {
   issuePassportBestEffort,
   retryPendingPassports,
   repairAnchoredUids,
+  UID_REPAIR_DEFER_SECONDS,
   setAnchor,
   setAnchorRecovery,
   setAnchorLiveness,

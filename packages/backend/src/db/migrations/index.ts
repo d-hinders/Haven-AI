@@ -97,6 +97,7 @@ import * as agentTaskBudgets from './095_agent_task_budgets.js'
 import * as agentPassportsUidRepairConfirmedAt from './096_agent_passports_uid_repair_confirmed_at.js'
 import * as inboundTransfers from './097_inbound_transfers.js'
 import * as ownerCompanyDetails from './098_owner_company_details.js'
+import * as agentPassportsUidRepairNextAt from './099_agent_passports_uid_repair_next_at.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -253,4 +254,5 @@ export const migrations: Migration[] = [
   agentPassportsUidRepairConfirmedAt,
   inboundTransfers,
   ownerCompanyDetails,
+  agentPassportsUidRepairNextAt,
 ]

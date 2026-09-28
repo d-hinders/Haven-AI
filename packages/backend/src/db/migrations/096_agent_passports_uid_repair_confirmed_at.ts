@@ -13,15 +13,22 @@ import type { PoolClient } from 'pg'
  * saturates at 5,760 receipt reads a day again.
  *
  * So a confirmed repair gets its own durable marker:
- * `uid_repair_confirmed_at` is set by `repairAnchoredUid` when the stored UID
- * already matches the receipt's, and the selector then excludes the row. A
- * healthy row costs the batch ONE read across its lifetime — reads per tick
- * stay bounded independent of how many healthy rows precede a phantom in the
- * queue, which is the acceptance criterion `updated_at` churn cannot meet.
+ * `uid_repair_confirmed_at` is stamped by `confirmAnchorUid` when the stored
+ * UID already matches the receipt's (`repairAnchoredUid` stamps it on a real
+ * repair), and the selector then excludes the row. A healthy row costs the
+ * batch TWO chain reads across its lifetime — the anchor receipt, then the
+ * transaction body for attribution (#3395: "ONE read" undercounted) — reads
+ * per tick stay bounded independent of how many healthy rows precede a
+ * phantom in the queue, which is the acceptance criterion `updated_at` churn
+ * cannot meet. What the marker does NOT exit is the class the sweep can
+ * never answer (`refused`, `no-receipt`, `no-candidate`, `reverted`,
+ * `tx-body-unavailable`): those are paced out of the head by
+ * `uid_repair_next_at` (migration 099, #3395).
  *
  * The marker is CANCELLED on every state change that invalidates the evidence
- * it recorded — a new anchor, a re-anchor reset, a revoke confirmation — so a
- * row that re-enters any anchored lifecycle is re-checked from scratch. It is
+ * it recorded — a new anchor, a re-anchor reset, and (since #3395) a revoke
+ * confirmation, whose statement now clears both repair columns — so a row
+ * that re-enters any anchored lifecycle is re-checked from scratch. It is
  * never read as "verified" anywhere else: `FIND_BY_AGENT_ADDRESS_SQL` keeps
  * breaking ties with `updated_at DESC`, and the merchant verifier's answer
  * does not churn.

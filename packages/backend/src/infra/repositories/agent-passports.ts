@@ -253,7 +253,7 @@ export async function markAnchored(
     `UPDATE agent_passports
         SET status = 'anchored', attestation_uid = $2, tx_hash = $3,
             agent_eoa = $4, smart_account = $5,
-            uid_repair_confirmed_at = NULL,
+            uid_repair_confirmed_at = NULL, uid_repair_next_at = NULL,
             last_error = NULL, anchored_at = NOW(), updated_at = NOW()
       WHERE agent_id = $1`,
     [agentId, attestationUid, txHash, normalizeAddress(addresses.agentEoa), normalizeAddress(addresses.smartAccount)],
@@ -285,27 +285,52 @@ function normalizeAddress(address: string | null | undefined): string | null {
  * forever.
  *
  * So a confirmed repair is recorded DURABLY — `uid_repair_confirmed_at`
- * (migration 096), set by `repairAnchoredUid` when the stored UID already
- * matches the receipt's — and the row leaves this queue. One confirmed row
- * costs the sweep one receipt read across its lifetime; reads per tick stay
- * bounded independent of how many healthy rows precede a phantom. The marker
- * is cancelled by every state change that invalidates its evidence
- * (`markAnchored`, `resetForReanchor` — new anchor, new anchor tx), so a row
- * that re-enters an anchored lifecycle is re-checked from scratch.
+ * (migration 096), stamped by `confirmAnchorUid` when the stored UID already
+ * matches the receipt's (`repairAnchoredUid` stamps the same marker on a real
+ * repair) — and the row leaves this queue. One confirmed row costs the sweep
+ * TWO chain reads across its lifetime — the receipt, then the tx body for
+ * attribution (#3395: the "one read" wording undercounted) — and reads per
+ * tick stay bounded independent of how many healthy rows precede a phantom.
+ * The marker is cancelled by every state change that invalidates its evidence
+ * (`markAnchored`, `resetForReanchor` — new anchor, new anchor tx; and
+ * `markRevocationConfirmed` since #3395 — a confirmed-revoked row's anchor
+ * evidence is dead and its repair state is cancelled with it), so a row that
+ * re-enters an anchored lifecycle is re-checked from scratch.
  *
- * The rest of the pre-marker pacing is unchanged:
+ * The rest of the pacing:
  *
  * - `tx_hash IS NOT NULL` — without the anchor transaction there is nothing to
  *   re-derive from, and the row is reported, never guessed at;
  * - `revocation_status <> 'confirmed'` — a confirmed row's attestation is
  *   provably dead under the UID the revoke succeeded on; there is nothing
  *   left to protect;
- * - `updated_at < NOW() - 1h` — a REPAIRED row (a real write) bumps
- *   `updated_at`, so the batch revisits it no more than once an hour until
- *   the next tick confirms it and it leaves the queue; a row whose repair
- *   THREW is deferred the same hour by the caller's bump, so a poison row
- *   cannot head the batch on every tick (#3342);
+ * - `updated_at < NOW() - 1h` — the freshness guard every due row waits out
+ *   between passes (#3342);
  * - `ORDER BY anchored_at ASC` — oldest damage first, unchanged.
+ *
+ * #3395 — the head must also DRAIN, not just cycle. #3342's marker exits rows
+ * the sweep can answer (repaired, confirmed), but every non-throwing
+ * `unrepairable` outcome — `refused`, `no-candidate`, `no-receipt`,
+ * `reverted`, `tx-body-unavailable` on a pruned node — writes nothing, so N ≥
+ * `limit` persistently unanswerable rows re-take the whole batch every tick
+ * and a live phantom behind them starves (the issue's real-DB probe: 5 ticks,
+ * `{"attempted":4,"repaired":0,"unrepairable":4}`, the phantom never
+ * reached). So an unanswerable row is PACED out of the head by its caller
+ * stamping `uid_repair_next_at` (migration 099, #3395), and the selector
+ * skips a row whose stamp is still in the future:
+ *
+ * - `(p.uid_repair_next_at IS NULL OR p.uid_repair_next_at <= NOW())` — the
+ *   pacing gate. Nullable with no default: existing rows read as not pacing
+ *   and are answered exactly once on the first post-deploy tick. The stamp is
+ *   a dedicated column, NOT `updated_at` — #3342 ruled `updated_at` out as a
+ *   state stamp because `FIND_BY_AGENT_ADDRESS_SQL` breaks the merchant
+ *   verifier's ties on `updated_at DESC`, and the same argument applies here:
+ *   the pacing write must not reorder what a merchant is handed. The write is
+ *   guarded by `status = 'anchored'` and the row's own `tx_hash`, so a defer
+ *   can never pace a row that has moved to another lifecycle (a re-anchor
+ *   reset hands it back to issuance; an anchored write replaces the anchor tx)
+ *   — and the sweep is billed no reads for a paced-out row, so the batch
+ *   reaches the rows behind it.
  */
 export const LIST_ANCHOR_REPAIRS_DUE_SQL = `SELECT p.agent_id, p.chain_id, p.attestation_uid, p.tx_hash
        FROM agent_passports p
@@ -313,6 +338,7 @@ export const LIST_ANCHOR_REPAIRS_DUE_SQL = `SELECT p.agent_id, p.chain_id, p.att
         AND p.tx_hash IS NOT NULL
         AND p.revocation_status <> 'confirmed'
         AND p.uid_repair_confirmed_at IS NULL
+        AND (p.uid_repair_next_at IS NULL OR p.uid_repair_next_at <= NOW())
         AND p.updated_at < NOW() - MAKE_INTERVAL(secs => $2)
       ORDER BY p.anchored_at ASC
       LIMIT $1`
@@ -385,11 +411,17 @@ export async function repairAnchoredUid(
  *
  * Guarded exactly like `repairAnchoredUid` — anchored, same anchor tx, and
  * not already confirmed — so a row that moved between the read and this
- * write is left unmarked and re-checked on a later pass. Idempotent.
+ * write is left unmarked and re-checked on a later pass. Idempotent. The
+ * `AND attestation_uid = $uid` compare-and-set (#3395) is parity with
+ * `repairAnchoredUid`: the `uid_repair_confirmed_at IS NULL` guard already
+ * covers the race, but the marker should describe THIS stored UID, so a row
+ * whose UID was swapped between the read and the confirm is re-checked, not
+ * marked over different evidence.
  */
 export async function confirmAnchorUid(
   agentId: string,
   txHash: string,
+  expectedUid: string | null,
   db: Executor = pool,
 ): Promise<boolean> {
   const { rowCount } = await db.query(
@@ -398,24 +430,54 @@ export async function confirmAnchorUid(
       WHERE agent_id = $1
         AND status = 'anchored'
         AND tx_hash = $2
+        AND attestation_uid IS NOT DISTINCT FROM $3
         AND uid_repair_confirmed_at IS NULL`,
-    [agentId, txHash],
+    [agentId, txHash, expectedUid],
   )
   return (rowCount ?? 0) > 0
 }
 
 /**
- * Defer a row whose repair THREW (a UID collision on the unique
- * `agent_passports_uid_idx`, a transient pool error) by bumping `updated_at`
- * (#3342): the row waits out the same hour every due row waits before it is
- * retried, instead of heading the oldest-first batch again on the very next
- * tick. The row stays in the queue — its damage is unresolved — and stays
- * visible in the sweep's per-row report.
+ * Pace a row the sweep could not answer out of the head of the queue
+ * (#3395).
+ *
+ * #3342 deferred rows whose repair THREW by bumping `updated_at`, and that
+ * was the only defer: every non-throwing `unrepairable` outcome (`refused`,
+ * `no-candidate`, `no-receipt`, `reverted`, `tx-body-unavailable`) wrote
+ * NOTHING, so N ≥ `limit` persistently unanswerable rows re-took the whole
+ * oldest-first batch on every tick while a live phantom behind them starved.
+ * This replaces the bump with a dedicated pacing stamp,
+ * `uid_repair_next_at` (migration 099): the row waits out the same hour as
+ * every other due row before it is retried, and — unlike an `updated_at`
+ * bump, which #3342 ruled out as a state stamp because
+ * `FIND_BY_AGENT_ADDRESS_SQL` breaks the merchant verifier's ties on
+ * `updated_at DESC` — it cannot reorder what a merchant is handed, and it
+ * cannot make a repaired/confirmed row look fresher than it is.
+ *
+ * Guarded by `status = 'anchored'` and the row's OWN anchor tx hash, so a
+ * defer can never pace a row that has moved to another lifecycle between the
+ * read and the write: a re-anchor reset hands the row back to issuance, and
+ * an anchored write replaces the anchor tx — neither may inherit the old
+ * repair's pacing. The row stays in the queue — its damage is unresolved —
+ * and stays visible in the sweep's per-row report.
+ *
+ * On a repair that THROWS this is best-effort (`issuePassport`-style): the
+ * row's own data may be what threw, so the caller's guard is advisory there
+ * and a refused stamp costs nothing — the next tick re-reads the row.
  */
-export async function deferAnchorRepair(agentId: string, db: Executor = pool): Promise<void> {
+export async function deferAnchorRepair(
+  agentId: string,
+  txHash: string,
+  backoffSeconds: number,
+  db: Executor = pool,
+): Promise<void> {
   await db.query(
-    `UPDATE agent_passports SET updated_at = NOW() WHERE agent_id = $1`,
-    [agentId],
+    `UPDATE agent_passports
+        SET uid_repair_next_at = NOW() + MAKE_INTERVAL(secs => $3)
+      WHERE agent_id = $1
+        AND status = 'anchored'
+        AND tx_hash = $2`,
+    [agentId, txHash, backoffSeconds],
   )
 }
 
@@ -741,7 +803,9 @@ export async function markRevocationConfirmed(
     `UPDATE agent_passports
         SET revocation_status = 'confirmed', revocation_tx_hash = $2,
             revocation_confirmed_at = NOW(), revocation_last_error = NULL,
-            revocation_next_attempt_at = NULL, updated_at = NOW()
+            revocation_next_attempt_at = NULL,
+            uid_repair_confirmed_at = NULL, uid_repair_next_at = NULL,
+            updated_at = NOW()
       WHERE agent_id = $1`,
     [agentId, txHash],
   )
@@ -933,7 +997,7 @@ export const RESET_FOR_REANCHOR_SQL = `UPDATE agent_passports
         SET status = 'pending',
             attestation_uid = NULL, tx_hash = NULL,
             agent_eoa = NULL, smart_account = NULL,
-            uid_repair_confirmed_at = NULL,
+            uid_repair_confirmed_at = NULL, uid_repair_next_at = NULL,
             anchored_at = NULL, anchoring_started_at = NULL,
             attempts = 0, last_error = NULL,
             revocation_status = 'none',

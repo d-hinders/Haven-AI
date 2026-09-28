@@ -814,6 +814,19 @@ project owner — collaborators have Viewer access, not env-var write access.
 > described above are unchanged. Nothing else in this file's coverage was
 > touched; this note is the only edit.
 
+> **Re-verified #3395 (2026-09-27):** `index.ts`'s `anchor-repair` phase warn
+> report ("left rows unanswered") now excludes `repaired` rows alongside
+> `confirmed` ones — a repair is an answer, and the row left the queue on the
+> same write — so the operator's report carries only `unrepairable` and
+> `deferred` outcomes. The phase itself is unchanged: same position in the
+> sweep, same `repairAnchoredUids()` call with the same default limit; the
+> pacing this issue added (`uid_repair_next_at`, migration 099) lives in the
+> repository and the sweep's own per-row handling, and the selector still
+> skips whatever the phase's batch cannot reach. No route file is added or
+> moved, `enforcedModules` is untouched, and the shadow/enforce semantics this
+> document describes are unchanged. Nothing else in this file's coverage was
+> touched; this note and the `last-verified` date are the only edits.
+
 > **Re-verified #3333 (2026-09-27):** `index.ts`'s `enforcedModules` grew by
 > exactly one entry — `routes/receive.ts`, born ENFORCED per the rule above
 > (a genuinely new module with no existing caller). The generated map

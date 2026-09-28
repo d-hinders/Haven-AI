@@ -16,8 +16,13 @@
  *   `uid_repair_confirmed_at` marker, #3342) and writes no UID;
  * - a row that moved under us refuses the compare-and-set and defers;
  * - a log that fails the proven-ours invariant — foreign schema, foreign
- *   attester, tx not to EAS — is refused, and ours is chosen when a foreign
- *   log precedes it (#3342).
+ *   attester, tx not to EAS — is refused, and when a same-schema
+ *   foreign-attester log precedes ours, OURS is the one chosen (#3342's
+ *   candidate-equality criterion, enforced by #3395);
+ * - every row the sweep cannot answer is PACED out of the head
+ *   (`deferAnchorRepair` stamps `uid_repair_next_at`, #3395) — the throw
+ *   case #3342 deferred and, new in #3395, the non-throwing `unrepairable`
+ *   outcomes that used to write nothing and re-head the batch every tick.
  *
  * The chain is a collaborator this module does not own, so it is mocked
  * (`docs/contributing/testing-strategy.md`); the CAS's and the marker's SQL
@@ -76,7 +81,7 @@ vi.mock('../../../infra/repositories/agent-passports.js', async () => {
 })
 
 const { repairAnchorUidFromReceipt } = await import('../attestation.js')
-const { repairAnchoredUids } = await import('../issuance.js')
+const { repairAnchoredUids, UID_REPAIR_DEFER_SECONDS } = await import('../issuance.js')
 
 /** A receipt whose Attested log carries REAL_UID under our schema. */
 async function stageRealReceipt() {
@@ -254,6 +259,9 @@ describe('#3294 — the repair sweep (repairAnchoredUids)', () => {
     expect(result.repaired).toBe(0)
     expect(result.healthy).toBe(0)
     expect(result.unrepairable).toBe(2)
+    // #3395: the FIRST row was attempted and refused (a chain answer that
+    // failed the invariant); the SECOND was never attempted (no tx hash) —
+    // both unrepairable, but the first is an answer and the second is not.
     expect(result.rows.map((r) => r.outcome)).toEqual(['unrepairable', 'unrepairable'])
     expect(result.rows.map((r) => r.agent_id)).toEqual([
       AGENT,
@@ -274,8 +282,9 @@ describe('#3294 — the repair sweep (repairAnchoredUids)', () => {
     expect(result.rows).toEqual([
       { agent_id: AGENT, outcome: 'deferred', reason: expect.stringMatching(/pool exhausted/) },
     ])
-    // #3342: the throw must NOT leave the row first in line on the next tick.
-    expect(deferAnchorRepair).toHaveBeenCalledWith(AGENT)
+    // #3395: the defer must NOT head the queue on the next tick — stamped on
+    // the dedicated pacing column with the row's own tx hash as guard.
+    expect(deferAnchorRepair).toHaveBeenCalledWith(AGENT, TX, UID_REPAIR_DEFER_SECONDS)
   })
 
   it('passes the caller through to the paced selector', async () => {
@@ -315,10 +324,28 @@ describe('#3342 — the repair refuses an unproven Attested log', () => {
     expect(confirmAnchorUid).not.toHaveBeenCalled()
   })
 
+  /** A foreign EAS log under our PINNED schema, attested by a third party. */
+  async function sameSchemaForeignAttesterLog() {
+    const { Interface } = await import('ethers')
+    const { getEasDeployment } = await import('../schema.js')
+    const iface = new Interface([
+      'event Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)',
+    ])
+    const encoded = iface.encodeEventLog('Attested', [
+      '0x' + '22'.repeat(20),
+      '0x' + '77'.repeat(20), // foreign ATTESTER
+      '0x' + 'dd'.repeat(32),
+      STORED_UID, // the PINNED schema — this is the `:421` case
+    ])
+    return { address: getEasDeployment(CHAIN).eas, topics: [...encoded.topics], data: encoded.data }
+  }
+
   it('a foreign-ATTESTER log is refused, named as a proven-ours refusal', async () => {
     // The log says a third party attested it; the mined tx was sent by the
     // relayer. EAS sets attester to msg.sender, so this log does not describe
-    // this tx — the proven-ours guard must refuse it.
+    // this tx — the proven-ours guard must refuse it. The refusal names what
+    // is true (#3395): every pinned-schema log in this tx is attested by
+    // someone other than the tx's own sender.
     await stageReceiptWithAttester('0x' + '77'.repeat(20), REAL_UID, null, {
       txFrom: '0x' + '11'.repeat(20),
     })
@@ -327,9 +354,49 @@ describe('#3342 — the repair refuses an unproven Attested log', () => {
       tx_hash: TX,
     })
     expect(result.repaired).toBe(false)
-    expect(result.reason).toMatch(/proven-ours invariant/)
+    expect(result.reason).toMatch(/all attested by someone other than the transaction's own sender/)
     expect(repairAnchoredUid).not.toHaveBeenCalled()
     expect(confirmAnchorUid).not.toHaveBeenCalled()
+  })
+
+  it('a same-schema foreign-attester log BEFORE ours: OURS is chosen (#3342 criterion, #3395)', async () => {
+    // The candidate scan (no `from`) returns the FOREIGN log — it comes
+    // first. The proven scan (attester = the tx's own sender) skips it and
+    // returns ours. #3342 wrote this as `uid !== candidate → refused`, which
+    // refused the WHOLE tx and contradicted the issue's own "ours must be
+    // chosen"; that equality half was dead (the proven filter is a subset of
+    // the candidate filter) and is gone. Both mutations that hid here —
+    // dropping the proven scan and dropping the refusal branch — now turn
+    // this red.
+    const foreignSameSchema = await sameSchemaForeignAttesterLog()
+    await stageReceiptWithAttester('0x' + '11'.repeat(20), REAL_UID, foreignSameSchema, {
+      txFrom: '0x' + '11'.repeat(20),
+    })
+    const result = await repairAnchorUidFromReceipt(CHAIN, AGENT, {
+      attestation_uid: STORED_UID,
+      tx_hash: TX,
+    })
+    expect(result.repaired).toBe(true)
+    expect(result.uid).toBe(REAL_UID)
+    expect(repairAnchoredUid).toHaveBeenCalledWith(AGENT, STORED_UID, REAL_UID, TX)
+  })
+
+  it('a receipt where EVERY pinned-schema log is foreign-attested is refused, with the accurate reason', async () => {
+    // The candidate scan finds a pinned-schema log (so this is NOT
+    // `no-candidate`), but the proven scan finds nothing — nothing here is
+    // provably ours. Under #3342's equality form this same fixture was
+    // refused with a reason that misnamed the cause ("attester is not the
+    // tx's own sender" — as if OUR log were the problem).
+    await stageReceiptWithAttester('0x' + '77'.repeat(20), REAL_UID, null, {
+      txFrom: '0x' + '11'.repeat(20),
+    })
+    const { readProvenAnchorUid } = await import('../attestation.js')
+    const read = await readProvenAnchorUid(CHAIN, TX)
+    expect(read.kind).toBe('refused')
+    if (read.kind === 'refused') {
+      expect(read.reason).toMatch(/all attested by someone other than the transaction's own sender/)
+      expect(read.reason).not.toMatch(/attester is not the tx's own sender/)
+    }
   })
 
   it('a foreign log BEFORE ours is skipped — ours is the UID repaired', async () => {
@@ -386,13 +453,15 @@ describe('#3342 — steady state: healthy rows leave the queue', () => {
     expect(result.outcome).toBe('confirmed')
     expect(result.reason).toMatch(/already matches/)
     expect(repairAnchoredUid).not.toHaveBeenCalled()
-    expect(confirmAnchorUid).toHaveBeenCalledWith(AGENT, TX)
+    // #3395: the confirm is a CAS on the stored UID, same as repairAnchoredUid.
+    expect(confirmAnchorUid).toHaveBeenCalledWith(AGENT, TX, REAL_UID)
   })
 
   it('a confirmed row is EXCLUDED by the selector (marker set) — no re-read next tick', async () => {
     await stageRealReceipt()
     await repairAnchorUidFromReceipt(CHAIN, AGENT, { attestation_uid: REAL_UID, tx_hash: TX })
     expect(confirmAnchorUid).toHaveBeenCalledTimes(1)
+    expect(confirmAnchorUid).toHaveBeenCalledWith(AGENT, TX, REAL_UID)
   })
 
   it('the sweep counts a confirmed row as healthy, not unrepairable', async () => {
@@ -407,7 +476,8 @@ describe('#3342 — steady state: healthy rows leave the queue', () => {
     expect(result.rows).toEqual([
       { agent_id: AGENT, outcome: 'confirmed', reason: 'stored UID already matches the anchor receipt' },
     ])
-    expect(confirmAnchorUid).toHaveBeenCalledWith(AGENT, TX)
+    // #3395: the confirm is a CAS on the stored UID, same as repairAnchoredUid.
+    expect(confirmAnchorUid).toHaveBeenCalledWith(AGENT, TX, REAL_UID)
   })
 
   it('a CAS-refused confirmation (row moved) is not counted healthy', async () => {

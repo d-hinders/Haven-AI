@@ -192,6 +192,33 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     expect((await findForAgent(grant.id, b.agentId))?.status).toBe('open')
   })
 
+  it('criterion 3 (survivor): revoking B\u2019s grant ends ONLY B\u2019s slice — A\u2019s parent-child stays open and keeps resolving by hash', async () => {
+    const a = await seedAgent('a')
+    const b = await seedAgent('b')
+    const { parentChild, grant } = await seedTree(a, b)
+    await markOpen(parentChild.id, a.agentId, JSON.stringify({ signed: true }))
+    await markOpen(grant.id, a.agentId, JSON.stringify({ signed: true }))
+
+    // B's grant is resolvable through the open middle link...
+    expect(await selectOpenForPayment(grant.id, b.agentId, USDC, Math.floor(Date.now() / 1000))).not.toBeNull()
+
+    // ...B's own child is revoked (B's request, or the owner DELETE on the
+    // grant — the delegating agent A's delegate prepares the disable)...
+    await markClosing(grant.id, a.agentId, JSON.stringify({ userOp: true }))
+    await markClosed(grant.id, a.agentId, null)
+
+    // ...B's slice no longer resolves for payment, but A's parent-child row
+    // still resolves by hash: A's budget delegation is intact, A itself keeps
+    // spending against it, and any future grant re-issued under the same
+    // parent-child hashes back into the tree.
+    expect(await selectOpenForPayment(grant.id, b.agentId, USDC, Math.floor(Date.now() / 1000))).toBeNull()
+    expect(
+      (await findOpenParentChildByHash(parentChild.delegation_hash, Math.floor(Date.now() / 1000)))?.id,
+    ).toBe(parentChild.id)
+    expect(await findOpenGrantsForAgent(b.agentId)).toEqual([])
+    expect((await listForOwner(a.agentId, a.userId)).find((r) => r.id === parentChild.id)?.status).toBe('open')
+  })
+
   it('findOpenGrantsForAgent names the parent agent and only OPEN/closing grants (haven_get_agent\u2019s additive read)', async () => {
     const a = await seedAgent('parent-a')
     const b = await seedAgent('sub-b')

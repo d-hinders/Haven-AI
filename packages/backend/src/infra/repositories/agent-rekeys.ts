@@ -239,13 +239,30 @@ export async function insertRekeyDelegation(
     // R1's row, so a sibling's stage never satisfies it. Locking the specific
     // `agent_rekeys` row (not just the agent row) means a concurrent abandon
     // of THIS re-key serializes against this transaction rather than racing
-    // it. The alternative is one transaction around the issue route's whole
-    // piece loop plus `markIssued` (the delegate-account RPC runs before the
-    // loop, so that is feasible). It would also stop two CONCURRENT issue
-    // calls on one re-key from both inserting, which this re-check does not:
-    // the stage stays `metered` until one of them reaches `markIssued`. This
-    // smaller change meets #3439's criterion; the concurrent-issue case is a
-    // tracked follow-up (#3450).
+    // it.
+    //
+    // #3450 (closed): this re-check ALONE did not stop two CONCURRENT issue
+    // calls on one re-key from both inserting — the stage stays `metered`
+    // until one of them reaches `markIssued`, so a loser that read its
+    // version after the winner's first insert committed, but before the
+    // winner's `markIssued`, still passed this same `FOR UPDATE` (still
+    // `metered`) and landed its own row. The fix is the caller: the issue
+    // route now runs its whole piece loop plus `markIssued` inside ONE
+    // transaction (`withRekeyIssueTransaction` below), and every call this
+    // function makes inside that loop — including this one — runs on that
+    // SAME transaction client, not a fresh one. `withTransaction` recognises
+    // an already-checked-out client (by `release`, #3450) and runs inline
+    // instead of nesting a second BEGIN. Concretely: the first insert of the
+    // winning call takes this row's lock and holds it for the rest of the
+    // transaction, including `markIssued`'s stage flip to `issued`. A
+    // concurrent second call queues on `lockOwnedAgentForRekeyDelegation`'s
+    // agent-row lock above, and once the winner commits, re-runs THIS
+    // statement as a new READ COMMITTED statement against the now-committed
+    // `issued` row — so `rekeyLock.rowCount === 0` here for the loser,
+    // exactly as it already did for the stalled-issue case #3439 closed.
+    // This subsumes nothing: the check stays exactly as #3439 wrote it, and
+    // is now additionally correct for the concurrent-caller case because of
+    // where it runs, not because of anything new here.
     const rekeyLock = await tx.query<{ id: string }>(
       `SELECT id FROM agent_rekeys WHERE id = $1 AND agent_id = $2 AND stage = 'metered' FOR UPDATE`,
       [row.rekeyId, row.agentId],
@@ -427,6 +444,36 @@ export async function markIssued(
 ): Promise<AgentRekeyRow | null> {
   const result = await db.query<AgentRekeyRow>(MARK_ISSUED_SQL, [rekeyId, agentId])
   return result.rows[0] ?? null
+}
+
+/**
+ * Opens the ONE transaction the issue route's whole piece loop plus
+ * `markIssued` run inside (#3450). Exported from here — not called with
+ * `withTransaction`/`pool` directly from the route — for the same reason
+ * `completeRekey` below is the one place that already owns a dedicated
+ * client for the route: `dep-lint`'s pg-only-in-infra boundary keeps driver
+ * access inside `infra/`, and the route tests that mock this module wholesale
+ * (`vi.mock('.../agent-rekeys.js', ...)`) need one call to intercept rather
+ * than a raw `pool` import that would open a real connection under a
+ * fully-mocked test.
+ *
+ * The callback runs business logic (`planCarry`, `buildBudgetDelegation`,
+ * hash computation) interleaved with the DB calls, which is genuinely a
+ * route-layer concern — unlike every other transaction in this file, which
+ * wraps DB statements only. That is the deliberate trade #3450 makes: the
+ * alternative (moving the carry-planning and delegation-building calls into
+ * this repository module) would cross the module boundary the file header
+ * describes the other way, pulling `rails/delegation-policy.ts` and
+ * `modules/agents/rekey-carry.ts` into `infra/`. A transaction boundary that
+ * must span business logic AND storage is the one case #1698's "no SQL in
+ * the route" rule cannot keep both properties at once; this function is the
+ * smallest surface that gives the route the transaction while keeping every
+ * actual SQL statement in this file, reachable from the real-DB harness.
+ */
+export async function withRekeyIssueTransaction<T>(
+  fn: (tx: Executor) => Promise<T>,
+): Promise<T> {
+  return withTransaction(pool, fn)
 }
 
 export const MARK_COMPLETED_SQL = `UPDATE agent_rekeys

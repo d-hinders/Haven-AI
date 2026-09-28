@@ -105,6 +105,7 @@ import {
   nextDelegationVersion,
   openRekey,
   RekeyOpenConflictError,
+  withRekeyIssueTransaction,
   type AgentRekeyRow,
   type CarrySnapshotEntry,
   type RekeyAgentRow,
@@ -120,6 +121,7 @@ import {
   type RekeyStage,
 } from '../modules/agents/index.js'
 import { reanchorPassportBestEffort } from '../modules/passport/index.js'
+import type { Executor } from '../infra/transaction.js'
 
 function safeDetails(err: unknown): string {
   return redactVendorSecrets(err instanceof Error ? err.message : String(err))
@@ -191,6 +193,46 @@ function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyRep
     required_stage: err.required,
     detail: err.message,
   })
+}
+
+/**
+ * Sentinels for the issue route's transactional piece loop (#3450).
+ *
+ * `withTransaction`/`withRekeyIssueTransaction` COMMITS on a normal return
+ * and ROLLS BACK only on a throw — so every early exit that used to be a
+ * `return reply...` inside the loop must become one of these, thrown from
+ * inside the transaction callback and mapped back to the identical HTTP
+ * reply outside it, after the transaction has settled. Four distinct classes
+ * rather than one generic "abort with a reply" sentinel because the mapping
+ * (status code, body shape) differs per site and a single carried payload
+ * would just re-implement this switch with an extra layer of indirection.
+ */
+class IssueCarryRefusedError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly delegationHash: string,
+    public readonly detail: string,
+  ) {
+    super('carry_refused')
+  }
+}
+
+class IssueBuildFailedError extends Error {
+  constructor(public readonly details: string) {
+    super('build_failed')
+  }
+}
+
+class IssueInsertRefusedError extends Error {
+  constructor() {
+    super('insert_refused')
+  }
+}
+
+class IssueMarkIssuedFailedError extends Error {
+  constructor() {
+    super('mark_issued_failed')
+  }
 }
 
 // The unique-violation narrow lives in `infra/pg-errors.ts` (#3032). The
@@ -848,7 +890,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         })
       }
       const meteredAtSec = Math.floor(new Date(rekey.metered_at).getTime() / 1000)
-      const built: Array<{
+      type BuiltDelegation = {
         delegation_hash: string
         carry_role: string
         token_address: string
@@ -858,162 +900,225 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         start_date: number
         expires_at: number
         signing_payload: unknown
-      }> = []
-      const skipped: Array<{ delegation_hash: string; reason: string }> = []
-
-      for (const entry of snapshot) {
-        const old: DelegationTerms = {
-          budgetAtomic: BigInt(entry.budget_atomic),
-          periodSeconds: entry.period_seconds,
-          startDate: entry.start_date,
-          expiresAt: entry.expires_at,
-        }
-        let plan
-        try {
-          plan = planCarry({
-            old,
-            meter: {
-              remainingAtomic: BigInt(entry.remaining_atomic),
-              fromChain: entry.from_chain,
-            },
-            meteredAtSec,
-            nowSec,
-          })
-        } catch (err) {
-          if (err instanceof CarryRefusedError) {
-            // A refusal here is recoverable and must be loud: the agent has
-            // no authority and the owner needs to know why the replacement
-            // was not built rather than being told it was.
-            return reply.code(409).send({
-              error: 'carry_refused',
-              code: err.code,
-              delegation_hash: entry.delegation_hash,
-              detail: err.message,
-            })
-          }
-          throw err
-        }
-
-        const pieces: Array<{ role: 'carry' | 'steady' | 'reanchor'; terms: DelegationTerms }> = []
-        if (plan.kind === 'expired') {
-          skipped.push({
-            delegation_hash: entry.delegation_hash,
-            reason: 'The replaced delegation had already expired — nothing to carry.',
-          })
-        } else if (plan.kind === 'dormant') {
-          if (plan.reissue) pieces.push({ role: 'reanchor', terms: plan.reissue })
-        } else {
-          if (plan.carry) pieces.push({ role: 'carry', terms: plan.carry })
-          else if (plan.dropped.every((d) => d.role !== 'carry'))
-            skipped.push({
-              delegation_hash: entry.delegation_hash,
-              reason: fullySpentReason(plan.steady, plan.dropped, nowSec),
-            })
-          if (plan.steady) pieces.push({ role: 'steady', terms: plan.steady })
-        }
-
-        // #1849: anything the delay outran, reported with the delay named. A
-        // dropped piece is not a silent omission — it is the difference
-        // between the owner understanding why a grant is missing and
-        // concluding the re-key broke their agent.
-        if (plan.kind !== 'expired') {
-          for (const drop of plan.dropped) {
-            skipped.push({ delegation_hash: entry.delegation_hash, reason: drop.reason })
-          }
-        }
-
-        // #3386: the merchant label, read unconditionally off the old row by
-        // hash — never trusted from the snapshot. The old row survives the
-        // revoke (it is marked `revoked`, never deleted) and its FK is kept
-        // current by `ON DELETE SET NULL`, so this resolves the CURRENT
-        // state of the merchant even if it was deleted between metering and
-        // this request, rather than replaying a value frozen at metering
-        // time that could point at a merchant no longer there. Read once per
-        // entry, and only when the entry actually produced a piece to insert
-        // — an entry with nothing to carry has no label to resolve.
-        const merchantId =
-          pieces.length === 0
-            ? null
-            : ((await findDelegationTerms(request.params.id, entry.delegation_hash))?.merchant_id ?? null)
-
-        for (const piece of pieces) {
-          const version = await nextDelegationVersion(
-            request.params.id,
-            entry.token_address,
-            entry.recipient_address,
-          )
-          const policy: HavenBudgetPolicy = {
-            agentId: request.params.id,
-            chainId: agent.chain_id,
-            treasuryAddress: agent.treasury_address as Address,
-            delegateAccountAddress,
-            tokenAddress: entry.token_address as Address,
-            budgetAtomic: piece.terms.budgetAtomic,
-            periodSeconds: piece.terms.periodSeconds,
-            startDate: piece.terms.startDate,
-            recipient: (entry.recipient_address ?? undefined) as Address | undefined,
-            expiresAt: piece.terms.expiresAt,
-            version,
-          }
-          let delegation
-          try {
-            delegation = buildBudgetDelegation(policy)
-          } catch (err) {
-            return reply
-              .code(502)
-              .send({ error: 'Could not build the replacement delegation', details: safeDetails(err) })
-          }
-          const hash = delegationIdentity(delegation)
-          const inserted = await insertRekeyDelegation({
-            agentId: request.params.id,
-            userId: sub,
-            chainId: agent.chain_id,
-            tokenAddress: entry.token_address,
-            recipientAddress: entry.recipient_address,
-            delegationHash: hash,
-            delegationJson: JSON.stringify(delegation),
-            version,
-            budgetAtomic: piece.terms.budgetAtomic.toString(),
-            periodSeconds: piece.terms.periodSeconds,
-            startDate: piece.terms.startDate,
-            expiresAt: piece.terms.expiresAt,
-            rekeyId: rekey.id,
-            carryRole: piece.role,
-            merchantId,
-          })
-          if (inserted === false) {
-            // #3439: `insertRekeyDelegation` returns false for either of two
-            // reasons — the agent is no longer eligible (unlinked, revoked)
-            // or THIS re-key is no longer `metered` (abandoned, or overtaken
-            // by a stalled/duplicate issue call). Both are "this issue
-            // request can no longer place new budget delegations", so one
-            // message covers both honestly without over-claiming a cause.
-            return reply
-              .code(409)
-              .send({ error: 'This re-key can no longer receive new budget delegations' })
-          }
-          built.push({
-            delegation_hash: hash,
-            carry_role: piece.role,
-            token_address: entry.token_address,
-            recipient_address: entry.recipient_address,
-            budget_atomic: piece.terms.budgetAtomic.toString(),
-            period_seconds: piece.terms.periodSeconds,
-            start_date: piece.terms.startDate,
-            expires_at: piece.terms.expiresAt,
-            signing_payload: delegationSigningPayload(delegation, agent.chain_id),
-          })
-        }
       }
 
-      const issued = await markIssued(rekey.id, request.params.id)
-      if (!issued) return reply.code(409).send({ error: 'rekey_out_of_order' })
+      // #3450: the whole piece loop plus `markIssued` run in ONE transaction.
+      // `withTransaction` commits on a normal RETURN and rolls back only on a
+      // THROW, so every early exit below is a thrown sentinel
+      // (`IssueCarryRefusedError` etc.), caught and mapped back to the exact
+      // same HTTP reply OUTSIDE the transaction, after it has committed or
+      // rolled back. This is what makes a concurrent second call block on
+      // the first insert's `agents` row lock and then see the winner's
+      // committed `issued` stage — and what makes a failure part-way through
+      // roll back every piece already inserted in this call, rather than
+      // leaving them committed for a retry to orphan (see
+      // `IssueInsertRefusedError` / the stage re-check in
+      // `insertRekeyDelegation`, and the comment there).
+      //
+      // No network call runs inside: `computeHybridAccountAddress` (the one
+      // RPC this route makes) already ran above, before the transaction
+      // opens.
+      let result: { issued: AgentRekeyRow; built: BuiltDelegation[]; skipped: Array<{ delegation_hash: string; reason: string }> }
+      try {
+        result = await withRekeyIssueTransaction(async (tx: Executor) => {
+          const built: BuiltDelegation[] = []
+          const skipped: Array<{ delegation_hash: string; reason: string }> = []
+
+          for (const entry of snapshot) {
+            const old: DelegationTerms = {
+              budgetAtomic: BigInt(entry.budget_atomic),
+              periodSeconds: entry.period_seconds,
+              startDate: entry.start_date,
+              expiresAt: entry.expires_at,
+            }
+            let plan
+            try {
+              plan = planCarry({
+                old,
+                meter: {
+                  remainingAtomic: BigInt(entry.remaining_atomic),
+                  fromChain: entry.from_chain,
+                },
+                meteredAtSec,
+                nowSec,
+              })
+            } catch (err) {
+              if (err instanceof CarryRefusedError) {
+                // A refusal here is recoverable and must be loud: the agent
+                // has no authority and the owner needs to know why the
+                // replacement was not built rather than being told it was.
+                // Thrown, not replied here — a normal return would COMMIT
+                // any pieces already inserted for earlier snapshot entries
+                // in this same call.
+                throw new IssueCarryRefusedError(err.code, entry.delegation_hash, err.message)
+              }
+              throw err
+            }
+
+            const pieces: Array<{ role: 'carry' | 'steady' | 'reanchor'; terms: DelegationTerms }> = []
+            if (plan.kind === 'expired') {
+              skipped.push({
+                delegation_hash: entry.delegation_hash,
+                reason: 'The replaced delegation had already expired — nothing to carry.',
+              })
+            } else if (plan.kind === 'dormant') {
+              if (plan.reissue) pieces.push({ role: 'reanchor', terms: plan.reissue })
+            } else {
+              if (plan.carry) pieces.push({ role: 'carry', terms: plan.carry })
+              else if (plan.dropped.every((d) => d.role !== 'carry'))
+                skipped.push({
+                  delegation_hash: entry.delegation_hash,
+                  reason: fullySpentReason(plan.steady, plan.dropped, nowSec),
+                })
+              if (plan.steady) pieces.push({ role: 'steady', terms: plan.steady })
+            }
+
+            // #1849: anything the delay outran, reported with the delay
+            // named. A dropped piece is not a silent omission — it is the
+            // difference between the owner understanding why a grant is
+            // missing and concluding the re-key broke their agent.
+            if (plan.kind !== 'expired') {
+              for (const drop of plan.dropped) {
+                skipped.push({ delegation_hash: entry.delegation_hash, reason: drop.reason })
+              }
+            }
+
+            // #3386: the merchant label, read unconditionally off the old
+            // row by hash — never trusted from the snapshot. The old row
+            // survives the revoke (it is marked `revoked`, never deleted)
+            // and its FK is kept current by `ON DELETE SET NULL`, so this
+            // resolves the CURRENT state of the merchant even if it was
+            // deleted between metering and this request, rather than
+            // replaying a value frozen at metering time that could point at
+            // a merchant no longer there. Read once per entry, and only
+            // when the entry actually produced a piece to insert — an entry
+            // with nothing to carry has no label to resolve. Reads through
+            // `tx` (#3450): on `pool` this could read a merchant row from
+            // outside this call's own uncommitted work, which is correct
+            // here (the merchant table is untouched by this transaction)
+            // but the rule this route follows throughout the loop is "every
+            // DB call takes the transaction client", stated once here rather
+            // than re-justified at every call site.
+            const merchantId =
+              pieces.length === 0
+                ? null
+                : ((await findDelegationTerms(request.params.id, entry.delegation_hash, tx))
+                    ?.merchant_id ?? null)
+
+            for (const piece of pieces) {
+              // #3450: MUST run on `tx`, not the default `pool` — otherwise
+              // a `steady` piece in the same call cannot see the `carry`
+              // piece's own uncommitted insert moments earlier and would
+              // compute the SAME next version, corrupting the #827 salt
+              // this route relies on for a deterministic hash per piece.
+              const version = await nextDelegationVersion(
+                request.params.id,
+                entry.token_address,
+                entry.recipient_address,
+                tx,
+              )
+              const policy: HavenBudgetPolicy = {
+                agentId: request.params.id,
+                chainId: agent.chain_id,
+                treasuryAddress: agent.treasury_address as Address,
+                delegateAccountAddress,
+                tokenAddress: entry.token_address as Address,
+                budgetAtomic: piece.terms.budgetAtomic,
+                periodSeconds: piece.terms.periodSeconds,
+                startDate: piece.terms.startDate,
+                recipient: (entry.recipient_address ?? undefined) as Address | undefined,
+                expiresAt: piece.terms.expiresAt,
+                version,
+              }
+              let delegation
+              try {
+                delegation = buildBudgetDelegation(policy)
+              } catch (err) {
+                throw new IssueBuildFailedError(safeDetails(err))
+              }
+              const hash = delegationIdentity(delegation)
+              const inserted = await insertRekeyDelegation(
+                {
+                  agentId: request.params.id,
+                  userId: sub,
+                  chainId: agent.chain_id,
+                  tokenAddress: entry.token_address,
+                  recipientAddress: entry.recipient_address,
+                  delegationHash: hash,
+                  delegationJson: JSON.stringify(delegation),
+                  version,
+                  budgetAtomic: piece.terms.budgetAtomic.toString(),
+                  periodSeconds: piece.terms.periodSeconds,
+                  startDate: piece.terms.startDate,
+                  expiresAt: piece.terms.expiresAt,
+                  rekeyId: rekey.id,
+                  carryRole: piece.role,
+                  merchantId,
+                },
+                tx,
+              )
+              if (inserted === false) {
+                // #3439/#3450: `insertRekeyDelegation` returns false for any
+                // of: the agent is no longer eligible (unlinked, revoked),
+                // or THIS re-key is no longer `metered` (abandoned, or
+                // overtaken by a stalled/duplicate issue call, or — now
+                // that this whole loop is one transaction — a concurrent
+                // issue call that already committed `issued` while this
+                // call was queued on the agent row lock). All are "this
+                // issue request can no longer place new budget
+                // delegations", so one message covers them honestly
+                // without over-claiming a cause.
+                throw new IssueInsertRefusedError()
+              }
+              built.push({
+                delegation_hash: hash,
+                carry_role: piece.role,
+                token_address: entry.token_address,
+                recipient_address: entry.recipient_address,
+                budget_atomic: piece.terms.budgetAtomic.toString(),
+                period_seconds: piece.terms.periodSeconds,
+                start_date: piece.terms.startDate,
+                expires_at: piece.terms.expiresAt,
+                signing_payload: delegationSigningPayload(delegation, agent.chain_id),
+              })
+            }
+          }
+
+          const issued = await markIssued(rekey.id, request.params.id, tx)
+          if (!issued) throw new IssueMarkIssuedFailedError()
+
+          return { issued, built, skipped }
+        })
+      } catch (err) {
+        if (err instanceof IssueCarryRefusedError) {
+          return reply.code(409).send({
+            error: 'carry_refused',
+            code: err.code,
+            delegation_hash: err.delegationHash,
+            detail: err.message,
+          })
+        }
+        if (err instanceof IssueBuildFailedError) {
+          return reply
+            .code(502)
+            .send({ error: 'Could not build the replacement delegation', details: err.details })
+        }
+        if (err instanceof IssueInsertRefusedError) {
+          return reply
+            .code(409)
+            .send({ error: 'This re-key can no longer receive new budget delegations' })
+        }
+        if (err instanceof IssueMarkIssuedFailedError) {
+          return reply.code(409).send({ error: 'rekey_out_of_order' })
+        }
+        throw err
+      }
 
       return reply.code(201).send({
-        stage: issued.stage,
+        stage: result.issued.stage,
         delegate_account_address: delegateAccountAddress,
-        delegations: built,
-        skipped,
+        delegations: result.built,
+        skipped: result.skipped,
         carry_note:
           'A "carry" grant is capped at the frozen remainder and EXPIRES at the old period ' +
           'boundary; the paired "steady" grant starts at that same instant with the original ' +

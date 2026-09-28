@@ -72,7 +72,21 @@ export async function withTransaction<T>(
 ): Promise<T> {
   const connectable = db as Executor & {
     connect?: () => Promise<{ query: Executor['query']; release: () => void }>
+    release?: () => void
   }
+  // `release` — not `connect` — is what discriminates "already a checked-out
+  // client" from "a poolable executor" (#3450). A real `pg` `PoolClient` has
+  // BOTH `connect` (inherited from `Client.prototype`) and `release`; the
+  // `db.ts` pool wrapper and a raw `pg.Pool` have `connect` and never
+  // `release`. Checking `connect` alone — the pre-#3450 rule — checks out a
+  // SECOND client from a client that is already checked out, which `pg`
+  // rejects with "Client has already been connected. You cannot reuse a
+  // client." A caller composing repository functions inside its own
+  // transaction (e.g. a route holding one transaction across an entire
+  // piece loop, #3450) passes that transaction's `PoolClient` straight
+  // through, so this is not a hypothetical: it is the normal shape of
+  // nested repository calls under a single outer transaction.
+  if (typeof connectable.release === 'function') return fn(db)
   if (typeof connectable.connect !== 'function') return fn(db)
   const client = await connectable.connect()
   try {

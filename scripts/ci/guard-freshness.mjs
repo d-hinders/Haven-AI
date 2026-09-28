@@ -358,6 +358,57 @@ export function newestTimestamp(runs) {
   return stamps.length === 0 ? null : stamps.slice().sort().at(-1)
 }
 
+// #3409: reason codes `observe()` can attach to `incompleteReasons`, and the
+// prose each renders as. Split in two: BOUNDEDNESS causes stopped a search
+// that otherwise trusted what it read (a success may genuinely sit further
+// back); DISTRUST causes mean what was read could not be trusted at all, so
+// "may exist further back" would overstate what is known — dropped for those.
+const BOUNDEDNESS_REASONS = {
+  'page-cap': 'the page cap',
+  'lookup-budget': 'the job-lookup budget',
+  'index-reach': 'a Deployments index that does not reach that far',
+}
+const DISTRUST_REASONS = {
+  'listing-not-near-now': 'page 1 of the run listing did not open near "now"',
+  'listing-not-contiguous': 'the run listing was not contiguous and newest-first across pages',
+  'listing-missing-run': 'an in-window Railway deployment has no matching run in the listing',
+  'lookup-failure': 'a check-runs lookup threw or could not be read',
+  'malformed-index': 'the Deployments index response body was not a list',
+}
+
+/** The `unconfirmed` finding's detail text, from `observe()`'s `incompleteReasons`. */
+export function renderUnconfirmedDetail(guard, seen) {
+  const reasons = Array.isArray(seen.incompleteReasons) ? seen.incompleteReasons : []
+  const bounded = reasons.filter((r) => r in BOUNDEDNESS_REASONS).map((r) => BOUNDEDNESS_REASONS[r])
+  const distrust = reasons.filter((r) => r in DISTRUST_REASONS).map((r) => DISTRUST_REASONS[r])
+  const clauses = []
+  if (bounded.length > 0) {
+    clauses.push(`the search stopped before covering ${guard.maxAgeDays} days (${bounded.join('; ')})`)
+  }
+  if (distrust.length > 0) {
+    clauses.push(`the run listing, a job lookup, or the Deployments index could not be trusted (${distrust.join('; ')})`)
+  }
+  if (clauses.length === 0) {
+    clauses.push(`the search stopped before covering ${guard.maxAgeDays} days`)
+  }
+  let detail = `No successful run was found among the ${seen.examined ?? 'examined'} runs read (${clauses.join('; ')}).`
+  if (distrust.length > 0) {
+    detail += " See the run's `::warning::` lines for which check tripped."
+  }
+  if (reasons.includes('listing-missing-run')) {
+    detail +=
+      ' An in-window deployment with no matching run reads as EITHER an anomalous listing OR the ' +
+      "deployment_status trigger itself has stopped firing (#2268) — the listing alone cannot tell them apart."
+  }
+  // Only true for the causes that stopped an otherwise-trusted search short —
+  // a distrusted read is not "the answer is further back", it is "this read
+  // cannot say" (review round 1, finding 2).
+  if (bounded.length > 0) {
+    detail += ' A success may exist further back; this is not evidence that it never succeeded.'
+  }
+  return detail
+}
+
 /**
  * `{ healthy, findings }` for a set of observations.
  *
@@ -418,11 +469,7 @@ export function evaluate({ guards = SCHEDULED_GUARDS, observations = {}, now = D
       findings.push({
         guard,
         kind: 'unconfirmed',
-        detail:
-          `No successful run was found among the ${seen.examined ?? 'examined'} runs read ` +
-          `(the search stopped before covering ${guard.maxAgeDays} days: the page cap, the job-lookup ` +
-          'budget, or a Deployments index that does not reach that far). ' +
-          'A success may exist further back; this is not evidence that it never succeeded.',
+        detail: renderUnconfirmedDetail(guard, seen),
       })
       continue
     }
@@ -554,6 +601,12 @@ function readDeploymentIndex({ environment, creator }, gh = defaultGh) {
   // Non-enumerable: the oldest deployment a FULL index page reaches (#3340
   // review N2). A short page is the whole history, so it cannot be "too short".
   Object.defineProperty(index, '__oldest', { value: list.length >= 100 ? (created[0] ?? null) : null, enumerable: false })
+  // #3409 review round 1, finding 4: the diagnostic line needs the ACTUAL
+  // oldest entry regardless of page length — `__oldest` stays gated on
+  // `length >= 100` because that gate is what `indexShort` (and the M1
+  // mutation test) exercises, not what a human reading the log wants to see.
+  Object.defineProperty(index, '__oldestActual', { value: created[0] ?? null, enumerable: false })
+  Object.defineProperty(index, '__count', { value: list.length, enumerable: false })
   Object.defineProperty(index, '__malformed', { value: malformed, enumerable: false })
   // #3409: `{ sha, created_at }` for every Railway-created deployment, kept
   // alongside the sha→creator map so `observe()` can ask "is there an
@@ -608,14 +661,12 @@ function boundedCheckRunReader(budget, jobName, shaOfRun, gh = defaultGh) {
       }
       left -= 1
       read.attempted += 1
-      // #3409: cache decision — a thrown/unreadable lookup is NOT cached for
-      // its sha. It is caught HERE (rather than left to propagate, as before)
-      // so `observe()` can count it, but `bySha` stays unset on failure, so a
-      // later run at the same sha re-attempts the call — spending budget again
-      // — exactly as an uncaught throw already did before this change. A
-      // measured refutation (#3409 spec-review) ruled out caching the failure:
-      // that would leave a transient blip permanently unresolved for the rest
-      // of the evaluation instead of retried on the next page.
+      // Decision (#3409): not cached, so a transient blip is retried on the
+      // next pass rather than refusing the sha for the rest of the
+      // evaluation; the budget cost is the same as before this change. It is
+      // caught HERE (rather than left to propagate, as before) so `observe()`
+      // can count it, but `bySha` stays unset on failure, so a later run at
+      // the same sha re-attempts the call while the lookup budget lasts.
       let checks
       try {
         checks = JSON.parse(gh([
@@ -677,8 +728,18 @@ function readRunPage(guard, event, page, gh) {
  * Runs are read a page at a time, newest first, per counted event, and paging
  * stops once a qualifying success is found, the page reaches past the guard's
  * `maxAgeDays`, the pages run out, or `RUN_PAGE_CAP` is hit — so the common
- * healthy case costs one page. `searchComplete` is false when the page cap or
- * the job-lookup budget stopped the search before the window was covered.
+ * healthy case costs one page. `searchComplete` is false, and the returned
+ * `incompleteReasons` names why, whenever the search did not reach a definite
+ * answer: the page cap or the job-lookup budget stopped it short of the
+ * window (a success may still exist further back), OR the run listing, a
+ * check-runs lookup, or the Deployments index could not be trusted (#3409) —
+ * a page not opening near "now" while the deployment index shows an in-window
+ * deploy, pages arriving out of order, an in-window Railway deployment with
+ * no matching run in the listing (which reads as EITHER an anomalous listing
+ * OR the trigger itself has stopped firing, #2268 — the `::warning::` lines
+ * say which check tripped), a thrown/unreadable lookup, or a non-array
+ * Deployments response body. A found success (however old) always yields
+ * `stale`, never `unconfirmed`, whatever else tripped.
  */
 export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT } = {}) {
   const workflowPath = path.join(root, '.github', 'workflows', guard.workflow)
@@ -708,20 +769,30 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     const runs = []
     let searchComplete = true
     let qualifying = []
-    // #3409: the evidence for the false `never-run` at 07:42 was an anomalous
-    // *listing*, not a failed lookup — a page of old rows that a correct,
-    // event-filtered, newest-first, paged read could not have produced. These
-    // three checks catch that shape directly, on the pages actually read,
-    // rather than trusting the API's pagination to be internally consistent.
+    // #3409: the LEADING HYPOTHESIS for the false `never-run` at 07:42 (spec
+    // review on this issue) is an anomalous *listing* — a page of old rows
+    // that a correct, event-filtered, newest-first, paged read could not have
+    // produced — kept as a hypothesis because nothing logged what that page
+    // actually held, so it cannot be proven after the fact. These checks
+    // catch that SHAPE directly, on the pages actually read, rather than
+    // trusting the API's pagination to be internally consistent, and are
+    // worth keeping whether or not that hypothesis is what actually fired.
     // `warnings` collects the `::warning::` lines named by the acceptance
-    // criteria; `pageStats` feeds the per-page diagnostics printed below.
+    // criteria; `pageStats` feeds the per-page diagnostics printed below;
+    // `reasons` records which check(s) tripped, for `evaluate()`'s detail text.
     const warnings = []
     const pageStats = []
+    const reasons = []
+    const markIncomplete = (reason) => {
+      searchComplete = false
+      if (!reasons.includes(reason)) reasons.push(reason)
+    }
+    let page1Newest = null
     for (const event of guard.countedEvents) {
       let prevPageOldest = null // reset per event: each stream paginates independently
       for (let page = 1; ; page += 1) {
         if (page > RUN_PAGE_CAP) {
-          searchComplete = false
+          markIncomplete('page-cap')
           break
         }
         const batch = readRunPage(guard, event, page, gh)
@@ -731,25 +802,18 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
         const oldest = dates[0]
         const newest = dates.at(-1)
         pageStats.push({ event, page, count: batch.length, newest: newest ?? null, oldest: oldest ?? null })
+        if (page === 1 && newest && page1Newest === null) page1Newest = newest
 
-        // Coherence check 1: page 1, newest-first, should open near "now" — a
-        // page whose newest row already predates the guard's own maxAgeDays
-        // budget cannot be trusted to be the actual head of the listing (the
-        // 07:42 page's newest row was ~8 days old against a 4-day budget).
-        if (page === 1 && newest && newest < horizon) {
-          searchComplete = false
-          warnings.push(
-            `guard-freshness: listing-coherence — page 1 of ${guard.workflow}'s ${event} runs opens at ` +
-              `${newest}, already past its ${guard.maxAgeDays}-day budget; not trusted as "near now".`,
-          )
-        }
         // Coherence check 2: contiguous and newest-first. Page N's newest row
         // must not be newer than page N-1's oldest — otherwise the pages
         // overlap or arrived out of order, and paging-until-horizon can stop
         // having skipped real rows in between (exactly how the 07:42 page,
-        // read alone, was not provably the true head of the list).
+        // read alone, was not provably the true head of the list). Reachable
+        // only while still searching: pagination stops as soon as a success
+        // qualifies, so a page this check inspects is always one read before
+        // any success was found.
         if (prevPageOldest && newest && newest > prevPageOldest) {
-          searchComplete = false
+          markIncomplete('listing-not-contiguous')
           warnings.push(
             `guard-freshness: listing-coherence — ${guard.workflow}'s ${event} page ${page} is not contiguous ` +
               `with page ${page - 1} (newest ${newest} is after the previous page's oldest ${prevPageOldest}).`,
@@ -769,30 +833,32 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
         if (batch.length < 100 || !oldest || oldest < horizon) break
         // Past the lookup budget, more pages can only feed `lastRunAt`.
         if (jobsFor?.exhausted) {
-          searchComplete = false
+          markIncomplete('lookup-budget')
           break
         }
       }
     }
     const foundSuccess = () => qualifying.some((r) => r.conclusion === 'success')
-    if (jobsFor?.exhausted && !foundSuccess()) searchComplete = false
-    if (indexShort && !foundSuccess()) searchComplete = false
+    if (jobsFor?.exhausted && !foundSuccess()) markIncomplete('lookup-budget')
+    if (indexShort && !foundSuccess()) markIncomplete('index-reach')
     // #3409 criterion 3: a non-array Deployments body used to read as "Railway
     // deployed nothing", indistinguishable from a genuinely empty history.
     if (index?.__malformed && !foundSuccess()) {
-      searchComplete = false
+      markIncomplete('malformed-index')
       warnings.push(
         `guard-freshness: listing-coherence — the deployment index for ${guard.workflow} was not a list ` +
           '(empty or unparseable response body); not trusted.',
       )
     }
     // #3409 criterion 2: a thrown/unreadable check-runs lookup. Not cached
-    // (see boundedCheckRunReader) — a later run at the same sha re-attempts it
-    // — but a failure that occurred while no qualifying success has been found
-    // must not read as a confident "never", because the lookup that could have
-    // supplied the success is exactly the one that failed.
+    // (see boundedCheckRunReader) — a later pass over the accumulated run
+    // list re-attempts the same sha while the lookup budget lasts — but a
+    // failure that occurred while no qualifying success has been found by the
+    // end of the search must not read as a confident "never", because the
+    // lookup that could have supplied the success is exactly the one that
+    // failed.
     if (jobsFor?.failed > 0 && !foundSuccess()) {
-      searchComplete = false
+      markIncomplete('lookup-failure')
       warnings.push(
         `guard-freshness: lookup-failure — ${jobsFor.failed} check-runs lookup(s) for ${guard.workflow} ` +
           `threw and no qualifying success was found among the ${runs.length} runs read.`,
@@ -801,18 +867,42 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     // Coherence check 3: a Railway dev deployment inside the window whose sha
     // never showed up anywhere in the listing we read. At 07:42 the index held
     // `679e7971`, deployed inside the 4-day window, with no matching run in
-    // the page the guard trusted.
+    // the page the guard trusted. Evaluated once, after the full search across
+    // every counted event, and only when no success was found by then.
+    let hasInWindowDeploy = false
     if (index?.__deployments && !foundSuccess()) {
       const seenShas = new Set(runs.map((r) => r.headSha))
-      const missing = index.__deployments.filter((d) => d.created_at >= horizon && !seenShas.has(d.sha))
+      const inWindow = index.__deployments.filter((d) => d.created_at >= horizon)
+      hasInWindowDeploy = inWindow.length > 0
+      const missing = inWindow.filter((d) => !seenShas.has(d.sha))
       if (missing.length > 0) {
-        searchComplete = false
+        markIncomplete('listing-missing-run')
         warnings.push(
           `guard-freshness: listing-coherence — the deployment index has ${missing.length} in-window Railway ` +
             `deployment(s) to ${guard.workflow} with no matching run in the listing (e.g. sha ${missing[0].sha} ` +
-            `deployed ${missing[0].created_at}).`,
+            `deployed ${missing[0].created_at}). Either the run listing is anomalous, or the deployment_status ` +
+            'trigger has stopped firing (#2268) — the other ::warning:: lines above say which.',
         )
       }
+    }
+    // Coherence check 1: page 1, newest-first, should open near "now" — a
+    // page whose newest row already predates the guard's own maxAgeDays
+    // budget cannot be trusted to be the actual head of the listing (the
+    // 07:42 page's newest row was, on the leading hypothesis, well past the
+    // budget). Evaluated once, after the full search, and gated on TWO
+    // things: no success was found, AND the deployment index shows at least
+    // one dev deployment actually happened inside the window — deploys
+    // happened, so recent runs should exist. Without an in-window deploy, a
+    // stale page 1 is exactly what a genuinely quiet week looks like, and is
+    // reported as a diagnostic line only (below), never a `::warning::` or an
+    // incomplete search (review round 1, finding 3).
+    if (page1Newest && page1Newest < horizon && !foundSuccess() && hasInWindowDeploy) {
+      markIncomplete('listing-not-near-now')
+      warnings.push(
+        `guard-freshness: listing-coherence — page 1 of ${guard.workflow}'s run listing opens at ` +
+          `${page1Newest}, already past its ${guard.maxAgeDays}-day budget, while the deployment index shows a ` +
+          'dev deployment inside that window; not trusted as "near now".',
+      )
     }
 
     for (const w of warnings) console.error(`::warning::${w}`)
@@ -820,12 +910,12 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     const readDates = runs.map((r) => r.createdAt).filter(Boolean).sort()
     const success = qualifying.filter((r) => r.conclusion === 'success')
     const lastSuccessAt = newestTimestamp(success)
-    // #3409 criterion 4: diagnostics on every non-fresh verdict — the two
+    // #3409 criterion 4: diagnostics on every observation without an in-budget
+    // success (never-run, never-succeeded, unconfirmed, stale) — the two
     // hypotheses at 07:42 (an anomalous page vs. a failed lookup) were
     // indistinguishable after the fact because nothing logged what either page
-    // held. Printed only when the observation is not a clean success inside
-    // budget, so the common healthy push stays quiet (per the module's own
-    // "stays green, low-noise" design).
+    // held. Printed only then, so the common healthy push stays quiet (per the
+    // module's own "stays green, low-noise" design).
     const ageMs = lastSuccessAt ? nowMs - Date.parse(lastSuccessAt) : null
     const nonFresh = !lastSuccessAt || !searchComplete || (ageMs !== null && ageMs > guard.maxAgeDays * DAY_MS)
     if (nonFresh) {
@@ -833,8 +923,16 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
       for (const p of pageStats) {
         console.error(`  page ${p.page} (${p.event}): ${p.count} rows, newest=${p.newest}, oldest=${p.oldest}`)
       }
+      // The size counts SHAs from every creator (the index is not filtered to
+      // Railway's), so it is comparable across guards; the oldest entry and
+      // the short-page note are what say whether it reaches the horizon.
       console.error(
-        `  deployment index: ${index ? `${Object.keys(index).length} shas, oldest=${index.__oldest ?? 'n/a (short page)'}` : 'n/a (no provenance)'}`,
+        `  deployment index: ${
+          index
+            ? `${Object.keys(index).length} shas (all creators), oldest=${index.__oldestActual ?? 'n/a'} ` +
+              `(${index.__count < 100 ? 'short page — likely the whole history' : 'full page — may not reach further back'})`
+            : 'n/a (no provenance)'
+        }`,
       )
       console.error(
         `  lookups: attempted=${jobsFor?.attempted ?? 0}, failed=${jobsFor?.failed ?? 0}, cached=${jobsFor?.cached ?? 0}`,
@@ -848,6 +946,7 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
       searchComplete,
       examined: runs.length,
       searchedBackTo: readDates[0] ?? null,
+      incompleteReasons: reasons,
     }
   } catch (err) {
     console.error(`run list failed for ${guard.workflow}: ${err.message}`)

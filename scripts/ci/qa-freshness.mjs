@@ -942,7 +942,7 @@ function jobsForRun(repo, databaseId) {
     const parsed = JSON.parse(out || '{}')
     return Array.isArray(parsed.jobs) ? parsed.jobs : null
   } catch (err) {
-    console.error(`::warning::qa-freshness: could not read jobs for run ${databaseId}: ${err.message}`)
+    console.error(`qa-freshness: could not read jobs for run ${databaseId}: ${err.message}`)
     return null
   }
 }

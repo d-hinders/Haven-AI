@@ -979,23 +979,42 @@ them is a string a caller supplies:
   `code-quality`; if the reopen fails, it files a new one rather than editing a
   closed issue.
   **Listing coherence (#3409).** A page cap or lookup budget stopping the
-  search is not the only way `unconfirmed` fires. A false `never-run` on
-  2026-09-28 traced to an anomalous *listing* page — one whose rows predated
-  the 4-day budget by over a week, which a correct, newest-first, paged read
-  cannot produce. `observe()` now checks, on every page it reads: (1) page 1's
-  newest row is near "now" (inside the guard's own `maxAgeDays` budget); (2) a
-  later page's newest row is not newer than the previous page's oldest
-  (contiguous, newest-first); (3) every in-window Railway deployment in the
-  index has a matching run somewhere in the listing. A trip on any of these,
-  or a check-runs lookup that threw with no qualifying success yet found (kept
-  uncached — a failed sha is re-attempted, never permanently refused), or a
-  non-array Deployments response body, downgrades the search to `unconfirmed`
-  and prints a `::warning::` naming the check. Every non-`fresh` verdict also
-  logs per-page row counts and newest/oldest `createdAt`, the deployment
-  index's size and oldest entry, and the lookup accounting
-  (attempted/failed/cached) — the diagnostics that would have told the true
-  cause from a failed-lookup hypothesis apart at the time, rather than only
-  after the fact.
+  search is not the only way `unconfirmed` fires. The false `never-run` on
+  2026-09-28 is best explained by an anomalous *listing* page — the spec
+  review's leading hypothesis, kept as a hypothesis because nothing logged the
+  page at the time, so it cannot be proven after the fact: its only observed
+  row, `2026-09-18T21:18:20Z`, was over nine days old against the 4-day
+  budget, and a correct, newest-first, paged read could not have opened there.
+  `observe()` now checks, once a search finds no success by the time it ends:
+  (1) page 1's newest row was near "now" (inside the guard's own `maxAgeDays`
+  budget) — evaluated only when the deployment index also shows a dev
+  deployment inside the window, since deploys happened and recent runs should
+  exist; without an in-window deploy a stale page 1 is what a genuinely quiet
+  week looks like, logged as a diagnostic line only, never escalated; (2) every
+  later page's newest row was not newer than the previous page's oldest
+  (contiguous, newest-first) — checked as each page arrives, which can only
+  happen while still searching, since pagination stops the moment a success
+  qualifies; (3) every in-window Railway deployment in the index has a
+  matching run somewhere in the listing — checked once, after paging every
+  counted event. A trip on any of these, or a check-runs lookup that threw
+  with no qualifying success by the end of the search (not cached — a failed
+  sha is re-attempted on the next pass while the lookup budget lasts), or a
+  non-array Deployments response body, marks the search incomplete and prints
+  a `::warning::` naming the check — but a success found ANYWHERE, however
+  old, still yields `stale`, never `unconfirmed`, whatever else tripped. An
+  in-window deployment with no matching run (check 3) reads as EITHER an
+  anomalous listing OR the `deployment_status` trigger itself has stopped
+  firing again (#2268) — the listing alone cannot tell them apart, so that
+  `unconfirmed` no longer claims "a success may exist further back" (that
+  claim only holds for the page-cap/lookup-budget/index-reach causes) and
+  #3321 still reopens either way. Every observation without an in-budget
+  success (`never-run`, `never-succeeded`, `unconfirmed`, `stale`) also logs
+  per-page row counts and newest/oldest `createdAt`, the deployment index's
+  size (every creator's shas, not only Railway's), its actual oldest entry,
+  and whether the page was short (likely the whole history) or full (may not
+  reach further back), plus the lookup accounting (attempted/failed/cached) —
+  the diagnostics that would have told the leading hypothesis apart from a
+  failed lookup at the time, rather than only after the fact.
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

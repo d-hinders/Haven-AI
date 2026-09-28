@@ -154,3 +154,28 @@ describe('CLIENT_COMPAT (the shipped table)', () => {
     }
   })
 })
+
+describe('the live CLIENT_COMPAT table (owner decisions, #3302)', () => {
+  it('pins exactly the decided thresholds — a change here is an owner decision, not a drive-by', () => {
+    expect(CLIENT_COMPAT).toEqual({
+      '@haven_ai/sdk': { recommended_version: null, min_version: null },
+      // Owner decision 2026-09-28, epic #3302 option A.
+      '@haven_ai/signer': { recommended_version: null, min_version: '0.6.0-alpha.0' },
+      '@haven_ai/mcp': { recommended_version: null, min_version: null },
+      '@haven_ai/connect': { recommended_version: null, min_version: null },
+      '@haven_ai/cli': { recommended_version: null, min_version: null },
+    })
+  })
+
+  it('refuses the first header-sending signer, and nothing it must not', () => {
+    // 0.5.0-alpha.1 is the first signer that sends X-Haven-Client: below the minimum.
+    expect(evaluateClient('@haven_ai/signer/0.5.0-alpha.1')).toMatchObject({ kind: 'below_min' })
+    // At the minimum, and a dev snapshot, are served.
+    expect(evaluateClient('@haven_ai/signer/0.6.0-alpha.0').kind).not.toBe('below_min')
+    expect(evaluateClient('@haven_ai/signer/0.0.0-dev.202609281335.705f436')).toMatchObject({ kind: 'exempt', reason: 'snapshot' })
+    // No header (a pre-0.5.0-alpha.1 signer) is never refused.
+    expect(evaluateClient(undefined)).toEqual({ kind: 'unidentified' })
+    // The other packages keep no minimum.
+    expect(evaluateClient('@haven_ai/sdk/0.5.0-alpha.1').kind).not.toBe('below_min')
+  })
+})

@@ -2626,7 +2626,12 @@ It can never be refused and reads no hint. The hosted
 nothing below ever applies to it.
 
 The backend reads the header against one hand-edited table, `CLIENT_COMPAT` in
-`packages/core/src/client-compat.ts`. Two things can happen:
+`packages/core/src/client-compat.ts`. Its values are owner decisions, each recorded where it is made. The first
+real one: **`@haven_ai/signer` `min_version` = `0.6.0-alpha.0`** (epic #3302,
+owner decision 2026-09-28, option A). Because signers send the header only from
+`0.5.0-alpha.1`, this refuses exactly the `0.5.0-alpha.1` signers, at
+sign-context, until they run the upgrade command. Older signers send no header
+and are never refused. Two things can happen:
 
 | Client is… | Effect | Where |
 |---|---|---|

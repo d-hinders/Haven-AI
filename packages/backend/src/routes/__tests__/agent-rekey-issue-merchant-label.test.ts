@@ -5,17 +5,21 @@
  *
  * ## Why this file exists at the ROUTE level
  *
- * `infra/repositories/__tests__/agent-rekeys.test.ts` proves the DATA layer:
- * `findDelegationTerms` reads `merchant_id` and `insertRekeyDelegation`
- * writes it. It cannot prove the ROUTE reads the snapshot entry's
- * `merchant_id` and passes it through per piece, or that a snapshot
- * persisted before this field existed (`merchant_id` absent, not `null` —
- * reachable only through `adoptAbandonedCarry`'s wholesale copy of a
- * predecessor's `carry_snapshot`) falls back to a by-hash read of the old
- * row instead of silently dropping the label. Both are route-level wiring,
- * proven here the same way #1849's issue-clock file proves the route reads
- * `metered_at` — by mocking the repository layer and asserting what the
- * route hands to `insertRekeyDelegation`.
+ * The label is resolved UNCONDITIONALLY by a by-hash read of the old row
+ * (`findDelegationTerms`) — the snapshot never carries `merchant_id` for new
+ * re-keys, and even where an old persisted snapshot still has the field this
+ * route no longer trusts it, because only the old row's live FK (kept
+ * current under `ON DELETE SET NULL`) can say whether the merchant still
+ * exists at issue time. `infra/repositories/__tests__/agent-rekeys.test.ts`
+ * proves the DATA layer: `findDelegationTerms` reads `merchant_id`,
+ * `insertRekeyDelegation` writes it through a merchant-existence subselect,
+ * and a merchant deleted between metering and issue still lets issuance
+ * succeed with `merchant_id: null`. It cannot prove the ROUTE reads once per
+ * entry, only when a piece is built, and never for an entry that produces
+ * none — that is route-level wiring, proven here the same way #1849's
+ * issue-clock file proves the route reads `metered_at` — by mocking the
+ * repository layer and asserting what the route hands to
+ * `insertRekeyDelegation`.
  */
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -169,67 +173,23 @@ describe('#3386 re-key issue — the merchant label carries onto every replaceme
     }
   }
 
-  it('carries a snapshot-entry merchant_id onto BOTH the carry and steady pieces', async () => {
-    const { status, body } = await issue({ merchant_id: MERCHANT_ID })
+  it('carries the by-hash-read merchant_id onto BOTH the carry and steady pieces', async () => {
+    mockFindDelegationTerms.mockResolvedValue({
+      token_address: USDC,
+      recipient_address: '0x' + 'c0'.repeat(20),
+      budget_atomic: BUDGET.toString(),
+      period_seconds: DAY,
+      start_date: String(START),
+      expires_at: String(START + 365 * DAY),
+      merchant_id: MERCHANT_ID,
+    })
+    const { status, body } = await issue()
     expect(status).toBe(201)
     expect(body.delegations.map((d) => d.carry_role)).toEqual(['carry', 'steady'])
 
-    expect(mockInsertRekeyDelegation).toHaveBeenCalledTimes(2)
-    for (const call of mockInsertRekeyDelegation.mock.calls) {
-      expect((call[0] as { merchantId: string | null }).merchantId).toBe(MERCHANT_ID)
-    }
-    // The fallback read is never consulted when the snapshot already carries
-    // the field — even as `null` (a genuinely unlocked budget), not just when
-    // it is present.
-    expect(mockFindDelegationTerms).not.toHaveBeenCalled()
-  })
-
-  it('writes merchantId: null for an ordinary (unlocked) snapshot entry, without a fallback read', async () => {
-    const { status } = await issue({ merchant_id: null })
-    expect(status).toBe(201)
-    expect(mockInsertRekeyDelegation).toHaveBeenCalled()
-    for (const call of mockInsertRekeyDelegation.mock.calls) {
-      expect((call[0] as { merchantId: string | null }).merchantId).toBeNull()
-    }
-    expect(mockFindDelegationTerms).not.toHaveBeenCalled()
-  })
-
-  it('MUTATION TARGET — falls back to a by-hash read of the old row when the snapshot predates the field', async () => {
-    // `merchant_id` OMITTED entirely — the shape of a `carry_snapshot`
-    // persisted before this field existed, including one inherited wholesale
-    // through `adoptAbandonedCarry`. `undefined`, not `null`: JSON.stringify
-    // in `markMetered`/`adoptAbandonedCarry` would drop an explicit
-    // `undefined` too, so this is indistinguishable on the wire from "field
-    // never existed" — which is exactly the case under test.
-    const stale = snapshotEntry()
-    delete (stale as { merchant_id?: string | null }).merchant_id
-    mockFindDelegationTerms.mockResolvedValue({
-      token_address: USDC,
-      recipient_address: stale.recipient_address,
-      budget_atomic: stale.budget_atomic,
-      period_seconds: stale.period_seconds,
-      start_date: String(stale.start_date),
-      expires_at: String(stale.expires_at),
-      merchant_id: MERCHANT_ID,
-    })
-    mockFindRekey.mockResolvedValue(rekeyRow({ carry_snapshot: [stale] }))
-
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime((START + 600) * 1000)
-    let res
-    try {
-      res = await app.inject({
-        method: 'POST',
-        url: `/agents/${AGENT_ID}/rekey/${REKEY_ID}/issue`,
-        payload: {},
-      })
-    } finally {
-      vi.useRealTimers()
-    }
-    expect(res.statusCode).toBe(201)
-
-    // Read once per entry that actually produced a piece to insert, scoped by
-    // agent and the OLD delegation's hash — not the new replacement's.
+    // Read once per entry that produced a piece to insert, scoped by agent
+    // and the OLD delegation's hash — not the new replacement's.
+    expect(mockFindDelegationTerms).toHaveBeenCalledTimes(1)
     expect(mockFindDelegationTerms).toHaveBeenCalledWith(AGENT_ID, HASH)
     expect(mockInsertRekeyDelegation).toHaveBeenCalledTimes(2)
     for (const call of mockInsertRekeyDelegation.mock.calls) {
@@ -237,44 +197,52 @@ describe('#3386 re-key issue — the merchant label carries onto every replaceme
     }
   })
 
-  it('the fallback read reports no merchant when the old row never had one either', async () => {
-    const stale = snapshotEntry()
-    delete (stale as { merchant_id?: string | null }).merchant_id
+  it('MUTATION TARGET — writes merchantId: null when the by-hash read reports no merchant', async () => {
     mockFindDelegationTerms.mockResolvedValue({
       token_address: USDC,
-      recipient_address: stale.recipient_address,
-      budget_atomic: stale.budget_atomic,
-      period_seconds: stale.period_seconds,
-      start_date: String(stale.start_date),
-      expires_at: String(stale.expires_at),
+      recipient_address: '0x' + 'c0'.repeat(20),
+      budget_atomic: BUDGET.toString(),
+      period_seconds: DAY,
+      start_date: String(START),
+      expires_at: String(START + 365 * DAY),
       merchant_id: null,
     })
-    mockFindRekey.mockResolvedValue(rekeyRow({ carry_snapshot: [stale] }))
-
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime((START + 600) * 1000)
-    let res
-    try {
-      res = await app.inject({
-        method: 'POST',
-        url: `/agents/${AGENT_ID}/rekey/${REKEY_ID}/issue`,
-        payload: {},
-      })
-    } finally {
-      vi.useRealTimers()
-    }
-    expect(res.statusCode).toBe(201)
+    const { status } = await issue()
+    expect(status).toBe(201)
+    expect(mockInsertRekeyDelegation).toHaveBeenCalled()
     for (const call of mockInsertRekeyDelegation.mock.calls) {
       expect((call[0] as { merchantId: string | null }).merchantId).toBeNull()
     }
   })
 
-  it('never queries the fallback, and inserts nothing, for an entry that produces no piece (expired)', async () => {
+  it('MUTATION TARGET — a merchant_id lingering on the persisted snapshot is IGNORED; only the by-hash read is trusted', async () => {
+    // Even where an old `carry_snapshot` still carries a `merchant_id` field
+    // (persisted before the write was removed, or inherited wholesale
+    // through `adoptAbandonedCarry`), the route must not read it — only the
+    // live state of the old row, by hash, decides the label now.
+    mockFindDelegationTerms.mockResolvedValue({
+      token_address: USDC,
+      recipient_address: '0x' + 'c0'.repeat(20),
+      budget_atomic: BUDGET.toString(),
+      period_seconds: DAY,
+      start_date: String(START),
+      expires_at: String(START + 365 * DAY),
+      merchant_id: MERCHANT_ID,
+    })
+    // The stale snapshot value is a DIFFERENT id — proving it is not the
+    // source used.
+    const { status } = await issue({ merchant_id: '99999999-9999-9999-9999-999999999999' })
+    expect(status).toBe(201)
+    for (const call of mockInsertRekeyDelegation.mock.calls) {
+      expect((call[0] as { merchantId: string | null }).merchantId).toBe(MERCHANT_ID)
+    }
+  })
+
+  it('never queries the by-hash read, and inserts nothing, for an entry that produces no piece (expired)', async () => {
     // Metered AFTER expiry — `planCarry` reports `kind: 'expired'`, so no
-    // piece is built and the merchant_id resolution (including any fallback
-    // read) must never run for this entry.
+    // piece is built and the merchant_id resolution (the by-hash read) must
+    // never run for this entry.
     const stale = snapshotEntry({ start_date: START - 2 * DAY, expires_at: START - DAY })
-    delete (stale as { merchant_id?: string | null }).merchant_id
     mockFindRekey.mockResolvedValue(
       rekeyRow({ carry_snapshot: [stale], metered_at: new Date((START - DAY / 2) * 1000).toISOString() }),
     )

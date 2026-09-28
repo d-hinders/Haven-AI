@@ -774,9 +774,9 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         expires_at: Number(terms.expires_at),
         remaining_atomic: meter.remainingAtomic,
         from_chain: meter.fromChain,
-        // #3386: carried so the merchant page still finds this budget after
-        // a re-key. A label only — never read by payment selection.
-        merchant_id: terms.merchant_id,
+        // #3386: no longer written here — the issue step resolves the
+        // merchant label unconditionally off the old row by hash, which
+        // stays current (via `ON DELETE SET NULL`) all the way to issue.
       })
     }
 
@@ -922,21 +922,19 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
           }
         }
 
-        // #3386: the merchant label, carried from the old delegation. Most
-        // snapshots already carry it (written at revoke/submit, above). A
-        // snapshot persisted before that field existed — reachable only
-        // through `adoptAbandonedCarry`'s wholesale copy of a predecessor's
-        // `carry_snapshot` — has `merchant_id` absent rather than `null`, so
-        // it is distinguished from "no merchant" and re-read from the old
-        // row by hash here instead. The old row survives the revoke (it is
-        // marked `revoked`, never deleted), so the read still resolves after
-        // the point of no return.
+        // #3386: the merchant label, read unconditionally off the old row by
+        // hash — never trusted from the snapshot. The old row survives the
+        // revoke (it is marked `revoked`, never deleted) and its FK is kept
+        // current by `ON DELETE SET NULL`, so this resolves the CURRENT
+        // state of the merchant even if it was deleted between metering and
+        // this request, rather than replaying a value frozen at metering
+        // time that could point at a merchant no longer there. Read once per
+        // entry, and only when the entry actually produced a piece to insert
+        // — an entry with nothing to carry has no label to resolve.
         const merchantId =
           pieces.length === 0
             ? null
-            : entry.merchant_id !== undefined
-              ? entry.merchant_id
-              : ((await findDelegationTerms(request.params.id, entry.delegation_hash))?.merchant_id ?? null)
+            : ((await findDelegationTerms(request.params.id, entry.delegation_hash))?.merchant_id ?? null)
 
         for (const piece of pieces) {
           const version = await nextDelegationVersion(

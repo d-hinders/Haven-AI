@@ -294,6 +294,12 @@ The chain round trip that derives the delegate account address is taken
 *before* the lock — a slot held across an RPC turns a slow node into a stalled
 slot, which would trade a duplicate-offer defect for an availability one.
 
+An abandoned re-key can still leave a slot holding two pending rows at once —
+its own inert re-key replacement plus a later ordinary build's row — because
+re-key rows are excluded from reuse (#3386) rather than merged with it; the
+re-key row can never be signed or activated, so this is a leftover, not a
+second live offer.
+
 **Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
 ordinary recipient-pinned budget whose pin the server fills with the
 merchant's verified payTo on the agent's chain. That is the one address every

@@ -778,6 +778,83 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     expect(row.rows[0].merchant_id).toBeNull()
   })
 
+  it('a merchant deleted between metering and issue does not block issuance — the insert writes merchant_id: null', async () => {
+    // #3386 review finding: the route resolves `merchant_id` by a by-hash
+    // read of the old row moments before this insert, but the merchant can
+    // be deleted in that window. The FK is `ON DELETE SET NULL`, so the OLD
+    // row's read already comes back null once the merchant is gone — but
+    // proving the INSERT itself survives a merchant id resolved a moment
+    // earlier and since deleted (a race the by-hash read alone cannot rule
+    // out under concurrency) is the point of this test: the subselect in
+    // `INSERT_REKEY_DELEGATION_SQL` resolves any non-existent merchant id to
+    // NULL rather than throwing 23503.
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    await db.query(`DELETE FROM merchants WHERE id = $1`, [merchantId])
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      // The value resolved a moment before the merchant vanished — exactly
+      // what the route would still be holding.
+      merchantId,
+    })
+    expect(inserted).toBe(true)
+
+    const row = await db.query<{ merchant_id: string | null }>(
+      `SELECT merchant_id FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBeNull()
+  })
+
+  it('MUTATION TARGET — a present merchant is still carried through the same subselect (the guard above is not a blanket null)', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId,
+    })
+    expect(inserted).toBe(true)
+
+    const row = await db.query<{ merchant_id: string | null }>(
+      `SELECT merchant_id FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBe(merchantId)
+  })
+
   it('#3386 reuse decision — a re-key\'s own pending replacement is never handed out by build reuse', async () => {
     const seeded = await seedAgent()
     const merchantId = await seedMerchant()

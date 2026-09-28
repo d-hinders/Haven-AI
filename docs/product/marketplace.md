@@ -139,10 +139,10 @@ for the modal's own shape.
     pin would pay that merchant too; a degraded or not-yet-verified offer
     counts, since it can recover without anyone re-issuing the budget, and
     only a delisted one does not).
-  - `erc7710` is true only when **every** such offer advertises the ERC-7710
-    transfer method. A pinned budget cannot fund an EIP-3009 payment, because
-    that leg pays the agent's own wallet first, so an EIP-3009 merchant is paid
-    from the open budget, if the agent has one.
+  - `erc7710` is true only when **every** such offer on that recorded network
+    advertises the ERC-7710 transfer method. A pinned budget cannot fund an
+    EIP-3009 payment, because that leg pays the agent's own wallet first, so
+    an EIP-3009 merchant is paid from the open budget, if the agent has one.
 - **Issuing one.** `POST /agents/{id}/delegations/build` with `merchant_slug`.
   The server fills the recipient from the merchant's verified payTo on the
   agent's chain and records the merchant on the row. It returns 404 for an
@@ -244,6 +244,7 @@ for the modal's own shape.
   `merchant_id`, `merchant_slug` and `merchant_name`, so a budget card can
   name its merchant. A deleted merchant leaves the budget pinned and drops
   only the label.
+
 ## Prospects
 
 A `coming_soon` merchant is a company Haven is in conversation with — migration

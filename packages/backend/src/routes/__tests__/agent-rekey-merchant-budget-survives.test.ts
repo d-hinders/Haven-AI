@@ -126,10 +126,9 @@ describeDb('a merchant-locked budget survives a re-key (#3386)', () => {
     await revokeDelegationsByHashes(agentId, [oldHash])
     await markRevoked(rekey.id, agentId, '0xrevoketx')
 
-    // ── Meter: the snapshot carries the merchant_id read off the old row,
-    //    exactly as the route's revoke/submit handler does (#3386) ─────────
-    const oldTerms = await findDelegationTerms(agentId, oldHash)
-    expect(oldTerms?.merchant_id).toBe(merchant.id)
+    // ── Meter: the snapshot carries NO merchant_id (#3386) — the label is
+    //    resolved unconditionally at issue time instead, by a fresh by-hash
+    //    read of the old row, exactly as the route's issue handler does ────
     const snapshot: CarrySnapshotEntry[] = [
       {
         delegation_hash: oldHash,
@@ -141,12 +140,16 @@ describeDb('a merchant-locked budget survives a re-key (#3386)', () => {
         expires_at: 1_900_000_000,
         remaining_atomic: '3000000',
         from_chain: true,
-        merchant_id: oldTerms?.merchant_id ?? null,
       },
     ]
     await markMetered(rekey.id, agentId, snapshot)
 
-    // ── Issue: one steady replacement, carrying the label (#3386) ─────────
+    // ── Issue: one steady replacement, carrying the label read off the OLD
+    //    row by hash — the old row survives the revoke (marked `revoked`,
+    //    never deleted), so this still resolves after the point of no
+    //    return (#3386) ───────────────────────────────────────────────────
+    const oldTerms = await findDelegationTerms(agentId, oldHash)
+    expect(oldTerms?.merchant_id).toBe(merchant.id)
     const version = await nextDelegationVersion(agentId, USDC, PAY_TO)
     const newHash = `0x${String(++seq).padStart(64, '0')}`
     const inserted = await insertRekeyDelegation({
@@ -164,7 +167,7 @@ describeDb('a merchant-locked budget survives a re-key (#3386)', () => {
       expiresAt: 1_900_000_000,
       rekeyId: rekey.id,
       carryRole: 'steady',
-      merchantId: snapshot[0].merchant_id ?? null,
+      merchantId: oldTerms?.merchant_id ?? null,
     })
     expect(inserted).toBe(true)
     const issued = await markIssued(rekey.id, agentId)

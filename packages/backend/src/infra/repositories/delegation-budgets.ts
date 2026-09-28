@@ -77,6 +77,14 @@ export async function listActiveDelegations(
  * survive above Number.MAX_SAFE_INTEGER; the comparison casts both sides to
  * numeric, so '5000000' and '05000000' match and '5000001' does not.
  */
+// #3386: excludes `rekey_id IS NOT NULL` — a re-key's own pending rows are
+// never a build-reuse candidate. Without this, carrying `merchant_id` onto a
+// re-key's replacement pieces (#3386) would make an ABANDONED re-key's inert
+// pending rows (dead: completion requires `stage = 'issued'`, and `abandoned`
+// is terminal) eligible for merchant-scoped reuse here — handing a later
+// ordinary build a row it never signed for. A live re-key's own pending rows
+// must not be reused either: they exist to be activated by ITS OWN
+// completion, not handed out as someone else's build result.
 export const FIND_REUSABLE_PENDING_DELEGATION_SQL = `SELECT id, delegation_hash, version, delegation_json
      FROM agent_delegations
      WHERE agent_id = $1
@@ -90,14 +98,6 @@ export const FIND_REUSABLE_PENDING_DELEGATION_SQL = `SELECT id, delegation_hash,
        AND rekey_id IS NULL
      ORDER BY created_at ASC`
 
-// #3386: excludes `rekey_id IS NOT NULL` — a re-key's own pending rows are
-// never a build-reuse candidate. Without this, carrying `merchant_id` onto a
-// re-key's replacement pieces (#3386) would make an ABANDONED re-key's inert
-// pending rows (dead: completion requires `stage = 'issued'`, and `abandoned`
-// is terminal) eligible for merchant-scoped reuse here — handing a later
-// ordinary build a row it never signed for. A live re-key's own pending rows
-// must not be reused either: they exist to be activated by ITS OWN
-// completion, not handed out as someone else's build result.
 export interface ReusablePendingDelegationRow {
   id: string
   delegation_hash: string

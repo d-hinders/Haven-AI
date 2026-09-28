@@ -64,8 +64,9 @@ export interface ProbeResult {
   network?: string
   /**
    * Distinct x402 `assetTransferMethod`s advertised across all `accepts[]`
-   * options, in first-seen order (e.g. `['eip3009', 'erc7710']`). Undefined for
-   * non-x402 rails (MPP) and when the challenge carries no `accepts[]`.
+   * options on the recorded network, in first-seen order (e.g. `['eip3009',
+   * 'erc7710']`). Undefined for non-x402 rails (MPP) and when the challenge
+   * carries no `accepts[]`.
    */
   assetTransferMethods?: string[]
   /**

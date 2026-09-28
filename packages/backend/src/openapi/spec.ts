@@ -8164,7 +8164,7 @@ export const openapiSpec = {
           asset_transfer_methods: {
             anyOf: [{ type: 'string' }, { type: 'null' }],
             description:
-              'Comma-separated set of x402 assetTransferMethods the merchant advertises (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null.',
+              'Comma-separated set of x402 assetTransferMethods the merchant advertises on the recorded network (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null.',
           },
           status: { type: 'string', enum: ['active', 'degraded', 'delisted'] },
           verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },

@@ -159,7 +159,7 @@ function passesLuhn(ocr: string): boolean {
 
 describe('OCR check digit (#3422)', () => {
   it('matches the textbook Luhn vector (79927398713)', () => {
-    const invoice = generateInvoice({ ...BASE_PARAMS, invoiceNumber: 'FAK-7992739871' })
+    const invoice = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate_account', invoiceNumber: 'FAK-7992739871' })
     expect(invoice.json.ocr_nummer).toBe('79927398713')
   })
 
@@ -171,7 +171,7 @@ describe('OCR check digit (#3422)', () => {
       ['FAK-2026-1790585044332', '202617905850443323'],
     ]
     for (const [invoiceNumber, expected] of observed) {
-      expect(generateInvoice({ ...BASE_PARAMS, invoiceNumber }).json.ocr_nummer).toBe(expected)
+      expect(generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate_account', invoiceNumber }).json.ocr_nummer).toBe(expected)
     }
   })
 
@@ -179,7 +179,7 @@ describe('OCR check digit (#3422)', () => {
     const next = createInvoiceNumberer(Date.parse('2026-09-28T12:00:00.000Z'))
     for (let i = 0; i < 200; i++) {
       const invoiceNumber = next()
-      const { ocr_nummer } = generateInvoice({ ...BASE_PARAMS, invoiceNumber }).json
+      const { ocr_nummer } = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate_account', invoiceNumber }).json
       expect(ocr_nummer.startsWith(invoiceNumber.replace(/\D/g, ''))).toBe(true)
       expect(passesLuhn(ocr_nummer), `${invoiceNumber} → ${ocr_nummer}`).toBe(true)
     }

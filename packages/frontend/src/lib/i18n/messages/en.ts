@@ -462,7 +462,7 @@ export const en = {
       // to name the one case removal is not self-serve (the flag going off)
       // without describing the reader's own vantage point.
       purpose:
-        "Optional — saving these never blocks an agent or a payment. Haven asks so they can appear on receipts your agents hand to merchants. For a sole trader, the organisation number is your personal identity number, and Sweden's SE-format VAT number encodes that same number (SE + personal number + 01). Adding a VAT number gets it checked against VIES, the EU's VAT number register. You can remove them here at any time; if this section is ever unavailable, Haven support can remove them.",
+        "Optional — saving these never blocks an agent or a payment. For a sole trader, the organisation number is your personal identity number, and Sweden's SE-format VAT number encodes that same number (SE + personal number + 01). Adding a VAT number gets it checked against VIES, the EU's VAT number register. You can remove them here at any time; if this section is ever unavailable, Haven support can remove them.",
       loadError: 'We could not load your company details. Try again in a moment.',
       retry: 'Try again',
 

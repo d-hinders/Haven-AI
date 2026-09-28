@@ -306,13 +306,12 @@ Isolation rules that are non-negotiable for a payments product:
 - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details
-  screen. Dark by default; GET/PUT/POST/vies-check answer 404 when off, and
+  screen. Dark by default; GET/PUT and POST vies-check answer 404 when off, and
   the Settings screen itself renders nothing (no title, no form) while off —
-  so the DELETE route staying ungated does not mean an owner can self-serve
-  erase with the flag off: there is no UI affordance to reach it. Erasure
-  then goes through Haven support, who calls the ungated `DELETE
-  /user/company-details` (or the DB directly) on the owner's behalf — the
-  M3 decision, #3332 review round 2. With the flag on, the owner erases it
+  so with the flag off there is no dashboard way to erase, even though the
+  DELETE route stays ungated (it erases only the caller's own row). Erasure
+  then goes through Haven support, who removes the row directly in the
+  database — the M3 decision, #3332 review round 2. With the flag on, the owner erases it
   themselves from Settings. See
   [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys

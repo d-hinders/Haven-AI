@@ -22,9 +22,10 @@
  *   with no way to reach "Check again".
  * - M2: `save`/`remove`/`recheckVies` each bump a shared generation counter
  *   that a poll tick (and `load`) check before applying their own response,
- *   so a slow poll or load in flight can never clobber a newer one —
- *   covered for all three of `save`, `remove`, and `recheckVies`, not just
- *   `save`.
+ *   so a slow poll or load in flight can never clobber a newer one. The
+ *   bump is proven for `save` and `recheckVies`; for a successful `remove`
+ *   the poll effect's own cleanup (details → null) already drops a stale
+ *   response, so the `remove` test here does not isolate the bump.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

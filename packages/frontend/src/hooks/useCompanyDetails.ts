@@ -24,8 +24,8 @@
  * background check's outcome. Polling stops on: the status leaving
  * `pending`, the owner navigating away (unmount — the effect's cleanup
  * clears the timer), or `VIES_POLL_MAX_MS` of wall time elapsing (a bounded
- * wait — a check that never resolves must not poll forever; the last-seen
- * `pending` state stays on screen, and "Check again" still works).
+ * wait — a check that never resolves must not poll forever; the line then
+ * reads "VIES has not answered yet." and "Check again" is offered).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApiOperations } from '@haven_ai/core'

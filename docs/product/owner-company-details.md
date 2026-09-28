@@ -222,9 +222,11 @@ same reason.
   /user/company-details` works regardless of the feature flag, and with the
   flag ON the owner calls it themselves from Settings → Company details. With
   the flag OFF, though, that screen renders nothing at all (#3332 review round
-  2, M3) — so erasure is not self-serve in that state: the owner asks Haven
-  support, who calls the ungated `DELETE` route (or acts directly on the
-  table) on their behalf. Deleting the Haven account WOULD also
+  2, M3) — so there is no dashboard way to erase in that state. The owner can
+  still call the ungated `DELETE` with their own session, but in practice
+  they ask Haven support, who removes the row directly in the database: the
+  route only ever erases the CALLER's own row, so support cannot call it on
+  the owner's behalf. Deleting the Haven account WOULD also
   remove these details (`user_id` is `ON DELETE CASCADE`), but account
   deletion is an operator action today — there is no self-serve
   delete-my-account route — so that cascade is not itself something an owner

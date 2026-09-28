@@ -59,6 +59,29 @@ beforeAll(async () => {
 
 // ── haven_pay_x402_quote ──────────────────────────────────────────────────────
 
+
+/**
+ * #3417: the backend's confirmed-replay body for an erc7710 row paying the
+ * fixture merchant for `resourceUrl` — what `modules/x402/replay.ts` answers
+ * for a settled key. `to` is the row's payee (the merchant on erc7710).
+ */
+function settledReplayBody(resourceUrl: string, over: Record<string, unknown> = {}) {
+  return {
+    success: true,
+    payment_id: 'pay_settled_7710',
+    status: 'confirmed',
+    tx_hash: '0x' + '7d'.repeat(32),
+    to: PAYMENT_REQUIRED.accepts[0].payTo.toLowerCase(),
+    merchant_to: PAYMENT_REQUIRED.accepts[0].payTo.toLowerCase(),
+    resource_url: resourceUrl,
+    explorer_url: 'https://sepolia.basescan.org/tx/0x' + '7d'.repeat(32),
+    chain_id: 84532,
+    amount: '0.001',
+    token: 'USDC',
+    ...over,
+  }
+}
+
 describe('haven_pay_x402_quote', () => {
   it('rejects with PRICE_EXCEEDS_MAX before funding when the option price is above max_amount', async () => {
     stubFetch({
@@ -990,14 +1013,7 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     it('a replayed key whose payment already settled answers with the original payment (#3417)', async () => {
       stubFetch({
         'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
-        'POST /x402': { status: 200, body: {
-      success: true,
-      payment_id: 'pay_settled_7710',
-      status: 'confirmed',
-      tx_hash: '0x' + '7d'.repeat(32),
-      amount: '0.001',
-      token: 'USDC',
-    } },
+        'POST /x402': { status: 200, body: settledReplayBody('https://merchant.test/paid') },
       })
       const res = ok(
         await handlers().haven_pay_x402_quote({
@@ -1018,7 +1034,30 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
       expect(res.data.next_tool).toBeUndefined()
       expect(res.data.next_tool_omitted_reason).toMatch(/already settled/)
       expect(res.data.agent_summary).toMatchObject({ payment_id: 'pay_settled_7710', status: 'confirmed', amount: '0.001', token: 'USDC' })
+      expect(res.data).toMatchObject({ resource_url: expect.any(String), merchant_to: expect.any(String), explorer_url: expect.any(String), chain_id: 84532 })
+      expect(res.data).not.toHaveProperty('delivered')
+      expect(res.data.reason).toMatch(/cannot re-deliver/)
       expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
+    })
+
+    it('a replayed key whose confirmed row pays someone else is a 409 collision, never "settled" (#3417)', async () => {
+      // An EIP-3009 funding-leg row's payee is the delegate: its confirmed
+      // tx_hash proves only that the delegate was funded.
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': {
+          status: 200,
+          body: settledReplayBody(PAYMENT_REQUIRED.resource.url, { to: '0x' + '99'.repeat(20) }),
+        },
+      })
+      const res = (await handlers().haven_pay_x402_quote({
+        payment_required: ERC7710_PAYMENT_REQUIRED,
+        idempotency_key: 'x402:generic-7710:reused',
+      })) as Record<string, any>
+      expect(res.success).toBe(false)
+      expect(res.statusCode).toBe(409)
+      expect(res.next_action).toBe('stop_and_tell_user')
+      expect(JSON.stringify(res)).not.toContain('"settled":true')
     })
 
     it('omits the field entirely when the caller gave no key, keeping the old request shape', async () => {

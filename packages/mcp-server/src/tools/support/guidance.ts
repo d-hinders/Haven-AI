@@ -23,7 +23,7 @@ import {
   type NextStepHandoff,
   type NextStepInput,
   type NextStepTarget,
-  X402PaymentAlreadySettledError,
+  X402Erc7710AlreadySettledError,
 } from '@haven_ai/sdk'
 import { z } from 'zod'
 import { toolSchemas } from '../contracts.js'
@@ -220,15 +220,22 @@ export function buildAgentGuidance(input: AgentGuidanceInput): AgentGuidanceEnve
 
 /**
  * #3417: the answer to a prepare whose idempotency_key already belongs to a
- * SETTLED erc7710 payment. The backend replays the settled intent (no child to
- * sign), and the SDK surfaces it as `X402PaymentAlreadySettledError`; this is
- * the success an agent recovering from a crash should read — the original
+ * SETTLED erc7710 payment to this merchant for this resource. The backend
+ * replays the confirmed intent (no child to sign), and the SDK surfaces it as
+ * `X402Erc7710AlreadySettledError` only after checking payee and resource; this
+ * is the answer an agent recovering from a crash should read — the original
  * payment and its settlement hash, a done state that names no tool — instead
  * of the "transient, retry" 500 it used to relay. Shared by the catalog and
  * plain-HTTP prepare sites, which both reach `prepareX402Erc7710`.
+ *
+ * Unlike the settled arm of `haven_settle_mcp_tool` it carries no `delivered`:
+ * Haven cannot know whether the merchant's result reached the agent before a
+ * crash, and it cannot re-deliver it. `status` is the backend's own
+ * `confirmed`, echoed rather than renamed.
  */
-function settledReplayResponse(err: X402PaymentAlreadySettledError) {
-  const body = (err.body ?? {}) as { amount?: unknown; token?: unknown }
+function settledReplayResponse(err: X402Erc7710AlreadySettledError) {
+  const body = (err.body ?? {}) as Record<string, unknown>
+  const str = (key: string) => (typeof body[key] === 'string' ? { [key]: body[key] as string } : {})
   return {
     payment_id: err.paymentId,
     status: 'confirmed',
@@ -236,6 +243,12 @@ function settledReplayResponse(err: X402PaymentAlreadySettledError) {
     settled: true,
     idempotent_replay: true,
     settlement_tx_hash: err.txHash,
+    ...str('amount'),
+    ...str('token'),
+    ...str('merchant_to'),
+    ...str('resource_url'),
+    ...str('explorer_url'),
+    ...(typeof body.chain_id === 'number' ? { chain_id: body.chain_id } : {}),
     ...buildAgentGuidance({
       nextAction: AgentPaymentNextAction.None,
       nextTool: null,
@@ -243,14 +256,16 @@ function settledReplayResponse(err: X402PaymentAlreadySettledError) {
         'this idempotency_key already settled; there is nothing left to sign, settle or pay',
       safeToContinue: true,
       reason:
-        'Idempotent replay of a payment that already settled: nothing was signed and nothing new ' +
-        'was charged. Report the original purchase to the user from payment_id and ' +
-        'settlement_tx_hash. To buy again, use a new idempotency_key.',
+        'Idempotent replay: this idempotency_key already paid this merchant for this resource, and ' +
+        'the payment settled on-chain. Nothing was signed and nothing new was charged. Haven cannot ' +
+        "re-deliver the merchant's result: if you received it earlier, report that purchase from " +
+        "payment_id and settlement_tx_hash; if you did not, tell the user it was paid but the result " +
+        'was not received. To buy again, use a new idempotency_key.',
       summary: {
         payment_id: err.paymentId,
         status: 'confirmed',
-        ...(typeof body.amount === 'string' ? { amount: body.amount } : {}),
-        ...(typeof body.token === 'string' ? { token: body.token } : {}),
+        ...str('amount'),
+        ...str('token'),
       },
     }),
   }
@@ -262,7 +277,7 @@ function settledReplayResponse(err: X402PaymentAlreadySettledError) {
  * failure is rethrown unchanged, so every existing refusal keeps its path.
  */
 export function catchSettledReplay(err: unknown): { settledReplay: ReturnType<typeof settledReplayResponse> } {
-  if (err instanceof X402PaymentAlreadySettledError) return { settledReplay: settledReplayResponse(err) }
+  if (err instanceof X402Erc7710AlreadySettledError) return { settledReplay: settledReplayResponse(err) }
   throw err
 }
 

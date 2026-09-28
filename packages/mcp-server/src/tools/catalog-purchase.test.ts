@@ -44,6 +44,29 @@ import {
   type RouteDefinition,
 } from '../test-support/hosted-mcp.js'
 
+
+/**
+ * #3417: the backend's confirmed-replay body for an erc7710 row paying the
+ * fixture merchant for `resourceUrl` — what `modules/x402/replay.ts` answers
+ * for a settled key. `to` is the row's payee (the merchant on erc7710).
+ */
+function settledReplayBody(resourceUrl: string, over: Record<string, unknown> = {}) {
+  return {
+    success: true,
+    payment_id: 'pay_settled_7710',
+    status: 'confirmed',
+    tx_hash: '0x' + '7d'.repeat(32),
+    to: PAYMENT_REQUIRED.accepts[0].payTo.toLowerCase(),
+    merchant_to: PAYMENT_REQUIRED.accepts[0].payTo.toLowerCase(),
+    resource_url: resourceUrl,
+    explorer_url: 'https://sepolia.basescan.org/tx/0x' + '7d'.repeat(32),
+    chain_id: 84532,
+    amount: '0.001',
+    token: 'USDC',
+    ...over,
+  }
+}
+
 installSharedFixtureLifecycle()
 
 beforeEach(() => {
@@ -1094,14 +1117,7 @@ describe('haven_prepare_catalog_purchase', () => {
       stubFetch({
         'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
         'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
-        'POST /x402': { status: 200, body: {
-      success: true,
-      payment_id: 'pay_settled_7710',
-      status: 'confirmed',
-      tx_hash: '0x' + '7d'.repeat(32),
-      amount: '0.001',
-      token: 'USDC',
-    } },
+        'POST /x402': { status: 200, body: settledReplayBody('http://merchant.test/mcp') },
         'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
         'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
       })
@@ -1125,6 +1141,9 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(res.data.next_tool).toBeUndefined()
       expect(res.data.next_tool_omitted_reason).toMatch(/already settled/)
       expect(res.data.agent_summary).toMatchObject({ payment_id: 'pay_settled_7710', status: 'confirmed', amount: '0.001', token: 'USDC' })
+      expect(res.data).toMatchObject({ resource_url: expect.any(String), merchant_to: expect.any(String), explorer_url: expect.any(String), chain_id: 84532 })
+      expect(res.data).not.toHaveProperty('delivered')
+      expect(res.data.reason).toMatch(/cannot re-deliver/)
       expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
     })
 
@@ -1820,14 +1839,7 @@ describe('#2051 — cap binds the authorized option', () => {
           responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(merchant('3000000', '500000'))) },
         },
         'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
-        'POST /x402': { status: 200, body: {
-      success: true,
-      payment_id: 'pay_settled_7710',
-      status: 'confirmed',
-      tx_hash: '0x' + '7d'.repeat(32),
-      amount: '0.001',
-      token: 'USDC',
-    } },
+        'POST /x402': { status: 200, body: settledReplayBody('http://merchant.test/mcp') },
       })
       const res = ok<Record<string, any>>(
         await handlers().haven_pay_mcp_tool({
@@ -1851,6 +1863,9 @@ describe('#2051 — cap binds the authorized option', () => {
       expect(res.data.next_tool).toBeUndefined()
       expect(res.data.next_tool_omitted_reason).toMatch(/already settled/)
       expect(res.data.agent_summary).toMatchObject({ payment_id: 'pay_settled_7710', status: 'confirmed', amount: '0.001', token: 'USDC' })
+      expect(res.data).toMatchObject({ resource_url: expect.any(String), merchant_to: expect.any(String), explorer_url: expect.any(String), chain_id: 84532 })
+      expect(res.data).not.toHaveProperty('delivered')
+      expect(res.data.reason).toMatch(/cannot re-deliver/)
       expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
     })
 

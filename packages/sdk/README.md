@@ -244,7 +244,11 @@ case where two purchases collided on a key you did not choose.
 
 This applies to the **EIP-3009 funding-leg** scheme, which routes money
 through the delegate EOA. **erc7710 direct settlement is unaffected**: it has
-no funding leg and no delegate balance to exhaust.
+no funding leg and no delegate balance to exhaust. On erc7710, a key whose
+payment to the same merchant for the same resource already settled makes
+`prepareX402Erc7710()` throw `X402Erc7710AlreadySettledError` (`paymentId`,
+`txHash`) instead of minting a settlement child. A key already used for a
+different payment is refused with a 409 `HavenApiError`: use a new key (#3417).
 
 For agents that need to inspect the price before paying, use the quote-first
 path. `quoteX402()` probes the merchant and parses the HTTP 402 response, but it
@@ -640,11 +644,18 @@ try {
 }
 ```
 
-`X402AlreadySettledError` extends `HavenApiError` (status 409) and is the one
-error above that is **not** a failure to pay — it reports that the payment it
-describes *succeeded*, earlier. Handle it before the generic `HavenApiError`
-branch, and treat `err.receipt` as proof of purchase rather than retrying. See
-[Idempotency](#idempotency-what-the-key-guarantees-and-what-it-costs).
+Two errors are **not** a failure to pay; each reports that the payment it
+describes *succeeded*, earlier. Handle both before the generic branches, and
+treat them as proof of purchase rather than retrying:
+
+- `X402AlreadySettledError` extends `HavenApiError` (status 409; EIP-3009
+  path) and carries `err.receipt`.
+- `X402Erc7710AlreadySettledError` extends `HavenError`, **not**
+  `HavenApiError` (no status; code `PAYMENT_ALREADY_SETTLED`; erc7710
+  `prepareX402Erc7710()`), and carries `err.paymentId` and `err.txHash`. An
+  `instanceof HavenApiError` branch does not catch it.
+
+See [Idempotency](#idempotency-what-the-key-guarantees-and-what-it-costs).
 
 ## License
 

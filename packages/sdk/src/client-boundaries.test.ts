@@ -492,6 +492,7 @@ describe('HavenClient structural boundary', () => {
       'TRANSFER_WITH_AUTHORIZATION_TYPES',
       'TYPED_DATA_NOT_ALLOWED', // #3283
       'X402AlreadySettledError',
+      'X402Erc7710AlreadySettledError', // #3417
       'X402PaymentHeaderValidationError',
       'X402TaskBudgetMismatchError', // #3392
       'X402UnexpectedStatusError',

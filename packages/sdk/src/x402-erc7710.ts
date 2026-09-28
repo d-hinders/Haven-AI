@@ -1,7 +1,7 @@
 import {
   HavenApiError,
   HavenSigningError,
-  X402PaymentAlreadySettledError,
+  X402Erc7710AlreadySettledError,
 } from './types.js'
 import type {
   RawX402AuthorizeResponse,
@@ -273,13 +273,32 @@ export class X402Erc7710 {
     if (!raw.payment_id) {
       throw new HavenApiError('No payment_id returned from x402/authorize', 500, raw)
     }
-    // #3417: an idempotent replay of a key whose payment already settled. The
-    // backend answers with the settled intent and no `sign_data` — there is
+    // #3417: an idempotent replay of a key whose payment is already confirmed.
+    // The backend answers with the stored intent and no `sign_data` — there is
     // nothing left to sign — so this is not the scheme mismatch refused below.
     // Checked first, and never signed: a confirmed payment must not yield a
-    // second child.
+    // second child. The backend's lookup is keyed on the idempotency key alone,
+    // so the row is only THIS purchase when it pays this merchant (`to` is the
+    // merchant on an erc7710 row, the delegate on an EIP-3009 funding leg) for
+    // the resource this request names. Anything else is a key collision: a 409
+    // the caller must not retry with the same key, never "already settled".
     if (raw.status === 'confirmed' && raw.tx_hash) {
-      throw new X402PaymentAlreadySettledError(raw.payment_id, raw.tx_hash, raw)
+      const requestedUrl = options.resourceUrl ?? paymentRequired.resource?.url
+      const samePurchase =
+        typeof raw.to === 'string' &&
+        raw.to.toLowerCase() === merchantPayTo.toLowerCase() &&
+        raw.resource_url === requestedUrl
+      if (!samePurchase) {
+        throw new HavenApiError(
+          `Idempotency key already belongs to confirmed payment ${raw.payment_id}, which is not this ` +
+            'erc7710 purchase (different payee or resource). Nothing was signed and nothing was charged; ' +
+            'use a new idempotency key for this purchase.',
+          409,
+          raw,
+          raw.payment_id,
+        )
+      }
+      throw new X402Erc7710AlreadySettledError(raw.payment_id, raw.tx_hash, raw)
     }
     const signData = raw.sign_data
     if (signData?.signature_scheme !== 'eip712_delegation' || !signData.typed_data) {

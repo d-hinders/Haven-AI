@@ -1671,14 +1671,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 
 > **Re-verified (#3417, 2026-09-28):** the SDK's erc7710 `prepare()` now
 > recognises `delegationReplay`'s confirmed-200 answer (`status: 'confirmed'`
-> with a `tx_hash` and no `sign_data`) and throws the typed
-> `X402PaymentAlreadySettledError` before its scheme check. It used to throw
+> with a `tx_hash` and no `sign_data`) before its scheme check. It used to throw
 > the scheme-mismatch 500 there, which the hosted MCP relayed as "transient,
-> retry once". The three hosted erc7710 prepare sites (`haven_pay_mcp_tool`,
-> `haven_prepare_catalog_purchase`, `haven_pay_x402_quote`) turn it into a
-> done state that names no tool. Nothing is signed on that answer, before or
-> after this change; `settle()` stops after the authorize. A `confirmed`
-> answer without a `tx_hash` keeps the scheme refusal. No authority moves: the
+> retry once". Because the confirmed branch compares only the task budget
+> (#3392 above), the SDK itself checks that the row pays this merchant (`to`)
+> for this resource (`resource_url`): only then does it throw the typed
+> `X402Erc7710AlreadySettledError`, which the three hosted erc7710 prepare
+> sites (`haven_pay_mcp_tool`, `haven_prepare_catalog_purchase`,
+> `haven_pay_x402_quote`) turn into a done state that names no tool. Any other
+> confirmed row, such as an EIP-3009 funding leg whose payee is the delegate
+> and whose `tx_hash` proves only funding, is a 409 key collision, never
+> "settled". Nothing is signed on any of these answers, before or after this
+> change. A `confirmed` answer without a `tx_hash` keeps the scheme refusal.
+> No authority moves: the
 > backend is untouched, and no signature, key role, delegation, caveat or
 > on-chain surface changes. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.

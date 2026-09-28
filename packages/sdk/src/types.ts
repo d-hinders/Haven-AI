@@ -2289,15 +2289,23 @@ export class MerchantTimeoutError extends HavenApiError {
 }
 
 /**
- * #3417: `POST /x402` answered an idempotent replay of a key whose payment has
- * already settled — the backend returns `200 { status: 'confirmed', tx_hash }`
- * and, correctly, no `sign_data`, because nothing is left to sign
+ * #3417: an erc7710 `POST /x402` authorize replayed a key whose payment to THIS
+ * merchant for THIS resource has already settled. The backend returns
+ * `200 { status: 'confirmed', tx_hash, to, resource_url }` and, correctly, no
+ * `sign_data`, because nothing is left to sign
  * (`packages/backend/src/modules/x402/replay.ts`). Before this class the
  * erc7710 path read that answer as a scheme mismatch and threw a 500, which
  * hosted callers relayed as "transient, retry". Typed so a caller can report
  * the original settlement instead of retrying, and never signs anything.
+ *
+ * Only thrown when the confirmed row pays the merchant this request names, for
+ * the resource it asked for. The backend's replay lookup is keyed on the
+ * idempotency key alone, so a key reused for another purchase — or first spent
+ * on an EIP-3009 funding leg, whose confirmed `tx_hash` proves only that the
+ * delegate was funded — is refused as a 409 collision instead of read as this
+ * settlement. A `HavenError`, not a `HavenApiError`: nothing failed upstream.
  */
-export class X402PaymentAlreadySettledError extends HavenError {
+export class X402Erc7710AlreadySettledError extends HavenError {
   readonly x402ErrorCode = 'payment_already_settled' as const
   constructor(
     public override readonly paymentId: string,
@@ -2311,7 +2319,7 @@ export class X402PaymentAlreadySettledError extends HavenError {
       undefined,
       paymentId,
     )
-    this.name = 'X402PaymentAlreadySettledError'
+    this.name = 'X402Erc7710AlreadySettledError'
   }
 }
 

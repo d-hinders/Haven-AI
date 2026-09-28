@@ -40,9 +40,9 @@ export const version = '102_delist_skip_settle_catalog_row'
  * the same unconditional restore 059's `down()` uses, not a lookup of
  * whatever status the row held before `up()` ran. It leaves `verified_at`
  * alone (the next probe refreshes it) and does NOT restore a prior
- * `degraded` status: a row this migration delisted was `active` (058 seeds
- * it that way and nothing else in this migration's own history changes it),
- * so `down()`'s job is symmetry with `up()`, not a general-purpose undo for
+ * `degraded` status: a row delisted from `degraded` comes back `active`, and
+ * the next probe re-degrades it if the merchant is still failing, so
+ * `down()`'s job is symmetry with `up()`, not a general-purpose undo for
  * every possible prior state.
  *
  * The `network` predicate is redundant TODAY against 058's own unique index

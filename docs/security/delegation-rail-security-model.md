@@ -302,8 +302,11 @@ not a second live offer, and a later re-key revokes it along with every
 other non-revoked row (`pending` included) before it can complete. The raw
 activate route (`POST /agents/:id/delegations/:hash/activate`) does not
 filter on `rekey_id`, though, which leaves a narrow race open: an issue
-request stalled across an abandon can insert its rows after a successor
-re-key has already completed on the same key (#3439).
+request stalled across an abandon can still insert its rows while a
+successor re-key on the same key is in flight past its revoke step — the
+insert's lock requires only that some re-key of the agent be in flight, not
+that one — and those rows are left `pending` under the key the successor
+installs (#3439).
 
 **Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
 ordinary recipient-pinned budget whose pin the server fills with the

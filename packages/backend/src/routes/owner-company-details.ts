@@ -53,9 +53,10 @@ function toWireRow(row: OwnerCompanyDetailsRow) {
 }
 
 /**
- * Behind the flag, GET/PUT/POST all answer 404 — not just a future settings
- * UI. #3332 gates the feature itself: a deployment with the flag off must
- * behave as though `parties.buyer` and this whole surface do not exist.
+ * Behind the flag, GET/PUT/POST all answer 404 — not just the Settings →
+ * Company details screen built on top of them. #3332 gates the feature
+ * itself: a deployment with the flag off must behave as though
+ * `parties.buyer` and this whole surface do not exist.
  *
  * DELETE is the one exception (#3332 review, owner-privacy default): erasure
  * must work regardless of the flag, so an owner who saved details while the

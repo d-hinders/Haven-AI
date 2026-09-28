@@ -805,6 +805,15 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #3332: 404 is the DEFAULT (feature off) — the same status a real
+    // deployment answers with `HAVEN_OWNER_COMPANY_DETAILS` unset. A spec
+    // that needs the flag "on" (empty or filled) overrides this route
+    // itself, same convention as every other fixture override in this file.
+    if (method === 'GET' && path === '/user/company-details') {
+      await fulfillJson(route, { error: 'Not found' }, 404)
+      return
+    }
+
     if (method === 'GET' && path === '/user/owners') {
       await fulfillJson(route, {
         owners: [],

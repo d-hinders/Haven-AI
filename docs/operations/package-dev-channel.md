@@ -28,6 +28,18 @@ covers:
 last-verified: "2026-09-25"
 ---
 
+> **Re-verification (#3332, 2026-09-28):** coupled through
+> `packages/backend/src/config.ts`, which is in this doc's `covers:` — the
+> edit is a comment-only re-wording of `ownerCompanyDetailsEnabled`'s own
+> comment (the "no settings UI yet" line, now stale for an unrelated reason:
+> #3332's frontend slice shipped that UI). No channel, dist-tag, snapshot,
+> build order, credential path, or runtime-spec-override behaviour moves, and
+> this document names no fact about that flag's own gating, so nothing in it
+> was made stale. `last-verified` deliberately NOT bumped, for the reason in
+> the `docs/contributing/branch-and-release-flow.md` precedent note: this is
+> a scoped check of one comment-only edit, not a re-verification of the
+> document.
+
 # Package dev channel (`@haven_ai/*@dev`)
 
 The five npx-installed packages have a **dev channel**: every package-touching

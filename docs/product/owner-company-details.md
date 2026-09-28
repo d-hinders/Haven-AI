@@ -11,7 +11,9 @@ covers:
   - packages/backend/src/modules/payments/receipt.ts
   - packages/backend/src/modules/mpp/evidence.ts
   - packages/sdk/src/payment-mappers.ts
-last-verified: "2026-09-27"
+  - packages/frontend/src/hooks/useCompanyDetails.ts
+  - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
+last-verified: "2026-09-28"
 ---
 
 # Owner company details
@@ -86,19 +88,19 @@ guarded on `vies_status = 'pending'` and staleness), not a plain read, so two
 concurrent `GET`s never both start a check for the same row.
 
 **Naming discipline:** wherever this reaches a person — the API's own
-responses today, and the settings screen once the #3332 frontend slice ships
-— the copy must say "VAT number checked against VIES on `<date>`", never
-"verified". `docs/product/agent-passport.md` reserves that word for a
-passport tier that does not exist yet, and the reasoning is identical here:
-`vies_status: valid` is a checked fact, not an identity claim.
+responses, and the Settings → Company details screen
+(`CompanyDetailsCard`) — the copy must say "VAT number checked against VIES
+on `<date>`", never "verified". `docs/product/agent-passport.md` reserves
+that word for a passport tier that does not exist yet, and the reasoning is
+identical here: `vies_status: valid` is a checked fact, not an identity
+claim.
 
 ## The API
 
-There is no settings UI for this yet — that is the #3332 FRONTEND slice, not
-built as of this writing. Everything below describes the API, which is live
-today behind the flag. `GET`/`PUT`/`POST .../vies-check` answer `404` when the
-flag is off, not just the future settings screen; `DELETE` is the one
-exception (see its row below).
+Everything below describes the API, which is live today behind the flag.
+`GET`/`PUT`/`POST .../vies-check` answer `404` when the flag is off, not
+just the settings screen built on top of it; `DELETE` is the one exception
+(see its row below).
 
 | Route | Notes |
 |---|---|
@@ -108,9 +110,9 @@ exception (see its row below).
 | `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
 
 An agent API key is refused with a named `403` on every route above,
-including `DELETE` — this is an owner-only surface (an API today; a dashboard
-settings screen once the frontend slice ships), and an agent must never
-manage — or erase — its own owner's company details.
+including `DELETE` — this is an owner-only surface (Settings → Company
+details in the dashboard, on top of the same owner-scoped routes), and an
+agent must never manage — or erase — its own owner's company details.
 
 ## Where it surfaces: `parties.buyer`
 
@@ -175,24 +177,56 @@ details, and adding it there is a separate, unreviewed change. The OpenAPI
 `Parties.buyer` field description is scoped to the receipt surfaces for the
 same reason.
 
+## The settings screen
+
+Settings → Company details (`CompanyDetailsCard`, `useCompanyDetails`) is the
+#3332 frontend slice on top of the API above. Two things worth naming about
+how it is built:
+
+- **Gating without a second flag.** The screen has no frontend-side feature
+  flag of its own; it reads the STATUS of `GET /user/company-details`, never
+  its body. `404` means only one thing — the feature is off
+  (`requireFeatureEnabled` in `routes/owner-company-details.ts`) — and the
+  screen renders nothing. `200` with a `null` body means the flag is on and
+  the owner has never saved a row, and the screen renders an empty form ready
+  to fill in. `200` with a row renders the filled form. A first-time owner on
+  a flagged-on deployment therefore always sees an empty form, never nothing.
+- **The purpose and retention text is shown above the form, always** — not
+  behind a tooltip or a second screen — because *Purpose, retention and GDPR
+  basis* below is what the owner is agreeing to by filling it in.
+
+The VIES status line polls `GET /user/company-details` every few seconds
+while `vies_status` is `pending`, bounded (a check that never resolves stops
+being polled rather than polling forever) and stopped on navigating away;
+"Check again" calls `POST /user/company-details/vies-check` on demand and
+surfaces its `429` in plain words. "Remove company details" asks for
+confirmation before calling `DELETE /user/company-details`, then resets the
+form to empty.
+
 ## Purpose, retention and GDPR basis
 
 This is the owner's own data, about themself, saved voluntarily to appear on
 receipts their own agents may hand to merchants. For a sole trader, the
 organisation number *is* the personal identity number — this document, and
-the future settings form (the #3332 frontend slice), state this plainly,
-alongside the VAT number's own SE-format personal-number encoding (`SE` +
-personal number + `01`) for the same reason.
+the settings form itself, state this plainly, alongside the VAT number's own
+SE-format personal-number encoding (`SE` + personal number + `01`) for the
+same reason.
 
 - **Basis**: consent — the owner opts in by calling `PUT
-  /user/company-details` (today) or filling in the future settings form;
+  /user/company-details` or filling in the Settings → Company details form;
   nothing here is required for an agent or a payment to work.
 - **Purpose**: stating the buyer on a payment receipt the owner's own agent may
   give to a merchant, and (asynchronously) validating the VAT number against
   VIES.
 - **Retention**: kept until the owner deletes it. `DELETE
-  /user/company-details` is the owner's actual erasure path today, and it
-  works regardless of the feature flag. Deleting the Haven account WOULD also
+  /user/company-details` works regardless of the feature flag, and with the
+  flag ON the owner calls it themselves from Settings → Company details. With
+  the flag OFF, though, that screen renders nothing at all (#3332 review round
+  2, M3) — so there is no dashboard way to erase in that state. The owner can
+  still call the ungated `DELETE` with their own session, but in practice
+  they ask Haven support, who removes the row directly in the database: the
+  route only ever erases the CALLER's own row, so support cannot call it on
+  the owner's behalf. Deleting the Haven account WOULD also
   remove these details (`user_id` is `ON DELETE CASCADE`), but account
   deletion is an operator action today — there is no self-serve
   delete-my-account route — so that cascade is not itself something an owner

@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { SettingsSection as Section, SettingsRow as SettingRow } from './SettingsSection'
 import { ConnectionsCard } from '@/components/accounting/ConnectionsCard'
+import { CompanyDetailsCard } from '@/components/settings/CompanyDetailsCard'
 
 function StatusPill({
   children,
@@ -151,6 +152,14 @@ export default function SettingsClient() {
           Disconnect, the feed settings and the backfill choice.
         */}
         <ConnectionsCard />
+
+        {/*
+          Owner company details + VIES (#3332): renders only when
+          `GET /user/company-details` does not answer the feature-off 404 —
+          `CompanyDetailsCard` itself returns null in that case, so there is
+          no flag to check here.
+        */}
+        <CompanyDetailsCard />
 
         {/*
           The Approvers section is DELETED (#1989, epic #1440). It hosted

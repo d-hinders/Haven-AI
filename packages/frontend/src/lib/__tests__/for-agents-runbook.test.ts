@@ -161,9 +161,11 @@ describe('/for-agents.md (#2523)', () => {
     // agent looks for this page when something has already failed; the 270
     // bytes are the one thing it needs then: a `client_update` on a result
     // means that client must be updated before retrying, `required: true`
-    // means payments stop until it is, and where the release notes are. It
-    // does not promise `upgrade_command` runs as given: for the connector,
-    // signer and MCP it does not yet (#3304 review; recorded on epic #3302). Trimmed
+    // means payments stop until it is, and where the release notes are. Since
+    // #3412 it DOES promise `upgrade_command` runs as given: for the connector,
+    // signer and MCP it is the connector doctor, which works on an existing
+    // install and prints the exact repair line (before #3412 it was a bare
+    // setup re-run that stopped at "Missing --setup"). Trimmed
     // from a first draft about twice as long that also restated the manifest
     // path — `/releases` itself names it.
     expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10900)

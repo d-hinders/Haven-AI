@@ -347,7 +347,8 @@ describe('capability manifest', () => {
         expect(entry.name).toBe(pkg)
         expect(entry.released_version).toBe(CLIENT_RELEASES[pkg].released_version)
         expect(entry.notes).toEqual(CLIENT_RELEASES[pkg].notes)
-        expect(entry.upgrade_command).toMatch(/@dev$/)
+        // #3412: the connector-installed packages carry the doctor suffix.
+        expect(entry.upgrade_command).toMatch(/@dev( --doctor)?$/)
       }
       expect(manifest.packages.connect.channel).toBe('@haven_ai/connect@dev')
       expect(manifest.release_notes_url).toBe('/releases')

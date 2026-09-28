@@ -917,8 +917,9 @@ const spendTotals = {
 const clientOutdatedResponse = {
   description:
     'Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this ' +
-    'deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` ' +
-    'updates it; retry the same request afterwards.',
+    'deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` ' +
+    '(for a connector-installed package it diagnoses the install and prints the exact repair ' +
+    'line to run next), then retry the same request.',
   content: {
     'application/json': {
       schema: {
@@ -7828,8 +7829,11 @@ export const openapiSpec = {
         description:
           '#3303: the backend\'s update hint for an outdated published client. `required: true` ' +
           'means the client is below a minimum this deployment set and will be refused at its ' +
-          'refusal points; `upgrade_command` is the exact command that updates it, on this ' +
-          'deployment\'s channel.',
+          'refusal points; `upgrade_command` is the command that starts the update, on this ' +
+          'deployment\'s channel. For the connector-installed packages (signer, mcp, connect) it is ' +
+          'the connector doctor (#3412): it works as pasted on an existing install and prints the ' +
+          'exact `--doctor --repair` line to run next — a bare connector re-run is a setup command ' +
+          'that stops at "Missing --setup" on an already set-up machine.',
         required: ['package', 'current', 'recommended', 'min_version', 'required', 'upgrade_command', 'notes_url'],
         properties: {
           package: { type: 'string', examples: ['@haven_ai/mcp'] },
@@ -7837,7 +7841,7 @@ export const openapiSpec = {
           recommended: { type: ['string', 'null'] },
           min_version: { type: ['string', 'null'] },
           required: { type: 'boolean' },
-          upgrade_command: { type: 'string', examples: ['npx -y @haven_ai/connect@alpha'] },
+          upgrade_command: { type: 'string', examples: ['npx -y @haven_ai/connect@alpha --doctor'] },
           notes_url: {
             type: ['string', 'null'],
             description: '#3304: the public release notes page. Nullable for clients built before it existed.',
@@ -8318,7 +8322,7 @@ export const openapiSpec = {
             type: ['string', 'null'],
             description: "Below this, the package's refusal points answer `client_outdated`. Null = never refused.",
           },
-          upgrade_command: { type: ['string', 'null'], examples: ['npx -y @haven_ai/connect@alpha'] },
+          upgrade_command: { type: ['string', 'null'], examples: ['npx -y @haven_ai/connect@alpha --doctor'] },
           notes: {
             type: 'array',
             description: 'Newest first. What changed, for deciding whether to update — not the full CHANGELOG.',

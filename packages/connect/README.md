@@ -703,6 +703,16 @@ which.
 runtime, rewrite the wrapper + sidecar, and re-write the runtime config from
 the STORED credentials. It never touches keys and never needs a new token.
 
+**Several agents on one machine (#3412).** A repair rewrites the runtime config
+from ONE agent's stored credentials. With more than one agent credential
+directory under `~/.haven/agents`, every repair line the doctor prints names
+the agent it is about with `--credentials-dir <dir>`, and a `--repair` without
+`--credentials-dir` is refused — nothing is changed — with one exact command
+per agent (its agent id beside it). Without that, "the newest directory" was a
+guess, and it re-wired a different agent than the one the doctor described.
+Every "update your signer" hint Haven emits names the flagless
+`npx -y @haven_ai/connect@<channel> --doctor`, which then prints that line.
+
 ## Installing an unpublished signer / SDK / MCP build (`HAVEN_SIGNER_SPEC`, #2424)
 
 Setup installs the connector's **pinned** siblings — `@haven_ai/signer@<pin>`

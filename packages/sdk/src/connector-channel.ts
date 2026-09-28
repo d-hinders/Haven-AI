@@ -140,3 +140,26 @@ export function connectorRerunCommand(
   const command = `npx ${flags}${connectorSpec(channel)}`
   return args ? `${command} ${args}` : command
 }
+
+/**
+ * The command every UPGRADE hint names (#3412): `npx -y @haven_ai/connect@<channel> --doctor`.
+ *
+ * A bare connector re-run is a SETUP command — on a machine that is already
+ * set up it stops at "Missing --setup <hv_setup_...> setup token", so an
+ * outdated signer, local MCP or connector told to "re-run the connector" was
+ * handed a dead end. The flagless doctor works as pasted on an existing
+ * install (#3210: it resolves the runtime from the setup record), diagnoses an
+ * outdated signer, and prints the exact `--doctor --repair` line for the agent
+ * it describes — with `--credentials-dir` whenever more than one agent lives on
+ * the machine, so the repair cannot land on a different agent.
+ *
+ * `-y` because an upgrade hint is often run by an agent in a non-interactive
+ * shell. `@haven_ai/core`'s `upgradeCommandFor` (the backend's
+ * `client_update.upgrade_command`) cannot import this package, so it carries a
+ * copy; `packages/backend/src/__tests__/connector-upgrade-command-parity.test.ts`
+ * fails if the two ever disagree. Setup-time hints (identity restore,
+ * mid-setup retry) legitimately stay on {@link connectorRerunCommand}.
+ */
+export function connectorUpgradeCommand(options?: { channel?: string }): string {
+  return connectorRerunCommand('--doctor', { channel: options?.channel, npxFlags: '-y' })
+}

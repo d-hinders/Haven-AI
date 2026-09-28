@@ -102,13 +102,18 @@ export function upgradeCommandFor(pkg: PublishedClientPackage, channel: string):
       return `npm install @haven_ai/sdk@${channel}`
     case '@haven_ai/cli':
       return `npx -y @haven_ai/cli@${channel}`
-    // The signer and the local MCP runtime are installed BY the connector; a
-    // connector re-run reinstalls the pinned runtime (the signer's own
-    // version-mismatch guidance says the same).
+    // The signer and the local MCP runtime are installed BY the connector, but
+    // a BARE connector re-run is a setup command: on an existing install it
+    // stops at "Missing --setup" (#3412). The flagless doctor works as pasted,
+    // diagnoses the outdated runtime and prints the exact `--doctor --repair`
+    // line — naming `--credentials-dir` when several agents share the machine.
+    // A copy of `connectorUpgradeCommand` in `@haven_ai/sdk`, which this private
+    // package cannot import; the backend's
+    // `connector-upgrade-command-parity.test.ts` fails if the two disagree.
     case '@haven_ai/signer':
     case '@haven_ai/mcp':
     case '@haven_ai/connect':
-      return `npx -y @haven_ai/connect@${channel}`
+      return `npx -y @haven_ai/connect@${channel} --doctor`
   }
 }
 

@@ -49,6 +49,7 @@ export {
   CONNECTOR_PACKAGE_NAME,
   connectorSpec,
   connectorRerunCommand,
+  connectorUpgradeCommand,
   resolveConnectorChannel,
   isConnectorChannel,
 } from './connector-channel.js'

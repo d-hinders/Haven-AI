@@ -2660,6 +2660,26 @@ owner sets one the only observable change is the header itself.
   client's build-time one. Since #3304 the command itself comes from
   `upgradeCommandFor` in `packages/core/src/client-releases.ts`, the same
   function the public release documents use.
+- **Since #3412 the command for the signer, the local MCP and the connector is
+  the connector doctor** — `npx -y @haven_ai/connect@<channel> --doctor` — not
+  a bare connector re-run. A bare re-run is a setup command: on an
+  already-set-up machine it stops at `Missing --setup <hv_setup_...> setup
+  token`. The doctor works as pasted, reports an outdated signer and prints
+  the exact `--doctor --repair --runtime <runtime>` line; when several agent
+  credential directories share the machine, that line names
+  `--credentials-dir <dir>`, and a `--repair` without it is refused with one
+  command per agent. The same form is named by every upgrade hint the
+  published signer (initialize instructions, out-of-date refusal), the SDK
+  (`signerUpdateFallback`) and the hosted MCP (signer-compat notices, server
+  instructions) emit, from `connectorUpgradeCommand` in `@haven_ai/sdk`;
+  core carries a copy, pinned by
+  `packages/backend/src/__tests__/connector-upgrade-command-parity.test.ts`,
+  and `scripts/ci/upgrade-hint-guard.test.mjs` fails on a bare re-run in an
+  upgrade hint. Setup-time hints (identity restore, mid-setup retry) keep the
+  bare form. **Not covered:** `--local` installs — `--repair` refuses that
+  topology and asks for the original `--local` setup command — and signers
+  from 0.4 and older, whose baked-in hints still name the bare re-run (they
+  send no `X-Haven-Client`, so they are never refused either).
 - **Since #3304 the hint's `notes_url` is set**, to the dashboard's public
   `/releases` page, resolved against the backend's configured frontend URL and
   never against a request header. The same per-package data is served as

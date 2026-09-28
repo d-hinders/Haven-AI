@@ -1,4 +1,4 @@
-import { connectorRerunCommand, resolveConnectorChannel } from '@haven_ai/sdk'
+import { connectorRerunCommand, connectorUpgradeCommand, resolveConnectorChannel } from '@haven_ai/sdk'
 
 /**
  * The connector dist-tag THIS DEPLOYMENT names in its re-run hints (#2423).
@@ -26,4 +26,14 @@ export const HOSTED_CONNECTOR_CHANNEL = resolveConnectorChannel(
 /** `npx @haven_ai/connect@<this deployment's channel> [args]`. */
 export function hostedConnectorRerunCommand(args?: string): string {
   return connectorRerunCommand(args, { channel: HOSTED_CONNECTOR_CHANNEL })
+}
+
+/**
+ * `npx -y @haven_ai/connect@<this deployment's channel> --doctor` — the command
+ * every UPGRADE hint this server emits names (#3412). A bare re-run is a setup
+ * command that stops at "Missing --setup" on an existing install; see
+ * `connectorUpgradeCommand` in `@haven_ai/sdk` for why the doctor is the form.
+ */
+export function hostedConnectorUpgradeCommand(): string {
+  return connectorUpgradeCommand({ channel: HOSTED_CONNECTOR_CHANNEL })
 }

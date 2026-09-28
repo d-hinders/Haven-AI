@@ -43,8 +43,12 @@ every "rerun the connector" hint it prints names the channel THIS build was
 published under, so a build installed from a non-production channel tells you
 to reinstall from that same channel rather than sending you to production.
 
-Rerunning it is also the documented fix for a signer that has fallen behind the
-backend's expected-context version. To run the signer directly:
+That command SETS UP an agent. To update a signer that has fallen behind the
+backend's expected-context version on a machine that is already set up, run
+the connector doctor instead — `npx -y @haven_ai/connect@<channel> --doctor` —
+and then the `--repair` line it prints; a bare re-run stops at "Missing
+--setup" (#3412). Every update hint this signer prints names that form. To run
+the signer directly:
 
 ```sh
 HAVEN_DELEGATE_KEY=0x... npx @haven_ai/signer@alpha

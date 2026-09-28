@@ -25,7 +25,7 @@ export {
   type X402PaymentRequired,
 } from './types.js'
 export { createNextStepBuilder, type NextStep, type NextStepHandoff, type NextStepTarget } from './next-step.js'
-export { HAVEN_CONNECTOR_CHANNEL, connectorRerunCommand } from './connector-channel.js'
+export { HAVEN_CONNECTOR_CHANNEL, connectorRerunCommand, connectorUpgradeCommand } from './connector-channel.js'
 export {
   HAVEN_CLIENT_HEADER,
   havenClientIdentity,

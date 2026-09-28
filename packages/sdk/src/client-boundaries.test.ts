@@ -515,6 +515,7 @@ describe('HavenClient structural boundary', () => {
       'composeDescription',
       'connectorRerunCommand',
       'connectorSpec',
+      'connectorUpgradeCommand', // #3412
       'createNextStepBuilder', // #3101
       'decodeBase64Json',
       'decodeBase64Utf8',

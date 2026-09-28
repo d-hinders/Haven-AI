@@ -211,7 +211,7 @@ describe('haven_pay_x402_quote', () => {
 
     const check = result.data.signer_compatibility.check
     expect(check).toContain('@haven_ai/signer')
-    expect(check).toContain('npx @haven_ai/connect@alpha')
+    expect(check).toContain('npx -y @haven_ai/connect@alpha --doctor')
     expect(check).toMatch(/STOP before signing/)
     // Same standing instruction as the signing-time error (#1143).
     expect(check).toMatch(/invalidates the signature/)

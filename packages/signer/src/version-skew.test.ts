@@ -212,6 +212,20 @@ describe('assertSupportedBindingVersion structured fields (#1309)', () => {
     expect(error?.code).toBe(SignerRefusalCode.UnsupportedSweepBindingVersion)
   })
 
+  it('an out-of-date refusal names the upgrade command, never the bare setup re-run (#3412)', () => {
+    // A bare `npx @haven_ai/connect@<ch>` stops at "Missing --setup" on an
+    // existing install; the refusal message is what the user actually reads.
+    let error: HavenUnsupportedSignerVersionError | undefined
+    try {
+      assertSupportedBindingVersion(99, [2, 3], 'x402 expected context')
+    } catch (err) {
+      error = err as HavenUnsupportedSignerVersionError
+    }
+    expect(error?.message).toContain('This signer is out of date')
+    expect(error?.message).toContain('npx -y @haven_ai/connect@alpha --doctor')
+    expect(error?.message).not.toContain('npx @haven_ai/connect@alpha`')
+  })
+
   it('does NOT tell the caller to update when the version is below the floor — updating cannot fix it', () => {
     // The opposite skew: this signer is NEWER than the (retired) version it
     // received. SIGNER_UPDATE_FALLBACK would be actively wrong advice here, so
@@ -399,7 +413,9 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
       expect(result.received_version).toBe(UNKNOWN_X402_VERSION)
       expect(result.fallback).toBeTruthy()
       expect(result.fallback).toContain('@haven_ai/signer')
-      expect(result.fallback).toContain('npx @haven_ai/connect@alpha')
+      // #3412: the upgrade command, never the bare setup re-run.
+      expect(result.fallback).toContain('npx -y @haven_ai/connect@alpha --doctor')
+      expect(result.fallback).not.toContain('npx @haven_ai/connect@alpha`')
       expect(result.fallback).toMatch(/unspent|unaffected/)
       // Existing taxonomy, not a new one: AgentPaymentNextAction.StopAndTellUser.
       expect(result.next_action).toBe('stop_and_tell_user')
@@ -565,7 +581,9 @@ describe('signer advertises its supported versions at handshake (#1155)', () => 
   it('names the #1143 fix at handshake, so the agent can act without paying first', async () => {
     const { instructions } = await handshake()
     expect(instructions).toContain('@haven_ai/signer')
-    expect(instructions).toContain('npx @haven_ai/connect@alpha')
+    // #3412: the upgrade command, never the bare setup re-run.
+    expect(instructions).toContain('npx -y @haven_ai/connect@alpha --doctor')
+    expect(instructions).not.toContain('npx @haven_ai/connect@alpha`')
     // Same standing instruction as the signing-time error: the version is inside
     // the Haven-signed message, so rewriting it is never the fix.
     expect(instructions).toMatch(/invalidates the signature/)

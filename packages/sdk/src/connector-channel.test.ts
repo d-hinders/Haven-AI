@@ -4,6 +4,7 @@ import {
   HAVEN_CONNECTOR_CHANNEL,
   connectorRerunCommand,
   connectorSpec,
+  connectorUpgradeCommand,
   isConnectorChannel,
   resolveConnectorChannel,
 } from './connector-channel.js'
@@ -98,22 +99,43 @@ describe('resolveConnectorChannel', () => {
   })
 })
 
+describe('connectorUpgradeCommand (#3412)', () => {
+  it('is the flagless doctor, non-interactive, on the build channel', () => {
+    expect(connectorUpgradeCommand()).toBe(`npx -y @haven_ai/connect@${HAVEN_CONNECTOR_CHANNEL} --doctor`)
+  })
+
+  it('moves only the channel tag', () => {
+    expect(connectorUpgradeCommand({ channel: 'dev' })).toBe('npx -y @haven_ai/connect@dev --doctor')
+  })
+
+  it('is never the bare setup re-run, which stops at "Missing --setup" on an existing install', () => {
+    const bare = connectorRerunCommand()
+    expect(connectorUpgradeCommand()).not.toBe(bare)
+    expect(connectorUpgradeCommand().replace('-y ', '')).toBe(`${bare} --doctor`)
+  })
+
+  it('leaves connectorRerunCommand()\'s no-args form alone (verify-connect-bundle.mjs pins it)', () => {
+    expect(connectorRerunCommand()).toBe(`npx @haven_ai/connect@${HAVEN_CONNECTOR_CHANNEL}`)
+  })
+})
+
 describe('signerUpdateFallback', () => {
-  it('is byte-identical to the pre-#2423 literal at the production channel', () => {
-    // Characterization: #2423 says "do not change hint wording beyond the
-    // channel token", and these strings sit inside signer refusal messages
-    // that users and agents pattern-match on. This is the literal as it stood
-    // before the constant was introduced.
+  it('names the upgrade command, not a bare setup re-run, at the production channel (#3412)', () => {
+    // Characterization: these strings sit inside signer refusal messages that
+    // users and agents pattern-match on, so the whole literal is pinned. The
+    // wording changed ON PURPOSE in #3412: the pre-#3412 form told an existing
+    // install to run a bare `npx @haven_ai/connect@alpha`, which stops at
+    // "Missing --setup". Everything after the command is unchanged.
     expect(SIGNER_UPDATE_FALLBACK).toBe(
-      'Update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, which reinstalls the ' +
-        'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
+      'Update @haven_ai/signer: run `npx -y @haven_ai/connect@alpha --doctor` and then the repair line it prints, ' +
+        'which reinstalls the pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
         'quote or payment this version came from is unaffected and does not need to be re-quoted.',
     )
   })
 
   it('renders another channel by moving only the tag', () => {
     expect(signerUpdateFallback('dev')).toBe(SIGNER_UPDATE_FALLBACK.replace('@alpha', '@dev'))
-    expect(signerUpdateFallback('dev')).toContain('npx @haven_ai/connect@dev')
+    expect(signerUpdateFallback('dev')).toContain('npx -y @haven_ai/connect@dev --doctor')
     expect(signerUpdateFallback('dev')).not.toContain('connect@alpha')
   })
 

@@ -3147,7 +3147,7 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
-        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the exact command that updates it, on this deployment's channel. */
+        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. */
         ClientUpdate: {
             /** @example @haven_ai/mcp */
             package: string;
@@ -3156,7 +3156,7 @@ export type components = {
             recommended: string | null;
             min_version: string | null;
             required: boolean;
-            /** @example npx -y @haven_ai/connect@alpha */
+            /** @example npx -y @haven_ai/connect@alpha --doctor */
             upgrade_command: string;
             /** @description #3304: the public release notes page. Nullable for clients built before it existed. */
             notes_url: string | null;
@@ -3444,7 +3444,7 @@ export type components = {
             recommended_version: string | null;
             /** @description Below this, the package's refusal points answer `client_outdated`. Null = never refused. */
             min_version: string | null;
-            /** @example npx -y @haven_ai/connect@alpha */
+            /** @example npx -y @haven_ai/connect@alpha --doctor */
             upgrade_command: string | null;
             /** @description Newest first. What changed, for deciding whether to update — not the full CHANGELOG. */
             notes: {
@@ -15628,7 +15628,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -15866,7 +15866,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -16307,7 +16307,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -16455,7 +16455,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -16681,7 +16681,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -17301,7 +17301,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;

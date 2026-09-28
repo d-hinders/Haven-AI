@@ -60,7 +60,7 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/issuance.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
-last-verified: "2026-09-27"
+last-verified: "2026-09-28"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -299,14 +299,20 @@ its own inert re-key replacement plus a later ordinary build's row — because
 re-key rows are excluded from reuse (#3386) rather than merged with it. No
 Haven flow presents that re-key row for signing again, so it is a leftover,
 not a second live offer, and a later re-key revokes it along with every
-other non-revoked row (`pending` included) before it can complete. The raw
-activate route (`POST /agents/:id/delegations/:hash/activate`) does not
-filter on `rekey_id`, though, which leaves a narrow race open: an issue
-request stalled across an abandon can still insert its rows while a
-successor re-key on the same key is in flight past its revoke step — the
-insert's lock requires only that some re-key of the agent be in flight, not
-that one — and those rows are left `pending` under the key the successor
-installs (#3439).
+other non-revoked row (`pending` included) before it can complete. A re-key's
+own `pending` replacement rows cannot be activated outside that re-key's own
+completion (`ACTIVATE_REKEY_DELEGATION_SQL` inside `completeRekey`): the raw
+activate route (`POST /agents/:id/delegations/:hash/activate`) refuses any
+row with `rekey_id IS NOT NULL` before the slot sweep, with the same filter
+kept in `ACTIVATE_PENDING_DELEGATION_SQL` as a backstop. This does not claim
+such a row can never be *signed* — an owner who still holds a stale payload
+can sign it — only that a signed one is never accepted through the ordinary
+route. Separately, the stalled-issue race that could plant one of these rows
+in the first place is closed: `insertRekeyDelegation` re-checks the inserting
+re-key's OWN stage (must still be `metered`) under the agent-row lock, not
+merely that *some* re-key of the agent is in flight, so a stalled issue
+request for an abandoned re-key can no longer insert rows while a different,
+successor re-key is the one actually in flight (#3439).
 
 **Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
 ordinary recipient-pinned budget whose pin the server fills with the

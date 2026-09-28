@@ -260,6 +260,10 @@ function mockDb(opts: {
         status: 'pending',
         token_address: USDC.toLowerCase(),
         recipient_address: RECIPIENT.toLowerCase(),
+        // #3439: an ORDINARY pending grant row is never a re-key's own
+        // replacement — every activate test not specifically about the new
+        // guard keeps this null.
+        rekey_id: null,
       }] })
     }
     if (/FROM agent_delegations/.test(s)) return Promise.resolve({ rows: opts.list ?? [] })
@@ -867,6 +871,33 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json()).toEqual({ error: 'Delegation is no longer pending' })
     })
 
+    it("refuses a re-key's own pending row (rekey_id set) BEFORE the slot sweep, with a structured error (#3439)", async () => {
+      mockDb({
+        stored: {
+          id: 'row-1',
+          delegation_json: JSON.stringify({ delegate: DELEGATE_ACCOUNT, delegator: TREASURY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1' }),
+          status: 'pending',
+          token_address: USDC.toLowerCase(),
+          recipient_address: RECIPIENT.toLowerCase(),
+          rekey_id: 'rekey-1',
+        },
+      })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({
+        error: "This delegation belongs to a re-key and can only be activated by that re-key's own completion",
+        error_code: 'REKEY_DELEGATION_NOT_ACTIVATABLE',
+      })
+      // Never even opened the activation transaction — the network reads
+      // (deploy, address derivation) are also skipped.
+      expect(mockQuery.mock.calls.map((c) => String(c[0]))).not.toContain('BEGIN')
+      expect(mockEnsureDeployed).not.toHaveBeenCalled()
+      expect(mockCompute).not.toHaveBeenCalled()
+    })
+
     it('accepts a WebAuthn-length signature (ABI-encoded assertion, >65 bytes) (#887)', async () => {
       mockDb({
         owner: null,
@@ -1121,6 +1152,7 @@ describe('delegation lifecycle API (#828)', () => {
             status: 'pending',
             token_address: USDC.toLowerCase(),
             recipient_address: RECIPIENT.toLowerCase(),
+            rekey_id: null,
           },
         })
         const res = await app.inject({

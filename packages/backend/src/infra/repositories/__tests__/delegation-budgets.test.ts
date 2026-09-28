@@ -725,3 +725,86 @@ describeDb('merchant-locked budgets (#3331, real DB)', () => {
     expect((await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0))!.id).toBe(plain)
   })
 })
+
+// ── ACTIVATE_PENDING_DELEGATION_SQL's rekey_id backstop (#3439) ────────────
+//
+// The PRIMARY guard against activating a re-key's own row is the route
+// check, before the slot sweep (`agent-delegations-rekey-row-guard.test.ts`
+// proves that one, on the real route). This block proves the SQL's
+// `AND rekey_id IS NULL` backstop in isolation, calling the repository
+// function directly with no route in front of it — so a future caller of
+// `activatePendingDelegation`/`activatePendingDelegationInSlot` that forgets
+// the route-level check still cannot activate a re-key row.
+import { activatePendingDelegation } from '../delegation-budgets.js'
+import { openRekey as openRekeyForBackstop } from '../agent-rekeys.js'
+
+describeDb('ACTIVATE_PENDING_DELEGATION_SQL rekey_id backstop (#3439)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  async function seedAgentWithDelegateAndAccount(): Promise<{ userId: string; agentId: string }> {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`u${++hashCounter}-${Date.now()}@test.example`],
+    )
+    const userId = user.rows[0].id
+    const account = await db.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
+       VALUES ($1, $2, 84532, 'delegation', 'delegator_hybrid') RETURNING id`,
+      [userId, `0x${String(hashCounter).padStart(40, 'a')}`],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, account_id, name, delegate_address, api_key_hash, api_key_prefix, status)
+       VALUES ($1, $2, 'Backstop agent', $3, $4, 'sk_bkstp', 'active') RETURNING id`,
+      [userId, account.rows[0].id, `0x${String(hashCounter).padStart(40, 'b')}`, `hash-bkstp-${hashCounter}-${Date.now()}`],
+    )
+    return { userId, agentId: agent.rows[0].id }
+  }
+
+  it("a pending row with rekey_id set is NOT activated by ACTIVATE_PENDING_DELEGATION_SQL, even called directly with no route in front of it", async () => {
+    const { userId, agentId } = await seedAgentWithDelegateAndAccount()
+    const rekey = await openRekeyForBackstop({
+      agentId,
+      userId,
+      oldDelegateAddress: `0x${String(hashCounter).padStart(40, 'b')}`,
+      newDelegateAddress: `0x${String(hashCounter).padStart(40, 'c')}`,
+      residualAtomic: '0',
+      residualTokenAddress: null,
+      residualDisposition: 'none',
+    })
+    const rekeyDelegationId = await db.query<{ id: string }>(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds,
+          start_date, expires_at, rekey_id, carry_role)
+       VALUES ($1, 84532, $2, NULL, $3, '{"signed":"capability"}', 1, 'pending', '1000000',
+               86400, 0, 9999999999, $4, 'steady') RETURNING id`,
+      [agentId, USDC, `0x${String(++hashCounter).padStart(64, '9')}`, rekey.id],
+    )
+
+    const activated = await activatePendingDelegation(
+      rekeyDelegationId.rows[0].id,
+      SIGNED_JSON,
+    )
+
+    // MUTATION TARGET: dropping `AND rekey_id IS NULL` from
+    // `ACTIVATE_PENDING_DELEGATION_SQL` turns this `true` and the row
+    // `active`.
+    expect(activated).toBe(false)
+    expect(await statusOf(rekeyDelegationId.rows[0].id)).toBe('pending')
+  })
+
+  it('an ordinary pending row (rekey_id NULL) still activates — the backstop is scoped, not a blanket refusal', async () => {
+    const agent = await seedUserAndAgent('Backstop control agent')
+    const plain = await seedDelegation({ agentId: agent, status: 'pending', delegationJson: '{"signed":"not yet"}' })
+
+    const activated = await activatePendingDelegation(plain, SIGNED_JSON)
+
+    expect(activated).toBe(true)
+    expect(await statusOf(plain)).toBe('active')
+  })
+})

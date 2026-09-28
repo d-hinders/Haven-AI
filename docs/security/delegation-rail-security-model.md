@@ -1669,6 +1669,20 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > powers, and no signature, key role or on-chain surface changes. The rest of
 > this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified (#3417, 2026-09-28):** the SDK's erc7710 `prepare()` now
+> recognises `delegationReplay`'s confirmed-200 answer (`status: 'confirmed'`
+> with a `tx_hash` and no `sign_data`) and throws the typed
+> `X402PaymentAlreadySettledError` before its scheme check. It used to throw
+> the scheme-mismatch 500 there, which the hosted MCP relayed as "transient,
+> retry once". The three hosted erc7710 prepare sites (`haven_pay_mcp_tool`,
+> `haven_prepare_catalog_purchase`, `haven_pay_x402_quote`) turn it into a
+> done state that names no tool. Nothing is signed on that answer, before or
+> after this change; `settle()` stops after the authorize. A `confirmed`
+> answer without a `tx_hash` keeps the scheme refusal. No authority moves: the
+> backend is untouched, and no signature, key role, delegation, caveat or
+> on-chain surface changes. The rest of this document was not re-read for it,
+> and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this diff renames backend-internal identifiers to account vocabulary in the
 > files this document spans: `userSafeId` → `accountId`

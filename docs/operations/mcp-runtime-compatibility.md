@@ -2410,6 +2410,21 @@ reading `null`.
 > none-vs-none and replay exactly as before. No wire field moves and no
 > runtime needs an update for calls that never name a task budget.
 
+> **Re-verified (#3417, 2026-09-28):** the `confirmed` arm of the replay
+> recipe above did not reach the agent as described. The backend answers with
+> the `tx_hash` and no `sign_data`, but the SDK's erc7710 path read the
+> missing `sign_data` as a scheme mismatch, so all three hosted entry points
+> returned a 500 with "retry once". That is a deterministic dead end: the
+> retry gets the same answer. The hosted entry points now answer a settled key
+> with a done state instead: `settled: true`, `idempotent_replay: true`,
+> `settlement_tx_hash`, `next_action: none`, and no `next_tool`. This is
+> hosted-only; no signer or connector version is involved. An SDK consumer
+> calling `prepareX402Erc7710()` / `settleX402Erc7710()` gets the typed
+> `X402PaymentAlreadySettledError` from the first SDK built with this change.
+> Every SDK published before it (`alpha`/`latest` `0.6.0-alpha.0` and the
+> `dev` snapshots before it) still throws the scheme-mismatch `HavenApiError`
+> for that answer.
+
 One more skew row since #1307, on the SETTLE leg rather than the sign leg:
 `haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /
 `tool_name` / `arguments` / `mcp_transport` as optional and rehydrate them by

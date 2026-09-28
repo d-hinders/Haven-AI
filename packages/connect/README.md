@@ -705,8 +705,9 @@ the STORED credentials. It never touches keys and never needs a new token.
 
 **Several agents on one machine (#3412).** A repair rewrites the runtime config
 from ONE agent's stored credentials. With more than one agent credential
-directory under `~/.haven/agents`, every repair line the doctor prints names
-the agent it is about with `--credentials-dir <dir>`, and a `--repair` without
+directory under `~/.haven/agents` — or when `--doctor` was itself given
+`--credentials-dir` — every repair line the doctor prints names the agent it is
+about with `--credentials-dir <dir>`, and a `--repair` without
 `--credentials-dir` is refused — nothing is changed — with one exact command
 per live agent (its agent id beside it); a retired directory is listed as
 "retired — not a repair target" and never offered. Without that, "the newest directory" was a

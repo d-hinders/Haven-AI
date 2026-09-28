@@ -161,6 +161,15 @@ function runtimeFlagFor(runtime: string): string {
   return normalizeRuntimeName(runtime) ? ` --runtime ${runtime}` : ''
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * #3412: ` --credentials-dir <dir>` for a repair line, or '' when no directory
  * is named. A repair REWRITES the runtime config from one agent's stored
@@ -171,15 +180,6 @@ function runtimeFlagFor(runtime: string): string {
  * directory whenever more than one agent lives here. Quoted for a POSIX shell
  * only when it needs to be, so the common `~/.haven/agents/<id>` prints unquoted.
  */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
 function credentialsDirFlagFor(credentialsDir?: string): string {
   if (!credentialsDir) return ''
   const quoted = /^[\w@%+=:,./~-]+$/.test(credentialsDir)
@@ -712,8 +712,9 @@ async function checksForAgent(
 
 async function verdictsForAgent(
   entry: { directory: string; identity?: IdentityFile; sidecar: SignerRuntimeSidecar | null },
-  // #3412: `repairDir` is set only when several agents share this machine, so
-  // each repair line names the directory it is about.
+  // #3412: `repairDir` is set when several agents share this machine or the
+  // caller named the directory with --credentials-dir, so each repair line
+  // names the directory it is about.
   input: { runtime: string; repairDir?: string },
   deps: DoctorDeps,
 ): Promise<{ checks: CheckVerdict[]; signerCapabilities?: Record<string, unknown> }> {

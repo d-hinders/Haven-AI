@@ -6047,7 +6047,7 @@ export const openapiSpec = {
         summary: 'List sub-budgets this agent holds (it is the sub-agent).',
         description:
           "Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.",
-        security: [{ AgentApiKey: *** }],
+        security: [{ AgentApiKey: [] }],
         parameters: [
           {
             name: 'status',
@@ -6080,7 +6080,7 @@ export const openapiSpec = {
         tags: ['SubBudgets'],
         operationId: 'getSubBudget',
         summary: 'Fetch one sub-budget this agent holds.',
-        security: [{ AgentApiKey: *** }],
+        security: [{ AgentApiKey: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
         responses: {
           '200': {
@@ -6107,7 +6107,7 @@ export const openapiSpec = {
         summary: 'Re-servable, byte-free signing handoff for a pending or closing sub-budget row.',
         description:
           "DELEGATOR-scoped: both children of a tree (the parent-child narrowing AND the grant to the sub-agent) are signed by the DELEGATING agent's delegate key, so only the delegating agent authenticates here. purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for that row's child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.",
-        security: [{ AgentApiKey: *** }],
+        security: [{ AgentApiKey: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
         responses: {
           '200': {
@@ -6143,7 +6143,7 @@ export const openapiSpec = {
         summary: 'Submit the delegating agent signature — opens a pending child, or relays the signed close operation.',
         description:
           "status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409.",
-        security: [{ AgentApiKey: *** }],
+        security: [{ AgentApiKey: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
         requestBody: {
           required: true,
@@ -6190,7 +6190,7 @@ export const openapiSpec = {
         summary: 'Close a sub-budget row — trivially if never signed or already expired, otherwise prepares the revocation.',
         description:
           "DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.",
-        security: [{ AgentApiKey: *** }],
+        security: [{ AgentApiKey: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
         responses: {
           '200': {

@@ -244,13 +244,14 @@ Isolation rules that are non-negotiable for a payments product:
   agent payments are paymaster-sponsored UserOps and never use it (#3264). **Gnosis (chain 100) is intentionally unfunded/dead** — the
   delegation rail is pinned to 8453/84532, so a zero balance there is a
   decision, not a broken relayer.
-- **The bundler credential is per chain** (#3416). Both 8453 and 84532 are
-  enabled on every deployment, but a bundler URL is chain-scoped by its path.
-  So `DELEGATION_RAIL_BUNDLER_URL_<chainId>` is read first for a chain, and the
-  unsuffixed `DELEGATION_RAIL_BUNDLER_URL` is the fallback. A chain with no
-  usable credential answers a typed 503 `rail_unavailable_for_chain` on its
-  bundler legs. Every secret here still MUST differ from production. See
-  [`delegation-rail-vendor-ops.md` §2](delegation-rail-vendor-ops.md).
+- **The bundler credential is per chain** (#3416). The delegation rail accepts
+  both 8453 and 84532 on every deployment (`DELEGATION_RAIL_CHAIN_IDS` is a
+  code constant), but a bundler URL is chain-scoped by its path. So
+  `DELEGATION_RAIL_BUNDLER_URL_<chainId>` is read first for a chain, and the
+  unsuffixed `DELEGATION_RAIL_BUNDLER_URL` is the fallback. What a chain with no
+  usable credential answers is in
+  [`delegation-rail-vendor-ops.md` §2](delegation-rail-vendor-ops.md). Every
+  secret here still MUST differ from production.
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
   chain 100 is dead per above), `RPC_URL_BASE` → **Base Sepolia**. Swap to
   mainnet RPCs only if a test genuinely needs mainnet state.

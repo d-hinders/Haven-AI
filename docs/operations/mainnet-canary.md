@@ -52,8 +52,8 @@ does not require any signing key or wallet credential.
 
    ```bash
    node --input-type=module -e '
-   const url = process.env.DELEGATION_RAIL_BUNDLER_URL
-   if (!url) { console.error("exit 2: DELEGATION_RAIL_BUNDLER_URL is not configured"); process.exit(2) }
+   const url = process.env.DELEGATION_RAIL_BUNDLER_URL_8453 || process.env.DELEGATION_RAIL_BUNDLER_URL
+   if (!url) { console.error("exit 2: no bundler credential for 8453 (DELEGATION_RAIL_BUNDLER_URL_8453, else DELEGATION_RAIL_BUNDLER_URL)"); process.exit(2) }
    if (/\/v2\/\d+\//.test(url) && !url.includes("/v2/8453/")) {
      console.error("exit 2: credential targets a DIFFERENT chain than 8453"); process.exit(2)
    }
@@ -68,9 +68,10 @@ does not require any signing key or wallet credential.
    '
    ```
 
-   From a laptop the real script works as written above — export the prod
-   value without echoing (`read -rs DELEGATION_RAIL_BUNDLER_URL && export …`,
-   run, then `unset`).
+   From a laptop the real script works as written above — export the value
+   prod resolves for 8453 without echoing (`read -rs
+   DELEGATION_RAIL_BUNDLER_URL_8453 && export DELEGATION_RAIL_BUNDLER_URL_8453`,
+   run, then `unset`); the per-chain name wins in the resolver either way.
 
 2. **Sponsorship policy bound and capped.** In the Pimlico dashboard, confirm
    `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` (prod env) names a policy that is

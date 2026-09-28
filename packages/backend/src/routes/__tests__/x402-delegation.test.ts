@@ -712,6 +712,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(503)
       expect(res.json()).toMatchObject({ error_code: 'rail_unavailable_for_chain', chain_id: 84532 })
+      expectMatchesSpec('POST', '/x402/authorize', res.json(), '503')
       expect(res.json().error).not.toMatch(/funding authorization failed/)
       expect(res.json().error).toMatch(/retrying will get the same answer/)
       expect(mockCreateIntent).not.toHaveBeenCalled()

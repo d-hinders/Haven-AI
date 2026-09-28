@@ -77,16 +77,17 @@ describe('delegationRailBundlerUrl — one credential choke point (#824 invarian
 
 /**
  * #3416: both chains are enabled on every deployment, but a bundler URL is
- * chain-scoped by its path. With one unsuffixed variable, prod (mainnet key)
- * could never serve a Base Sepolia bundler leg: every EIP-3009 funding leg,
- * `/payments` and task budget there failed with a generic 502. The credential
- * now resolves per chain, with the unsuffixed variable as the fallback.
+ * chain-scoped by its path. With one unsuffixed variable, a deployment whose
+ * URL named one chain could never serve the other chain's bundler legs: every
+ * EIP-3009 funding leg, `/payments` and task budget there failed with a
+ * generic 502. The credential now resolves per chain, with the unsuffixed
+ * variable as the fallback.
  */
 describe('delegationRailBundlerUrl — a credential per chain (#3416)', () => {
   const MAINNET = 'https://api.pimlico.io/v2/8453/rpc?apikey=main-secret'
   const SEPOLIA = 'https://api.pimlico.io/v2/84532/rpc?apikey=sepolia-secret'
 
-  it('serves the second chain from its own variable while the fallback serves the first (the prod shape)', () => {
+  it('serves the second chain from its own variable while the fallback serves the first', () => {
     process.env.DELEGATION_RAIL_BUNDLER_URL = MAINNET
     process.env.DELEGATION_RAIL_BUNDLER_URL_84532 = SEPOLIA
     expect(delegationRailBundlerUrl(8453)).toBe(MAINNET)
@@ -99,7 +100,7 @@ describe('delegationRailBundlerUrl — a credential per chain (#3416)', () => {
     expect(delegationRailBundlerUrl(84532)).toBe(SEPOLIA)
   })
 
-  it('without a per-chain variable, the fallback still serves its own chain (every environment today)', () => {
+  it('without a per-chain variable, the fallback still serves its own chain', () => {
     process.env.DELEGATION_RAIL_BUNDLER_URL = SEPOLIA
     expect(delegationRailBundlerUrl(84532)).toBe(SEPOLIA)
   })
@@ -122,6 +123,7 @@ describe('delegationRailBundlerUrl — a credential per chain (#3416)', () => {
     process.env.DELEGATION_RAIL_BUNDLER_URL_8453 = SEPOLIA
     expect(() => delegationRailBundlerUrl(8453)).toThrow(DelegationRailChainUnavailableError)
     expect(() => delegationRailBundlerUrl(8453)).toThrow(/DELEGATION_RAIL_BUNDLER_URL_8453 targets a different chain/)
+    expect(() => delegationRailBundlerUrl(8453)).toThrow(/DELEGATION_RAIL_BUNDLER_URL_8453 must hold a chain-8453 URL/)
   })
 
   it('no credential at all is the same typed error (a configuration state, not a transient failure)', () => {
@@ -137,6 +139,8 @@ describe('delegationRailBundlerUrl — a credential per chain (#3416)', () => {
       body = railUnavailableRefusalBody(e as DelegationRailChainUnavailableError)
     }
     expect(body).toMatchObject({ error_code: 'rail_unavailable_for_chain', chain_id: 84532 })
+    // The operator instruction (which variable to set) is not agent-facing.
+    expect(JSON.stringify(body)).not.toContain('DELEGATION_RAIL_BUNDLER_URL')
     expect(JSON.stringify(body)).not.toContain('main-secret')
     expect(JSON.stringify(body)).not.toContain('pimlico.io')
   })

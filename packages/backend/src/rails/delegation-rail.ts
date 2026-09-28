@@ -72,13 +72,13 @@ export class DelegationRailChainUnavailableError extends Error {
 }
 
 /**
- * The refusal a payment route answers for `DelegationRailChainUnavailableError`
- * (#3416): 503 with a machine-readable `error_code`, so a client can tell
- * "this deployment cannot serve this chain until an operator provisions it"
- * from a transient bundler failure. The message names the variable, never the
- * URL.
+ * The body a payment route answers, with a literal 503, for
+ * `DelegationRailChainUnavailableError` (#3416): a machine-readable
+ * `error_code`, so a client can tell "this deployment cannot serve this chain
+ * until an operator provisions it" from a transient bundler failure. The
+ * operator detail (which variable to set) stays in the thrown error for the
+ * server's own logs; the agent-facing body carries only the chain.
  */
-export const RAIL_UNAVAILABLE_STATUS = 503
 export function railUnavailableRefusalBody(err: DelegationRailChainUnavailableError) {
   return {
     error:
@@ -87,7 +87,6 @@ export function railUnavailableRefusalBody(err: DelegationRailChainUnavailableEr
       'get the same answer until the operator provisions this chain.',
     error_code: err.errorCode,
     chain_id: err.chainId,
-    details: err.message,
   }
 }
 
@@ -106,10 +105,10 @@ export function delegationRailBundlerUrlVar(chainId: number): string {
  * enabled on every deployment (chain is decoupled from environment, the
  * multichain architecture-B decision). So the credential is resolved PER
  * CHAIN: `DELEGATION_RAIL_BUNDLER_URL_<chainId>` first, then the unsuffixed
- * `DELEGATION_RAIL_BUNDLER_URL` as the fallback every environment already
- * sets. Before this, a deployment could only ever serve the one chain its
- * single URL named, and the other chain's bundler legs (EIP-3009 funding legs,
- * `/payments`, task budgets) failed with a generic 502.
+ * `DELEGATION_RAIL_BUNDLER_URL` as the fallback. Before this, a deployment
+ * could only ever serve the one chain its single URL named, and the other
+ * chain's bundler legs (EIP-3009 funding legs, `/payments`, task budgets)
+ * failed with a generic 502.
  */
 export function delegationRailBundlerUrl(chainId: number): string {
   if (!DELEGATION_RAIL_CHAIN_IDS.has(chainId)) {
@@ -138,7 +137,9 @@ export function delegationRailBundlerUrl(chainId: number): string {
     throw new DelegationRailChainUnavailableError(
       chainId,
       `${source} targets a different chain than ${chainId} — the credential is chain-scoped; ` +
-        `set ${perChainVar} to serve this chain`,
+        (perChain
+          ? `${perChainVar} must hold a chain-${chainId} URL`
+          : `set ${perChainVar} to serve this chain`),
     )
   }
   return url

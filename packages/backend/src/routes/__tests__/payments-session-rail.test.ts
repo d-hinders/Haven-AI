@@ -356,6 +356,8 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     })
     expect(response.statusCode).toBe(503)
     expect(response.json()).toMatchObject({ error_code: 'rail_unavailable_for_chain', chain_id: 84532 })
+    const { expectMatchesSpec } = await import('../../openapi/response-shape.js')
+    expectMatchesSpec('POST', '/payments', response.json(), '503')
     expect(response.json().error).not.toMatch(/authorization failed/)
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
     expect(mockRecordRefusal).not.toHaveBeenCalled()

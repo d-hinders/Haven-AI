@@ -87,9 +87,9 @@ type Site = {
   thrown?: unknown
 }
 
-/** Refusal fixtures: 32 HostedToolError sites (31 + the #3213 symbol-resolution refusal, the eip3009 rejection carrying a live-state branch) + the 4 generic normalizeError branches #3214 added. */
+/** Refusal fixtures: 32 HostedToolError sites (31 + the #3213 symbol-resolution refusal, the eip3009 rejection carrying a live-state branch) + the 4 generic normalizeError branches #3214 added + #3416's typed rail-unavailable branch. */
 export const REFUSAL_SITE_COUNT = 37
-/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal). */
+/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503). */
 export const REFUSAL_STEP_CALLS = 46
 
 export const REFUSAL_SITES: Site[] = [

@@ -104,7 +104,8 @@ run no estimation, so recovery retries cost nothing.
 
 - `DELEGATION_RAIL_BUNDLER_URL` (and its per-chain form
   `DELEGATION_RAIL_BUNDLER_URL_<chainId>`, below) — SECRET (embeds the API
-  key). REQUIRED and fail-closed: the legacy `SESSION_RAIL_BUNDLER_URL` fallback was **removed**
+  key). REQUIRED for every chain the deployment serves — the per-chain form or
+  the unsuffixed fallback — and fail-closed: the legacy `SESSION_RAIL_BUNDLER_URL` fallback was **removed**
   once both deployed envs migrated (#882), so an unset var throws
   ("delegation rail unavailable") instead of silently borrowing the retired
   rail's credential. The `SESSION_RAIL_*` variables and
@@ -340,7 +341,10 @@ Probes:
   whenever more than one chain is enabled (both 8453 and 84532 since the #908
   mainnet pins) — the probe exits 2 rather than guess, because a Sepolia
   credential answering a mainnet probe would read healthy while proving
-  nothing. With a single enabled chain it defaults to that chain.
+  nothing. Each chain's credential resolves separately since #3416
+  (`DELEGATION_RAIL_BUNDLER_URL_<chainId>`, then the unsuffixed fallback), so
+  one run proves one chain: run it once per chain the deployment serves. With
+  a single enabled chain it defaults to that chain.
   (Until 2026-07-25 it read the retired `SESSION_RAIL_BUNDLER_URL` and proved
   nothing about the deployed env — fixed by pointing it at the resolver so the
   probe cannot drift from the rail again.)

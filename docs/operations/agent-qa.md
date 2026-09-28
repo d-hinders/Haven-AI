@@ -978,6 +978,44 @@ them is a string a caller supplies:
   with the same title instead of filing another, re-asserting `ci-health` and
   `code-quality`; if the reopen fails, it files a new one rather than editing a
   closed issue.
+  **Listing coherence (#3409).** A page cap or lookup budget stopping the
+  search is not the only way `unconfirmed` fires. The false `never-run` on
+  2026-09-28 is best explained by an anomalous *listing* page — the spec
+  review's leading hypothesis, kept as a hypothesis because nothing logged the
+  page at the time, so it cannot be proven after the fact: its only observed
+  row, `2026-09-18T21:18:20Z`, was over nine days old against the 4-day
+  budget, and a correct, newest-first, paged read could not have opened there.
+  `observe()` runs five checks. (1) page 1's newest row was near "now" (inside
+  the guard's own `maxAgeDays` budget); (2) a later page's newest row was not
+  newer than the previous page's oldest (contiguous, newest-first); (3) every
+  in-window Railway deployment in the index has a matching run somewhere in
+  the listing; plus a check-runs lookup that threw, and a non-array
+  Deployments response body. Checks 1 and 3, the lookup-failure check, and the
+  malformed-index check all count only when no qualifying success has been
+  found — check 1 is also gated on the deployment index actually showing a dev
+  deployment inside the window, since deploys happened and recent runs should
+  exist (without one, a stale page 1 is what a genuinely quiet week looks
+  like, logged as a diagnostic line only, never escalated), and check 3 is
+  evaluated once, after paging every counted event. Check 2 fires as each page
+  arrives, which — unlike the others — can only happen while still searching,
+  since pagination stops the moment a success qualifies. A trip on any check
+  marks the search incomplete and prints a `::warning::` naming it, but a
+  found success — wherever it turns up, even on the same page a check
+  tripped on — yields `fresh` or `stale` by its own age, never `unconfirmed`.
+  An in-window deployment with no matching run (check 3) reads as EITHER an
+  anomalous listing OR the `deployment_status` trigger itself has stopped
+  firing again (#2268) — the listing alone cannot tell them apart, so
+  `unconfirmed` no longer claims "a success may exist further back" unless
+  the page cap, the lookup budget, or the index's reach also stopped the
+  search (those causes still leave it possible); #3321 still reopens either
+  way. Every observation without an in-budget success (`never-run`,
+  `never-succeeded`, `unconfirmed`, `stale`) also logs
+  per-page row counts and newest/oldest `createdAt`, the deployment index's
+  size (every creator's shas, not only Railway's), its actual oldest entry,
+  and whether the page was short (likely the whole history) or full (may not
+  reach further back), plus the lookup accounting (attempted/failed/cached) —
+  the diagnostics that would have told the leading hypothesis apart from a
+  failed lookup at the time, rather than only after the fact.
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

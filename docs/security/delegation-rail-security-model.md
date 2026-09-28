@@ -50,7 +50,11 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-25"
+  - packages/backend/src/modules/passport/attestation.ts
+  - packages/backend/src/modules/passport/revocation.ts
+  - packages/backend/src/modules/passport/issuance.ts
+  - packages/backend/src/infra/repositories/agent-passports.ts
+last-verified: "2026-09-27"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -140,6 +144,25 @@ only, carries zero value, encodes no transfer, and involves no user key,
 delegation, or allowance (a test pins the target and the zero value). It does
 not add a value-bearing server signer, so invariant 3 stands. See
 [11-agent-passport-schema](../architecture/11-agent-passport-schema.md).
+
+**Passport UID repair and recovery (#3395) — reads stay read-only; refusals
+keep the record honest:** the anchor-UID repair sweep and the #1043 recovery
+write only to `agent_passports` (the CAS UID swap, the confirmation and
+pacing stamps), never to any payment, budget or authority surface, and they
+never sign or broadcast anything. Their authority relevance is narrower: a
+UID is written only from an `Attested` log the proven-ours reader accepts
+(pinned schema, attested by the mined tx's own sender, tx targeting the
+pinned EAS contract), and every row the sweep cannot answer is paced out of
+the head on a dedicated column (`uid_repair_next_at`) rather than re-taken
+every tick — pacing cannot widen any client's powers and cannot reorder what
+the merchant verifier is handed (it never touches `updated_at`, the column
+that verifier breaks ties on). Two #3342 residuals are named rather than
+handled and live in the passport doc: a reorg between a fresh revoke's
+mining and its head-read confirmation could mark a row `confirmed` for an
+attestation the reorg resurrected, and a schema re-registration makes
+pre-existing rows permanently unrepairable until they are re-anchored.
+Neither moves spend authority; both are passport-record correctness, and the
+second is an owner-runbook obligation on re-registration.
 
 **Read-only reporting columns (#2871) — no invariant moves:** the covered
 repository `infra/repositories/transaction-history.ts` now also projects

@@ -11,7 +11,9 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-09-04"
+  - packages/backend/src/db/migrations/096_agent_passports_uid_repair_confirmed_at.ts
+  - packages/backend/src/db/migrations/099_agent_passports_uid_repair_next_at.ts
+last-verified: "2026-09-27"
 ---
 
 # L0 Agent Passport — EAS schema
@@ -251,13 +253,34 @@ that fails any guard is refused and reported, never written (#3342). The
 repair runs as a paced, idempotent sweep step (a bounded batch per tick) whose
 selector excludes rows already CONFIRMED against their receipt — a row whose
 stored UID matches its receipt is confirmed once (`uid_repair_confirmed_at`,
-migration 096) and then leaves the queue, so reads per tick stay bounded
-instead of round-robining the same oldest rows forever (#3342) — and the
+migration 096) and then leaves the queue, and every row the sweep cannot
+answer is paced out of the head on a dedicated stamp (`uid_repair_next_at`,
+migration 099, [#3395](https://github.com/d-hinders/Haven-AI/issues/3395))
+for the same hour every due row waits between passes — so reads per tick stay
+bounded and the batch DRAINS: N unanswerable rows at the head cannot starve
+the rows behind them. That is the round-robin #3342 ended for healthy rows
+and #3395 ended for the rest (#3342's version left `refused`, `no-candidate`,
+`no-receipt`, `reverted` and `tx-body-unavailable` rows re-taking the whole
+batch every tick) — and the
 revocation reconcile consults it before spending gas on a UID the chain
 cannot see — a repaired row's revoke targets the real UID and converges
 through the ordinary backoff. The re-anchor path inherits the same gate: the
 retire repairs the row and revokes the REAL attestation, then hands the row
 back to issuance keyed on the uid that was actually retired.
+
+The repair's evidence is anchored to the schema UID pinned in env
+(`AGENT_PASSPORT_SCHEMA_UID_<chain>`), so re-registering the passport schema —
+changing the pin — makes every pre-existing row's anchor receipt foreign by
+definition: its `Attested` logs carry the old schema, the proven-ours scan
+finds no candidate under the new pin, and the rows answer `no-candidate`
+(#3388) from then on. They are paced out of the sweep's head (`uid_repair_next_at`,
+migration 099, [#3395](https://github.com/d-hinders/Haven-AI/issues/3395)), so
+they cost one bounded attempt an hour rather than the whole batch — but they
+never self-repair, and a row re-entering issuance in that state refuses
+recovery the same way and cycles `failed` (the #1745 attention threshold
+eventually pages a human) until it is re-anchored. This is #3342's residual 1:
+named, not handled; re-registration is an owner action whose runbook must
+include re-anchoring every pre-existing row.
 
 Two limits on "never re-minted", stated because the unqualified version is not
 true today:
@@ -557,6 +580,26 @@ each is deliberate:
   throwing probe, an unreadable UID, a `live` attestation: all fall through to
   submitting the revoke, which is what this code did before the probe existed.
   The probe can only ever remove a stuck row, never create a wrong one.
+
+Two residuals are named rather than handled, per #3342's threat model
+([#3395](https://github.com/d-hinders/Haven-AI/issues/3395)):
+
+- **The fresh-mint confirmation reads its receipt at the chain head.** The
+  probe's settled vantage point covers the pre-spend check, but the
+  confirmation from a revoke this sweep broadcast itself is the `tx.wait(1)`
+  receipt in `revokeOnChain` (via `markRevocationConfirmed`): the path has
+  just watched that exact transaction mine, and re-reading it settled would
+  re-work the gas path for a residual that needs a reorg undoing the
+  revoke's OWN block within seconds of the wait resolving. A reorg that does
+  that would leave the row `confirmed` while the attestation is live again —
+  the monitor keeps reporting the row's DB standing, but the DB standing
+  would be wrong until the operator re-revokes. Named here; the
+  settle-before-confirm rework is not part of the UID-repair correctness
+  work.
+- **Schema re-registration makes pre-existing rows permanently unrepairable**
+  until they are re-anchored (see the repair section above). The repair and
+  recovery readers refuse old-schema evidence by design — they cannot know a
+  new pin still describes the same attestation semantics.
 
 Migration 049 refuses `revocation_status = 'confirmed'` without a
 `revocation_tx_hash`, so the convergence also needs the transaction that did it.

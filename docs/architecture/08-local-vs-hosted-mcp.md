@@ -140,8 +140,10 @@ whose open count is now 0. Three pairs stay divergent on purpose — `txHash`/`h
 map; a new undeclared pair fails `lint:vocabulary`.
 
 **Same-named tools do not always spell their arguments the same way, and until
-#2312 the difference was invisible.** The local MCP takes `idempotencyKey`
-where the hosted surface takes `idempotency_key`; local
+#2312 the difference was invisible.** The local MCP used to take `idempotencyKey`
+where the hosted surface takes `idempotency_key`; #3411 closed that divergence —
+the local surface now takes only `idempotency_key`, and refuses `idempotencyKey`
+by name (see below). Local
 `haven_pay_x402_quote` takes `quote` where hosted takes `payment_required`;
 local `haven_quote_x402` took a `body` the hosted schema had no field for
 (closed by [#2366](https://github.com/d-hinders/Haven-AI/issues/2366) — `body`
@@ -245,14 +247,16 @@ it. Conflating the two would be the same class of error the refusal existed to
 avoid committing. That divergence is gone rather than mitigated: one field, one name,
 both surfaces.
 
-**The spelling half is now IN its window** (owner decision 2026-09-06). The local
-surface accepts `idempotency_key` alongside `idempotencyKey`, warns on the legacy
-name in an additive `warnings` field, and **refuses the pair when they disagree**
-rather than resolving it — choosing either would be Haven deciding which replay
-scope the caller meant, and on this argument a wrong choice is a second spend.
-Equal values are not ambiguous and are accepted. The legacy name still works,
-because a published package cannot break installed callers on the release that
-renames an argument; removing it is a later, separate release.
+**The spelling half's window is now CLOSED** (owner decision 2026-09-06 opened it;
+#3411 closed it). The removal condition — the warning shipping in a real release,
+with `latest` several releases past it — was met by `0.1.35-alpha.0`
+(published 2026-09-07). The local surface now takes only `idempotency_key`.
+`idempotencyKey` stays **declared** in each tool's schema (so the MCP SDK's
+default `z.object` strip mode cannot silently drop it before the handler runs —
+the exact #2348 failure the refusal exists to prevent) but is **refused by
+name** with `IDEMPOTENCY_KEY_RENAMED`, whether it is sent alone or alongside
+`idempotency_key` — the legacy name being present at all is the refusal
+condition, not a disagreement between the two.
 
 **And one item on that list turned out not to belong on it.** `quote` (local)
 versus `payment_required` (hosted) is **not a spelling difference**, and the two
@@ -286,10 +290,10 @@ accept `payment_required` means the caller must know which field of its own
 quote to send, and gains a second deprecation to run for no behavioural benefit.
 Both trade a real guard for a cosmetic symmetry.
 
-**Nothing schedules the removal.** The window is open; its closing is a
-release-train decision and has not been taken. Until it is, `idempotencyKey`
-keeps working and keeps warning — which is a window only for as long as someone
-means to shut it.
+**The removal has happened (#3411).** The window closed once its written
+condition was met — see above — rather than staying open indefinitely for lack
+of a release-train decision to shut it. `idempotencyKey` no longer works; it is
+refused.
 
 Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools/contracts.ts` (re-exported by

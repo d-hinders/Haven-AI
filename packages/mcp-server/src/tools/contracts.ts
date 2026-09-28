@@ -742,15 +742,17 @@ export const STRICT_INPUT_TOOLS = {
   // unrecognised.
   haven_send:
     'This is the HOSTED surface, which spells the key idempotency_key (snake_case). ' +
-    'The local MCP (@haven_ai/mcp) spells it idempotencyKey — carrying that spelling here ' +
-    'used to be dropped in silence, and the payment then reached POST /payments with no ' +
-    'idempotency_key at all, so the replay contract never engaged and a retry spent twice.',
+    'The local MCP (@haven_ai/mcp) used to spell it idempotencyKey — carrying that spelling ' +
+    'here used to be dropped in silence, and the payment then reached POST /payments with no ' +
+    'idempotency_key at all, so the replay contract never engaged and a retry spent twice. ' +
+    '@haven_ai/mcp now refuses idempotencyKey itself (#3411); it takes idempotency_key.',
   haven_pay_mcp_tool:
     'This is the HOSTED surface, which spells the key idempotency_key (snake_case). ' +
-    'The local MCP (@haven_ai/mcp) spells it idempotencyKey — carrying that spelling here ' +
-    'used to be dropped in silence, and the SDK then fell back to a key DERIVED from the ' +
+    'The local MCP (@haven_ai/mcp) used to spell it idempotencyKey — carrying that spelling ' +
+    'here used to be dropped in silence, and the SDK then fell back to a key DERIVED from the ' +
     "merchant quote inside a 5-minute bucket, so the caller's own replay scope was " +
-    'silently replaced by a different one rather than merely lost.',
+    'silently replaced by a different one rather than merely lost. @haven_ai/mcp now refuses ' +
+    'idempotencyKey itself (#3411); it takes idempotency_key.',
   haven_quote_x402:
     'This is the HOSTED surface. It takes url, method, headers and body (#2366 added body, so ' +
     'a body-bearing POST paywall is quoted with the body the caller means to pay for). The ' +
@@ -759,11 +761,12 @@ export const STRICT_INPUT_TOOLS = {
     'hands you resource_url; this tool spells that argument url (#3100).',
   haven_pay_x402_quote:
     'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
-    '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotencyKey. Passing ' +
-    'quote already failed loudly here, because payment_required is required — it is ' +
-    'idempotencyKey that was dropped in silence, replacing the caller\'s replay scope with ' +
-    'a key derived from the quote. Pass payment_required (the paymentRequired field of a ' +
-    'haven_quote_x402 result) and idempotency_key.',
+    '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotency_key — it used to ' +
+    'take idempotencyKey, but now refuses that spelling itself (#3411). Passing quote already ' +
+    'failed loudly here, because payment_required is required — it is idempotencyKey that was ' +
+    'dropped in silence before that, replacing the caller\'s replay scope with a key derived ' +
+    'from the quote. Pass payment_required (the paymentRequired field of a haven_quote_x402 ' +
+    'result) and idempotency_key.',
   // ── #2349, batch 3 — the remainder ──────────────────────────────────────
   // Same discipline as above: each message says what the tool DOES read the
   // value from, so a caller holding the refused key learns where it belongs.

@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Removed
+
+- **BREAKING (#3411) — the legacy `idempotencyKey` argument spelling is refused, not accepted.** The #2366 deprecation window is closed: it was met when the warning shipped in `0.1.35-alpha.0` (2026-09-07), several releases behind `latest`. `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`, `haven_pay_x402_quote` and `haven_pay_x402` still **declare** `idempotencyKey` in their schema (so the MCP SDK's default `z.object` strip mode cannot silently drop it before the handler runs — the #2348 double-spend this refusal exists to prevent), but any call that sets it now fails with `IDEMPOTENCY_KEY_RENAMED` before anything is contacted or spent, whether or not `idempotency_key` was also sent. Send `idempotency_key`. The public `toolSchemas` export changes meaning: `idempotencyKey` on it is no longer an accepted input, only a refused one.
+
 ## 0.6.0-alpha.0 — 2026-09-26
 
 ### Removed

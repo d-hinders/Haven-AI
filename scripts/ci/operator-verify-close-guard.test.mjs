@@ -873,7 +873,9 @@ test('#3425: a conventional `fix: #N` commit subject is a closing keyword', () =
 })
 
 test('#3425: a body QUOTING such a subject re-emits the keyword', () => {
-  const body = 'Reworded the subject `fix: #3412 doc-review round` because it closed the issue.'
+  // Unquoted, as it was on #3415: GitHub honours this. (A code span would be
+  // ignored by GitHub's rendered parse, though this guard still over-fires on it.)
+  const body = 'Reworded the subject fix: #3412 doc-review round because it closed the issue.'
   assert.deepEqual(parseClosingRefs(body), [3412])
   assert.equal(findViolations({ body, labelsByIssue: OV_3412 }).length, 1)
 })
@@ -895,6 +897,20 @@ test('#3425: a reference only GitHub reports is named a MANUAL connection, with 
   const report = renderReport([v])
   assert.match(report, /MANUAL CONNECTION/)
   assert.match(report, /open the same commits from an unlinked branch/)
+  assert.doesNotMatch(report, /->\s+Refs #3412/, 'no rewording advice: there is no keyword to reword')
+})
+
+test('#3425: a manual connection on the SELF-CONTRADICTION path is named too', () => {
+  const [v] = findViolations({ body: '#3412 stays open after this merge.', closingRefs: [3412] })
+  assert.equal(v.signal, 'self-contradiction')
+  assert.equal(v.manual, true)
+  assert.match(v.evidence, /most likely a manual connection/)
+  assert.match(renderReport([v]), /MANUAL CONNECTION/)
+})
+
+test('#3425: a keyword in the TITLE counts as text, so it is never called manual', () => {
+  const [v] = findViolations({ title: 'Closes #3412', closingRefs: [3412], labelsByIssue: OV_3412 })
+  assert.equal(v.manual, undefined)
 })
 
 test('#3425: a reference GitHub reports AND the text carries is not called manual', () => {

@@ -377,7 +377,7 @@ export function findViolations({ body, title, commits = [], closingRefs, labelsB
       : {
           manual: true,
           suffix:
-            '; no text on this pull request names it with a keyword: it is a manual connection ' +
+            '; no keyword this guard recognises names it, so it is most likely a manual connection ' +
             '(linked branch or Development sidebar): close and reopen from an unlinked branch',
         }
 
@@ -435,7 +435,8 @@ export function renderReport(violations) {
     'that reaches the default branch, and — via the squash subject — in the title.',
     'Reference it without a closing keyword instead:',
     '',
-    ...violations.map((v) => `  Closes #${v.issue}  ->  Refs #${v.issue}`),
+    // A manual connection is in no text, so there is no keyword to reword.
+    ...violations.filter((v) => !v.manual).map((v) => `  Closes #${v.issue}  ->  Refs #${v.issue}`),
     '',
     'To write ABOUT the keyword without emitting it, use a form GitHub does not',
     'parse: `Refs #<n>`, a non-numeric placeholder (`Closes #<n>`), or the number',

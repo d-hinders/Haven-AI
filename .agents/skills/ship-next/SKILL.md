@@ -70,8 +70,8 @@ for overlap:
 - `gh pr list --state open` — any open PR on the candidate's `area:*` surface or
   touching the files this issue implies;
 - recently pushed branches (`git ls-remote --heads origin` or `gh api` recent
-  branch activity) whose name references this issue or surface — still
-  mandatory: it is the only bullet that sees a branch nobody linked;
+  branch activity) whose name references this issue or surface — the main
+  pushed-branch check, since sessions no longer link branches (#3425);
 - the candidate issue's assignee and latest comments;
 - `gh pr list --search "<issue-number>"`;
 - the tail of the standing coordination channel,
@@ -122,8 +122,8 @@ connection** to an issue that must stay open, close it and open the same
 commits from an unlinked branch; the close guard names this case.
 
 If your claim is refused, or you abandon the work **before any PR was opened
-from the branch**, delete the branch (`git push origin --delete <branch>`) when
-you post the `🔓 RELEASE`. A zero-PR branch is never reaped by delete-on-merge,
+from the branch**, delete the branch you pushed
+(`git push origin --delete <branch>`) when you post the `🔓 RELEASE`. A zero-PR branch is never reaped by delete-on-merge,
 and it would signal an overlap with no expiry. Once a PR exists, the PR is the
 record: close the PR instead and leave the ref to GitHub (deleting the head of
 an open PR closes it silently). Never delete a pinned designated branch.

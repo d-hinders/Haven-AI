@@ -402,7 +402,10 @@ test.describe('marketplace visual regression', () => {
     await expect(dialog).toHaveCount(1)
     await expect(dialog.getByRole('heading', { name: `Fund ${havenDemoStore.name}` })).toHaveCount(1)
     await expect(dialog.getByLabel('Agent')).toHaveCount(1)
-    await expect(dialog.getByText(`Pays only ${havenDemoStore.name}`)).toHaveCount(1)
+    // Anchored and case-sensitive: `getByText` with a string is a
+    // case-insensitive substring match, and the modal's intro ("…a budget that
+    // pays only <merchant>…") contains the same words.
+    await expect(dialog.getByText(new RegExp(`^Pays only ${havenDemoStore.name} \\(`))).toHaveCount(1)
 
     await page.evaluate(() => document.fonts.ready)
     await expect(dialog).toHaveScreenshot(`merchant-page-fund-merchant-modal-desktop${schemeSuffix}.png`, {

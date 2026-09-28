@@ -44,12 +44,21 @@ export function createInvoiceNumberer(seedMs: number = Date.now()): () => string
 
 const nextInvoiceNumber = createInvoiceNumberer()
 
-/** Luhn-based check digit for Swedish OCR. */
-function luhnCheck(digits: string): number {
+/**
+ * Luhn (modulus 10) check digit to APPEND to `base` — the rule Bankgirot OCR
+ * references are validated with.
+ *
+ * #3422: the digit is computed before it exists, so the RIGHTMOST digit of
+ * the base is the first one doubled. The validating form of the same
+ * algorithm starts one position further left, because there the rightmost
+ * digit is the check digit itself; using that form here produced a wrong
+ * digit on every OCR this merchant issued.
+ */
+function luhnCheckDigit(base: string): number {
   let sum = 0
-  let double = false
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let d = parseInt(digits[i], 10)
+  let double = true
+  for (let i = base.length - 1; i >= 0; i--) {
+    let d = parseInt(base[i], 10)
     if (double) d *= 2
     if (d > 9) d -= 9
     sum += d
@@ -61,8 +70,7 @@ function luhnCheck(digits: string): number {
 function generateOcr(invoiceNumber: string): string {
   // Use numeric part of invoice number as OCR base
   const base = invoiceNumber.replace(/\D/g, '')
-  const check = luhnCheck(base)
-  return `${base}${check}`
+  return `${base}${luhnCheckDigit(base)}`
 }
 
 function isoDate(d: Date): string {

@@ -135,3 +135,53 @@ describe('invoice numbering across restarts (#2988)', () => {
     expect(seq).toBeLessThanOrEqual(Date.now() + 1)
   })
 })
+
+/**
+ * #3422: every OCR the merchant issued failed Luhn validation — the check
+ * digit was computed with the VALIDATING form of the algorithm (doubling from
+ * the second-to-last digit) instead of the generating form (doubling from the
+ * last digit of the base). These assertions validate the OCR the executed
+ * `generateInvoice` emitted, with an independent validator, not the helper's
+ * own arithmetic.
+ */
+function passesLuhn(ocr: string): boolean {
+  let sum = 0
+  for (let i = 0; i < ocr.length; i++) {
+    let d = Number(ocr[ocr.length - 1 - i])
+    if (i % 2 === 1) {
+      d *= 2
+      if (d > 9) d -= 9
+    }
+    sum += d
+  }
+  return sum % 10 === 0
+}
+
+describe('OCR check digit (#3422)', () => {
+  it('matches the textbook Luhn vector (79927398713)', () => {
+    const invoice = generateInvoice({ ...BASE_PARAMS, invoiceNumber: 'FAK-7992739871' })
+    expect(invoice.json.ocr_nummer).toBe('79927398713')
+  })
+
+  it('reissues the four OCRs observed live on 2026-09-28 with valid check digits', () => {
+    const observed: Array<[string, string]> = [
+      ['FAK-2026-1790585044329', '202617905850443299'],
+      ['FAK-2026-1790585044330', '202617905850443307'],
+      ['FAK-2026-1790585044331', '202617905850443315'],
+      ['FAK-2026-1790585044332', '202617905850443323'],
+    ]
+    for (const [invoiceNumber, expected] of observed) {
+      expect(generateInvoice({ ...BASE_PARAMS, invoiceNumber }).json.ocr_nummer).toBe(expected)
+    }
+  })
+
+  it('every OCR from a run of consecutive invoice numbers passes Luhn validation', () => {
+    const next = createInvoiceNumberer(Date.parse('2026-09-28T12:00:00.000Z'))
+    for (let i = 0; i < 200; i++) {
+      const invoiceNumber = next()
+      const { ocr_nummer } = generateInvoice({ ...BASE_PARAMS, invoiceNumber }).json
+      expect(ocr_nummer.startsWith(invoiceNumber.replace(/\D/g, ''))).toBe(true)
+      expect(passesLuhn(ocr_nummer), `${invoiceNumber} → ${ocr_nummer}`).toBe(true)
+    }
+  })
+})

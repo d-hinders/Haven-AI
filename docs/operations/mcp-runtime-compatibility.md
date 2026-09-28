@@ -11,6 +11,7 @@ covers:
   - packages/backend/src/__tests__/connector-upgrade-command-parity.test.ts
   - scripts/ci/upgrade-hint-guard.test.mjs
   - packages/mcp-server/src/tools/**
+  - packages/sdk/src/x402-erc7710.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/x402/sign-context.ts
   - packages/sdk/src/userop-binding.ts
@@ -2409,6 +2410,31 @@ reading `null`.
 > published SDKs before that never send the budget, so their retries are
 > none-vs-none and replay exactly as before. No wire field moves and no
 > runtime needs an update for calls that never name a task budget.
+
+> **Re-verified (#3417, 2026-09-28):** the `confirmed` arm of the replay
+> recipe above did not reach the agent as described. The backend answers with
+> the `tx_hash` and no `sign_data`, but the SDK's erc7710 path read the
+> missing `sign_data` as a scheme mismatch, so all three hosted entry points
+> returned a 500 with "retry once". That is a deterministic dead end: the
+> retry gets the same answer. The hosted entry points now answer a settled key
+> with a done state instead: `settled: true`, `idempotent_replay: true`,
+> `settlement_tx_hash`, `next_action: none`, and no `next_tool`. That holds only
+> when the confirmed row pays the merchant this call names (`to`) for the
+> resource it names (`resource_url`). The backend's lookup is keyed on the
+> idempotency key alone, so a key reused for another payee or resource, or
+> first spent on an EIP-3009 funding leg (whose payee is the delegate), answers
+> a 409 "use a new idempotency key" refusal instead. Amount and the MCP tool
+> call are not compared, so a key reused for a different tool at the same MCP
+> merchant endpoint answers with that merchant's original settlement. This is
+> hosted-only; no signer
+> or connector version is involved. An SDK consumer calling
+> `prepareX402Erc7710()` with an `idempotencyKey` gets the typed
+> `X402Erc7710AlreadySettledError` (or the 409 `HavenApiError`) from the first
+> SDK built with this change. (`settleX402Erc7710()` shares the check, but its
+> typed options carry no idempotency key, so it does not reach a replay.)
+> Every SDK published before it (`alpha`/`latest` `0.6.0-alpha.0` and the `dev`
+> snapshots before it) still throws the scheme-mismatch `HavenApiError` for
+> that answer.
 
 One more skew row since #1307, on the SETTLE leg rather than the sign leg:
 `haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /

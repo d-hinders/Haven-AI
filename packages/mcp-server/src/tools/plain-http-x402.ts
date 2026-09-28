@@ -71,7 +71,13 @@ import {
   readMaxAmountCap,
 } from './support/cap-price.js'
 import { HostedToolError, normalizeError, runTool } from './support/errors.js'
-import { buildAgentGuidance, paymentStatusHandoff, type HostedHandoff, refusalNextStep } from './support/guidance.js'
+import {
+  buildAgentGuidance,
+  catchSettledReplay,
+  paymentStatusHandoff,
+  type HostedHandoff,
+  refusalNextStep,
+} from './support/guidance.js'
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
 import {
   isPendingApproval,
@@ -366,7 +372,10 @@ export function createPlainHttpX402Handlers(
               // #3378: build the settlement child under the task budget the
               // caller named (#3329) — this handler used to drop it.
               ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
-            })
+            }).catch(catchSettledReplay)
+            // #3417: a replayed key whose payment already settled is a done state,
+            // not the transient 500 it used to surface as — answer with the original.
+            if ('settledReplay' in prepared) return prepared.settledReplay
             return {
               payment_id: prepared.paymentId,
               status: 'pending_signature',

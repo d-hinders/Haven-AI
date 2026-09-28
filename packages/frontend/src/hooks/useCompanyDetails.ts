@@ -32,9 +32,10 @@ import type { ApiOperations } from '@haven_ai/core'
 import { api, ApiRequestError } from '@/lib/api'
 
 export type CompanyDetails = ApiOperations['getCompanyDetails']['responses']['200']['content']['application/json']
+export type CompanyDetailsRow = NonNullable<CompanyDetails>
 export type UpsertCompanyDetailsBody =
   ApiOperations['putCompanyDetails']['requestBody']['content']['application/json']
-export type ViesStatus = NonNullable<CompanyDetails['vies_status']>
+export type ViesStatus = NonNullable<CompanyDetailsRow['vies_status']>
 
 export type CompanyDetailsStatus = 'loading' | 'off' | 'empty' | 'ready' | 'error'
 
@@ -48,8 +49,12 @@ export type CompanyDetailsStatus = 'loading' | 'off' | 'empty' | 'ready' | 'erro
  * words to show, verbatim, per the issue's "surface the backend's 400
  * messages in plain words" acceptance point.
  */
-export type SaveResult = { code: 'validation'; message: string } | { code: 'rate_limited' } | { code: 'unknown' }
-export type ViesCheckResult = { code: 'rate_limited' } | { code: 'unknown' }
+export type SaveResult =
+  | { code: 'validation'; message: string }
+  | { code: 'rate_limited' }
+  | { code: 'feature_off' }
+  | { code: 'unknown' }
+export type ViesCheckResult = { code: 'rate_limited' } | { code: 'feature_off' } | { code: 'unknown' }
 
 export const VIES_POLL_INTERVAL_MS = 4000
 export const VIES_POLL_MAX_MS = 60_000
@@ -77,14 +82,22 @@ export function useCompanyDetails() {
   const [checkingVies, setCheckingVies] = useState(false)
   const [viesCheckError, setViesCheckError] = useState<ViesCheckResult | null>(null)
 
+  // A single counter, bumped by `load`, `save`, `remove` and `recheckVies`
+  // BEFORE each of those starts its own request. Any earlier request that
+  // resolves after a newer one has started — most importantly a VIES poll
+  // tick resolving after the owner has just saved or deleted — checks this
+  // counter against the value it captured and discards its own result
+  // rather than clobbering the newer one (#3332 review m2, the poll/save
+  // race).
   const generationRef = useRef(0)
+  const [pollTimedOut, setPollTimedOut] = useState(false)
 
   const load = useCallback(async () => {
     const generation = ++generationRef.current
     setStatus((prev) => (prev === 'ready' || prev === 'empty' ? prev : 'loading'))
     setError(null)
     try {
-      const row = await api.get<CompanyDetails | null>(PATH)
+      const row = await api.get<CompanyDetails>(PATH)
       if (generationRef.current !== generation) return
       setDetails(row)
       setStatus(row ? 'ready' : 'empty')
@@ -96,7 +109,11 @@ export function useCompanyDetails() {
       }
       setDetails(null)
       setStatus('error')
-      setError(err instanceof Error ? err.message : 'We could not load your company details.')
+      // The component owns the actual copy (`copy.loadError`) — this hook
+      // never renders a hard-coded English sentence; `error` here is kept
+      // only for a future need to log/report the underlying cause, not for
+      // display (#3332 review m1).
+      setError(err instanceof Error ? err.message : null)
     }
   }, [])
 
@@ -104,30 +121,55 @@ export function useCompanyDetails() {
     void load()
   }, [load])
 
-  // Poll while a VIES check is in flight — bounded, and cleaned up on
-  // unmount or the moment the status leaves `pending`.
+  // Poll while a VIES check is in flight — bounded (`VIES_POLL_MAX_MS`),
+  // cleaned up on unmount or the moment the status leaves `pending`, and
+  // RESTARTED (a fresh `startedAt`, `pollTimedOut` cleared) whenever
+  // `updated_at` moves — a re-save or a manual recheck that lands back on
+  // `pending` must not inherit an already-elapsed bound (#3332 review m1).
   useEffect(() => {
-    if (details?.vies_status !== 'pending') return
+    if (details?.vies_status !== 'pending') {
+      setPollTimedOut(false)
+      return
+    }
+    setPollTimedOut(false)
     let cancelled = false
     let timeout: ReturnType<typeof setTimeout> | null = null
     const startedAt = Date.now()
 
     async function tick() {
       if (cancelled) return
-      if (Date.now() - startedAt >= VIES_POLL_MAX_MS) return
+      if (Date.now() - startedAt >= VIES_POLL_MAX_MS) {
+        setPollTimedOut(true)
+        return
+      }
+      const requestGeneration = generationRef.current
       try {
         const row = await api.get<CompanyDetails>(PATH)
-        if (cancelled) return
+        if (cancelled || generationRef.current !== requestGeneration) return
+        if (row === null) {
+          // The row was removed elsewhere (another tab, an operator) while
+          // this tab was polling — never read a property of `null`.
+          setDetails(null)
+          setStatus('empty')
+          return
+        }
         setDetails(row)
-        if (row.vies_status === 'pending' && Date.now() - startedAt < VIES_POLL_MAX_MS) {
-          timeout = setTimeout(() => void tick(), VIES_POLL_INTERVAL_MS)
+        if (row.vies_status === 'pending') {
+          if (Date.now() - startedAt < VIES_POLL_MAX_MS) {
+            timeout = setTimeout(() => void tick(), VIES_POLL_INTERVAL_MS)
+          } else {
+            setPollTimedOut(true)
+          }
         }
       } catch {
         // A flaky poll tick is not evidence the check failed — try again
         // until the bound runs out, silently (the same convention
         // `useAgentConnectionSetupStatus` follows).
-        if (!cancelled && Date.now() - startedAt < VIES_POLL_MAX_MS) {
+        if (cancelled || generationRef.current !== requestGeneration) return
+        if (Date.now() - startedAt < VIES_POLL_MAX_MS) {
           timeout = setTimeout(() => void tick(), VIES_POLL_INTERVAL_MS)
+        } else {
+          setPollTimedOut(true)
         }
       }
     }
@@ -137,9 +179,10 @@ export function useCompanyDetails() {
       cancelled = true
       if (timeout !== null) clearTimeout(timeout)
     }
-  }, [details?.vies_status])
+  }, [details?.vies_status, details?.updated_at])
 
   const save = useCallback(async (body: UpsertCompanyDetailsBody) => {
+    generationRef.current += 1
     setSaving(true)
     setSaveError(null)
     try {
@@ -151,6 +194,11 @@ export function useCompanyDetails() {
       let result: SaveResult
       if (err instanceof ApiRequestError && err.status === 429) {
         result = { code: 'rate_limited' }
+      } else if (err instanceof ApiRequestError && err.status === 404) {
+        // The flag went off mid-session (an operator action, or a stale
+        // tab) — a validation message ("check the fields") would blame the
+        // wrong thing (#3332 review m2).
+        result = { code: 'feature_off' }
       } else if (err instanceof ApiRequestError && err.status === 400) {
         const bodyError = (err.body as { error?: string } | undefined)?.error
         result = { code: 'validation', message: bodyError ?? err.message }
@@ -165,6 +213,7 @@ export function useCompanyDetails() {
   }, [])
 
   const remove = useCallback(async () => {
+    generationRef.current += 1
     setDeleting(true)
     setDeleteError(false)
     try {
@@ -181,6 +230,7 @@ export function useCompanyDetails() {
   }, [])
 
   const recheckVies = useCallback(async () => {
+    generationRef.current += 1
     setCheckingVies(true)
     setViesCheckError(null)
     try {
@@ -188,8 +238,14 @@ export function useCompanyDetails() {
       setDetails(row)
       return { ok: true as const }
     } catch (err) {
-      const result: ViesCheckResult =
-        err instanceof ApiRequestError && err.status === 429 ? { code: 'rate_limited' } : { code: 'unknown' }
+      let result: ViesCheckResult
+      if (err instanceof ApiRequestError && err.status === 429) {
+        result = { code: 'rate_limited' }
+      } else if (err instanceof ApiRequestError && err.status === 404) {
+        result = { code: 'feature_off' }
+      } else {
+        result = { code: 'unknown' }
+      }
       setViesCheckError(result)
       return { ok: false as const, ...result }
     } finally {
@@ -211,5 +267,6 @@ export function useCompanyDetails() {
     recheckVies,
     checkingVies,
     viesCheckError,
+    pollTimedOut,
   }
 }

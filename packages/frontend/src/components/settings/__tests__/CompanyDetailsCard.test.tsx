@@ -1,11 +1,11 @@
 /**
  * `CompanyDetailsCard` (#3332) through the real hook with `@/lib/api` mocked.
  *
- * Covers: the 404-gating split (feature off vs. no row yet — the backend
- * answers 404 for both, distinguished only by the error body), form
- * validation, the PUT body shape, every VIES status line (and the "never
- * verified" rule), VIES polling stopping on unmount, delete-with-confirm,
- * and 429/400 handling.
+ * Covers: status-only gating (404 = feature off, 200 `null` = flag on but no
+ * row saved yet, 200 with a row = ready), form validation, the PUT body
+ * shape, every VIES status line (and the "never verified" rule), VIES
+ * polling stopping on unmount and on the 60s bound, "Check again" behaviour,
+ * the poll/save generation race, delete-with-confirm, and 429/400 handling.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,8 +23,9 @@ vi.mock('@/lib/api', async () => {
 
 import { ApiRequestError } from '@/lib/api'
 import { CompanyDetailsCard } from '@/components/settings/CompanyDetailsCard'
+import { VIES_POLL_INTERVAL_MS, VIES_POLL_MAX_MS } from '@/hooks/useCompanyDetails'
 
-type CompanyDetails = ApiOperations['getCompanyDetails']['responses']['200']['content']['application/json']
+type CompanyDetails = NonNullable<ApiOperations['getCompanyDetails']['responses']['200']['content']['application/json']>
 type PutBody = ApiOperations['putCompanyDetails']['requestBody']['content']['application/json']
 
 // #3332 contract check (tsc-time, never invoked): a field this literal does
@@ -201,13 +202,108 @@ describe('CompanyDetailsCard — validation and save', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText(/too many times just now/)).toBeInTheDocument()
   })
+
+  it('shows "This setting is no longer available." on a 404 from PUT (flag went off mid-session)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    mockApi.put.mockImplementation(() => Promise.reject(new ApiRequestError('Not found', 404, { error: 'Not found' })))
+    renderCard()
+    await waitFor(() => screen.getByTestId('company-details-form'))
+    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+    fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('This setting is no longer available.')).toBeInTheDocument()
+    expect(screen.queryByText(/Check the fields/)).not.toBeInTheDocument()
+  })
+
+  it('shows "Try again in a moment." — never "check the fields" — on a network/5xx Save failure (design review 8)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    mockApi.put.mockImplementation(() => Promise.reject(new ApiRequestError('boom', 500)))
+    renderCard()
+    await waitFor(() => screen.getByTestId('company-details-form'))
+    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+    fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('We could not save your company details. Try again in a moment.')).toBeInTheDocument()
+  })
+
+  it('rejects an organisation number with a disallowed character, matching the backend shape, without calling PUT (m2)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    renderCard()
+    await waitFor(() => screen.getByTestId('company-details-form'))
+    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+    fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677_8899' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(
+      await screen.findByText('Organisation number can only contain letters, numbers, spaces, and . - /'),
+    ).toBeInTheDocument()
+    expect(mockApi.put).not.toHaveBeenCalled()
+  })
+
+  it('rejects a legal name with a control character, without calling PUT (m2)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    renderCard()
+    await waitFor(() => screen.getByTestId('company-details-form'))
+    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada\u0000 Lovelace AB' } })
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+    fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Legal name cannot contain hidden or control characters.')).toBeInTheDocument()
+    expect(mockApi.put).not.toHaveBeenCalled()
+  })
+
+  it('maps a backend VAT-shape 400 onto the VAT field and focuses it (design review 3)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    mockApi.put.mockImplementation(() =>
+      Promise.reject(
+        new ApiRequestError('Enter a VAT number as a two-letter country prefix followed by up to 20 letters or digits.', 400, {
+          error: 'Enter a VAT number as a two-letter country prefix followed by up to 20 letters or digits.',
+        }),
+      ),
+    )
+    renderCard()
+    await waitFor(() => screen.getByTestId('company-details-form'))
+    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+    fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+    fireEvent.change(screen.getByLabelText('VAT number (optional)'), { target: { value: 'NOT-A-VAT' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    const message = await screen.findByText(
+      'Enter a VAT number as a two-letter country prefix followed by up to 20 letters or digits.',
+    )
+    expect(message).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText('VAT number (optional)')).toHaveFocus())
+    expect(screen.getByLabelText('VAT number (optional)')).toHaveAttribute(
+      'aria-describedby',
+      expect.stringContaining('company-vat-number-error'),
+    )
+  })
+
+  it('focuses the first invalid field on a client-validation failure (design review 3)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    renderCard()
+    await waitFor(() => screen.getByTestId('company-details-form'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Enter a legal name.')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveFocus())
+  })
+
+  it('has autoComplete off on the organisation and VAT number fields (nit)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    renderCard()
+    await waitFor(() => screen.getByTestId('company-details-form'))
+    expect(screen.getByLabelText('Organisation number')).toHaveAttribute('autoComplete', 'off')
+    expect(screen.getByLabelText('VAT number (optional)')).toHaveAttribute('autoComplete', 'off')
+  })
 })
 
 describe('CompanyDetailsCard — VIES status copy', () => {
   const ALL_RENDERED_TEXT_CASES: Array<[CompanyDetails['vies_status'], string, string | null]> = [
     ['pending', 'Checking the VAT number with VIES…', null],
-    ['valid', 'VAT number checked against VIES on September 20, 2026', '2026-09-20T10:00:00.000Z'],
-    ['invalid', 'VIES says this VAT number is not valid.', null],
+    ['valid', 'VAT number checked against VIES on 20 September 2026', '2026-09-20T10:00:00.000Z'],
+    ['invalid', 'VIES says this VAT number is not valid. Check the number and save it again.', null],
     ['not_verifiable', 'VIES could not check this number right now.', null],
   ]
 
@@ -243,7 +339,7 @@ describe('CompanyDetailsCard — VIES status copy', () => {
     mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'invalid' })))
     mockApi.post.mockImplementation(() => Promise.resolve(details({ vies_status: 'pending', vies_checked_at: null })))
     renderCard()
-    await waitFor(() => screen.getByText('VIES says this VAT number is not valid.'))
+    await waitFor(() => screen.getByText('VIES says this VAT number is not valid. Check the number and save it again.'))
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/user/company-details/vies-check'))
     expect(await screen.findByText('Checking the VAT number with VIES…')).toBeInTheDocument()
@@ -253,9 +349,33 @@ describe('CompanyDetailsCard — VIES status copy', () => {
     mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'invalid' })))
     mockApi.post.mockImplementation(() => Promise.reject(new ApiRequestError('Too many requests', 429, { error: 'Too many requests' })))
     renderCard()
-    await waitFor(() => screen.getByText('VIES says this VAT number is not valid.'))
+    await waitFor(() => screen.getByText('VIES says this VAT number is not valid. Check the number and save it again.'))
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     expect(await screen.findByText(/too many times just now/)).toBeInTheDocument()
+  })
+
+  it('shows "This setting is no longer available." on a 404 from vies-check (flag off mid-session)', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'invalid' })))
+    mockApi.post.mockImplementation(() => Promise.reject(new ApiRequestError('Not found', 404, { error: 'Not found' })))
+    renderCard()
+    await waitFor(() => screen.getByText('VIES says this VAT number is not valid. Check the number and save it again.'))
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(await screen.findByText('This setting is no longer available.')).toBeInTheDocument()
+  })
+
+  it('renders "valid" with no dangling "on" when vies_checked_at is null (nit)', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'valid', vies_checked_at: null })))
+    renderCard()
+    expect(await screen.findByText('VIES confirmed this VAT number.')).toBeInTheDocument()
+    expect(screen.queryByText(/checked against VIES on\s*$/)).not.toBeInTheDocument()
+  })
+
+  it('hides the VIES line while the VAT field has been edited away from the saved number (design review 11/12)', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'valid' })))
+    renderCard()
+    await waitFor(() => screen.getByText('VAT number checked against VIES on 20 September 2026'))
+    fireEvent.change(screen.getByLabelText('VAT number (optional)'), { target: { value: 'SE999999999901' } })
+    expect(screen.queryByTestId('vies-status-line')).not.toBeInTheDocument()
   })
 })
 
@@ -279,7 +399,7 @@ describe('CompanyDetailsCard — VIES polling', () => {
       await vi.advanceTimersByTimeAsync(4000)
     })
     expect(call).toBe(2)
-    expect(await screen.findByText('VAT number checked against VIES on September 20, 2026')).toBeInTheDocument()
+    expect(await screen.findByText('VAT number checked against VIES on 20 September 2026')).toBeInTheDocument()
 
     // No further poll ticks once the status left `pending`.
     await act(async () => {
@@ -305,6 +425,26 @@ describe('CompanyDetailsCard — VIES polling', () => {
       await vi.advanceTimersByTimeAsync(30000)
     })
     expect(call).toBe(1)
+  })
+
+  it('hides "Check again" while a poll is actively in flight, and never shows "Checking…" forever (M1)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'pending', vies_checked_at: null })))
+    renderCard()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(await screen.findByText('Checking the VAT number with VIES…')).toBeInTheDocument()
+    // Still well inside the bound — no action shown while a poll tick is live.
+    expect(screen.queryByRole('button', { name: 'Check again' })).not.toBeInTheDocument()
+
+    // Once the bound elapses, a still-pending check gets an action instead
+    // of being stuck on "Checking…" forever.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VIES_POLL_MAX_MS + VIES_POLL_INTERVAL_MS)
+    })
+    expect(screen.getByText('Checking the VAT number with VIES…')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Check again' })).toBeInTheDocument()
   })
 })
 
@@ -336,5 +476,73 @@ describe('CompanyDetailsCard — delete', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
     expect(await screen.findByText('We could not remove your company details. Try again in a moment.')).toBeInTheDocument()
     expect(screen.getByLabelText('Legal name')).toHaveValue('Ada Lovelace AB')
+    // Design review 5: shown INSIDE the still-open dialog, not behind it.
+    expect(within(dialog).getByText('We could not remove your company details. Try again in a moment.')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('clears "Saved." on a successful delete, and announces "Company details removed." (m3 / design review 6)', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details()))
+    mockApi.put.mockImplementation((_path: string, body: unknown) => Promise.resolve({ ...details(), ...(body as PutBody) }))
+    mockApi.delete.mockImplementation(() => Promise.resolve({ ok: true }))
+    renderCard()
+    await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveValue('Ada Lovelace AB'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+
+    mockApi.get.mockImplementation(() => noRow())
+    fireEvent.click(screen.getByRole('button', { name: 'Remove company details' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    expect(screen.queryByText('Saved.')).not.toBeInTheDocument()
+    expect(await screen.findByText('Company details removed.')).toBeInTheDocument()
+  })
+
+  it('blocks Escape and backdrop close while a delete is in flight (nit)', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details()))
+    let resolveDelete!: (value: { ok: boolean }) => void
+    mockApi.delete.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDelete = resolve
+        }),
+    )
+    renderCard()
+    await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveValue('Ada Lovelace AB'))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove company details' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    resolveDelete({ ok: true })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+})
+
+describe('CompanyDetailsCard — load error (m1/design review 4)', () => {
+  it('always shows the plain copy.loadError sentence, never a raw err.message', async () => {
+    mockApi.get.mockImplementation(() => Promise.reject(new ApiRequestError('ECONNRESET: socket hang up', 500)))
+    renderCard()
+    expect(await screen.findByText('We could not load your company details. Try again in a moment.')).toBeInTheDocument()
+    expect(screen.queryByText(/ECONNRESET/)).not.toBeInTheDocument()
+  })
+
+  it('renders nothing while the first read is in flight — no title, no skeleton (design review 7)', async () => {
+    let resolveGet!: (value: unknown) => void
+    mockApi.get.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveGet = resolve
+        }),
+    )
+    const { container } = renderCard()
+    expect(container).toBeEmptyDOMElement()
+    resolveGet(null)
+    await waitFor(() => expect(screen.getByTestId('company-details-form')).toBeInTheDocument())
   })
 })

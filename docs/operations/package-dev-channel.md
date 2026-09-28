@@ -25,8 +25,14 @@ covers:
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-09-25"
+last-verified: "2026-09-28"
 ---
+
+> `last-verified` bumped to 2026-09-28 by the coupling gate on #3332's fix
+> pass, which touched `packages/backend/src/config.ts` — a comment-only
+> re-wording of `ownerCompanyDetailsEnabled`'s own comment, nowhere near this
+> document's dev-channel/connector-runtime claims. Re-read against the
+> touched hunk and nothing here moved.
 
 # Package dev channel (`@haven_ai/*@dev`)
 

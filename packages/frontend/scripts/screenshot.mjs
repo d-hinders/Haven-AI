@@ -1755,6 +1755,12 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/accounting/providers') return { providers: FIXTURE_ACCOUNTING_PROVIDERS }
   if (pathname === '/accounting/connections') return { connections: [FIXTURE_ACCOUNTING_CONNECTION] }
   if (pathname === '/accounting/feed/status') return FIXTURE_ACCOUNTING_FEED_STATUS
+  // Owner company details (#3332): 404 is the DEFAULT state — the flag off,
+  // same as a real deployment with `HAVEN_OWNER_COMPANY_DETAILS` unset —
+  // so a plain `/settings` route capture shows the section correctly
+  // hidden rather than `FIXTURE_EMPTY_FALLBACK`'s benign-but-wrong 200
+  // (which `useCompanyDetails` would read as an empty, flag-ON row).
+  if (pathname === '/user/company-details') return httpError(404, { error: 'Not found' })
   if (pathname === '/agent-activity/feed') {
     return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
   }

@@ -451,9 +451,9 @@ export const config = {
   // GET/PUT/POST-vies-check on `/user/company-details*` answer 404 when off
   // (DELETE is the deliberate exception — erasure always works), and the
   // evidence `parties.buyer` block (`openapi/party-model.ts`) is omitted
-  // regardless of what the table holds — the flag gates the FEATURE, not a
-  // settings form (there is no settings UI yet; that is the #3332 frontend
-  // slice).
+  // regardless of what the table holds — the flag gates the FEATURE, not the
+  // Settings → Company details screen built on top of it (the #3332
+  // frontend slice).
   ownerCompanyDetailsEnabled: parseBooleanFlag(
     'HAVEN_OWNER_COMPANY_DETAILS',
     process.env.HAVEN_OWNER_COMPANY_DETAILS,

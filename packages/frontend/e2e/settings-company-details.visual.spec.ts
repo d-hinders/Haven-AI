@@ -25,6 +25,24 @@ const SNAPSHOT_OPTIONS = {
   threshold: 0.02,
 } as const
 
+/**
+ * The mobile clip's own height (#3332 design review 1). The form stacks all
+ * four fields at 390px width (below the `sm:grid-cols-2` breakpoint), which
+ * makes the card taller than the committed 844px mobile viewport. Capturing
+ * an element taller than the viewport at the committed height forced Chromium
+ * to paint the fixed mobile tab bar (`Sidebar`'s `fixed bottom-…`) into the
+ * capture surface, over the bottom of the card, the same class of bug
+ * `scripts/full-page-capture.mjs` documents for full-page captures of this
+ * same `#main-content` shell (`h-screen overflow-hidden` outer, `overflow-y-
+ * auto` inner) — a cut-off card under fixed chrome. The width stays the
+ * committed 390 (this IS the 390px render); only the browser viewport's
+ * HEIGHT grows here, tall enough that the whole card sits inside one
+ * viewport and nothing needs to be painted beyond it, so the fixed tab bar
+ * never gets baked into the crop. The clip filenames are unchanged — height
+ * is not part of their identity, only the width class (`-mobile`) is.
+ */
+const MOBILE_CAPTURE_HEIGHT = 2000
+
 const EMPTY_DETAILS = null
 
 const FILLED_DETAILS = {
@@ -82,7 +100,7 @@ test.describe('settings company details', () => {
     test(`empty — purpose text, blank fields (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
-      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
       await serveCompanyDetails(page, EMPTY_DETAILS, 200)
       const card = await openSettings(page)
       await expect(card.getByLabel('Legal name')).toHaveValue('')
@@ -96,11 +114,11 @@ test.describe('settings company details', () => {
     test(`filled — VIES checked against VIES, never "verified" (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
-      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
       await serveCompanyDetails(page, FILLED_DETAILS)
       const card = await openSettings(page)
       await expect(card.getByLabel('Legal name')).toHaveValue('Ada Lovelace AB')
-      await expect(card.getByText('VAT number checked against VIES on September 20, 2026')).toHaveCount(1)
+      await expect(card.getByText('VAT number checked against VIES on 20 September 2026')).toHaveCount(1)
       await expect(card.getByText(/verified/i)).toHaveCount(0)
       await expect(card.getByRole('button', { name: 'Remove company details' })).toHaveCount(1)
       await expect(card).toHaveScreenshot(

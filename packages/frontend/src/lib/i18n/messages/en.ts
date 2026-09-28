@@ -445,8 +445,16 @@ export const en = {
       title: 'Company details',
       description:
         'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants.',
+      // D3/design 9 (#3332 review): "gates" replaced with plain words; VIES
+      // named as the EU's VAT number register, not left unexplained; the
+      // Swedish sole-trader VAT-encodes-the-personal-number fact stated
+      // alongside the org-number one, not only in the field helper; the
+      // receipts sentence lives in `description` above ONLY — repeating it
+      // here read as the same claim twice (D3). The erasure sentence is the
+      // captain's decision on M3: true whether the flag is on or off, since
+      // this text is only ever shown WHILE the section itself is shown.
       purpose:
-        'This is optional and never gates an agent or a payment. When you save details, Haven adds them to the receipts your own agents may hand to a merchant — the way an ordinary invoice states a buyer. For a sole trader, the organisation number is your personal identity number. These details are kept until you remove them here, or until your Haven account is deleted.',
+        "This is optional — saving it is never required for an agent or a payment to work. For a sole trader, the organisation number is your personal identity number, and Sweden's own SE-format VAT number encodes that same personal number (SE + personal number + 01). If you add a VAT number, Haven checks it against VIES, the EU's VAT number register. You can remove these details here at any time while this section is shown; otherwise ask Haven support to remove them.",
       loadError: 'We could not load your company details. Try again in a moment.',
       retry: 'Try again',
 
@@ -467,16 +475,30 @@ export const en = {
       validation: {
         legalNameRequired: 'Enter a legal name.',
         legalNameTooLong: 'Enter a legal name using 200 characters or fewer.',
+        // Matches `CONTROL_CHAR_RE` in `modules/owner-profile/service.ts` —
+        // client-side so the message names the actual cause instead of a
+        // generic one (#3332 review m2).
+        legalNameInvalidChars: 'Legal name cannot contain hidden or control characters.',
         countryInvalid: 'Country must be a two-letter code, e.g. "SE".',
         orgNumberRequired: 'Enter an organisation number.',
         orgNumberTooLong: 'Enter an organisation number using 32 characters or fewer.',
+        // Matches `ORG_NUMBER_RE` (`^[A-Za-z0-9 .\-/]{1,32}$`) in the same file.
+        orgNumberInvalidChars: 'Organisation number can only contain letters, numbers, spaces, and . - /',
         vatNumberTooLong: 'Enter a VAT number using 32 characters or fewer.',
       },
 
       save: 'Save',
       saving: 'Saving…',
       saved: 'Saved.',
-      saveError: 'We could not save your company details. Check the fields and try again.',
+      // Design review 8: this is the NETWORK/5xx line — never "check the
+      // fields", which blames the wrong thing when nothing about the input
+      // was wrong. A 400 always surfaces the backend's own field-specific
+      // message instead (see `save`'s `validation` result).
+      saveError: 'We could not save your company details. Try again in a moment.',
+      // #3332 review m2: a 404 on PUT/POST means the flag went off mid-
+      // session (an operator action, or a stale tab) — distinct from both
+      // the network line above and a field-specific validation message.
+      featureOff: 'This setting is no longer available.',
 
       remove: {
         action: 'Remove company details',
@@ -486,6 +508,8 @@ export const en = {
         confirm: 'Remove',
         cancel: 'Keep details',
         error: 'We could not remove your company details. Try again in a moment.',
+        // Design review 6: announced (role=status) after a successful delete.
+        removed: 'Company details removed.',
       },
 
       /**
@@ -501,12 +525,19 @@ export const en = {
       vies: {
         pending: 'Checking the VAT number with VIES…',
         valid: (date: string) => `VAT number checked against VIES on ${date}`,
-        invalid: 'VIES says this VAT number is not valid.',
+        // #3332 review m1: a `valid` row with no `vies_checked_at` (the
+        // stale-pending re-trigger landing an outcome with no VIES-answer
+        // timestamp) never renders a dangling "on" with nothing after it.
+        validNoDate: 'VIES confirmed this VAT number.',
+        // Design review 8: names the next step rather than leaving the owner
+        // to guess one.
+        invalid: 'VIES says this VAT number is not valid. Check the number and save it again.',
         notVerifiable: 'VIES could not check this number right now.',
         checkAgain: 'Check again',
         checking: 'Checking…',
         checkError: 'We could not check the VAT number with VIES. Try again in a moment.',
         rateLimited: "You've checked this VAT number too many times just now. Try again in a minute.",
+        featureOff: 'This setting is no longer available.',
       },
     },
   },

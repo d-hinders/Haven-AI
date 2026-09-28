@@ -184,14 +184,13 @@ Settings → Company details (`CompanyDetailsCard`, `useCompanyDetails`) is the
 how it is built:
 
 - **Gating without a second flag.** The screen has no frontend-side feature
-  flag of its own; it renders only when `GET /user/company-details` does NOT
-  answer the feature-off `404` (`{ error: 'Not found' }`,
-  `requireFeatureEnabled` in `routes/owner-company-details.ts`). That route
-  answers `404` for two different reasons — the feature is off, or the flag
-  is on but the owner has never saved a row — with the SAME status code and
-  different error bodies (`'Not found'` vs. `'No company details saved'`);
-  the hook reads the body to tell them apart, so a first-time owner on a
-  flagged-on deployment sees an empty form rather than nothing.
+  flag of its own; it reads the STATUS of `GET /user/company-details`, never
+  its body. `404` means only one thing — the feature is off
+  (`requireFeatureEnabled` in `routes/owner-company-details.ts`) — and the
+  screen renders nothing. `200` with a `null` body means the flag is on and
+  the owner has never saved a row, and the screen renders an empty form ready
+  to fill in. `200` with a row renders the filled form. A first-time owner on
+  a flagged-on deployment therefore always sees an empty form, never nothing.
 - **The purpose and retention text is shown above the form, always** — not
   behind a tooltip or a second screen — because *Purpose, retention and GDPR
   basis* below is what the owner is agreeing to by filling it in.

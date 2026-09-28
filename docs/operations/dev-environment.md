@@ -293,9 +293,9 @@ Isolation rules that are non-negotiable for a payments product:
   lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
   so a copied flag cannot publish them on prod, whose list is `8453`.
 - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
-  boolean) gates `/user/company-details*` and the additive `parties.buyer`
-  field on payment evidence/receipts; there is no settings UI yet (that is
-  the #3332 frontend slice). Dark by default; GET/PUT/POST vies-check answer
+  boolean) gates `/user/company-details*`, the additive `parties.buyer`
+  field on payment evidence/receipts, and the Settings → Company details
+  screen. Dark by default; GET/PUT/POST vies-check answer
   404 when off — DELETE is the deliberate exception, so an owner can always
   erase saved details. See [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys

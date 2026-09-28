@@ -298,10 +298,12 @@ An abandoned re-key can still leave a slot holding two pending rows at once —
 its own inert re-key replacement plus a later ordinary build's row — because
 re-key rows are excluded from reuse (#3386) rather than merged with it. No
 Haven flow presents that re-key row for signing again, so it is a leftover,
-not a second live offer. The raw activate route
-(`POST /agents/:id/delegations/:hash/activate`) does not filter on
-`rekey_id`, though: it would accept the row with an owner signature if a
-later re-key reused the same new delegate key (#3439).
+not a second live offer, and a later re-key revokes it along with every
+other non-revoked row (`pending` included) before it can complete. The raw
+activate route (`POST /agents/:id/delegations/:hash/activate`) does not
+filter on `rekey_id`, though, which leaves a narrow race open: an issue
+request stalled across an abandon can insert its rows after a successor
+re-key has already completed on the same key (#3439).
 
 **Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
 ordinary recipient-pinned budget whose pin the server fills with the

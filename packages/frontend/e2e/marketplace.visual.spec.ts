@@ -240,6 +240,10 @@ test.describe('marketplace visual regression', () => {
         await dismissMobileSidebar(page)
 
         await scenario.assert(page)
+        // #3331 baseline review: a merchant page must never be blessed in the
+        // budgets-read error state (a fixture gap once baked it into six
+        // baselines).
+        await expect(page.getByText("Haven could not load this merchant's budgets.")).toHaveCount(0)
 
         await page.evaluate(() => document.fonts.ready)
         await page.waitForLoadState('networkidle')
@@ -298,7 +302,10 @@ test.describe('marketplace visual regression', () => {
 
   async function routeFundMerchantScenario(
     page: Page,
-    { existingDelegation = false }: { existingDelegation?: boolean } = {},
+    {
+      existingDelegation = false,
+      merchantBudgets = [],
+    }: { existingDelegation?: boolean; merchantBudgets?: unknown[] } = {},
   ) {
     const fundEligibleAgent = {
       ...testAgent,
@@ -343,7 +350,7 @@ test.describe('marketplace visual regression', () => {
         return
       }
       if (request.method() === 'GET' && path === `/merchants/${havenDemoStore.slug}/budgets`) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ budgets: [] }) })
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ budgets: merchantBudgets }) })
         return
       }
       // #3331 review finding design-10: seed the SAME (agent, token,
@@ -384,6 +391,56 @@ test.describe('marketplace visual regression', () => {
       await route.fallback()
     })
   }
+
+  /**
+   * #3331 baseline review finding 2: the page-level entry point — the "Fund
+   * this merchant" action and a populated merchant budgets list — pixel-checked
+   * as a full page, not only the element-scoped modal clips.
+   */
+  test('merchant-page funded (action + budgets list) renders pixel-stable (desktop)', async ({ page }, testInfo) => {
+    const schemeSuffix = schemeOf(testInfo) === 'dark' ? '-dark' : ''
+    await routeFundMerchantScenario(page, {
+      merchantBudgets: [
+        {
+          agent_id: FUND_ELIGIBLE_AGENT_ID,
+          agent_name: 'Fund Agent',
+          chain_id: 84532,
+          token_address: FUND_USDC_84532.toLowerCase(),
+          recipient_address: FUND_PAY_TO,
+          delegation_hash: `0x${'6f'.repeat(32)}`,
+          budget_atomic: '20000000',
+          period_seconds: 2_592_000,
+          expires_at: String(Math.floor(Date.UTC(2027, 4, 2) / 1000)),
+          remaining_atomic: '12500000',
+          remaining_is_from_chain: true,
+          pin_status: 'current',
+        },
+      ],
+    })
+
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.clock.setFixedTime(FROZEN_NOW)
+    await page.goto(`/marketplace/${havenDemoStore.slug}`)
+    await expect(page.getByRole('heading', { name: havenDemoStore.name, exact: true })).toBeVisible({
+      timeout: ANCHOR_TIMEOUT_MS,
+    })
+    await dismissMobileSidebar(page)
+    await expect(page.getByRole('button', { name: 'Fund this merchant' })).toHaveCount(1)
+    await expect(page.getByText('Fund Agent', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText("Haven could not load this merchant's budgets.")).toHaveCount(0)
+
+    await page.evaluate(() => document.fonts.ready)
+    await page.waitForLoadState('networkidle')
+    await expect(page.locator('.animate-pulse')).toHaveCount(0)
+    await unclipScrollShell(page)
+    await expect(page).toHaveScreenshot(`merchant-page-funded-desktop${schemeSuffix}.png`, {
+      fullPage: true,
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
+      threshold: PIXEL_THRESHOLD,
+    })
+  })
 
   test('merchant-page fund-merchant modal renders pixel-stable (desktop)', async ({ page }, testInfo) => {
     const schemeSuffix = schemeOf(testInfo) === 'dark' ? '-dark' : ''

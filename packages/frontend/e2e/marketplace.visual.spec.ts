@@ -23,9 +23,14 @@
  *   - `merchant-not-found`    — an unknown slug (desktop only): the client
  *     `notFound()` must land on the segment's own `not-found.tsx` inside
  *     the shell, a join the unit tests cannot see.
- *   - `merchant-page-fund-merchant-modal` (desktop only, element-scoped) —
+ *   - `merchant-page-fund-merchant-modal` (desktop AND mobile, element-scoped) —
  *     the "Fund this merchant" modal's plain SELECT step (agent, amount,
  *     token, period) — not the review step; that is the scenario just below.
+ *     The mobile clip is #3398's: below 640 px the shared `BudgetAmountRow`
+ *     keeps the token symbol inside the amount input, so no line holds only
+ *     the token label (the stacked "USDC" orphan the #3331 design review
+ *     captured). No dark baseline exists for the mobile clip — the dark run
+ *     skips it, the same rule the SCENARIOS loop applies to its mobile shots.
  *   - `merchant-page-fund-merchant-modal-review-warning` (desktop only,
  *     element-scoped) — the same modal's review step with the
  *     replace-warning seeded (an active budget already in the slot the new
@@ -466,6 +471,53 @@ test.describe('marketplace visual regression', () => {
 
     await page.evaluate(() => document.fonts.ready)
     await expect(dialog).toHaveScreenshot(`merchant-page-fund-merchant-modal-desktop${schemeSuffix}.png`, {
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixels: 50,
+      threshold: PIXEL_THRESHOLD,
+    })
+  })
+
+  /**
+   * #3398: the same select step at the 390 px evidence viewport
+   * (`scripts/evidence-viewports.mjs`). Below `sm` the amount row stacks:
+   * the token symbol must stay INSIDE the amount input (the shared
+   * `BudgetAmountRow` suffix), so no line holds only the token label —
+   * the orphan the #3331 design review captured at this exact width.
+   * Runs under BOTH projects like the desktop test above, but the dark
+   * project skips (no mobile dark baseline, the SCENARIOS loop's own
+   * rule), so only `-mobile.png` is declared at baseline dispatch.
+   */
+  test('merchant-page fund-merchant modal renders pixel-stable (mobile)', async ({ page }, testInfo) => {
+    const schemeSuffix = schemeOf(testInfo) === 'dark' ? '-dark' : ''
+    test.skip(schemeSuffix === '-dark', 'no mobile dark baseline for marketplace visual specs')
+    const vp = VIEWPORTS.find((v) => v.name === 'mobile')
+    if (!vp) throw new Error('evidence-viewports.mjs carries no "mobile" viewport')
+    await routeFundMerchantScenario(page)
+
+    await page.setViewportSize({ width: vp.width, height: vp.height })
+    await page.clock.setFixedTime(FROZEN_NOW)
+    await page.goto(`/marketplace/${havenDemoStore.slug}`)
+    await expect(page.getByRole('heading', { name: havenDemoStore.name, exact: true })).toBeVisible({
+      timeout: ANCHOR_TIMEOUT_MS,
+    })
+    await dismissMobileSidebar(page)
+
+    await page.getByRole('button', { name: 'Fund this merchant' }).click()
+    const dialog = page.getByTestId('fund-merchant-modal')
+    await expect(dialog).toHaveCount(1)
+    await expect(dialog.getByRole('heading', { name: `Fund ${havenDemoStore.name}` })).toHaveCount(1)
+    await expect(dialog.getByLabel('Agent')).toHaveCount(1)
+    // The suffix is aria-hidden — the token is readable through the input's
+    // own accessible name pattern ("Budget amount"), not as a stray node.
+    await expect(dialog.getByText('USDC')).toHaveCount(1)
+    // Anchored: the header subtitle ("Give an agent a budget that pays only
+    // …") also contains this phrase as a substring — a bare getByText resolved
+    // 2 elements on the #3331 head (found running #3398's structural pass).
+    await expect(dialog.getByText(new RegExp(`^Pays only ${havenDemoStore.name}`))).toHaveCount(1)
+
+    await page.evaluate(() => document.fonts.ready)
+    await expect(dialog).toHaveScreenshot(`merchant-page-fund-merchant-modal-mobile.png`, {
       animations: 'disabled',
       caret: 'hide',
       maxDiffPixels: 50,

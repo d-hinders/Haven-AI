@@ -855,3 +855,51 @@ test('#2839: the REQUIRED job never opts out of an event, the advisory one skips
     'the advisory condition is inverted — it would run ONLY on description edits',
   )
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #3425: three traps that closed #3412 (operator-verify) from PRs #3414/#3415
+// on 2026-09-28. Each is a real shape, not a synthetic one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OV_3412 = { 3412: [OPERATOR_VERIFY_LABEL] }
+
+test('#3425: a conventional `fix: #N` commit subject is a closing keyword', () => {
+  const commits = [{ oid: 'abcdef1234', message: 'fix: #3412 doc-review round — reword the table' }]
+  assert.deepEqual(allClosingRefs({ commits }), [3412])
+  const [v] = findViolations({ commits, labelsByIssue: OV_3412 })
+  assert.equal(v.issue, 3412)
+  assert.equal(v.signal, 'label')
+  assert.equal(v.manual, undefined, 'a keyword in a commit is text, not a manual connection')
+})
+
+test('#3425: a body QUOTING such a subject re-emits the keyword', () => {
+  const body = 'Reworded the subject `fix: #3412 doc-review round` because it closed the issue.'
+  assert.deepEqual(parseClosingRefs(body), [3412])
+  assert.equal(findViolations({ body, labelsByIssue: OV_3412 }).length, 1)
+})
+
+test('#3425: the issue number as a conventional-commit SCOPE is safe', () => {
+  // The form #3415 merged with: `closingIssuesReferences` came back empty.
+  const commits = [{ oid: '1234abcd', message: 'fix(3412): doc-review round — reword the table\n\nRefs #3412' }]
+  assert.deepEqual(allClosingRefs({ commits }), [])
+  assert.deepEqual(findViolations({ commits, labelsByIssue: OV_3412 }), [])
+})
+
+test('#3425: a reference only GitHub reports is named a MANUAL connection, with the recovery', () => {
+  // PR #3414: no keyword anywhere, `closingIssuesReferences: [3412]` from the linked branch.
+  const pr = { body: 'Refs #3412', title: 'docs(3412): the table', commits: [{ oid: 'deadbeef', message: 'docs(3412): x' }], closingRefs: [3412] }
+  const [v] = findViolations({ ...pr, labelsByIssue: OV_3412 })
+  assert.equal(v.issue, 3412)
+  assert.equal(v.manual, true)
+  assert.match(v.evidence, /manual connection \(linked branch or Development sidebar\): close and reopen from an unlinked branch/)
+  const report = renderReport([v])
+  assert.match(report, /MANUAL CONNECTION/)
+  assert.match(report, /open the same commits from an unlinked branch/)
+})
+
+test('#3425: a reference GitHub reports AND the text carries is not called manual', () => {
+  const [v] = findViolations({ body: 'Closes #3412', closingRefs: [3412], labelsByIssue: OV_3412 })
+  assert.equal(v.manual, undefined)
+  assert.doesNotMatch(v.evidence, /manual connection/)
+  assert.doesNotMatch(renderReport([v]), /MANUAL CONNECTION/)
+})

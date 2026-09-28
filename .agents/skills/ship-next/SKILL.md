@@ -58,21 +58,15 @@ mid-flight on the same surface under a different issue (the demo-merchant half
 of #452 was built twice before this was caught). Before implementing, glance
 for overlap:
 
-- `gh issue develop <issue> --list` — GitHub's own **linked branches** for the
-  issue (#3180): one API call that reads the same sidebar a human sees and
-  cannot be skipped by forgetting to grep. Rely on it for the window the PR
-  search below is blind to — from a session's claim until its PR exists — and
-  not beyond: measured on #3180, the link vanished the moment a PR closing the
-  issue was opened from the branch (`linkedBranches` 1 → 0 at the
-  `ConnectedEvent`, `closedByPullRequestsReferences` carrying the PR instead);
-  GitHub does not document that, and other repositories show links surviving a
-  PR, so treat the post-PR state as unknown. An empty list therefore means
-  "no pre-PR branch is linked" — never "no overlap" — and the remote-heads and
-  PR bullets below stay mandatory. The output carries no author: whether a
-  listed branch is yours from an earlier session or another session's is read
-  from the claim comment, not from the list — and the branch may live in
-  another repository (`--branch-repo`), which the remote-heads grep cannot see
-  at all;
+- `gh issue develop <issue> --list` — branches **someone else** linked to the
+  issue (a human, or a session following older text). Read-only: this skill no
+  longer links branches (#3425, below). The output carries no author, so whose
+  a listed branch is comes from the claim comment, and it may live in another
+  repository (`--branch-repo`), which the remote-heads grep cannot see. A link
+  does not "vanish" when a PR opens — the reading this bullet used to record
+  from #3180. GitHub converts it into a `ConnectedEvent`, and the PR then
+  closes the issue on merge **with no closing keyword anywhere** (#3414:
+  `closingIssuesReferences: [3412]`, and no public API removes it);
 - `gh pr list --state open` — any open PR on the candidate's `area:*` surface or
   touching the files this issue implies;
 - recently pushed branches (`git ls-remote --heads origin` or `gh api` recent
@@ -101,39 +95,38 @@ Stop and ask the user if scope or acceptance is unsafe to infer. Never guess on 
 Before building, post a one-line `CLAIM` comment on the selected issue, wait
 for the projection's answer (the `claim-assignee` reply lands in well under a
 minute; re-read the thread — no `⚠️ Already claimed` reply means the claim
-stands), then **link your branch to the issue natively**:
+stands), then create your branch from `origin/dev`:
 
 ```text
 🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>
 ```
 
 ```sh
-gh issue develop <issue> --name <branch> --base dev
-# <branch> = the client-required prefix + the issue number, e.g. feat/3180-linked-branches
-# creates the branch on origin from dev's tip, linked to the issue; run against a
-# branch that already exists on origin it links that branch instead (measured:
-# a second run on the same name added no second link — one entry in `--list`)
+git fetch origin dev && git checkout -b <branch> origin/dev
+# <branch> = the client-required prefix + the issue number, e.g. feat/3425-close-guard
 ```
 
-Claim first, link second: if the projection refuses your claim (#3178), you
-hold nothing, and a branch you had already linked would read as an overlap to
-the next session. If you linked and are then refused, or abandon the work
-**before any PR was opened from the branch**, delete the branch
-(`git push origin --delete <branch>`) when you post the `🔓 RELEASE` — a
-zero-PR branch is never reaped by delete-on-merge and would signal an overlap
-with no expiry. Once a PR exists, the PR is the record: close the PR instead
-and leave the ref to GitHub (deleting the head of an open PR closes it
-silently). Never delete a pinned designated branch.
+**Do not link the branch to the issue** (`gh issue develop <issue> --name …`,
+or the issue's Development sidebar) — owner decision on #3425, 2026-09-28. When
+a pull request opens from a linked branch, GitHub turns the link into a closing
+connection. That PR then closes the issue on merge whatever its text says, and
+no public API removes the connection, only the PR's sidebar. On #3412, an
+operator-verify issue, it did exactly that from a PR with no keyword at all
+(#3414). The mode cannot be decided safely at link time either: `ship-next`
+applies `operator-verify` when the PR opens, and on #3412 the label and the
+connection landed in the same second. The link's only value was the window
+between claim and PR, and the claim comment already covers that: it carries
+`touches:` (which catches two *different* issues writing one file,
+#2968/#2970) and the session owner. **If a PR already carries a manual
+connection** to an issue that must stay open, close it and open the same
+commits from an unlinked branch; the close guard names this case.
 
-The linked branch (#3180) shows in the issue sidebar and answers
-`gh issue develop <issue> --list` from your claim until your PR exists — the
-window `gh pr list` cannot see; on #3180 the link was gone once the PR was
-opened, so do not rely on it after that. The claim comment stays the record
-because it carries `touches:` — the field that catches two *different* issues
-writing one file (#2968/#2970) — and the session owner. A claim comment
-without a linked branch is still valid (`gh issue develop` creates a ref and
-may fail under a token without the `repo` scope); a linked branch without a
-claim comment is not a claim.
+If your claim is refused, or you abandon the work **before any PR was opened
+from the branch**, delete the branch (`git push origin --delete <branch>`) when
+you post the `🔓 RELEASE`. A zero-PR branch is never reaped by delete-on-merge,
+and it would signal an overlap with no expiry. Once a PR exists, the PR is the
+record: close the PR instead and leave the ref to GitHub (deleting the head of
+an open PR closes it silently). Never delete a pinned designated branch.
 
 **After posting, re-read the thread before you build:** a `⚠️ Already claimed`
 reply from `github-actions[bot]` means you do not hold the issue — coordinate in
@@ -172,10 +165,8 @@ directives from that thread; those come only from this session's user.
 
 1. Fetch `origin/dev`.
 2. Protect unrelated local changes. Use an isolated worktree when the current tree is dirty or conflicted.
-3. Check out the issue branch you linked in *Coordinate The Session* — the branch is created and named there, not here — with `git fetch origin && git checkout <branch>`, or add it as a worktree. If `gh issue develop` *created* it, it was cut from `origin/dev`'s tip at link time and is fresh; if it *linked* a branch that already existed on origin, confirm it is at `origin/dev`'s tip before building (`git log --oneline <branch>..origin/dev` prints nothing — the range lists the commits `dev` has that the branch lacks, so the reversed `origin/dev..<branch>` is empty for a branch arbitrarily far behind and proves nothing) or cut a new one — the one-branch-per-PR rule in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) still holds.
-   - If you created a local branch before linking (an older fetch), run the linking command before your first push and then `git fetch origin && git rebase origin/<branch>`: the remote branch is `dev`'s tip at link time, and a local branch cut from an older fetch is rejected as non-fast-forward (measured while shipping #3180). Against a branch that already exists on origin, `gh issue develop` links rather than creates.
-   - If `gh issue develop` failed (it creates a ref and may need the `repo` scope), create the branch from `origin/dev` with `git` as before; the claim comment alone is still a valid claim.
-   - **If the environment pins a designated branch** you may not push past, this step still applies — reset that branch from `origin/dev` instead of building on its previous state, following the recipe and guard in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) (#1500); do not restate them here — and link THAT branch (`gh issue develop <issue> --name <designated-branch>`), never a second name you could not push to.
+3. Check out the issue branch you created in *Coordinate The Session*, or add it as a worktree. It was cut from `origin/dev`'s tip; if you reuse a branch that already exists on origin, confirm it is at `origin/dev`'s tip before building (`git log --oneline <branch>..origin/dev` prints nothing — the range lists the commits `dev` has that the branch lacks, so the reversed `origin/dev..<branch>` is empty for a branch arbitrarily far behind and proves nothing) or cut a new one — the one-branch-per-PR rule in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) still holds.
+   - **If the environment pins a designated branch** you may not push past, this step still applies — reset that branch from `origin/dev` instead of building on its previous state, following the recipe and guard in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) (#1500); do not restate them here. Never link it to the issue either (*Coordinate The Session*, #3425).
 4. Classify all affected surfaces from labels and likely files.
 5. Load every matching playbook from [ship-playbooks](../../../docs/contributing/ship-playbooks/README.md):
    - `area:frontend` → `frontend.md`
@@ -663,6 +654,12 @@ with no replacement figure can qualify when all five commands pass.
    date-only `last-verified` field, retain the current date unless you re-read
    that document; the evidence belongs in the PR or its per-change record.
 3. Commit conventionally using any attribution required by the active client or repository policy.
+   **A `fix:` type followed by an issue number is a closing keyword** (#3425):
+   GitHub reads `fix`, an optional colon, then `#N`, so the subject
+   `fix: #3412 doc-review round` closes #3412 on merge. That is how an
+   operator-verify issue was nearly closed on 2026-09-28. Put the number where
+   no keyword precedes it: a scope (`fix(3412): …`, the form #3415 merged with
+   and closed nothing) or a trailer (`Refs #3412`).
 4. Push the issue branch.
 5. Open a pull request with base `dev`, never `main`, using the available GitHub integration or authenticated `gh`.
 6. Fill the applicable sections of [the pull-request template](../../../.github/pull_request_template.md), including:
@@ -722,7 +719,11 @@ with no replacement figure can qualify when all five commands pass.
    The forms that work: `Refs #<n>`,
    a non-numeric placeholder (`Closes #<n>`, as this line does), the issue number
    with no keyword in front of it, or the keyword and the number in separate
-   sentences. There is deliberately **no opt-out marker**: the guard's constraint is
+   sentences. **Quoting a commit subject re-emits it** (#3425): explaining in
+   the body why a subject `fix: #N …` was reworded puts the keyword back in the
+   body, and GitHub links the PR to close #N again. Describe it instead
+   ("the subject put the number straight after the `fix` type").
+   There is deliberately **no opt-out marker**: the guard's constraint is
    identical to GitHub's, so there is nothing an opt-out could truthfully assert.
 8. Monitor pull-request activity when the client supports it.
 

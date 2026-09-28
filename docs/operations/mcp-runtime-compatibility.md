@@ -2421,9 +2421,12 @@ reading `null`.
 > `settlement_tx_hash`, `next_action: none`, and no `next_tool`. That holds only
 > when the confirmed row pays the merchant this call names (`to`) for the
 > resource it names (`resource_url`). The backend's lookup is keyed on the
-> idempotency key alone, so a key reused for another purchase, or first spent on
-> an EIP-3009 funding leg (whose payee is the delegate), answers a 409
-> "use a new idempotency key" refusal instead. This is hosted-only; no signer
+> idempotency key alone, so a key reused for another payee or resource, or
+> first spent on an EIP-3009 funding leg (whose payee is the delegate), answers
+> a 409 "use a new idempotency key" refusal instead. Amount and the MCP tool
+> call are not compared, so a key reused for a different tool at the same MCP
+> merchant endpoint answers with that merchant's original settlement. This is
+> hosted-only; no signer
 > or connector version is involved. An SDK consumer calling
 > `prepareX402Erc7710()` with an `idempotencyKey` gets the typed
 > `X402Erc7710AlreadySettledError` (or the 409 `HavenApiError`) from the first

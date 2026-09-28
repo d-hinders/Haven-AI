@@ -291,8 +291,9 @@ export class X402Erc7710 {
       if (!samePurchase) {
         throw new HavenApiError(
           `Idempotency key already belongs to confirmed payment ${raw.payment_id}, which is not this ` +
-            'erc7710 purchase (different payee or resource). Nothing was signed and nothing was charged; ' +
-            'use a new idempotency key for this purchase.',
+            'erc7710 purchase (different payee or resource). Nothing was signed and nothing was charged. ' +
+            "Check that payment's status before buying again: a funded but undelivered EIP-3009 payment " +
+            'is recovered, not paid twice. Otherwise use a new idempotency key for this purchase.',
           409,
           raw,
           raw.payment_id,

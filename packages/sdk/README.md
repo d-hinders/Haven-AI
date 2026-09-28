@@ -248,7 +248,8 @@ no funding leg and no delegate balance to exhaust. On erc7710, a key whose
 payment to the same merchant for the same resource already settled makes
 `prepareX402Erc7710()` throw `X402Erc7710AlreadySettledError` (`paymentId`,
 `txHash`) instead of minting a settlement child. A key already used for a
-different payment is refused with a 409 `HavenApiError`: use a new key (#3417).
+payment to a different payee or resource is refused with a 409
+`HavenApiError`; amount and MCP tool call are not compared (#3417).
 
 For agents that need to inspect the price before paying, use the quote-first
 path. `quoteX402()` probes the merchant and parses the HTTP 402 response, but it

@@ -301,7 +301,7 @@ Haven flow presents that re-key row for signing again, so it is a leftover,
 not a second live offer. The raw activate route
 (`POST /agents/:id/delegations/:hash/activate`) does not filter on
 `rekey_id`, though: it would accept the row with an owner signature if a
-later re-key reused the same new delegate key (tracked as a follow-up).
+later re-key reused the same new delegate key (#3439).
 
 **Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
 ordinary recipient-pinned budget whose pin the server fills with the

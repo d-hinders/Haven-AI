@@ -3409,7 +3409,7 @@ export type components = {
          * @description Stable Haven agent payment state phase.
          * @enum {string}
          */
-        AgentPaymentPhase: "agent_signature_required" | "payment_submitted" | "payment_confirmed" | "user_approval_required" | "user_execution_required" | "waiting_for_additional_approvals" | "funding_sent" | "rejected" | "expired" | "failed" | "insufficient_funds" | "funded_but_unsettled";
+        AgentPaymentPhase: "agent_signature_required" | "payment_submitted" | "payment_confirmed" | "user_approval_required" | "user_execution_required" | "waiting_for_additional_approvals" | "funding_sent" | "rejected" | "expired" | "failed" | "insufficient_funds" | "funded_but_unsettled" | "delivered_unverified";
         /**
          * @description Stable next action an agent should take for a Haven payment state.
          * @enum {string}
@@ -4184,6 +4184,8 @@ export type components = {
             expires_at: string;
             chain_id: number;
             message: string;
+            /** @description True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown. */
+            delivered?: boolean;
             fee?: {
                 amount: string;
                 token: string;

@@ -1314,6 +1314,20 @@ export const AgentPaymentPhase = {
    * the funds.
    */
   FundedButUnsettled: 'funded_but_unsettled',
+  /**
+   * #3420: TERMINAL — a `submitted` erc7710 x402 intent whose settlement
+   * window AND the sweep's last attribution chance have both passed with no
+   * verified evidence. The sweep's tick (120s) only ever confirms a
+   * transaction mined inside the payment's own settlement window (the child
+   * delegation's on-chain `timestamp` caveat, plus the verifier's 120s
+   * clock-skew allowance), so once authorize + window + skew is behind the
+   * payment, no poll — and no sweep tick — can ever change the answer.
+   * The paired `next_action` is `stop_and_tell_user`: tell the user the goods
+   * were delivered but Haven holds no verified settlement evidence; reporting
+   * a real settlement hash (`haven_report_settlement_evidence`) still works
+   * at any age.
+   */
+  DeliveredUnverified: 'delivered_unverified',
 } as const
 
 export type AgentPaymentPhase = (typeof AgentPaymentPhase)[keyof typeof AgentPaymentPhase]
@@ -1504,6 +1518,8 @@ export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = 
     'Pre-flight check determined the delegate balance plus the remaining on-chain budget cannot cover the requested amount, so no payment was created. The account must be funded or the agent budget raised before retrying.',
   [AgentPaymentPhase.FundedButUnsettled]:
     "Haven's funding leg confirmed on-chain but the merchant rejected the x402 retry. The delegate wallet may hold stranded funds. The agent should stop and wait for the wallet owner to sweep the stranded funds back to the account.",
+  [AgentPaymentPhase.DeliveredUnverified]:
+    "Terminal: the merchant delivered the goods and the settlement window plus the sweep's last attribution chance have both passed with no verified on-chain evidence. The payment can no longer resolve by polling. Tell the user the goods were delivered but Haven holds no verified settlement evidence for this payment.",
 }
 
 export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, string> = {
@@ -1765,6 +1781,11 @@ export interface PaymentStatusResult {
   expiresAt: string
   chainId: number
   message: string
+  /**
+   * #3420: `true` = the merchant answered 2xx (a `machine_payment_evidence`
+   * row records its response); absent = unknown. See the raw field's doc.
+   */
+  delivered?: boolean
   /** Platform fee surfaced so it's never silently collected (#386). */
   fee?: PaymentFee | null
   amountAtomic?: string | null
@@ -2004,6 +2025,17 @@ export interface RawPaymentStatusResult {
   expires_at: string
   chain_id: number
   message: string
+  /**
+   * #3420: the delivered half of the settle vocabulary, on the status read.
+   * `true` = a `machine_payment_evidence` row records the merchant's response
+   * (the receipt capture `completeX402MerchantCall` runs on every accepted
+   * merchant reply) — the merchant answered 2xx; settlement may still be
+   * unverified. Absent = the backend does not know (older payloads, or no
+   * evidence row either way). Never `false`-as-claim: absence is the honest
+   * default, matching the settle call's own `delivered: true` on the
+   * DELIVERED_UNSETTLED branches.
+   */
+  delivered?: boolean
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null

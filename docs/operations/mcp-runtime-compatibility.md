@@ -984,6 +984,28 @@ last-verified: "2026-09-28"
 > changes only narrow what the response claims. Regression tests are
 > mutation-proven (removing the classify gate or the zero-hash nulling
 > re-fails them).
+>
+> **Recent re-verification (#3420):** `haven_get_payment_status`'s
+> delivered-but-unsettled state now ends. The #2970 answer
+> (`awaiting_settlement_evidence`) is bounded by the sweep's LAST attribution
+> chance — the verifier's own `notAfterSec` (`authorize` +
+> `MAX_SETTLEMENT_WINDOW_SECONDS` + the exported `CLOCK_SKEW_SECONDS`,
+> `settlement-observed.ts`); past that instant the same read answers the new
+> additive phase `delivered_unverified` with the tool-less
+> `next_action: stop_and_tell_user`, and the message says polling is over
+> (the only live remedy left, a real hash via
+> `haven_report_settlement_evidence`, works at any age). Within the horizon
+> the `awaiting_settlement_evidence` message states the remaining patience as
+> expiry-bounded ("until shortly after this payment's expiry") instead of the
+> fixed "about two minutes", which read identically at 3 minutes and at 3
+> hours. The status response also gains the additive `delivered: true` —
+> present only when a `machine_payment_evidence` row records the merchant's
+> response, omitted (never false) otherwise — so the status read now matches
+> the `delivered: true` the settle call already reported. Local runtime:
+> additive phase/next_action value and additive response field, forwarded
+> unchanged like every other — same schemas, same strict-input policy, no
+> route, migration, or signer change, and nothing about when the settle gate
+> itself decides `settled`.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

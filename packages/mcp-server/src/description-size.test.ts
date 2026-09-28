@@ -135,8 +135,18 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * the absolute pin moves to the exact measured value of this surface,
  * 22,340 UTF-8 bytes across 26 tools, shrink-only from here. The mean
  * pin stays HELD at 875: 22,340 / 26 = 859.23, still below the ceiling.
+ *
+ * **Re-derived — round 7, #3420 (2026-09-28).** `haven_get_payment_status`'s
+ * shared description now carries the two facts this issue mandates agents
+ * read: the additive `delivered` field (when the merchant answered) and the
+ * new terminal `delivered_unverified` state (stop, no poll) — required copy;
+ * hand-trimming it would cut exactly the state vocabulary the issue sends
+ * agents to match on (+76 UTF-8 bytes). The measured total is exactly
+ * 22,416 bytes across 26 tools, so the absolute pin moves to that value,
+ * shrink-only from here. The mean pin stays HELD at 875:
+ * 22,416 / 26 = 862.15, still below the ceiling.
  */
-const MAX_TOTAL_BYTES = 22_340
+const MAX_TOTAL_BYTES = 22_416
 // Mean pin: HELD at the #3329 ceiling (21,000 / 24 = 875.0), not re-derived —
 // the composed surface's actual mean (22,173 / 26 = 852.81) already sits
 // BELOW the ceiling, so the held value is the stricter pin, and re-deriving

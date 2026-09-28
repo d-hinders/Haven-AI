@@ -580,7 +580,16 @@ answered `settled: true` on the zero hash, which is the F2 finding this issue
 closed. `haven_get_payment_status` on the same payment answers
 `check_status_later` inside the settlement window and
 `awaiting_settlement_evidence` once it passes, since nothing will ever report
-evidence for a deliberately-skipped settlement. **#2972 — this stays true even
+evidence for a deliberately-skipped settlement. **#3420 — that answer now
+ends.** The sweep's last attribution chance is the verifier's own boundary
+(window + clock-skew, `settlement-observed.ts`); past it the status read goes
+TERMINAL: phase `delivered_unverified`, `next_action: stop_and_tell_user`, no
+poll named — tell the user the goods were delivered but unverified. The
+interim `awaiting_settlement_evidence` message states its remaining patience
+as expiry-bounded, not a fixed "about two minutes". The status read also
+carries `delivered: true` once the merchant's response is recorded
+(`merchant_leg_reported`), matching the settle call's own `delivered: true`.
+**#2972 — this stays true even
 with the new remedy tool.** `haven_report_settlement_evidence` refuses a zero
 settlement hash client-side before any network call
 (`isZeroSettlementTxHash`, the same recognizer the fixture's own marker

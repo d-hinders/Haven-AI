@@ -985,30 +985,31 @@ them is a string a caller supplies:
   page at the time, so it cannot be proven after the fact: its only observed
   row, `2026-09-18T21:18:20Z`, was over nine days old against the 4-day
   budget, and a correct, newest-first, paged read could not have opened there.
-  `observe()` now checks, once a search finds no success by the time it ends:
-  (1) page 1's newest row was near "now" (inside the guard's own `maxAgeDays`
-  budget) — evaluated only when the deployment index also shows a dev
+  `observe()` runs four checks. (1) page 1's newest row was near "now" (inside
+  the guard's own `maxAgeDays` budget); (2) a later page's newest row was not
+  newer than the previous page's oldest (contiguous, newest-first); (3) every
+  in-window Railway deployment in the index has a matching run somewhere in
+  the listing; plus a check-runs lookup that threw, and a non-array
+  Deployments response body. Checks 1 and 3, the lookup-failure check, and the
+  malformed-index check all count only when no qualifying success has been
+  found — check 1 is also gated on the deployment index actually showing a dev
   deployment inside the window, since deploys happened and recent runs should
-  exist; without an in-window deploy a stale page 1 is what a genuinely quiet
-  week looks like, logged as a diagnostic line only, never escalated; (2) every
-  later page's newest row was not newer than the previous page's oldest
-  (contiguous, newest-first) — checked as each page arrives, which can only
-  happen while still searching, since pagination stops the moment a success
-  qualifies; (3) every in-window Railway deployment in the index has a
-  matching run somewhere in the listing — checked once, after paging every
-  counted event. A trip on any of these, or a check-runs lookup that threw
-  with no qualifying success by the end of the search (not cached — a failed
-  sha is re-attempted on the next pass while the lookup budget lasts), or a
-  non-array Deployments response body, marks the search incomplete and prints
-  a `::warning::` naming the check — but a success found ANYWHERE, however
-  old, still yields `stale`, never `unconfirmed`, whatever else tripped. An
-  in-window deployment with no matching run (check 3) reads as EITHER an
+  exist (without one, a stale page 1 is what a genuinely quiet week looks
+  like, logged as a diagnostic line only, never escalated), and check 3 is
+  evaluated once, after paging every counted event. Check 2 fires as each page
+  arrives, which — unlike the others — can only happen while still searching,
+  since pagination stops the moment a success qualifies. A trip on any check
+  marks the search incomplete and prints a `::warning::` naming it, but a
+  found success — wherever it turns up, even on the same page a check
+  tripped on — yields `fresh` or `stale` by its own age, never `unconfirmed`.
+  An in-window deployment with no matching run (check 3) reads as EITHER an
   anomalous listing OR the `deployment_status` trigger itself has stopped
-  firing again (#2268) — the listing alone cannot tell them apart, so that
-  `unconfirmed` no longer claims "a success may exist further back" (that
-  claim only holds for the page-cap/lookup-budget/index-reach causes) and
-  #3321 still reopens either way. Every observation without an in-budget
-  success (`never-run`, `never-succeeded`, `unconfirmed`, `stale`) also logs
+  firing again (#2268) — the listing alone cannot tell them apart, so
+  `unconfirmed` no longer claims "a success may exist further back" unless
+  the page cap, the lookup budget, or the index's reach also stopped the
+  search (those causes still leave it possible); #3321 still reopens either
+  way. Every observation without an in-budget success (`never-run`,
+  `never-succeeded`, `unconfirmed`, `stale`) also logs
   per-page row counts and newest/oldest `createdAt`, the deployment index's
   size (every creator's shas, not only Railway's), its actual oldest entry,
   and whether the page was short (likely the whole history) or full (may not

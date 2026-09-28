@@ -376,7 +376,16 @@ const DISTRUST_REASONS = {
   'malformed-index': 'the Deployments index response body was not a list',
 }
 
-/** The `unconfirmed` finding's detail text, from `observe()`'s `incompleteReasons`. */
+/**
+ * The `unconfirmed` finding's detail text, from `observe()`'s `incompleteReasons`.
+ *
+ * An empty `incompleteReasons` still renders the bare "search stopped before
+ * covering N days" sentence, with no bucket-specific clause, no `::warning::`
+ * pointer, and no dead-trigger sentence — `observe()` itself never returns
+ * `searchComplete: false` without recording at least one reason, so this
+ * shape is reachable only from a hand-built `observations` object (as the
+ * `evaluate()` unit tests above do), never from a real `observe()` call.
+ */
 export function renderUnconfirmedDetail(guard, seen) {
   const reasons = Array.isArray(seen.incompleteReasons) ? seen.incompleteReasons : []
   const bounded = reasons.filter((r) => r in BOUNDEDNESS_REASONS).map((r) => BOUNDEDNESS_REASONS[r])
@@ -402,7 +411,7 @@ export function renderUnconfirmedDetail(guard, seen) {
   }
   // Only true for the causes that stopped an otherwise-trusted search short —
   // a distrusted read is not "the answer is further back", it is "this read
-  // cannot say" (review round 1, finding 2).
+  // cannot say".
   if (bounded.length > 0) {
     detail += ' A success may exist further back; this is not evidence that it never succeeded.'
   }
@@ -601,8 +610,8 @@ function readDeploymentIndex({ environment, creator }, gh = defaultGh) {
   // Non-enumerable: the oldest deployment a FULL index page reaches (#3340
   // review N2). A short page is the whole history, so it cannot be "too short".
   Object.defineProperty(index, '__oldest', { value: list.length >= 100 ? (created[0] ?? null) : null, enumerable: false })
-  // #3409 review round 1, finding 4: the diagnostic line needs the ACTUAL
-  // oldest entry regardless of page length — `__oldest` stays gated on
+  // #3409: the diagnostic line needs the ACTUAL oldest entry regardless of
+  // page length — `__oldest` stays gated on
   // `length >= 100` because that gate is what `indexShort` (and the M1
   // mutation test) exercises, not what a human reading the log wants to see.
   Object.defineProperty(index, '__oldestActual', { value: created[0] ?? null, enumerable: false })
@@ -736,10 +745,14 @@ function readRunPage(guard, event, page, gh) {
  * a page not opening near "now" while the deployment index shows an in-window
  * deploy, pages arriving out of order, an in-window Railway deployment with
  * no matching run in the listing (which reads as EITHER an anomalous listing
- * OR the trigger itself has stopped firing, #2268 — the `::warning::` lines
- * say which check tripped), a thrown/unreadable lookup, or a non-array
- * Deployments response body. A found success (however old) always yields
- * `stale`, never `unconfirmed`, whatever else tripped.
+ * OR the trigger itself has stopped firing, #2268 — the listing alone cannot
+ * tell them apart), a thrown/unreadable lookup, or a non-array
+ * Deployments response body. A found success yields `fresh` or `stale` by
+ * its own age, never `unconfirmed`, whatever else tripped — including a
+ * `searchComplete: false` from a coherence check on the SAME page the
+ * success came from (e.g. an out-of-order page 2 that also contains a fresh
+ * success): the `::warning::` line and the diagnostics still print, but the
+ * verdict is `fresh`, not `unconfirmed`.
  */
 export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT } = {}) {
   const workflowPath = path.join(root, '.github', 'workflows', guard.workflow)
@@ -881,7 +894,7 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
           `guard-freshness: listing-coherence — the deployment index has ${missing.length} in-window Railway ` +
             `deployment(s) to ${guard.workflow} with no matching run in the listing (e.g. sha ${missing[0].sha} ` +
             `deployed ${missing[0].created_at}). Either the run listing is anomalous, or the deployment_status ` +
-            'trigger has stopped firing (#2268) — the other ::warning:: lines above say which.',
+            'trigger has stopped firing (#2268) — the listing alone cannot tell them apart.',
         )
       }
     }
@@ -895,7 +908,8 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     // happened, so recent runs should exist. Without an in-window deploy, a
     // stale page 1 is exactly what a genuinely quiet week looks like, and is
     // reported as a diagnostic line only (below), never a `::warning::` or an
-    // incomplete search (review round 1, finding 3).
+    // incomplete search: without a real deploy in the window, an old page 1
+    // is not evidence the listing lied.
     if (page1Newest && page1Newest < horizon && !foundSuccess() && hasInWindowDeploy) {
       markIncomplete('listing-not-near-now')
       warnings.push(
@@ -930,7 +944,13 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
         `  deployment index: ${
           index
             ? `${Object.keys(index).length} shas (all creators), oldest=${index.__oldestActual ?? 'n/a'} ` +
-              `(${index.__count < 100 ? 'short page — likely the whole history' : 'full page — may not reach further back'})`
+              `(${
+                index.__malformed
+                  ? 'malformed — response body was not a list'
+                  : index.__count < 100
+                    ? 'short page — likely the whole history'
+                    : 'full page — may not reach further back'
+              })`
             : 'n/a (no provenance)'
         }`,
       )

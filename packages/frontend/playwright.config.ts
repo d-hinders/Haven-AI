@@ -248,6 +248,10 @@ export default defineConfig({
       NEXT_TELEMETRY_DISABLED: '1',
       HOSTNAME: '127.0.0.1',
       PORT: String(PORT),
+      // #3393: /releases renders fixture release data in every e2e run, so a
+      // release bump never moves its visual baselines. Server-only; read by
+      // src/app/releases/release-source.ts and nothing else.
+      HAVEN_RELEASES_FIXTURE: path.join(__dirname, 'e2e', 'fixtures', 'releases-fixture.json'),
     },
   },
   // Both projects GATE on every frontend pull request (#1768). Before that,

@@ -64,7 +64,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-27"
 ---
 
 # MCP Runtime Compatibility
@@ -180,6 +180,35 @@ last-verified: "2026-09-26"
 > description change, and the skew-flatness this document asserts holds — the
 > endpoint and the tool that calls it deploy in the same train. Nothing else
 > in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3031):** `routes/machine-payments.ts` joined the
+> request-validation `enforcedModules`, so its wire contract now refuses an
+> off-spec REQUEST SHAPE with the plugin's 400 envelope before the handler —
+> including on the routes the hosted MCP tools call (`/receipts`' uuid
+> `cursor`, `/evidence`'s field shapes, `/sweep/submit`'s full
+> `SweepAuthorization`, which the shipped SDK already sends). Every body the
+> current `@haven_ai/sdk` and the hosted MCP send passes byte-identically
+> (the suites assemble the app the production way and prove it), and the
+> refusals a CONFORMANT caller can still get are unchanged: same handlers,
+> same semantic gates, no tool added, renamed or re-described. An older
+> runtime sees the same success shapes; only a caller already sending an
+> off-spec body — which no shipped client does — gets the new 400. The skew
+> dimension is unchanged: route and tools deploy in the same train.
+>
+> **Round-2 correction (#3031 rework, owner decision epic #3028 2026-09-24):**
+> `POST /machine-payments/reconciliation-events` — the endpoint
+> `report-x402-outcome` posts to when a merchant retry rejects a confirmed
+> payment — is the rollout's NAMED RESIDUE and stays SHADOWED: it moved to
+> its own route file (`routes/machine-payments-reconciliation-events.ts`,
+> same prefix) so the module flip could not drag it into enforcement. For the
+> MCP surface this changes nothing: the tool already sends a spec-conformant
+> body, a shadowed route answers exactly as it always did (shadow only
+> measures), and the route is enforced the day a real merchant rejection
+> gives the shadow reading traffic to prove it. The rework also moved the
+> retired `/machine-payments/authorize` refusal into an `onRequest` hook
+> (owner-ordered, #3030 tombstone pattern) and restored the strict
+> `MachinePaymentAuthorizeRequest` schema; the tombstone answers 410 before
+> validation, so no MCP-visible answer changed there either.
 >
 > **Recent re-verification (#3132):** `haven_list_receipts`'s `selectionGuidance`
 > prose changed on BOTH runtimes (one shared fragment,
@@ -1033,6 +1062,29 @@ plus the read-only quote probe still gate any listing on the backend.
 The source of truth is `packages/connect/src/runtime-manifest.ts` (the SDK and
 signer versions are pinned there; `@haven_ai/mcp` tracks its own `MCP_VERSION`,
 and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
+
+> **Re-verification (#3402, 2026-09-27):** the release-note generator's
+> break notice gains a shorter form, "Includes a breaking change.", used only
+> when "(+N more in the changelog)" follows it, so a summary names the
+> changelog once. The covered `scripts/README.md` §7b and
+> `scripts/release-bump.test.mjs` change with it. No served note changes:
+> `client-releases.data.ts` is byte-identical, since the one real notice
+> (connect 0.6.0-alpha.0) has no count. Nothing below moves.
+
+> **Re-verification (#3393, 2026-09-27):** the generated
+> `packages/core/src/client-releases.data.ts` changed in two ways, neither a
+> runtime or compatibility change:
+> - each release note gains an additive `summary_segments` field, `summary`
+>   split into `{ text, code }` parts so `/releases` renders code as code. The
+>   texts join to exactly `summary`, which is unchanged for every note but one;
+> - that one is connect 0.6.0-alpha.0, whose summary omitted the break its
+>   bullet carries and now ends "Includes a breaking change: see the changelog."
+>
+> `GET /discovery` and `/.well-known/haven.json` serve the new field. It is
+> additive, so no client that parses these documents breaks, and no in-repo
+> client reads `summary`. No version constant, tool, schema, capability,
+> consent input or version-skew surface moved; `client-compat.ts` is untouched.
+> The Supported Runtime Manifest table and every claim below stand unchanged.
 
 > **Re-verification (#3305):** this doc's covered trees changed in four ways,
 > none of which is a runtime or compatibility change:
@@ -2317,6 +2369,19 @@ that still shows the double-child behaviour — recognisable by a second
 `payment_id` for the same key, with `haven_get_payment_status.idempotencyKey`
 reading `null`.
 
+> **Re-verified (#3392, 2026-09-27):** the replay recipes above gained one
+> refusal on every runtime: a keyed retry naming a DIFFERENT `task_budget_id`
+> / `taskBudgetId` than the stored intent was charged under — or none where
+> the row has one, or one where it has none — now answers 409
+> (`…different x402 task_budget` on `/x402`; the sibling wording on
+> `/payments`) instead of replaying the first payment charged to the other
+> budget. SDK `0.6.0-alpha.0` and later additionally refuse locally, before
+> any network call, when the client's own receipt cache or in-flight entry
+> was created under a different budget (`X402TaskBudgetMismatchError`);
+> published SDKs before that never send the budget, so their retries are
+> none-vs-none and replay exactly as before. No wire field moves and no
+> runtime needs an update for calls that never name a task budget.
+
 One more skew row since #1307, on the SETTLE leg rather than the sign leg:
 `haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /
 `tool_name` / `arguments` / `mcp_transport` as optional and rehydrate them by
@@ -3357,6 +3422,26 @@ to call next in structured fields, and those fields are typed end to end
 > behaviour, tool schema, runtime floor or failure code moves. Scope of this
 > note: those schemas and that hook. Nothing else in this document was
 > re-verified.
+
+> **Re-verified #3032 (2026-09-25, request validation slice 4, the
+> enforcement itself):** this diff touches the same covered files again —
+> `routes/agent-connection-setups.ts` and `routes/agents.ts` — and moves no
+> wire contract the MCP server or connector depends on. The handler-side
+> shape rungs (name string-ness, setup-token string-ness, MCP-server-name
+> regex entry, 23505 unique narrowing) are deleted because the OpenAPI
+> schemas (including the #3276 loosenings above) state each one, and the
+> five modules join `enforcedModules` with the mode default flipped to
+> `enforce`: an off-spec request now answers the 400 envelope BEFORE the
+> handler, where before it reached the handler's own 400/401. For conformant
+> connector and MCP traffic — the only traffic this document's skew and
+> consent-hash contracts are about — nothing changes: every field those
+> clients send is declared, coercion converts the loose-typed extras the
+> schemas permit, and the handler-side normalisation (`mcp_server_name` →
+> null when malformed, `superseded_agent_ids` filtering) is unchanged. A
+> connector that today gets a 400 from a handler rung gets the same 400 from
+> the envelope, naming the field. Version-skew and consent-hash contracts
+> are untouched. Scope of this note: the validation plumbing and the mode
+> default. Nothing else in this document was re-verified.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this doc is coupled through `routes/transactions.ts`,

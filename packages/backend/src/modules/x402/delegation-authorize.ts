@@ -185,6 +185,9 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
 
   const replayContext = {
     url, payTo, merchantPayTo, amountRaw, tokenAddress, tokenSymbol: tokenConfig.symbol, network, facilitatorAddresses,
+    // #3392: part of the replay pin — delegationReplay compares it against
+    // the stored row on pending_signature (unexpired) and confirmed rows.
+    taskBudgetId,
   }
   const findExistingByKey = async (): Promise<Record<string, unknown> | null> => {
     if (!idempotencyKey) return null

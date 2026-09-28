@@ -363,6 +363,16 @@ export function issuePassportBestEffort(agentId: string, userId: string): void {
 /** Attempts past this need eyes — the backoff has hit its cap by then. */
 export const ISSUANCE_ATTENTION_ATTEMPTS = 10
 
+/**
+ * How long a row the repair sweep could not answer waits before it is due
+ * again (#3395). Same hour every due row already waits out between passes —
+ * the selector's freshness guard — so a paced row and a fresh row re-enter
+ * on the same beat. Stamped on `uid_repair_next_at` (migration 099), never
+ * `updated_at` (#3342: the merchant verifier breaks ties on `updated_at
+ * DESC`, so a pacing write must not touch it).
+ */
+export const UID_REPAIR_DEFER_SECONDS = 3600
+
 export async function retryPendingPassports(
   limit = 50,
 ): Promise<{ attempted: number; failed: number; needingAttention: number }> {
@@ -412,16 +422,24 @@ export async function retryPendingPassports(
  *
  * Every row is REPORTED, not just counted: `rows` carries `agent_id`,
  * `outcome` and the reason for each, and the caller logs them — a row left
- * unrepaired is never silently dropped, and the selector hands it back on a
- * later tick.
+ * unrepaired is never silently dropped.
+ *
+ * **Every row the sweep cannot answer is PACED, not retried at the head
+ * (#3395).** `confirmed` and `repaired` exit the queue through migration
+ * 096's `uid_repair_confirmed_at` marker. Everything else — a non-throwing
+ * `unrepairable` (`refused`, `no-candidate`, `no-receipt`, `reverted`,
+ * `tx-body-unavailable`) exactly as much as a repair that THROWS (a UID
+ * collision on the unique `agent_passports_uid_idx`, a pool error) — is
+ * stamped out of the head by `deferAnchorRepair` (`uid_repair_next_at`,
+ * migration 099) and re-attempted after the same hour every due row waits,
+ * keeping the row visible in the per-row report instead of starving the
+ * queue behind it. #3342 deferred only the throw; the non-throwing outcomes
+ * wrote nothing, so N ≥ `limit` persistently unanswerable rows re-took the
+ * whole batch on every tick and a live phantom behind them was never
+ * reached.
  *
  * **Each row is isolated**, exactly like `retryPendingPassports`: one bad row
- * or transient pool error must not stop the batch. A repair that THROWS (a
- * UID collision on the unique `agent_passports_uid_idx`, a pool error) is
- * deferred — `updated_at` is bumped so the row cannot head the oldest-first
- * batch again on the very next tick (#3342) — and re-attempted after the
- * same hour every due row waits, keeping the poison row visible in the
- * per-row report instead of starving the queue behind it.
+ * or transient pool error must not stop the batch.
  */
 export async function repairAnchoredUids(
   limit = 10,
@@ -455,16 +473,30 @@ export async function repairAnchoredUids(
         reported.push({ agent_id: row.agent_id, outcome: 'confirmed', reason: result.reason })
       } else {
         unrepairable++
+        // Pace the row out of the head: a persistent `refused`,
+        // `no-candidate`, `no-receipt`, `reverted` or `tx-body-unavailable`
+        // writes nothing, so without this stamp the oldest-first selector
+        // hands it back on every tick and the batch never drains (#3395).
+        // The stamp is guarded (`status='anchored'` + the row's own tx hash)
+        // and billed against no chain read, so the batch reaches the rows
+        // behind this one.
+        try {
+          await repo.deferAnchorRepair(row.agent_id, row.tx_hash, UID_REPAIR_DEFER_SECONDS)
+        } catch {
+          /* the next tick re-reads the row — never mask the original outcome */
+        }
         reported.push({ agent_id: row.agent_id, outcome: 'unrepairable', reason: result.reason })
       }
     } catch (err) {
       // A thrown repair (UID collision, transient pool error) must not head
-      // the queue on every tick: bump `updated_at` so the row waits out the
-      // same hour as every other due row before it is retried (#3342). If
-      // even this bump fails the database itself is down — the next tick
-      // re-reads the same row then, which a dead tick cannot make worse.
+      // the queue on every tick: pace it out of the head on the dedicated
+      // `uid_repair_next_at` column (migration 099, #3395 — replacing
+      // #3342's `updated_at` bump, which the verifier's `updated_at DESC`
+      // tie-break ruled out as a state stamp). Best-effort: the row's own
+      // data may be what threw, so a refused stamp costs nothing — the next
+      // tick re-reads the row, which a dead tick cannot make worse.
       try {
-        await repo.deferAnchorRepair(row.agent_id)
+        await repo.deferAnchorRepair(row.agent_id, row.tx_hash, UID_REPAIR_DEFER_SECONDS)
       } catch {
         /* the next tick re-reads the row — never mask the original failure */
       }

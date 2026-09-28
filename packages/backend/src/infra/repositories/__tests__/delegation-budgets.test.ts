@@ -315,16 +315,24 @@ describeDb('batch revocation (#1400, real DB)', () => {
     await resetDb()
   })
 
-  it('lists pending AND active, never revoked/replaced; batch-revoke flips exactly the given hashes', async () => {
+  it('lists pending, active AND replaced (still-enabled authority, #3343); never revoked; batch-revoke flips exactly the given hashes', async () => {
     const agentId = await seedUserAndAgent('Batch agent')
     const otherAgent = await seedUserAndAgent('Other agent')
     const hActive = await seedDelegation({ agentId, status: 'active', tokenAddress: USDC })
     const hPending = await seedDelegation({ agentId, status: 'pending', tokenAddress: '0x' + '11'.repeat(20) })
+    // #3343: a replaced row is still ENABLED on-chain until its Stop userop
+    // lands, so the batch revocation list must carry it — skipping it is how
+    // a re-key completed with the old key's delegation left live.
+    const hReplaced = await seedDelegation({ agentId, status: 'replaced', tokenAddress: '0x' + '33'.repeat(20) })
     await seedDelegation({ agentId, status: 'revoked', tokenAddress: '0x' + '22'.repeat(20) })
     const hForeign = await seedDelegation({ agentId: otherAgent, status: 'active', tokenAddress: USDC })
 
     const targets = await listNonRevokedDelegationsForAgent(agentId)
-    expect(targets.map((t) => t.status).sort()).toEqual(['active', 'pending'])
+    expect(targets.map((t) => t.status).sort()).toEqual(['active', 'pending', 'replaced'])
+    const replacedHash = (await db.query<{ delegation_hash: string }>(
+      `SELECT delegation_hash FROM agent_delegations WHERE id = $1`, [hReplaced],
+    )).rows[0].delegation_hash
+    expect(targets.map((t) => t.delegation_hash)).toContain(replacedHash)
     const hashes = targets.map((t) => t.delegation_hash)
 
     // The foreign hash rides along in the request — the agent scope must
@@ -336,7 +344,7 @@ describeDb('batch revocation (#1400, real DB)', () => {
     expect(flipped.sort()).toEqual(hashes.sort())
 
     const after = await db.query<{ status: string }>(
-      `SELECT status FROM agent_delegations WHERE id = ANY($1)`, [[hActive, hPending]],
+      `SELECT status FROM agent_delegations WHERE id = ANY($1)`, [[hActive, hPending, hReplaced]],
     )
     expect(after.rows.every((r) => r.status === 'revoked')).toBe(true)
     const foreign = await db.query<{ status: string }>(

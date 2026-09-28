@@ -124,8 +124,10 @@ describeDb('merchants routes (#3078)', () => {
     await app.register(fastifyJwt, { secret: 'test-secret' })
     // `/merchants` is born ENFORCED in `src/index.ts` (#3028 rollout): the
     // suite runs every case under enforcement so a spec/route mismatch on a
-    // legitimate request would fail here, not on dev.
-    installRequestValidation(app, { mode: 'off', enforcedModules: ['routes/merchants.ts'] })
+    // legitimate request would fail here, not on dev. The production shape
+    // since the #3032 flip: mode `enforce` — the list decides only under it
+    // (the kill switches are global; `off` would now enforce NOTHING).
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/merchants.ts'] })
     await app.register(merchantRoutes, { prefix: '/merchants' })
     await app.register(catalogRoutes, { prefix: '/catalog' })
   })

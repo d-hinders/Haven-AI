@@ -28,7 +28,7 @@ import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payme
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { classifyRevertForLedger, refuse } from '../modules/payments/index.js'
-import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
+import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).
@@ -170,8 +170,7 @@ function resolveToken(chainId: number, symbol: string) {
 // ── Routes ────────────────────────────────────────────────────────
 
 /**
- * Idempotent-replay lookup for POST /payments (#1207) — the same contract
- * /machine-payments/send carries on the same key column (migration 020).
+ * Idempotent-replay lookup for POST /payments (#1207).
  *
  * A key that matches an existing row returns the FIRST request's result:
  * a still-signable intent replays its original sign_data (delegation-rail
@@ -196,7 +195,7 @@ function resolveToken(chainId: number, symbol: string) {
 async function findPaymentReplay(
   agent: AgentContext,
   idempotencyKey: string,
-  requested: { tokenAddress: string; toAddress: string; amountRaw: string },
+  requested: { tokenAddress: string; toAddress: string; amountRaw: string; taskBudgetId: string | null },
 ): Promise<{ code: number; body: Record<string, unknown> } | null> {
   const statusReplay = async (paymentId: string) => {
     const status = await getAgentPaymentStatus(agent, paymentId)
@@ -208,10 +207,23 @@ async function findPaymentReplay(
       body: { payment_id: paymentId, error: 'Payment already exists but could not be loaded', idempotent_replay: true },
     }
   }
-  const mismatch = (row: { token_address: string; to_address: string; amount_raw: string }): string | null => {
+  const mismatch = (row: {
+    token_address: string
+    to_address: string
+    amount_raw: string
+    task_budget_id: string | null
+  }): string | null => {
     if (row.token_address.toLowerCase() !== requested.tokenAddress) return 'token'
     if (row.to_address.toLowerCase() !== requested.toAddress) return 'recipient'
     if (row.amount_raw !== requested.amountRaw) return 'amount'
+    // #3392: the task budget the payment was charged to is part of the pin,
+    // exactly like token/recipient/amount. Lower-case both ids and treat
+    // "absent" as a value, so A→B, A→none and none→A all refuse. This runs
+    // before any task-budget lookup: a replay naming an id the stored row
+    // does not carry gets this 409 even when the id is malformed.
+    if ((row.task_budget_id ?? null) !== (requested.taskBudgetId ? requested.taskBudgetId.toLowerCase() : null)) {
+      return 'task_budget'
+    }
     return null
   }
 
@@ -323,20 +335,18 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     const { token, amount, to, idempotency_key, task_budget_id } = request.body
 
     // 1. Validate inputs
-    if (!token || typeof token !== 'string') {
-      return reply.code(400).send({ error: 'Token symbol is required' })
-    }
-    if (!amount || typeof amount !== 'string' || isNaN(Number(amount)) || Number(amount) <= 0) {
+    //
+    // #3031: the SHAPES — required `token`/`amount`/`to`, the recipient
+    // address pattern, and the 1–128 `idempotency_key` — are the request
+    // schema's job now (`CreatePaymentRequest`, enforced since this file
+    // joined `enforcedModules`). What stays here is what the schema cannot
+    // say: `Number(amount)` must PARSE and be POSITIVE — `parseTokenAmount`
+    // is the converter and the zero/negative refusal below is its own rung;
+    // the token-SYMBOL resolution against the chain's token list is semantic
+    // (the supported set is chain data, not a wire enum), and so is the rail
+    // gate behind it.
+    if (isNaN(Number(amount)) || Number(amount) <= 0) {
       return reply.code(400).send({ error: 'Amount must be a positive number' })
-    }
-    if (!to || !isValidAddress(to)) {
-      return reply.code(400).send({ error: 'Valid recipient address is required' })
-    }
-    if (
-      idempotency_key !== undefined &&
-      (typeof idempotency_key !== 'string' || idempotency_key.length === 0 || idempotency_key.length > 128)
-    ) {
-      return reply.code(400).send({ error: 'idempotency_key must be a non-empty string of at most 128 characters' })
     }
     // #3329: task_budget_id's shape (a non-empty string) is the spec's job
     // (`CreatePaymentRequest`) — this handler only reads the value.
@@ -407,15 +417,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
     // 4a. Idempotent replay (#1207): a retried request must return the FIRST
     // request's result, never mint a second transfer or a second approval —
-    // the same contract /machine-payments/send has carried since migration
-    // 020, on the same key column, so agents get one mechanism, not a
-    // per-route dialect. Before any chain read: a replay costs two indexed
-    // lookups.
+    // the same key column migration 020 introduced, so agents get one
+    // mechanism, not a per-route dialect. Before any chain read: a replay
+    // costs two indexed lookups.
     if (idempotency_key) {
       const replay = await findPaymentReplay(agent, idempotency_key, {
         tokenAddress: tokenAddress.toLowerCase(),
         toAddress: to.toLowerCase(),
         amountRaw: amountRaw.toString(),
+        taskBudgetId: (task_budget_id as string | undefined) ?? null,
       })
       if (replay) return reply.code(replay.code).send(replay.body)
     }
@@ -593,6 +603,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           tokenAddress: tokenAddress.toLowerCase(),
           toAddress: to.toLowerCase(),
           amountRaw: amountRaw.toString(),
+          taskBudgetId: (task_budget_id as string | undefined) ?? null,
         })
         if (replay) return reply.code(replay.code).send(replay.body)
       }
@@ -634,9 +645,13 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       const { id } = request.params
       const { signature } = request.body
 
-      if (!signature || typeof signature !== 'string' || !signature.startsWith('0x')) {
-        return reply.code(400).send({ error: 'Valid 0x-prefixed signature is required' })
-      }
+      // #3031: the `0x`-prefix + hex + minimum-length shape check moved to
+      // the request schema (`^0x[0-9a-fA-F]{100,}$` — the rung's exact
+      // floor, corrected from the spec's stricter `{130}` so 100–129-hex
+      // shapes the route always accepted stay accepted). The signature's
+      // VALIDITY is deliberately not checked here at all: the account's own
+      // EIP-1271/4337 validation at submit is the real validator (note
+      // below), so there is nothing between the schema and that.
 
       // 1. Load intent
       const intent = await findIntentForAgent(id, agent.id)
@@ -718,12 +733,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // validates in `validateUserOp`. That on-chain check IS the signature
       // verification — strictly stronger than a local recover, and it cannot
       // drift from the account's own rules. A bad signature is rejected by
-      // the bundler at submit; nothing moves. We therefore only shape-check
-      // here (a local EIP-712 reconstruction would add a second, weaker
-      // source of truth that could false-reject valid signatures).
-      if (!/^0x[0-9a-fA-F]{100,}$/.test(signature)) {
-        return reply.code(400).send({ error: 'Invalid signature format' })
-      }
+      // the bundler at submit; nothing moves. The shape check the first
+      // sentence refers to is the request schema's since #3031 (the rung
+      // that stood here answered `Invalid signature format`); a local
+      // EIP-712 reconstruction would add a second, weaker source of truth
+      // that could false-reject valid signatures.
 
       // #1482: refuse a MISDIRECTED erc7710 intent before anything is claimed.
       //

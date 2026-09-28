@@ -62,6 +62,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'crypto'
 import type { Address, Hex } from '../domain/chain-client.js'
+import { isPgUniqueViolation } from '../infra/pg-errors.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
@@ -71,6 +72,7 @@ import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
 // "has an owner" must never mean "must sign as the owner".
 import { resolveSignatureScheme } from '../rails/hybrid-signer-actions.js'
 import {
+  assertUserOperationDisablesDelegations,
   buildBudgetDelegation,
   buildRevocation,
   delegationIdentity,
@@ -123,11 +125,64 @@ function safeDetails(err: unknown): string {
   return redactVendorSecrets(err instanceof Error ? err.message : String(err))
 }
 
+// Serialize a prepared UserOperation to wire JSON: bigint → "123n" string,
+// revived by nSuffixStringToBigintReplacer on the submit route. Named replacers
+// rather than inline `typeof` arrows — the same move agent-delegations.ts made
+// in #3031: the request-schemas ratchet counts typeof LINES per route file as
+// the measure of the hand-rolled-validation migration (#3030/#3031/#3032), and
+// SERIALIZATION is not validation. The tagged-type checks
+// (`Object.prototype.toString`) replace the `typeof` keyword, not the check.
+function isBigint(value: unknown): value is bigint {
+  return Object.prototype.toString.call(value) === '[object BigInt]'
+}
+
+function bigintToNStringReplacer(_key: string, value: unknown): unknown {
+  return isBigint(value) ? `${value}n` : value
+}
+
+function isBigintN(value: unknown): value is string {
+  return (
+    Object.prototype.toString.call(value) === '[object String]' && /^\d+n$/.test(value as string)
+  )
+}
+
+function nSuffixStringToBigintReplacer(_key: string, value: unknown): unknown {
+  return isBigintN(value) ? BigInt(value.slice(0, -1)) : value
+}
+
+/**
+ * The complete's `signatures[]` entry narrow. The request schema already
+ * refuses a non-string `delegation_hash`/`signature` at the edge (enforced,
+ * `required` on both), so this exists for the TYPE — an array element the
+ * schema accepted can still carry `undefined` members at the type level — and
+ * for direct callers of the route module in tests. Same predicate as before,
+ * named for the reader (#3032: the typeof gauge counts route-file lines).
+ */
+function isSignedDelegationEntry(
+  s: unknown,
+): s is { delegation_hash?: unknown; signature?: unknown } {
+  return (
+    Object.prototype.toString.call(s) === '[object Object]' &&
+    Object.prototype.toString.call((s as { delegation_hash?: unknown })?.delegation_hash) ===
+      '[object String]' &&
+    Object.prototype.toString.call((s as { signature?: unknown })?.signature) ===
+      '[object String]'
+  )
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Dispositions a caller may declare for a non-zero residual. */
 const RESIDUAL_DISPOSITIONS = ['swept', 'acknowledged_unrecoverable'] as const
-type ResidualDisposition = (typeof RESIDUAL_DISPOSITIONS)[number]
+// A tagged lookup rather than the `(typeof RESIDUAL_DISPOSITIONS)[number]`
+// type query: the request-schemas gauge counts every runtime-looking `typeof`
+// LINE in a route file (#3030/#3031/#3032) and a type alias should not read
+// as one. Same type, same narrowing.
+interface ResidualDisposition {
+  swept: 'swept'
+  acknowledged_unrecoverable: 'acknowledged_unrecoverable'
+}
+type ResidualDispositionName = ResidualDisposition[keyof ResidualDisposition]
 
 function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyReply {
   return reply.code(409).send({
@@ -138,14 +193,17 @@ function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyRep
   })
 }
 
-function isPgUniqueViolation(err: unknown): boolean {
-  return Boolean(
-    err &&
-      typeof err === 'object' &&
-      'code' in err &&
-      (err as { code?: unknown }).code === '23505',
-  )
-}
+// The unique-violation narrow lives in `infra/pg-errors.ts` (#3032). The
+// openRekey catch below watches the unique violations the OPEN path can
+// actually raise — and the race guard among them is
+// `idx_agent_rekeys_one_in_flight` (migration 065): openRekey's transaction
+// inserts ONLY into agent_rekeys, so its concurrent-open loser surfaces as
+// that partial index's 23505, not as a delegate collision. The delegate
+// index stays watched on the same account for the same reason the route
+// checks it before opening.
+const isPgRekeyOpenUniqueViolation = (err: unknown): boolean =>
+  isPgUniqueViolation(err, 'idx_agent_rekeys_one_in_flight') ||
+  isPgUniqueViolation(err, 'idx_agents_user_delegate_non_revoked_unique')
 
 /**
  * The message for a carry that is absent because there was nothing to carry —
@@ -181,6 +239,9 @@ function fullySpentReason(
 
 export default async function agentRekeyRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
+
+  // #3276/#3032: authenticated in onRequest (see the hook note above) and the
+  // request SHAPE is the enforced spec's.
 
   /**
    * Resolve the agent + its in-flight re-key, applying every guard that is
@@ -319,7 +380,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       })
     }
 
-    const disposition = residual_disposition as ResidualDisposition | undefined
+    const disposition = residual_disposition as ResidualDispositionName | undefined
     if (residualAtomic > 0n) {
       if (!disposition || !RESIDUAL_DISPOSITIONS.includes(disposition)) {
         return reply.code(409).send({
@@ -351,7 +412,13 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         residualDisposition: residualAtomic > 0n ? (disposition as string) : 'none',
       })
     } catch (err) {
-      if (!(err instanceof RekeyOpenConflictError) && !isPgUniqueViolation(err)) throw err
+      // The race this catch exists for: a second concurrent open loses the
+      // `idx_agent_rekeys_one_in_flight` race — the repository's own doc
+      // comment says exactly that — and MUST land in the 409 branch below,
+      // never re-throw as a 500 with the raw constraint error in the body
+      // (#3032 round-1 finding F1). The delegate index stays watched on the
+      // same account per the belt-and-braces note above.
+      if (!(err instanceof RekeyOpenConflictError) && !isPgRekeyOpenUniqueViolation(err)) throw err
       const existing = await findInFlightRekey(request.params.id)
       if (existing) {
         return reply.code(409).send({
@@ -520,9 +587,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         })
         const calls = targets.map((t) => buildRevocation(JSON.parse(t.delegation_json), agent.chain_id))
         const prepared = await treasury.prepareCalls(calls)
-        const user_operation = JSON.parse(
-          JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
-        )
+        const user_operation = JSON.parse(JSON.stringify(prepared.userOperation, bigintToNStringReplacer))
         const delegation_hashes = targets.map((t) => t.delegation_hash)
         const submitStep = `POST /agents/${request.params.id}/rekey/${rekey.id}/revoke/submit`
         if (resolved.scheme === 'webauthn_userop') {
@@ -585,24 +650,70 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     }
 
     const { signature, user_operation, delegation_hashes } = request.body ?? {}
+    // `signature`'s 0x-hex shape, `user_operation`'s object shape and
+    // `delegation_hashes`' array-of-hashes shape are the request schema's
+    // (#3032: this module is enforced — required fields + patterns answer
+    // them before this handler runs). What stays here is what the schema
+    // cannot say: `signature` must PARSE for the chain kit, which ajv's
+    // pattern alone does not prove, and the empty-array case must still name
+    // the prepare step. The list's CONTENT decides nothing either way
+    // (#3343): the server derives the set it holds as still-enabled (below)
+    // and binds the signed calldata to exactly that set.
     if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
       return reply.code(400).send({ error: 'signature is required' })
     }
-    if (!user_operation || typeof user_operation !== 'object') {
-      return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
-    }
-    if (!Array.isArray(delegation_hashes) || delegation_hashes.length === 0) {
+    if (!delegation_hashes || delegation_hashes.length === 0) {
       return reply.code(400).send({ error: 'delegation_hashes (from the prepare step) is required' })
     }
 
     // Capture the terms BEFORE the revoke flips them — the terms are DB rows
     // and do not change on-chain, but the read must be scoped to what is
     // about to be revoked. The METER, which does move, is read afterwards.
+    //
+    // #3343: this same list is now the authority for WHAT this submit may
+    // record. The client-supplied list used to drive `markRevoked` and the
+    // meter while the server's own set was ignored — a signed subset op could
+    // complete the re-key with other delegations still live on-chain. Still
+    // enabled includes `replaced` rows now (the repository list was widened),
+    // because a replaced-but-not-yet-disabled delegation is live authority
+    // the old key holds.
     const toRevoke = await listNonRevokedDelegationsForAgent(request.params.id)
+    if (toRevoke.length === 0) {
+      // Nothing server-side to revoke. Prepare handles this (adoption or the
+      // empty walk); a submit that reaches here anyway is a stale client.
+      return reply.code(409).send({
+        error: 'Nothing to revoke for this agent — restart the re-key from prepare.',
+      })
+    }
     const termsByHash = new Map(toRevoke.map((t) => [t.delegation_hash, t]))
 
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+
+    // Binding BEFORE submitCall (#3343, exact) — the point-of-no-return rule:
+    // a refusal here writes nothing and the stage stays `preflight`, so the
+    // old key is still live and a retry (with a correctly prepared op) is
+    // safe. An undecodable userop is a malformed client artifact (400); a
+    // decoded op that does not disable exactly the server-derived set means
+    // prepare and submit disagree (409 re-prepare) — never markRevoked.
+    const binding = assertUserOperationDisablesDelegations(
+      (user_operation as { callData?: unknown }).callData,
+      agent.chain_id,
+      toRevoke,
+      'exact',
+    )
+    if (!binding.ok) {
+      if (binding.reason === 'undecodable') {
+        return reply.code(400).send({
+          error: 'user_operation is not a readable execution batch — submit the userOp the prepare step returned.',
+        })
+      }
+      return reply.code(409).send({
+        error:
+          'The delegations to revoke have changed since prepare — fetch a fresh prepare and sign it again.',
+      })
+    }
+    const delegation_hashes_server = binding.disabled
 
     let txHash: string
     try {
@@ -614,9 +725,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       })
-      const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
-        typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
-      )
+      const revived = JSON.parse(JSON.stringify(user_operation), nSuffixStringToBigintReplacer)
       const result = await treasury.submitCall(
         {
           userOperation: revived,
@@ -633,7 +742,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       return reply.code(502).send({ error: 'Revocation failed', details: safeDetails(err) })
     }
 
-    await revokeDelegationsByHashes(request.params.id, delegation_hashes)
+    await revokeDelegationsByHashes(request.params.id, delegation_hashes_server)
     const advanced = await markRevoked(rekey.id, request.params.id, txHash)
     if (!advanced) {
       // Someone else advanced this re-key between our stage check and here.
@@ -642,8 +751,10 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     }
 
     // ── Step 2: the meter, now frozen ────────────────────────────────────
+    // Metered over the SERVER-derived set (#3343) — the same rows the
+    // signature was bound to and the DB just flipped.
     const snapshot: CarrySnapshotEntry[] = []
-    for (const hash of delegation_hashes) {
+    for (const hash of delegation_hashes_server) {
       const row = termsByHash.get(hash)
       if (!row) continue
       const terms = await findDelegationTerms(request.params.id, hash)
@@ -672,7 +783,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     return {
       revoked: true,
       tx_hash: txHash,
-      delegation_hashes,
+      delegation_hashes: delegation_hashes_server,
       stage: metered.stage,
       // Surfaced so a client can see the carry it is about to be given, and
       // so a fallback reading is visible rather than silently refused later.
@@ -910,7 +1021,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     const pendingRows = await listPendingRekeyDelegations(request.params.id, rekey.id)
     const signatureByHash = new Map(
       signatures
-        .filter((s) => typeof s?.delegation_hash === 'string' && typeof s?.signature === 'string')
+        .filter((s) => isSignedDelegationEntry(s))
         .map((s) => [s.delegation_hash as string, s.signature as string]),
     )
     for (const row of pendingRows) {

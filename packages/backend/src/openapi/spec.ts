@@ -2293,7 +2293,16 @@ export const openapiSpec = {
                 type: 'object',
                 required: ['signature'],
                 properties: {
-                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130,}$' },
+                  // #3031: the rung's TWO constraints, both expressible in
+                  // one pattern. `{130,}` was already here; the rung also
+                  // refused an ODD number of hex characters
+                  // (`signature.length % 2 !== 0` — hex travels as byte
+                  // pairs, so an odd tail cannot decode). `(?:[..]{2}){65,}`
+                  // says exactly that: 65+ whole bytes, 130+ hex chars, even
+                  // length. 65-byte ECDSA and longer WebAuthn assertions
+                  // both still pass; the EIP-1271 redemption check stays the
+                  // real validator.
+                  signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2}){65,}$' },
                 },
               },
             },
@@ -2356,6 +2365,8 @@ export const openapiSpec = {
         tags: ['Delegations'],
         operationId: 'submitDelegationRevocation',
         summary: 'Revoke step 2: submit the signed UserOp; the row flips only after it lands.',
+        description:
+          'The submitted user_operation is BOUND to the delegation being revoked (#3343): its calldata must disable THAT delegation on the pinned DelegationManager (identity comparison, signature excluded), checked before submission. A userop that disables something else — or nothing — is refused 400 and nothing is recorded. On success the delegation is disabled on-chain and the row is marked revoked.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
         requestBody: {
@@ -2375,7 +2386,8 @@ export const openapiSpec = {
         },
         responses: {
           '200': {
-            description: 'Delegation disabled on-chain and marked revoked.',
+            description:
+              'Delegation disabled on-chain and marked revoked. The recorded revocation was verified against the signed calldata (#3343).',
             content: {
               'application/json': {
                 schema: {
@@ -2533,7 +2545,7 @@ export const openapiSpec = {
         operationId: 'submitRekeyRevocation',
         summary: 'Re-key steps 1b + 2: land the revoke, THEN read the now-frozen meter (#1698).',
         description:
-          "Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe.",
+          "Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe. The revoked set is derived SERVER-side (#3343): every delegation this agent still holds enabled on-chain (pending, active and replaced rows), and the signed calldata must disable exactly that set before anything is recorded — a subset or stale op answers 409 re-prepare, an unreadable one 400, and the stage stays preflight either way.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
         requestBody: {
@@ -2788,7 +2800,7 @@ export const openapiSpec = {
         operationId: 'submitRevokeAllDelegations',
         summary: 'Batch revoke step 2: submit the signed batch; rows flip only after the UserOp lands.',
         description:
-          'The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.',
+          'The revoked set is derived SERVER-side (#3343) — every delegation this agent still holds enabled on-chain (pending, active and replaced rows); the request\'s delegation_hashes is accepted for compatibility but does not decide anything. The signed calldata must disable exactly that set (checked before submission): a subset or stale op answers 409 re-prepare, an unreadable op 400. The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -6073,7 +6085,7 @@ export const openapiSpec = {
             ...errorResponse,
             description:
               'Idempotency conflict: the key already belongs to a payment with a different token, ' +
-              'recipient or amount, or it replays an intent that is mid-flight ' +
+              'recipient, amount or task budget (#3392), or it replays an intent that is mid-flight ' +
               '(pending_signature / submitted). Only `payment_intents` carry the key — the ' +
               'approval-queue replay fallback is gone with the table (#2055).',
           },
@@ -6187,7 +6199,17 @@ export const openapiSpec = {
                 type: 'object',
                 required: ['signature'],
                 properties: {
-                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+                  // #3031: the handler's floor, stated as it behaves. The
+                  // declared `{130}` was stricter than the route: 100–129 hex
+                  // characters are shape-accepted (the rung that stood in
+                  // `routes/payments.ts` was `^0x[0-9a-fA-F]{100,}$`) and the
+                  // existing suite exercises a 97-BYTE signature through this
+                  // route (`payments-session-rail.test.ts`), so enforcing the
+                  // old declaration would have refused accepted shapes. The
+                  // REAL validator is the account's own EIP-1271/4337 check at
+                  // submit — this is a shape check only, so it states only
+                  // what the shape check accepts.
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{100,}$' },
                 },
                 additionalProperties: false,
               },
@@ -6588,6 +6610,39 @@ export const openapiSpec = {
           'HELD funds. Rail-aware like every read: both retired rails answer 410. Reporting only — ' +
           'grants no authority, moves nothing; enforcement stays on-chain.',
         security: [{ AgentApiKey: [] }],
+        // #3031: the two query parameters declared. The route has required
+        // both since #3126 (`parseBalanceCoverageQuery` refuses their absence
+        // with a 400 naming the field) and no client calls the route without
+        // them — but the spec declared nothing, so enforcement would have
+        // answered a spec refusal only where the handler meant to answer its
+        // own 400. Declared as the handler parses them. `token` is an ADDRESS
+        // because that is the route's contract: the hosted MCP tool resolves
+        // a token SYMBOL against the agent's allowances FIRST (#3213,
+        // `state-direct-recovery.ts`) and calls this route with the address
+        // — the 2026-09-22 traffic drive's "symbol form" never reached this
+        // route as a symbol. A non-address value reaches the chain read today
+        // and is mislabelled `covered: null` (an RPC failure); under
+        // enforcement the schema refuses it as the caller error it is.
+        // `amount_atomic` is a decimal atomic string — the `^[0-9]+$` HALF of
+        // the handler's check is here; the `> 0` half JSON Schema does not
+        // express and the handler keeps (`must be a decimal atomic amount`).
+        parameters: [
+          {
+            name: 'token',
+            in: 'query',
+            required: true,
+            schema: address,
+            description: 'The ERC-20 contract address to check holdings of.',
+          },
+          {
+            name: 'amount_atomic',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', pattern: '^[0-9]+$' },
+            description:
+              'The amount the coverage question is asked about, in ATOMIC units, as a decimal string. Zero passes the schema and is refused by the handler (a sufficiency question about nothing has no honest answer).',
+          },
+        ],
         responses: {
           '200': {
             description: 'The coverage answer for the requested token and amount.',
@@ -6710,6 +6765,8 @@ export const openapiSpec = {
                   },
                   idempotency_key: {
                     type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
                     description:
                       'Validated (1–128 characters) and then IGNORED — nothing is deduplicated, ' +
                       'because every call refuses. Accepted only so an existing client is ' +
@@ -7147,6 +7204,174 @@ export const openapiSpec = {
           '200': {
             description: 'Paginated per-account transactions.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/TransactionsPageResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    // ── The receive side (#3333, epic #3328) ────────────────────────────────
+    //
+    // The owner's persisted inbound index, the matching state, and the
+    // owner-signed off-ramp hand-off. The receipt drop is deliberately
+    // UNAUTHENTICATED (a payer has no Haven account): its authentication is
+    // the ECDSA signature over the drop payload, recovered and checked
+    // against the payer the inbound transfer names. It can only add a
+    // receipt document and flip an inbound row's earned flag — never move
+    // funds or authority.
+    '/receive/{accountAddress}': {
+      get: {
+        tags: ['Transactions'],
+        operationId: 'getReceiveLedger',
+        summary: 'The receive ledger for one account: address, matched USDC balance, inbound rows.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        responses: {
+          '200': {
+            description: 'The account receive ledger. `earned: false` rows are unmatched = unearned; nothing is delivered on them.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ReceiveLedgerResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/off-ramp-destination': {
+      put: {
+        tags: ['Transactions'],
+        operationId: 'setOffRampDestination',
+        summary: 'Save (or replace) the owner off-ramp destination for one account+chain.',
+        description:
+          'Owner-only by topology: the route sits behind the dashboard JWT and no agent route wraps it. ' +
+          'One destination per account+chain; a PUT replaces it. This address is the ONLY recipient the ' +
+          'off-ramp hand-off can prepare a transfer to.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/OffRampDestinationInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The saved destination.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OffRampDestination' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/off-ramp/prepare': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'prepareOffRampHandoff',
+        summary: 'Prepare the owner-signed USDC transfer to the saved off-ramp destination.',
+        description:
+          'Builds the UserOperation through the same prepareTransfer the owner send uses (#1083): Haven ' +
+          'prepares, the OWNER signs with the account own signer, Haven relays. The token is the chain ' +
+          'registry USDC and the recipient is the SAVED destination — neither comes from the request ' +
+          'body. Submit goes through `/hybrid/{accountAddress}/transfers/submit`, which re-derives the ' +
+          'calldata and refuses a user_operation that does not contain it. Not a sweep: the sweep is ' +
+          'the agent-keyed stranded-delegate machinery.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/OffRampPrepareInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The prepared UserOperation plus the submit instructions the owner signs into.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OffRampPrepareResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/receipt-drop': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'dropReceiptForTransfer',
+        summary: 'A payer-signed receipt document for one inbound transfer (no authentication; signature IS the auth).',
+        description:
+          'A payer has no Haven account, so this route carries no auth middleware. The signer is ' +
+          'RECOVERED from the EIP-191 signature over the exact drop payload ' +
+          '(`haven:receipt-drop\\ntx:<hash>\\namount_raw:<atomic>`) and the drop is accepted only when ' +
+          'the recovered address IS the payer the inbound transfer names, the amount matches the ' +
+          'persisted transfer, and the transfer is still unmatched. The stored document is a reference ' +
+          'that flips the row earned flag — it grants nothing and moves nothing.',
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReceiptDropInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The transfer is matched and now earned.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ReceiptDropResponse' } } },
+          },
+          '400': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/ingest': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'ingestInboundTransfer',
+        summary: 'Record one inbound USDC transfer in the account receive index.',
+        description:
+          'Owner-scoped ingestion hook (tests and the eventual indexer tick; the production indexer ' +
+          'feeds the same repository). Idempotent per (chain, tx hash): a re-ingest returns ' +
+          '`ingested: false` rather than double-counting.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/InboundIngestInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Recorded (`ingested: false` when the hash was already indexed).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/InboundIngestResponse' } } },
           },
           '400': errorResponse,
           '401': errorResponse,
@@ -8099,11 +8324,25 @@ export const openapiSpec = {
             description: 'Newest first. What changed, for deciding whether to update — not the full CHANGELOG.',
             items: {
               type: 'object',
-              required: ['version', 'date', 'summary', 'action_required'],
+              required: ['version', 'date', 'summary', 'summary_segments', 'action_required'],
               properties: {
                 version: { type: 'string' },
                 date: { type: 'string', format: 'date' },
-                summary: { type: 'string' },
+                summary: { type: 'string', description: 'Plain text: code spans keep their content, without backticks.' },
+                summary_segments: {
+                  type: 'array',
+                  description:
+                    '#3393: `summary` split into parts, so a renderer can show code as code. The texts join to exactly `summary`.',
+                  items: {
+                    type: 'object',
+                    required: ['text', 'code'],
+                    properties: {
+                      text: { type: 'string' },
+                      code: { type: 'boolean', description: 'True when the part was a code span in the CHANGELOG.' },
+                    },
+                    additionalProperties: false,
+                  },
+                },
                 action_required: {
                   type: 'boolean',
                   description: 'True when a client must update to keep paying. Not the same as a breaking change.',
@@ -9121,16 +9360,24 @@ export const openapiSpec = {
             minLength: 1,
             maxLength: 128,
             description:
-              'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send.',
+              'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer — token, recipient, amount or task budget (#3392) — is a 409.',
           },
           task_budget_id: {
             type: 'string',
             minLength: 1,
             description:
-              '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
+              '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
           },
         },
-        additionalProperties: true,
+        // #3031: CLOSED. The shipped SDK sends exactly the four fields above
+        // (`createIntent`), and every field the handler used to rung out is
+        // declared. An undeclared field used to ride through to the handler,
+        // which ignored it — on a route that mints a payment intent that is
+        // silent-typo exposure (`idempotencyKey` instead of
+        // `idempotency_key` deduplicates nothing). `removeAdditional: false`
+        // means nothing is stripped either: an unknown field is REFUSED,
+        // never rerouted.
+        additionalProperties: false,
       },
       SignablePaymentIntent: {
         type: 'object',
@@ -9419,7 +9666,7 @@ export const openapiSpec = {
             type: 'string',
             minLength: 1,
             description:
-              '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
+              '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
           },
         },
         additionalProperties: false,
@@ -9613,6 +9860,18 @@ export const openapiSpec = {
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
         },
         additionalProperties: false,
+        // #3031 round 2: the pre-#3031 declaration, RESTORED. Round 1 made
+        // this schema permissive so the handler's 410 would win over any
+        // body — but the owner decision (epic #3028, 2026-09-24T21:24:44Z,
+        // closing #3223) ordered the retirement answer moved to `onRequest`
+        // instead (the #3030 retired-tombstone pattern), and the move makes
+        // the strict schema SAFE again: the tombstone hook refuses at
+        // `onRequest`, which fastify runs BEFORE schema validation, so a
+        // body that misses the declared shape gets the honest 410, not a
+        // 400. What the schema then refuses (for a hypothetical future that
+        // lets the hook's answer lapse) is a body the tombstone would have
+        // refused anyway — no accepted shape narrows. `AuthorizeBody`
+        // remains the route's request TYPE for documentation.
       },
       MachinePaymentAuthorizeResponse: {
         oneOf: [
@@ -9927,7 +10186,15 @@ export const openapiSpec = {
           paymentId: uuid,
           rail: { type: 'string' },
           txHash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-          resourceUrl: { type: 'string', format: 'uri' },
+          // #3031: a plain string, not `format: uri`. The handler's guard was
+          // string-ness only, and the SEMANTIC check — the value must equal
+          // the settled payment's own resource URL — lives in
+          // `modules/mpp/evidence.ts` and refuses 409 `resourceUrl does not
+          // match payment intent`. The format would have refused any
+          // syntactically-non-URI string the semantic check was already going
+          // to answer 409, as a 400 naming a different rule; the shape check
+          // states only the shape.
+          resourceUrl: { type: 'string' },
           merchantStatus: { type: 'integer', minimum: 100, maximum: 599 },
           challengePayload: { type: 'object', additionalProperties: true },
           selectedPayment: { type: 'object', additionalProperties: true },
@@ -9975,7 +10242,11 @@ export const openapiSpec = {
           value: { type: 'string', description: 'Atomic USDC amount.' },
           validAfter: { type: 'string', description: 'Unix seconds the authorization becomes valid.' },
           validBefore: { type: 'string', description: 'Unix seconds the authorization expires.' },
-          nonce: { type: 'string', description: '0x-prefixed 32-byte hex nonce.' },
+          nonce: {
+            type: 'string',
+            description: '0x-prefixed 32-byte hex nonce.',
+            pattern: '^0x[0-9a-fA-F]{64}$',
+          },
           token: address,
           chainId: { type: 'integer', examples: [8453] },
         },
@@ -10012,7 +10283,11 @@ export const openapiSpec = {
         required: ['authorization', 'signature'],
         properties: {
           authorization: { $ref: '#/components/schemas/SweepAuthorization' },
-          signature: { type: 'string', description: 'Delegate EIP-712 signature over the authorization.' },
+          // #3031: the handler's rung stated the same pattern — a 0x-prefixed
+          // hex string of ANY length (the EIP-712 signature length is the
+          // chain's problem at recovery, and `recoverSweepSigner` refuses a
+          // bad one). Stated as the rung had it.
+          signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'Delegate EIP-712 signature over the authorization.' },
         },
         additionalProperties: false,
       },
@@ -10557,6 +10832,145 @@ export const openapiSpec = {
             },
           },
         },
+      },
+      ReceiveLedgerResponse: {
+        type: 'object',
+        description: 'The account receive ledger (#3333): the persisted inbound index, the matched balance, and the saved off-ramp destination.',
+        required: ['account_address', 'chain_id', 'usdc_address', 'balance_atomic', 'balance_formatted', 'off_ramp_destination', 'transfers'],
+        properties: {
+          account_address: { ...address, description: 'The receiving account address.' },
+          chain_id: { type: 'integer' },
+          usdc_address: { type: ['string', 'null'], description: 'The chain registry USDC contract, or null when the chain has none.' },
+          balance_atomic: { type: 'string', description: 'SUM of matched (balance_consumed) inbound rows, atomic units, as a numeric string. Unmatched rows are unearned and never counted.' },
+          balance_formatted: { type: 'string', description: 'The balance in USDC human decimals (6).' },
+          off_ramp_destination: {
+            oneOf: [{ $ref: '#/components/schemas/OffRampDestination' }, { type: 'null' }],
+            description: 'The owner-saved off-ramp destination, or null when none is saved yet.',
+          },
+          transfers: { type: 'array', items: { $ref: '#/components/schemas/ReceiveLedgerTransfer' } },
+        },
+        additionalProperties: false,
+      },
+      ReceiveLedgerTransfer: {
+        type: 'object',
+        required: ['tx_hash', 'payer_address', 'amount_raw', 'amount_formatted', 'block_time', 'match_kind', 'matched_payment_intent_id', 'matched_receipt_id', 'balance_consumed', 'earned'],
+        properties: {
+          tx_hash: { type: 'string' },
+          payer_address: { type: 'string' },
+          amount_raw: { type: 'string', description: 'Atomic units, numeric string.' },
+          amount_formatted: { type: 'string', description: 'USDC human decimals (6).' },
+          block_time: { type: 'string', format: 'date-time' },
+          match_kind: {
+            oneOf: [{ type: 'string', enum: ['x402_payto', 'receipt'] }, { type: 'null' }],
+            description: 'How the row is linked to evidence: an x402 settlement the account was payTo for, or a supplied receipt. Null = unmatched = unearned.',
+          },
+          matched_payment_intent_id: { type: ['string', 'null'], description: 'The x402 settlement intent id, present only for x402_payto. Stored for audit; never a grant.' },
+          matched_receipt_id: { type: ['string', 'null'], description: 'The linked receipt document id, present only for the receipt kind.' },
+          balance_consumed: { type: 'boolean', description: 'True once the row counts in balance_atomic.' },
+          earned: { type: 'boolean', description: 'match_kind !== null. Unmatched = unearned; nothing is delivered on an unearned row.' },
+        },
+        additionalProperties: false,
+      },
+      OffRampDestination: {
+        type: 'object',
+        required: ['destination_address', 'destination_kind', 'label', 'updated_at'],
+        properties: {
+          destination_address: { ...address, description: 'The deposit address at the venue (Safello, Coinbase, or a custody account).' },
+          destination_kind: { type: 'string', enum: ['safello', 'coinbase', 'custody_deposit'] },
+          label: { type: ['string', 'null'] },
+          updated_at: { type: 'string', format: 'date-time' },
+        },
+        additionalProperties: false,
+      },
+      OffRampDestinationInput: {
+        type: 'object',
+        required: ['destination_address'],
+        properties: {
+          destination_address: { ...address, description: 'The deposit address. The zero address is refused.' },
+          // No schema-side default: a request-body default would let ajv
+          // inject the value into payloads (shadow invariant, #3135 S5) and
+          // read as a server-coerced field. The handler falls back to
+          // custody_deposit when the field is absent.
+          destination_kind: { type: 'string', enum: ['safello', 'coinbase', 'custody_deposit'], description: 'Defaults to custody_deposit when omitted (handler fallback).' },
+        },
+        additionalProperties: false,
+      },
+      OffRampPrepareInput: {
+        type: 'object',
+        required: ['amount_atomic'],
+        properties: {
+          amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'The amount to move, atomic units. The recipient and token are NOT in the request: they are the saved destination and the chain registry USDC.' },
+        },
+        additionalProperties: false,
+      },
+      OffRampPrepareResponse: {
+        type: 'object',
+        required: ['prepared', 'submit'],
+        properties: {
+          prepared: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'The prepared UserOperation (same shape the owner send prepare returns) — what the OWNER signs with the account own signer.',
+          },
+          submit: { $ref: '#/components/schemas/OffRampSubmitInstructions' },
+        },
+        additionalProperties: false,
+      },
+      OffRampSubmitInstructions: {
+        type: 'object',
+        required: ['endpoint', 'token_address', 'to', 'destination_kind', 'amount_atomic', 'signature_required_from'],
+        properties: {
+          endpoint: { type: 'string', description: 'The submit route; it re-derives the calldata and refuses a user_operation that does not contain it.' },
+          token_address: { ...address },
+          to: { ...address, description: 'The saved destination — echoed so the owner signs what they verified.' },
+          destination_kind: { type: 'string' },
+          amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          signature_required_from: { type: 'string', enum: ['owner'], description: 'Only the account owner signs; no agent key can authorize this transfer.' },
+        },
+        additionalProperties: false,
+      },
+      ReceiptDropInput: {
+        type: 'object',
+        required: ['tx_hash', 'amount_raw', 'payer_address', 'signature'],
+        properties: {
+          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: 'The on-chain transfer the receipt is for — the match key.' },
+          amount_raw: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units; must equal the persisted transfer amount.' },
+          payer_address: { ...address, description: 'The payer the transfer names; the signature must recover to it.' },
+          signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'EIP-191 personal signature over `haven:receipt-drop\\ntx:<tx_hash>\\namount_raw:<amount_raw>`.' },
+        },
+        additionalProperties: false,
+      },
+      ReceiptDropResponse: {
+        type: 'object',
+        required: ['matched', 'match_kind', 'transfer_id'],
+        properties: {
+          matched: { type: 'boolean', enum: [true] },
+          match_kind: { type: 'string', enum: ['x402_payto', 'receipt'] },
+          transfer_id: { type: 'string', format: 'uuid' },
+        },
+        additionalProperties: false,
+      },
+      InboundIngestInput: {
+        type: 'object',
+        required: ['tx_hash', 'payer_address', 'amount_raw'],
+        properties: {
+          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          payer_address: { ...address },
+          amount_raw: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+          token_address: { ...address, description: 'Optional; defaults to the chain registry USDC — the receive index tracks USDC only.' },
+          block_time: { type: 'string', format: 'date-time', description: 'Defaults to now.' },
+          block_number: { type: 'string', pattern: '^[0-9]+$' },
+        },
+        additionalProperties: false,
+      },
+      InboundIngestResponse: {
+        type: 'object',
+        required: ['ingested', 'id'],
+        properties: {
+          ingested: { type: 'boolean', description: 'false when the (chain, tx hash) was already indexed — idempotent re-ingest.' },
+          id: { type: ['string', 'null'], format: 'uuid', description: 'The row id, or null when it already existed.' },
+        },
+        additionalProperties: false,
       },
       TransactionsResponse: {
         type: 'object',

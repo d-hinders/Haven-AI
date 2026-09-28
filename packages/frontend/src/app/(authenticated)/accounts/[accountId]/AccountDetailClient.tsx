@@ -36,6 +36,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
+import { ReceivePanel } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 // #3127 (finding 6): the shared formatter — this page's inline copy was the
@@ -659,6 +660,12 @@ export default function AccountDetailClient() {
         account={account}
         onClose={() => setReceiveOpen(false)}
       />
+      {accountAddress && (
+        <ReceivePanel
+          accountAddress={accountAddress}
+          chainId={chainId}
+        />
+      )}
       {renameOpen && (
         <RenameModal
           account={account}

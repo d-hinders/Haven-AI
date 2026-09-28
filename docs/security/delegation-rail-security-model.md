@@ -50,7 +50,11 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-25"
+  - packages/backend/src/modules/passport/attestation.ts
+  - packages/backend/src/modules/passport/revocation.ts
+  - packages/backend/src/modules/passport/issuance.ts
+  - packages/backend/src/infra/repositories/agent-passports.ts
+last-verified: "2026-09-27"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -141,6 +145,25 @@ delegation, or allowance (a test pins the target and the zero value). It does
 not add a value-bearing server signer, so invariant 3 stands. See
 [11-agent-passport-schema](../architecture/11-agent-passport-schema.md).
 
+**Passport UID repair and recovery (#3395) — reads stay read-only; refusals
+keep the record honest:** the anchor-UID repair sweep and the #1043 recovery
+write only to `agent_passports` (the CAS UID swap, the confirmation and
+pacing stamps), never to any payment, budget or authority surface, and they
+never sign or broadcast anything. Their authority relevance is narrower: a
+UID is written only from an `Attested` log the proven-ours reader accepts
+(pinned schema, attested by the mined tx's own sender, tx targeting the
+pinned EAS contract), and every row the sweep cannot answer is paced out of
+the head on a dedicated column (`uid_repair_next_at`) rather than re-taken
+every tick — pacing cannot widen any client's powers and cannot reorder what
+the merchant verifier is handed (it never touches `updated_at`, the column
+that verifier breaks ties on). Two #3342 residuals are named rather than
+handled and live in the passport doc: a reorg between a fresh revoke's
+mining and its head-read confirmation could mark a row `confirmed` for an
+attestation the reorg resurrected, and a schema re-registration makes
+pre-existing rows permanently unrepairable until they are re-anchored.
+Neither moves spend authority; both are passport-record correctness, and the
+second is an owner-runbook obligation on re-registration.
+
 **Read-only reporting columns (#2871) — no invariant moves:** the covered
 repository `infra/repositories/transaction-history.ts` now also projects
 `machine_payment_evidence.fx_rate_sek` and `.fx_source` alongside the
@@ -201,14 +224,27 @@ the retired session rail's (one period's budget per recipient) — with
 revocation one `disableDelegation` away.
 
 **Batch revocation (#1400):** `POST /agents/:id/delegations/revoke-all`
-prepares ONE UserOp batching a `disableDelegation` call per pending/active
+prepares ONE UserOp batching a `disableDelegation` call per still-enabled
 delegation (`prepareCalls`, `ExecutionMode.BatchDefault` — atomic: all
-disable or none do). The owner signs that UserOp exactly as a single revoke;
-Haven still cannot sign it (invariant 3 unchanged). Fail-closed ordering: the
-DB rows flip to `revoked` only AFTER the UserOp lands, so a crash window can
-leave on-chain-disabled rows still marked active (a directionally safe
-surplus — a later redemption attempt reverts on-chain), never the reverse.
-Because `disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
+disable or none do; "still enabled" spans `pending`, `active` AND `replaced`
+rows since #3343 — a replaced row's delegation is live until its own disable
+lands). The owner signs that UserOp exactly as a single revoke; Haven still
+cannot sign it (invariant 3 unchanged). Fail-closed ordering: the DB rows
+flip to `revoked` only AFTER the UserOp lands, so a crash window can leave
+on-chain-disabled rows still marked active (a directionally safe surplus — a
+later redemption attempt reverts on-chain), never the reverse. What makes
+that ordering honest is the CALldata binding (#3343): a submit route records
+`revoked` only after its server verifies the signed UserOp's calldata —
+decoded from the account's `execute` envelope, selector-checked — actually
+disables the delegation(s) it is about to mark, by `delegationIdentity`
+(signature excluded), against the set the SERVER derives (`pending`/`active`/
+`replaced`), not a client-supplied hash list. The per-hash route refuses an
+op that does not disable its one row (400, before submission); revoke-all and
+the re-key revoke refuse an op that does not disable exactly the server's
+whole still-enabled set (409 re-prepare — the re-key stays at `preflight`,
+its point of no return). The client pairing of a userop with delegation
+hashes, and any client-supplied hash list, are not trusted inputs. Because
+`disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
 the batch is atomic, the prepare step reconciles that window (#1423): it reads
 `disabledDelegations(hash)` for every candidate, heals already-disabled rows
 to `revoked`, and drops them from the batch — a failed read degrades to the
@@ -354,6 +390,22 @@ chain.
 > x402 legs behind `GET /transactions` bind it as `$2` alongside an account-id
 > `ANY(...)` — the same ownership property, written differently. An earlier
 > draft of this note said `WHERE user_id = $1` flatly; review measured it.
+
+> **Re-verified #3031 (edit budget limits in place):** the diff touched one
+> covered backend file, `routes/agent-delegations.ts`, and the change is the
+> request-SCHEMA layer only: the file joined the request-validation
+> `enforcedModules`, so a body or path parameter whose shape the OpenAPI spec
+> does not declare (required `signature`, the `budget_atomic` digits-only
+> and uint96 shapes, uuid path params) is refused with the plugin's 400
+> envelope BEFORE the handler — the hand-rolled shape rungs are deleted.
+> Every authority claim in this document is untouched: the Owner-Signature
+> Invariant holds verbatim (a delegation activates, revokes or rekeys only
+> after the OWNER's signature is verified — the schema never substitutes for
+> it, it only refuses malformed input earlier); budget, expiry, rail and
+> delegate-identity checks stay semantic in the handlers; no route, role or
+> ceremony was added or reordered. The body-less revoke-prepare shape dev
+> always accepted is preserved (an optional requestBody validates declared
+> shape OR absent). Nothing else in this document was re-read.
 
 > **Re-verified #3166 (edit budget limits in place):** this diff touched one
 > file in this document's coverage list, `hooks/useDelegationBudget.ts` — it
@@ -1331,6 +1383,27 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > those two files and those four fields. Nothing else in this document was
 > re-verified.
 
+> **Re-verified #3032 (2026-09-25, request validation slice 4, the
+> enforcement itself):** this diff touches four covered files —
+> `routes/agents.ts`, `routes/agent-rekey.ts`,
+> `routes/agent-connection-setups.ts`, `routes/hybrid-accounts.ts` — and moves
+> no authority or custody boundary. What moved is where the request SHAPE is
+> decided: the handler-side type/shape rungs (name string-ness, delegate
+> address narrowing, bigint serializer rungs, setup-token string-ness,
+> passkey coordinate shapes, the 23505 uniques) are deleted because the
+> OpenAPI schemas state each one, and the five modules join `enforcedModules`
+> with the mode default flipped to `enforce`. The authority checks the
+> paragraphs above describe — revoke-precedes-issue, budget carry, owner
+> signatures, the delegation rail's approve-verify flow — are handler
+> SEMANTICS and are untouched: the schema refuses shapes before the handler,
+> never authority after it. The refusal code stays 400 with the plugin's
+> envelope (which names a field, never a rail, so the #2245 rail-agnostic
+> refusal property holds); an anonymous caller still gets 401 before any 400
+> (the #3276 note above). The `agent-passports.ts` module enforces without a
+> handler edit — its rung count was already 0. Scope of this note: the four
+> files' validation plumbing and the mode default. Nothing else in this
+> document was re-verified.
+
 ## 10. The delegate key's signing surface (#3272, epic #3284)
 
 The agent's delegate key signs in two places: `@haven_ai/signer` on the user's
@@ -1520,6 +1593,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > binding, the allowlist (which accepts the #3329 two-link task chain) and the
 > #3375 recipient pin, whichever delegation the backend redeems under. The rest
 > of this document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified (#3392, 2026-09-27):** the idempotent replay on both payment
+> routes now refuses a `task_budget` mismatch with a 409 instead of silently
+> replaying onto another budget: `POST /payments` compares `task_budget_id`
+> alongside token/recipient/amount (`mismatch()`, lower-cased, "absent" is a
+> value), and `POST /x402`'s `delegationReplay` compares it on
+> `pending_signature` (unexpired) and `confirmed` rows BEFORE the
+> confirmed-200 branch — a budget-only check there; enforcing the other
+> fields on confirmed rows is out of scope. The SDK's x402 receipt cache and
+> in-flight map record the `taskBudgetId` each entry was created under and
+> `authorizeX402`/`fetch`/`payX402Quote`/`resumeAuthorizedX402` throw the new
+> typed `X402TaskBudgetMismatchError` before any network call. No authority
+> moves: the comparison only reports an attribution mismatch the replay used
+> to hide — the caller, Haven and the enforcers keep exactly their previous
+> powers, and no signature, key role or on-chain surface changes. The rest of
+> this document was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this diff renames backend-internal identifiers to account vocabulary in the

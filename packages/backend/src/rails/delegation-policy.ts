@@ -30,7 +30,14 @@
  */
 
 import { keccak256, toUtf8Bytes, Interface } from 'ethers'
-import { recoverTypedDataAddress, pad, type Address, type Hex } from 'viem'
+import {
+  decodeFunctionData,
+  decodeAbiParameters,
+  recoverTypedDataAddress,
+  pad,
+  type Address,
+  type Hex,
+} from 'viem'
 import {
   createDelegation,
   getSmartAccountsEnvironment,
@@ -274,4 +281,256 @@ export function buildRevocation(
   const pins = getDelegationContracts(chainId)
   const data = contracts.DelegationManager.encode.disableDelegation({ delegation }) as Hex
   return { to: pins.delegationManager, data }
+}
+
+// ── Binding submitted owner ops to the revocations they execute (#3343) ────
+//
+// The prepare routes build the disableDelegation calldata from the SERVER's
+// own delegation rows; the submit routes used to record `revoked` for
+// whatever hashes the client paired with the signature — an op whose calldata
+// disabled something else, or nothing, still flipped the rows. The same class
+// of gap was closed for the other two owner-submit sites with #906 ("so the
+// stored signer set can never diverge from what was signed on-chain"); this
+// is the delegation-rail twin.
+//
+// The decoder below is deliberately INDEPENDENT of `buildRevocation`: it
+// hand-declares the ABI shapes and re-derives the identity from DECODED
+// bytes, so a test that mutates the encoder (disableDelegation →
+// enableDelegation, a moved pin, a different salt rule) turns red here
+// instead of the routes testing the builder against itself.
+
+/** The kit 1.6.0 DelegationManager.disableDelegation ABI item, hand-declared. */
+export const DISABLE_DELEGATION_ABI_ITEM = {
+  type: 'function',
+  name: 'disableDelegation',
+  inputs: [
+    {
+      name: '_delegation',
+      type: 'tuple',
+      internalType: 'struct Delegation',
+      components: [
+        { name: 'delegate', type: 'address', internalType: 'address' },
+        { name: 'delegator', type: 'address', internalType: 'address' },
+        { name: 'authority', type: 'bytes32', internalType: 'bytes32' },
+        {
+          name: 'caveats',
+          type: 'tuple[]',
+          internalType: 'struct Caveat[]',
+          components: [
+            { name: 'enforcer', type: 'address', internalType: 'address' },
+            { name: 'terms', type: 'bytes', internalType: 'bytes' },
+            { name: 'args', type: 'bytes', internalType: 'bytes' },
+          ],
+        },
+        { name: 'salt', type: 'uint256', internalType: 'uint256' },
+        { name: 'signature', type: 'bytes', internalType: 'bytes' },
+      ],
+    },
+  ],
+  outputs: [],
+  stateMutability: 'nonpayable',
+} as const
+
+/** Account-level execution envelope, hand-declared (ERC-7821-shaped). */
+const EXECUTE_SINGLE_ABI = [
+  {
+    type: 'function',
+    name: 'execute',
+    inputs: [
+      {
+        name: 'execution',
+        type: 'tuple',
+        components: [
+          { name: 'target', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'callData', type: 'bytes' },
+        ],
+      },
+    ],
+    outputs: [],
+    stateMutability: 'payable',
+  },
+] as const
+
+const EXECUTE_WITH_MODE_ABI = [
+  {
+    type: 'function',
+    name: 'execute',
+    inputs: [
+      { name: 'mode', type: 'bytes32' },
+      { name: 'executionData', type: 'bytes' },
+    ],
+    outputs: [],
+    stateMutability: 'payable',
+  },
+] as const
+
+const EXECUTION_TUPLE = [
+  { name: 'target', type: 'address' },
+  { name: 'value', type: 'uint256' },
+  { name: 'callData', type: 'bytes' },
+] as const
+
+/** kit ExecutionMode.SingleDefault — the packed-single executionData form. */
+const MODE_SINGLE_DEFAULT = `0x${'00'.repeat(32)}` as Hex
+/** kit ExecutionMode.BatchDefault — the atomic batch the prepare routes build. */
+export const MODE_BATCH_DEFAULT = `0x01${'00'.repeat(31)}` as Hex
+/** execType byte (mode byte 1): 0x00 = default (revert on failure). */
+const EXEC_TYPE_DEFAULT = '00'
+
+export interface DecodedUserOperationCall {
+  to: Address
+  data: Hex
+}
+
+/**
+ * Flatten a Hybrid account UserOp callData into its per-call (to, data) list.
+ *
+ * kit 1.6.0 envelope (verified against @metamask/smart-accounts-kit dist):
+ *  - a single call to another contract → `execute(Execution)` (selector
+ *    0x5c1c6dcd);
+ *  - a batch → `execute(bytes32 mode, bytes executionData)` (selector
+ *    0xe9ae5c53), executionData an ABI-encoded Execution[].
+ *
+ * Returns null when the calldata matches NO known envelope shape — the
+ * callers treat that as a failed binding, not as a crash.
+ */
+export function decodeUserOperationCalls(callData: string): DecodedUserOperationCall[] | null {
+  if (typeof callData !== 'string' || !callData.startsWith('0x') || callData.length < 10) {
+    return null
+  }
+  const selector = callData.slice(0, 10).toLowerCase()
+  try {
+    if (selector === '0x5c1c6dcd') {
+      const decoded = decodeFunctionData({ abi: EXECUTE_SINGLE_ABI, data: callData as Hex })
+      const exec = decoded.args[0]
+      return [{ to: exec.target as Address, data: exec.callData as Hex }]
+    }
+    if (selector === '0xe9ae5c53') {
+      const decoded = decodeFunctionData({ abi: EXECUTE_WITH_MODE_ABI, data: callData as Hex })
+      const [mode, executionData] = decoded.args
+      // Default execType only (mode byte 1): BatchTry would let individual
+      // disable calls revert while receipt.success stays true — the record
+      // would then name revocations that never happened. Default reverts the
+      // WHOLE op instead. (Byte 0 is the callType — batch vs single.)
+      if (mode.slice(4, 6).toLowerCase() !== EXEC_TYPE_DEFAULT) return null
+      // Strip '0x' so byte b of the payload starts at char 2b below.
+      const h = executionData.slice(2)
+      if (mode === MODE_SINGLE_DEFAULT) {
+        // EIP-7821 single mode: encodePacked(address, uint256, bytes) — a
+        // 32-byte padded target, a 32-byte value, then the RAW call bytes
+        // (no offset, no length word).
+        const target = `0x${h.slice(24, 64)}` as Address
+        const data = `0x${h.slice(128)}` as Hex
+        return [{ to: target, data }]
+      }
+      const [executions] = decodeAbiParameters(
+        [{ components: EXECUTION_TUPLE, name: 'executions', type: 'tuple[]' }],
+        executionData as Hex,
+      )
+      return executions.map((e) => ({ to: e.target as Address, data: e.callData as Hex }))
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+export type DisableBindingMode = 'subset' | 'exact'
+
+export interface DisableBindingFailure {
+  ok: false
+  reason: 'undecodable' | 'unsupported_exec_type' | 'wrong_target' | 'wrong_selector' | 'missing' | 'extra'
+  expected: string[]
+  disabled: string[]
+}
+
+export interface DisableBindingSuccess {
+  ok: true
+  disabled: string[]
+}
+
+/**
+ * THE invariant (#3343): every delegation about to be recorded `revoked` is
+ * disabled by THIS userop's calldata — a `disableDelegation` call aimed at
+ * the PINNED DelegationManager whose decoded delegation has the row's
+ * identity (signature excluded). `exact` additionally refuses a userop that
+ * would disable something the server does not hold as still-enabled (the
+ * re-key / revoke-all posture: the owner signed one op and it must cover
+ * precisely the server-derived set).
+ *
+ * Pure: no DB, no network. The routes call this BEFORE submitCall.
+ */
+export function assertUserOperationDisablesDelegations(
+  userOperationCallData: unknown,
+  chainId: number,
+  expected: Array<{ delegation_hash: string; delegation_json: string }>,
+  mode: DisableBindingMode,
+): DisableBindingSuccess | DisableBindingFailure {
+  const pins = getDelegationContracts(chainId)
+  const expectedIds = expected.map((row) => ({
+    hash: row.delegation_hash,
+    identity: delegationIdentity(JSON.parse(row.delegation_json)),
+  }))
+  const expectedSet = new Map(expectedIds.map((e) => [e.identity, e.hash]))
+
+  const calls = decodeUserOperationCalls(String(userOperationCallData ?? ''))
+  if (calls === null) {
+    return { ok: false, reason: 'undecodable', expected: expectedIds.map((e) => e.hash), disabled: [] }
+  }
+  const disabledHashes: string[] = []
+  const disabledIdentities = new Set<string>()
+  let disableCallCount = 0
+  for (const call of calls) {
+    if (call.to.toLowerCase() !== pins.delegationManager.toLowerCase()) continue
+    const selector = call.data.slice(0, 10).toLowerCase()
+    if (selector !== '0x49934047') continue // disableDelegation — enable/redeem/anything else is not a revoke
+    let decoded: { delegate: Address; delegator: Address; authority: Hex; caveats: Array<{ enforcer: Address; terms: Hex; args?: Hex }>; salt: bigint; signature: Hex }
+    try {
+      const res = decodeFunctionData({ abi: [DISABLE_DELEGATION_ABI_ITEM], data: call.data })
+      decoded = res.args[0] as typeof decoded
+    } catch {
+      return {
+        ok: false,
+        reason: 'wrong_selector',
+        expected: expectedIds.map((e) => e.hash),
+        disabled: disabledHashes,
+      }
+    }
+    // Count EVERY decoded disable, matched or not — `exact` must refuse an op
+    // that also disables something the server does not hold as still-enabled.
+    disableCallCount += 1
+    const identity = delegationIdentity({
+      delegate: decoded.delegate,
+      delegator: decoded.delegator,
+      authority: decoded.authority,
+      caveats: decoded.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: c.args ?? '0x' })),
+      salt: `0x${decoded.salt.toString(16).padStart(64, '0')}`,
+    })
+    disabledIdentities.add(identity)
+    const hash = expectedSet.get(identity)
+    if (hash) disabledHashes.push(hash)
+  }
+
+  const missing = expectedIds.filter((e) => !disabledIdentities.has(e.identity))
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: 'missing',
+      expected: expectedIds.map((e) => e.hash),
+      disabled: disabledHashes,
+    }
+  }
+  if (mode === 'exact' && disableCallCount !== expectedIds.length) {
+    // The op disables at least one delegation the server does not hold as
+    // still-enabled — not the batch this route derives. Refuse rather than
+    // mark rows the signed op does not name.
+    return {
+      ok: false,
+      reason: 'extra',
+      expected: expectedIds.map((e) => e.hash),
+      disabled: disabledHashes,
+    }
+  }
+  return { ok: true, disabled: disabledHashes }
 }

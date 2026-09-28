@@ -5,8 +5,10 @@
  */
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { expectMatchesSpec } from '../../openapi/response-shape.js'
+import { encodeFunctionData, encodeAbiParameters } from 'viem'
+import { expectMatchesSpec, expectRejectsOffSpec } from '../../openapi/response-shape.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
+import { DelegationManager, DeleGatorCore } from '@metamask/delegation-abis'
 
 const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed, mockReadDisabled } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -77,6 +79,72 @@ const DELEGATION_ROW = {
 }
 const OWNER = '0x' + 'ee'.repeat(20)
 const HASH = `0x${'ab'.repeat(32)}`
+// Pinned Base Sepolia DelegationManager — the target a bound revoke op names.
+const MANAGER = '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3'
+/** The exact stored row the per-hash fixtures read back (matches storedJsonWithSalt('1')). */
+const storedJson = JSON.stringify({
+  delegate: DELEGATE_ACCOUNT, delegator: TREASURY,
+  authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1', signature: '0x' + 'cd'.repeat(65),
+})
+/**
+ * A BOUND revoke userop for `storedJson`: disableDelegation encoded straight
+ * from the ABI (#3343 — never via buildRevocation, or these tests would test
+ * the builder against itself) inside the kit's single-execute envelope.
+ */
+function boundOpJson(): string {
+  const delegation = { ...JSON.parse(storedJson) }
+  delegation.salt = BigInt(delegation.salt)
+  const data = encodeFunctionData({
+    abi: DelegationManager,
+    functionName: 'disableDelegation',
+    args: [delegation],
+  })
+  return encodeFunctionData({
+    abi: DeleGatorCore,
+    functionName: 'execute',
+    args: [{ target: MANAGER as `0x${string}`, value: 0n, callData: data }],
+  })
+}
+
+/** A BatchDefault op disabling one delegation per salt (the batch fixtures use salts '1' and '2'). */
+function batchOpJson(salts: string[]): string {
+  const mode = ('0x01' + '00'.repeat(31)) as `0x${string}`
+  const executionData = encodeAbiParameters(
+    [{
+      components: [
+        { name: 'target', type: 'address' },
+        { name: 'value', type: 'uint256' },
+        { name: 'callData', type: 'bytes' },
+      ],
+      name: 'executions',
+      type: 'tuple[]',
+    }],
+    [salts.map((salt) => {
+      const withBigSalt = {
+        delegate: DELEGATE_ACCOUNT as `0x${string}`,
+        delegator: TREASURY as `0x${string}`,
+        authority: `0x${'0'.repeat(64)}` as `0x${string}`,
+        caveats: [] as Array<{ enforcer: `0x${string}`; terms: `0x${string}`; args: `0x${string}` }>,
+        salt: BigInt(salt),
+        signature: ('0x' + 'cd'.repeat(65)) as `0x${string}`,
+      }
+      return {
+        target: MANAGER as `0x${string}`,
+        value: 0n,
+        callData: encodeFunctionData({
+          abi: DelegationManager,
+          functionName: 'disableDelegation',
+          args: [withBigSalt],
+        }),
+      }
+    })],
+  )
+  return encodeFunctionData({
+    abi: DeleGatorCore,
+    functionName: 'execute',
+    args: [mode, executionData],
+  })
+}
 
 function agentRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -190,6 +258,11 @@ describe('delegation lifecycle API (#828)', () => {
   let app: FastifyInstance
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — every money-path module is in
+    // `enforcedModules`, so the request schema refuses off-spec shapes
+    // before the handler (and the rungs that used to make those refusals
+    // are gone).
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/agent-delegations.ts'] })
     await app.register(agentDelegationRoutes, { prefix: '/agents' })
   })
   afterAll(async () => app.close())
@@ -602,14 +675,37 @@ describe('delegation lifecycle API (#828)', () => {
   describe('POST /:id/delegations/:hash/activate — grant step 2', () => {
     it('refuses a revoked agent before parsing a signature or deploying (#2025)', async () => {
       mockDb({ agent: agentRow({ status: 'revoked' }) })
+      // #3031: a CONFORMANT signature — the schema must accept the input so
+      // this test keeps pinning the SEMANTIC ordering (#2025: the revoked
+      // refusal fires before any signature parsing or deploy), not the
+      // shape layer. The malformed-signature refusal now belongs to the
+      // enforced schema and is pinned separately below.
       const res = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
-        payload: { signature: 'not-even-a-signature' },
+        payload: { signature: '0x' + 'ab'.repeat(65) },
       })
       expect(res.statusCode).toBe(409)
       expect(res.json()).toEqual({ error: 'Revoked agents cannot receive new budget delegations' })
       expect(mockEnsureDeployed).not.toHaveBeenCalled()
       expect(mockQuery.mock.calls.some((c) => /UPDATE agent_delegations/.test(String(c[0])))).toBe(false)
+    })
+
+    it('a malformed activate signature is refused by the SCHEMA, before the handler (#3031)', async () => {
+      // #3031 layer pin: the activate body's signature shape
+      // (`^0x(?:[0-9a-fA-F]{2}){65,}$` — 130+ hex chars, even length) is the
+      // enforced request schema's; the handler's `length % 2` and
+      // startsWith rungs are gone. The refusal is the plugin's envelope, so
+      // no agent lookup refusal (409) can mask a shape error and no
+      // deployment is attempted.
+      mockDb({ agent: agentRow() })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: 'not-even-a-signature' },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toBe('Request does not match the API spec')
+      expect(res.json().details).toMatch(/signature/)
+      expect(mockEnsureDeployed).not.toHaveBeenCalled()
     })
 
     it('activating the first grant ALSO activates a pending_approval agent — the rail\'s approval (#1069)', async () => {
@@ -1050,7 +1146,8 @@ describe('delegation lifecycle API (#828)', () => {
     })
 
     it('submit marks revoked and never leaks the bundler credential on failure', async () => {
-      mockDb({ stored: { delegation_json: '{}', status: 'active' } })
+      mockDb({ stored: { delegation_json: storedJson, status: 'active' } })
+      const op = boundOpJson()
       mockTreasury.mockResolvedValue({
         treasuryAddress: TREASURY,
         prepareCall: vi.fn(),
@@ -1060,24 +1157,71 @@ describe('delegation lifecycle API (#828)', () => {
       })
       const res = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke/submit`,
-        payload: { signature: '0xabcd', user_operation: { nonce: '1n' } },
+        payload: { signature: '0xabcd', user_operation: { callData: op } },
       })
       expect(res.statusCode).toBe(502)
       expect(res.body).not.toContain('SUPERSECRET')
       expect(res.body).toContain('apikey=REDACTED')
     })
 
-    it('successful submit marks the row revoked', async () => {
-      mockDb({ stored: { delegation_json: '{}', status: 'active' } })
-      mockTreasury.mockResolvedValue({
-        treasuryAddress: TREASURY,
-        prepareCall: vi.fn(),
-        submitCall: vi.fn().mockResolvedValue({ txHash: '0xfeed', userOpHash: '0x', actualGasUsed: 1n, actualGasCost: 1n }),
+    it('submit 404s a hash with no row, and 400s a malformed hash — before anything is submitted (#3343)', async () => {
+      mockDb({ stored: null })
+      const op = boundOpJson()
+      mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCall: vi.fn(), submitCall: vi.fn() })
+      const missing = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke/submit`,
+        payload: { signature: '0xabcd', user_operation: { callData: op } },
       })
-      const res = await app.inject({
+      expect(missing.statusCode).toBe(404)
+      const malformed = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/0xnope/revoke/submit`,
+        payload: { signature: '0xabcd', user_operation: { callData: op } },
+      })
+      expect(malformed.statusCode).toBe(400)
+      expect(mockTreasury).not.toHaveBeenCalled()
+    })
+
+    it('submit REFUSES an unbound user_operation (400) — submitCall is never reached (#3343)', async () => {
+      mockDb({ stored: { delegation_json: storedJson, status: 'active' } })
+      const submitCall = vi.fn()
+      mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCall: vi.fn(), submitCall })
+      // The old fixture shape — a userop with no disableDelegation calldata.
+      const unbound = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke/submit`,
         payload: { signature: '0xabcd', user_operation: { nonce: '1n' } },
       })
+      expect(unbound.statusCode).toBe(400)
+      expect(unbound.json().error).toMatch(/does not match the requested revocation/)
+      // And the INVERTED op — enableDelegation on the same delegation.
+      const delegation = JSON.parse(storedJson)
+      const enable = encodeFunctionData({
+        abi: DelegationManager,
+        functionName: 'enableDelegation',
+        args: [delegation],
+      })
+      const inverted = encodeFunctionData({
+        abi: DeleGatorCore,
+        functionName: 'execute',
+        args: [{ target: MANAGER, value: 0n, callData: enable }],
+      })
+      const invertedRes = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke/submit`,
+        payload: { signature: '0xabcd', user_operation: { callData: inverted } },
+      })
+      expect(invertedRes.statusCode).toBe(400)
+      expect(submitCall).not.toHaveBeenCalled()
+      expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
+    })
+
+    it('successful submit marks the row revoked — bound to the signed calldata (#3343)', async () => {
+      mockDb({ stored: { delegation_json: storedJson, status: 'active' } })
+      const submitCall = vi.fn().mockResolvedValue({ txHash: '0xfeed', userOpHash: '0x', actualGasUsed: 1n, actualGasCost: 1n })
+      mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCall: vi.fn(), submitCall })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke/submit`,
+        payload: { signature: '0xabcd', user_operation: { callData: boundOpJson() } },
+      })
+      expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ revoked: true, tx_hash: '0xfeed' })
       expectMatchesSpec('POST', '/agents/{id}/delegations/{hash}/revoke/submit', res.json())
       expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(true)
@@ -1172,8 +1316,13 @@ describe('delegation lifecycle API (#828)', () => {
       const res = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`, payload: {},
       })
+      // #3031: "no signature" is now a SCHEMA refusal (required `signature`
+      // on a closed body) before the handler runs — which is stronger than
+      // the handler rung it replaces: the 400 comes from the same layer for
+      // every caller, and nothing is written either way.
       expect(res.statusCode).toBe(400)
-      expect(res.json().error).toMatch(/owner signature is required/)
+      expect(res.json().error).toBe('Request does not match the API spec')
+      expect(res.json().details).toMatch(/signature/)
       expect(mockQuery.mock.calls.some((c) => /UPDATE agent_delegations/.test(String(c[0])))).toBe(false)
     })
 
@@ -1307,6 +1456,26 @@ describe('delegation lifecycle API (#828)', () => {
     })
   })
 
+  describe('#1464: a malformed uuid path param is refused by the schema, before the query', () => {
+    // The incident: `/agents/<garbage>/delegations` reached Postgres, whose
+    // uuid cast raised 22P02 — a 500 until the central handler began mapping
+    // it to a 400 (#1464). Slice 3's modules carry uuid path params
+    // (`AgentId`), and the enforced schema now answers BEFORE the query: the
+    // garbage id is a `params/id` format refusal, and `pool.query` never
+    // runs. The 22P02 half of #1464 (a well-formed id that Postgres still
+    // rejects, or any 22P02 raised past the schema) belongs to
+    // `infra/http-error-handler.ts` and its own suite; the delegation route
+    // pins the property #1464's fix depends on there — that this route does
+    // NOT catch errors locally, so a 22P02 would still reach the central
+    // handler.
+    it('a garbage agent id is a params/id uuid refusal naming params/id', async () => {
+      mockDb({})
+      await expectRejectsOffSpec(app, `GET /agents/not-a-uuid/delegations`, undefined, 'params/id')
+      // Refused BEFORE the handler: not even the ownership lookup ran.
+      expect(mockQuery).not.toHaveBeenCalled()
+    })
+  })
+
   describe('multi-signer accounts pick the signature scheme per request (the Daniel regression)', () => {
     // An account with BOTH an EOA owner and passkeys accepts either signer
     // on-chain. The old code read "has an owner" as "must sign as the owner",
@@ -1388,6 +1557,11 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
   let app: FastifyInstance
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — routes/agent-delegations.ts is in
+    // `enforcedModules`, so the request schema refuses off-spec shapes
+    // before the handler (and the rungs that used to make those refusals
+    // are gone). Same wiring the main describe installs at the top.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/agent-delegations.ts'] })
     await app.register(agentDelegationRoutes, { prefix: '/agents' })
   })
   afterAll(async () => app.close())
@@ -1424,7 +1598,7 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
       if (/FROM hybrid_account_passkeys/.test(s)) {
         return Promise.resolve({ rows: opts.passkeys ?? [] })
       }
-      if (/status IN \('pending', 'active'\)/.test(s)) {
+      if (/status IN \('pending', 'active', 'replaced'\)/.test(s)) {
         return Promise.resolve({
           rows: opts.targets ?? [
             { delegation_hash: HASH, delegation_json: storedJsonWithSalt('1'), status: 'active' },
@@ -1585,16 +1759,19 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     expect(mockTreasury).not.toHaveBeenCalled()
   })
 
-  it('submit marks exactly the batch revoked ONLY after the UserOp lands', async () => {
+  it('submit marks exactly the batch revoked ONLY after the UserOp lands — and the op is BOUND to the server set (#3343)', async () => {
     mockBatchDb({})
     const submitCall = vi.fn().mockResolvedValue({ txHash: `0x${'11'.repeat(32)}` })
     mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCalls: vi.fn(), submitCall })
 
+    // disableDelegation for BOTH batch rows, encoded straight from the ABI
+    // (#3343 — not via buildRevocation), inside the kit's BatchDefault envelope.
+    const batchOp = batchOpJson(['1', '2'])
     const res = await app.inject({
       method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
       payload: {
         signature: '0x' + 'ab'.repeat(65),
-        user_operation: { nonce: '1n', sender: TREASURY },
+        user_operation: { callData: batchOp },
         delegation_hashes: [HASH, HASH2],
       },
     })
@@ -1606,6 +1783,36 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     // Batch statement, agent-scoped: ANY($2) with this agent's id first.
     expect(String(update[0])).toContain('ANY($2)')
     expect(update[1]).toEqual([AGENT_ID, [HASH, HASH2]])
+    // The recorded hashes came from the SERVER-derived set the op was bound
+    // to — the client list is shape-checked only (#3343).
+    expect(res.json().delegation_hashes).toEqual([HASH, HASH2])
+  })
+
+  it('submit 409s (re-prepare) when the op does not cover the server set, and 400s an unreadable op — submitCall never runs (#3343)', async () => {
+    mockBatchDb({})
+    const submitCall = vi.fn()
+    mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCalls: vi.fn(), submitCall })
+
+    // Undecodable op (the old fixture shape): 400.
+    const unreadable = await app.inject({
+      method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
+      payload: { signature: '0x' + 'ab'.repeat(65), user_operation: { nonce: '1n', sender: TREASURY } },
+    })
+    expect(unreadable.statusCode).toBe(400)
+    // A SUBSET op (one disable for two rows): 409 re-prepare.
+    const subsetOp = batchOpJson(['1'])
+    const stale = await app.inject({
+      method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
+      payload: {
+        signature: '0x' + 'ab'.repeat(65),
+        user_operation: { callData: subsetOp },
+        delegation_hashes: [HASH],
+      },
+    })
+    expect(stale.statusCode).toBe(409)
+    expect(stale.json().error).toMatch(/changed since prepare/)
+    expect(submitCall).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'revoked'/.test(String(c[0])))).toBe(false)
   })
 
   it('a failed submit leaves every row untouched and never leaks the bundler credential', async () => {
@@ -1617,7 +1824,7 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
       method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
       payload: {
         signature: '0x' + 'ab'.repeat(65),
-        user_operation: { nonce: '1n', sender: TREASURY },
+        user_operation: { callData: batchOpJson(['1', '2']) },
         delegation_hashes: [HASH],
       },
     })
@@ -1628,6 +1835,11 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
 
   it('submit 400s on malformed signature, missing user_operation, and bad hashes', async () => {
     mockBatchDb({})
+    // #3031: every shape refusal in this list is the ENFORCED request
+    // schema's (`required` signature/user_operation/delegation_hashes,
+    // `hexBytes` signature pattern, `delegationHashList` items pattern,
+    // minItems 1) — the handler's rungs are gone, and the 400 is the
+    // plugin's envelope naming the field in `details`.
     const cases = [
       { signature: '0xzz', user_operation: {}, delegation_hashes: [HASH] },
       { signature: '0x' + 'ab'.repeat(65), delegation_hashes: [HASH] },
@@ -1639,7 +1851,26 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`, payload,
       })
       expect(res.statusCode).toBe(400)
+      expect(res.json().error).toBe('Request does not match the API spec')
     }
+  })
+
+  it('#1464: a malformed uuid path param on revoke-all is refused by the schema before any read', async () => {
+    // #1464 on a WRITE route of this module: the garbage id fails the
+    // enforced `AgentId` uuid schema (`params/id`) before the handler — no
+    // ownership read, no delegation lookup, no treasury work. The
+    // schema-first answer is the slice's contribution to the incident's
+    // fix; the 22P02→400 mapping past the schema stays the central
+    // handler's (its own suite pins that).
+    mockBatchDb({})
+    const res = await app.inject({
+      method: 'POST', url: `/agents/not-a-uuid/delegations/revoke-all`,
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('Request does not match the API spec')
+    expect(res.json().details).toMatch(/params\/id/)
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockTreasury).not.toHaveBeenCalled()
   })
 })
 

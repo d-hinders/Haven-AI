@@ -25,7 +25,7 @@ covers:
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-09-24"
+last-verified: "2026-09-25"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -245,6 +245,20 @@ and the `release` skill.
 > release documents publish `released_version` per package; a snapshot is not a
 > release, so nothing a `--snapshot` run writes appears in them. `last-verified`
 > is not bumped.
+
+> **Re-verification (#3032, slice-4 default flip, 2026-09-25):** this doc is
+> coupled once more through the same `covers:` entry on
+> `packages/backend/src/config.ts`, and this time the DEFAULT did move:
+> `parseRequestValidationMode` now returns `enforce` when
+> `HAVEN_REQUEST_VALIDATION` is unset or empty (previously `shadow`), per epic
+> #3028 slice 4 — every constrained module is listed in `index.ts` and the
+> rollout completes. Step 5's claim was rewritten for the new default (the
+> accepted values `off`/`shadow`/`enforce`, the refuse-the-boot shape, the
+> restart semantics and the variable's irrelevance to package selection are
+> untouched). `last-verified` is bumped by this edit: the claim it anchors
+> changed.
+> Scope of this note: the default in step 5 — nothing else in this document
+> was re-verified.
 
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
@@ -683,7 +697,8 @@ the live state of an environment is read from the environment, not from prose.
       `false`, lower-case, anything else refuses the boot),
       `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` (#2866, a plain
       `Number(...) || default`) and `HAVEN_REQUEST_VALIDATION` (#3029, that
-      shape a third time — `off`/`shadow`/`enforce`, default `shadow`, a mode
+      shape a third time — `off`/`shadow`/`enforce`, default `enforce` since
+      the #3032 flip, a mode
       change is a restart) does not affect this
       package-selection path; anything else
       makes the backend **refuse to boot**, naming the variable, rather than

@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import crypto from 'crypto'
+import { isPgUniqueViolation } from '../infra/pg-errors.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { normalizeAgentAllowanceTokenAddress } from '../modules/agents/index.js'
 import { getTokenBalance } from '../infra/chain/relayer-reads.js'
@@ -212,7 +213,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { name, description, delegate_address, safe_id, account_id, allowances, issue_passport } =
       request.body
 
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    // `name` string-ness is the enforced schema's (`CreateAgentRequest.name`,
+    // required + minLength 1). What stays here is the TRIM semantic: ajv's
+    // minLength counts raw length, so a whitespace-only name still reaches the
+    // handler and must refuse.
+    if (!name || name.trim().length === 0) {
       return reply.code(400).send({ error: 'Name is required' })
     }
     if (!delegate_address || !isValidAddress(delegate_address)) {
@@ -583,13 +588,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   )
 }
 
-function isUniqueDelegateConflict(err: unknown): boolean {
-  return Boolean(
-    err &&
-      typeof err === 'object' &&
-      'code' in err &&
-      err.code === '23505' &&
-      'constraint' in err &&
-      String(err.constraint).includes('idx_agents_user_delegate_non_revoked_unique'),
-  )
-}
+// The unique-violation narrow lives in `infra/pg-errors.ts` (#3032) — the
+// same predicate agent-rekey.ts and agent-connection-setups.ts import.
+const isUniqueDelegateConflict = (err: unknown): boolean =>
+  isPgUniqueViolation(err, 'idx_agents_user_delegate_non_revoked_unique')

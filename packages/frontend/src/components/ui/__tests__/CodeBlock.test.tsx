@@ -34,4 +34,15 @@ describe('CodeBlock wrap classes (#3434)', () => {
     const pre = preOf(<CodeBlock wrap>npx -y @haven_ai/connect@alpha --doctor</CodeBlock>)
     expect(pre.textContent).toBe('npx -y @haven_ai/connect@alpha --doctor')
   })
+
+  it('with wrap, each token is one inline-block, so a flag never splits at its hyphens', () => {
+    const pre = preOf(<CodeBlock wrap>npx -y @haven_ai/connect@alpha --doctor</CodeBlock>)
+    const tokens = Array.from(pre.querySelectorAll('span.inline-block')).map((s) => s.textContent)
+    expect(tokens).toEqual(['npx', '-y', '@haven_ai/connect@alpha', '--doctor'])
+  })
+
+  it('without wrap, the command renders as one text node (no token spans)', () => {
+    const pre = preOf(<CodeBlock>npx -y @haven_ai/connect@alpha --doctor</CodeBlock>)
+    expect(pre.querySelectorAll('span').length).toBe(0)
+  })
 })

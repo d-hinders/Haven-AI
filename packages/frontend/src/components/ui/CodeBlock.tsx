@@ -85,7 +85,23 @@ export function CodeBlock({
           wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'overflow-x-auto'
         } v2-tabular`}
       >
-        <code>{children}</code>
+        <code>
+          {wrap
+            ? // Each whitespace-separated token is one inline-block, so a line
+              // breaks only at a space: the browser would otherwise split a
+              // flag at its hyphens (`--` / `doctor`, #3434 design review). A
+              // token wider than the line still breaks, via overflow-wrap.
+              children.split(/(\s+)/).map((part, i) =>
+                /^\s+$/.test(part) || part === '' ? (
+                  part
+                ) : (
+                  <span key={i} className="inline-block max-w-full">
+                    {part}
+                  </span>
+                ),
+              )
+            : children}
+        </code>
       </pre>
     </div>
   )

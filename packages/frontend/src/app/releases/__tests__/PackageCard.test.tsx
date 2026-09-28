@@ -58,7 +58,7 @@ describe('PackageCard update note (#3424)', () => {
 })
 
 describe('UpdateCommand wrap classes (#3434)', () => {
-  it('renders the update command in wrap mode, so --doctor is never clipped', () => {
+  it('renders the update command with the wrap classes', () => {
     const { container } = render(<PackageCard entry={withChannel('signer')} />)
     const pre = container.querySelector('pre')
     expect(pre?.textContent).toBe('npx -y @haven_ai/connect@alpha --doctor')

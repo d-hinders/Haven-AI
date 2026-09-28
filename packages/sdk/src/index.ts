@@ -159,6 +159,7 @@ export {
   HavenApiError,
   AgentPaymentWarningCode,
   MerchantTimeoutError,
+  X402PaymentAlreadySettledError,
   X402UnexpectedStatusError,
   X402AlreadySettledError,
   X402TaskBudgetMismatchError,

@@ -987,6 +987,40 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
       expect(seen).toEqual(['x402:generic-7710:abc', 'x402:generic-7710:abc'])
     })
 
+    it('a replayed key whose payment already settled answers with the original payment (#3417)', async () => {
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 200, body: {
+      success: true,
+      payment_id: 'pay_settled_7710',
+      status: 'confirmed',
+      tx_hash: '0x' + '7d'.repeat(32),
+      amount: '0.001',
+      token: 'USDC',
+    } },
+      })
+      const res = ok(
+        await handlers().haven_pay_x402_quote({
+          payment_required: ERC7710_PAYMENT_REQUIRED,
+          idempotency_key: 'x402:generic-7710:settled',
+        }),
+      ) as { data: Record<string, any> }
+      // #3417: the original payment as a done state — no retry, no signer, no
+      // second payment. Before the fix this was a 500 with "retry once".
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_settled_7710',
+        status: 'confirmed',
+        settled: true,
+        idempotent_replay: true,
+        settlement_tx_hash: '0x' + '7d'.repeat(32),
+        next_action: 'none',
+      })
+      expect(res.data.next_tool).toBeUndefined()
+      expect(res.data.next_tool_omitted_reason).toMatch(/already settled/)
+      expect(res.data.agent_summary).toMatchObject({ payment_id: 'pay_settled_7710', status: 'confirmed', amount: '0.001', token: 'USDC' })
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
+    })
+
     it('omits the field entirely when the caller gave no key, keeping the old request shape', async () => {
       await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
       expect(authorizeBody()).not.toHaveProperty('idempotencyKey')

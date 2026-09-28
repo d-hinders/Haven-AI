@@ -1,6 +1,7 @@
 import {
   HavenApiError,
   HavenSigningError,
+  X402PaymentAlreadySettledError,
 } from './types.js'
 import type {
   RawX402AuthorizeResponse,
@@ -271,6 +272,14 @@ export class X402Erc7710 {
 
     if (!raw.payment_id) {
       throw new HavenApiError('No payment_id returned from x402/authorize', 500, raw)
+    }
+    // #3417: an idempotent replay of a key whose payment already settled. The
+    // backend answers with the settled intent and no `sign_data` — there is
+    // nothing left to sign — so this is not the scheme mismatch refused below.
+    // Checked first, and never signed: a confirmed payment must not yield a
+    // second child.
+    if (raw.status === 'confirmed' && raw.tx_hash) {
+      throw new X402PaymentAlreadySettledError(raw.payment_id, raw.tx_hash, raw)
     }
     const signData = raw.sign_data
     if (signData?.signature_scheme !== 'eip712_delegation' || !signData.typed_data) {

@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 import { HavenClient } from './client.js'
-import { HavenApiError } from './types.js'
+import { HavenApiError, X402PaymentAlreadySettledError } from './types.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 import FIXTURE_CHILD from './__fixtures__/settlement-delegation-payload.json' with { type: 'json' }
 import { deriveDelegateAccountAddress } from './delegate-account.js'
@@ -333,6 +333,60 @@ describe('settleX402Erc7710 (#1454)', () => {
       ).rejects.toThrow(/did not return an erc7710 settlement child/)
       // Authorize happened; settle did NOT.
       expect(posts.map((p) => p.path)).toEqual(['/x402'])
+    })
+
+    describe('a replayed key whose payment already settled (#3417)', () => {
+      // The backend's confirmed-replay body (`modules/x402/replay.ts`): the
+      // settled intent, no `sign_data` — there is nothing left to sign.
+      const settledReplay = {
+        success: true,
+        payment_id: 'pay_settled',
+        status: 'confirmed',
+        tx_hash: '0x' + '7d'.repeat(32),
+        amount: '0.001',
+        token: 'USDC',
+      }
+      const replayHarness = (body: Record<string, unknown>) => {
+        const h = harness()
+        const signSpy = vi.spyOn(h.client as never, 'signForData')
+        vi.spyOn(h.client as never, 'post').mockImplementation((async (...args: unknown[]) => {
+          h.posts.push({ path: args[0] as string, body: args[1] as Record<string, unknown> })
+          return args[0] === '/x402' ? body : { payment_header: 'never' }
+        }) as never)
+        return { ...h, signSpy }
+      }
+
+      it('prepare surfaces the settled payment as a typed error, not a scheme mismatch', async () => {
+        const { client } = replayHarness(settledReplay)
+        const err = await client
+          .prepareX402Erc7710(paymentRequired([erc7710Option()]), { idempotencyKey: 'k1' })
+          .catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(X402PaymentAlreadySettledError)
+        expect(err).not.toBeInstanceOf(HavenApiError)
+        const settled = err as X402PaymentAlreadySettledError
+        expect(settled.code).toBe('PAYMENT_ALREADY_SETTLED')
+        expect(settled.paymentId).toBe('pay_settled')
+        expect(settled.txHash).toBe(settledReplay.tx_hash)
+        expect(settled.message).not.toMatch(/did not return an erc7710 settlement child/)
+      })
+
+      it('settle stops after authorize: nothing is signed and settle is never posted', async () => {
+        const { client, posts, signSpy } = replayHarness(settledReplay)
+        await expect(client.settleX402Erc7710(paymentRequired([erc7710Option()]))).rejects.toBeInstanceOf(
+          X402PaymentAlreadySettledError,
+        )
+        expect(posts.map((p) => p.path)).toEqual(['/x402'])
+        expect(signSpy).not.toHaveBeenCalled()
+      })
+
+      it('a confirmed answer WITHOUT a tx hash is still refused as a scheme mismatch', async () => {
+        // Only a settled replay the backend can evidence becomes a done state;
+        // anything else keeps the loud refusal.
+        const { client } = replayHarness({ ...settledReplay, tx_hash: undefined })
+        await expect(
+          client.prepareX402Erc7710(paymentRequired([erc7710Option()])),
+        ).rejects.toThrow(/did not return an erc7710 settlement child/)
+      })
     })
 
     it('refuses when settle returns no payment_header', async () => {

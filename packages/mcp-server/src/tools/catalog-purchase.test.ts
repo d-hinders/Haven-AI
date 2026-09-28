@@ -1090,6 +1090,44 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(xBody()).not.toHaveProperty('idempotencyKey')
     })
 
+    it('a replayed key whose payment already settled answers with the original payment (#3417)', async () => {
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
+        'POST /x402': { status: 200, body: {
+      success: true,
+      payment_id: 'pay_settled_7710',
+      status: 'confirmed',
+      tx_hash: '0x' + '7d'.repeat(32),
+      amount: '0.001',
+      token: 'USDC',
+    } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_1',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-7710-settled',
+        }),
+      )
+      // #3417: the original payment as a done state — no retry, no signer, no
+      // second payment. Before the fix this was a 500 with "retry once".
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_settled_7710',
+        status: 'confirmed',
+        settled: true,
+        idempotent_replay: true,
+        settlement_tx_hash: '0x' + '7d'.repeat(32),
+        next_action: 'none',
+      })
+      expect(res.data.next_tool).toBeUndefined()
+      expect(res.data.next_tool_omitted_reason).toMatch(/already settled/)
+      expect(res.data.agent_summary).toMatchObject({ payment_id: 'pay_settled_7710', status: 'confirmed', amount: '0.001', token: 'USDC' })
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
+    })
+
     it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
       const res = await prepare(erc7710Header, AGENT_RESPONSE)
       expect(res.data.settlement_scheme).toBeUndefined()
@@ -1773,6 +1811,47 @@ describe('#2051 — cap binds the authorized option', () => {
       )
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(x402Body()?.idempotencyKey).toBe('x402:pay-mcp-7710:k1')
+    })
+
+    it('a replayed key whose payment already settled answers with the original payment (#3417)', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(merchant('3000000', '500000'))) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 200, body: {
+      success: true,
+      payment_id: 'pay_settled_7710',
+      status: 'confirmed',
+      tx_hash: '0x' + '7d'.repeat(32),
+      amount: '0.001',
+      token: 'USDC',
+    } },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '1',
+          idempotency_key: 'x402:pay-mcp-7710:settled',
+        }),
+      )
+      // #3417: the original payment as a done state — no retry, no signer, no
+      // second payment. Before the fix this was a 500 with "retry once".
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_settled_7710',
+        status: 'confirmed',
+        settled: true,
+        idempotent_replay: true,
+        settlement_tx_hash: '0x' + '7d'.repeat(32),
+        next_action: 'none',
+      })
+      expect(res.data.next_tool).toBeUndefined()
+      expect(res.data.next_tool_omitted_reason).toMatch(/already settled/)
+      expect(res.data.agent_summary).toMatchObject({ payment_id: 'pay_settled_7710', status: 'confirmed', amount: '0.001', token: 'USDC' })
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
     })
 
     // Review of #3043: `quote.idempotencyKey` is NEVER null on the MCP quote

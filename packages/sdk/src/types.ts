@@ -2288,6 +2288,33 @@ export class MerchantTimeoutError extends HavenApiError {
   }
 }
 
+/**
+ * #3417: `POST /x402` answered an idempotent replay of a key whose payment has
+ * already settled — the backend returns `200 { status: 'confirmed', tx_hash }`
+ * and, correctly, no `sign_data`, because nothing is left to sign
+ * (`packages/backend/src/modules/x402/replay.ts`). Before this class the
+ * erc7710 path read that answer as a scheme mismatch and threw a 500, which
+ * hosted callers relayed as "transient, retry". Typed so a caller can report
+ * the original settlement instead of retrying, and never signs anything.
+ */
+export class X402PaymentAlreadySettledError extends HavenError {
+  readonly x402ErrorCode = 'payment_already_settled' as const
+  constructor(
+    public override readonly paymentId: string,
+    public readonly txHash: string,
+    public readonly body?: unknown,
+  ) {
+    super(
+      `Payment ${paymentId} already settled on-chain (tx ${txHash}); this idempotency key is spent. ` +
+        'Nothing was signed and nothing new was charged.',
+      'PAYMENT_ALREADY_SETTLED',
+      undefined,
+      paymentId,
+    )
+    this.name = 'X402PaymentAlreadySettledError'
+  }
+}
+
 export class X402UnexpectedStatusError extends HavenApiError {
   readonly x402ErrorCode = 'unexpected_non_402_status' as const
   /**

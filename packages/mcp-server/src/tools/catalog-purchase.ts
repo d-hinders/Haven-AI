@@ -59,7 +59,12 @@ import {
 } from './support/cap-price.js'
 import { getUsableCatalogMcpEntry } from './support/catalog-entry.js'
 import { HostedToolError, runTool } from './support/errors.js'
-import { buildAgentGuidance, paymentStatusHandoff, refusalNextStep } from './support/guidance.js'
+import {
+  buildAgentGuidance,
+  catchSettledReplay,
+  paymentStatusHandoff,
+  refusalNextStep,
+} from './support/guidance.js'
 import {
   buildX402SigningContext,
   quoteMcpToolCall,
@@ -291,7 +296,10 @@ export function createCatalogPurchaseHandlers(
                 // price colliding. Auto-keys are scan F3, designed on purpose.
                 ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
               },
-            )
+            ).catch(catchSettledReplay)
+            // #3417: a replayed key whose payment already settled is a done state,
+            // not the transient 500 it used to surface as — answer with the original.
+            if ('settledReplay' in prepared) return prepared.settledReplay
             return {
               payment_id: prepared.paymentId,
               settlement_scheme: 'erc7710',
@@ -751,7 +759,10 @@ export function createCatalogPurchaseHandlers(
                 // fallback.
                 ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
               },
-            )
+            ).catch(catchSettledReplay)
+            // #3417: a replayed key whose payment already settled is a done state,
+            // not the transient 500 it used to surface as — answer with the original.
+            if ('settledReplay' in prepared) return prepared.settledReplay
             return {
               payment_id: prepared.paymentId,
               settlement_scheme: 'erc7710',

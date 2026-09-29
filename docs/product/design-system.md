@@ -639,9 +639,11 @@ rather than repeated per entry:
   because a `<button>` does not match `:focus-visible` on mouse click while an `<a>` behaves
   differently again.
 - **`trailingIcon`** renders a 14px lucide `ArrowRight` after the label, at the base
-  `gap-1.5`. It is available on **every** variant and on **both** elements — six of its eight
-  call sites are the marketing `href`/`<a>` form, and two (`AddFundsModal.tsx:123` and
-  `:166`) are `onClick` `<button>`s. **It does not animate.**
+  `gap-1.5`. It is available on **every** variant and on **both** elements. In
+  `AddFundsModal.tsx`, the only `onClick` call sites are the modal's two,
+  `:144` (Buy with card) and `:187` (Show receive address); every other call
+  site, including the faucet link added by #3478 (`:258`, Open Circle's
+  faucet), is the `href`/`<a>` form. **It does not animate.**
   (Through #1829 this section claimed the icon "slides 2px on hover via wrapper
   `group-hover:gap-2`". It never did: `Button` sets no `group` class and no call site wraps
   one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link

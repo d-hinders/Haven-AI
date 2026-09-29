@@ -586,7 +586,7 @@ export function classifySettlementEvidenceReport(
         safeToContinue: true,
         reason:
           'Haven verified this settlement transaction on-chain against the payment and ' +
-          'confirmed it — the payment now has verified settlement evidence.',
+          'recorded it — the payment now has verified settlement evidence.',
         summary: { payment_id: paymentId, status: 'settled' },
       }),
     }

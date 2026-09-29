@@ -1,17 +1,13 @@
-import { ethers } from 'ethers'
 import { getChain } from '../../domain/chains.js'
-import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { fetchTokenPrices } from '../../infra/prices.js'
-import { createCache } from '../../platform/cache.js'
 import {
-  balanceFreshness,
-  knownBalance,
-  recordKnownBalance,
-  type BalanceFreshness,
-} from './balance-freshness.js'
-
-const ERC20_ABI = ['function balanceOf(address account) view returns (uint256)']
+  balanceReadsDegraded,
+  evictBalanceReads,
+  fetchBalanceReads,
+  resolveSettledBalance,
+} from './balance-reads.js'
+import type { BalanceFreshness } from './balance-freshness.js'
 
 export interface PortfolioBreakdownItem {
   symbol: string
@@ -37,8 +33,6 @@ export interface Portfolio {
   totalSek: number
   breakdown: PortfolioBreakdownItem[]
 }
-
-const portfolioCache = createCache<Portfolio>(60_000)
 
 type PriceMap = Awaited<ReturnType<typeof fetchTokenPrices>>
 type TokenPrice = PriceMap[string]
@@ -112,116 +106,129 @@ const degradedResults = new WeakSet<Portfolio>()
  * Membership in `degradedResults` — not a field on the object — keeps the
  * marker off the wire (`GET /portfolio/:accountAddress` returns the object
  * as-is and the overview schema is `additionalProperties: false`; any wire
- * field belongs to #3295) and is what makes the answer survive being served
- * from the cache: the flag was computed inside the loader and rides the
- * exact instance the cache hands back. This is a READ of the marker only —
- * a degraded result still lands in the TTL cache and is dropped right after
- * (#3292/#3297), so the snapshot signal never changes caching behaviour.
+ * field belongs to #3295) and is what makes the answer survive being SERVED
+ * TWICE from a clean read: since #3460 the balance READS are cached (shared
+ * with /balances), while this envelope is re-derived per call — a caller may
+ * legitimately hold two envelope instances from the same cached reads, and
+ * the flag rides each derived instance.
+ *
+ * The marker is a READ of the degraded result only: a FAILED read-set is
+ * dropped from the shared balance cache right after serving
+ * (#3292/#3295/#3460), so the snapshot signal never changes caching
+ * behaviour. An unpriceable read over clean reads evicts nothing — the
+ * reads were good.
  */
 export function isPortfolioUnpriceable(portfolio: Portfolio): boolean {
   return degradedResults.has(portfolio)
-}
-
-/**
- * Resolve one read to its raw base-unit string and wire marker. A fulfilled
- * read is recorded as the token's last-known balance and carries no marker;
- * a rejected one substitutes the last-known value and is marked stale with
- * its as-of time, or stays '0' marked unavailable when nothing was ever read.
- */
-function resolveBalanceRead(
-  chainId: number,
-  accountAddress: string,
-  tokenAddress: string | null,
-  result: PromiseSettledResult<bigint>,
-): { raw: string; freshness: BalanceFreshness | null } {
-  if (result.status === 'fulfilled') {
-    const raw = result.value.toString()
-    recordKnownBalance(chainId, accountAddress, tokenAddress, raw)
-    return { raw, freshness: null }
-  }
-  const known = knownBalance(chainId, accountAddress, tokenAddress)
-  return { raw: known?.balance ?? '0', freshness: balanceFreshness(true, known) }
 }
 
 export async function fetchPortfolioForAccount(
   chainId: number,
   accountAddress: string,
 ): Promise<Portfolio> {
-  const chain = getChain(chainId)
-  const cacheKey = `portfolio:${chainId}:${accountAddress.toLowerCase()}`
+  // Single-flight coalescing ONLY — a settled envelope is never stored (the
+  // balance reads it was derived from live in the shared #3460 cache; this
+  // map drops every entry as soon as it settles). Concurrent callers share
+  // one derivation — one instance, degraded marker included (#3292's "served
+  // once, then deleted"); a LATER caller derives a fresh envelope from the
+  // cached reads. Nothing here can stack a TTL over the reads' 60 s.
+  const key = `portfolio:${chainId}:${accountAddress.toLowerCase()}`
+  const existing = inFlightEnvelopes.get(key)
+  if (existing) return existing
 
-  const portfolio = await portfolioCache.getOrFetch(cacheKey, async () => {
-    const provider = getProvider(chainId)
-    const tokens = Object.values(chain.tokens)
-    const nativeToken = tokens.find((token) => token.address === null)!
-    const erc20Tokens = tokens.filter((token) => token.address !== null)
-
-    const [pricesResult, nativeResult, ...erc20Results] =
-      await Promise.allSettled([
-        readDisplayPrices(),
-        provider.getBalance(accountAddress),
-        ...erc20Tokens.map((token) => {
-          const contract = new ethers.Contract(token.address!, ERC20_ABI, provider)
-          return contract.balanceOf(accountAddress) as Promise<bigint>
-        }),
-      ])
-
-    const prices = pricesResult.status === 'fulfilled' ? pricesResult.value : {}
-
-    const breakdown: PortfolioBreakdownItem[] = []
-    let unpriceable = false
-    const priceHeld = (symbol: string, amount: number): TokenPrice | undefined => {
-      const price = displayPrice(prices, symbol)
-      if (!price && amount > 0) unpriceable = true
-      return price
-    }
-
-    const nativeRead = resolveBalanceRead(chainId, accountAddress, null, nativeResult)
-    const nativeFormatted = formatTokenValue(nativeRead.raw, nativeToken.decimals)
-    const nativeNum = parseFloat(nativeFormatted)
-    const nativePrice = priceHeld(nativeToken.symbol, nativeNum)
-    breakdown.push({
-      symbol: nativeToken.symbol,
-      balance: nativeRead.raw,
-      formatted: nativeFormatted,
-      usdValue: nativeNum * (nativePrice?.usd ?? 0),
-      eurValue: nativeNum * (nativePrice?.eur ?? 0),
-      sekValue: nativeNum * (nativePrice?.sek ?? 0),
-      ...(nativeRead.freshness ? { balanceFreshness: nativeRead.freshness } : {}),
-    })
-
-    for (let i = 0; i < erc20Tokens.length; i++) {
-      const token = erc20Tokens[i]
-      const read = resolveBalanceRead(
-        chainId,
-        accountAddress,
-        token.address,
-        erc20Results[i],
-      )
-      const formatted = formatTokenValue(read.raw, token.decimals)
-      const num = parseFloat(formatted)
-      const price = priceHeld(token.symbol, num)
-      breakdown.push({
-        symbol: token.symbol,
-        balance: read.raw,
-        formatted,
-        usdValue: num * (price?.usd ?? 0),
-        eurValue: num * (price?.eur ?? 0),
-        sekValue: num * (price?.sek ?? 0),
-        ...(read.freshness ? { balanceFreshness: read.freshness } : {}),
-      })
-    }
-
-    const totalUsd = breakdown.reduce((sum, item) => sum + item.usdValue, 0)
-    const totalEur = breakdown.reduce((sum, item) => sum + item.eurValue, 0)
-    const totalSek = breakdown.reduce((sum, item) => sum + item.sekValue, 0)
-
-    const result = { totalUsd, totalEur, totalSek, breakdown }
-    if (unpriceable || [nativeResult, ...erc20Results].some((r) => r.status === 'rejected')) {
-      degradedResults.add(result)
-    }
-    return result
+  const promise = derivePortfolio(chainId, accountAddress).finally(() => {
+    inFlightEnvelopes.delete(key)
   })
-  if (degradedResults.has(portfolio)) portfolioCache.delete(cacheKey)
-  return portfolio
+  inFlightEnvelopes.set(key, promise)
+  return promise
+}
+
+const inFlightEnvelopes = new Map<string, Promise<Portfolio>>()
+
+async function derivePortfolio(
+  chainId: number,
+  accountAddress: string,
+): Promise<Portfolio> {
+  // The reads come from the SHARED (chainId, address) balance cache (#3460) —
+  // the same one `GET /balances` uses. There is deliberately NO second cache
+  // over them here: the old 60 s `portfolioCache` cached the whole envelope
+  // and would have stacked two 60 s TTL layers (portfolio balances up to
+  // ~120 s old). The envelope is re-derived from the ≤60 s cached reads on
+  // every call, so a portfolio's balances are never older than /balances'.
+  // The only other layer is CoinGecko's own 60 s price cache
+  // (`infra/prices.ts`), unchanged.
+  const [reads, prices] = await Promise.all([
+    fetchBalanceReads(chainId, accountAddress),
+    // Never throws (its own catch is the #3297 backoff arm), so no defensive
+    // catch here — a throw from it would correctly fail the derivation.
+    readDisplayPrices(),
+  ])
+
+  const chain = getChain(chainId)
+  const tokens = Object.values(chain.tokens)
+  const nativeToken = tokens.find((token) => token.address === null)!
+  const erc20Tokens = tokens.filter((token) => token.address !== null)
+
+  const breakdown: PortfolioBreakdownItem[] = []
+  let unpriceable = false
+  const priceHeld = (symbol: string, amount: number): TokenPrice | undefined => {
+    const price = displayPrice(prices, symbol)
+    if (!price && amount > 0) unpriceable = true
+    return price
+  }
+
+  const nativeRead = resolveSettledBalance(chainId, accountAddress, null, reads.native)
+  const nativeFormatted = formatTokenValue(nativeRead.raw, nativeToken.decimals)
+  const nativeNum = parseFloat(nativeFormatted)
+  const nativePrice = priceHeld(nativeToken.symbol, nativeNum)
+  breakdown.push({
+    symbol: nativeToken.symbol,
+    balance: nativeRead.raw,
+    formatted: nativeFormatted,
+    usdValue: nativeNum * (nativePrice?.usd ?? 0),
+    eurValue: nativeNum * (nativePrice?.eur ?? 0),
+    sekValue: nativeNum * (nativePrice?.sek ?? 0),
+    ...(nativeRead.freshness ? { balanceFreshness: nativeRead.freshness } : {}),
+  })
+
+  for (let i = 0; i < erc20Tokens.length; i++) {
+    const token = erc20Tokens[i]
+    const read = resolveSettledBalance(
+      chainId,
+      accountAddress,
+      token.address,
+      reads.erc20[i],
+    )
+    const formatted = formatTokenValue(read.raw, token.decimals)
+    const num = parseFloat(formatted)
+    const price = priceHeld(token.symbol, num)
+    breakdown.push({
+      symbol: token.symbol,
+      balance: read.raw,
+      formatted,
+      usdValue: num * (price?.usd ?? 0),
+      eurValue: num * (price?.eur ?? 0),
+      sekValue: num * (price?.sek ?? 0),
+      ...(read.freshness ? { balanceFreshness: read.freshness } : {}),
+    })
+  }
+
+  const totalUsd = breakdown.reduce((sum, item) => sum + item.usdValue, 0)
+  const totalEur = breakdown.reduce((sum, item) => sum + item.eurValue, 0)
+  const totalSek = breakdown.reduce((sum, item) => sum + item.sekValue, 0)
+
+  const result = { totalUsd, totalEur, totalSek, breakdown }
+  if (unpriceable || balanceReadsDegraded(reads)) {
+    degradedResults.add(result)
+  }
+  // #3292/#3295 at the shared-cache layer: a FAILED read-set is served once
+  // (concurrent callers already waiting on the same in-flight load share it)
+  // and then dropped, so the next request re-reads the chain. An unpriceable
+  // read over CLEAN reads does NOT evict — the balances were read
+  // successfully and stay cached (#3460); only the envelope is uncached, so
+  // the next call re-prices the cached reads (bounded by the backoff above).
+  if (balanceReadsDegraded(reads)) {
+    evictBalanceReads(chainId, accountAddress)
+  }
+  return result
 }

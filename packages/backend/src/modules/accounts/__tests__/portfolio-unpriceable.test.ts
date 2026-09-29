@@ -130,7 +130,11 @@ describe('isPortfolioUnpriceable (#3296)', () => {
     expect(isPortfolioUnpriceable(fromLastGood)).toBe(false)
   })
 
-  it('a cached clean read still reports priceable — same object from the TTL', async () => {
+  // Since #3460 the TTL cache holds the BALANCE READS (shared with
+  // /balances); the envelope is re-derived from them per call — so the
+  // second call gets a NEW instance with the same values, and the clean
+  // read-set is still served from the cache (one set of on-chain reads).
+  it('a cached clean read still reports priceable — same values, re-derived instance', async () => {
     mockFetchTokenPrices.mockResolvedValue(PRICES_84532)
     mockGetBalance.mockResolvedValue(ONE_ETH)
     mockCall.mockResolvedValue(erc20(2_000_000n))
@@ -139,9 +143,12 @@ describe('isPortfolioUnpriceable (#3296)', () => {
     const first = await fetchPortfolioForAccount(84532, holder)
     const second = await fetchPortfolioForAccount(84532, holder)
 
-    // One set of reads: the second call was served from the cache.
+    // One set of reads: the second derivation was served from the shared
+    // balance-read cache.
     expect(mockGetBalance).toHaveBeenCalledTimes(1)
-    expect(second).toBe(first)
+    expect(second).not.toBe(first)
+    expect(second.totalUsd).toBe(first.totalUsd)
+    expect(second.breakdown).toEqual(first.breakdown)
     expect(isPortfolioUnpriceable(second)).toBe(false)
   })
 

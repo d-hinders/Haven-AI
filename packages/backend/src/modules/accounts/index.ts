@@ -14,3 +14,4 @@
 export * from './mainnet-gate.js'
 export * from './portfolio.js'
 export * from './balance-freshness.js'
+export * from './balance-reads.js'

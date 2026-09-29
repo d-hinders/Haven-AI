@@ -264,8 +264,11 @@ settlement status, money, merchant identity, and funding fields. `product` and
 `invoice_id` are narrow merchant display metadata; `settlement_tx_hash` is an
 optional merchant `PAYMENT-RESPONSE` (or, since #3118,
 `_meta["x402/payment-response"]`) receipt reference, not Haven settlement
-proof. Missing values are explicit `null`. The top-level raw `result` remains
-advanced merchant evidence and never decides whether Haven reports settlement.
+proof. Missing values are explicit `null` — on erc7710, `funding_tx_hash` is
+always `null` (no funding leg; #3423), never back-filled from the settlement
+hash the scheme's `payment.txHash` otherwise carries. The top-level raw
+`result` remains advanced merchant evidence and never decides whether Haven
+reports settlement.
 
 Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
 (#1271): when the probe misses (non-402), it makes one bounded same-origin
@@ -700,9 +703,10 @@ it performs the same chain-scoped catalog lookup and usable-MCP-row guard, then
 runs the same live merchant probe as `haven_quote_mcp_tool`. It returns the
 generic quote fields plus the catalog identity and its price, explicitly marked
 indicative. It creates no intent, approval, signing context, allowance check, or
-price reservation. An unknown/degraded/non-MCP catalog row keeps the existing
-manual fallback: use `haven_pay_mcp_tool` with an explicit merchant URL and
-tool name. When ready to buy, call `haven_prepare_catalog_purchase` with a cap;
+price reservation. A degraded or tool-less MCP row keeps the manual fallback
+`haven_pay_mcp_tool`. A plain-HTTP row hands off to `haven_quote_x402 { url:
+resource_url }` (#3423). An unknown row names `haven_discover_tools`. When
+ready to buy, call `haven_prepare_catalog_purchase` with a cap;
 that paid preflight obtains a fresh live quote and checks the cap independently.
 When the user stated no cap, the documented convention
 ([#1548](https://github.com/d-hinders/Haven-AI/issues/1548)) is quote first and
@@ -747,8 +751,10 @@ Sequence:
    `network = eip155:<agent.chain_id>` predicate) — an id that does not exist
    and an id curated for a DIFFERENT chain both 404 identically; nothing is
    re-filtered in JS.
-2. Refuse a `degraded` row or one missing MCP tool metadata
-   (`protocol`/`tool_name`) before any merchant probe, naming
+2. Refuse before any merchant probe: a plain-HTTP row (`protocol !== 'mcp'`)
+   hands off to `haven_quote_x402 { url: resource_url }` (#3423, checked
+   FIRST — the mcp-only fallback below needs a `tool_name` an http row does
+   not have); a `degraded` MCP row or one missing `tool_name` names
    `haven_pay_mcp_tool` (with an explicit `merchant_url`/`tool_name`) as the
    manual fallback.
 3. Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
@@ -2330,3 +2336,22 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 > consumer of `Parties` is unaffected by construction: an optional key nothing
 > previously read. Scope of this note: that one field. Nothing else in this
 > document was re-verified.
+
+> **Re-verified #3423 (slice A, hosted agent-surface polish, 2026-09-29):**
+> this diff made three passages stale. This document said an
+> "unknown/degraded/non-MCP catalog row" and the `2.` sequence step's
+> "`degraded` row or one missing MCP tool metadata (`protocol`/`tool_name`)"
+> ALL shared one fallback, `haven_pay_mcp_tool` — that was already wrong for a
+> plain-HTTP row (no `tool_name` to pass it) before this fix, and this fix is
+> what corrected the code. Both passages now read: a plain-HTTP row hands off
+> to `haven_quote_x402 { url: resource_url }` (checked FIRST); a degraded or
+> tool-less MCP row keeps `haven_pay_mcp_tool`; an unknown catalog_id names
+> `haven_discover_tools`. The `agent_summary.purchase_summary` passage gained
+> one sentence: on erc7710, `funding_tx_hash` is always `null` (no funding
+> leg), never back-filled from the settlement hash `payment.txHash` otherwise
+> carries on that scheme — the erc7710 settled branch of
+> `haven_settle_mcp_tool` did not build `purchase_summary` at all before this
+> fix, so the field's existing generic description was previously read as
+> EIP-3009-only; it is now true of both schemes. Scope of this note: those
+> three passages. Nothing else in this document was re-verified.
+> `last-verified` is not re-stamped.

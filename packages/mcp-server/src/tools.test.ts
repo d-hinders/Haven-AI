@@ -1019,7 +1019,7 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
       // The message quotes the cap back in the units the AGENT wrote, with the
       // atomic figure it resolved to — not a bare 1000000 it never typed.
-      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(payload.message).toContain('your cap 1 USDC (1000000 atomic)') // #3423: both sides in whole tokens
       expect(payload.message).toContain('1000000')
       expect(payload.message).toContain(LIVE_PRICE_ATOMIC)
       // Pre-funding: no intent was ever created.
@@ -1097,7 +1097,10 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      // No human-unit framing on the atomic path — the message reads as before.
+      // #3423 review round 1 nit: the message now states both sides in whole
+      // tokens (item 3), so this is no longer "reads as before" — but the
+      // atomic-cap framing this test pins is unchanged: "max_amount 1", never
+      // relabeled as "max_amount_human".
       expect(payload.message).toContain('max_amount 1')
       expect(payload.message).not.toContain('max_amount_human')
       expect(fundingCall()).toBeUndefined()
@@ -1143,7 +1146,7 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(payload.message).toContain('your cap 1 USDC (1000000 atomic)') // #3423: both sides in whole tokens
       expect(fundingCall()).toBeUndefined()
     })
 
@@ -1360,7 +1363,7 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(payload.message).toContain('your cap 1 USDC (1000000 atomic)') // #3423: both sides in whole tokens
       expect(fundingCall()).toBeUndefined()
     })
 

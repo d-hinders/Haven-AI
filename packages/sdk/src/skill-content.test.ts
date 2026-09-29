@@ -103,6 +103,83 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toMatch(/both or\s+none/)
   })
 
+  // #3423 item 5: the catalog-path Signing/Settle prose used to describe only
+  // the EIP-3009 shape. erc7710 (chosen per merchant, not a blanket default)
+  // signs with haven_sign and settles with NO payment_header; EIP-3009 signs
+  // with haven_sign_x402 and settles WITH payment_header. Both must be named.
+  it('describes both settlement shapes in the catalog Signing/Settle paragraphs (#3423)', () => {
+    const settle = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('**Settle:**'),
+      HAVEN_SKILL_MD.indexOf('Step-by-step alternative'),
+    )
+    expect(settle).toMatch(/erc7710[\s\S]*?no\s+`payment_header`/i)
+    expect(settle).toMatch(/EIP-3009[\s\S]*?payment_header/)
+    expect(settle).not.toMatch(/live default/i)
+
+    const signing = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('**Signing:**'),
+      HAVEN_SKILL_MD.indexOf('**Settle:**'),
+    )
+    expect(signing).toContain('mcp__haven-signer__haven_sign`')
+    expect(signing).toContain('mcp__haven-signer__haven_sign_x402')
+    expect(signing).toMatch(/chosen per merchant/i)
+  })
+
+  // #3423 review round 1 (F4-2): a paragraph-scoped assertion for the
+  // catalog step-4 sentence that hands an http row off to haven_quote_x402.
+  it('names haven_quote_x402 for a plain-HTTP catalog row in the catalog-purchase step 4 paragraph (#3423)', () => {
+    const step4 = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('4. Then FOLLOW THE RESPONSE'),
+      HAVEN_SKILL_MD.indexOf('**Signing:**'),
+    )
+    expect(step4).toMatch(/plain-HTTP x402 paywall[\s\S]*?haven_quote_x402/)
+    expect(step4).toContain('as `url`')
+    expect(step4).toMatch(/degraded or has no tool name[\s\S]*?haven_pay_mcp_tool/)
+  })
+
+  // #3423 review round 1 (D3): erc7710 requires BOTH the merchant advertising
+  // it AND the account being on the delegation rail — an erc7710-only
+  // merchant against a non-delegation account REFUSES, it does not silently
+  // fall back to EIP-3009 (see requireSettleableSelection / cap-price.ts).
+  it('states erc7710 needs the delegation rail too, and that a non-delegation account refuses rather than falling back (#3423 D3)', () => {
+    const signing = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('**Signing:**'),
+      HAVEN_SKILL_MD.indexOf('**Settle:**'),
+    )
+    expect(signing).toMatch(/erc7710[\s\S]*?delegation rail/i)
+    expect(signing).toMatch(/NOT on the\s+delegation rail is\s+refused/i)
+    expect(signing).toContain('does not fall back to EIP-3009')
+  })
+
+  // #3423 review round 2 (N1): "used when the merchant does not advertise
+  // erc7710" was too narrow — `selectX402SettlementScheme` also picks
+  // EIP-3009 for a merchant that advertises BOTH, when the account is off
+  // the delegation rail (delegationRail is checked first; the standard
+  // fallback runs whenever no erc7710 selection was made, not only when none
+  // was offered). The corrected sentence says "used otherwise, whenever the
+  // merchant offers a standard entry" instead of naming just one condition.
+  it('does not narrow EIP-3009 to "merchant does not advertise erc7710" — it is the otherwise case (#3423 N1)', () => {
+    const signing = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('**Signing:**'),
+      HAVEN_SKILL_MD.indexOf('**Settle:**'),
+    )
+    expect(signing).toMatch(/EIP-3009[\s\S]*?used otherwise[\s\S]*?standard entry/i)
+    expect(signing).not.toMatch(/used when the merchant does not advertise/i)
+  })
+
+  // #3423 review round 1 (D4): `settled: false` means something different per
+  // scheme — EIP-3009 has a funding leg that can fail to confirm; erc7710 has
+  // none, so `settled: false` there means unverified settlement, not funding.
+  it('distinguishes what settled: false means per scheme in the Settle paragraph (#3423 D4)', () => {
+    const settle = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('**Settle:**'),
+      HAVEN_SKILL_MD.indexOf('Step-by-step alternative'),
+    )
+    expect(settle).toMatch(/EIP-3009[\s\S]*?settled: false[\s\S]*?funding has not confirmed/)
+    expect(settle).toMatch(/erc7710[\s\S]*?settlement is not yet verified/)
+    expect(settle).toMatch(/do not re-pay/)
+  })
+
   it('never tells the agent to pass haven_complete_mcp_tool a `payment_required` (#2353)', () => {
     // The tool has never declared `payment_required`; since #1307 the 402 is
     // read from the stored record by payment_id. This skill told agents to

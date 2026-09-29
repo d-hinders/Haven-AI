@@ -79,6 +79,29 @@ last-verified: "2026-09-29"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified unchanged (#3423 slice A, 2026-09-28, hosted agent-surface
+> polish):** this diff touches `packages/mcp-server/src/tools/{support/catalog-entry,support/cap-price,paid-mcp-completion,support/guidance}.ts`
+> and `packages/sdk/src/skill-content.ts`, all under this doc's covered trees.
+> Four fixes, none touching a tool's name, schema, input shape or the
+> version-skew/consent-hash contracts: (1) a `protocol: 'http'` catalog row's
+> refusal now names `haven_quote_x402` instead of the mcp-only
+> `haven_pay_mcp_tool`, with `next_action: retry_with_explicit_context`
+> (was `stop_and_tell_user`) — refusal wording and `next_action`/
+> `next_tool`/`next_arguments` content change; `CATALOG_ENTRY_UNUSABLE` is
+> unchanged, no schema change; (2) the `PRICE_EXCEEDS_MAX` message states
+> both sides in whole tokens instead of mixing units — message text only, same
+> code/status/`retry_with_new_quote`; (3) the erc7710 settled branch of
+> `haven_settle_mcp_tool` now ALSO includes `agent_summary.purchase_summary`
+> alongside the `agent_summary.product` field it already carried (additive,
+> review round 1 F1) — a read-only field built from values the handler
+> already held, no new call, no wire shape removed; (4) the
+> skill's catalog Signing/Settle prose now names both settlement shapes
+> instead of only EIP-3009 — prose only, mirrored byte-for-byte into the
+> frontend skill bundle, which its own parity test enforces. No runtime is
+> added, no tool is renamed or re-shaped, and this document's version-skew and
+> consent-hash contracts are untouched. `last-verified` is not re-stamped:
+> this block is the scope. Nothing else in this document was re-verified.
+>
 > **Re-verified #3430 (2026-09-29, the runbook runs the manifest's own CLI
 > command):** the agent runbook (`HAVEN_AGENT_RUNBOOK_MD` in
 > `packages/sdk/src/agent-guidance.ts`, served as `/for-agents.md` and bundled

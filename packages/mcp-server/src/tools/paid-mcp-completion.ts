@@ -783,6 +783,22 @@ export function createPaidMcpCompletionHandlers(
             merchant7710.evidence_outcome,
           )
           if (gate.outcome === 'settled') {
+            // #3423 item 4: erc7710 settle used to omit
+            // `agent_summary.purchase_summary` — only the EIP-3009 branch
+            // built one, but the skill's "Reporting after a purchase"
+            // section tells every agent to report from it. `hasFundingLeg:
+            // false` is load-bearing here (see the guidance.ts doc comment):
+            // without it, `buildPurchaseSummary` would back-fill
+            // `funding_tx_hash` from `summary7710.payment?.txHash`, which on
+            // this scheme is the SETTLEMENT hash, not a funding one.
+            const purchaseSummary = buildPurchaseSummary({
+              payment: summary7710.payment,
+              merchantResult: merchant7710.result,
+              fundingTxHash: null,
+              settlementTxHash: merchant7710.settlement_tx_hash,
+              allowance: summary7710.allowance,
+              hasFundingLeg: false,
+            })
             return {
               payment_id: args.payment_id,
               settlement_scheme: 'erc7710',
@@ -807,11 +823,16 @@ export function createPaidMcpCompletionHandlers(
                 safeToContinue: true,
                 reason:
                   'Settled directly from the treasury through the budget delegation — no funding ' +
-                  'leg, so the delegate wallet never held these funds and there is nothing to sweep.',
+                  'leg, so the delegate wallet never held these funds and there is nothing to sweep. ' +
+                  'Report the result to the user from agent_summary.purchase_summary.',
                 summary: {
                   payment_id: args.payment_id,
                   status: summary7710.payment?.status ?? 'settled',
+                  // #3423 review round 1 (F1): additive, not a replacement —
+                  // `product` stayed the field this summary carried before
+                  // this fix, and `purchase_summary` is new alongside it.
                   product: args.tool_name,
+                  purchase_summary: purchaseSummary,
                 },
                 warnings: summary7710.warnings,
               }),

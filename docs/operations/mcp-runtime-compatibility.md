@@ -83,9 +83,8 @@ last-verified: "2026-09-29"
 > **Re-verified #3427 (2026-09-29, the paid x402 retry carries the buyer tax
 > declaration):** this diff touches files under covered trees —
 > `packages/sdk/src/client.ts`, `merchant-completion.ts`, `edge.ts`,
-> `tool-descriptions.ts` and `skill-content.ts`, `packages/mcp/src/tools.test.ts`,
-> and the frontend mirrored skill bundle
-> `packages/frontend/src/lib/agent-skill-bundle.ts`. The SDK edge entry gains
+> `tool-descriptions.ts` and `skill-content.ts`, and
+> `packages/mcp/src/tools.test.ts`. The SDK edge entry gains
 > `buildSignedTaxDeclaration`: the EIP-712 tax declaration is built LOCALLY over
 > exactly the wg-tax PR #5 §2.1 fields and signed by the same delegate key that
 > signs the EIP-3009 payment authorization (§2.2: the signer is the payer);

@@ -1901,6 +1901,13 @@ export class HavenClient {
    * `MerchantCompletion.reportSettlementEvidence` for the fail-closed
    * verification this posts into (`observeErc7710Settlement`) and the
    * client-side zero-hash refusal.
+   *
+   * #3475: also takes an eip3009 payment's merchant settlement (the
+   * `PAYMENT-RESPONSE.transaction` of a plain-HTTP merchant the agent retried
+   * itself). The payment is already confirmed by its funding transaction;
+   * Haven verifies the delegate → merchant transfer on-chain
+   * (`observeEip3009MerchantSettlement`) and records it beside the funding
+   * hash, so receipts name the merchant's settlement.
    */
   async reportSettlementEvidence(
     paymentId: string,

@@ -263,7 +263,11 @@ merchant answered: \`mcp__haven__haven_report_x402_outcome\` with the
 \`payment_id\`, \`outcome\` (\`"accepted"\` for a 2xx, else \`"rejected"\`)
 and the \`merchant_status\` you got. Because Haven never contacted that
 merchant, this is the only way it can learn the purchase failed — without it a
-failed purchase reads as complete for fifteen minutes. (The SDK's own
+failed purchase reads as complete for fifteen minutes. If the merchant's
+\`PAYMENT-RESPONSE\` header names a \`transaction\`, also pass it to
+\`mcp__haven__haven_report_settlement_evidence\` (\`payment_id\`,
+\`settlement_tx_hash\`): Haven verifies it on-chain, and the receipt then shows
+the merchant's settlement, not only the funding transaction. (The SDK's own
 \`haven_pay_x402\` tool does perform the merchant retry itself; that tool is
 not part of the hosted MCP surface.) On this SDK path, when the owner opted the
 agent in, the paid EIP-3009 retry also carries the agent-signed buyer tax

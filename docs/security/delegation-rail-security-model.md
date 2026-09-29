@@ -1794,6 +1794,31 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > shape predicates, `signer/tools.ts`'s new `sub_budget_id` channel, and the
 > allowlist bullets above. Nothing else in this document was re-read for it,
 
+> **Re-verified (#3475, 2026-09-29):** an agent can report an eip3009
+> payment's merchant settlement hash (`haven_report_settlement_evidence`). The
+> backend verifies it on-chain with the existing
+> `verifySettlementTransferTx` (a Transfer of exactly the amount, in the
+> token, from the payment's delegate EOA to its merchant, mined after the
+> payment's funding confirmed) and records it on the intent's metadata.
+> Nothing is signed, submitted or moved, and the intent's status and funding
+> hash stay. The one write is serialized per hash with the erc7710 confirm's
+> advisory lock and refuses a hash another payment already holds. That check
+> runs from the eip3009 side only (the erc7710 confirm reads `tx_hash`
+> alone); the reverse collision would need one transaction to be both an
+> account → merchant and a delegate EOA → merchant settlement. Which of two
+> same-shaped payments a transfer settled is not decided, because Haven never
+> sees the EIP-3009 nonce on this path: a hash can be recorded on any
+> payment with the same agent, amount, token, delegate and merchant whose
+> funding confirmed before the transfer was mined (within the 120 s skew),
+> including one whose merchant leg failed, and that payment's receipt and
+> funded-retry remedy then follow the attribution. That takes an agent
+> misreporting a payment id; the record itself moves no money. A recorded settlement
+> closes the funded-merchant-retry remedy (`isFundedX402AwaitingMerchantLeg`),
+> so the delegate key is not asked to sign a second authorization for a
+> payment whose merchant settlement is recorded. No signature, key role, delegation, caveat or on-chain surface
+> changes. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
 > **Re-verified (#3423 slice C, 2026-09-29):** the SDK's
 > `listReceiptsPage` (and `haven_list_receipts` on both surfaces) gains an
 > opt-in `compact` that drops three verbatim payload echoes from each

@@ -1,12 +1,14 @@
 'use client'
 
-import { ArrowLeftRight, Check, Clipboard, CreditCard, X } from 'lucide-react'
+import { ArrowLeftRight, Check, Clipboard, CreditCard, Droplet, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useRef, useState, useCallback } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { Button } from '@/components/ui/Button'
 import { resolveChainOrNull } from '@/lib/chains'
+import { getFaucetUrl } from '@haven_ai/core'
+import { isTestnetChain } from '@/lib/marketplace'
 
 interface Props {
   open: boolean
@@ -51,8 +53,23 @@ export default function AddFundsModal({ open, onClose, onReceive, accountAddress
   // environment-correct but still unreadable as a guess from the screen.
   const chainConfig = resolveChainOrNull(chainId)
   const chainName = chainConfig?.name ?? null
-  const onrampAvailable = Boolean(ONRAMP_APP_ID && accountAddress && chainConfig)
   const depositInstructionsAvailable = Boolean(accountAddress && chainConfig)
+
+  // #3478: the faucet and the onramp are gated on the SELECTED ACCOUNT's
+  // chain (`chainId`, passed in from `selectedActionAccount?.chain_id`),
+  // never on the deployment's `NEXT_PUBLIC_HAVEN_CHAIN_ID` default — both
+  // Base and Base Sepolia are offered as an account chain in every
+  // environment, so a deployment-level gate would show a faucet for a
+  // Base-mainnet account on dev, or hide it for a Base Sepolia account on
+  // production. Gated on `chainConfig` (not the bare `chainId`) so
+  // `isTestnetChain` only ever runs on an already-resolved chain — `chainName`
+  // is therefore never null wherever `isTestnet` is true, and the copy never
+  // needs a fallback. `isTestnetChain` still fails closed on an unregistered
+  // id (it checks `isRegisteredChain` before it ever calls `getFaucetUrl`,
+  // which itself throws on one), so this never needs a try/catch to stay safe.
+  const isTestnet = chainConfig != null && isTestnetChain(chainConfig.chainId)
+  const faucetUrl = isTestnet ? getFaucetUrl(chainConfig.chainId) : undefined
+  const onrampAvailable = Boolean(ONRAMP_APP_ID && accountAddress && chainConfig) && !isTestnet
 
   const handleCopy = useCallback(async () => {
     if (!accountAddress) return
@@ -214,6 +231,42 @@ export default function AddFundsModal({ open, onClose, onReceive, accountAddress
               saying so.
             */}
           </div>
+
+          {/* Faucet — testnet accounts only, and only once an address is
+              actually shown above (#3478, review round 1 M2): the copy says
+              "from above", so it is gated on `depositInstructionsAvailable`,
+              the SAME condition that renders the address card, not merely on
+              the chain being a testnet. Circle is named as the source and the
+              copy states plainly this is test money with no value; the claim
+              that it comes from Circle, not Haven, is scoped to this link,
+              not restated as a product-wide claim. */}
+          {isTestnet && faucetUrl && depositInstructionsAvailable && (
+            <div className="rounded-lg border border-[var(--v2-border)] p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+                  <Icon icon={Droplet} className="h-4 w-4 text-[var(--v2-ink-2)]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">Get test funds</p>
+                  <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+                    Get free {chainName} USDC from Circle&apos;s faucet. It&apos;s test money
+                    with no value, and it comes from Circle, not Haven. Pick USDC and{' '}
+                    {chainName} there, then paste your account address from above.
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                className="mt-3 w-full"
+                href={faucetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                trailingIcon
+              >
+                Open Circle&apos;s faucet
+              </Button>
+            </div>
+          )}
 
           {/* Fallback when provider unavailable and no account */}
           {!onrampAvailable && !accountAddress && onReceive && (

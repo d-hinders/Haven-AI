@@ -65,7 +65,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_list_receipts` | `GET /machine-payments/receipts` (paged, #3128: `limit` + `cursor`, plus `compact` (#3423) which strips payload echoes client-side → `{ receipts, total, hasMore, nextCursor }`) | no |
 | `haven_sweep_delegate` | gasless stranded-funds sweep prepare/submit | no — relays signed sweep |
 | `haven_report_x402_outcome` | `POST /machine-payments/reconciliation-events` (rejected) or `POST /machine-payments/evidence` (accepted) | no — records a caller-asserted outcome; contacts no merchant |
-| `haven_report_settlement_evidence` | `POST /machine-payments/evidence` (fail-closed on-chain verification of an erc7710 settlement hash the agent holds; #2972) | no — hands over a hash; contacts no merchant |
+| `haven_report_settlement_evidence` | `POST /machine-payments/evidence` (fail-closed on-chain verification of a settlement hash the agent holds: an erc7710 settlement, #2972, or an eip3009 merchant settlement from a plain-HTTP retry, #3475) | no — hands over a hash; contacts no merchant |
 
 `haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget. A
 payment outside the agent's on-chain budget, recipient pin or expiry is declined

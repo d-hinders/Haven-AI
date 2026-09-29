@@ -31,6 +31,19 @@ import {
 
 const ORIGIN = 'https://preview.test'
 
+// `default: DEFAULT_CHAIN_ID` beside `deployable: [84532]` is a shape the
+// backend itself never sends after #3431 (`/discovery` reports the
+// deployment's EFFECTIVE default, which would be 84532 here) — deliberately
+// kept anyway, because most of this file exercises OTHER fields against this
+// fixture and DEFAULT_CHAIN_ID is a convenient constant to assert against.
+// The impossible shape is also useful: a manifest that RECOMPUTED `default`
+// from `deployable` would give 84532 and fail the "takes the
+// environment-dependent values from the backend" test. What this fixture
+// cannot catch is a hard-coded `default: 8453`, because it equals
+// DEFAULT_CHAIN_ID. The relay test below ("relays chains.default exactly as
+// the backend sent it") catches that one.
+// The backend's own derivation is `effectiveDefaultChainId` in
+// `@haven_ai/core`, covered by `packages/core/src/chains.test.ts`.
 const FACTS: DiscoveryFacts = {
   hosted_mcp_url: 'https://mcp.test',
   connector_package: '@haven_ai/connect@dev',
@@ -144,6 +157,17 @@ describe('capability manifest', () => {
       'approve_budget',
     ])
     expect(HUMAN_ONLY_STEPS).toContain('approve_budget')
+  })
+
+  it('relays chains.default exactly as the backend sent it, never a literal (#3431 review F2)', () => {
+    // FACTS.chains.default happens to equal DEFAULT_CHAIN_ID, so a
+    // `default: 8453` hard-coded straight into `buildManifestFrom` would pass
+    // every other assertion in this file. A default other than 8453 catches
+    // that literal. (84532 also equals FACTS.chains.deployable[0], so this
+    // test cannot catch a recompute-from-deployable; the "takes the
+    // environment-dependent values" test below does.)
+    const facts = { ...FACTS, chains: { ...FACTS.chains, default: 84532 } }
+    expect(buildManifestFrom(ORIGIN, facts).chains?.default).toBe(84532)
   })
 
   it('takes the environment-dependent values from the backend, never a literal', () => {
@@ -347,7 +371,10 @@ describe('capability manifest', () => {
         expect(entry.name).toBe(pkg)
         expect(entry.released_version).toBe(CLIENT_RELEASES[pkg].released_version)
         expect(entry.notes).toEqual(CLIENT_RELEASES[pkg].notes)
-        expect(entry.upgrade_command).toMatch(/@dev$/)
+        // #3412: the connector-installed packages carry the doctor suffix; the
+        // SDK and CLI update themselves and do not.
+        const viaConnector = ['@haven_ai/signer', '@haven_ai/mcp', '@haven_ai/connect'].includes(pkg)
+        expect(entry.upgrade_command).toMatch(viaConnector ? /@dev --doctor$/ : /@dev$/)
       }
       expect(manifest.packages.connect.channel).toBe('@haven_ai/connect@dev')
       expect(manifest.release_notes_url).toBe('/releases')
@@ -380,7 +407,9 @@ describe('capability manifest', () => {
     // Mutates the SOURCE table the backend enforces (client-compat.ts), not a
     // copy, so this fails if the manifest ever stops reading it.
     it('follows a min_version change in CLIENT_COMPAT', () => {
-      expect(buildManifestFrom(ORIGIN, FACTS).packages.signer.min_version).toBeNull()
+      // Starts at the live decision (#3302: 0.6.0-alpha.0); the mutation below differs from it.
+      expect(buildManifestFrom(ORIGIN, FACTS).packages.signer.min_version).toBe(CLIENT_COMPAT['@haven_ai/signer'].min_version)
+      expect(CLIENT_COMPAT['@haven_ai/signer'].min_version).not.toBe('0.5.0-alpha.1')
       ;(CLIENT_COMPAT['@haven_ai/signer'] as { min_version: string | null }).min_version = '0.5.0-alpha.1'
       expect(buildManifestFrom(ORIGIN, FACTS).packages.signer.min_version).toBe('0.5.0-alpha.1')
     })

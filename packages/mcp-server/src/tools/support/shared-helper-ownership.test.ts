@@ -134,6 +134,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
+  // #3417: the settled-replay answer for an erc7710 prepare — the catalog
+  // slice's two prepare sites and the plain-HTTP slice's one.
+  catchSettledReplay: { module: 'guidance', slices: ['s2810', 's2811'] },
+  // #3423: its settle-side twin — haven_settle_mcp_tool (s2812) and
+  // haven_submit's erc7710 branch (s2809).
+  catchSettledResettle: { module: 'guidance', slices: ['s2809', 's2812'] },
   // #3101: the status handoff for a refusal that may not know its payment id —
   // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
   paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
@@ -161,6 +167,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // #3277: the direct-payment (haven_send/haven_pay) twin of the notice
   // above, called only from s2809's two success sites.
   directSignerCompatibilityNotice: { module: 'signer-compat', slices: ['s2809'] },
+  // #3419: the task-budget twin of the notice above, called only from
+  // s3329's two handoff sites; the constant rides the same results.
+  taskSignerCompatibilityNotice: { module: 'signer-compat', slices: ['s3329'] },
+  TASK_BUDGET_MIN_SIGNER_VERSION: { module: 'signer-compat', slices: ['s3329'] },
   // tools/support/mcp-context.ts — transport serialization/context validation,
   // signing context, relay wrappers. The merchant delivery/context-rehydration
   // helpers that #2808 parked here moved to their owning capability module in
@@ -282,6 +292,18 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'direct-payment twin of signerCompatibilityNotice (s2810+s2811) and stays beside it in ' +
     'tools/support/signer-compat.ts so the two agent-mediated compatibility notices never drift apart ' +
     'as separate copies — the same reason signerCompatibilityNotice itself is not owned by one capability.',
+  // #3419: the task-budget twin, called only by s3329's two handoff sites —
+  // same shape as the entry above: it stays beside the other two notices so
+  // the agent-mediated compatibility notices never drift apart as copies.
+  taskSignerCompatibilityNotice:
+    'Only the #3329 handlers (haven_open_task_budget/haven_close_task_budget) call it (#3419), but it ' +
+    'is DELIBERATE: it is the task-budget twin of signerCompatibilityNotice (s2810+s2811) and ' +
+    'directSignerCompatibilityNotice (s2809) and stays beside them in tools/support/signer-compat.ts ' +
+    'so the three agent-mediated compatibility notices never drift apart as separate copies.',
+  TASK_BUDGET_MIN_SIGNER_VERSION:
+    'Reported as data on s3329\u2019s two handoff results and pinned cross-package by ' +
+    'hosted-signer-integration.test.ts — a constant beside the notices that report it, the same ' +
+    'reason SIGNER_CAPABILITY_KEY is not owned by one capability.',
   // s2811 (#2811 plain-HTTP x402 capability, to come):
   coerceJsonField:
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
@@ -376,7 +398,15 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'paymentWindowExpiredErrorFor',
     'normalizeError',
   ],
-  guidance: ['buildAgentGuidance', 'buildPurchaseSummary', 'paymentStatusHandoff', 'refusalNextStep', 'taskBudgetNextStep'],
+  guidance: [
+    'buildAgentGuidance',
+    'buildPurchaseSummary',
+    'catchSettledReplay',
+    'catchSettledResettle',
+    'paymentStatusHandoff',
+    'refusalNextStep',
+    'taskBudgetNextStep',
+  ],
   'mcp-context': [
     'delegationSignFields',
     'isMerchantEndpointMiss',
@@ -408,7 +438,15 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'resolveResumeState',
     'settlementPredictionFields',
   ],
-  'signer-compat': ['SIGNER_CAPABILITY_KEY', 'signerCompatibilityNotice', 'directSignerCompatibilityNotice'],
+  // #3419: the task-budget twin rides s3329's two handoff sites; the min-version
+  // constant is reported on those results and pinned cross-package.
+  'signer-compat': [
+    'SIGNER_CAPABILITY_KEY',
+    'signerCompatibilityNotice',
+    'directSignerCompatibilityNotice',
+    'taskSignerCompatibilityNotice',
+    'TASK_BUDGET_MIN_SIGNER_VERSION',
+  ],
 }
 
 /**
@@ -981,8 +1019,9 @@ describe('MUTATION (a): selecting the wrong quoted option fails the cap', () => 
     // entries at the helper level either. 1.5 USDC quoted against a 1 USDC
     // cap refuses; the same helper pricing the 0.5 entry passes.
     const option = PAYMENT_REQUIRED.accepts[0]
+    // #3423 item 3: both sides in whole tokens, atomic in parentheses.
     expect(() => capPrice.priceSelectedOption({ kind: 'human', value: '1' }, option)).toThrow(
-      /exceeds max_amount_human 1 USDC/,
+      /exceeds your cap 1 USDC \(1000000 atomic\)/,
     )
     const cheap = { ...option, amount: '500000', maxAmountRequired: '500000' }
     const priced = capPrice.priceSelectedOption({ kind: 'human', value: '1' }, cheap)

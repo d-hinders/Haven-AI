@@ -56,6 +56,8 @@ export interface X402AuthorizeBody {
   mcpCallContext?: X402McpCallContextInput
   /** #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. */
   taskBudgetId?: string
+  /** #3330: an OPEN sub-budget (this agent is the sub-agent B) to authorize this settlement through. */
+  subBudgetId?: string
 }
 /** A route-serializable {statusCode, body} pair — orchestration returns this instead of touching `reply` directly. */
 export interface X402HandlerResult {

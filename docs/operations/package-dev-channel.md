@@ -7,6 +7,7 @@ covers:
   - scripts/release-snapshot-version.mjs
   - scripts/release-channel.mjs
   - scripts/release-bump.mjs
+  - scripts/release-version-constants.mjs
   - scripts/release-version-order.mjs
   - packages/sdk/src/connector-channel.ts
   - packages/mcp-server/src/connector-channel.ts
@@ -25,8 +26,20 @@ covers:
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-09-24"
+last-verified: "2026-09-25"
 ---
+
+> **Re-verification (#3332, 2026-09-28):** coupled through
+> `packages/backend/src/config.ts`, which is in this doc's `covers:` — the
+> edit is a comment-only re-wording of `ownerCompanyDetailsEnabled`'s own
+> comment (the "no settings UI yet" line, now stale for an unrelated reason:
+> #3332's frontend slice shipped that UI). No channel, dist-tag, snapshot,
+> build order, credential path, or runtime-spec-override behaviour moves, and
+> this document names no fact about that flag's own gating, so nothing in it
+> was made stale. `last-verified` deliberately NOT bumped, for the reason in
+> the `docs/contributing/branch-and-release-flow.md` precedent note: this is
+> a scoped check of one comment-only edit, not a re-verification of the
+> document.
 
 # Package dev channel (`@haven_ai/*@dev`)
 
@@ -194,6 +207,23 @@ and the `release` skill.
 > today**, and a scoped check of one constant is not a re-verification of this
 > document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
+> **Re-verification (0.7.0-alpha.0 release, 2026-09-29):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.6.0-alpha.0` → `0.7.0-alpha.0`. `HAVEN_CONNECTOR_CHANNEL` stays `alpha`,
+> since a prerelease of `0.7.0` keeps the `alpha` label.
+> - **Publish path.** Re-measured at `origin/dev` `ffd8856c`:
+>   `git log origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+>   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **0**
+>   commits.
+> - **The bump's own diff.** It touches none of those four. It does include the
+>   release-bump constant-table fix (`SIGNER_VERSION` is read from the signer's
+>   `tools.ts`), which landed on `dev` just before this cut.
+> - **Live dist-tags read during this release.** `dev` =
+>   `0.0.0-dev.202609282315.dd06d7c`, below `alpha`/`latest` = `0.6.0-alpha.0`.
+>   The next `alpha`/`latest` is `0.7.0-alpha.0`.
+>
+> `last-verified` is not bumped.
+
 > **Re-verification (0.6.0-alpha.0 release, 2026-09-26):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
 > `0.5.0-alpha.1` → `0.6.0-alpha.0`, with `HAVEN_CONNECTOR_CHANNEL` = `alpha`
@@ -246,6 +276,20 @@ and the `release` skill.
 > release, so nothing a `--snapshot` run writes appears in them. `last-verified`
 > is not bumped.
 
+> **Re-verification (#3032, slice-4 default flip, 2026-09-25):** this doc is
+> coupled once more through the same `covers:` entry on
+> `packages/backend/src/config.ts`, and this time the DEFAULT did move:
+> `parseRequestValidationMode` now returns `enforce` when
+> `HAVEN_REQUEST_VALIDATION` is unset or empty (previously `shadow`), per epic
+> #3028 slice 4 — every constrained module is listed in `index.ts` and the
+> rollout completes. Step 5's claim was rewritten for the new default (the
+> accepted values `off`/`shadow`/`enforce`, the refuse-the-boot shape, the
+> restart semantics and the variable's irrelevance to package selection are
+> untouched). `last-verified` is bumped by this edit: the claim it anchors
+> changed.
+> Scope of this note: the default in step 5 — nothing else in this document
+> was re-verified.
+
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
 > is in this doc's `covers:`. Verified rather than asserted: the constant moved
@@ -286,7 +330,10 @@ and the `release` skill.
   **exempts** a snapshot: a `0.0.0-dev.*` version in `X-Haven-Client` is never
   hinted or refused, whatever minimum the deployment sets
   (`isSnapshotVersion` in `packages/core/src/client-compat.ts`), so a dev-channel
-  install keeps working against dev after a minimum is set.
+  install keeps working against dev after a minimum is set. One is set since
+  #3302 (`@haven_ai/signer` `min_version` = `0.6.0-alpha.0`): a `@dev`
+  snapshot signer is still served on every deployment, while a published
+  `0.5.0-alpha.1` signer is refused at sign-context until it upgrades.
 - **All five carry the same version.** The job runs the ordinary
   `scripts/release-bump.mjs` with `--snapshot` over the CI checkout, so the
   cross-package pins, connect's `runtime-manifest.ts`, the baked version
@@ -565,12 +612,14 @@ throughout.
    compat versions. On the dev channel the pinned build moves often: an install
    that is intact but behind the connector's current pin is reported as an
    **advisory** (`!` marker, "intact, but outdated", both versions named) and
-   exits 0 — only a real failure exits 1 (#3121). Run
-   `--doctor --repair --runtime <runtime>` to catch up when you want the newer
-   snapshot. Its hosted MCP row proves endpoint reachability; the
+   exits 0 — only a real failure exits 1 (#3121). Run the `--doctor --repair`
+   line the doctor prints to catch up when you want the newer snapshot — with
+   several agents on the machine (a dev and a prod agent, typically) it names
+   `--credentials-dir <dir>`, and a `--repair` without it is refused (#3412). Its hosted MCP row proves endpoint reachability; the
    `identity_match` row is the authenticated stored-credential check. Every
-   "re-run `npx @haven_ai/connect@<tag>`" hint the
-   snapshot's packages print names **`@dev`**, because the tag is a build-time
+   connector hint the snapshot's packages print — the setup re-run
+   `npx @haven_ai/connect@<tag>` and, since #3412, the upgrade command
+   `npx -y @haven_ai/connect@<tag> --doctor` — names **`@dev`**, because the tag is a build-time
    constant (`HAVEN_CONNECTOR_CHANNEL` in `packages/sdk/src/connector-channel.ts`)
    that the snapshot bump rewrote from the version — a snapshot telling its
    tester to re-run `@alpha` would silently replace the build under test (#2423).
@@ -610,7 +659,8 @@ the pinned directory) and is never reused between runs; and `--doctor` reports
 a **failing** `runtime_spec_override` check — that is the record of the override,
 not a defect. A malformed value is refused before npm runs. To return to the
 pinned manifest, unset the variables and run
-`--doctor --repair --runtime <runtime>`. The full contract — the three
+`--doctor --repair --runtime <runtime>` (adding `--credentials-dir <dir>` when
+several agents share the machine — #3412). The full contract — the three
 variables, what each replaces, the sidecar and wrapper records — is in the
 connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).
@@ -683,7 +733,8 @@ the live state of an environment is read from the environment, not from prose.
       `false`, lower-case, anything else refuses the boot),
       `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` (#2866, a plain
       `Number(...) || default`) and `HAVEN_REQUEST_VALIDATION` (#3029, that
-      shape a third time — `off`/`shadow`/`enforce`, default `shadow`, a mode
+      shape a third time — `off`/`shadow`/`enforce`, default `enforce` since
+      the #3032 flip, a mode
       change is a restart) does not affect this
       package-selection path; anything else
       makes the backend **refuse to boot**, naming the variable, rather than
@@ -818,3 +869,19 @@ The production path (bump PR → `dev → main` promotion → `publish.yml` on
 `--snapshot` mode, and why a snapshot is not a release). The runtime
 compatibility contract — the manifest table, version skew, `--doctor`'s checks:
 [`mcp-runtime-compatibility.md`](mcp-runtime-compatibility.md).
+
+> **Re-verification (#3332, unrelated `config.ts` addition, 2026-09-27):** this
+> diff adds one new field to `config.ts` — `ownerCompanyDetailsEnabled`
+> (`HAVEN_OWNER_COMPANY_DETAILS`), a strict boolean flag for an unrelated
+> settings feature. It does not touch `HAVEN_CONNECTOR_CHANNEL`, the channel
+> validation regex, or any field this document names; nothing about channel
+> selection, dist-tag resolution, or the snapshot path moves. Scope of this
+> note: confirming that. Nothing else in this document was re-verified.
+
+> **Re-verification (release-bump constant table, 2026-09-29):** coupled
+> through `scripts/release-bump.mjs`. The snapshot path is untouched: it
+> rewrites the same constants, now read from
+> `scripts/release-version-constants.mjs`, with `SIGNER_VERSION` in
+> the signer's `tools.ts` since #3454. The snapshot version format, the
+> guards, `HAVEN_CONNECTOR_CHANNEL` and the `dev` dist-tag publish did not
+> move.

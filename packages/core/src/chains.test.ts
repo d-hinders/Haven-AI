@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_CHAIN_ID, CHAIN_REGISTRY, getChainData } from './chains.js'
+import { DEFAULT_CHAIN_ID, CHAIN_REGISTRY, getChainData, effectiveDefaultChainId } from './chains.js'
 
 describe('DEFAULT_CHAIN_ID (#990)', () => {
   it('is Base mainnet, the value the call sites used before the hoist', () => {
@@ -43,5 +43,45 @@ describe('DEFAULT_CHAIN_ID (#990)', () => {
     // catch this, but the failure message matters: "expected 8453" reads as a
     // typo, while this one names what regressed.
     expect(DEFAULT_CHAIN_ID).not.toBe(100)
+  })
+})
+
+describe('effectiveDefaultChainId (#3431)', () => {
+  it('production: DEFAULT_CHAIN_ID is deployable, so the value is unchanged at 8453', () => {
+    // Production's shape, pinned directly rather than through a fixture that
+    // could silently drift from what production actually serves.
+    expect(effectiveDefaultChainId([8453, 84532])).toBe(8453)
+  })
+
+  it('DEFAULT_CHAIN_ID first in the deployable list is still fine', () => {
+    expect(effectiveDefaultChainId([8453])).toBe(8453)
+  })
+
+  it('DEFAULT_CHAIN_ID NOT first in the deployable list still wins — the includes() check, not "first"', () => {
+    // Every other fixture in this file lists 8453 first (or omits it), so
+    // deleting the `includes(DEFAULT_CHAIN_ID)` short-circuit and falling
+    // straight through to `deployable[0]` would still pass them all. This is
+    // the one case that distinguishes "prefer DEFAULT_CHAIN_ID when it is
+    // deployable" from "prefer whichever chain is listed first" — proven by
+    // mutation (see the worker report).
+    expect(effectiveDefaultChainId([84532, 8453])).toBe(8453)
+  })
+
+  it('a deployment whose deployable list excludes DEFAULT_CHAIN_ID reports a default that IS deployable', () => {
+    // Dev's shape: Base Sepolia only. This is the funding-step trap #3431
+    // found — the fixture is the one a bad fix would still fail on.
+    expect(effectiveDefaultChainId([84532])).toBe(84532)
+    expect([84532]).toContain(effectiveDefaultChainId([84532]))
+  })
+
+  it('falls back to the first deployable chain, not always the same one', () => {
+    // Order matters: this is "the first chain it does deploy on", not "the
+    // lowest id" or "the last". A hard-coded 84532 here would pass the case
+    // above and fail this one.
+    expect(effectiveDefaultChainId([100, 84532])).toBe(100)
+  })
+
+  it('an empty deployable list — a misconfigured HAVEN_DEPLOY_CHAIN_IDS — falls back to DEFAULT_CHAIN_ID', () => {
+    expect(effectiveDefaultChainId([])).toBe(DEFAULT_CHAIN_ID)
   })
 })

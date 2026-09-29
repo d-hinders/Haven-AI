@@ -1019,7 +1019,7 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
       // The message quotes the cap back in the units the AGENT wrote, with the
       // atomic figure it resolved to — not a bare 1000000 it never typed.
-      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(payload.message).toContain('your cap 1 USDC (1000000 atomic)') // #3423: both sides in whole tokens
       expect(payload.message).toContain('1000000')
       expect(payload.message).toContain(LIVE_PRICE_ATOMIC)
       // Pre-funding: no intent was ever created.
@@ -1097,7 +1097,10 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      // No human-unit framing on the atomic path — the message reads as before.
+      // #3423 review round 1 nit: the message now states both sides in whole
+      // tokens (item 3), so this is no longer "reads as before" — but the
+      // atomic-cap framing this test pins is unchanged: "max_amount 1", never
+      // relabeled as "max_amount_human".
       expect(payload.message).toContain('max_amount 1')
       expect(payload.message).not.toContain('max_amount_human')
       expect(fundingCall()).toBeUndefined()
@@ -1143,7 +1146,7 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(payload.message).toContain('your cap 1 USDC (1000000 atomic)') // #3423: both sides in whole tokens
       expect(fundingCall()).toBeUndefined()
     })
 
@@ -1360,7 +1363,7 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(payload.message).toContain('your cap 1 USDC (1000000 atomic)') // #3423: both sides in whole tokens
       expect(fundingCall()).toBeUndefined()
     })
 
@@ -1523,6 +1526,60 @@ describe('hosted erc7710 (#1456)', () => {
     expect(
       recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent')).length,
     ).toBe(1)
+  })
+
+  it('a second settle of a payment that already settled answers with the original settlement, and the merchant is not called (#3423)', async () => {
+    const TX = '0x' + '7d'.repeat(32)
+    stubFetch({
+      'POST /x402/pay_7710/settle': {
+        status: 409,
+        body: {
+          error: 'Payment pay_7710 already settled on-chain; nothing was signed or charged again.',
+          code: 'payment_already_settled',
+          payment_id: 'pay_7710',
+          tx_hash: TX,
+        },
+      },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const res = ok(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data).toMatchObject({
+      payment_id: 'pay_7710',
+      settled: true,
+      settlement_tx_hash: TX,
+      next_action: 'none',
+    })
+    expect(res.data.next_tool).toBeUndefined()
+    expect(res.data.next_tool_omitted_reason).toMatch(/this payment already settled/)
+    expect(res.data.reason).toMatch(/nothing new was charged/)
+    expect(merchant).not.toHaveBeenCalled()
+  })
+
+  it('a settle 409 for a payment that is only submitted keeps the refusal (not settled) (#3423)', async () => {
+    stubFetch({
+      'POST /x402/pay_7710/settle': { status: 409, body: { error: 'Payment is submitted, expected pending_signature' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const res = (await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_7710',
+      signature: SIG7710,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })) as Record<string, any>
+    expect(res.success).toBe(false)
+    expect(JSON.stringify(res)).not.toContain('"settled":true')
   })
 
   it('settle exchanges the signature for the header, with NO funding relay and NO preflight', async () => {

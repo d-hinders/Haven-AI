@@ -264,8 +264,11 @@ settlement status, money, merchant identity, and funding fields. `product` and
 `invoice_id` are narrow merchant display metadata; `settlement_tx_hash` is an
 optional merchant `PAYMENT-RESPONSE` (or, since #3118,
 `_meta["x402/payment-response"]`) receipt reference, not Haven settlement
-proof. Missing values are explicit `null`. The top-level raw `result` remains
-advanced merchant evidence and never decides whether Haven reports settlement.
+proof. Missing values are explicit `null` — on erc7710, `funding_tx_hash` is
+always `null` (no funding leg; #3423), never back-filled from the settlement
+hash the scheme's `payment.txHash` otherwise carries. The top-level raw
+`result` remains advanced merchant evidence and never decides whether Haven
+reports settlement.
 
 Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
 (#1271): when the probe misses (non-402), it makes one bounded same-origin
@@ -700,9 +703,10 @@ it performs the same chain-scoped catalog lookup and usable-MCP-row guard, then
 runs the same live merchant probe as `haven_quote_mcp_tool`. It returns the
 generic quote fields plus the catalog identity and its price, explicitly marked
 indicative. It creates no intent, approval, signing context, allowance check, or
-price reservation. An unknown/degraded/non-MCP catalog row keeps the existing
-manual fallback: use `haven_pay_mcp_tool` with an explicit merchant URL and
-tool name. When ready to buy, call `haven_prepare_catalog_purchase` with a cap;
+price reservation. A degraded or tool-less MCP row keeps the manual fallback
+`haven_pay_mcp_tool`. A plain-HTTP row hands off to `haven_quote_x402 { url:
+resource_url }` (#3423). An unknown row names `haven_discover_tools`. When
+ready to buy, call `haven_prepare_catalog_purchase` with a cap;
 that paid preflight obtains a fresh live quote and checks the cap independently.
 When the user stated no cap, the documented convention
 ([#1548](https://github.com/d-hinders/Haven-AI/issues/1548)) is quote first and
@@ -747,8 +751,10 @@ Sequence:
    `network = eip155:<agent.chain_id>` predicate) — an id that does not exist
    and an id curated for a DIFFERENT chain both 404 identically; nothing is
    re-filtered in JS.
-2. Refuse a `degraded` row or one missing MCP tool metadata
-   (`protocol`/`tool_name`) before any merchant probe, naming
+2. Refuse before any merchant probe: a plain-HTTP row (`protocol !== 'mcp'`)
+   hands off to `haven_quote_x402 { url: resource_url }` (#3423, checked
+   FIRST — the mcp-only fallback below needs a `tool_name` an http row does
+   not have); a `degraded` MCP row or one missing `tool_name` names
    `haven_pay_mcp_tool` (with an explicit `merchant_url`/`tool_name`) as the
    manual fallback.
 3. Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
@@ -2005,15 +2011,34 @@ same reason it was written: the caller named the payment, so refusing on
 `chainRpcs` entry — a money-safety fix turned into an availability regression.
 This is a funding-leg concern only; erc7710 has no delegate balance to exhaust.
 
+> **erc7710 (#3417, 2026-09-28):** the same replayed `confirmed` answer reaches
+> `prepareX402Erc7710()` with no `sign_data`. It is not ambiguous there, because
+> an erc7710 row's payee (`to`) is the merchant and its `tx_hash` is the
+> settlement itself. So when `to` is this request's merchant and `resource_url`
+> its resource, the SDK throws `X402Erc7710AlreadySettledError`. The three
+> hosted erc7710 prepare tools answer it as a done state (`settled: true`,
+> `idempotent_replay: true`, `next_action: none`, no `next_tool`). Any other
+> confirmed row under the key, such as an EIP-3009 funding leg whose payee is
+> the delegate, is refused as a 409 key collision. The rest of this document
+> was not re-read for it, and `last-verified` is not bumped.
+
 Further hardening with #1061: a non-numeric `maxTimeoutSeconds` is a `400`
 rather than a `NaN` that clamps through into a `502` — since #3031 that refusal
 is the request schema's, and with ajv coercion on, a numeric STRING (`"300"`)
 is now accepted and coerced to `300` instead of refused (#3031's shard records
 the three inputs that widened); and
 `delegationRailBundlerUrl()` asserts that a chain-scoped bundler URL names the
-chain being requested. `DELEGATION_RAIL_BUNDLER_URL` is a single value while two
-chains are enabled, so a mismatched env now fails at first use with a config
+chain being requested, so a mismatched env fails at first use with a config
 error instead of quietly routing a payment at the wrong chain's bundler.
+Since #3416 the credential resolves per chain:
+`DELEGATION_RAIL_BUNDLER_URL_<chainId>` first, then the unsuffixed
+`DELEGATION_RAIL_BUNDLER_URL`. Before that, one value served both enabled
+chains, so a deployment could only ever serve the chain its URL named. A chain
+with no usable credential throws `DelegationRailChainUnavailableError`, which
+the x402 funding leg and `POST /payments` answer as a typed 503
+`rail_unavailable_for_chain` (no ledger row: nothing was refused). The hosted
+MCP maps that to `RAIL_UNAVAILABLE_FOR_CHAIN` with `stop_and_tell_user`, not
+the 5xx "retry once".
 
 ## Task budgets — a time-boxed child budget for one run (#3329)
 
@@ -2064,6 +2089,98 @@ remainder unchanged, plus a separate "reserved for task budgets" line and a
 short explanation above the task-budget list —
 an open child reserves nothing on-chain, so the two figures are shown apart
 rather than netted into a number the chain would not agree with.
+
+## Sub-agent budgets — an agent re-delegates a narrower budget to another agent (#3330)
+
+A **sub-budget** is agent A re-delegating a narrower budget to agent B in the
+same account: agent A's delegate account carves a PERIOD-scoped narrowing of
+its own budget delegation (the parent-child), then grants it to agent B's
+delegate account (the grant). Both children are `erc20PeriodTransfer`-scoped
+with the SAME periodDuration and startDate as the parent — a slice of the same
+window, never a different clock — and are issued owner-governed (the owner
+co-signs each sub-budget; A's delegate key only signs within the
+owner-approved envelope, decision log 2026-09-27). The chain agent B redeems
+is three links, leaf first:
+
+```
+treasury ──(budget delegation: period budget, recipient?, expiry)──▶ A account
+A account ──(parent-child: periodAmount ≤ parent's, SAME window,
+            expiry ≤ parent's, self-delegated)──▶ A account
+A account ──(grant: to B's delegate account — the ONLY redeemer,
+            periodAmount ≤ its parent-child's)──▶ B account
+```
+
+Every hop's caveats run in ONE `redeemDelegations` redemption, so the PARENT's
+period enforcer binds any spend B makes even within B's own allowance — the
+chain is the enforcement. An erc7710 settlement child built under the grant
+makes the merchant-redeemed context `[settlement, grant, parent-child,
+budget]` (four links). An erc7710 `POST /x402`/`POST /payments` by agent B
+itself redeems `[grant, parent-child, budget]` (three links).
+
+**Lifecycle** (`packages/backend/src/modules/sub-budgets/`,
+`routes/agent-sub-budgets.ts`, `routes/sub-budgets.ts`, migration 100):
+
+1. `POST /agents/:id/sub-budgets` (the OWNER) issues
+   `{ period_amount_human, period, expiry, recipient? }` for agent B; the API
+   decodes the parent budget delegation and refuses a child wider than the
+   parent in amount, expiry or recipient BEFORE signing
+   (`sub_budget_wider_than_parent`), and both rows are stored `pending`
+   (`agent_sub_budgets`: A's parent-child + B's grant, one identity root,
+   `haven-sub-budget:<id>` salts).
+2. A's delegate key signs both rows — `haven_sign` with `sub_budget_id`
+   fetches the exact bytes from `GET /sub-budgets/:id/sign-context`
+   (delegator-scoped: only A can fetch; A signs both) and runs the SDK's
+   `assertOwnSubBudgetChild`; `POST /sub-budgets/:id/submit` (A) and the
+   owner's `POST /agents/:id/sub-budgets/:id/sign` flip each row
+   `pending`→`open` as its signature lands. B's grant is redeemable only
+   once BOTH rows are open.
+3. Agent B names the budget: `sub_budget_id` on `POST /payments`,
+   `subBudgetId` on `POST /x402/authorize`. The backend refuses before
+   building the chain when the grant or its parent-child row is not open
+   (`sub_budget_not_open` — A revoked its grant, A's own budget delegation
+   was revoked, or expiry), the token or pinned recipient disagrees, or the
+   grant was not carved from the budget delegation selected for the payment
+   (`sub_budget_parent_mismatch`) — the parent delegation is then used
+   VERBATIM by hash, the #3329 review-finding-E rule applied twice. Revoking
+   B's child leaves A intact; revoking A's budget delegation strands B's
+   child (its chain root no longer resolves active by hash, and reverts
+   on-chain once the owner's disable lands) — surfaced as the structured 409
+   above.
+4. `DELETE /agents/:id/sub-budgets/:sub` (owner) or `POST
+   /sub-budgets/:id/close` (the owning agent, A or B) prepares a sponsored
+   `disableDelegation(child)` UserOp from the closing agent's OWN delegate
+   account — authority-reducing only (`assertOwnSubBudgetCloseUserOp`), the
+   same shape class the task budget's close learned. A closing its
+   parent-child strands B's grant; B closing its grant leaves A intact.
+
+**The issue's open questions, answered in this slice:**
+
+- *Two-party flow:* owner-governed issuance (the owner picks B, amount,
+  expiry, pin; the API refuses wider-than-parent pre-sign), then A's delegate
+  key signs both already-built children within that owner-approved envelope
+  and the owner relays each signature (`POST /agents/:id/sub-budgets/:id/sign`,
+  decision log 2026-09-27).
+- *A's rekey:* A's rekey revokes A's budget delegation, so B's child dies with
+  it — surfaced, not hidden: the parent-child's chain root stops resolving
+  active by hash and B's payments answer the structured 409 above, and the
+  on-chain disable lands whenever the owner submits it. Re-issue on rekey is a
+  deliberate non-goal: the replacement delegation has a different hash, so
+  every existing child would be stale anyway.
+- *Budget selection when B also holds a treasury-issued budget:* the caller
+  names one — `sub_budget_id` and `task_budget_id` are mutually exclusive on
+  the payment body (400 when both), and with neither named the payment runs on
+  the agent's own budget delegation. A sub-budget is never silently chosen.
+- *Concrete `to` on the child (preferred) over a redeemer caveat:* the grant's
+  `to` IS B's delegate account, so only B's delegate can redeem — no
+  `RedeemerEnforcer` caveat is needed (the account that signs the redemption
+  must be the delegation's `delegate`).
+- *Children under a multi-token parent:* out of scope for v1 — the builder
+  refuses any parent whose scope is not a single-token
+  `erc20PeriodTransfer` (`parent_not_period_scoped`); widening is a future
+  slice.
+
+On the agent page, `haven_get_agent` for B names its parent agent and the
+effective (narrower) limits, and the dashboard shows the parent→child tree.
 
 ## Guardrails
 
@@ -2206,3 +2323,35 @@ rather than netted into a number the chain would not agree with.
 > unchanged). The leg's assertions, its reads and every payment step it drives
 > are unchanged; its suite passes unmodified. Scope of this note: that helper.
 > Nothing else in this document was re-verified.
+
+> **Re-verification (#3332, additive `parties.buyer`, 2026-09-27):** this diff
+> adds an OPTIONAL `buyer` field to `Parties` (`openapi/party-model.ts`) — the
+> paying agent's owner's company details, present only when
+> `HAVEN_OWNER_COMPANY_DETAILS` is on and the owner has saved details, absent
+> (the key missing, never present-and-null) otherwise. It is not part of any
+> settlement typed data, does not change `withParties`' existing four fields,
+> and does not touch `routes/x402.ts`, `x402-delegation.ts`, the settlement-
+> transfer verifier, or `agent-payment-status.ts` (deliberately not wired in
+> this slice — see `docs/product/owner-company-details.md`). Every existing
+> consumer of `Parties` is unaffected by construction: an optional key nothing
+> previously read. Scope of this note: that one field. Nothing else in this
+> document was re-verified.
+
+> **Re-verified #3423 (slice A, hosted agent-surface polish, 2026-09-29):**
+> this diff made three passages stale. This document said an
+> "unknown/degraded/non-MCP catalog row" and the `2.` sequence step's
+> "`degraded` row or one missing MCP tool metadata (`protocol`/`tool_name`)"
+> ALL shared one fallback, `haven_pay_mcp_tool` — that was already wrong for a
+> plain-HTTP row (no `tool_name` to pass it) before this fix, and this fix is
+> what corrected the code. Both passages now read: a plain-HTTP row hands off
+> to `haven_quote_x402 { url: resource_url }` (checked FIRST); a degraded or
+> tool-less MCP row keeps `haven_pay_mcp_tool`; an unknown catalog_id names
+> `haven_discover_tools`. The `agent_summary.purchase_summary` passage gained
+> one sentence: on erc7710, `funding_tx_hash` is always `null` (no funding
+> leg), never back-filled from the settlement hash `payment.txHash` otherwise
+> carries on that scheme — the erc7710 settled branch of
+> `haven_settle_mcp_tool` did not build `purchase_summary` at all before this
+> fix, so the field's existing generic description was previously read as
+> EIP-3009-only; it is now true of both schemes. Scope of this note: those
+> three passages. Nothing else in this document was re-verified.
+> `last-verified` is not re-stamped.

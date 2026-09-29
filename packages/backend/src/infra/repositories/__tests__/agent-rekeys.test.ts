@@ -12,15 +12,17 @@
  * around the constraint. These tests prove the constraint half.
  */
 import { beforeAll, beforeEach, expect, it } from 'vitest'
-import db from '../../../db.js'
+import db, { getPool } from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   activateRekeyDelegation,
   abandonRekey,
   adoptAbandonedCarry,
   completeRekey,
+  findDelegationTerms,
   findInFlightRekey,
   findRekey,
+  insertRekeyDelegation,
   invalidateOldPayerIntents,
   markCompleted,
   markIssued,
@@ -30,6 +32,7 @@ import {
   rotateAgentCredentials,
   type CarrySnapshotEntry,
 } from '../agent-rekeys.js'
+import { findReusablePendingDelegation } from '../delegation-budgets.js'
 
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const OLD_DELEGATE = '0x00000000000000000000000000000000000000d1'
@@ -668,6 +671,447 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     )
     expect(row.rows[0].rekey_id).toBeNull()
     expect(row.rows[0].carry_role).toBeNull()
+  })
+
+  // ── #3386: the merchant label carries onto every replacement piece ─────
+
+  async function seedMerchant(): Promise<string> {
+    const n = ++seq
+    const row = await db.query<{ id: string }>(
+      `INSERT INTO merchants (slug, name, description, listing_status)
+       VALUES ($1, $2, 'x', 'live') RETURNING id`,
+      [`rekey-merchant-${n}`, `Rekey merchant ${n}`],
+    )
+    return row.rows[0].id
+  }
+
+  /** A merchant-locked ACTIVE grant — the old row a re-key replaces. */
+  async function seedMerchantLockedDelegation(
+    agentId: string,
+    merchantId: string,
+    recipient = '0x' + 'c0'.repeat(20),
+  ): Promise<string> {
+    const hash = `0x${String(++seq).padStart(64, '0')}`
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds, start_date,
+          expires_at, merchant_id)
+       VALUES ($1, 84532, $2, $3, $4, '{"signed":"capability"}', 1, 'active', '1000000',
+               86400, 0, 9999999999, $5)`,
+      [agentId, USDC, recipient, hash, merchantId],
+    )
+    return hash
+  }
+
+  it('findDelegationTerms reads the merchant_id off the old row', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const hash = await seedMerchantLockedDelegation(seeded.agentId, merchantId)
+
+    const terms = await findDelegationTerms(seeded.agentId, hash)
+    expect(terms?.merchant_id).toBe(merchantId)
+
+    // MUTATION TARGET — an ordinary (unlocked) delegation reads null, not the
+    // column being silently dropped from the SELECT.
+    const plainHash = await seedPlainDelegation(seeded.agentId)
+    expect((await findDelegationTerms(seeded.agentId, plainHash))?.merchant_id).toBeNull()
+  })
+
+  it('insertRekeyDelegation writes the carried merchant_id, and the CHECK holds because the recipient survives', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    // #3439: insertRekeyDelegation now re-checks the re-key's OWN stage
+    // under the lock — it must be `metered`, the stage the issue route
+    // checks before building rows.
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId,
+    })
+    expect(inserted).toBe(true)
+
+    const row = await db.query<{ merchant_id: string; recipient_address: string }>(
+      `SELECT merchant_id, recipient_address FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBe(merchantId)
+    expect(row.rows[0].recipient_address).toBe(recipient.toLowerCase())
+  })
+
+  it('MUTATION TARGET — insertRekeyDelegation with merchantId: null writes no label', async () => {
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+    await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: null,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId: null,
+    })
+    const row = await db.query<{ merchant_id: string | null }>(
+      `SELECT merchant_id FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBeNull()
+  })
+
+  it('a merchant deleted between metering and issue does not block issuance — the insert writes merchant_id: null', async () => {
+    // #3386 review finding: the route resolves `merchant_id` by a by-hash
+    // read of the old row moments before this insert, but the merchant can
+    // be deleted in that window. The FK is `ON DELETE SET NULL`, so the OLD
+    // row's read already comes back null once the merchant is gone — but
+    // proving the INSERT itself survives a merchant id resolved a moment
+    // earlier and since deleted (a race the by-hash read alone cannot rule
+    // out under concurrency) is the point of this test: the subselect in
+    // `INSERT_REKEY_DELEGATION_SQL` resolves any non-existent merchant id to
+    // NULL rather than throwing 23503.
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    await db.query(`DELETE FROM merchants WHERE id = $1`, [merchantId])
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      // The value resolved a moment before the merchant vanished — exactly
+      // what the route would still be holding.
+      merchantId,
+    })
+    expect(inserted).toBe(true)
+
+    const row = await db.query<{ merchant_id: string | null }>(
+      `SELECT merchant_id FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBeNull()
+  })
+
+  it('MUTATION TARGET — a present merchant is still carried through the same subselect (the guard above is not a blanket null)', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId,
+    })
+    expect(inserted).toBe(true)
+
+    const row = await db.query<{ merchant_id: string | null }>(
+      `SELECT merchant_id FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    expect(row.rows[0].merchant_id).toBe(merchantId)
+  })
+
+  it('#3386 reuse decision — a re-key\'s own pending replacement is never handed out by build reuse', async () => {
+    const seeded = await seedAgent()
+    const merchantId = await seedMerchant()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+    const recipient = '0x' + 'c0'.repeat(20)
+
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: recipient,
+      delegationHash: `0x${String(++seq).padStart(64, '0')}`,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: rekey.id,
+      carryRole: 'carry',
+      merchantId,
+    })
+    // The row must genuinely exist before "abandoned rows are never reused"
+    // means anything — without this, the test would still pass on a row
+    // that silently never got inserted.
+    expect(inserted).toBe(true)
+    // Abandon the re-key — the row stays `pending` forever (completion
+    // requires `stage = 'issued'`, and `abandoned` is terminal).
+    await abandonRekey(rekey.id, seeded.agentId, 'stopped')
+
+    // MUTATION TARGET — without `rekey_id IS NULL`, carrying merchant_id onto
+    // this dead row would make it eligible here: a later merchant-locked
+    // build for the SAME (agent, token, recipient, budget, period, merchant)
+    // slot must build a fresh row, not hand out the abandoned re-key's inert
+    // pending one.
+    const reusable = await findReusablePendingDelegation(
+      seeded.agentId,
+      USDC,
+      recipient,
+      '1000000',
+      86_400,
+      9_999_999_999,
+      db,
+      merchantId,
+    )
+    expect(reusable).toBeNull()
+  })
+})
+
+/**
+ * #3439 — the stalled-issue race. `lockOwnedAgentForRekeyDelegation` only
+ * proves that SOME re-key of the agent is in flight, not that it is the one
+ * calling `insertRekeyDelegation`. The interleaving from the (corrected)
+ * issue body:
+ *
+ * 1. R1 reaches `metered`. Its issue request passes the (route-level) stage
+ *    check and stalls before it inserts anything.
+ * 2. The owner abandons R1 and opens R2 with a fresh candidate key.
+ * 3. R2 moves past its own revoke step (`revoked` → `metered`, here) —
+ *    R2 is now in flight.
+ * 4. R1's stalled issue resumes. Before #3439, `insertRekeyDelegation`
+ *    re-checked only that *some* re-key of the agent was in flight — R2
+ *    satisfies that — so R1's rows were inserted for an abandoned re-key
+ *    while a DIFFERENT re-key was the one actually in flight.
+ *
+ * This block calls `insertRekeyDelegation` directly with R1's id while R2 is
+ * `metered`, which is exactly step 4 — the route-level stage check in step 1
+ * is out of scope for a repository test and is exercised at the route level
+ * (`agent-rekey-issue-clock.test.ts` et al.); what this proves is that the
+ * REPOSITORY function itself refuses once R1 stops being R1's own `metered`.
+ */
+describeDb('insertRekeyDelegation refuses a stalled re-key while a successor is in flight (#3439)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it("R1's stalled insert is refused once R1 is abandoned, even though R2 (a different re-key) is in flight", async () => {
+    const seeded = await seedAgent()
+
+    // R1 reaches metered — the stage its issue request checked before
+    // "stalling".
+    const r1 = await open(seeded)
+    await markRevoked(r1.id, seeded.agentId, '0xr1revoke')
+    await markMetered(r1.id, seeded.agentId, snapshot())
+
+    // Owner abandons R1 — frees the one-in-flight slot.
+    const abandoned = await abandonRekey(r1.id, seeded.agentId, 'stalled, owner abandoned')
+    expect(abandoned?.stage).toBe('abandoned')
+
+    // R2 opens with a fresh candidate key and moves past its own revoke —
+    // R2 is the re-key actually in flight when R1's stalled insert resumes.
+    const r2NewDelegate = '0x00000000000000000000000000000000000000d3'
+    const r2 = await open(seeded, { newDelegateAddress: r2NewDelegate })
+    await markRevoked(r2.id, seeded.agentId, '0xr2revoke')
+    await markMetered(r2.id, seeded.agentId, snapshot())
+    expect((await findRekey(r2.id, seeded.agentId))?.stage).toBe('metered')
+
+    // R1's stalled issue resumes and tries to insert. `lockOwnedAgentForRekeyDelegation`
+    // alone would pass (R2 satisfies "some re-key in flight") — the guard
+    // under test is the re-check of R1's OWN stage.
+    const hash = `0x${String(++seq).padStart(64, '0')}`
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: null,
+      delegationHash: hash,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: r1.id,
+      carryRole: 'steady',
+      merchantId: null,
+    })
+
+    // MUTATION TARGET: without the stage re-check, this is `true` and the
+    // row below exists under R1 while R2 is still in flight — surviving R2's
+    // eventual completion as a `pending` row nothing else in the re-key
+    // lifecycle ever revisits.
+    expect(inserted).toBe(false)
+    const row = await db.query(`SELECT 1 FROM agent_delegations WHERE delegation_hash = $1`, [hash])
+    expect(row.rowCount).toBe(0)
+  })
+
+  it("control: R1's insert still succeeds while R1 ITSELF is the metered re-key in flight — the guard is scoped to R1, not a blanket refusal", async () => {
+    const seeded = await seedAgent()
+    const r1 = await open(seeded)
+    await markRevoked(r1.id, seeded.agentId, '0xr1revoke')
+    await markMetered(r1.id, seeded.agentId, snapshot())
+
+    const hash = `0x${String(++seq).padStart(64, '0')}`
+    const inserted = await insertRekeyDelegation({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      chainId: 84532,
+      tokenAddress: USDC,
+      recipientAddress: null,
+      delegationHash: hash,
+      delegationJson: '{"signed":"capability"}',
+      version: 2,
+      budgetAtomic: '1000000',
+      periodSeconds: 86_400,
+      startDate: 0,
+      expiresAt: 9_999_999_999,
+      rekeyId: r1.id,
+      carryRole: 'steady',
+      merchantId: null,
+    })
+
+    expect(inserted).toBe(true)
+  })
+})
+
+/**
+ * #3450 — `insertRekeyDelegation` called with a REAL checked-out `PoolClient`
+ * as its executor, not a fake. This is the exact call the issue route's
+ * transactional piece loop makes for every piece after the first: the route
+ * opens ONE transaction (`withRekeyIssueTransaction`) and threads that same
+ * `PoolClient` through every DB call inside the loop, including this one.
+ *
+ * Before #3450, `withTransaction` treated ANY executor with a `connect`
+ * method as poolable and tried to check out a SECOND client from it. A real
+ * `pg` `PoolClient` has `connect` (inherited from `Client.prototype`) as well
+ * as `release`, so this rejected with "Client has already been connected. You
+ * cannot reuse a client." The existing "runs inline on an executor that is
+ * already a transaction client" test in `transaction.test.ts` uses a FAKE
+ * executor with no `connect` method at all, so it could not, and did not,
+ * catch this.
+ */
+describeDb('insertRekeyDelegation on a checked-out PoolClient (#3450)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('MUTATION TARGET — accepts a real PoolClient and runs INLINE on it, not on a second checkout', async () => {
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+
+    const client = await getPool().connect()
+    try {
+      await client.query('BEGIN')
+      const hash = `0x${String(++seq).padStart(64, '0')}`
+      const inserted = await insertRekeyDelegation(
+        {
+          agentId: seeded.agentId,
+          userId: seeded.userId,
+          chainId: 84532,
+          tokenAddress: USDC,
+          recipientAddress: null,
+          delegationHash: hash,
+          delegationJson: '{"signed":"capability"}',
+          version: 2,
+          budgetAtomic: '1000000',
+          periodSeconds: 86_400,
+          startDate: 0,
+          expiresAt: 9_999_999_999,
+          rekeyId: rekey.id,
+          carryRole: 'carry',
+          merchantId: null,
+        },
+        // Before #3450 this line threw "Client has already been connected."
+        client,
+      )
+      expect(inserted).toBe(true)
+
+      // Visible on THIS client's own open transaction...
+      const withinTx = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM agent_delegations WHERE delegation_hash = $1`,
+        [hash],
+      )
+      expect(withinTx.rows[0].n).toBe(1)
+
+      // ...but NOT yet on a fresh connection — proving `withTransaction` ran
+      // INLINE on `client` rather than silently opening (and committing) an
+      // independent second transaction on a different connection, which
+      // would make this row visible here before `client` ever commits.
+      const outsideTx = await db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM agent_delegations WHERE delegation_hash = $1`,
+        [hash],
+      )
+      expect(outsideTx.rows[0].n).toBe(0)
+
+      await client.query('COMMIT')
+      const afterCommit = await db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM agent_delegations WHERE delegation_hash = $1`,
+        [hash],
+      )
+      expect(afterCommit.rows[0].n).toBe(1)
+    } finally {
+      client.release()
+    }
   })
 })
 

@@ -52,31 +52,95 @@ export type { Delegation }
 const ERC20_ABI = parseAbi(['function transfer(address to, uint256 amount) returns (bool)'])
 
 /**
+ * #3416: this deployment has no usable bundler credential for the chain a
+ * request needs. That is a configuration state, not a transient failure:
+ * retrying cannot succeed until an operator provisions the chain's
+ * credential. Typed so the payment routes can answer a non-retryable
+ * `rail_unavailable_for_chain` refusal instead of the generic "funding
+ * authorization failed" 502, which hosted agents read as "retry once". The
+ * message never carries the URL (it embeds the API key).
+ */
+export class DelegationRailChainUnavailableError extends Error {
+  readonly errorCode = 'rail_unavailable_for_chain' as const
+  constructor(
+    readonly chainId: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'DelegationRailChainUnavailableError'
+  }
+}
+
+/**
+ * The body a payment route answers, with a literal 503, for
+ * `DelegationRailChainUnavailableError` (#3416): a machine-readable
+ * `error_code`, so a client can tell "this deployment cannot serve this chain
+ * until an operator provisions it" from a transient bundler failure. The
+ * operator detail (which variable to set) stays on the thrown error: neither
+ * route logs it, and `ops:check-bundler` prints it (exit 2). The agent-facing
+ * body carries only the chain.
+ */
+export function railUnavailableRefusalBody(err: DelegationRailChainUnavailableError) {
+  return {
+    error:
+      `This Haven deployment cannot serve delegation-rail bundler payments on chain ${err.chainId} yet. ` +
+      'Nothing was signed or charged. This is a configuration state, not a transient failure: retrying will ' +
+      'get the same answer until the operator provisions this chain.',
+    error_code: err.errorCode,
+    chain_id: err.chainId,
+  }
+}
+
+/** The per-chain credential variable (#3416), e.g. `DELEGATION_RAIL_BUNDLER_URL_84532`. */
+export function delegationRailBundlerUrlVar(chainId: number): string {
+  return `DELEGATION_RAIL_BUNDLER_URL_${chainId}`
+}
+
+/**
  * Bundler endpoint for the delegation rail — env-only SECRET (hosted bundler
- * URLs embed the API key). Falls back to the session rail's credential (same
- * Pimlico account on Base Sepolia); a dedicated var lets ops split vendors
- * per rail later without code changes. Never logged, never persisted.
- * Session rail retired (#834) → this is the single delegation-rail bundler var.
+ * URLs embed the API key). Never logged, never persisted. The single
+ * delegation-rail credential choke point (#824 invariant 9): every consumer
+ * resolves through here.
+ *
+ * #3416: a bundler URL is chain-scoped by its path, and both chains are
+ * enabled on every deployment (chain is decoupled from environment, the
+ * multichain architecture-B decision). So the credential is resolved PER
+ * CHAIN: `DELEGATION_RAIL_BUNDLER_URL_<chainId>` first, then the unsuffixed
+ * `DELEGATION_RAIL_BUNDLER_URL` as the fallback. Before this, a deployment
+ * could only ever serve the one chain its single URL named, and the other
+ * chain's bundler legs (EIP-3009 funding legs, `/payments`, task budgets)
+ * failed with a generic 502.
  */
 export function delegationRailBundlerUrl(chainId: number): string {
-  // The session rail is retired (#834) and both Railway environments migrated
-  // to the dedicated var (#882), so the legacy SESSION_RAIL_BUNDLER_URL
-  // fallback is gone: this reads DELEGATION_RAIL_BUNDLER_URL only, fail-closed.
-  const url = process.env.DELEGATION_RAIL_BUNDLER_URL
-  if (!url) {
-    throw new Error('DELEGATION_RAIL_BUNDLER_URL is not configured — delegation rail unavailable')
-  }
   if (!DELEGATION_RAIL_CHAIN_IDS.has(chainId)) {
     throw new Error(`delegation rail: chain ${chainId} is not enabled`)
   }
-  // #1053 review, finding 7: the env var is ONE URL while two chains are
-  // enabled, and a Pimlico URL is chain-scoped by its path. Assert the URL
-  // names the requested chain so a mismatched env fails at first use with a
-  // config error instead of routing a payment at the wrong chain's bundler.
+  // The session rail is retired (#834) and both Railway environments migrated
+  // to the dedicated var (#882), so there is no SESSION_RAIL_BUNDLER_URL
+  // fallback: an unset credential fails closed.
+  const perChainVar = delegationRailBundlerUrlVar(chainId)
+  const perChain = process.env[perChainVar]
+  const source = perChain ? perChainVar : 'DELEGATION_RAIL_BUNDLER_URL'
+  const url = perChain || process.env.DELEGATION_RAIL_BUNDLER_URL
+  if (!url) {
+    throw new DelegationRailChainUnavailableError(
+      chainId,
+      `DELEGATION_RAIL_BUNDLER_URL is not configured for chain ${chainId} ` +
+        `(set ${perChainVar}, or DELEGATION_RAIL_BUNDLER_URL) — delegation rail unavailable on this chain`,
+    )
+  }
+  // #1053 review, finding 7: a Pimlico URL is chain-scoped by its path. Assert
+  // the resolved URL names the requested chain, so a mismatched env fails at
+  // first use with a config error instead of routing a payment at the wrong
+  // chain's bundler. Applies to the per-chain var too: a Sepolia key pasted
+  // into the mainnet slot is refused, not used.
   if (/\/v2\/\d+\//.test(url) && !url.includes(`/v2/${chainId}/`)) {
-    throw new Error(
-      `DELEGATION_RAIL_BUNDLER_URL targets a different chain than ${chainId} — ` +
-        'the credential is chain-scoped; this deployment cannot serve this chain',
+    throw new DelegationRailChainUnavailableError(
+      chainId,
+      `${source} targets a different chain than ${chainId} — the credential is chain-scoped; ` +
+        (perChain
+          ? `${perChainVar} must hold a chain-${chainId} URL`
+          : `set ${perChainVar} to serve this chain`),
     )
   }
   return url

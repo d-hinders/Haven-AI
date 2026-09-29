@@ -244,7 +244,12 @@ case where two purchases collided on a key you did not choose.
 
 This applies to the **EIP-3009 funding-leg** scheme, which routes money
 through the delegate EOA. **erc7710 direct settlement is unaffected**: it has
-no funding leg and no delegate balance to exhaust.
+no funding leg and no delegate balance to exhaust. On erc7710, a key whose
+payment to the same merchant for the same resource already settled makes
+`prepareX402Erc7710()` throw `X402Erc7710AlreadySettledError` (`paymentId`,
+`txHash`) instead of minting a settlement child. A key already used for a
+payment to a different payee or resource is refused with a 409
+`HavenApiError`; amount and MCP tool call are not compared (#3417).
 
 For agents that need to inspect the price before paying, use the quote-first
 path. `quoteX402()` probes the merchant and parses the HTTP 402 response, but it
@@ -420,6 +425,7 @@ x402 tool-window failures:
 | `rejected` | The payment was rejected and cannot proceed. | yes |
 | `expired` | Payment expired before completion. | yes |
 | `failed` | Haven could not complete the payment. | yes |
+| `delivered_unverified` | **#3420: terminal.** The merchant delivered, but the settlement window and the sweep's last attribution chance have both passed with no verified on-chain evidence. Polling cannot change this; the only remedy is reporting a real settlement hash (`haven_report_settlement_evidence`). | yes |
 
 The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with the payment header (`PAYMENT-SIGNATURE`, plus `X-PAYMENT` on this bridged path) (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
 
@@ -430,10 +436,11 @@ The merchant settlement leg of x402 (and the MPP retry) is the agent's own reque
 | `sign_and_submit_payment` | Sign with the delegate key and submit the payment to Haven. |
 | `check_status_later` | Poll `getPaymentStatus(payment_id)` later. |
 | `none` | Stop polling; no more action is needed for this payment id. |
+| `awaiting_settlement_evidence` | #2970/#3420: the erc7710 settlement window passed with no verified evidence. Poll `getPaymentStatus(payment_id)` once more shortly after the payment's expiry; if it still shows nothing (or already answers the terminal `delivered_unverified` phase), tell the user the goods were delivered but unverified. |
 | `wait_for_user_approval` | **No longer produced — nothing maps to it.** Retired with the Safe rail's approval queue; kept in the exported enum for wire compatibility. The SDK's own status mapping now answers `stop_and_tell_user` for the statuses that used to yield this. |
 | `wait_for_user_to_complete_payment` | **No longer produced — nothing maps to it.** Same retirement as above. |
 | `retry_original_x402_request` | Haven's funding leg confirmed but no merchant response was ever recorded — most often because the process crashed between the funding confirmation and the merchant retry (a 15-minute grace window applies before this fires; a client-reported merchant rejection instead yields `sweep_stranded_funds`). Call `resumeX402Payment()` with the preserved `resumeState`, or rehydrate it first with `getResumeState(payment_id)`. Do not start a new payment for the same purchase. |
-| `stop_and_tell_user` | Stop retrying and tell the user the payment failed or was rejected. |
+| `stop_and_tell_user` | Stop retrying and tell the user what happened — the payment failed, was rejected, or (#3420) was delivered but its settlement can no longer be verified. |
 | `request_again_if_user_still_wants_it` | The request expired; ask again only if the user still wants the payment. |
 | `payment_window_expired` | The x402 funding/quote window expired. Re-quote the same paid MCP tool call with the same `idempotency_key`, then sign the fresh `payload_hash`. |
 | `sweep_stranded_funds` | A funding leg succeeded but the merchant/protocol leg did not settle. Stop retrying and use `haven_sweep_delegate` to recover stranded delegate funds. |
@@ -640,11 +647,19 @@ try {
 }
 ```
 
-`X402AlreadySettledError` extends `HavenApiError` (status 409) and is the one
-error above that is **not** a failure to pay — it reports that the payment it
-describes *succeeded*, earlier. Handle it before the generic `HavenApiError`
-branch, and treat `err.receipt` as proof of purchase rather than retrying. See
-[Idempotency](#idempotency-what-the-key-guarantees-and-what-it-costs).
+Two errors are **not** a failure to pay; each reports that the payment it
+describes *succeeded*, earlier. Handle both before the generic branches, and
+treat them as proof of purchase rather than retrying:
+
+- `X402AlreadySettledError` extends `HavenApiError` (status 409; EIP-3009
+  path) and carries `err.receipt`.
+- `X402Erc7710AlreadySettledError` extends `HavenError`, **not**
+  `HavenApiError` (no status; code `PAYMENT_ALREADY_SETTLED`; erc7710
+  `prepareX402Erc7710()`, and since #3423 `submitX402Erc7710()` on a repeated
+  settle), and carries `err.paymentId` and `err.txHash`. An
+  `instanceof HavenApiError` branch does not catch it.
+
+See [Idempotency](#idempotency-what-the-key-guarantees-and-what-it-costs).
 
 ## License
 

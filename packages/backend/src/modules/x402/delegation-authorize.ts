@@ -13,6 +13,7 @@ import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } 
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { redactVendorSecrets } from '../../rails/execution-rail.js'
+import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../../rails/delegation-rail.js'
 import { selectDelegation, selectDelegationByHash, prepareDelegationPayment } from '../../rails/delegation-authorization.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../../rails/hybrid-provisioning.js'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
@@ -40,9 +41,18 @@ import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 import { findForAgent as findTaskBudgetForAgent } from '../../infra/repositories/task-budgets.js'
 import {
+  findForAgent as findSubBudgetForAgent,
+  findOpenParentChildByHash,
+} from '../../infra/repositories/sub-budgets.js'
+import {
   resolveTaskBudgetChildForPayment,
   type TaskBudgetPaymentRefusal,
 } from '../task-budgets/index.js'
+import {
+  resolveSubBudgetForPayment,
+  type SubBudgetPaymentRefusal,
+} from '../sub-budgets/index.js'
+import type { Delegation } from '@metamask/smart-accounts-kit'
 
 type ResolvedToken = Extract<ResolvePaymentTokenResult, { ok: true }>
 
@@ -60,6 +70,23 @@ const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
   task_budget_token_mismatch: "This payment's token does not match the task budget's token",
   task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
   task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
+}
+
+/** #3330 §3: the sub-budget refusal table, x402's own copy (matches routes/payments.ts). */
+const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> = {
+  sub_budget_not_found: 404,
+  sub_budget_not_open: 409,
+  sub_budget_token_mismatch: 409,
+  sub_budget_recipient_mismatch: 409,
+  sub_budget_parent_mismatch: 409,
+}
+const SUB_BUDGET_REFUSAL_MESSAGE: Record<SubBudgetPaymentRefusal, string> = {
+  sub_budget_not_found: 'Sub-budget not found',
+  sub_budget_not_open: 'Sub-budget is not open (closed, closing, pending, or expired)',
+  sub_budget_token_mismatch: "This payment's token does not match the sub-budget's token",
+  sub_budget_recipient_mismatch: "This payment's recipient does not match the sub-budget's pinned recipient",
+  sub_budget_parent_mismatch:
+    "The sub-budget's chain is broken — its parent-child link is closed or it was not carved from the budget delegation selected for this payment",
 }
 
 export interface DelegationAuthorizeInput {
@@ -84,6 +111,8 @@ export interface DelegationAuthorizeInput {
   paymentRequired?: Record<string, unknown>
   /** #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. */
   taskBudgetId?: string
+  /** #3330: an OPEN sub-budget (this agent is the sub-agent B) to authorize this settlement through. Mutually exclusive with taskBudgetId. */
+  subBudgetId?: string
 }
 
 /**
@@ -143,15 +172,89 @@ async function resolveTaskBudgetOrRefusal(
   return { ok: true as const, childDelegation: resolved.childDelegation, parentDelegation }
 }
 
+/**
+ * #3330: resolve `subBudgetId` (when supplied) — the same shape as
+ * `resolveTaskBudgetOrRefusal` one level deeper. The grant's
+ * `parent_delegation_hash` names A's parent-child ROW (must still be open);
+ * that row's `parent_delegation_hash` names A's budget delegation (must
+ * still be an active grant, selected by hash — #3329 review finding E's
+ * rule twice over).
+ */
+async function resolveSubBudgetOrRefusal(
+  agentId: string,
+  subBudgetId: string,
+  tokenAddress: string,
+  toAddress: string,
+) {
+  const grantRow = await findSubBudgetForAgent(subBudgetId, agentId)
+  if (!grantRow) {
+    return {
+      ok: false as const,
+      result: { code: 404, body: { error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_not_found, error_code: 'sub_budget_not_found' } } as X402HandlerResult,
+    }
+  }
+  const parentChildRow = await findOpenParentChildByHash(grantRow.parent_delegation_hash, Math.floor(Date.now() / 1000))
+  if (!parentChildRow) {
+    return {
+      ok: false as const,
+      result: {
+        code: 409,
+        body: { error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch, error_code: 'sub_budget_parent_mismatch' },
+      } as X402HandlerResult,
+    }
+  }
+  const parentDelegation = await selectDelegationByHash(parentChildRow.agent_id, parentChildRow.parent_delegation_hash)
+  if (!parentDelegation) {
+    return {
+      ok: false as const,
+      result: {
+        code: 409,
+        body: { error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch, error_code: 'sub_budget_parent_mismatch' },
+      } as X402HandlerResult,
+    }
+  }
+  const resolved = resolveSubBudgetForPayment(
+    grantRow,
+    parentChildRow,
+    tokenAddress,
+    toAddress,
+    parentDelegation,
+    Math.floor(Date.now() / 1000),
+  )
+  if (!resolved.ok) {
+    const code = resolved.refusal as SubBudgetPaymentRefusal
+    return {
+      ok: false as const,
+      result: {
+        code: SUB_BUDGET_REFUSAL_STATUS[code],
+        body: { error: SUB_BUDGET_REFUSAL_MESSAGE[code], error_code: code },
+      } as X402HandlerResult,
+    }
+  }
+  return {
+    ok: true as const,
+    grantDelegation: resolved.childDelegation!,
+    parentChildDelegation: JSON.parse(parentChildRow.delegation_json) as Delegation,
+    parentDelegation,
+  }
+}
+
 export async function runDelegationAuthorize(input: DelegationAuthorizeInput): Promise<X402HandlerResult> {
   const {
     agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
     maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
-    mcpCallContext, paymentRequired, taskBudgetId,
+    mcpCallContext, paymentRequired, taskBudgetId, subBudgetId,
   } = input
 
   if (tokenAddress === ZERO_ADDRESS) {
     return { code: 400, body: { error: 'Native-token x402 is not supported on the delegation rail' } }
+  }
+  // #3330: exactly one authorizing child per settlement.
+  if (taskBudgetId && subBudgetId) {
+    return {
+      code: 400,
+      body: { error: 'Pass exactly one of taskBudgetId or subBudgetId — never both' },
+    }
   }
 
   // ── Scheme routing (#946) ────────────────────────────────────────────
@@ -185,6 +288,11 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
 
   const replayContext = {
     url, payTo, merchantPayTo, amountRaw, tokenAddress, tokenSymbol: tokenConfig.symbol, network, facilitatorAddresses,
+    // #3392: part of the replay pin — delegationReplay compares it against
+    // the stored row on pending_signature (unexpired) and confirmed rows.
+    taskBudgetId,
+    // #3330: same pin for a sub-budget-authorized intent.
+    subBudgetId,
   }
   const findExistingByKey = async (): Promise<Record<string, unknown> | null> => {
     if (!idempotencyKey) return null
@@ -269,6 +377,18 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       fundingTaskBudgetParent = resolved.parentDelegation
     }
 
+    // ── Sub-budget (#3330, optional), funding leg ─────────────────────────
+    let fundingSubBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetOrRefusal>>['grantDelegation']
+    let fundingSubBudgetParentChild: Awaited<ReturnType<typeof resolveSubBudgetOrRefusal>>['parentChildDelegation']
+    let fundingSubBudgetParent: Awaited<ReturnType<typeof selectDelegationByHash>> = null
+    if (subBudgetId) {
+      const resolved = await resolveSubBudgetOrRefusal(agent.id, subBudgetId, tokenAddress, payTo.toLowerCase())
+      if (!resolved.ok) return resolved.result
+      fundingSubBudgetGrant = resolved.grantDelegation
+      fundingSubBudgetParentChild = resolved.parentChildDelegation
+      fundingSubBudgetParent = resolved.parentDelegation
+    }
+
     if (fundingDelegation) {
       let fundingRemainingAtomic: bigint | null = null
       try {
@@ -345,9 +465,17 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         tokenAddress,
         payTo.toLowerCase(),
         amountRaw,
-        fundingTaskBudgetChild && fundingTaskBudgetParent
-          ? { taskBudget: { childDelegation: fundingTaskBudgetChild, parentDelegation: fundingTaskBudgetParent } }
-          : undefined,
+        fundingSubBudgetGrant && fundingSubBudgetParent && fundingSubBudgetParentChild
+          ? {
+              subBudget: {
+                grantDelegation: fundingSubBudgetGrant,
+                parentChildDelegation: fundingSubBudgetParentChild,
+                parentDelegation: fundingSubBudgetParent,
+              },
+            }
+          : fundingTaskBudgetChild && fundingTaskBudgetParent
+            ? { taskBudget: { childDelegation: fundingTaskBudgetChild, parentDelegation: fundingTaskBudgetParent } }
+            : undefined,
       )
     } catch (err) {
       // Caveat rejection (budget/expiry) or bundler failure — database untouched.
@@ -367,6 +495,13 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // synchronously and swallows its own failures (see refusal-ledger.ts).
       // #3053 (slice 2 of epic #3056) migrates this call site behind the
       // shared choke point that slice introduces.
+      // #3416: no bundler credential for this chain on this deployment is a
+      // configuration state, not a failed authorization — a typed,
+      // non-retryable 503. Not a policy refusal either (nothing was
+      // refused), so nothing is booked, exactly like the outage case below.
+      if (err instanceof DelegationRailChainUnavailableError) {
+        return refuse({ code: 503, body: railUnavailableRefusalBody(err) }, null)
+      }
       const fundingRefusalReason = classifyRevertForLedger(err)
       // #3053: through the shared choke point. The ledger input is null when
       // the classification says NOT a refusal (an outage is not a refusal):
@@ -479,6 +614,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       budgetDelegationHash: fundingAuth.delegationHash,
       preparedUserOp: serializeUserOp(fundingAuth.prepared.userOperation),
       taskBudgetId: fundingTaskBudgetChild ? taskBudgetId : null,
+      subBudgetId: fundingSubBudgetGrant ? subBudgetId : null,
       conflictTarget: 'x402_idempotency_key',
     })
     if (!intent) {
@@ -594,6 +730,22 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     const resolved = await resolveTaskBudgetOrRefusal(agent.id, taskBudgetId, tokenAddress, payTo.toLowerCase())
     if (!resolved.ok) return resolved.result
     erc7710TaskBudgetChild = resolved.childDelegation
+    budget = resolved.parentDelegation
+  }
+
+  // ── Sub-budget (#3330, optional), erc7710 leg ───────────────────────────
+  // The grant's parent-child row and A's budget delegation are both read by
+  // hash (resolveSubBudgetOrRefusal) and `budget` is reassigned to A's REAL
+  // parent grant — every downstream use (the remaining-budget pre-check,
+  // buildSettlementDelegation, the stored settle-time state) then redeems
+  // the SAME grant the B child's `authority` chain names.
+  let erc7710SubBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetOrRefusal>>['grantDelegation']
+  let erc7710SubBudgetParentChild: Awaited<ReturnType<typeof resolveSubBudgetOrRefusal>>['parentChildDelegation']
+  if (subBudgetId) {
+    const resolved = await resolveSubBudgetOrRefusal(agent.id, subBudgetId, tokenAddress, payTo.toLowerCase())
+    if (!resolved.ok) return resolved.result
+    erc7710SubBudgetGrant = resolved.grantDelegation
+    erc7710SubBudgetParentChild = resolved.parentChildDelegation
     budget = resolved.parentDelegation
   }
 
@@ -780,6 +932,12 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // #3329: when a task budget authorizes this settlement, its signed
       // child is the settlement child's immediate parent.
       taskBudgetChild: erc7710TaskBudgetChild,
+      // #3330: when a sub-budget authorizes it, the grant is the immediate
+      // parent and A's parent-child rides as the next link.
+      subBudget:
+        erc7710SubBudgetGrant && erc7710SubBudgetParentChild
+          ? { grantDelegation: erc7710SubBudgetGrant, parentChildDelegation: erc7710SubBudgetParentChild }
+          : undefined,
       asset: tokenAddress as `0x${string}`,
       amountAtomic: amountRaw,
       payTo: payTo.toLowerCase() as `0x${string}`,
@@ -905,8 +1063,15 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // rather than [settlement, budget] — the settlement child's `authority`
       // names the task child, so redeeming without it reverts.
       taskBudgetChild: erc7710TaskBudgetChild,
+      // #3330: settle.ts needs grant + parent-child to encode
+      // [settlement, grant, parentChild, budget] for a sub-budget settlement.
+      subBudget:
+        erc7710SubBudgetGrant && erc7710SubBudgetParentChild
+          ? { grantDelegation: erc7710SubBudgetGrant, parentChildDelegation: erc7710SubBudgetParentChild }
+          : undefined,
     }),
     taskBudgetId: erc7710TaskBudgetChild ? taskBudgetId : null,
+    subBudgetId: erc7710SubBudgetGrant ? subBudgetId : null,
     conflictTarget: 'x402_idempotency_key',
   })
   if (!intent) {

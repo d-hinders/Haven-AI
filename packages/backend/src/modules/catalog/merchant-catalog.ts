@@ -37,6 +37,13 @@ export interface CatalogRow {
    * probe; MPP entries (not an x402 rail) stay NULL. See migration 037.
    */
   asset_transfer_methods: string | null
+  /**
+   * The lowercased `payTo` the entry's x402 challenge names, when every
+   * `accepts[]` option names the same well-formed one (#3331, migration 101).
+   * NULL for MPP rows, before the first successful probe, and when the
+   * challenge names none or disagrees with itself.
+   */
+  pay_to: string | null
   created_at: string
   updated_at: string
 }
@@ -57,10 +64,16 @@ export interface ProbeResult {
   network?: string
   /**
    * Distinct x402 `assetTransferMethod`s advertised across all `accepts[]`
-   * options, in first-seen order (e.g. `['eip3009', 'erc7710']`). Undefined for
-   * non-x402 rails (MPP) and when the challenge carries no `accepts[]`.
+   * options on the recorded network, in first-seen order (e.g. `['eip3009',
+   * 'erc7710']`). Undefined for non-x402 rails (MPP) and when the challenge
+   * carries no `accepts[]`.
    */
   assetTransferMethods?: string[]
+  /**
+   * The lowercased `payTo` every `accepts[]` option agrees on (#3331).
+   * Undefined for MPP and whenever there is no single well-formed one.
+   */
+  payTo?: string
 }
 
 interface X402Accept {
@@ -68,6 +81,7 @@ interface X402Accept {
   maxAmountRequired?: string
   asset?: string
   network?: string
+  payTo?: string
   extra?: { assetTransferMethod?: string }
 }
 
@@ -75,22 +89,62 @@ interface X402Accept {
 const DEFAULT_ASSET_TRANSFER_METHOD = 'eip3009'
 
 /**
- * The distinct `assetTransferMethod`s a merchant advertises across every
- * `accepts[]` option, in first-seen order. Per the x402 exact-EVM spec an
- * omitted method means EIP-3009, so a plain merchant reports `['eip3009']` and
- * an ERC-7710-capable one that lists both reports `['eip3009', 'erc7710']`.
- * Scanning all options (not just the first) matters because merchants keep the
- * EIP-3009 option first for compatibility and add `erc7710` alongside it.
+ * The distinct `assetTransferMethod`s a merchant advertises on the RECORDED
+ * network (#3386) — `accepts[0]`'s, the same scoping `collectPayTo` already
+ * uses and the one the row's own `network`/price columns are read from. Per
+ * the x402 exact-EVM spec an omitted method means EIP-3009, so a plain
+ * merchant reports `['eip3009']` and an ERC-7710-capable one that lists both
+ * on that network reports `['eip3009', 'erc7710']`. Scanning every option ON
+ * THAT NETWORK (not just the first) still matters — merchants keep the
+ * EIP-3009 option first for compatibility and add `erc7710` alongside it —
+ * but an option on a DIFFERENT network says nothing about what this row's
+ * network accepts. Before this, a challenge listing EIP-3009 on one network
+ * and ERC-7710 on another recorded the union on whichever network happened to
+ * be `accepts[0]`'s, so a merchant-locked budget could be built for a network
+ * the merchant never accepts ERC-7710 on there — stranding the budget, never
+ * misdirecting money.
  */
 function collectAssetTransferMethods(payload: unknown): string[] | undefined {
   const accepts = (payload as { accepts?: unknown[] })?.accepts
   if (!Array.isArray(accepts) || accepts.length === 0) return undefined
+  const network = (accepts[0] as X402Accept | null)?.network
   const methods: string[] = []
   for (const entry of accepts) {
+    if ((entry as X402Accept | null)?.network !== network) continue
     const method = (entry as X402Accept).extra?.assetTransferMethod ?? DEFAULT_ASSET_TRANSFER_METHOD
     if (!methods.includes(method)) methods.push(method)
   }
   return methods.length > 0 ? methods : undefined
+}
+
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+
+/**
+ * The one `payTo` a challenge names, lowercased (#3331). Every `accepts[]`
+ * option on the recorded network must name a well-formed address and they must all be the same one:
+ * a merchant-locked budget pins `transfer(to)` to this address, so a
+ * challenge that names two (or one option that names none) has not told us
+ * where "this merchant" is paid, and the answer is none rather than the
+ * first one seen.
+ */
+function collectPayTo(payload: unknown): string | undefined {
+  const accepts = (payload as { accepts?: unknown[] })?.accepts
+  if (!Array.isArray(accepts) || accepts.length === 0) return undefined
+  // Only the options on the network this row records (accepts[0]'s, the one
+  // the price is read from): a Base + Solana merchant names a base58 payTo on
+  // the other option, and a merchant may be paid at different addresses on
+  // different chains. Neither says anything about where it is paid HERE.
+  const network = (accepts[0] as X402Accept | null)?.network
+  let payTo: string | undefined
+  for (const entry of accepts) {
+    if ((entry as X402Accept | null)?.network !== network) continue
+    const candidate = (entry as X402Accept | null)?.payTo
+    if (typeof candidate !== 'string' || !EVM_ADDRESS.test(candidate)) return undefined
+    const lowered = candidate.toLowerCase()
+    if (payTo !== undefined && payTo !== lowered) return undefined
+    payTo = lowered
+  }
+  return payTo
 }
 
 const TOKEN_DECIMALS: Record<string, number> = { USDC: 6, EURe: 18 }
@@ -200,6 +254,7 @@ export async function probeCatalogEntry(
     asset: symbol,
     network: accept.network,
     assetTransferMethods: collectAssetTransferMethods(payload),
+    payTo: collectPayTo(payload),
   }
 }
 
@@ -232,6 +287,7 @@ export async function refreshCatalog(
          SET price_atomic = $2, price_display = $3, asset = $4,
              network = COALESCE($5, network),
              asset_transfer_methods = COALESCE($6, asset_transfer_methods),
+             pay_to = $7,
              status = 'active', verified_at = now(),
              consecutive_failures = 0, updated_at = now()
          WHERE id = $1`,
@@ -242,6 +298,13 @@ export async function refreshCatalog(
           result.asset,
           result.network ?? null,
           result.assetTransferMethods?.join(',') ?? null,
+          // #3331: written as seen, NOT COALESCEd like the fields above — a
+          // merchant that stops naming one payTo must lose its verified one
+          // (the merchant-locked-budget action then disappears) rather than
+          // keep pinning budgets to an address its own challenge no longer
+          // names. A rotation lands here as a different value, which is what
+          // flags the budgets pinned to the old one as stale.
+          result.payTo ?? null,
         ],
       )
     } else {

@@ -2,6 +2,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { getAddress } from 'ethers'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
+// #3031 round 2: the reconciliation-events module — split out of
+// machine-payments.ts and SHADOWED (owner decision, epic #3028 2026-09-24);
+// registered beside it below, the way index.ts registers it.
+import machinePaymentsReconciliationEventsRoutes from '../machine-payments-reconciliation-events.js'
+// #3031: production wiring for the enforced module (see beforeAll).
+import { installRequestValidation } from '../../openapi/request-validation.js'
 // #1444: validate the real payload against the spec's own schema.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 // #1987 (epic #1440 slice #1987): `modules/mpp/authorize.ts` — and its
@@ -266,7 +272,17 @@ describe('machine payment routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — every money-path module is in
+    // `enforcedModules`, so the request schema refuses off-spec shapes
+    // before the handler (and the rungs that used to make those refusals
+    // are gone). Round 2: `/reconciliation-events` split into its own file
+    // and stays SHADOWED (owner decision, epic #3028 2026-09-24) — it is
+    // registered beside this module exactly as `index.ts` registers it,
+    // WITHOUT an enforcedModules entry, so this suite keeps proving its
+    // handler characterization the way dev actually serves it.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/machine-payments.ts'] })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
+    await app.register(machinePaymentsReconciliationEventsRoutes, { prefix: '/machine-payments' })
   })
 
   afterAll(async () => {
@@ -372,6 +388,9 @@ describe('machine payment routes', () => {
       // #1306: AGENT fixture carries no execution_rail — buckets into legacy,
       // same as handleGetAllowances' own branch below.
       execution_rail: 'legacy',
+      // #3330: the agent's open sub-budget grants (additive — B's view of its
+      // parent's tree; empty for this legacy fixture).
+      parent_sub_budgets: [],
     })
   })
 
@@ -733,7 +752,14 @@ describe('machine payment routes', () => {
       headers: { authorization: 'Bearer sk_agent_test' },
     })
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(/next_cursor/)
+    // #3031: the cursor's uuid SHAPE is the enforced request schema's
+    // (`format: uuid` on the `cursor` query parameter) — the rung that
+    // answered "next_cursor" wording is gone, and the schema refuses before
+    // any query, which is the #3128 property this test pins. The OWNERSHIP
+    // half (a well-formed uuid naming no receipt of this agent) stays a 400
+    // from `listReceipts`.
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().details).toMatch(/cursor/)
     expect(findCall(/FROM machine_payment_evidence e/)).toBeUndefined()
     expect(findCall(/SELECT 1 AS found FROM machine_payment_evidence/)).toBeUndefined()
   })
@@ -978,6 +1004,16 @@ describe('machine payment routes', () => {
   // inspected. (The generic MPP orchestrator this route used to delegate to,
   // `modules/mpp/authorize.ts`, was deleted outright in #1987 — see the file
   // header comment.)
+  //
+  // #3031 round 2 (owner decision, epic #3028 2026-09-24T21:24:44Z, closing
+  // #3223): the refusal lives in a ROUTE-LEVEL `onRequest` hook now, not the
+  // handler body — the #3030 retired-tombstone pattern — and the enforced
+  // schema on `MachinePaymentAuthorizeRequest` is the strict pre-#3031
+  // declaration again. The ordering property these cases pin: `onRequest`
+  // runs BEFORE schema validation, so every body below gets the honest 410,
+  // never the plugin's 400 envelope; and the module-level
+  // `agentAuthMiddleware` (also an `onRequest` hook, added first) still runs
+  // before the tombstone, so an unauthenticated caller keeps their 401.
   describe('POST /machine-payments/authorize (#1328: mpp_demo retired)', () => {
     it('refuses a well-formed mpp_demo challenge — 410, zero writes', async () => {
       primeDb(AUTH)
@@ -998,7 +1034,7 @@ describe('machine payment routes', () => {
       expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
     })
 
-    it('refuses an empty/garbage body the same way — 410 before any body validation', async () => {
+    it('refuses an empty/garbage body the same way — 410 from the onRequest tombstone, never a schema 400', async () => {
       primeDb(AUTH)
 
       const response = await app.inject({
@@ -1008,8 +1044,14 @@ describe('machine payment routes', () => {
         payload: {},
       })
 
+      // The body misses the (restored, strict) MachinePaymentAuthorizeRequest
+      // schema — `challenge` and `idempotencyKey` are required. The answer is
+      // still the tombstone's 410, which proves the onRequest hook ran before
+      // validation: the owner-ordered mechanism, not the round-1 permissive
+      // schema, is what keeps a retired endpoint's contract intact.
       expect(response.statusCode).toBe(410)
       expect(response.json().error).toMatch(/retired/i)
+      expect(response.json().error).not.toBe('Request does not match the API spec')
       expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
     })
 
@@ -1090,7 +1132,11 @@ describe('machine payment routes', () => {
   // #2970: a submitted erc7710 intent past its settlement window with no
   // verified evidence answers awaiting_settlement_evidence, not
   // check_status_later, which promised a resolution nothing would produce.
-  it('returns awaiting_settlement_evidence for a submitted erc7710 intent past its settlement window', async () => {
+  // #3420: that answer is now bounded — INSIDE the sweep's last attribution
+  // chance (window + the verifier's clock-skew allowance) it still reads
+  // awaiting_settlement_evidence, with expiry-bounded wording instead of the
+  // old fixed "about two minutes".
+  it('returns awaiting_settlement_evidence for a submitted erc7710 intent past its settlement window but inside the attribution horizon', async () => {
     primeDb(
       AUTH,
       intentStatusRow({
@@ -1098,7 +1144,9 @@ describe('machine payment routes', () => {
         status: 'submitted',
         tx_hash: null,
         confirmed_at: null,
-        created_at: '2020-01-01T00:00:00.000Z',
+        // Past the settlement window (600s) but inside the verifier's last
+        // attribution instant (600s + 120s skew): 660s ago.
+        created_at: new Date(Date.now() - 660_000).toISOString(),
         payment_rail: 'x402',
         source: 'x402',
         machine_metadata: JSON.stringify({ settlement_scheme: 'erc7710' }),
@@ -1120,10 +1168,56 @@ describe('machine payment routes', () => {
     // this scheme (`haven_report_x402_outcome` takes no hash).
     expect(body.message).toMatch(/settlement sweep/i)
     expect(body.message).not.toMatch(/haven_report_x402_outcome/)
+    // #3420: the residual patience is stated as expiry-bounded, never the
+    // fixed "about two minutes" that read identically at 3 minutes and at 3
+    // hours.
+    expect(body.message).toMatch(/expiry/)
+    expect(body.message).not.toMatch(/about two minutes/)
     // #2970 review: expectMatchesSpec('GET', '/machine-payments/{id}/status', body)
     // surfaces a PRE-EXISTING spec drift unrelated to this change (the route's
     // real response carries `fee` and `mpp.challenge_id`, which openapi/spec.ts
     // does not declare) — reported, not silently fixed here; see the final report.
+  })
+
+  // #3420: PAST the sweep's last attribution chance the same read goes
+  // TERMINAL — polling cannot change the outcome at any age, so the answer
+  // must stop asking the agent to poll.
+  it('returns the terminal delivered_unverified shape for a submitted erc7710 intent past the attribution horizon', async () => {
+    primeDb(
+      AUTH,
+      intentStatusRow({
+        ...confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' }),
+        status: 'submitted',
+        tx_hash: null,
+        confirmed_at: null,
+        // Years past the horizon: nothing — reported hash or sweep tick —
+        // can confirm this settlement anymore.
+        created_at: '2020-01-01T00:00:00.000Z',
+        payment_rail: 'x402',
+        source: 'x402',
+        machine_metadata: JSON.stringify({ settlement_scheme: 'erc7710' }),
+      }),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    // The terminal triple: terminal phase, tool-less stop, stored row
+    // untouched (the late-reported-hash confirm seam stays open).
+    expect(body.phase).toBe('delivered_unverified')
+    expect(body.next_action).toBe('stop_and_tell_user')
+    expect(body.status).toBe('submitted')
+    expect(body.message).toMatch(/delivered/i)
+    expect(body.message).toMatch(/cannot change this|Polling cannot/)
+    expect(body.message).toMatch(/haven_report_settlement_evidence/)
+    expect(body.message).not.toMatch(/poll haven_get_payment_status/i)
+    expect(body.message).not.toMatch(/may still attribute|can still attribute/)
+    expect(body.message).not.toMatch(/haven_report_x402_outcome/)
   })
 
   // Inside the window the same shape still answers check_status_later — the
@@ -1532,7 +1626,10 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('txHash must be a 0x-prefixed transaction hash')
+    // #3031: txHash's 0x-hex-64 shape is the enforced schema's; the handler
+    // rung is gone and the refusal names the field via `details`.
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().details).toMatch(/txHash/)
     expect(mockQuery).toHaveBeenCalledTimes(1)
   })
 
@@ -1552,7 +1649,10 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('merchantStatus must be an HTTP status code')
+    // #3031: the 100–599 HTTP status range is the enforced schema's
+    // (`merchantStatus` integer minimum/maximum); the handler rung is gone.
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().details).toMatch(/merchantStatus/)
     expect(mockQuery).toHaveBeenCalledTimes(1)
   })
 
@@ -1858,7 +1958,10 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toContain('ETH, USDC')
+      // #3031: the ETH|USDC enum is the enforced schema's — the rung that
+      // echoed the supported list is gone; the refusal names the field.
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toMatch(/asset/)
     })
 
     it('rejects invalid recipient address with 400', async () => {
@@ -1872,7 +1975,10 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toContain('recipient')
+      // #3031: the recipient address pattern is the enforced schema's; the
+      // refusal names the field.
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toMatch(/recipient/)
     })
 
     it('rejects missing amount with 400', async () => {
@@ -1886,7 +1992,10 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toContain('amount')
+      // #3031: `amount` is required on the enforced schema; the refusal
+      // names the field.
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toMatch(/amount/)
     })
 
     // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is
@@ -2022,7 +2131,10 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toContain('idempotency_key')
+      // #3031: the 1–128 idempotency_key length is the enforced schema's
+      // (minLength/maxLength); the refusal names the field.
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toMatch(/idempotency_key/)
     })
 
     // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is

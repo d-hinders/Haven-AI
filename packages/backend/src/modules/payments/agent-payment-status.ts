@@ -17,6 +17,7 @@ import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from '../x402/x402-delegation.js'
+import { CLOCK_SKEW_SECONDS } from '../x402/settlement-observed.js'
 
 /**
  * #2085: narrowed — this module constructs `'payment_intent'` and nothing
@@ -73,6 +74,15 @@ export interface AgentPaymentStatus {
   expires_at: string
   chain_id: number
   message: string
+  /**
+   * #3420: the delivered half of the settle vocabulary, on the status read —
+   * `true` when a `machine_payment_evidence` row records the merchant's
+   * response (`merchant_leg_reported`, which `FIND_INTENT_STATUS_ROW_SQL`
+   * already computes: the receipt capture `completeX402MerchantCall` runs on
+   * every accepted merchant reply). Absent when there is no such row —
+   * honest "unknown", never a claimed `false`.
+   */
+  delivered?: boolean
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
@@ -544,6 +554,33 @@ export function isPastSettlementEvidenceWindowErc7710(payment: PaymentIntentStat
 }
 
 /**
+ * #3420: the sweep's LAST attribution chance, as a wall-clock instant.
+ *
+ * A settlement of this intent can only ever be confirmed by the evidence
+ * report (the agent-reported settle door) or by the sweeper, and BOTH
+ * verify the transfer with `notAfterSec = authorize + MAX_SETTLEMENT_WINDOW_SECONDS
+ * + CLOCK_SKEW_SECONDS` (`settlement-observed.ts` — the child delegation's
+ * on-chain `timestamp` caveat bounded by the window, widened by the same skew
+ * both copies carry). Past that instant no verified confirmation is possible
+ * at ANY age: the sweep's tick cadence only decides how long the within-grace
+ * answer stays honest, and its width here is the verifier's own boundary, not
+ * an invented second constant.
+ *
+ * Exported for the status test, which pins the cutover on the real DB like
+ * #2970's suite does.
+ */
+export function isPastSettlementAttributionHorizonErc7710(
+  payment: Pick<PaymentIntentStatusRow, 'created_at'>,
+  nowMs = Date.now(),
+): boolean {
+  const createdMs = new Date(payment.created_at).getTime()
+  // Same fail-closed direction as the window predicate: an unreadable anchor
+  // is past every horizon.
+  if (!Number.isFinite(createdMs)) return true
+  return nowMs > createdMs + (MAX_SETTLEMENT_WINDOW_SECONDS + CLOCK_SKEW_SECONDS) * 1000
+}
+
+/**
  * #2145: the phase/next_action/message for a payment-intent row, including
  * the two funded-but-unsettled overrides of the plain status mapping.
  *
@@ -607,6 +644,37 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
     }
   }
   if (isPastSettlementEvidenceWindowErc7710(payment)) {
+    // #3420: split the #2970 answer by HOW LONG the window has been past.
+    //
+    // Within the sweep's last attribution chance (window + the verifier's own
+    // clock-skew allowance — `isPastSettlementAttributionHorizonErc7710`
+    // below), `awaiting_settlement_evidence` stays honest and a poll can
+    // still resolve: the sweep's 120s tick runs continuously, so a settlement
+    // mined inside the window can still land at any point up to that horizon.
+    // The message now says which, instead of the fixed "about two minutes"
+    // that read identically at 3 minutes and at 3 hours (#3420's wording
+    // defect) — the sweep works from the SAME verifier boundary this code
+    // does, so the remaining patience is exactly horizon − now, and an agent
+    // reading the expiry it already holds (expires_at = authorize + window)
+    // can derive it without a new field.
+    //
+    // Past the horizon the answer is TERMINAL: no verification — reported
+    // hash or sweep — can ever confirm this settlement again, so the phase
+    // names the fact (`delivered_unverified`), the next action is the
+    // tool-less stop, and the message says polling is over. `phase` moves off
+    // `payment_submitted` (the #2970 shape) because that phase's own
+    // description promises a poll; the wire enum gains one ADDITIVE member —
+    // no existing value is narrowed, retired, or remapped. The row's stored
+    // `status` stays `submitted`: the sweep's confirm seam can still flip a
+    // late-reported hash, and nothing here writes.
+    if (isPastSettlementAttributionHorizonErc7710(payment)) {
+      return {
+        phase: AgentPaymentPhase.DeliveredUnverified,
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        message:
+          'This payment is settled no further than it was: the merchant delivered, but the settlement window and the sweep\'s last chance to verify a settlement have both passed with no verified on-chain evidence. Polling cannot change this — tell the user the goods were delivered but Haven holds no verified settlement evidence for this payment. If you hold the merchant\'s real settlement transaction hash, haven_report_settlement_evidence still accepts it.',
+      }
+    }
     return {
       phase: AgentPaymentPhase.PaymentSubmitted,
       nextAction: AgentPaymentNextAction.AwaitingSettlementEvidence,
@@ -617,7 +685,13 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
       // that tool posts to the SAME fail-closed on-chain verification door
       // `modules/mpp/evidence.ts` already guards (see #2680's confirm-seam
       // census). Otherwise poll haven_get_payment_status, unchanged.
-      message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. If you hold the merchant's real settlement transaction hash, report it with haven_report_settlement_evidence. Otherwise, Haven's settlement sweep may still attribute it within about two minutes — poll haven_get_payment_status once more after that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
+      //
+      // #3420: the sweep's residual window is stated as what it is — bounded
+      // by the payment's own expiry plus the verifier's skew allowance, not a
+      // fixed "about two minutes". expires_at IS authorize + the settlement
+      // window (both anchors are the authorize write), so this phrasing stays
+      // true at every age inside the grace band.
+      message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. If you hold the merchant's real settlement transaction hash, report it with haven_report_settlement_evidence. Otherwise, Haven's settlement sweep can still attribute it until shortly after this payment's expiry — poll haven_get_payment_status once more a couple of minutes past that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
     }
   }
   return paymentIntentState(payment.status)
@@ -890,6 +964,10 @@ function statusFromRow(
       expires_at: payment.expires_at,
       chain_id: payment.chain_id,
       message: state.message,
+      // #3420: additive delivered-visibility — `true` only when the merchant's
+      // response is recorded server-side; the key is OMITTED otherwise so the
+      // payload never claims a `false` it cannot know.
+      ...(payment.merchant_leg_reported ? { delivered: true as const } : {}),
       fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
       ...railContext({
         rail,

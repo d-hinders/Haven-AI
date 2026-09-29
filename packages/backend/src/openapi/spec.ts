@@ -917,8 +917,9 @@ const spendTotals = {
 const clientOutdatedResponse = {
   description:
     'Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this ' +
-    'deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` ' +
-    'updates it; retry the same request afterwards.',
+    'deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` ' +
+    '(for a connector-installed package it diagnoses the install and prints the exact repair ' +
+    'line to run next), then retry the same request.',
   content: {
     'application/json': {
       schema: {
@@ -953,6 +954,21 @@ const errorResponse = {
       },
     },
   },
+} as const
+
+/**
+ * #3416: this deployment has no delegation-rail bundler credential for the
+ * agent's chain. A configuration state, not a transient failure — retrying
+ * gets the same answer until an operator provisions the chain. Nothing was
+ * signed, written or charged, and no refusal is booked.
+ */
+const railUnavailableResponse = {
+  ...errorResponse,
+  description:
+    'This deployment has no delegation-rail bundler credential for the agent\'s chain (#3416). ' +
+    'The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a ' +
+    'retry gets the same answer until an operator provisions the chain. Nothing was signed, ' +
+    'written or charged.',
 } as const
 
 /**
@@ -1078,6 +1094,37 @@ const paymentSignData = {
  * exactly the collision #2960 exists to name explicitly instead of leaving
  * implicit in a single ambiguous `payer` field.
  */
+/**
+ * #3332: the paying agent's owner's company details, additive alongside the
+ * address quadruple above — present only when `HAVEN_OWNER_COMPANY_DETAILS`
+ * is on AND the owner has saved company details; absent otherwise (never
+ * `null` — a caller distinguishes "not on this deployment / not filled in"
+ * from "filled in with a genuinely empty field", which none of these are,
+ * since the row's own CHECK constraints refuse an empty legal name, country
+ * or organisation number).
+ *
+ * `vies_status` here mirrors the settings copy's own naming discipline
+ * (`docs/product/agent-passport.md:71`): Haven never renders a `valid` VIES
+ * result as "verified" anywhere, and this field is named for what VIES
+ * itself calls it, not for that word.
+ */
+const partiesBuyerSchema = {
+  type: 'object',
+  required: ['legal_name', 'country', 'org_number', 'vat_number', 'vies_status', 'vies_checked_at'],
+  properties: {
+    legal_name: { type: 'string' },
+    country: { type: 'string', pattern: '^[A-Z]{2}$', description: 'ISO 3166-1 alpha-2.' },
+    org_number: { type: 'string' },
+    vat_number: { type: ['string', 'null'] },
+    vies_status: {
+      type: ['string', 'null'],
+      enum: ['pending', 'valid', 'invalid', 'not_verifiable', null],
+    },
+    vies_checked_at: { type: ['string', 'null'], format: 'date-time' },
+  },
+  additionalProperties: false,
+} as const
+
 const partiesSchema = {
   type: 'object',
   required: ['treasury_account', 'delegate', 'delegate_account', 'merchant'],
@@ -1090,6 +1137,11 @@ const partiesSchema = {
         "The agent's delegate smart account (erc7710 `delegator`), persisted at authorize time. Null for rows authorized before #2960 and on the legacy rail.",
     },
     merchant: { anyOf: [address, { type: 'null' }], description: '`payTo`.' },
+    buyer: {
+      $ref: '#/components/schemas/PartiesBuyer',
+      description:
+        "The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /machine-payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise.",
+    },
   },
   additionalProperties: false,
 } as const
@@ -1144,6 +1196,11 @@ const agentPaymentStatus = {
     expires_at: isoDateTime,
     chain_id: { type: 'integer' },
     message: { type: 'string' },
+    // #3420: the delivered half of the settle vocabulary, additive alongside
+    // `delivered: true` on the settle/complete tool answers. Present (true)
+    // only when a machine_payment_evidence row records the merchant's
+    // response; omitted — never false — when the backend does not know.
+    delivered: { type: 'boolean', description: 'True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown.' },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
     fee: {
@@ -1237,6 +1294,11 @@ export const openapiSpec = {
     { name: 'Machine payments' },
     { name: 'Transactions' },
     { name: 'Delegations' },
+    {
+      name: 'SubBudgets',
+      description:
+        'Sub-budgets (#3330): a budget one agent re-delegates to another agent in the same account, as an ERC-7710 child of the delegating agent\'s own budget delegation. Payments authorized through one redeem the three-link chain [grant, parent child, budget].',
+    },
     {
       name: 'Webhooks',
       description:
@@ -1641,6 +1703,84 @@ export const openapiSpec = {
         },
       },
     },
+    '/user/company-details': {
+      get: {
+        tags: ['User'],
+        operationId: 'getCompanyDetails',
+        summary: "Read the signed-in owner's company details.",
+        description:
+          'Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and ONLY then. When the feature is on and the owner has never saved details (or deleted them), 200 with a JSON `null` body, so a client can tell "feature off" from "nothing saved" by status alone. A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing, or a genuine DB failure recording the check\'s result) is re-checked asynchronously (an atomic claim, so concurrent reads start at most one check) as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check\'s eventual outcome.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: "The owner's saved company details, or `null` when none are saved.",
+            content: { 'application/json': { schema: { anyOf: [{ $ref: '#/components/schemas/CompanyDetails' }, { type: 'null' }] } } },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      put: {
+        tags: ['User'],
+        operationId: 'putCompanyDetails',
+        summary: 'Create or replace the company details.',
+        description:
+          "Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (`ownerProfileRateLimit`).",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/UpsertCompanyDetailsRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'The saved company details.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CompanyDetails' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '429': { ...errorResponse, description: 'Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls.' },
+        },
+      },
+      delete: {
+        tags: ['User'],
+        operationId: 'deleteCompanyDetails',
+        summary: 'Delete the company details.',
+        description:
+          "The owner's erasure path — deliberately NOT gated by `HAVEN_OWNER_COMPANY_DETAILS` (every other route on this and the vies-check path answers 404 when the feature is off; this one does not), so an owner can always remove details they saved while the feature was on, even after an operator turns it back off. Deleting the Haven account itself would also remove these details (the table's `user_id` foreign key is `ON DELETE CASCADE`), but account deletion is an operator action today — there is no self-serve delete-my-account route — so this is the only erasure path that exists. The response is `{ ok: true }` whether or not a row existed.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Deleted (or there was nothing to delete).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DeleteCompanyDetailsResponse' } } },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/user/company-details/vies-check': {
+      post: {
+        tags: ['User'],
+        operationId: 'recheckCompanyDetailsVies',
+        summary: 'Re-run the VIES check for the saved VAT number.',
+        description:
+          "Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per session credential (`ownerProfileRateLimit`).",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The details, with `vies_status` now `pending`.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CompanyDetails' } } },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '429': { ...errorResponse, description: 'Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls.' },
+        },
+      },
+    },
     '/agents': {
       get: {
         tags: ['Agents'],
@@ -1776,6 +1916,65 @@ export const openapiSpec = {
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
           '410': { ...errorResponse, description: 'Always. The message names the archive route to use instead.' },
+        },
+      },
+    },
+    '/agents/{id}/tax-declaration': {
+      put: {
+        tags: ['Agents'],
+        operationId: 'putAgentTaxDeclaration',
+        summary: "Opt this agent in or out of the buyer-side x402 tax declaration.",
+        description:
+          "The OWNER's per-agent opt-in (#3426, wg-tax #5 §2.1). Opting IN is refused with a structured 409 unless the deployment has `HAVEN_OWNER_COMPANY_DETAILS` on and the owner's saved company details carry a VAT number whose VIES status is `valid` AT THE MOMENT of the write — the refusal names the reason (`feature_disabled`, `no_company_details` or `vies_not_valid`) and writes nothing. Opting OUT always succeeds: an owner whose VIES result dropped is exactly the owner who needs to withdraw the opt-in. The toggle changes only this agent's own opt-in bit — it grants no spending authority and sends nothing; the declaration itself is only ever carried on EIP-3009 payments (#3427). An agent API key is refused with a named 403: this is an owner-session surface, the same as the company-details routes.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpsertAgentTaxDeclarationRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The new state of the opt-in.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentTaxDeclarationState' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'The opt-in is not currently possible. The body carries `reason` (`feature_disabled`, `no_company_details` or `vies_not_valid`) and `available: false`; nothing was written.',
+          },
+        },
+      },
+      get: {
+        tags: ['Agents'],
+        operationId: 'getAgentTaxDeclaration',
+        summary: 'Read the unsigned buyer-side tax declaration content for this agent.',
+        description:
+          "The AGENT's own read (#3426, wg-tax #5 §2.1) — authenticated by this agent's API key. Answers 200 with the UNSIGNED §2.1 content when the deployment flag is on, this agent is opted in, and the owner's VAT number is VIES `valid` AT READ TIME: `version` (`x402-tax-1`), `jurisdiction` (the owner's saved country — never derived from the VAT number's prefix; a `GR…` VAT number with country `GR` declares `GR`, and Northern Ireland's `XI…` prefix declares the saved country), `taxableStatus` (`TAXABLE_PERSON`), `taxId` (the saved VAT number) and `validUntil` (integer MILLISECONDS, the lesser of now + 24h and the VIES check's completion time + 24h — the check's own freshness caps the declaration). Answers 200 with `{ available: false, reason }` otherwise — `feature_disabled` (flag off), `disabled` (this agent not opted in, or a foreign agent id), `no_company_details` (no VAT number saved) or `vies_not_valid` (VIES anything-but-valid right now, `pending` included). Availability is the body, not the status code: a temporarily unavailable declaration is a state to poll, not an error. The response is NEVER signed and carries no `signature`, `principalId` or `principalAttributionHash` — the SDK computes those locally (#3427) — and none of the company-details fields the declaration does not state. This slice sends nothing; the declaration is only ever carried on EIP-3009 payments (#3427).",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The declaration content, or the structured not-available answer.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentTaxDeclarationContent' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
         },
       },
     },
@@ -2081,7 +2280,7 @@ export const openapiSpec = {
         operationId: 'buildAgentDelegation',
         summary: 'Grant step 1: build an unsigned budget delegation for the owner to sign.',
         description:
-          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.',
+          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period, merchant) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -2105,7 +2304,7 @@ export const openapiSpec = {
                     // `pattern` constrains strings only, so it still applies
                     // to a real address and ignores null.
                     type: ['string', 'null'],
-                    description: 'Optional recipient pin. Omit (or null) for an open budget.',
+                    description: "Optional recipient pin. Omit (or null) for an open budget — unless merchant_slug is set, in which case the server pins it to the merchant's verified payTo.",
                   },
                   budget_atomic: {
                     type: 'string',
@@ -2114,6 +2313,16 @@ export const openapiSpec = {
                   },
                   period_seconds: { type: 'integer', minimum: 60, description: 'Native refill period; ≥ 60.' },
                   expires_at: { type: 'integer', description: 'Unix seconds, must be in the future. Default: now + 90 days.' },
+                  merchant_slug: {
+                    // `['string', 'null']`, not a bare `string` (#3331 merge):
+                    // the handler treats an explicit null as absent (a plain
+                    // build, no lookup) — the same omit-or-null contract as
+                    // `recipient_address` above (#3082). `pattern` constrains
+                    // strings only, so it still refuses a malformed slug.
+                    type: ['string', 'null'],
+                    pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+                    description: "A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury).",
+                  },
                 },
               },
             },
@@ -2157,7 +2366,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409.' },
+          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent\u2019s own addresses, recipient_address differs from the current payTo).' },
           '502': errorResponse,
         },
       },
@@ -2179,7 +2388,16 @@ export const openapiSpec = {
                 type: 'object',
                 required: ['signature'],
                 properties: {
-                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130,}$' },
+                  // #3031: the rung's TWO constraints, both expressible in
+                  // one pattern. `{130,}` was already here; the rung also
+                  // refused an ODD number of hex characters
+                  // (`signature.length % 2 !== 0` — hex travels as byte
+                  // pairs, so an odd tail cannot decode). `(?:[..]{2}){65,}`
+                  // says exactly that: 65+ whole bytes, 130+ hex chars, even
+                  // length. 65-byte ECDSA and longer WebAuthn assertions
+                  // both still pass; the EIP-1271 redemption check stays the
+                  // real validator.
+                  signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2}){65,}$' },
                 },
               },
             },
@@ -2204,7 +2422,11 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': { ...errorResponse, description: 'Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409.' },
+          '409': {
+            ...errorResponse,
+            description:
+              'Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key\'s own completion (#3439).',
+          },
           '429': { ...errorResponse, description: 'Relayer gas budget exhausted — retry later.' },
           '500': { ...errorResponse, description: 'Stored owner config no longer derives the stored account address.' },
           '502': { ...errorResponse, description: 'Account deploy failed; the grant stays pending and activate can be retried.' },
@@ -2242,6 +2464,8 @@ export const openapiSpec = {
         tags: ['Delegations'],
         operationId: 'submitDelegationRevocation',
         summary: 'Revoke step 2: submit the signed UserOp; the row flips only after it lands.',
+        description:
+          'The submitted user_operation is BOUND to the delegation being revoked (#3343): its calldata must disable THAT delegation on the pinned DelegationManager (identity comparison, signature excluded), checked before submission. A userop that disables something else — or nothing — is refused 400 and nothing is recorded. On success the delegation is disabled on-chain and the row is marked revoked.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
         requestBody: {
@@ -2261,7 +2485,8 @@ export const openapiSpec = {
         },
         responses: {
           '200': {
-            description: 'Delegation disabled on-chain and marked revoked.',
+            description:
+              'Delegation disabled on-chain and marked revoked. The recorded revocation was verified against the signed calldata (#3343).',
             content: {
               'application/json': {
                 schema: {
@@ -2310,6 +2535,234 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
+        },
+      },
+    },
+    // ── Sub-budgets (owner-facing, #3330) ──────────────────────────────────
+    // The owner governs issuance and revocation; the AGENT-facing half of
+    // this surface (list/get/sign-context/submit/close with the agent API
+    // key) is at /sub-budgets* further down. Responses reuse the SubBudget
+    // component schema; the wire shape is `toWire` in routes/agent-sub-budgets.ts.
+    '/agents/{id}/sub-budgets': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'issueAgentSubBudget',
+        summary: 'Issue a sub-budget: agent A re-delegates a narrower budget to agent B.',
+        description:
+          "Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (409 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side (sign-context, then relay each signature via POST /agents/{id}/sub-budgets/{sub}/sign). A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329).",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['sub_agent_id', 'period_amount_atomic', 'expires_at'],
+                properties: {
+                  sub_agent_id: { ...uuid, description: 'The sub-agent B — a different agent in the same account.' },
+                  token_address: { ...address, description: 'Defaults to the chain USDC when omitted.' },
+                  period_amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'Per-period atomic amount; must be <= the parent budget period amount (checked pre-sign).' },
+                  expires_at: { type: 'integer', description: 'Unix seconds; must be in the future and <= the parent budget expiry.' },
+                  recipient_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', description: 'Optional recipient pin; may only NARROW the parent pin, never widen it.' },
+                  label: { type: ['string', 'null'], maxLength: 120 },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Both rows of the tree created pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'parent_child_sub_budget', 'next_action', 'sign_targets'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    parent_child_sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    next_action: { type: 'string' },
+                    sign_targets: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['sub_budget_id', 'who', 'what'],
+                        properties: {
+                          sub_budget_id: uuid,
+                          who: { type: 'string' },
+                          what: { type: 'string' },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'listAgentSubBudgets',
+        summary: "List this agent's sub-budget rows, newest first.",
+        description:
+          "Every row of the trees THIS agent issued (its parent-child narrowings and the grants nested under them) — the owner-facing twin of the agent-auth list at GET /sub-budgets. Scoped by BOTH agent id and the caller's ownership of it.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'Sub-budget rows ordered by created_at DESC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budgets'],
+                  properties: {
+                    sub_budgets: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/sub-budgets/tree': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'getAgentSubBudgetTree',
+        summary: 'The parent→child sub-budget tree this agent issued.',
+        description:
+          "A's parent-child rows on top, each grant nested under the parent-child row its parent_sub_budget_id names (#3330 dashboard tree). Grants whose parent-child row is gone come back under `unattached` rather than being dropped.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The tree.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['agent_id', 'trees', 'unattached'],
+                  properties: {
+                    agent_id: uuid,
+                    trees: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['parent_child_sub_budget', 'grants'],
+                        properties: {
+                          parent_child_sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                          grants: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                    unattached: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/sub-budgets/{sub}/sign': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'signAgentSubBudget',
+        summary: "Relay the delegating agent's signature over one pending sub-budget child.",
+        description:
+          "Owner relays step (#3330): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { $ref: '#/components/parameters/AgentId' },
+          { name: 'sub', in: 'path', required: true, schema: uuid },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: {
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: "A's delegate-key signature over the row's sign-context typed data." },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The opened sub-budget.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'status'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['open'] },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/sub-budgets/{sub}': {
+      delete: {
+        tags: ['SubBudgets'],
+        operationId: 'revokeAgentSubBudget',
+        summary: 'Revoke one sub-budget row (the parent-child, or a single grant).',
+        description:
+          "Authority-reducing only (#3329-2's rule): the delegating agent's own delegate account prepares disableDelegation of THIS row's child. Revoking a PARENT-CHILD row strands every grant under it (their chain's middle link dies — revoking A's budget delegation closes this row too, which is what makes B's child unredeemable); revoking a GRANT row ends B's slice and leaves A intact. status=pending or expired: closes immediately, nothing signed. status=open and live: returns the prepared close operation for the agent to sign (then relay via the agent close endpoint).",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { $ref: '#/components/parameters/AgentId' },
+          { name: 'sub', in: 'path', required: true, schema: uuid },
+        ],
+        responses: {
+          '200': {
+            description: 'The closed row, or the prepared close awaiting the agent signature.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'status'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['closed', 'closing'] },
+                    next_action: { type: ['string', 'null'] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
         },
       },
     },
@@ -2419,7 +2872,7 @@ export const openapiSpec = {
         operationId: 'submitRekeyRevocation',
         summary: 'Re-key steps 1b + 2: land the revoke, THEN read the now-frozen meter (#1698).',
         description:
-          "Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe.",
+          "Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe. The revoked set is derived SERVER-side (#3343): every delegation this agent still holds enabled on-chain (pending, active and replaced rows), and the signed calldata must disable exactly that set before anything is recorded — a subset or stale op answers 409 re-prepare, an unreadable one 400, and the stage stays preflight either way.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
         requestBody: {
@@ -2509,7 +2962,7 @@ export const openapiSpec = {
           '409': {
             ...errorResponse,
             description:
-              'Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain.',
+              'Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain. Also returned if this re-key stopped being `metered` between the stage check and an individual delegation insert — an abandon, or another issue call for the same re-key that already reached `issued`, including one still in flight CONCURRENTLY: the whole piece-build loop and the stage flip to `issued` run in one transaction (#3450), so a second call on the same re-key either loses on the first insert or — for a re-key whose snapshot has no pieces — on the stage flip itself, and inserts nothing either way (#3439, #3450).',
           },
           '502': errorResponse,
         },
@@ -2674,7 +3127,7 @@ export const openapiSpec = {
         operationId: 'submitRevokeAllDelegations',
         summary: 'Batch revoke step 2: submit the signed batch; rows flip only after the UserOp lands.',
         description:
-          'The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.',
+          'The revoked set is derived SERVER-side (#3343) — every delegation this agent still holds enabled on-chain (pending, active and replaced rows); the request\'s delegation_hashes is accepted for compatibility but does not decide anything. The signed calldata must disable exactly that set (checked before submission): a subset or stale op answers 409 re-prepare, an unreadable op 400. The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -5243,7 +5696,7 @@ export const openapiSpec = {
           '400': { ...errorResponse, description: 'A delegate signature is required.' },
           '401': errorResponse,
           '404': { ...errorResponse, description: 'Payment not found.' },
-          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize.' },
+          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize. Exception (#3423): an erc7710 payment that already settled answers code "payment_already_settled" with payment_id and tx_hash; nothing is signed, written or charged again.' },
           '429': { ...errorResponse, description: 'Money-path rate limit.' },
           '502': { ...errorResponse, description: 'Settlement state was lost — re-authorize.' },
         },
@@ -5874,6 +6327,192 @@ export const openapiSpec = {
         },
       },
     },
+    '/sub-budgets': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'listSubBudgets',
+        summary: 'List sub-budgets this agent holds (it is the sub-agent).',
+        description:
+          "Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['open', 'all'] },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Sub-budgets held by this agent.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budgets'],
+                  properties: {
+                    sub_budgets: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'getSubBudget',
+        summary: 'Fetch one sub-budget this agent holds.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The sub-budget.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget'],
+                  properties: { sub_budget: { $ref: '#/components/schemas/SubBudget' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}/sign-context': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'getSubBudgetSignContext',
+        summary: 'Re-servable, byte-free signing handoff for a pending or closing sub-budget row.',
+        description:
+          "DELEGATOR-scoped: both children of a tree (the parent-child narrowing AND the grant to the sub-agent) are signed by the DELEGATING agent's delegate key, so only the delegating agent authenticates here. purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for that row's child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The sign context for whichever signature is currently pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget_id', 'purpose', 'sub_budget_sign_context_version', 'typed_data', 'expected'],
+                  properties: {
+                    sub_budget_id: uuid,
+                    purpose: { type: 'string', enum: ['open', 'close'] },
+                    sub_budget_sign_context_version: { type: 'integer', enum: [1] },
+                    typed_data: { type: 'object', additionalProperties: true },
+                    user_operation: { type: 'object', additionalProperties: true, description: 'purpose=close only.' },
+                    user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'purpose=close only.' },
+                    expected: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'sign_context_unavailable — the sub-budget has no signature currently pending.' },
+        },
+      },
+    },
+    '/sub-budgets/{id}/submit': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'submitSubBudget',
+        summary: 'Submit the delegating agent signature — opens a pending child, or relays the signed close operation.',
+        description:
+          "status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: { signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Opened (from pending) or closed (from closing).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'status'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['open', 'closed'] },
+                    close_tx_hash: { type: 'string', description: 'Present when status=closed.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'signature_mismatch, or a malformed signature.' },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}/close': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'closeSubBudget',
+        summary: 'Close a sub-budget row — trivially if never signed or already expired, otherwise prepares the revocation.',
+        description:
+          "DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'Closed trivially, or a close signature is now pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['closed'], description: 'Present on a trivial close.' },
+                    sign_data: {
+                      type: 'object',
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        typed_data: { type: 'object', additionalProperties: true },
+                        user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' },
+                      },
+                      description: 'Present when a live child needs a revocation signature.',
+                    },
+                    next_action: { type: 'string', enum: ['sign_then_submit'] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'Already closed.' },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
     '/payments': {
       get: {
         tags: ['Payments'],
@@ -5959,7 +6598,7 @@ export const openapiSpec = {
             ...errorResponse,
             description:
               'Idempotency conflict: the key already belongs to a payment with a different token, ' +
-              'recipient or amount, or it replays an intent that is mid-flight ' +
+              'recipient, amount or task budget (#3392), or it replays an intent that is mid-flight ' +
               '(pending_signature / submitted). Only `payment_intents` carry the key — the ' +
               'approval-queue replay fallback is gone with the table (#2055).',
           },
@@ -5979,6 +6618,7 @@ export const openapiSpec = {
               'Preparation failed against the chain, or an idempotent replay of a request whose ' +
               'payment has failed.',
           },
+          '503': railUnavailableResponse,
         },
       },
     },
@@ -6073,7 +6713,17 @@ export const openapiSpec = {
                 type: 'object',
                 required: ['signature'],
                 properties: {
-                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+                  // #3031: the handler's floor, stated as it behaves. The
+                  // declared `{130}` was stricter than the route: 100–129 hex
+                  // characters are shape-accepted (the rung that stood in
+                  // `routes/payments.ts` was `^0x[0-9a-fA-F]{100,}$`) and the
+                  // existing suite exercises a 97-BYTE signature through this
+                  // route (`payments-session-rail.test.ts`), so enforcing the
+                  // old declaration would have refused accepted shapes. The
+                  // REAL validator is the account's own EIP-1271/4337 check at
+                  // submit — this is a shape check only, so it states only
+                  // what the shape check accepts.
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{100,}$' },
                 },
                 additionalProperties: false,
               },
@@ -6110,7 +6760,7 @@ export const openapiSpec = {
         operationId: 'getPaymentReceipt',
         summary: 'Fetch a verifiable receipt for a settled payment.',
         description:
-          'Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. The bundle is verifiable independently of Haven by recovering the signer from the authorization and confirming it is the agent delegate.',
+          'Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. verification checks the delegate signature over the hash named by its verifiedOver field: on erc7710 payments the EIP-712 delegation digest (verifiedOver delegation_digest), on retired-rail history the raw sign_hash. verification is NOT proof the payment settled and does not bind the payment block: amount and recipient are Haven-asserted, and settlement is proven only by the on-chain transaction (settlementTxHash / onChain.txHash, check on an explorer). Direct-payment and eip3009-funding bundles carry authorization.signatureScheme eip712_userop and their verification returns not_verifiable_offline — the signed user operation is not part of the bundle.',
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
@@ -6223,6 +6873,7 @@ export const openapiSpec = {
           '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
           '502': errorResponse,
+          '503': railUnavailableResponse,
         },
       },
     },
@@ -6343,6 +6994,7 @@ export const openapiSpec = {
           },
           '429': errorResponse,
           '502': errorResponse,
+          '503': railUnavailableResponse,
         },
       },
     },
@@ -6474,6 +7126,39 @@ export const openapiSpec = {
           'HELD funds. Rail-aware like every read: both retired rails answer 410. Reporting only — ' +
           'grants no authority, moves nothing; enforcement stays on-chain.',
         security: [{ AgentApiKey: [] }],
+        // #3031: the two query parameters declared. The route has required
+        // both since #3126 (`parseBalanceCoverageQuery` refuses their absence
+        // with a 400 naming the field) and no client calls the route without
+        // them — but the spec declared nothing, so enforcement would have
+        // answered a spec refusal only where the handler meant to answer its
+        // own 400. Declared as the handler parses them. `token` is an ADDRESS
+        // because that is the route's contract: the hosted MCP tool resolves
+        // a token SYMBOL against the agent's allowances FIRST (#3213,
+        // `state-direct-recovery.ts`) and calls this route with the address
+        // — the 2026-09-22 traffic drive's "symbol form" never reached this
+        // route as a symbol. A non-address value reaches the chain read today
+        // and is mislabelled `covered: null` (an RPC failure); under
+        // enforcement the schema refuses it as the caller error it is.
+        // `amount_atomic` is a decimal atomic string — the `^[0-9]+$` HALF of
+        // the handler's check is here; the `> 0` half JSON Schema does not
+        // express and the handler keeps (`must be a decimal atomic amount`).
+        parameters: [
+          {
+            name: 'token',
+            in: 'query',
+            required: true,
+            schema: address,
+            description: 'The ERC-20 contract address to check holdings of.',
+          },
+          {
+            name: 'amount_atomic',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', pattern: '^[0-9]+$' },
+            description:
+              'The amount the coverage question is asked about, in ATOMIC units, as a decimal string. Zero passes the schema and is refused by the handler (a sufficiency question about nothing has no honest answer).',
+          },
+        ],
         responses: {
           '200': {
             description: 'The coverage answer for the requested token and amount.',
@@ -6596,6 +7281,8 @@ export const openapiSpec = {
                   },
                   idempotency_key: {
                     type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
                     description:
                       'Validated (1–128 characters) and then IGNORED — nothing is deduplicated, ' +
                       'because every call refuses. Accepted only so an existing client is ' +
@@ -7040,6 +7727,174 @@ export const openapiSpec = {
         },
       },
     },
+    // ── The receive side (#3333, epic #3328) ────────────────────────────────
+    //
+    // The owner's persisted inbound index, the matching state, and the
+    // owner-signed off-ramp hand-off. The receipt drop is deliberately
+    // UNAUTHENTICATED (a payer has no Haven account): its authentication is
+    // the ECDSA signature over the drop payload, recovered and checked
+    // against the payer the inbound transfer names. It can only add a
+    // receipt document and flip an inbound row's earned flag — never move
+    // funds or authority.
+    '/receive/{accountAddress}': {
+      get: {
+        tags: ['Transactions'],
+        operationId: 'getReceiveLedger',
+        summary: 'The receive ledger for one account: address, matched USDC balance, inbound rows.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        responses: {
+          '200': {
+            description: 'The account receive ledger. `earned: false` rows are unmatched = unearned; nothing is delivered on them.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ReceiveLedgerResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/off-ramp-destination': {
+      put: {
+        tags: ['Transactions'],
+        operationId: 'setOffRampDestination',
+        summary: 'Save (or replace) the owner off-ramp destination for one account+chain.',
+        description:
+          'Owner-only by topology: the route sits behind the dashboard JWT and no agent route wraps it. ' +
+          'One destination per account+chain; a PUT replaces it. This address is the ONLY recipient the ' +
+          'off-ramp hand-off can prepare a transfer to.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/OffRampDestinationInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The saved destination.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OffRampDestination' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/off-ramp/prepare': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'prepareOffRampHandoff',
+        summary: 'Prepare the owner-signed USDC transfer to the saved off-ramp destination.',
+        description:
+          'Builds the UserOperation through the same prepareTransfer the owner send uses (#1083): Haven ' +
+          'prepares, the OWNER signs with the account own signer, Haven relays. The token is the chain ' +
+          'registry USDC and the recipient is the SAVED destination — neither comes from the request ' +
+          'body. Submit goes through `/hybrid/{accountAddress}/transfers/submit`, which re-derives the ' +
+          'calldata and refuses a user_operation that does not contain it. Not a sweep: the sweep is ' +
+          'the agent-keyed stranded-delegate machinery.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/OffRampPrepareInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The prepared UserOperation plus the submit instructions the owner signs into.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OffRampPrepareResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/receipt-drop': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'dropReceiptForTransfer',
+        summary: 'A payer-signed receipt document for one inbound transfer (no authentication; signature IS the auth).',
+        description:
+          'A payer has no Haven account, so this route carries no auth middleware. The signer is ' +
+          'RECOVERED from the EIP-191 signature over the exact drop payload ' +
+          '(`haven:receipt-drop\\ntx:<hash>\\namount_raw:<atomic>`) and the drop is accepted only when ' +
+          'the recovered address IS the payer the inbound transfer names, the amount matches the ' +
+          'persisted transfer, and the transfer is still unmatched. The stored document is a reference ' +
+          'that flips the row earned flag — it grants nothing and moves nothing.',
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReceiptDropInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The transfer is matched and now earned.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ReceiptDropResponse' } } },
+          },
+          '400': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/receive/{accountAddress}/ingest': {
+      post: {
+        tags: ['Transactions'],
+        operationId: 'ingestInboundTransfer',
+        summary: 'Record one inbound USDC transfer in the account receive index.',
+        description:
+          'Owner-scoped ingestion hook (tests and the eventual indexer tick; the production indexer ' +
+          'feeds the same repository). Idempotent per (chain, tx hash): a re-ingest returns ' +
+          '`ingested: false` rather than double-counting.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'accountAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', required: true, schema: { type: 'integer', minimum: 1 } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/InboundIngestInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Recorded (`ingested: false` when the hash was already indexed).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/InboundIngestResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
     '/dashboard/overview': {
       get: {
         tags: ['Dashboard'],
@@ -7394,9 +8249,14 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['merchant', 'offers'],
+                  required: ['merchant', 'funding', 'offers'],
                   properties: {
                     merchant: { $ref: '#/components/schemas/Merchant' },
+                    funding: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MerchantFundingTarget' },
+                      description: 'Where the merchant is paid on each listed chain that has an active, verified x402 offer (#3331). Empty when none does.',
+                    },
                     offers: { type: 'array', items: { $ref: '#/components/schemas/CatalogEntry' } },
                   },
                 },
@@ -7405,6 +8265,66 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '403': agentAuthForbidden,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/merchants/{slug}/budgets': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'listMerchantBudgets',
+        summary: "The dashboard user's merchant-locked budgets for one merchant.",
+        description:
+          "Every ACTIVE, unexpired budget delegation the user issued for this merchant (#3331) on an agent that is not revoked, with what is left this period — read from the ERC20PeriodTransferEnforcer's storage, the same read GET /allowances makes (remaining_is_from_chain false = that read failed and remaining_atomic is the full budget) — and the pin against the merchant's current verified payTo. Dashboard session only: an agent key gets 403. 404 for an unknown or non-live merchant.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'slug', in: 'path', required: true, schema: { type: 'string', pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Budgets, by agent name.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['budgets'],
+                  properties: {
+                    budgets: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: [
+                          'agent_id', 'agent_name', 'chain_id', 'token_address', 'recipient_address',
+                          'delegation_hash', 'budget_atomic', 'period_seconds', 'expires_at',
+                          'remaining_atomic', 'remaining_is_from_chain', 'pin_status',
+                        ],
+                        properties: {
+                          agent_id: { type: 'string', format: 'uuid' },
+                          agent_name: { type: 'string' },
+                          chain_id: { type: 'integer' },
+                          token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
+                          recipient_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
+                          delegation_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+                          budget_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                          period_seconds: { type: 'integer' },
+                          expires_at: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
+                          remaining_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                          remaining_is_from_chain: { type: 'boolean' },
+                          pin_status: {
+                            type: 'string',
+                            enum: ['current', 'stale', 'unverified', 'not_erc7710'],
+                            description: '`stale`: the merchant now names a different payTo (a rotation) — this budget pays only the old address, and payments to the new one use the open budget, if the agent has one. `unverified`: the merchant names no single payTo on that chain now (including a `shared` one). `not_erc7710`: the payTo still matches but not every offer there advertises ERC-7710, and a pinned budget pays only through ERC-7710.',
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
           '404': errorResponse,
         },
       },
@@ -7489,8 +8409,11 @@ export const openapiSpec = {
         description:
           '#3303: the backend\'s update hint for an outdated published client. `required: true` ' +
           'means the client is below a minimum this deployment set and will be refused at its ' +
-          'refusal points; `upgrade_command` is the exact command that updates it, on this ' +
-          'deployment\'s channel.',
+          'refusal points; `upgrade_command` is the command that starts the update, on this ' +
+          'deployment\'s channel. For the connector-installed packages (signer, mcp, connect) it is ' +
+          'the connector doctor (#3412): it works as pasted on an existing install and prints the ' +
+          'exact `--doctor --repair` line to run next — a bare connector re-run is a setup command ' +
+          'that stops at "Missing --setup" on an already set-up machine.',
         required: ['package', 'current', 'recommended', 'min_version', 'required', 'upgrade_command', 'notes_url'],
         properties: {
           package: { type: 'string', examples: ['@haven_ai/mcp'] },
@@ -7498,7 +8421,7 @@ export const openapiSpec = {
           recommended: { type: ['string', 'null'] },
           min_version: { type: ['string', 'null'] },
           required: { type: 'boolean' },
-          upgrade_command: { type: 'string', examples: ['npx -y @haven_ai/connect@alpha'] },
+          upgrade_command: { type: 'string', examples: ['npx -y @haven_ai/connect@alpha --doctor'] },
           notes_url: {
             type: ['string', 'null'],
             description: '#3304: the public release notes page. Nullable for clients built before it existed.',
@@ -7542,7 +8465,7 @@ export const openapiSpec = {
         required: [
           'id', 'chain_id', 'token_address', 'recipient_address', 'delegation_hash',
           'version', 'status', 'budget_atomic', 'period_seconds', 'start_date',
-          'expires_at', 'created_at',
+          'expires_at', 'created_at', 'merchant_id', 'merchant_slug', 'merchant_name',
         ],
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -7561,6 +8484,36 @@ export const openapiSpec = {
           start_date: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
           expires_at: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
           created_at: { type: 'string', format: 'date-time' },
+          merchant_id: {
+            anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }],
+            description: 'The merchant a merchant-locked budget was issued for (#3331); null for every other row, and after that merchant is deleted.',
+          },
+          merchant_slug: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'That merchant\u2019s slug, or null.' },
+          merchant_name: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'That merchant\u2019s display name, or null.' },
+        },
+      },
+      /**
+       * #3331: where a merchant is paid on one chain.
+       */
+      MerchantFundingTarget: {
+        type: 'object',
+        required: ['network', 'chain_id', 'pay_to', 'pay_to_status', 'erc7710'],
+        properties: {
+          network: { type: 'string', description: 'CAIP-2, e.g. "eip155:84532".' },
+          chain_id: { type: 'integer' },
+          pay_to: {
+            anyOf: [{ type: 'string', pattern: '^0x[0-9a-f]{40}$' }, { type: 'null' }],
+            description: 'The lowercased payTo every active, verified x402 offer of the merchant on this network names — non-null only when pay_to_status is `verified`. A merchant-locked budget pins its recipient here.',
+          },
+          pay_to_status: {
+            type: 'string',
+            enum: ['verified', 'conflicting', 'unstated', 'shared'],
+            description: '`conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant\u2019s non-delisted offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.',
+          },
+          erc7710: {
+            type: 'boolean',
+            description: 'Every one of those offers advertises the ERC-7710 transfer method — the rail a pinned budget pays through. False: payments to this merchant use the open budget, so no merchant-locked budget is offered.',
+          },
         },
       },
       /**
@@ -7598,6 +8551,63 @@ export const openapiSpec = {
           closed_at: { type: ['string', 'null'], format: 'date-time' },
           close_tx_hash: { type: ['string', 'null'] },
         },
+      },
+      /**
+       * #3330: one row of a sub-budget tree — either A's self-delegated
+       * PARENT-CHILD (`parent_sub_budget_id: null`) or B's GRANT nested under
+       * one (`parent_sub_budget_id` naming it). `toWire` in
+       * `routes/agent-sub-budgets.ts` selects exactly these columns.
+       */
+      SubBudget: {
+        type: 'object',
+        required: [
+          'id', 'agent_id', 'parent_agent_id', 'parent_sub_budget_id', 'chain_id',
+          'token_address', 'recipient_address', 'parent_delegation_hash',
+          'delegation_hash', 'label', 'period_amount_atomic', 'status',
+          'expires_at', 'is_expired', 'created_at', 'opened_at', 'closed_at',
+          'close_tx_hash',
+        ],
+        properties: {
+          id: uuid,
+          agent_id: uuid,
+          parent_agent_id: uuid,
+          parent_sub_budget_id: { anyOf: [uuid, { type: 'null' }] },
+          chain_id: { type: 'integer' },
+          token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Stored lowercase.' },
+          recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description: 'Lowercase recipient pin, or null when this sub-budget carries none.',
+          },
+          parent_delegation_hash: delegationHash,
+          delegation_hash: { ...delegationHash, description: "This sub-budget's own child delegation hash." },
+          label: { type: ['string', 'null'], maxLength: 120 },
+          period_amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          status: { type: 'string', enum: ['pending', 'open', 'closing', 'closed'] },
+          expires_at: { type: 'integer', description: 'Unix seconds.' },
+          is_expired: { type: 'boolean', description: 'Derived: expires_at <= now.' },
+          created_at: { type: 'string', format: 'date-time' },
+          opened_at: { type: ['string', 'null'], format: 'date-time' },
+          closed_at: { type: ['string', 'null'], format: 'date-time' },
+          close_tx_hash: { type: ['string', 'null'] },
+        },
+      },
+      /**
+       * #3330: one parent→child tree from `GET /agents/{id}/sub-budgets/tree`
+       * — A's parent-child narrowing with B's grants nested under it. Named
+       * here (not hand-written in the hook) so the frontend imports the wire
+       * shape instead of restating it (#1447 wire-type gauge).
+       */
+      SubBudgetTree: {
+        type: 'object',
+        description:
+          "One parent→child tree (#3330): the delegating agent's parent-child narrowing with its grants nested.",
+        required: ['parent_child_sub_budget', 'grants'],
+        properties: {
+          parent_child_sub_budget: { $ref: '#/components/schemas/SubBudget' },
+          grants: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+        },
+        additionalProperties: false,
       },
       /**
        * #1446: an address-book label. `LIST_CONTACTS_FOR_USER_SQL` and both
@@ -7720,7 +8730,7 @@ export const openapiSpec = {
           asset_transfer_methods: {
             anyOf: [{ type: 'string' }, { type: 'null' }],
             description:
-              'Comma-separated set of x402 assetTransferMethods the merchant advertises (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null.',
+              'Comma-separated set of x402 assetTransferMethods the merchant advertises on the recorded network (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null.',
           },
           status: { type: 'string', enum: ['active', 'degraded', 'delisted'] },
           verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -7927,7 +8937,18 @@ export const openapiSpec = {
             type: 'object',
             required: ['default', 'deployable', 'supported'],
             properties: {
-              default: { type: 'integer', description: 'Canonical Haven default chain id.' },
+              default: {
+                type: 'integer',
+                description:
+                  "This deployment's effective default chain id (#3431): the product default " +
+                  "(`DEFAULT_CHAIN_ID`) when this deployment deploys on it, else the first chain " +
+                  "it does deploy on, else the product default again if this deployment deploys " +
+                  "on nothing (a misconfigured deployable set). Not necessarily the product-wide " +
+                  "default — a deployment scoped to one chain (dev: Base Sepolia only) reports " +
+                  "that chain here, not Base mainnet. Confirm the funding chain with " +
+                  "`haven wallets funding` or the dashboard's Receive-funds screen before " +
+                  "sending money.",
+              },
               deployable: { type: 'array', items: { type: 'integer' } },
               supported: { type: 'array', items: { type: 'integer' } },
             },
@@ -7979,17 +9000,31 @@ export const openapiSpec = {
             type: ['string', 'null'],
             description: "Below this, the package's refusal points answer `client_outdated`. Null = never refused.",
           },
-          upgrade_command: { type: ['string', 'null'], examples: ['npx -y @haven_ai/connect@alpha'] },
+          upgrade_command: { type: ['string', 'null'], examples: ['npx -y @haven_ai/connect@alpha --doctor'] },
           notes: {
             type: 'array',
             description: 'Newest first. What changed, for deciding whether to update — not the full CHANGELOG.',
             items: {
               type: 'object',
-              required: ['version', 'date', 'summary', 'action_required'],
+              required: ['version', 'date', 'summary', 'summary_segments', 'action_required'],
               properties: {
                 version: { type: 'string' },
                 date: { type: 'string', format: 'date' },
-                summary: { type: 'string' },
+                summary: { type: 'string', description: 'Plain text: code spans keep their content, without backticks.' },
+                summary_segments: {
+                  type: 'array',
+                  description:
+                    '#3393: `summary` split into parts, so a renderer can show code as code. The texts join to exactly `summary`.',
+                  items: {
+                    type: 'object',
+                    required: ['text', 'code'],
+                    properties: {
+                      text: { type: 'string' },
+                      code: { type: 'boolean', description: 'True when the part was a code span in the CHANGELOG.' },
+                    },
+                    additionalProperties: false,
+                  },
+                },
                 action_required: {
                   type: 'boolean',
                   description: 'True when a client must update to keep paying. Not the same as a breaking change.',
@@ -8287,6 +9322,144 @@ export const openapiSpec = {
           ok: { type: 'boolean' },
         },
         additionalProperties: false,
+      },
+      /**
+       * Owner company details (#3332), behind `HAVEN_OWNER_COMPANY_DETAILS`.
+       * Onboarding data about the SIGNED-IN OWNER, not an organization the
+       * owner's agents belong to and not a passport tier — see
+       * `docs/product/agent-passport.md`'s onboarding-data paragraph. VIES
+       * `valid` is never rendered as "verified" anywhere this shape reaches.
+       */
+      CompanyDetails: {
+        type: 'object',
+        required: ['legal_name', 'country', 'org_number', 'vat_number', 'vies_status', 'vies_checked_at', 'created_at', 'updated_at'],
+        properties: {
+          legal_name: { type: 'string', minLength: 1, maxLength: 200 },
+          country: { type: 'string', pattern: '^[A-Z]{2}$', description: 'ISO 3166-1 alpha-2.' },
+          org_number: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 32,
+            description: 'For a sole trader this is the personal identity number — see docs/product/owner-company-details.md.',
+          },
+          vat_number: { type: ['string', 'null'], description: 'Normalised: uppercase, no spaces.' },
+          vies_status: {
+            type: ['string', 'null'],
+            enum: ['pending', 'valid', 'invalid', 'not_verifiable', null],
+          },
+          vies_checked_at: { type: ['string', 'null'], format: 'date-time' },
+          created_at: isoDateTime,
+          updated_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      UpsertCompanyDetailsRequest: {
+        type: 'object',
+        required: ['legal_name', 'country', 'org_number'],
+        properties: {
+          legal_name: { type: 'string', minLength: 1, maxLength: 200 },
+          country: { type: 'string', minLength: 2, maxLength: 2 },
+          org_number: { type: 'string', minLength: 1, maxLength: 32 },
+          /** Omit or null clears it. Setting or changing it re-runs the VIES check asynchronously. */
+          vat_number: { type: ['string', 'null'], maxLength: 32 },
+        },
+        additionalProperties: false,
+      },
+      DeleteCompanyDetailsResponse: {
+        type: 'object',
+        required: ['ok'],
+        properties: {
+          ok: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * Per-agent x402 tax declaration opt-in (#3426, wg-tax #5 §2.1). The
+       * toggle changes one agent's own opt-in bit and nothing else — it
+       * grants no spending authority. The declaration content schema is the
+       * UNSIGNED §2.1 subset, deliberately closed: no `signature` (this
+       * slice signs nothing, #3427 signs), no `principalId` /
+       * `principalAttributionHash` (the SDK computes those locally), and no
+       * company-details fields the declaration does not state.
+       */
+      UpsertAgentTaxDeclarationRequest: {
+        type: 'object',
+        required: ['tax_declaration_enabled'],
+        properties: {
+          tax_declaration_enabled: {
+            type: 'boolean',
+            description: 'True opts THIS agent in; false withdraws the opt-in (never refused).',
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentTaxDeclarationState: {
+        type: 'object',
+        required: ['id', 'tax_declaration_enabled'],
+        properties: {
+          id: uuid,
+          tax_declaration_enabled: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+      AgentTaxDeclarationUnavailableReason: {
+        type: 'string',
+        enum: ['feature_disabled', 'disabled', 'no_company_details', 'vies_not_valid'],
+        description:
+          'Why no declaration content is available: the deployment flag is off, the agent is not opted in, no VAT number is saved, or VIES is anything-but-valid at read time.',
+      },
+      AgentTaxDeclaration: {
+        type: 'object',
+        required: ['version', 'jurisdiction', 'taxableStatus', 'taxId', 'validUntil'],
+        properties: {
+          version: {
+            type: 'string',
+            enum: ['x402-tax-1'],
+            description: 'The §2.1 version discriminator of the first profile.',
+          },
+          jurisdiction: {
+            type: 'string',
+            pattern: '^[A-Z]{2}$',
+            description:
+              'ISO 3166-1 alpha-2 — the owner\'s saved country. Never derived from the VAT number\'s prefix.',
+          },
+          taxableStatus: {
+            type: 'string',
+            enum: ['TAXABLE_PERSON'],
+          },
+          taxId: {
+            type: 'string',
+            description: 'The owner\'s saved VAT number, normalised (uppercase, no spaces).',
+          },
+          validUntil: {
+            type: 'integer',
+            description:
+              'Integer MILLISECONDS. The lesser of now + 24h and the VIES check\'s completion time + 24h — the check\'s own freshness caps the declaration.',
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentTaxDeclarationContent: {
+        oneOf: [
+          {
+            type: 'object',
+            required: ['available', 'declaration'],
+            properties: {
+              available: { type: 'boolean', enum: [true] },
+              declaration: { $ref: '#/components/schemas/AgentTaxDeclaration' },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['available', 'reason'],
+            properties: {
+              available: { type: 'boolean', enum: [false] },
+              reason: { $ref: '#/components/schemas/AgentTaxDeclarationUnavailableReason' },
+            },
+            additionalProperties: false,
+          },
+        ],
       },
       /**
        * FULL REPLACEMENT is the mutation: the agent ends up carrying exactly
@@ -8802,7 +9975,7 @@ export const openapiSpec = {
           'id', 'name', 'delegate_address',
           'account_id', 'account_address', 'account_name', 'account_chain_id',
           'api_key_prefix', 'status', 'created_at', 'allowances', 'labels',
-          'organization_id',
+          'organization_id', 'tax_declaration_enabled',
         ],
         properties: {
           id: uuid,
@@ -8842,6 +10015,15 @@ export const openapiSpec = {
            * may read it.
            */
           organization_id: { anyOf: [uuid, { type: 'null' }] },
+          /**
+           * #3426: the owner's per-agent opt-in to the buyer-side x402 tax
+           * declaration (wg-tax #5 §2.1). SETTINGS ONLY — the same boundary
+           * as `labels`/`organization_id`: nothing in the delegation,
+           * budget, or enforcement path may read it. The toggle that writes
+           * it is PUT /agents/{id}/tax-declaration; the agent's own content
+           * read is GET /agents/{id}/tax-declaration.
+           */
+          tax_declaration_enabled: { type: 'boolean' },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**
@@ -8957,16 +10139,24 @@ export const openapiSpec = {
             minLength: 1,
             maxLength: 128,
             description:
-              'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send.',
+              'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer — token, recipient, amount or task budget (#3392) — is a 409.',
           },
           task_budget_id: {
             type: 'string',
             minLength: 1,
             description:
-              '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
+              '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
           },
         },
-        additionalProperties: true,
+        // #3031: CLOSED. The shipped SDK sends exactly the four fields above
+        // (`createIntent`), and every field the handler used to rung out is
+        // declared. An undeclared field used to ride through to the handler,
+        // which ignored it — on a route that mints a payment intent that is
+        // silent-typo exposure (`idempotencyKey` instead of
+        // `idempotency_key` deduplicates nothing). `removeAdditional: false`
+        // means nothing is stripped either: an unknown field is REFUSED,
+        // never rerouted.
+        additionalProperties: false,
       },
       SignablePaymentIntent: {
         type: 'object',
@@ -9125,6 +10315,7 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       Parties: partiesSchema,
+      PartiesBuyer: partiesBuyerSchema,
       AgentPaymentStatus: agentPaymentStatus,
       // #3031 note: this option's `maxTimeoutSeconds` stays `integer` while
       // `X402AuthorizeRequest`'s is `number, minimum: 1`. Not a contradiction —
@@ -9254,7 +10445,7 @@ export const openapiSpec = {
             type: 'string',
             minLength: 1,
             description:
-              '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
+              '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
           },
         },
         additionalProperties: false,
@@ -9448,6 +10639,18 @@ export const openapiSpec = {
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
         },
         additionalProperties: false,
+        // #3031 round 2: the pre-#3031 declaration, RESTORED. Round 1 made
+        // this schema permissive so the handler's 410 would win over any
+        // body — but the owner decision (epic #3028, 2026-09-24T21:24:44Z,
+        // closing #3223) ordered the retirement answer moved to `onRequest`
+        // instead (the #3030 retired-tombstone pattern), and the move makes
+        // the strict schema SAFE again: the tombstone hook refuses at
+        // `onRequest`, which fastify runs BEFORE schema validation, so a
+        // body that misses the declared shape gets the honest 410, not a
+        // 400. What the schema then refuses (for a hypothetical future that
+        // lets the hook's answer lapse) is a body the tombstone would have
+        // refused anyway — no accepted shape narrows. `AuthorizeBody`
+        // remains the route's request TYPE for documentation.
       },
       MachinePaymentAuthorizeResponse: {
         oneOf: [
@@ -9515,6 +10718,37 @@ export const openapiSpec = {
               'read it as "this account cannot pay until it re-onboards via POST /accounts/hybrid", ' +
               'not as a second live policy primitive. Reporting only; the enum keeps both values ' +
               'because a retired-rail account can still read its own identity here.',
+          },
+          /**
+           * #3330 (additive only): the OPEN sub-budget grants this agent
+           * holds — empty unless another agent re-delegated a narrower budget
+           * to this one. Each entry names the parent agent and the effective
+           * (narrower) limits; enforcement stays on-chain (the three-link
+           * chain B redeems), so these fields are reporting only.
+           */
+          parent_sub_budgets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['sub_budget_id', 'parent_agent_id', 'parent_agent_name', 'token_address', 'period_amount_atomic', 'expires_at', 'status', 'is_expired'],
+              properties: {
+                sub_budget_id: uuid,
+                parent_agent_id: uuid,
+                parent_agent_name: { type: 'string' },
+                token_address: address,
+                recipient_address: { anyOf: [address, { type: 'null' }] },
+                period_amount_atomic: { type: 'string' },
+                expires_at: { type: 'integer' },
+                status: { type: 'string', enum: ['open', 'closing'] },
+                is_expired: { type: 'boolean' },
+              },
+              additionalProperties: false,
+            },
+            description:
+              'Sub-budgets agent A granted this agent (B) (#3330): period-scoped ERC-7710 children ' +
+              'of A\u2019s own budget delegation. `period_amount_atomic` and `expires_at` are the ' +
+              'EFFECTIVE (narrower) limits; `is_expired` is derived. Enforcement stays on-chain ' +
+              'through the [grant, parent-child, budget] redemption chain.',
           },
         },
         additionalProperties: false,
@@ -9762,7 +10996,15 @@ export const openapiSpec = {
           paymentId: uuid,
           rail: { type: 'string' },
           txHash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-          resourceUrl: { type: 'string', format: 'uri' },
+          // #3031: a plain string, not `format: uri`. The handler's guard was
+          // string-ness only, and the SEMANTIC check — the value must equal
+          // the settled payment's own resource URL — lives in
+          // `modules/mpp/evidence.ts` and refuses 409 `resourceUrl does not
+          // match payment intent`. The format would have refused any
+          // syntactically-non-URI string the semantic check was already going
+          // to answer 409, as a 400 naming a different rule; the shape check
+          // states only the shape.
+          resourceUrl: { type: 'string' },
           merchantStatus: { type: 'integer', minimum: 100, maximum: 599 },
           challengePayload: { type: 'object', additionalProperties: true },
           selectedPayment: { type: 'object', additionalProperties: true },
@@ -9810,7 +11052,11 @@ export const openapiSpec = {
           value: { type: 'string', description: 'Atomic USDC amount.' },
           validAfter: { type: 'string', description: 'Unix seconds the authorization becomes valid.' },
           validBefore: { type: 'string', description: 'Unix seconds the authorization expires.' },
-          nonce: { type: 'string', description: '0x-prefixed 32-byte hex nonce.' },
+          nonce: {
+            type: 'string',
+            description: '0x-prefixed 32-byte hex nonce.',
+            pattern: '^0x[0-9a-fA-F]{64}$',
+          },
           token: address,
           chainId: { type: 'integer', examples: [8453] },
         },
@@ -9847,7 +11093,11 @@ export const openapiSpec = {
         required: ['authorization', 'signature'],
         properties: {
           authorization: { $ref: '#/components/schemas/SweepAuthorization' },
-          signature: { type: 'string', description: 'Delegate EIP-712 signature over the authorization.' },
+          // #3031: the handler's rung stated the same pattern — a 0x-prefixed
+          // hex string of ANY length (the EIP-712 signature length is the
+          // chain's problem at recovery, and `recoverSweepSigner` refuses a
+          // bad one). Stated as the rung had it.
+          signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'Delegate EIP-712 signature over the authorization.' },
         },
         additionalProperties: false,
       },
@@ -10392,6 +11642,145 @@ export const openapiSpec = {
             },
           },
         },
+      },
+      ReceiveLedgerResponse: {
+        type: 'object',
+        description: 'The account receive ledger (#3333): the persisted inbound index, the matched balance, and the saved off-ramp destination.',
+        required: ['account_address', 'chain_id', 'usdc_address', 'balance_atomic', 'balance_formatted', 'off_ramp_destination', 'transfers'],
+        properties: {
+          account_address: { ...address, description: 'The receiving account address.' },
+          chain_id: { type: 'integer' },
+          usdc_address: { type: ['string', 'null'], description: 'The chain registry USDC contract, or null when the chain has none.' },
+          balance_atomic: { type: 'string', description: 'SUM of matched (balance_consumed) inbound rows, atomic units, as a numeric string. Unmatched rows are unearned and never counted.' },
+          balance_formatted: { type: 'string', description: 'The balance in USDC human decimals (6).' },
+          off_ramp_destination: {
+            oneOf: [{ $ref: '#/components/schemas/OffRampDestination' }, { type: 'null' }],
+            description: 'The owner-saved off-ramp destination, or null when none is saved yet.',
+          },
+          transfers: { type: 'array', items: { $ref: '#/components/schemas/ReceiveLedgerTransfer' } },
+        },
+        additionalProperties: false,
+      },
+      ReceiveLedgerTransfer: {
+        type: 'object',
+        required: ['tx_hash', 'payer_address', 'amount_raw', 'amount_formatted', 'block_time', 'match_kind', 'matched_payment_intent_id', 'matched_receipt_id', 'balance_consumed', 'earned'],
+        properties: {
+          tx_hash: { type: 'string' },
+          payer_address: { type: 'string' },
+          amount_raw: { type: 'string', description: 'Atomic units, numeric string.' },
+          amount_formatted: { type: 'string', description: 'USDC human decimals (6).' },
+          block_time: { type: 'string', format: 'date-time' },
+          match_kind: {
+            oneOf: [{ type: 'string', enum: ['x402_payto', 'receipt'] }, { type: 'null' }],
+            description: 'How the row is linked to evidence: an x402 settlement the account was payTo for, or a supplied receipt. Null = unmatched = unearned.',
+          },
+          matched_payment_intent_id: { type: ['string', 'null'], description: 'The x402 settlement intent id, present only for x402_payto. Stored for audit; never a grant.' },
+          matched_receipt_id: { type: ['string', 'null'], description: 'The linked receipt document id, present only for the receipt kind.' },
+          balance_consumed: { type: 'boolean', description: 'True once the row counts in balance_atomic.' },
+          earned: { type: 'boolean', description: 'match_kind !== null. Unmatched = unearned; nothing is delivered on an unearned row.' },
+        },
+        additionalProperties: false,
+      },
+      OffRampDestination: {
+        type: 'object',
+        required: ['destination_address', 'destination_kind', 'label', 'updated_at'],
+        properties: {
+          destination_address: { ...address, description: 'The deposit address at the venue (Safello, Coinbase, or a custody account).' },
+          destination_kind: { type: 'string', enum: ['safello', 'coinbase', 'custody_deposit'] },
+          label: { type: ['string', 'null'] },
+          updated_at: { type: 'string', format: 'date-time' },
+        },
+        additionalProperties: false,
+      },
+      OffRampDestinationInput: {
+        type: 'object',
+        required: ['destination_address'],
+        properties: {
+          destination_address: { ...address, description: 'The deposit address. The zero address is refused.' },
+          // No schema-side default: a request-body default would let ajv
+          // inject the value into payloads (shadow invariant, #3135 S5) and
+          // read as a server-coerced field. The handler falls back to
+          // custody_deposit when the field is absent.
+          destination_kind: { type: 'string', enum: ['safello', 'coinbase', 'custody_deposit'], description: 'Defaults to custody_deposit when omitted (handler fallback).' },
+        },
+        additionalProperties: false,
+      },
+      OffRampPrepareInput: {
+        type: 'object',
+        required: ['amount_atomic'],
+        properties: {
+          amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'The amount to move, atomic units. The recipient and token are NOT in the request: they are the saved destination and the chain registry USDC.' },
+        },
+        additionalProperties: false,
+      },
+      OffRampPrepareResponse: {
+        type: 'object',
+        required: ['prepared', 'submit'],
+        properties: {
+          prepared: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'The prepared UserOperation (same shape the owner send prepare returns) — what the OWNER signs with the account own signer.',
+          },
+          submit: { $ref: '#/components/schemas/OffRampSubmitInstructions' },
+        },
+        additionalProperties: false,
+      },
+      OffRampSubmitInstructions: {
+        type: 'object',
+        required: ['endpoint', 'token_address', 'to', 'destination_kind', 'amount_atomic', 'signature_required_from'],
+        properties: {
+          endpoint: { type: 'string', description: 'The submit route; it re-derives the calldata and refuses a user_operation that does not contain it.' },
+          token_address: { ...address },
+          to: { ...address, description: 'The saved destination — echoed so the owner signs what they verified.' },
+          destination_kind: { type: 'string' },
+          amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          signature_required_from: { type: 'string', enum: ['owner'], description: 'Only the account owner signs; no agent key can authorize this transfer.' },
+        },
+        additionalProperties: false,
+      },
+      ReceiptDropInput: {
+        type: 'object',
+        required: ['tx_hash', 'amount_raw', 'payer_address', 'signature'],
+        properties: {
+          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: 'The on-chain transfer the receipt is for — the match key.' },
+          amount_raw: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units; must equal the persisted transfer amount.' },
+          payer_address: { ...address, description: 'The payer the transfer names; the signature must recover to it.' },
+          signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'EIP-191 personal signature over `haven:receipt-drop\\ntx:<tx_hash>\\namount_raw:<amount_raw>`.' },
+        },
+        additionalProperties: false,
+      },
+      ReceiptDropResponse: {
+        type: 'object',
+        required: ['matched', 'match_kind', 'transfer_id'],
+        properties: {
+          matched: { type: 'boolean', enum: [true] },
+          match_kind: { type: 'string', enum: ['x402_payto', 'receipt'] },
+          transfer_id: { type: 'string', format: 'uuid' },
+        },
+        additionalProperties: false,
+      },
+      InboundIngestInput: {
+        type: 'object',
+        required: ['tx_hash', 'payer_address', 'amount_raw'],
+        properties: {
+          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          payer_address: { ...address },
+          amount_raw: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+          token_address: { ...address, description: 'Optional; defaults to the chain registry USDC — the receive index tracks USDC only.' },
+          block_time: { type: 'string', format: 'date-time', description: 'Defaults to now.' },
+          block_number: { type: 'string', pattern: '^[0-9]+$' },
+        },
+        additionalProperties: false,
+      },
+      InboundIngestResponse: {
+        type: 'object',
+        required: ['ingested', 'id'],
+        properties: {
+          ingested: { type: 'boolean', description: 'false when the (chain, tx hash) was already indexed — idempotent re-ingest.' },
+          id: { type: ['string', 'null'], format: 'uuid', description: 'The row id, or null when it already existed.' },
+        },
+        additionalProperties: false,
       },
       TransactionsResponse: {
         type: 'object',

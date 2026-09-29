@@ -28,6 +28,7 @@ import { parseStrict } from './parsing.js'
 import { runTool, HostedToolError } from './support/errors.js'
 import { refusalNextStep, taskBudgetNextStep } from './support/guidance.js'
 import { humanToAtomic } from './support/cap-price.js'
+import { taskSignerCompatibilityNotice } from './support/signer-compat.js'
 
 /**
  * #3329 (review fix): the hand-off both tools return once a signature is
@@ -38,17 +39,30 @@ import { humanToAtomic } from './support/cap-price.js'
  * observable behavior was a model reading prose and guessing which signer
  * tool to call with which argument (and, on the wrong guess, a signer refusal
  * over typed_data it does not recognise for this shape).
+ *
+ * #3419: every result that carries this handoff also carries the
+ * `signer_compatibility` recovery notice (`taskSignerCompatibilityNotice`).
+ * A signer older than 0.6.0-alpha.0 strips the unknown `task_budget_id` key
+ * and answers the generic "Pass payment_id … or payload_hash." refusal — the
+ * notice is what tells the agent the signer is too old, how to release the
+ * pending budget, and how to update before retrying. The `reason` points at
+ * the notice field rather than restating its recovery steps, so the two
+ * surfaces cannot drift.
  */
 function taskBudgetSignHandoff(taskBudgetId: string) {
-  return taskBudgetNextStep({
-    nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-    nextTool: 'haven_sign',
-    nextArguments: { task_budget_id: taskBudgetId },
-    reason:
-      'Sign with the local signer tool named above, passing task_budget_id EXACTLY as given — it ' +
-      'fetches the signing context itself. Then relay the signature with haven_submit, passing ' +
-      'task_budget_id (not payment_id).',
-  })
+  return {
+    ...taskBudgetNextStep({
+      nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+      nextTool: 'haven_sign',
+      nextArguments: { task_budget_id: taskBudgetId },
+      reason:
+        'Sign with the local signer tool named above, passing task_budget_id EXACTLY as given — it ' +
+        'fetches the signing context itself. If the signer is too old to accept task_budget_id, ' +
+        'signer_compatibility below carries the recovery route. Then relay the signature with ' +
+        'haven_submit, passing task_budget_id (not payment_id).',
+    }),
+    signer_compatibility: taskSignerCompatibilityNotice(),
+  }
 }
 
 /** See `state-direct-recovery.ts` for why this is a tuple, not a `Record`. */

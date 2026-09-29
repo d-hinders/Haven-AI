@@ -123,8 +123,48 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * to 852.81 would make it one, and would tighten nothing the ceiling
  * does not already enforce), and only the absolute pin moves, to the
  * exact measured value of the composed surface, shrink-only from here.
+ *
+ * **Re-derived — round 6, #3418 (2026-09-28).** `haven_verify_receipt`'s
+ * shared description was rewritten to stop telling agents to fetch receipts
+ * with the history tool (the exact defect #3418 fixes — it sent every agent
+ * down the crash path) and to carry the corrected honesty contract instead:
+ * the signed-bundle source, the `not_a_signed_receipt` answer for a list
+ * row, the `not_verifiable_offline` branch, and the
+ * settlement-not-proven rule. Hand-trimming further would cut the exact
+ * text the issue mandates agents read (the same call as rounds 4-5), so
+ * the absolute pin moves to the exact measured value of this surface,
+ * 22,340 UTF-8 bytes across 26 tools, shrink-only from here. The mean
+ * pin stays HELD at 875: 22,340 / 26 = 859.23, still below the ceiling.
+ *
+ * **Re-derived — round 7, #3420 (2026-09-28).** `haven_get_payment_status`'s
+ * shared description now carries the two facts this issue mandates agents
+ * read: the additive `delivered` field (when the merchant answered) and the
+ * new terminal `delivered_unverified` state (stop, no poll) — required copy;
+ * hand-trimming it would cut exactly the state vocabulary the issue sends
+ * agents to match on (+76 UTF-8 bytes). The measured total is exactly
+ * 22,416 bytes across 26 tools, so the absolute pin moves to that value,
+ * shrink-only from here. The mean pin stays HELD at 875:
+ * 22,416 / 26 = 862.15, still below the ceiling.
+ *
+ * **Re-derived — round 7, #3419 (2026-09-28).** The task-budget results that
+ * hand off to `haven_sign { task_budget_id }` now carry the
+ * `signer_compatibility` recovery notice (the #3277 pattern on the
+ * `task_budget_id` form), and both task-budget descriptions' Returns name it
+ * — the issue mandates agents see the field before an old signer strips the
+ * argument and answers the generic signing error. That sentence costs +170
+ * UTF-8 bytes net (the hosted `haven_open_task_budget` /
+ * `haven_close_task_budget` Returns copy); hand-trimming it would cut either
+ * the mandated field name or the #3329 sign-and-relay instructions it sits
+ * beside — the same call as rounds 4-6. Two independent round-7 derivations
+ * converged on this composed surface: #3420's additive-field paragraph above
+ * (the `haven_get_payment_status` shared description) and this notice touch
+ * disjoint descriptions, so their deltas add over the same round-6 base —
+ * 22,340 + 76 + 170 — and the merged-tree 26-tool census measures exactly
+ * 22,586 UTF-8 bytes; the absolute pin moves to that measured value,
+ * shrink-only from here. The mean pin stays HELD at 875: 22,586 / 26 =
+ * 868.69, still below the ceiling.
  */
-const MAX_TOTAL_BYTES = 22_173
+const MAX_TOTAL_BYTES = 22_586
 // Mean pin: HELD at the #3329 ceiling (21,000 / 24 = 875.0), not re-derived —
 // the composed surface's actual mean (22,173 / 26 = 852.81) already sits
 // BELOW the ceiling, so the held value is the stricter pin, and re-deriving

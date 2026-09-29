@@ -4,6 +4,8 @@ status: current
 contract: true
 covers:
   - scripts/ci/rpc-conformance.mjs
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/infra/repositories/merchants.ts
   - .github/workflows/dev-gate.yml
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
@@ -23,7 +25,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-28"
 ---
 
 # Dev environment
@@ -214,7 +216,8 @@ never in code. **Every secret MUST differ from production.**
 **Boolean flags accept only lowercase `true` / `false` (#3015).** Every
 boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
 `HAVEN_FEE_ENABLED`, `HAVEN_LEGACY_BOOKKEEPING_ENABLED`, `HAVEN_HOSTED`,
-`HAVEN_ACCOUNTING_ENABLED` and the deprecated `HAVEN_REPORTING_FEED_ENABLED` —
+`HAVEN_ACCOUNTING_ENABLED`, `HAVEN_OWNER_COMPANY_DETAILS` and the deprecated
+`HAVEN_REPORTING_FEED_ENABLED` —
 goes through `parseBooleanFlag`: unset or blank means false; any other value
 (`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
 variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
@@ -241,6 +244,14 @@ Isolation rules that are non-negotiable for a payments product:
   agent payments are paymaster-sponsored UserOps and never use it (#3264). **Gnosis (chain 100) is intentionally unfunded/dead** — the
   delegation rail is pinned to 8453/84532, so a zero balance there is a
   decision, not a broken relayer.
+- **The bundler credential is per chain** (#3416). The delegation rail accepts
+  both 8453 and 84532 on every deployment (`DELEGATION_RAIL_CHAIN_IDS` is a
+  code constant), but a bundler URL is chain-scoped by its path. So
+  `DELEGATION_RAIL_BUNDLER_URL_<chainId>` is read first for a chain, and the
+  unsuffixed `DELEGATION_RAIL_BUNDLER_URL` is the fallback. What a chain with no
+  usable credential answers is in
+  [`delegation-rail-vendor-ops.md` §2](delegation-rail-vendor-ops.md). Every
+  secret here still MUST differ from production.
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
   chain 100 is dead per above), `RPC_URL_BASE` → **Base Sepolia**. Swap to
   mainnet RPCs only if a test genuinely needs mainnet state.
@@ -291,6 +302,26 @@ Isolation rules that are non-negotiable for a payments product:
   `84532,8453`, the operator step after PR #3202) and never on prod. The route
   lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
   so a copied flag cannot publish them on prod, whose list is `8453`.
+  The same list scopes a merchant page's `funding` (#3331) — where the
+  merchant is paid on each listed chain, the verified payTo a merchant-locked
+  budget pins to. That needs every active offer on the chain to advertise
+  ERC-7710, so the dev demo-merchant, which advertises EIP-3009 only until its
+  ERC-7710 rail is enabled ([below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant)),
+  reports `erc7710: false` and the build refuses a merchant-locked budget for
+  it. The payTo itself arrives with the next catalog refresh after migration
+  101 deploys (see `docs/product/marketplace.md`); until then every offer
+  reads `unstated`.
+- **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
+  boolean) gates `/user/company-details*`, the additive `parties.buyer`
+  field on payment evidence/receipts, and the Settings → Company details
+  screen. Dark by default; GET/PUT and POST vies-check answer 404 when off, and
+  the Settings screen itself renders nothing (no title, no form) while off —
+  so with the flag off there is no dashboard way to erase, even though the
+  DELETE route stays ungated (it erases only the caller's own row). Erasure
+  then goes through Haven support, who removes the row directly in the
+  database — the M3 decision, #3332 review round 2. With the flag on, the owner erases it
+  themselves from Settings. See
+  [`docs/product/owner-company-details.md`](../product/owner-company-details.md).
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
@@ -327,41 +358,62 @@ Isolation rules that are non-negotiable for a payments product:
   that deterministic test so the normal 15-minute merchant-report grace stays
   in force; never set it in production.
 - **Request-validation mode** — `HAVEN_REQUEST_VALIDATION` on the backend is
-  `off` (no schema is injected — EXCEPT on an `enforcedModules` module,
-  which stays enforced regardless of the mode) | `shadow` (default: log and
-  count would-be refusals;
-  since #3082 the request BODY is restored after validation so nothing the
-  handler reads changes, and a body that coercion alone made valid is counted
-  as `would_coerce`. Typed querystring/params are still coerced — that is what
-  makes them usable) | `enforce` (off-spec requests get the documented 400
-  envelope). Per the OpenAPI spec, via the request-validation plugin
-  (#3029, epic #3028).
+  `enforce` (**default since slice 4's flip, #3032**: off-spec requests on the
+  modules `index.ts`'s `enforcedModules` lists are refused with the documented
+  400 envelope; the list is the per-module ROLLBACK — epic decision 6 — so
+  removing one route file there returns exactly that module to shadow
+  behaviour, the response to one misbehaving module) | `shadow` (the GLOBAL
+  observation switch: log and count would-be refusals on every constrained
+  route, listed or not; since #3082 the request BODY is restored after
+  validation so nothing the handler reads changes, and a body that coercion
+  alone made valid is counted as `would_coerce`. Typed querystring/params are
+  still coerced — that is what makes them usable) | `off` (the GLOBAL kill
+  switch: nothing runs, `enforcedModules` included). Per the OpenAPI spec, via
+  the request-validation plugin (#3029, epic #3028). Any other value refuses
+  the boot.
 
-  **`enforce` is not global, despite the name.** A route is enforced only when
-  the route FILE that declares it is in the plugin's `enforcedModules` —
-  `mode` gates the `off` early-return and the counters and nothing else.
-  Since #3030 (epic #3028 slice 2) `index.ts` lists **every non-money route
-  module** there — the four already-enforced ones (`contacts`, `merchants`,
-  `labels`, `agent-labels`), the 22 slice-2 files (`accounting*`,
-  `agent-activity`, `analytics*`, `auth`, `balances`, `catalog*`,
-  `dashboard`, `discovery`, `health`, `openapi`, `passkeys`,
-  `passport-verify`, `portfolio`, `safe-deploy`, `transactions`, `user`,
-  `user-accounts*`, plus `accounting-webhooks`, which #3196 landed in the
-  slice's base commit) and the bare `'index.ts'` for the inline `GET /` and
-  `GET /chains`. `routes/x402.ts` joined them in slice 3
-  (#3031) — the first money-path module, and the only one the 2026-09-22
-  shadow reading proved conformant on every operation. Eight money-path
-  modules are still shadowed (`payments`, `machine-payments`, `agents`,
-  `agent-delegations`, `agent-rekey`, `agent-passports`,
-  `agent-connection-setups`, `hybrid-accounts` — the rest of slices 3–4,
-  #3031/#3032). The reading printed NOT PROVEN for 48 of their operations —
-  15 in slice 3's three remaining modules, 33 in slice 4's five — so on dev an off-spec request to any
-  other route answers the 400 envelope. Slice 2 flipped on the epic's
-  fallback (owner decision 2026-09-21 on #3028): the in-process shadow
-  counter resets on every deploy and carried no per-route traffic (until
-  #3208), so it could not prove the 22 modules; each module's route tests (off-spec → the
-  envelope, conformant → unchanged) are the instrument, and `enforce` on
-  dev is the reading. The variable is not the switch that widens the list.
+
+  **The list, not the mode, names the enforced routes.** Since #3030 (epic
+  #3028 slice 2) `index.ts` lists **every non-money route module** there —
+  the four already-enforced ones (`contacts`, `merchants`, `labels`,
+  `agent-labels`), the 22 slice-2 files (`accounting*`, `agent-activity`,
+  `analytics*`, `auth`, `balances`, `catalog*`, `dashboard`, `discovery`,
+  `health`, `openapi`, `passkeys`, `passport-verify`, `portfolio`,
+  `safe-deploy`, `transactions`, `user`, `user-accounts*`, plus
+  `accounting-webhooks`, which #3196 landed in the slice's base commit) and
+  the bare `'index.ts'` for the inline `GET /` and `GET /chains`.
+  `routes/x402.ts` joined them in slice 3 (#3031) — the first money-path
+  module, and the only one the 2026-09-22 shadow reading proved conformant on
+  every operation. The slice-3/4 modules stayed shadowed until then because
+  the reading printed NOT PROVEN for 48 of their operations — 15 in slice 3's
+  three remaining modules, 33 in slice 4's five — and the owner ruled (#3223,
+  2026-09-24, on the epic) that routes a shadow reading can never prove are
+  enforced on TEST evidence (per-route off-spec → envelope, conformant →
+  unchanged), the same instrument decision 8 allowed slice 2. #3031 round 2
+  flipped the rest of the money path (`routes/payments.ts`,
+  `routes/agent-delegations.ts`, `routes/machine-payments.ts`) on those route
+  tests plus the fresh #3208 shadow reading pasted on the epic (2026-09-26:
+  28.46 h window, zero would_refuse and zero would_coerce). One money-path
+  operation is the rollout's NAMED RESIDUE and stays SHADOWED by owner
+  decision (epic #3028, 2026-09-24T21:24:44Z, closing #3223):
+  `POST /machine-payments/reconciliation-events` — it is only posted on a
+  genuine merchant rejection after a confirmed payment, and driving it
+  synthetically would write a false record into a payment's ledger. It lives
+  in its own file, `routes/machine-payments-reconciliation-events.ts`
+  (registered under the same `/machine-payments` prefix), because
+  enforcement is keyed on the route file and the plugin has no per-operation
+  opt-out — a per-file exemption inside `machine-payments.ts` would have been
+  invisible to the `lint:request-schemas` gauge. Its shadow residue is
+  baselined (`shadow: 1, typeof: 5`), and it is enforced the day a real
+  rejection (or a QA scenario that produces one) gives the shadow reading
+  traffic to prove it. Slice 4 (#3032) added the last five (`agents`,
+  `agent-rekey`, `agent-connection-setups`, `agent-passports`,
+  `hybrid-accounts`) and flipped the default: every constrained module is
+  listed and the mode defaults to `enforce`. Before the flip the list
+  overrode every mode (the proof module had to refuse while the world was
+  still in shadow); since the flip `off` and `shadow` are global — an entry
+  in the list cannot escape either kill switch, which is what makes them
+  switches.
 
   **Keyed on the FILE, not the mount prefix, since #3135** (epic #3028
   decision 7). A prefix could not express the epic's slice partition:
@@ -379,7 +431,13 @@ Isolation rules that are non-negotiable for a payments product:
   the `/agents` prefix) and the agent-auth, money-path
   `routes/task-budgets.ts` (its own `/task-budgets` prefix): a module with no
   installed caller has no old shape to shadow for, so it is enforced from its
-  first commit even though it moves money. The `lint:request-schemas`
+  first commit even though it moves money. #3426's
+  `routes/agent-tax-declaration.ts` followed the same rule — the GET (agent
+  auth, one uuid path parameter, no body) and the PUT (owner auth) were both
+  added to `enforcedModules` in their first commit; the request schema comes
+  from the OpenAPI spec, so a body that is not exactly
+  `{ tax_declaration_enabled: boolean }` is refused before the handler. The
+  `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are
   still shadowed — with one stated limit, closed in #3030: the gate reads a
@@ -389,6 +447,19 @@ Isolation rules that are non-negotiable for a payments product:
   reported shadow 0 while the plugin ran it in shadow. `accounting-webhooks.ts`
   (#3196) was exactly that for a morning; the gate reads bare registrations
   as prefix `''` now.
+
+  > **Re-verified #3330 (2026-09-28):** the born-ENFORCED rule above gained
+  > two more followers — the owner-auth `routes/agent-sub-budgets.ts` and the
+  > agent-auth, money-path-adjacent `routes/sub-budgets.ts` (sub-budget
+  > issue/sign/list/tree/revoke), both listed in `index.ts`'s
+  > `enforcedModules` with their own key, both registered under existing
+  > prefixes (`/agents`, `/sub-budgets`), and `route-modules.generated.ts`
+  > regenerated for both. Same reasoning as #3329's pair: brand-new modules
+  > with no installed caller have no old shape to shadow for, so they are
+  > enforced from their first commit. The backend suite's request-validation
+  > envelopes for both files are green, and `check:route-modules` passes at
+  > the merged head. Nothing in this section's mode/rollback semantics
+  > moved.
 
   **How to take a shadow reading (#3208).** Not from `/health/ops` alone:
   its `request_validation` counters are in-process — they start at `since`
@@ -561,6 +632,25 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > `parseBooleanFlag`, the `installRequestValidation` options, the
   > non-money-route enumeration) were re-read against this tree and hold.
 
+  > **Re-verified #3426 (2026-09-29):** the PR's `index.ts` change registers
+  > ONE new route module — `app.register(agentTaxDeclarationRoutes, { prefix:
+  > '/agents' })` — the per-agent x402 tax-declaration toggle + content read
+  > (`routes/agent-tax-declaration.ts`). No new env variable (the module
+  > reads the existing `HAVEN_OWNER_COMPANY_DETAILS` through `config`), no
+  > plugin, no boot-order change. Request-validation claims hold unchanged:
+  > the module IS in `enforcedModules` from its first commit (a genuinely new
+  > module has no installed caller to shadow for — the born-ENFORCED rule
+  > above), and `route-modules.generated.ts` was regenerated in the same
+  > commit with both operations (`GET`/`PUT /agents/{id}/tax-declaration`)
+  > keyed to the new file. The PUT's request schema comes from the spec
+  > (`UpsertAgentTaxDeclarationRequest`), so the `lint:request-schemas`
+  > baseline does not grow. The GET is the only agent-auth surface in the
+  > module and carries no body; the PUT's hooks are route-level
+  > (`refuseAgentKey` then `authMiddleware`), deliberately NOT the
+  > instance-level `addHook` shape, so an agent key meets the named 403
+  > rather than `routes/agents.ts`' generic 401 — the module is mounted on
+  > its own app instance and shares only the prefix.
+
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 
 The dev demo-merchant advertises **EIP-3009 only** by default. The experimental
@@ -668,6 +758,19 @@ tool for a one-off check against an arbitrary merchant (see its header for the
 Reference: `packages/demo-merchant-mcp/README.md` § *ERC-7710 Smart-Account
 Payments*.
 
+> **Re-verified #3386 (2026-09-28):** `merchant-catalog.ts`'s
+> `collectAssetTransferMethods` now scopes to the offer's recorded network
+> (`accepts[0]`'s), the same scoping `collectPayTo` already used, instead of
+> scanning every `accepts[]` option regardless of network. This is a CATALOG
+> READ-SIDE change — what `merchant_catalog.asset_transfer_methods` records
+> for the marketplace and merchant-locked-budget build gate — and does not
+> touch this section's claims. Scheme SELECTION on a live payment
+> (`selectStandardPaymentOption`, `selectX402SettlementScheme`,
+> `routes/x402.ts`) does not read that column at all, so the erc7710/EIP-3009
+> dispatch described above, the QA scenario that proves it, and the ordering
+> footgun analysis are unaffected. Nothing else in this section's covered
+> claims was re-read, so `last-verified` is deliberately not bumped.
+
 ### The `DEV` badge
 
 `NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip in the app
@@ -746,6 +849,19 @@ project owner — collaborators have Viewer access, not env-var write access.
 > freshness gate described above selects the same runs as before. Nothing else
 > in this file's coverage was touched; this note is the only edit.
 
+> **Re-verified #3342 (2026-09-26):** `index.ts`'s `anchor-repair` phase — the
+> one #3294 added inside the existing leader-gated passport sweep — now also
+> emits a warn-level per-row report when the repair left rows unanswered
+> (`agent_id`, `outcome`, `reason`); the repair result itself gained a
+> `healthy` count and the per-row array. No phase is added, moved, or reordered
+> (the report is ten lines inside the existing `anchor-repair` phase), no route
+> file is added or moved, `enforcedModules` is untouched, and the
+> shadow/enforce semantics this document describes are unchanged. The repair
+> sweep now excludes rows durably confirmed against their anchor receipt
+> (migration 096's `uid_repair_confirmed_at` marker), which only shrinks what
+> the phase re-reads. Nothing else in this file's coverage was touched; this
+> note is the only edit.
+
 > **Re-verified #3361 (2026-09-26):** the promotion freshness gate described
 > above now reads every run-level qa-dev success created within twice
 > `QA_FRESHNESS_HOURS`, instead of the newest 30. Rows whose run name names
@@ -772,3 +888,27 @@ project owner — collaborators have Viewer access, not env-var write access.
 > RPC hiccup". Triggers, gating, the retry count and the freshness gate
 > described above are unchanged. Nothing else in this file's coverage was
 > touched; this note is the only edit.
+
+> **Re-verified #3395 (2026-09-27):** `index.ts`'s `anchor-repair` phase warn
+> report ("left rows unanswered") now excludes `repaired` rows alongside
+> `confirmed` ones — a repair is an answer, and the row left the queue on the
+> same write — so the operator's report carries only `unrepairable` and
+> `deferred` outcomes. The phase itself is unchanged: same position in the
+> sweep, same `repairAnchoredUids()` call with the same default limit; the
+> pacing this issue added (`uid_repair_next_at`, migration 099) lives in the
+> repository and the sweep's own per-row handling, and the selector still
+> skips whatever the phase's batch cannot reach. No route file is added or
+> moved, `enforcedModules` is untouched, and the shadow/enforce semantics this
+> document describes are unchanged. Nothing else in this file's coverage was
+> touched; this note and the `last-verified` date are the only edits.
+
+> **Re-verified #3333 (2026-09-27):** `index.ts`'s `enforcedModules` grew by
+> exactly one entry — `routes/receive.ts`, born ENFORCED per the rule above
+> (a genuinely new module with no existing caller). The generated map
+> (`route-modules.generated.ts`) was regenerated in the same commit and
+> `lint:request-schemas` stayed green with no baseline bump: the module
+> carries a spec operation for every registered route, including the
+> unauthenticated-but-signed receipt drop (whose body shape is the enforced
+> schema's). The shadow/enforce semantics this document describes are
+> unchanged. Nothing else in this file's coverage was touched; the note and
+> the `last-verified` date are the only edits.

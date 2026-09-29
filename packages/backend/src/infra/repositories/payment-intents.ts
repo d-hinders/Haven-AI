@@ -22,6 +22,7 @@
 
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
+import { OWNER_COMPANY_DETAILS_JOIN_COLUMNS, type BuyerJoinColumns, type ViesStatus } from './owner-company-details.js'
 
 export type { Executor }
 
@@ -134,9 +135,9 @@ export const INSERT_DELEGATION_INTENT_SQL = `INSERT INTO payment_intents (
           to_address, amount_raw, amount_human, delegate_address,
           allowance_nonce, sign_hash,
           execution_rail, delegation_hash, budget_delegation_hash, prepared_user_op,
-          send_idempotency_key, task_budget_id,
+          send_idempotency_key, task_budget_id, sub_budget_id,
           status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
           'pending_signature', NOW() + interval '10 minutes')
         RETURNING *`
 
@@ -163,6 +164,8 @@ export interface NewDelegationIntent {
   sendIdempotencyKey: string | null
   /** #3329: which task budget (if any) authorized this payment — additive, nullable. */
   taskBudgetId?: string | null
+  /** #3330: which sub-budget (if any) authorized this payment — additive, nullable. */
+  subBudgetId?: string | null
 }
 
 /** Direct delegation-rail transfer intent (`POST /payments`, #829). */
@@ -182,6 +185,7 @@ export async function insertDelegationIntent(
     input.preparedUserOp,
     input.sendIdempotencyKey,
     input.taskBudgetId ?? null,
+    input.subBudgetId ?? null,
   ])
   return result.rows[0]
 }
@@ -273,7 +277,8 @@ function machineIntentInsertSql(
       payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
       machine_idempotency_key, machine_metadata,
       execution_rail,
-      delegation_hash, budget_delegation_hash, prepared_user_op, task_budget_id, expires_at
+      delegation_hash, budget_delegation_hash, prepared_user_op, task_budget_id,
+      sub_budget_id, expires_at
     ) VALUES (
       -- #2094: an explicit id when the caller needs the row's identity BEFORE
       -- the insert (the erc7710 settlement child is salted from it); NULL
@@ -282,7 +287,8 @@ function machineIntentInsertSql(
       COALESCE($28::uuid, gen_random_uuid()),
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $29, NOW() + interval '10 minutes')
+      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $29,
+      $30, NOW() + interval '10 minutes')
     ON CONFLICT (agent_id, ${conflictColumn})
       WHERE ${conflictColumn} IS NOT NULL
         AND status NOT IN ('failed', 'expired')
@@ -324,6 +330,8 @@ export interface NewMachineIntent {
   preparedUserOp?: string
   /** #3329: which task budget (if any) authorized this payment — additive, nullable. */
   taskBudgetId?: string | null
+  /** #3330: which sub-budget (if any) authorized this payment — additive, nullable. */
+  subBudgetId?: string | null
   conflictTarget: 'machine_idempotency_key' | 'x402_idempotency_key'
 }
 
@@ -343,7 +351,7 @@ export async function insertMachineIntent(
     allowanceNonce, signHash, resourceUrl, category, merchantAddress,
     challengeId, idempotencyKey, metadata,
     executionRail,
-    delegationHash, budgetDelegationHash, preparedUserOp, taskBudgetId, conflictTarget,
+    delegationHash, budgetDelegationHash, preparedUserOp, taskBudgetId, subBudgetId, conflictTarget,
   } = input
   const sql =
     conflictTarget === 'x402_idempotency_key'
@@ -363,6 +371,7 @@ export async function insertMachineIntent(
     delegationHash ?? null, budgetDelegationHash ?? null, preparedUserOp ?? null,
     id ?? null,
     taskBudgetId ?? null,
+    subBudgetId ?? null,
   ])
   return result.rows[0] ?? null
 }
@@ -371,7 +380,7 @@ export async function insertMachineIntent(
 
 export const FIND_SEND_INTENT_BY_KEY_SQL = `SELECT id, status, expires_at, token_address, token_symbol, to_address,
             amount_raw, amount_human, allowance_nonce, sign_hash,
-            execution_rail, prepared_user_op, chain_id
+            execution_rail, prepared_user_op, chain_id, task_budget_id, sub_budget_id
      FROM payment_intents
      WHERE agent_id = $1 AND send_idempotency_key = $2
        AND status NOT IN ('failed', 'expired')
@@ -394,6 +403,11 @@ export interface SendIntentReplayRow {
   execution_rail: string | null
   prepared_user_op: unknown
   chain_id: number
+  /** #3392: which task budget authorized the intent, when one did — part of
+   *  the replay mismatch pin, so a retry naming a different budget 409s. */
+  task_budget_id: string | null
+  /** #3330: which sub-budget authorized the intent, when one did — same pin. */
+  sub_budget_id: string | null
 }
 
 export async function findSendIntentByIdempotencyKey(
@@ -749,14 +763,18 @@ export async function findIntentStatusRow(
 export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_address, pi.chain_id, pi.token_symbol, pi.token_address,
             pi.to_address, pi.amount_human, pi.delegate_address, pi.sign_hash,
             pi.signature, pi.tx_hash, pi.confirmed_at,
+            pi.execution_rail,
+            pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
             pi.machine_metadata->>'delegate_account_address' AS delegate_account_address,
             mpe.resource_url AS resource_url,
-            mpe.amount_sek AS amount_sek
+            mpe.amount_sek AS amount_sek,
+            ${OWNER_COMPANY_DETAILS_JOIN_COLUMNS}
      FROM payment_intents pi
      LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
+     LEFT JOIN owner_company_details ocd ON ocd.user_id = pi.user_id
      WHERE pi.id = $1 AND pi.agent_id = $2 AND pi.status = 'confirmed'`
 
-export interface PaymentReceiptRow {
+export interface PaymentReceiptRow extends BuyerJoinColumns {
   id: string
   account_address: string
   chain_id: number
@@ -773,6 +791,17 @@ export interface PaymentReceiptRow {
   amount_sek: string | null
   /** #2960: from `machine_metadata`; null on rows authorized before #2960. */
   delegate_account_address: string | null
+  /**
+   * #3418: the rail the intent ran on — `delegation` (erc7710 or the eip3009
+   * funding leg), `direct`, or null (legacy AllowanceModule / rows read by
+   * older callers).
+   */
+  execution_rail?: string | null
+  /**
+   * #3418: `machine_metadata.settlement_scheme` — `erc7710`, `eip3009`, or
+   * null (direct / retired rails / rows without the metadata).
+   */
+  settlement_scheme?: string | null
 }
 
 export async function findSettledPaymentReceiptRow(

@@ -1,5 +1,9 @@
 export { AgentBudgetCard } from './AgentBudgetCard'
 export { Amount, type AmountDirection } from './Amount'
+export {
+  default as BudgetAmountRow,
+  type BudgetAmountTokenOption,
+} from './BudgetAmountRow'
 export { Address, truncateAddress } from './Address'
 export {
   ExternalDetailsLink,
@@ -15,8 +19,5 @@ export { WalletIdentityBlock } from './WalletIdentityBlock'
 export { RiskExplainer } from './RiskExplainer'
 export { CredentialHandoffCard } from './CredentialHandoffCard'
 export { LabelChip, LabelChipRow, LabelOptionRow, type AgentLabel } from './LabelChip'
-export {
-  BalanceFreshnessIndicator,
-  WhenBalanceDegraded,
-  type BalanceFreshness,
-} from './BalanceFreshnessIndicator'
+export { BalanceFreshnessIndicator, WhenBalanceDegraded, type BalanceFreshness } from './BalanceFreshnessIndicator'
+export { default as ReceivePanel } from './ReceivePanel' // design-system-exempt: a live-data account-page composite — its visual pieces (Card, Button, Address, EmptyState, Skeleton) are the registered primitives; the panel itself is a screen section, not a primitive

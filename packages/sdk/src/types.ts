@@ -1,4 +1,4 @@
-import { HAVEN_CONNECTOR_CHANNEL, connectorRerunCommand } from './connector-channel.js'
+import { HAVEN_CONNECTOR_CHANNEL, connectorUpgradeCommand } from './connector-channel.js'
 
 // ── Client Configuration ─────────────────────────────────────────
 
@@ -91,6 +91,14 @@ export interface PaymentRequest {
    * token/recipient/parent disagree with this request.
    */
   taskBudgetId?: string
+  /**
+   * #3330: redeem against this open sub-budget's grant (this agent is the
+   * sub-agent B) instead of the agent's budget delegation directly —
+   * `[grant, parent-child, budget]`. The backend refuses (404/409) when the
+   * id is unknown, not open, or its token/recipient/parent disagree with
+   * this request. Mutually exclusive with `taskBudgetId`.
+   */
+  subBudgetId?: string
 }
 
 export interface SignData {
@@ -335,8 +343,23 @@ export interface X402AuthorizationOptions {
    * a task budget's recipient pin is compared with the agent's own delegate
    * wallet, so a merchant-pinned task budget is refused there
    * (`task_budget_recipient_mismatch`); it pays through erc7710 only (#3378).
+   * #3392: the receipt cache and in-flight map record this id per entry —
+   * reusing an idempotency key under a DIFFERENT budget throws
+   * `X402TaskBudgetMismatchError` before any network call; pay again under a
+   * new key instead.
    */
   taskBudgetId?: string
+  /**
+   * #3330: redeem against this open sub-budget's grant (this agent is the
+   * sub-agent B) for the funding leg / erc7710 settlement instead of the
+   * agent's budget delegation directly. Same refusal contract as
+   * `PaymentRequest.subBudgetId`; mutually exclusive with `taskBudgetId`.
+   * The receipt cache and in-flight map pin this id per entry exactly as
+   * they pin `taskBudgetId` (#3392) — a key reused under a different
+   * authorizing child throws the typed mismatch error before any network
+   * call.
+   */
+  subBudgetId?: string
 }
 
 /**
@@ -821,7 +844,7 @@ export interface HavenAgentAllowanceSummary {
   remainingAtomic: string
   /** Human-readable remaining, e.g. "4.96 USDC". */
   remainingDisplay: string
-  /** Configured allowance amount (atomic) the owner granted. */
+  /** Configured allowance amount in whole token units (human decimal, e.g. "1.00" — NOT atomic; on-chain.amount is the atomic figure). */
   configuredAmount: string
   resetPeriodMin: number
   isResetPending: boolean
@@ -1023,6 +1046,34 @@ export interface PaymentParties {
   delegate: string | null
   delegateAccount: string | null
   merchant: string | null
+  /**
+   * #3332: the paying agent's owner's company details — additive, present
+   * only when the backend has `HAVEN_OWNER_COMPANY_DETAILS` on AND the owner
+   * saved details; absent (not `undefined`-valued, the KEY is absent)
+   * otherwise. `viesStatus: 'valid'` means VIES accepted the VAT number —
+   * never render that as "verified" (see Haven's agent-passport docs on the
+   * same naming discipline).
+   *
+   * Present only on the receipt surfaces — `GET /payments/:id/receipt` and
+   * `GET /machine-payments/receipts` (`HavenClient.getReceipt()`,
+   * `listReceipts()`/`listReceiptsPage()`) — never on `GET
+   * /machine-payments/:id/status` (`getPaymentStatus`) or the evidence-attach echo,
+   * even with the feature on: those report payment/settlement state, not the
+   * buyer's company details (out of scope for #3332, see
+   * docs/product/owner-company-details.md).
+   */
+  buyer?: PaymentPartiesBuyer
+}
+
+export interface PaymentPartiesBuyer {
+  legalName: string
+  /** ISO 3166-1 alpha-2. */
+  country: string
+  /** For a sole trader this IS the personal identity number. */
+  orgNumber: string
+  vatNumber: string | null
+  viesStatus: 'pending' | 'valid' | 'invalid' | 'not_verifiable' | null
+  viesCheckedAt: string | null
 }
 
 /** @internal wire shape of {@link PaymentParties}. */
@@ -1031,6 +1082,17 @@ export interface RawPaymentParties {
   delegate: string | null
   delegate_account: string | null
   merchant: string | null
+  buyer?: RawPaymentPartiesBuyer
+}
+
+/** @internal wire shape of {@link PaymentPartiesBuyer}. */
+export interface RawPaymentPartiesBuyer {
+  legal_name: string
+  country: string
+  org_number: string
+  vat_number: string | null
+  vies_status: 'pending' | 'valid' | 'invalid' | 'not_verifiable' | null
+  vies_checked_at: string | null
 }
 
 /**
@@ -1271,6 +1333,20 @@ export const AgentPaymentPhase = {
    * the funds.
    */
   FundedButUnsettled: 'funded_but_unsettled',
+  /**
+   * #3420: TERMINAL — a `submitted` erc7710 x402 intent whose settlement
+   * window AND the sweep's last attribution chance have both passed with no
+   * verified evidence. The sweep's tick (120s) only ever confirms a
+   * transaction mined inside the payment's own settlement window (the child
+   * delegation's on-chain `timestamp` caveat, plus the verifier's 120s
+   * clock-skew allowance), so once authorize + window + skew is behind the
+   * payment, no poll — and no sweep tick — can ever change the answer.
+   * The paired `next_action` is `stop_and_tell_user`: tell the user the goods
+   * were delivered but Haven holds no verified settlement evidence; reporting
+   * a real settlement hash (`haven_report_settlement_evidence`) still works
+   * at any age.
+   */
+  DeliveredUnverified: 'delivered_unverified',
 } as const
 
 export type AgentPaymentPhase = (typeof AgentPaymentPhase)[keyof typeof AgentPaymentPhase]
@@ -1461,6 +1537,8 @@ export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = 
     'Pre-flight check determined the delegate balance plus the remaining on-chain budget cannot cover the requested amount, so no payment was created. The account must be funded or the agent budget raised before retrying.',
   [AgentPaymentPhase.FundedButUnsettled]:
     "Haven's funding leg confirmed on-chain but the merchant rejected the x402 retry. The delegate wallet may hold stranded funds. The agent should stop and wait for the wallet owner to sweep the stranded funds back to the account.",
+  [AgentPaymentPhase.DeliveredUnverified]:
+    "Terminal: the merchant delivered the goods and the settlement window plus the sweep's last attribution chance have both passed with no verified on-chain evidence. The payment can no longer resolve by polling. Tell the user the goods were delivered but Haven holds no verified settlement evidence for this payment.",
 }
 
 export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, string> = {
@@ -1722,6 +1800,11 @@ export interface PaymentStatusResult {
   expiresAt: string
   chainId: number
   message: string
+  /**
+   * #3420: `true` = the merchant answered 2xx (a `machine_payment_evidence`
+   * row records its response); absent = unknown. See the raw field's doc.
+   */
+  delivered?: boolean
   /** Platform fee surfaced so it's never silently collected (#386). */
   fee?: PaymentFee | null
   amountAtomic?: string | null
@@ -1961,6 +2044,17 @@ export interface RawPaymentStatusResult {
   expires_at: string
   chain_id: number
   message: string
+  /**
+   * #3420: the delivered half of the settle vocabulary, on the status read.
+   * `true` = a `machine_payment_evidence` row records the merchant's response
+   * (the receipt capture `completeX402MerchantCall` runs on every accepted
+   * merchant reply) — the merchant answered 2xx; settlement may still be
+   * unverified. Absent = the backend does not know (older payloads, or no
+   * evidence row either way). Never `false`-as-claim: absence is the honest
+   * default, matching the settle call's own `delivered: true` on the
+   * DELIVERED_UNSETTLED branches.
+   */
+  delivered?: boolean
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
@@ -2245,6 +2339,43 @@ export class MerchantTimeoutError extends HavenApiError {
   }
 }
 
+/**
+ * #3417: an erc7710 `POST /x402` authorize replayed a key whose payment to THIS
+ * merchant for THIS resource has already settled. The backend returns
+ * `200 { status: 'confirmed', tx_hash, to, resource_url }` and, correctly, no
+ * `sign_data`, because nothing is left to sign
+ * (`packages/backend/src/modules/x402/replay.ts`). Before this class the
+ * erc7710 path read that answer as a scheme mismatch and threw a 500, which
+ * hosted callers relayed as "transient, retry". Typed so a caller can report
+ * the original settlement instead of retrying, and never signs anything.
+ *
+ * Only thrown when the confirmed row pays the merchant this request names, for
+ * the resource it asked for. The backend's replay lookup is keyed on the
+ * idempotency key alone, so a key reused for another payee or resource — or
+ * first spent on an EIP-3009 funding leg, whose confirmed `tx_hash` proves only
+ * that the delegate was funded — is refused as a 409 collision instead of read
+ * as this settlement. Amount and the MCP tool call are not compared: on an MCP
+ * merchant the resource is its endpoint, so a key reused for another tool
+ * there is answered as that merchant's earlier payment. A `HavenError`, not a `HavenApiError`: nothing failed upstream.
+ */
+export class X402Erc7710AlreadySettledError extends HavenError {
+  readonly x402ErrorCode = 'payment_already_settled' as const
+  constructor(
+    public override readonly paymentId: string,
+    public readonly txHash: string,
+    public readonly body?: unknown,
+  ) {
+    super(
+      `Payment ${paymentId} already settled on-chain (tx ${txHash}). ` +
+        'Nothing was signed and nothing new was charged.',
+      'PAYMENT_ALREADY_SETTLED',
+      undefined,
+      paymentId,
+    )
+    this.name = 'X402Erc7710AlreadySettledError'
+  }
+}
+
 export class X402UnexpectedStatusError extends HavenApiError {
   readonly x402ErrorCode = 'unexpected_non_402_status' as const
   /**
@@ -2323,6 +2454,33 @@ export class HavenPaymentStateError extends HavenApiError {
   }
 }
 
+/**
+ * #3392: the SDK's x402 receipt cache and in-flight map record the
+ * `taskBudgetId` each entry was created under. A call reusing an idempotency
+ * key whose cached/in-flight entry was created under a DIFFERENT task budget
+ * is refused with this typed error BEFORE any network call — the alternative
+ * was silently returning (or joining) a payment charged to another budget.
+ * Typed rather than `HavenApiError`-shaped: no request was attempted, so
+ * there is no HTTP status or response body to carry (the
+ * `HavenZeroSettlementHashError` precedent). A caller that genuinely wants to
+ * pay again under a different budget passes a new `idempotencyKey`.
+ */
+export class X402TaskBudgetMismatchError extends HavenError {
+  readonly x402ErrorCode = 'task_budget_mismatch' as const
+  constructor(
+    message: string,
+    /** The idempotency key whose cached entry was created under another budget. */
+    public readonly idempotencyKey: string,
+    /** The budget the cached/in-flight entry was created under (undefined = none). */
+    public readonly entryTaskBudgetId: string | undefined,
+    /** The budget this call named (undefined = none). */
+    public readonly requestedTaskBudgetId: string | undefined,
+  ) {
+    super(message, 'X402_TASK_BUDGET_MISMATCH')
+    this.name = 'X402TaskBudgetMismatchError'
+  }
+}
+
 export class HavenSigningError extends HavenError {
   constructor(message: string) {
     super(message, 'SIGNING_ERROR')
@@ -2384,8 +2542,8 @@ export type SignerRefusalCode = (typeof SignerRefusalCode)[keyof typeof SignerRe
  */
 export function signerUpdateFallback(channel: string = HAVEN_CONNECTOR_CHANNEL): string {
   return (
-    `Update @haven_ai/signer by rerunning \`${connectorRerunCommand(undefined, { channel })}\`, which reinstalls the ` +
-    'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
+    `Update @haven_ai/signer: run \`${connectorUpgradeCommand({ channel })}\` and then the repair line it prints, ` +
+    'which reinstalls the pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
     'quote or payment this version came from is unaffected and does not need to be re-quoted.'
   )
 }

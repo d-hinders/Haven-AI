@@ -71,6 +71,28 @@ export const demoRateLimit = {
 } as const
 
 /**
+ * Owner company details writes (#3332 review M3): `PUT /user/company-details`
+ * and `POST /user/company-details/vies-check`, both dashboard-JWT-authenticated
+ * so the shared credential key generator buckets per SESSION CREDENTIAL (the
+ * presented JWT), never per shared proxy IP — and, precisely, per credential
+ * rather than per owner: two sessions for the same owner (two open tabs, a
+ * second device) get two separate buckets, since the key is a hash of the
+ * bearer token itself, not the JWT's `sub`. Each write can start a VIES check
+ * against the EU
+ * Commission's endpoint — the ceiling here is about being a considerate
+ * caller of THAT external service (and giving the async
+ * `recheckIfStalePending`/atomic-claim guard less to race against), not about
+ * an on-chain spend the way `moneyPathRateLimit` is. 20/min is far above any
+ * legitimate owner editing their own details by hand.
+ */
+export const ownerProfileRateLimit = {
+  rateLimit: {
+    max: 20,
+    timeWindow: '1 minute',
+  },
+} as const
+
+/**
  * Public passport verification (#974). Keyed per **SUBJECT**, not per caller.
  *
  * The endpoint is unauthenticated, so the default key is `ip:` — and there is
@@ -209,6 +231,35 @@ export function authRateLimit(
               : route === 'device_lookup'
                 ? 20
                 : 30,
+      timeWindow: '1 minute',
+    },
+  }
+}
+
+/**
+ * The payer's signed receipt drop (`POST /receive/:addr/receipt-drop`, #3333).
+ * The receive side's ONLY unauthenticated route, so like signup/login and the
+ * catalog submit it follows the self-disarming pattern: a per-IP ceiling whose
+ * "IP" is one shared proxy address (no `trustProxy` on the instance) is a
+ * cheap global denial-of-service on the drop, so the tier refuses to arm
+ * itself unless the operator trusts the proxy (`TRUST_PROXY_HOPS > 0`).
+ *
+ * Tighter than the passport tiers on purpose: the drop's authentication is the
+ * payload's own ECDSA signature, and a signature that fails verification has
+ * already cost the caller nothing but a 400 — without a limiter the route is
+ * the repo's only unauthenticated surface a flood could hammer for free (round-
+ * 2 finding F-3). 20/min per client IP is far above any legitimate payer (a
+ * payer drops one receipt per transfer) and below any meaningful flood. The
+ * handler's own 404 on an unknown receiving address is the resilient second
+ * layer, and a forged signature never reaches a match write regardless.
+ */
+export function receiptDropRateLimit(
+  trustProxyHops: number,
+): { rateLimit?: { max: number; timeWindow: string } } {
+  if (trustProxyHops <= 0) return {}
+  return {
+    rateLimit: {
+      max: 20,
       timeWindow: '1 minute',
     },
   }

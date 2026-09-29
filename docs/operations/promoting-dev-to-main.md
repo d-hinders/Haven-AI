@@ -8,8 +8,9 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
+  - packages/backend/src/index.ts
   - scripts/release-scope.mjs
-last-verified: "2026-09-09"
+last-verified: "2026-09-25"
 ---
 
 # Promoting `dev → main` (production release)
@@ -195,6 +196,7 @@ so this is a rule to point at rather than a question to ask the release runner.
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.
 - [ ] **Sweep the docs staleness audit** ([#2645](https://github.com/d-hinders/Haven-AI/issues/2645), "Docs staleness audit (weekly)" — one standing issue that `docs-audit.yml` rewrites every Monday). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
+- [ ] **The request-validation rollout's named residue (`#3223`, epic #3028) is expected here.** `POST /machine-payments/reconciliation-events` is intentionally NOT enforced — the shadow reading did not cover it and CANNOT have: the route is only posted on a genuine merchant rejection after a confirmed payment, and driving it synthetically would write a false record into a payment's ledger (owner decision 2026-09-24 on epic #3028). Do not read its `NOT PROVEN` row in a shadow table, or its entry in `lint-request-schemas-baseline.json` (`routes/machine-payments-reconciliation-events.ts`), as unfinished slice work; it is the standing residue until a real rejection — or a QA scenario that produces one — gives the reading traffic to prove it, at which point its file joins `enforcedModules` and its handler rungs delete like every other flip.
 - [ ] A code-owner approval, from an owner other than the PR author, is present
       if the batch touches an owned path — today only migration files:
       `git diff --name-only origin/main origin/dev -- ':(glob)packages/backend/src/db/migrations/*.ts'`.
@@ -261,6 +263,24 @@ so this is a rule to point at rather than a question to ask the release runner.
       `--burst`. A failing line means the endpoint cannot carry Haven's traffic —
       the September 2026 qa-dev waves were a provider that refused batches over
       three and the `pending` tag (epic #3335).
+
+- [ ] **Request validation is ENFORCING in prod since the #3032 flip** (epic
+      #3028 slice 4): with `HAVEN_REQUEST_VALIDATION` unset the backend boots
+      in `enforce` and off-spec requests to any enforced module get the 400
+      envelope. Prod sets no value — verify it stays that way (a stale
+      `HAVEN_REQUEST_VALIDATION=shadow` from the rollout era would silently
+      hold prod in observation). The per-module kill path is a **list edit**
+      (`packages/backend/src/index.ts`, `enforcedModules`): removing one route
+      file there returns exactly that module to shadow on the next deploy —
+      the response to one misbehaving module, per epic decision 6 — while
+      `HAVEN_REQUEST_VALIDATION=off` / `shadow` are the GLOBAL switches (a
+      listed module does not escape them; a mode change is a restart). The
+      shadow reading did not prove three machine-payment routes
+      (`GET /payments`, `GET /payments/{id}/receipt`,
+      `POST /machine-payments/reconciliation-events`); they are enforced on
+      test evidence per the #3223 owner decision, and a real
+      reconciliation-event refusal in prod is a client to fix, not the gate to
+      loosen.
 
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.

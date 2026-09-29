@@ -1460,6 +1460,8 @@ Plus a low‑opacity dotted texture masked from the centre. White text, eyebrow 
 
 Dark code on light page (Stripe pattern). `bg-[var(--v2-surface-code)]` (#0b1120), white/90 text, `font-mono text-[13px] leading-[1.65]`. Optional header with filename + language tag.
 
+Long lines scroll sideways by default. Pass `wrap` for a **single-line copy command** whose tail matters, so it wraps at phone width instead of hiding it (`whitespace-pre-wrap [overflow-wrap:anywhere]`; the `/releases` update command, whose `--doctor` was clipped at 390px, #3434). Never wrap multi-line code samples: re-flowing them breaks their indentation.
+
 ### Flow card (`FlowCard`, homepage hero)
 
 Animated, cycling state machine showing one payment lifecycle (Intent → Policy → Settled). CSS‑only animation, no framer‑motion. Soft brand glow behind shifts to green when settled. Includes status pill in footer with brand pulse → success. Pattern is reusable for other "live" demos in the app.

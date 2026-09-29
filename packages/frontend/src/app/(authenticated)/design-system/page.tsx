@@ -69,6 +69,7 @@ import {
   LabelOptionRow,
   BalanceFreshnessIndicator,
   WhenBalanceDegraded,
+  BudgetAmountRow,
 } from '@/components/haven'
 
 /**
@@ -326,6 +327,7 @@ export default function DesignSystemPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
+  const [dsBudgetAmount, setDsBudgetAmount] = useState('')
   const [segmented, setSegmented] = useState<'light' | 'dark' | 'system'>('system')
   const { toast } = useToast()
 
@@ -1579,12 +1581,18 @@ export default function DesignSystemPage() {
 
       <Section
         title="CodeBlock"
-        description="Dark monospace block for terminal commands and credential snippets. Optional filename header row with a check-pop copy button; onCopy fires only when the clipboard write succeeded (used for handoff telemetry)."
+        description="Dark monospace block for terminal commands and credential snippets. Optional filename header row with a check-pop copy button; onCopy fires only when the clipboard write succeeded (used for handoff telemetry). Long lines scroll sideways by default; pass wrap for a single-line copy command whose tail matters, so it wraps at phone width instead of hiding it (the /releases update command). Never wrap multi-line code: it breaks the indentation."
       >
-        <div className="max-w-xl">
+        <div className="max-w-xl space-y-4">
           <CodeBlock filename="Terminal" onCopy={() => toast.success('Command copied')}>
             npx @haven_ai/connect@alpha
           </CodeBlock>
+          {/* Card width on a phone: the tail wraps instead of scrolling out of view. */}
+          <div className="max-w-[300px]">
+            <CodeBlock filename="Update command" onCopy={() => toast.success('Command copied')} wrap>
+              npx -y @haven_ai/connect@alpha --doctor
+            </CodeBlock>
+          </div>
         </div>
       </Section>
 
@@ -1761,6 +1769,74 @@ export default function DesignSystemPage() {
               'Requests above the remaining budget are declined — nothing is paid past the rules you set.',
             ]}
           />
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+          {/* #3398: the budget modals' amount row, absorbed here on its second
+              use. The token symbol rides INSIDE the amount input as a suffix,
+              so below `sm` it stays attached to the amount it qualifies — no
+              line holds only the token label — and at `sm`+ it shares the
+              input's box, keeping the text baseline aligned. The period wraps
+              to its own line below `sm`; a multi-token caller (not shown)
+              renders a token Select beside the amount instead of a suffix. */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+              BudgetAmountRow
+            </p>
+            <div className="rounded-[10px] border border-[var(--v2-border)] p-4">
+              <BudgetAmountRow
+                amount={dsBudgetAmount}
+                onAmountChange={setDsBudgetAmount}
+                tokens={[{ address: '0xusdc', symbol: 'USDC', decimals: 6 }]}
+                selectedTokenAddress="0xusdc"
+                onTokenChange={() => undefined}
+                period={2_592_000}
+                onPeriodChange={() => undefined}
+                periods={[
+                  { label: 'per day', seconds: 86_400 },
+                  { label: 'per week', seconds: 604_800 },
+                  { label: 'per month', seconds: 2_592_000 },
+                ]}
+                inputClassName="sm:w-40"
+                periodSelectClassName="sm:w-36"
+              />
+            </div>
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              EditBudgetModal and FundMerchantModal share this row. Resize below 640 px: the
+              symbol stays inside the amount field and the period drops to its own line.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+              Labelled + invalid
+            </p>
+            <div className="rounded-[10px] border border-[var(--v2-border)] p-4">
+              <BudgetAmountRow
+                amount=""
+                onAmountChange={() => undefined}
+                tokens={[{ address: '0xusdc', symbol: 'USDC', decimals: 6 }]}
+                selectedTokenAddress="0xusdc"
+                onTokenChange={() => undefined}
+                period={604_800}
+                onPeriodChange={() => undefined}
+                periods={[
+                  { label: 'per day', seconds: 86_400 },
+                  { label: 'per week', seconds: 604_800 },
+                  { label: 'per month', seconds: 2_592_000 },
+                ]}
+                amountLabel="Amount"
+                inputId="ds-budget-amount-labelled"
+                amountAriaLabel="Budget amount"
+                amountInvalid
+                inputClassName="sm:w-40"
+                periodSelectClassName="sm:w-36"
+              />
+            </div>
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              The labelled variant (FundMerchantModal&apos;s form) with the invalid state shown —
+              the error paragraph itself belongs to the caller, announced via role=&quot;alert&quot;.
+            </p>
+          </div>
         </div>
       </Section>
 

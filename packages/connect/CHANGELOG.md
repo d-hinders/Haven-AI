@@ -15,6 +15,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.7.0-alpha.0 — 2026-09-29
+
+### Fixed
+
+- **`--repair` cannot land on a different agent (#3412).** With more than one agent credential directory under `~/.haven/agents`, every repair line `--doctor` prints now names its agent with `--credentials-dir <dir>` (also whenever `--doctor` itself was given `--credentials-dir`), and a `--repair` without `--credentials-dir` is refused — nothing changed — with one exact command per live agent and its agent id; a retired directory (tombstoned, or its key stripped) is listed as "retired — not a repair target" and never offered. Previously it repaired the newest directory by mtime, which is not necessarily the agent the doctor described, and re-wired the runtime to that agent's credentials. **Behaviour change:** scripts that ran a flagless `--repair` on a multi-agent machine must now pass `--credentials-dir`. A single-agent install is unchanged.
+
 ## 0.6.0-alpha.0 — 2026-09-26
 
 - **The runtime this connector installs moves to `0.6.0-alpha.0` (no connector source change).** A setup or re-run now wires `@haven_ai/mcp`, `@haven_ai/sdk` and `@haven_ai/signer` `0.6.0-alpha.0`. Two things reach you through them: **BREAKING (#3306)** — `haven_list_receipts` rows no longer carry the deprecated `rail`, `proofStatus`, `resourceUrl` and `merchantAddress` keys (read `source`, `paymentProofStatus`, `x402ResourceUrl`, `x402MerchantAddress`); and three new task-budget tools (#3329), so the consent hash changes and the operator is asked to consent once more on the next launch. The connector's own flags, output and exit codes are unchanged; see the mcp, sdk and signer CHANGELOGs for the full notes.

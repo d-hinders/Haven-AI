@@ -64,7 +64,7 @@ export async function listActiveDelegations(
  * and then polls `GET /agents/:id/delegations` for THAT hash to go active,
  * which never converges if a second build bumped the version.
  *
- * So the same `(agent, token, recipient|open, budget, period)` slot with a
+ * So the same `(agent, token, recipient|open, budget, period, merchant)` slot with a
  * still-pending, unexpired row now RETURNS that row instead of building a
  * competitor to it: same hash, same version, 201 shape unchanged. The
  * parameters must match exactly — budget included, so "raise my budget" builds
@@ -77,6 +77,14 @@ export async function listActiveDelegations(
  * survive above Number.MAX_SAFE_INTEGER; the comparison casts both sides to
  * numeric, so '5000000' and '05000000' match and '5000001' does not.
  */
+// #3386: excludes `rekey_id IS NOT NULL` — a re-key's own pending rows are
+// never a build-reuse candidate. Without this, carrying `merchant_id` onto a
+// re-key's replacement pieces (#3386) would make an ABANDONED re-key's inert
+// pending rows (dead: completion requires `stage = 'issued'`, and `abandoned`
+// is terminal) eligible for merchant-scoped reuse here — handing a later
+// ordinary build a row it never signed for. A live re-key's own pending rows
+// must not be reused either: they exist to be activated by ITS OWN
+// completion, not handed out as someone else's build result.
 export const FIND_REUSABLE_PENDING_DELEGATION_SQL = `SELECT id, delegation_hash, version, delegation_json
      FROM agent_delegations
      WHERE agent_id = $1
@@ -86,6 +94,8 @@ export const FIND_REUSABLE_PENDING_DELEGATION_SQL = `SELECT id, delegation_hash,
        AND budget_atomic::numeric = $4::numeric
        AND period_seconds = $5
        AND expires_at >= $6
+       AND merchant_id IS NOT DISTINCT FROM $7
+       AND rekey_id IS NULL
      ORDER BY created_at ASC`
 
 export interface ReusablePendingDelegationRow {
@@ -103,10 +113,17 @@ export async function findReusablePendingDelegation(
   periodSeconds: number,
   expiresAt: number,
   db: Executor = pool,
+  /**
+   * #3331: the merchant a merchant-locked build is FOR (null for every other
+   * build). Part of the match so a merchant build never re-hands a plain
+   * pinned row with the same recipient — that row carries no merchant, and
+   * the merchant page would never find the budget the owner just signed.
+   */
+  merchantId: string | null = null,
 ): Promise<ReusablePendingDelegationRow | null> {
   const result = await db.query<ReusablePendingDelegationRow>(
     FIND_REUSABLE_PENDING_DELEGATION_SQL,
-    [agentId, tokenAddress, recipientAddress, budgetAtomic, periodSeconds, expiresAt],
+    [agentId, tokenAddress, recipientAddress, budgetAtomic, periodSeconds, expiresAt, merchantId],
   )
   return result.rows[0] ?? null
 }
@@ -150,14 +167,21 @@ export function delegationBuildSlotKey(
  * delegate account address before taking the lock, because holding a database
  * lock across a chain round trip makes a slow node into a stalled slot.
  *
- * `fn` receives a QUERY-ONLY view of the transaction, and that is load-bearing.
- * `withTransaction` decides whether to open a transaction by asking whether its
- * executor has a `connect` method — and the pg client it hands out has one, so
- * passing the raw client to a repository that wraps itself in `withTransaction`
- * (`insertPendingDelegationForOwnedNonRevokedAgent` does) makes that repository
- * try to reconnect an already-connected client and throw. Handing over a plain
- * `{ query }` makes the nested `withTransaction` degrade to a direct call, which
- * is what joining an outer transaction is supposed to mean.
+ * `fn` receives a QUERY-ONLY view of the transaction (`joined`, below). This
+ * predates #3450: at the time this was written, `withTransaction` decided
+ * whether to open a transaction by asking whether its executor has a
+ * `connect` method — and the pg client it hands out has one, so passing the
+ * raw client to a repository that wraps itself in `withTransaction`
+ * (`insertPendingDelegationForOwnedNonRevokedAgent` does) made that
+ * repository try to reconnect an already-connected client and throw. A plain
+ * `{ query }` view has neither `connect` nor `release`, so the nested
+ * `withTransaction` degraded to a direct call — the same effect #3450 later
+ * gave `withTransaction` itself, by checking `release` instead of `connect`
+ * (a real `pg.PoolClient` has both, which is what made `connect` alone the
+ * wrong discriminator; see `infra/transaction.ts`). A checked-out `PoolClient`
+ * now runs inline whether or not it is wrapped in a query-only view first, so
+ * this view is redundant for that purpose today — but harmless, and kept
+ * rather than unwound as a change this function does not need to make.
  */
 export async function withDelegationBuildSlotLock<T>(
   agentId: string,
@@ -294,10 +318,18 @@ export async function selectActiveDelegationByHash(
 /**
  * #1400: everything the batch revocation must kill — pending AND active
  * (a pending grant is still a signed delegation that could activate).
+ *
+ * #3343: `replaced` rows are in this list deliberately. The edit flow leaves
+ * a row `replaced` in the DB while its delegation is still enabled on-chain
+ * (the slot sweep marks the old grant replaced, and it is disabled only when
+ * the owner's Stop userop lands). A re-key or revoke-all that skipped those
+ * rows would complete while the OLD key's delegation stayed live — so
+ * "still enabled" here means every status the chain has not confirmed dead.
+ * The per-hash path and the payment paths do NOT read this list.
  */
 export const LIST_NON_REVOKED_DELEGATIONS_FOR_AGENT_SQL = `SELECT delegation_hash, delegation_json, status
        FROM agent_delegations
-       WHERE agent_id = $1 AND status IN ('pending', 'active')
+       WHERE agent_id = $1 AND status IN ('pending', 'active', 'replaced')
        ORDER BY created_at ASC`
 
 export async function listNonRevokedDelegationsForAgent(
@@ -311,14 +343,40 @@ export async function listNonRevokedDelegationsForAgent(
 }
 
 /**
+ * The row a per-hash revocation targets — the same read its prepare makes,
+ * and since #3343 the submit makes too (it must resolve the row it would
+ * mark, 404 on a missing one, before anything is submitted).
+ */
+export const SELECT_DELEGATION_ROW_FOR_AGENT_BY_HASH_SQL = `SELECT delegation_json, status
+       FROM agent_delegations
+       WHERE agent_id = $1 AND delegation_hash = $2`
+
+export async function selectDelegationRowForAgentByHash(
+  agentId: string,
+  delegationHash: string,
+): Promise<{ delegation_json: string; status: string } | null> {
+  const result = await pool.query<{ delegation_json: string; status: string }>(
+    SELECT_DELEGATION_ROW_FOR_AGENT_BY_HASH_SQL,
+    [agentId, delegationHash],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
  * Activate exactly the pending grant that the caller just authenticated.
  * The conditional update is intentionally kept in the repository so the
  * lifecycle route cannot add another inline write while preserving the
  * transaction executor supplied by its dedicated client.
  */
+// #3439: `AND rekey_id IS NULL` is a backstop, not the primary guard — the
+// primary refusal is in the route, before the slot sweep runs (a filter here
+// alone would surface as the misleading "Delegation is no longer pending"
+// after the sweep already ran and had to be rolled back). Re-key rows are
+// activated only through `ACTIVATE_REKEY_DELEGATION_SQL` inside
+// `completeRekey`, which this statement must never touch.
 export const ACTIVATE_PENDING_DELEGATION_SQL = `UPDATE agent_delegations
        SET status = 'active', delegation_json = $1, updated_at = NOW()
-       WHERE id = $2 AND status = 'pending'
+       WHERE id = $2 AND status = 'pending' AND rekey_id IS NULL
        RETURNING id`
 
 export async function activatePendingDelegation(
@@ -440,4 +498,45 @@ export async function revokeDelegationsByHashes(
     hashes,
   ])
   return result.rows.map((row) => row.delegation_hash)
+}
+
+/**
+ * The owner's ACTIVE, unexpired merchant-locked budgets for one merchant
+ * (#3331), with the agent's name — the merchant page's "remaining this period" list. Only
+ * agents that are not revoked; `delegation_json` stays out of the row for
+ * the reason `listDelegationJsonByIds` gives, and the caller asks for it
+ * explicitly when it reads the enforcer.
+ */
+export const LIST_ACTIVE_MERCHANT_BUDGETS_FOR_USER_SQL = `SELECT d.id, d.agent_id, a.name AS agent_name,
+            d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
+            d.budget_atomic, d.period_seconds, d.expires_at
+     FROM agent_delegations d
+     JOIN agents a ON a.id = d.agent_id
+     WHERE a.user_id = $1
+       AND a.status <> 'revoked'
+       AND d.merchant_id = $2
+       AND d.status = 'active'
+       AND d.expires_at > EXTRACT(EPOCH FROM now())
+     ORDER BY a.name ASC, d.created_at ASC`
+
+export interface MerchantBudgetRow {
+  id: string
+  agent_id: string
+  agent_name: string
+  chain_id: number
+  token_address: string
+  recipient_address: string
+  delegation_hash: string
+  budget_atomic: string
+  period_seconds: number
+  expires_at: string | number
+}
+
+export async function listActiveMerchantBudgetsForUser(
+  userId: string,
+  merchantId: string,
+  db: Executor = pool,
+): Promise<MerchantBudgetRow[]> {
+  const result = await db.query<MerchantBudgetRow>(LIST_ACTIVE_MERCHANT_BUDGETS_FOR_USER_SQL, [userId, merchantId])
+  return result.rows
 }

@@ -5,14 +5,13 @@ import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
+import { findOpenGrantsForAgent, type AgentParentSubBudget } from '../infra/repositories/sub-budgets.js'
 import {
   handleGetAllowances,
   handleBalanceCoverage,
   handleBudgetPrecheck,
   budgetPrecheckBodyError,
   parseBalanceCoverageQuery,
-  handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
   handleMerchantReceiptCapture,
@@ -21,29 +20,26 @@ import {
   mppDemoRetired,
   prepareSweep,
   submitSweep,
-  RECONCILIATION_EVENT_TYPES,
-  SUPPORTED_ASSETS,
   type AuthorizeBody,
   type BudgetPrecheckBody,
   type EvidenceBody,
-  type ReconciliationEventBody,
   type SendAsset,
   type SendBody,
   type SweepSubmitBody,
 } from '../modules/mpp/index.js'
 
-// Route handlers only: request validation, auth middleware wiring, rate-limit
-// config, and response serialization. Everything else — authorize
+// Route handlers only: auth middleware wiring, rate-limit config, and
+// response serialization — the request SHAPE has been the plugin's since
+// #3031, and what stays here is what JSON Schema cannot state. Everything
+// else — authorize
 // orchestration, the send flow, sweep prepare/submit orchestration,
 // evidence/receipt assembly, and the rail-aware allowances read — lives in
 // `src/modules/mpp/` (#997, epic #980 M4). See that module's `index.ts` for
 // the public surface and the boundary rationale.
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
-}
-
-/** #3128: a receipts cursor is a receipt id (uuid). */
+/** #3128: a receipts cursor is a receipt id (uuid). The SHAPE check moved
+ *  to the request schema (#3031, `format: uuid`); ownership stays semantic
+ *  in `listReceipts`. */
 const RECEIPT_CURSOR_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
@@ -71,6 +67,20 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       }
     }
 
+    // #3330: this agent's OPEN sub-budget grants — additive only. When agent
+    // A re-delegated a narrower budget to THIS agent (B), B learns its parent
+    // agent and the effective (narrower) limits here; an agent holding no
+    // grants gets an empty array, and every pre-existing field is unchanged.
+    // A read failure degrades to an empty array rather than failing the
+    // identity read — the same reconciliation-metadata-not-authority rule the
+    // delegate-account derivation above follows.
+    let parent_sub_budgets: AgentParentSubBudget[] = []
+    try {
+      parent_sub_budgets = await findOpenGrantsForAgent(agent.id)
+    } catch {
+      parent_sub_budgets = []
+    }
+
     return ({
       id: agent.id,
       name: agent.name,
@@ -91,6 +101,20 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       // reporting only, same two-value bucketing handleGetAllowances already
       // branches on below.
       execution_rail: agentExecutionRailLabel(agent.execution_rail),
+      // #3330 (additive only): the sub-budget grants this agent holds — each
+      // names its parent agent and the effective (narrower) limits. Empty
+      // unless agent A actually re-delegated to this agent.
+      parent_sub_budgets: parent_sub_budgets.map((g) => ({
+        sub_budget_id: g.sub_budget_id,
+        parent_agent_id: g.parent_agent_id,
+        parent_agent_name: g.parent_agent_name,
+        token_address: g.token_address,
+        recipient_address: g.recipient_address,
+        period_amount_atomic: g.period_amount_atomic,
+        expires_at: Number(g.expires_at),
+        status: g.status,
+        is_expired: g.is_expired,
+      })),
     })
   })
 
@@ -130,12 +154,12 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const limit = Number.isInteger(parsedLimit)
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 25
-    // #3128: the cursor is a receipt id from a previous page. Anything else
-    // is refused up front rather than reaching the uuid cast in the query.
+    // #3031: the cursor's uuid SHAPE is the request schema's (`format:
+    // uuid` on the `cursor` parameter), so the RECEIPT_CURSOR_PATTERN rung
+    // is gone. What stays semantic is the cursor's OWNERSHIP half: a
+    // well-formed uuid that names no receipt of THIS agent is still a 400
+    // from `listReceipts`, not an empty page (#3128).
     const cursor = request.query.cursor ?? null
-    if (cursor !== null && !RECEIPT_CURSOR_PATTERN.test(cursor)) {
-      return reply.code(400).send({ error: 'cursor must be the id of a receipt returned by a previous page (next_cursor).' })
-    }
 
     const page = await listReceipts(agent.id, limit, cursor)
     if (page === null) {
@@ -164,104 +188,74 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const { asset, recipient, amount } = request.body
 
     // 1. Validate inputs
-    if (!asset || !SUPPORTED_ASSETS.includes(asset as SendAsset)) {
-      return reply.code(400).send({
-        error: 'asset must be one of: ETH, USDC',
-        supported: SUPPORTED_ASSETS,
-      })
-    }
-    if (!recipient || !isValidAddress(recipient)) {
-      return reply.code(400).send({ error: 'Valid recipient address is required' })
-    }
-    if (!amount || typeof amount !== 'string' || isNaN(Number(amount)) || Number(amount) <= 0) {
+    //
+    // #3031: the SHAPES — required `asset`/`recipient`/`amount`, the ETH|USDC
+    // enum, the recipient address pattern, `amount` string-ness, and the
+    // 1–128 `idempotency_key` — are the request schema's job now
+    // (`/machine-payments/send`, enforced since this file joined
+    // `enforcedModules`). What stays here is what the schema cannot say:
+    // `Number(amount)` must PARSE (`'1e2'` is digits-plus-letter and would
+    // NaN through `handleSend`'s conversion) and be POSITIVE — the same
+    // two-half split as the x402 amount.
+    if (isNaN(Number(amount)) || Number(amount) <= 0) {
       return reply.code(400).send({ error: 'amount must be a positive number' })
     }
 
-    let idempotencyKey: string | undefined
-    if (request.body.idempotency_key !== undefined) {
-      const key = request.body.idempotency_key
-      if (typeof key !== 'string' || key.length < 1 || key.length > 128) {
-        return reply.code(400).send({ error: 'idempotency_key must be a string of 1–128 characters' })
-      }
-      idempotencyKey = key
-    }
-
-    const result = await handleSend(agent, asset as SendAsset, recipient, amount, idempotencyKey)
+    const result = await handleSend(agent, asset as SendAsset, recipient, amount, request.body.idempotency_key)
     return reply.code(result.statusCode).send(result.body)
   })
 
   // #1328: the legacy internal MPP demo flow is retired outright — fail
-  // closed, nothing read or written beyond the agent-auth lookup the
+  // closed, nothing read or written beyond the agent-auth lookup the module
   // `onRequest` hook already did. `AuthorizeBody` stays as the route's
   // request type for OpenAPI/documentation purposes; the body is never
   // inspected. Agents are directed to the deployed x402 merchant flow.
-  app.post<{ Body: AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, async (_request, reply) => {
-    const refusal = mppDemoRetired()
-    return reply.code(refusal.statusCode).send(refusal.body)
-  })
+  //
+  // #3031 round 2 — the refusal is a ROUTE-LEVEL `onRequest` hook, not the
+  // handler body, per the owner decision (epic #3028, 2026-09-24T21:24:44Z,
+  // closing #3223): "enforce, with the retirement answer moved to
+  // `onRequest`" — the #3030 retired-tombstone pattern. Fastify runs
+  // `onRequest` hooks BEFORE request validation, so the enforced schema on
+  // `MachinePaymentAuthorizeRequest` (restored strict) can never answer a
+  // 400 where the honest answer is this 410: every body — a full old
+  // challenge, `{}`, a signed one-shot, garbage — reaches the tombstone
+  // first and gets exactly the refusal the handler used to send. The
+  // module-level `agentAuthMiddleware` is itself an `onRequest` hook and is
+  // added BEFORE this one, so it still runs first and an unauthenticated
+  // caller keeps their 401 (measured hook order on fastify 5.8.x; pinned by
+  // the suite's unauthenticated case — the same ordering property
+  // `routes/user-accounts-retired.ts` pins for its tombstones).
+  app.post<{ Body: AuthorizeBody }>(
+    '/authorize',
+    {
+      config: moneyPathRateLimit,
+      onRequest: async (_request, reply) => {
+        const refusal = mppDemoRetired()
+        return reply.code(refusal.statusCode).send(refusal.body)
+      },
+    },
+    async (_request, reply) => {
+      // Unreachable while the `onRequest` tombstone above answers every
+      // request; kept as the same producer so that if the route option is
+      // ever dropped by accident the honest 410 remains the answer rather
+      // than a validation result the retirement never intended.
+      const refusal = mppDemoRetired()
+      return reply.code(refusal.statusCode).send(refusal.body)
+    },
+  )
 
   app.post<{ Body: EvidenceBody }>('/evidence', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const body = request.body
 
-    if (!body || typeof body !== 'object') {
-      return reply.code(400).send({ error: 'Evidence body is required' })
-    }
-    if (!body.paymentId || typeof body.paymentId !== 'string') {
-      return reply.code(400).send({ error: 'paymentId is required' })
-    }
-    if (!body.rail || typeof body.rail !== 'string') {
-      return reply.code(400).send({ error: 'rail is required' })
-    }
-    if (!body.txHash || typeof body.txHash !== 'string') {
-      return reply.code(400).send({ error: 'txHash is required' })
-    }
-    if (body.resourceUrl !== undefined && typeof body.resourceUrl !== 'string') {
-      return reply.code(400).send({ error: 'resourceUrl must be a string' })
-    }
-    if (
-      body.paymentProofHeaderName !== undefined &&
-      typeof body.paymentProofHeaderName !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'paymentProofHeaderName must be a string' })
-    }
-    if (
-      body.paymentProofHeader !== undefined &&
-      typeof body.paymentProofHeader !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'paymentProofHeader must be a string' })
-    }
-    if (
-      body.protocolReceiptHeaderName !== undefined &&
-      typeof body.protocolReceiptHeaderName !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptHeaderName must be a string' })
-    }
-    if (
-      body.protocolReceiptHeader !== undefined &&
-      typeof body.protocolReceiptHeader !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptHeader must be a string' })
-    }
-    if (
-      body.challengePayload !== undefined &&
-      !isPlainObject(body.challengePayload)
-    ) {
-      return reply.code(400).send({ error: 'challengePayload must be an object' })
-    }
-    if (
-      body.selectedPayment !== undefined &&
-      !isPlainObject(body.selectedPayment)
-    ) {
-      return reply.code(400).send({ error: 'selectedPayment must be an object' })
-    }
-    if (
-      body.protocolReceiptPayload !== undefined &&
-      !isPlainObject(body.protocolReceiptPayload)
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptPayload must be an object' })
-    }
-
+    // #3031: `MachinePaymentEvidenceRequest` (enforced) refuses every shape
+    // error this ladder used to: required `paymentId` (uuid)/`rail`/`txHash`
+    // (0x 64-hex), the optional strings, and the three optional OBJECTS —
+    // `type: 'object'` without `additionalProperties: false` refuses arrays
+    // and null exactly as `isPlainObject` did. What stays in the module is
+    // the SEMANTIC layer: rail eligibility, payment ownership/state, and the
+    // cross-field agreement checks (`modules/mpp/evidence.ts`), plus the
+    // 100–599 merchantStatus bound the module's own guard already held.
     const result = await attachEvidenceHandler(agent.id, body)
     return reply.code(result.statusCode).send(result.body)
   })
@@ -277,55 +271,6 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(result.statusCode).send(result.body)
     },
   )
-
-  app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', { config: moneyPathRateLimit }, async (request, reply) => {
-    const agent = request.agent as AgentContext
-    const {
-      paymentId,
-      rail,
-      eventType,
-      txHash,
-      reason,
-      details,
-    } = request.body
-
-    if (!paymentId || typeof paymentId !== 'string') {
-      return reply.code(400).send({ error: 'paymentId is required' })
-    }
-    if (!rail || typeof rail !== 'string') {
-      return reply.code(400).send({ error: 'rail is required' })
-    }
-    if (!eventType || !RECONCILIATION_EVENT_TYPES.has(eventType)) {
-      return reply.code(400).send({ error: 'Unsupported reconciliation event type' })
-    }
-    if (txHash !== undefined && (
-      typeof txHash !== 'string' ||
-      !/^0x[0-9a-fA-F]{64}$/.test(txHash)
-    )) {
-      return reply.code(400).send({ error: 'txHash must be a 0x-prefixed transaction hash' })
-    }
-    if (reason !== undefined && typeof reason !== 'string') {
-      return reply.code(400).send({ error: 'reason must be a string' })
-    }
-    if (details !== undefined && (
-      !details ||
-      typeof details !== 'object' ||
-      Array.isArray(details)
-    )) {
-      return reply.code(400).send({ error: 'details must be an object' })
-    }
-
-    const result = await handleReconciliationEvent(
-      agent.id,
-      paymentId,
-      rail,
-      eventType,
-      txHash,
-      reason,
-      details,
-    )
-    return reply.code(result.statusCode).send(result.body)
-  })
 
   // ── POST /budget-precheck — server-side budget gate for the hosted prepare ─
   // #3054: the guided purchase's over-budget refusal is DECIDED here so it
@@ -361,20 +306,26 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   })
 
   // ── POST /sweep/submit — relay a signed sweep authorization ─────────────────
-  app.post<{ Body: SweepSubmitBody }>('/sweep/submit', { config: moneyPathRateLimit }, async (request, reply) => {
-    const agent = request.agent as AgentContext
-    const body = request.body ?? {}
-    const signature = body.signature
-    const nonce = body.authorization?.nonce
+  // Body generic: the enforced schema guarantees `signature` and
+  // `authorization.nonce` before the handler runs.
+  app.post<{ Body: SweepSubmitBody & { signature: string; authorization: { nonce: string } } }>(
+    '/sweep/submit',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const body = request.body ?? {}
+      const signature = body.signature
+      const nonce = body.authorization?.nonce
 
-    if (!signature || typeof signature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-      return reply.code(400).send({ error: 'signature must be a 0x-prefixed hex string' })
-    }
-    if (!nonce || typeof nonce !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(nonce)) {
-      return reply.code(400).send({ error: 'authorization.nonce must be a 0x-prefixed 32-byte hex string' })
-    }
+      // #3031: `SweepSubmitRequest` + `SweepAuthorization` (enforced) refuse
+      // every shape error these two rungs answered: required `signature`
+      // (`^0x[0-9a-fA-F]+$` — the same pattern the rung stated) and the
+      // authorization's `nonce` (`^0x[0-9a-fA-F]{64}$`, same as the rung).
+      // The signature RECOVERY and the CAS claim stay semantic, in
+      // `modules/mpp/sweep.ts`.
 
-    const result = await submitSweep(agent, nonce, signature)
-    return reply.code(result.statusCode).send(result.body)
-  })
+      const result = await submitSweep(agent, nonce, signature)
+      return reply.code(result.statusCode).send(result.body)
+    },
+  )
 }

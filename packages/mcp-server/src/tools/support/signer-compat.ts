@@ -9,8 +9,12 @@
  * One-direction dependencies: imports only the SDK and the connector channel.
  * Never imports a capability module.
  */
-import { DIRECT_SIGN_CONTEXT_VERSION, signerUpdateFallback } from '@haven_ai/sdk'
-import { HOSTED_CONNECTOR_CHANNEL, hostedConnectorRerunCommand } from '../../connector-channel.js'
+import {
+  DIRECT_SIGN_CONTEXT_VERSION,
+  TASK_SIGN_CONTEXT_VERSION,
+  signerUpdateFallback,
+} from '@haven_ai/sdk'
+import { HOSTED_CONNECTOR_CHANNEL, hostedConnectorUpgradeCommand } from '../../connector-channel.js'
 
 /**
  * The `capabilities.experimental` key the local signer advertises its supported
@@ -24,6 +28,20 @@ import { HOSTED_CONNECTOR_CHANNEL, hostedConnectorRerunCommand } from '../../con
  * the signer's exported `SIGNER_CAPABILITY_KEY`.
  */
 export const SIGNER_CAPABILITY_KEY = 'haven/signer-compatibility'
+
+/**
+ * #3419: the first `@haven_ai/signer` release whose `haven_sign` accepts the
+ * `task_budget_id` argument form (`0.6.0-alpha.0`, #3329). ONE exported
+ * constant — the hosted handoff, its cross-package pin
+ * (`hosted-signer-integration.test.ts`) and the release-note tie test all
+ * import this, never a literal, so the next form's floor has one place to
+ * land.
+ *
+ * Not a floor the hosted side ENFORCES (it cannot see the signer): it is the
+ * version a working `haven_sign { task_budget_id }` requires, reported as
+ * data in `signer_compatibility.min_signer_version`.
+ */
+export const TASK_BUDGET_MIN_SIGNER_VERSION = '0.6.0-alpha.0'
 
 /**
  * The pre-payment half of #1155: what this quote will emit, plus the instruction
@@ -80,7 +98,7 @@ export function signerCompatibilityNotice(emittedVersion: number) {
     check:
       'The signer enforces this version itself (#1547): on its version-mismatch refusal ' +
       '(code/supported_versions/fallback), STOP before signing again and update @haven_ai/signer ' +
-      `by rerunning \`${hostedConnectorRerunCommand()}\`. Never edit the version — it is Haven-signed, ` +
+      `by running \`${hostedConnectorUpgradeCommand()}\`, then the repair line it prints. Never edit the version — it is Haven-signed, ` +
       'so changing it invalidates the signature. Nothing has been spent at this point.',
     // #1309: the SAME recovery guidance as `check` above, as structured data
     // instead of prose to parse — and the SAME string
@@ -125,12 +143,61 @@ export function directSignerCompatibilityNotice() {
       'by payment_id. If haven_sign refuses with code SIGN_CONTEXT_REFUSED and backend_error_code ' +
       "'sign_context_unavailable' (a pre-#3271 signer: it signed nothing), sign through the relay " +
       'instead: call haven_sign with { payload_hash, typed_data_b64 } from THIS result, passed ' +
-      `through unchanged, then update the connector by rerunning \`${hostedConnectorRerunCommand()}\`.`,
+      `through unchanged, then update the connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair line it prints.`,
     // The same recovery sentence as structured data, mirroring the #1309
     // pattern on the x402 notice above: prose to read, data to route on.
     fallback:
       'haven_sign refused SIGN_CONTEXT_REFUSED / sign_context_unavailable and signed nothing: call ' +
       'haven_sign again with { payload_hash, typed_data_b64 } from the payment result, unchanged, ' +
-      `then update the connector by rerunning \`${hostedConnectorRerunCommand()}\`.`,
+      `then update the connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair line it prints.`,
+  }
+}
+
+/**
+ * #3419: the task-budget (`haven_open_task_budget` / `haven_close_task_budget`)
+ * twin of the two notices above. A task-budget handoff names
+ * `haven_sign { task_budget_id }`, and every signer older than
+ * `TASK_BUDGET_MIN_SIGNER_VERSION` predates that argument form: the MCP SDK
+ * validates the call against the tool's registered schema and hands the
+ * handler the STRIPPED object (#2312's mechanism, on the signer this time),
+ * so the key vanishes silently and the handler answers the generic
+ * `SIGNING_ERROR` "Pass payment_id … or payload_hash." — a refusal that says
+ * nothing about the version and follows a fetch that never happened. Unlike
+ * the direct-payment case there is NO relay fallback: a task-budget context
+ * is an `eip712_delegation` signing payload the 0.5.x unbound allowlist
+ * refuses and a 0.4.x signer must not be steered into, so the only recovery
+ * is to update — after releasing the pending budget this result reserved.
+ *
+ * This notice stays ADVISORY for the same reason as the x402 one: the hosted
+ * server cannot see the signer, so it reports what the backend emits and the
+ * recovery route, and the signer enforces its own versions.
+ *
+ * `task_sign_context_version` is `TASK_SIGN_CONTEXT_VERSION` from
+ * `@haven_ai/sdk` (`userop-binding.ts`) — the same constant the backend's
+ * `GET /task-budgets/:id/sign-context` route is versioned against and the
+ * signer's `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` derives from — never
+ * re-derived here.
+ */
+export function taskSignerCompatibilityNotice() {
+  return {
+    task_sign_context_version: TASK_SIGN_CONTEXT_VERSION,
+    min_signer_version: TASK_BUDGET_MIN_SIGNER_VERSION,
+    signer_capability: SIGNER_CAPABILITY_KEY,
+    check:
+      'Call next_tool with next_arguments EXACTLY as given — the signer fetches the exact bytes ' +
+      'by task_budget_id. If haven_sign answers SIGNING_ERROR with a message starting "Pass ' +
+      "payment_id (preferred for delegation-rail x402\", the signer predates task budgets and signed " +
+      'nothing: first close this budget with haven_close_task_budget { task_budget_id } to release ' +
+      `it, then update the connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair ` +
+      'line it prints, then open the budget again.',
+    // The same recovery sentence as structured data, mirroring the #1309
+    // pattern on the notices above: prose to read, data to route on. No relay
+    // fallback exists for this shape (see above), so the data says so too.
+    fallback:
+      'haven_sign answered SIGNING_ERROR with a message starting "Pass payment_id (preferred for ' +
+      'delegation-rail x402" — the signer predates task budgets and signed nothing: call ' +
+      'haven_close_task_budget { task_budget_id } to release the pending budget, then update the ' +
+      `connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair line it prints, ` +
+      'then open the budget again. There is no relay fallback for this signing context.',
   }
 }

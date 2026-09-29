@@ -4,11 +4,17 @@ status: current
 contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
+  - packages/backend/src/infra/repositories/merchants.ts
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/db/migrations/101_merchant_pay_to.ts
+  - packages/backend/src/routes/merchants.ts
+  - packages/backend/src/infra/repositories/delegation-budgets.ts
   - packages/sdk/src/delegate-account.ts
   - packages/sdk/src/redemption-guard.ts
   - packages/sdk/src/direct-payment-guard.ts
   - packages/sdk/src/settlement-child.ts
   - packages/sdk/src/task-budget-guards.ts
+  - packages/sdk/src/sub-budget-guards.ts
   - packages/sdk/src/userop-binding.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-erc7710.ts
@@ -22,6 +28,8 @@ covers:
   - packages/backend/src/db/migrations/078_device_authorizations.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
+  - packages/backend/src/infra/repositories/agent-rekeys.ts
+  - packages/backend/src/infra/transaction.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/infra/repositories/agent-organizations.ts
   - packages/backend/src/db/migrations/094_agent_organizations.ts
@@ -50,7 +58,11 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-25"
+  - packages/backend/src/modules/passport/attestation.ts
+  - packages/backend/src/modules/passport/revocation.ts
+  - packages/backend/src/modules/passport/issuance.ts
+  - packages/backend/src/infra/repositories/agent-passports.ts
+last-verified: "2026-09-27"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -141,6 +153,25 @@ delegation, or allowance (a test pins the target and the zero value). It does
 not add a value-bearing server signer, so invariant 3 stands. See
 [11-agent-passport-schema](../architecture/11-agent-passport-schema.md).
 
+**Passport UID repair and recovery (#3395) — reads stay read-only; refusals
+keep the record honest:** the anchor-UID repair sweep and the #1043 recovery
+write only to `agent_passports` (the CAS UID swap, the confirmation and
+pacing stamps), never to any payment, budget or authority surface, and they
+never sign or broadcast anything. Their authority relevance is narrower: a
+UID is written only from an `Attested` log the proven-ours reader accepts
+(pinned schema, attested by the mined tx's own sender, tx targeting the
+pinned EAS contract), and every row the sweep cannot answer is paced out of
+the head on a dedicated column (`uid_repair_next_at`) rather than re-taken
+every tick — pacing cannot widen any client's powers and cannot reorder what
+the merchant verifier is handed (it never touches `updated_at`, the column
+that verifier breaks ties on). Two #3342 residuals are named rather than
+handled and live in the passport doc: a reorg between a fresh revoke's
+mining and its head-read confirmation could mark a row `confirmed` for an
+attestation the reorg resurrected, and a schema re-registration makes
+pre-existing rows permanently unrepairable until they are re-anchored.
+Neither moves spend authority; both are passport-record correctness, and the
+second is an owner-runbook obligation on re-registration.
+
 **Read-only reporting columns (#2871) — no invariant moves:** the covered
 repository `infra/repositories/transaction-history.ts` now also projects
 `machine_payment_evidence.fx_rate_sek` and `.fx_source` alongside the
@@ -201,14 +232,27 @@ the retired session rail's (one period's budget per recipient) — with
 revocation one `disableDelegation` away.
 
 **Batch revocation (#1400):** `POST /agents/:id/delegations/revoke-all`
-prepares ONE UserOp batching a `disableDelegation` call per pending/active
+prepares ONE UserOp batching a `disableDelegation` call per still-enabled
 delegation (`prepareCalls`, `ExecutionMode.BatchDefault` — atomic: all
-disable or none do). The owner signs that UserOp exactly as a single revoke;
-Haven still cannot sign it (invariant 3 unchanged). Fail-closed ordering: the
-DB rows flip to `revoked` only AFTER the UserOp lands, so a crash window can
-leave on-chain-disabled rows still marked active (a directionally safe
-surplus — a later redemption attempt reverts on-chain), never the reverse.
-Because `disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
+disable or none do; "still enabled" spans `pending`, `active` AND `replaced`
+rows since #3343 — a replaced row's delegation is live until its own disable
+lands). The owner signs that UserOp exactly as a single revoke; Haven still
+cannot sign it (invariant 3 unchanged). Fail-closed ordering: the DB rows
+flip to `revoked` only AFTER the UserOp lands, so a crash window can leave
+on-chain-disabled rows still marked active (a directionally safe surplus — a
+later redemption attempt reverts on-chain), never the reverse. What makes
+that ordering honest is the CALldata binding (#3343): a submit route records
+`revoked` only after its server verifies the signed UserOp's calldata —
+decoded from the account's `execute` envelope, selector-checked — actually
+disables the delegation(s) it is about to mark, by `delegationIdentity`
+(signature excluded), against the set the SERVER derives (`pending`/`active`/
+`replaced`), not a client-supplied hash list. The per-hash route refuses an
+op that does not disable its one row (400, before submission); revoke-all and
+the re-key revoke refuse an op that does not disable exactly the server's
+whole still-enabled set (409 re-prepare — the re-key stays at `preflight`,
+its point of no return). The client pairing of a userop with delegation
+hashes, and any client-supplied hash list, are not trusted inputs. Because
+`disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
 the batch is atomic, the prepare step reconciles that window (#1423): it reads
 `disabledDelegations(hash)` for every candidate, heals already-disabled rows
 to `revoked`, and drops them from the batch — a failed read degrades to the
@@ -251,6 +295,86 @@ the first commits and returns that row instead of building a competitor to it.
 The chain round trip that derives the delegate account address is taken
 *before* the lock — a slot held across an RPC turns a slow node into a stalled
 slot, which would trade a duplicate-offer defect for an availability one.
+
+An abandoned re-key can still leave a slot holding two pending rows at once —
+its own inert re-key replacement plus a later ordinary build's row — because
+re-key rows are excluded from reuse (#3386) rather than merged with it. No
+Haven flow presents that re-key row for signing again, so it is a leftover,
+not a second live offer, and a later re-key revokes it along with every
+other non-revoked row (`pending` included) before it can complete. A re-key's
+own `pending` replacement rows cannot be activated outside that re-key's own
+completion (`ACTIVATE_REKEY_DELEGATION_SQL` inside `completeRekey`): the raw
+activate route (`POST /agents/:id/delegations/:hash/activate`) refuses any
+row with `rekey_id IS NOT NULL` before the slot sweep, with the same filter
+kept in `ACTIVATE_PENDING_DELEGATION_SQL` as a backstop. This does not claim
+such a row can never be *signed* — an owner who still holds a stale payload
+can sign it — only that a signed one is never accepted through the ordinary
+route. Separately, the stalled-issue race that could plant one of these rows
+in the first place is closed: `insertRekeyDelegation` re-checks the inserting
+re-key's OWN stage (must still be `metered`) under the agent-row lock, not
+merely that *some* re-key of the agent is in flight, so a stalled issue
+request for an abandoned re-key can no longer insert rows while a different,
+successor re-key is the one actually in flight (#3439).
+
+> **Re-verified (#3450, 2026-09-28):** #3439's own re-check did not by itself
+> stop two CONCURRENT issue calls on one (not abandoned) re-key from both
+> inserting — the stage stays `metered` until one of them reaches
+> `markIssued`, so a second call whose `nextDelegationVersion` read landed
+> after the first call's own insert but before that first call's
+> `markIssued` still passed the same re-check and landed a genuine duplicate
+> `pending` row — per the #3450 spec review's uncommitted scratch test (40
+> staggered trials per tree, 0–19ms stagger), dev 23/40 and #3439's head
+> 11/40; reproduced deterministically (not statistically) in the shipped
+> suite by `agent-rekey-issue-concurrent.test.ts`, which pins the exact
+> interleaving with a control point rather than relying on timing luck. The
+> issue route now runs its whole piece-build loop plus
+> `markIssued` inside ONE transaction
+> (`withRekeyIssueTransaction`/`withTransaction`), so the first call's insert
+> takes the `agents` row lock and holds it — together with every lock and
+> row this re-key's own pieces take — until that call's `markIssued` commits.
+> A second call blocks on that same lock and, once released, re-runs
+> #3439's `stage = 'metered'` re-check as a fresh READ COMMITTED statement
+> against the now-committed `issued` row, so it inserts nothing. The re-check
+> itself is unchanged; only the transaction it now runs inside is new. No
+> authority moves and no new network call runs inside the transaction — the
+> one RPC this route makes (`computeHybridAccountAddress`) still runs before
+> the loop opens. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
+**Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
+ordinary recipient-pinned budget whose pin the server fills with the
+merchant's verified payTo on the agent's chain. That is the one address every
+active, verified x402 operator offer of the merchant there names in its own
+402 challenge (`merchant_catalog.pay_to`, recorded by the read-only catalog
+probe). The client does not choose it: a sent `recipient_address` must equal
+it (409 otherwise). No merchant-locked budget is issued when:
+- the merchant has no such offer on the agent's chain;
+- the offers disagree, or one of them names no payTo;
+- another merchant's non-delisted offer on that network names the same
+  address (`shared`);
+- any of the offers lacks ERC-7710, read per the offer's own RECORDED
+  network — `merchant_catalog.asset_transfer_methods` reflects only the
+  `accepts[]` options on that row's `accepts[0]` network (#3386, the same
+  scoping `pay_to` already used), so an offer probed on a network where the
+  merchant only accepts EIP-3009 counts as lacking ERC-7710 there even if a
+  DIFFERENT network's challenge names it. A pinned budget cannot pay an
+  EIP-3009 merchant, per the rule in §8 below;
+- the payTo is one of the agent's own addresses: its delegate key, its
+  delegate account or its treasury.
+
+The payTo is the merchant's word, not the owner's. A payTo equal to the
+delegate key would pin the grant to the EIP-3009 funding leg's recipient,
+which the bridge selects before the open budget. The budget would then fund
+payments to any merchant. `agent_delegations.merchant_id` is a label, not a
+caveat, so the authority is still the signed caveat stack and nothing else.
+
+Two limits are deliberate:
+- **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
+  same address share one `(agent, token, recipient)` slot. Activating either
+  replaces the other; both carry the same on-chain authority.
+- **Rotation.** A later payTo rotation never re-points a signed grant. The
+  budget stays pinned to the address the owner signed for, and the merchant
+  page reports it `stale`.
 
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:
@@ -354,6 +478,22 @@ chain.
 > x402 legs behind `GET /transactions` bind it as `$2` alongside an account-id
 > `ANY(...)` — the same ownership property, written differently. An earlier
 > draft of this note said `WHERE user_id = $1` flatly; review measured it.
+
+> **Re-verified #3031 (edit budget limits in place):** the diff touched one
+> covered backend file, `routes/agent-delegations.ts`, and the change is the
+> request-SCHEMA layer only: the file joined the request-validation
+> `enforcedModules`, so a body or path parameter whose shape the OpenAPI spec
+> does not declare (required `signature`, the `budget_atomic` digits-only
+> and uint96 shapes, uuid path params) is refused with the plugin's 400
+> envelope BEFORE the handler — the hand-rolled shape rungs are deleted.
+> Every authority claim in this document is untouched: the Owner-Signature
+> Invariant holds verbatim (a delegation activates, revokes or rekeys only
+> after the OWNER's signature is verified — the schema never substitutes for
+> it, it only refuses malformed input earlier); budget, expiry, rail and
+> delegate-identity checks stay semantic in the handlers; no route, role or
+> ceremony was added or reordered. The body-less revoke-prepare shape dev
+> always accepted is preserved (an optional requestBody validates declared
+> shape OR absent). Nothing else in this document was re-read.
 
 > **Re-verified #3166 (edit budget limits in place):** this diff touched one
 > file in this document's coverage list, `hooks/useDelegationBudget.ts` — it
@@ -1331,6 +1471,27 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > those two files and those four fields. Nothing else in this document was
 > re-verified.
 
+> **Re-verified #3032 (2026-09-25, request validation slice 4, the
+> enforcement itself):** this diff touches four covered files —
+> `routes/agents.ts`, `routes/agent-rekey.ts`,
+> `routes/agent-connection-setups.ts`, `routes/hybrid-accounts.ts` — and moves
+> no authority or custody boundary. What moved is where the request SHAPE is
+> decided: the handler-side type/shape rungs (name string-ness, delegate
+> address narrowing, bigint serializer rungs, setup-token string-ness,
+> passkey coordinate shapes, the 23505 uniques) are deleted because the
+> OpenAPI schemas state each one, and the five modules join `enforcedModules`
+> with the mode default flipped to `enforce`. The authority checks the
+> paragraphs above describe — revoke-precedes-issue, budget carry, owner
+> signatures, the delegation rail's approve-verify flow — are handler
+> SEMANTICS and are untouched: the schema refuses shapes before the handler,
+> never authority after it. The refusal code stays 400 with the plugin's
+> envelope (which names a field, never a rail, so the #2245 rail-agnostic
+> refusal property holds); an anonymous caller still gets 401 before any 400
+> (the #3276 note above). The `agent-passports.ts` module enforces without a
+> handler edit — its rung count was already 0. Scope of this note: the four
+> files' validation plumbing and the mode default. Nothing else in this
+> document was re-verified.
+
 ## 10. The delegate key's signing surface (#3272, epic #3284)
 
 The agent's delegate key signs in two places: `@haven_ai/signer` on the user's
@@ -1373,7 +1534,10 @@ signer imports:
     `redeemDelegations` with exactly one permission context holding either a
     single grant made to this account by a different account, or — since
     #3329 — a two-link chain whose leaf is a task-budget child this account
-    delegated to itself under that grant; in `SingleDefault` mode,
+    delegated to itself under that grant, or — since #3330 — a three-link
+    chain whose leaf is a sub-budget grant TO this account from a different
+    account (the delegating agent A) standing under A's own self-delegated
+    parent-child of A's budget; in `SingleDefault` mode,
     canonically encoded at every level;
   - **on an x402 funding leg**, its single execution is a `transfer` of the
     quoted amount of the quoted token to this key's own delegate EOA. That
@@ -1415,11 +1579,47 @@ signer imports:
   at a different delegation.
   Authority-reducing only: it cannot disable the owner's budget delegation
   (a different delegator) or anything not self-granted.
-- **The redemption allowlist admits one more chain (#3329):** exactly two
-  links where the leaf is a self-delegation by this account and the parent is
-  a grant to this account from a different account — the task-budget shape —
-  in addition to the single grant. An empty chain, a longer chain, a leaf
-  delegated by anyone else and a leaf delegated *to* anyone else stay refused.
+- **The redemption allowlist admits one more chain (#3330):** exactly three
+  links — `[sub grant, parent child, budget]`, leaf first — where the leaf is
+  a grant made TO this account by the delegating agent's account (a real
+  grant from elsewhere, never self), the middle link is the delegating
+  agent's SELF-delegation (its delegate and delegator are both its own
+  account, the task-child shape class), and the budget link keeps the
+  one-link shape (a grant to the delegating agent's account from a different
+  account). An empty chain, a chain of four or more links, a three-link chain
+  whose leaf is self-delegated (a task child never chains two deep), a
+  three-link chain whose middle link is not the delegating agent
+  self-delegated, or a budget link whose delegator/delegate do not name the
+  delegating agent and its own granter stay refused — every case pinned by
+  `redemption-guard.test.ts`. The AND-only caveat property again makes the
+  three-link chain AS OR MORE restrictive than the two-hop task chain: every
+  caveat of all three hops runs in one redemption, so A's period budget binds
+  any spend B makes even within B's own allowance (the chain is the
+  enforcement). Alongside it, **a sub-budget child `Delegation` (#3330)** —
+  the delegating agent's signed narrowing of its own budget (`A`'s
+  parent-child, the self-delegated shape) or the grant to agent B's account —
+  is verified by `assertOwnSubBudgetChild` (`sub-budget-guards.ts`): pinned
+  Delegation/Caveat types and domain, the period-scoped
+  `erc20PeriodTransfer` scope (token, periodAmount, the SAME periodDuration
+  and startDate as the parent — a slice of the same window, never a different
+  clock), a `timestamp` caveat never outliving the parent budget, an
+  `allowedCalldata` recipient pin exactly when the parent pins, and
+  `delegator` = this signer's own account with `delegate` = the DECLARED child
+  delegate (A's own account on the parent-child row, B's on the grant row).
+  It refuses the task-budget hard-cap `erc20TransferAmount` shape, the same
+  way the task child refuses the period scope. As with #3329, this is the
+  AMENDMENT of the §10 one-delegation-per-redeem invariant — never a silent
+  loosening: the allowlist grows from "exactly one or two links" (#3329) to
+  "exactly one, two or three" with every link's shape pinned, issuance stays
+  owner-governed (decision log 2026-09-27: the owner co-signs each sub-budget;
+  A's delegate key only signs within the owner-approved envelope), and a
+  sub-budget child can only **narrow** what its parent's caveats already
+  allow — periodAmount ≤ the parent's on the same window, expiry ≤ the
+  parent's, recipient pin never unpinned — so the three-link chain is never
+  wider than the budget it hangs from. The close path gains the same
+  authority-reducing `disableDelegation` UserOp for a sub-budget child
+  (`assertOwnSubBudgetCloseUserOp`), byte-shape-identical to the task
+  budget's.
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
 Haven's binding key declared anything else. Every refusal on the shape checks,
@@ -1485,10 +1685,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   The allowlist therefore decodes the redemption. It must carry exactly one
   permission context holding either exactly one delegation — a grant to this
   signer's own account from a different account — or, since #3329, that
-  grant with a single self-delegated task-budget child in front of it, in
+  grant with a single self-delegated task-budget child in front of it, or,
+  since #3330, the three-link sub-budget chain `[sub grant, parent child,
+  budget]` (the leaf a grant TO this account from the delegating agent, the
+  middle link that agent's self-delegated narrowing of its own budget), in
   `SingleDefault` mode, with every level canonically encoded. An empty chain,
-  a chain of three or more links, a two-link chain whose leaf is not
-  delegated by this account to itself, a self-granted delegation standing
+  a chain of four or more links, a two-link chain whose leaf is not
+  delegated by this account to itself, a three-link chain whose leaf is
+  self-delegated or whose middle link is not the delegating agent
+  self-delegated, a self-granted delegation standing
   alone and a delegation to another account are each refused, and each case
   is pinned by a test. The
   treasury was never exposed beyond the caveats either way: budget, recipient
@@ -1505,8 +1710,12 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   it is upgraded. Haven cannot gate that: the attack never passes through
   Haven, and the hosted MCP cannot see the signer's handshake. Credential
   rotation does not help, because the new key lands in the same old signer. The
-  remedy is the signer upgrade (a connector re-run), carried by the release
-  notes (`packages/signer/CHANGELOG.md`).
+  remedy is the signer upgrade, carried by the release notes
+  (`packages/signer/CHANGELOG.md`). How an installed machine performs that
+  upgrade — the command every update hint names, and which older signers it
+  cannot reach — is maintained in
+  [`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md)
+  § *Client-version signal*.
 
 > **Scope of this section:** written for #3272 and rewritten once for epic
 > #3284 (#3283, #3281) against the signer and SDK at those changes; #3375
@@ -1521,6 +1730,108 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > #3375 recipient pin, whichever delegation the backend redeems under. The rest
 > of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified (#3392, 2026-09-27):** the idempotent replay on both payment
+> routes now refuses a `task_budget` mismatch with a 409 instead of silently
+> replaying onto another budget: `POST /payments` compares `task_budget_id`
+> alongside token/recipient/amount (`mismatch()`, lower-cased, "absent" is a
+> value), and `POST /x402`'s `delegationReplay` compares it on
+> `pending_signature` (unexpired) and `confirmed` rows BEFORE the
+> confirmed-200 branch — a budget-only check there; enforcing the other
+> fields on confirmed rows is out of scope. The SDK's x402 receipt cache and
+> in-flight map record the `taskBudgetId` each entry was created under and
+> `authorizeX402`/`fetch`/`payX402Quote`/`resumeAuthorizedX402` throw the new
+> typed `X402TaskBudgetMismatchError` before any network call. No authority
+> moves: the comparison only reports an attribution mismatch the replay used
+> to hide — the caller, Haven and the enforcers keep exactly their previous
+> powers, and no signature, key role or on-chain surface changes. The rest of
+> this document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified (#3330, 2026-09-28):** §10 is AMENDED, not loosened: the
+> redemption allowlist admits exactly one more chain shape — the three-link
+> sub-budget chain `[sub grant, parent child, budget]` (leaf a real grant TO
+> this signer's account from the delegating agent A, middle link A's
+> self-delegated narrowing of its own budget, budget link unchanged) — and a
+> new typed-data class, the sub-budget child, joins the task child as a
+> flow-keyed `haven_sign` signable (`sub_budget_id`), verified by
+> `assertOwnSubBudgetChild`/`assertOwnSubBudgetCloseUserOp`
+> (`sub-budget-guards.ts`, now named in this document's coverage list). A
+> sub-budget child can only
+> NARROW its parent (periodAmount ≤ the parent's on the SAME
+> periodDuration/startDate window, expiry ≤ the parent's, a recipient pin
+> never unpinned), so the chain B redeems is as or more restrictive than the
+> two-hop task chain and every hop's caveats still AND into the one
+> redemption — the DelegationManager, not Haven, meters the spend. Issuance
+> is owner-governed (decision log 2026-09-27: owner co-signs each sub-budget;
+> A's delegate key only signs within the owner-approved envelope), so an
+> agent still never signs authority for another account's delegator side. The
+> signer's x402 arm is unchanged: a three-link redemption moves through
+> `haven_sign`'s flow-keyed channel, and the settlement-child verifier's
+> shape routing (never a self-delegation, never a root) is untouched. Every
+> refusal case is pinned in `redemption-guard.test.ts`. Scope of this note:
+> `redemption-guard.ts`, `sub-budget-guards.ts`, `settlement-child.ts`'s
+> shape predicates, `signer/tools.ts`'s new `sub_budget_id` channel, and the
+> allowlist bullets above. Nothing else in this document was re-read for it,
+
+> **Re-verified (#3423 slice C, 2026-09-29):** the SDK's
+> `listReceiptsPage` (and `haven_list_receipts` on both surfaces) gains an
+> opt-in `compact` that drops three verbatim payload echoes from each
+> read-only history row. No authority moves: no signature, key role,
+> delegation, caveat or on-chain surface changes, and the default output is
+> unchanged. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
+> **Re-verified (#3423 slice B, 2026-09-29):** `settleX402` answers a repeated
+> settle of a confirmed erc7710 row (`machine_metadata.settlement_scheme =
+> 'erc7710'`, with a `tx_hash`) with a typed 409 `payment_already_settled`
+> before any signing, merchant or chain step, and writes nothing. An EIP-3009
+> funding row keeps the plain 409, because its `tx_hash` proves only funding.
+> No authority moves: no signature, key role, delegation, caveat or on-chain
+> surface changes. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
+> **Re-verified (#3417, 2026-09-28):** the SDK's erc7710 `prepare()` now
+> recognises `delegationReplay`'s confirmed-200 answer (`status: 'confirmed'`
+> with a `tx_hash` and no `sign_data`) before its scheme check. It used to throw
+> the scheme-mismatch 500 there, which the hosted MCP relayed as "transient,
+> retry once". Because the confirmed branch compares only the task budget
+> (#3392 above), the SDK itself checks that the row pays this merchant (`to`)
+> for this resource (`resource_url`): only then does it throw the typed
+> `X402Erc7710AlreadySettledError`, which the three hosted erc7710 prepare
+> sites (`haven_pay_mcp_tool`, `haven_prepare_catalog_purchase`,
+> `haven_pay_x402_quote`) turn into a done state that names no tool. Any other
+> confirmed row, such as an EIP-3009 funding leg whose payee is the delegate
+> and whose `tx_hash` proves only funding, is a 409 key collision, never
+> "settled". Nothing is signed on any of these answers, before or after this
+> change. A `confirmed` answer without a `tx_hash` keeps the scheme refusal.
+> No authority moves: the
+> backend is untouched, and no signature, key role, delegation, caveat or
+> on-chain surface changes. The rest of this document was not re-read for it,
+> and `last-verified` is not bumped.
+>
+> **Re-verified (#3419, 2026-09-29):** this diff touches two files in this
+> document's coverage list, `packages/sdk/src/userop-binding.ts` and
+> `packages/signer/src/tools.ts`. `TASK_SIGN_CONTEXT_VERSION` is a new
+> exported constant beside `DIRECT_SIGN_CONTEXT_VERSION`: additive data — the
+> backend's task sign-context version, now single-sourced for the signer's
+> `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` and the hosted/local
+> `signer_compatibility` notices — that moves no signing check. In `tools.ts`
+> every handler's parse became the strict re-parse `parseStrictFor` (the
+> registration keeps unknown keys, so the tool layer is the refusal point)
+> and `normalizeError` gained the `UNSUPPORTED_ARGUMENT` branch. An undeclared
+> top-level argument produced no signature and no audit entry before — the
+> old strip-mode parse dropped it before any fetch, so the call either signed
+> from the declared keys alone or was refused for missing ones — and still
+> produces none; what changes is only what that refusal says: structured
+> `UNSUPPORTED_ARGUMENT` (`unknown_arguments`, `signer_version`, `fallback`,
+> `next_action: stop_and_tell_user`) where the generic `SIGNING_ERROR` used
+> to be, and where the declared keys alone were sufficient the strict parse
+> now refuses a call the old signer signed without the key — a change that
+> can only narrow what this signer signs. No signature, key role, delegation,
+> caveat, allowlist, binding or redemption-guard claim in this document
+> moves: the allowlist, the #3271 binding, the #3375 recipient pin and the
+> redemption guards all run unchanged, after the parse. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.
+>
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this diff renames backend-internal identifiers to account vocabulary in the
 > files this document spans: `userSafeId` → `accountId`
@@ -1614,3 +1925,65 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > document claims about authority, custody or signing changes. Scope of this
 > note: which dashboard load writes the daily row. Nothing else in this
 > document was re-verified.
+>
+> **Re-verified (0.7.0-alpha.0 release, 2026-09-29):** the release bump touches
+> one file in this document's coverage list, `packages/signer/src/tools.ts`. It
+> rewrites the self-reported `SIGNER_VERSION` string literal to
+> `0.7.0-alpha.0` and nothing else. No signing check, refusal or allowlist
+> moves in that edit. The release's changes to the signing surface (#3330,
+> #3419) were each re-verified here when they merged. Nothing else in this
+> document was re-verified.
+
+> **Re-verified #3331 frontend (2026-09-27, round 2 review fixes):** this diff
+> touches `hooks/useDelegationBudget.ts` only. `reload`/`reloadSigners` read
+> `/agents/{id}/delegations` and `/agents/{id}/account-signers`, neither
+> chain-scoped, so the hook's own reset effect now clears state on an
+> `agentId` change only — not a `chainId`-only rerender, which used to blank a
+> still-valid signer set for no data reason. `editBudget`'s build call already
+> forwarded `merchant_slug` (#3331 round 1); this diff adds a doc-accurate
+> JSDoc only, no behaviour change: an edit sends the STORED recipient (the
+> row's own `recipient_address`, never re-derived client-side), which the
+> server compares against the merchant's CURRENT verified payTo and refuses
+> (409) on a mismatch, keeping the merchant label on success — on a refusal
+> the old budget stays live and untouched, exactly as the REPLACE composition
+> above already guarantees. Nothing here changes which signature authorises
+> what: the owner still signs the new grant, then the stop, and the delegate
+> key and local signer are never touched. Scope of this note:
+> `useDelegationBudget.ts`'s reset effect and JSDoc. Nothing else in this
+> document was re-verified.
+>
+> **Re-verified #3331 frontend (2026-09-27, round 3 review fixes):** this diff
+> touches one file in this document's coverage list, `hooks/useDelegationBudget.ts`,
+> plus non-authority UI changes in `FundMerchantModal.tsx`, `EditBudgetModal.tsx`,
+> `MerchantBudgetsList.tsx` and the merchant page that carry no authority and
+> are out of this document's scope. In the covered file: `reload`'s in-flight
+> guard (`manualBudgetsReloadInFlight`) changes from a boolean to a counter so
+> two overlapping MANUAL reloads (e.g. a fast double click on "Try again")
+> both have to finish before a background poll tick can run again — this is
+> the reload() manual-vs-poll guard from the round 2 note above, on the READ
+> path only: it decides whether a `GET /agents/{id}/delegations` poll fires,
+> never whether a build, activation or revoke is authorised. No handler,
+> query, signing path or refusal moves; budget, recipient and expiry remain
+> enforced on-chain by the caveat enforcers exactly as before. Scope of this
+> note: `useDelegationBudget.ts`'s manual-reload counter. Nothing else in this
+> document was re-verified.
+>
+> **Re-verified unchanged (#3426, 2026-09-29, agent tax-declaration opt-in):**
+> this diff touches two files in this document's coverage list,
+> `infra/repositories/agents.ts` and `db/migrations/index.ts`, and both
+> changes are SETTINGS-only by construction. The migration adds
+> `agents.tax_declaration_enabled` (BOOLEAN NOT NULL DEFAULT false) and the
+> index registers `103_agent_tax_declaration_opt_in.ts`; no delegation,
+> budget, re-key, activation or signing query is touched. The repository
+> additions are one gated owner write and one agent-scoped read: the write's
+> WHERE clause gates only its own new column (switching ON requires the
+> owner's company-details row to hold a VIES-valid VAT number; switching OFF
+> is never gated) and the read LEFT JOINs `owner_company_details` to answer
+> the agent's own declaration content — the unsigned §2.1 fields, never
+> `principalId`/`principalAttributionHash` (the SDK computes those locally)
+> and never a signature. Nothing this document claims about authority,
+> custody or signing moves: no delegation graph shape, caveat enforcer,
+> redemption guard, settlement child or signer allowlist changes, and the
+> column feeds no path that authorises a payment. Scope of this note: the new
+> column, its migration registration, and the two new repository functions.
+> Nothing else in this document was re-verified.

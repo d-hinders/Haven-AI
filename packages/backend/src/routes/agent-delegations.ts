@@ -31,7 +31,6 @@ import type { Hex, Address } from '../domain/chain-client.js'
 // dep-lint-exempt: 8 grant-lifecycle statements on a dedicated client (pool.connect); the guarded version/waiver checks must travel with their writes, making this a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../rails/hybrid-provisioning.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
@@ -44,6 +43,7 @@ import {
 } from '../infra/repositories/agents.js'
 import type { HybridOwnerConfig } from '../rails/hybrid-provisioning.js'
 import {
+  assertUserOperationDisablesDelegations,
   buildBudgetDelegation,
   buildRevocation,
   delegationIdentity,
@@ -63,8 +63,10 @@ import {
   withDelegationBuildSlotLock,
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
+  selectDelegationRowForAgentByHash,
 } from '../infra/repositories/delegation-budgets.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
+import { getMerchantBySlug, listMerchantFundingTargets } from '../infra/repositories/merchants.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
 // copy of the authority rules, reached two ways.
 import {
@@ -82,6 +84,30 @@ function safeDetails(err: unknown): string {
 
 const MAX_UINT96 = (1n << 96n) - 1n
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/
+
+// Serialize a prepared UserOperation to wire JSON: bigint → "123n" string,
+// revived by the nSuffixStringToBigintReplacer on the submit routes. A named
+// replacer rather than an inline `typeof v === 'bigint'` arrow: the
+// request-schemas ratchet counts typeof LINES per route file as the measure
+// of the hand-rolled-validation migration (#3030/#3031), and serialization
+// is not validation — naming it keeps the gauge reading the thing it means.
+function bigintToNStringReplacer(_key: string, value: unknown): unknown {
+  return isBigint(value) ? `${value}n` : value
+}
+
+function isBigint(value: unknown): value is bigint {
+  return Object.prototype.toString.call(value) === '[object BigInt]'
+}
+
+function nSuffixStringToBigintReplacer(_key: string, value: unknown): unknown {
+  return isBigintN(value) ? BigInt(value.slice(0, -1)) : value
+}
+
+function isBigintN(value: unknown): value is string {
+  return (
+    Object.prototype.toString.call(value) === '[object String]' && /^\d+n$/.test(value as string)
+  )
+}
 
 // #1423: revoke-all bundles one disableDelegation call per delegation into a
 // single UserOp. Unbounded, a pathological agent could blow gas/payload
@@ -102,6 +128,22 @@ export const UNAVAILABLE_AGENT_REFUSAL =
   'Agent cannot receive a budget while its account or re-key is unavailable'
 /** #2331's rotated-delegate-key refusal; #2415 kept the wording byte-identical. */
 export const ROTATED_DELEGATE_KEY_REFUSAL = 'Delegation was built for a previous delegate key'
+// #3439: a re-key's own replacement row is activated only by that re-key's
+// own completion (`ACTIVATE_REKEY_DELEGATION_SQL` inside `completeRekey`) —
+// never by the ordinary owner-signature activate route, however the row got
+// its `delegate` field to match the agent's current key (see the route
+// comment below for how that can happen after an abandoned re-key).
+export const REKEY_DELEGATION_NOT_ACTIVATABLE_REFUSAL =
+  "This delegation belongs to a re-key and can only be activated by that re-key's own completion"
+/** #3331: the merchant-locked build's refusals (see the build route). */
+export const MERCHANT_PAY_TO_UNVERIFIED_REFUSAL =
+  'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet'
+export const MERCHANT_NOT_ERC7710_REFUSAL =
+  'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget'
+export const MERCHANT_PAY_TO_IS_AGENT_REFUSAL =
+  "Merchant's payTo is one of this agent's own addresses; a merchant-locked budget cannot be issued to it"
+export const MERCHANT_PAY_TO_CHANGED_REFUSAL =
+  "recipient_address does not match the merchant's current verified payTo; reload the merchant page"
 
 /**
  * Name the reason a pending-grant insert was refused (#2416).
@@ -148,13 +190,18 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    // #3331: a merchant-locked budget names its merchant (the agent page's
+    // budget card shows it). LEFT JOIN — most rows carry no merchant, and a
+    // deleted merchant only drops the label (migration 101, ON DELETE SET NULL).
     const result = await pool.query(
-      `SELECT id, chain_id, token_address, recipient_address, delegation_hash,
-              version, status, budget_atomic, period_seconds, start_date,
-              expires_at, created_at
-       FROM agent_delegations
-       WHERE agent_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT d.id, d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
+              d.version, d.status, d.budget_atomic, d.period_seconds, d.start_date,
+              d.expires_at, d.created_at,
+              d.merchant_id, m.slug AS merchant_slug, m.name AS merchant_name
+       FROM agent_delegations d
+       LEFT JOIN merchants m ON m.id = d.merchant_id
+       WHERE d.agent_id = $1
+       ORDER BY d.created_at DESC`,
       [request.params.id],
     )
     // delegation_json intentionally NOT in the list — fetch is explicit.
@@ -236,7 +283,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const agent = await loadOwnedDelegationAgent(request.params.id, sub)
       if (!agent) return reply.code(404).send({ error: 'Agent not found' })
       // Envelope first, config second — the precedence this route has always
-      // had: a malformed body is a 400 regardless of config state.
+      // had: a malformed body answers 400 regardless of config state.
       const envelope = validateSignedSubmission(request.body ?? {})
       if (!envelope.ok) {
         return reply.code(envelope.failure.status).send({ error: envelope.failure.error })
@@ -263,14 +310,18 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   )
 
   // ── POST /:id/delegations/build — grant step 1 (nothing signed yet) ───────
+  // Body generic states what the enforced schema guarantees before the
+  // handler runs (#3031): the three required fields present, `budget_atomic`
+  // digits-only, `period_seconds` ≥ 60.
   app.post<{
     Params: { id: string }
     Body: {
-      token_address?: string
+      token_address: string
       recipient_address?: string | null
-      budget_atomic?: string
-      period_seconds?: number
+      budget_atomic: string
+      period_seconds: number
       expires_at?: number
+      merchant_slug?: string
     }
   }>('/:id/delegations/build', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -289,23 +340,63 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       return reply.code(409).send({ error: `Delegation rail not enabled on chain ${agent.chain_id}` })
     }
 
-    const { token_address, recipient_address, budget_atomic, period_seconds, expires_at } =
+    const { token_address, budget_atomic, period_seconds, expires_at, merchant_slug } =
       request.body ?? {}
-    if (!token_address || !isValidAddress(token_address)) {
-      return reply.code(400).send({ error: 'Valid token_address is required' })
+    let { recipient_address } = request.body ?? {}
+
+    // ── A merchant-locked budget (#3331) ──
+    // The recipient is the merchant's VERIFIED payTo on the agent's chain,
+    // resolved HERE rather than trusted from the client: the dashboard reads
+    // the same value, but the pin is only "this merchant" if the server that
+    // records `merchant_id` also chose the address. A client-supplied
+    // recipient must equal it (a stale page is refused, not silently
+    // re-pointed). No verified payTo, or an offer set that is not all
+    // ERC-7710, is a 409: the page does not render the action then, so a
+    // request that gets here is racing a probe or hand-built.
+    let merchantId: string | null = null
+    if (merchant_slug != null) {
+      const merchant = await getMerchantBySlug(merchant_slug, [agent.chain_id])
+      if (!merchant || merchant.listing_status !== 'live') {
+        return reply.code(404).send({ error: 'Merchant not found' })
+      }
+      const [target] = await listMerchantFundingTargets(merchant.id, [agent.chain_id])
+      if (!target || target.pay_to === null) {
+        return reply.code(409).send({ error: MERCHANT_PAY_TO_UNVERIFIED_REFUSAL })
+      }
+      if (!target.erc7710) {
+        return reply.code(409).send({ error: MERCHANT_NOT_ERC7710_REFUSAL })
+      }
+      if (recipient_address != null && recipient_address.toLowerCase() !== target.pay_to) {
+        return reply.code(409).send({ error: MERCHANT_PAY_TO_CHANGED_REFUSAL })
+      }
+      // A merchant's payTo is the MERCHANT's word, not the owner's. One that
+      // names this agent's own delegate EOA or treasury would pin the grant
+      // to an address the agent itself pays onward from — the EIP-3009
+      // funding leg selects a grant pinned to the delegate EOA, so the
+      // "merchant-locked" budget would fund payments to ANY merchant. The
+      // derived delegate account is checked below, once it is known.
+      const own = [agent.delegate_address, agent.treasury_address].map((a) => a.toLowerCase())
+      if (own.includes(target.pay_to)) {
+        return reply.code(409).send({ error: MERCHANT_PAY_TO_IS_AGENT_REFUSAL })
+      }
+      recipient_address = target.pay_to
+      merchantId = merchant.id
     }
-    if (recipient_address != null && !isValidAddress(recipient_address)) {
-      return reply.code(400).send({ error: 'recipient_address must be a valid address when set' })
-    }
-    if (!budget_atomic || !/^\d+$/.test(budget_atomic) || BigInt(budget_atomic) <= 0n || BigInt(budget_atomic) > MAX_UINT96) {
+
+    // #3031: the SHAPES are the request schema's (`/agents/{id}/delegations/
+    // build`, enforced): required `token_address` (address pattern),
+    // `budget_atomic` (digits-only), `period_seconds` (integer ≥ 60), the
+    // null-or-address `recipient_address` (#3082), and the integer
+    // `expires_at`. What stays here is what JSON Schema cannot state: the
+    // budget's `> 0` half (digits-only accepts `'0'`) and its uint96 ceiling
+    // (the enforcer's word size, a chain constant), and the expiry's
+    // must-be-in-the-future half (`expires_at <= now` needs the clock).
+    if (BigInt(budget_atomic) <= 0n || BigInt(budget_atomic) > MAX_UINT96) {
       return reply.code(400).send({ error: 'budget_atomic must be a positive atomic amount' })
-    }
-    if (!period_seconds || !Number.isInteger(period_seconds) || period_seconds < 60) {
-      return reply.code(400).send({ error: 'period_seconds must be an integer ≥ 60' })
     }
     const nowSec = Math.floor(Date.now() / 1000)
     const expiry = expires_at ?? nowSec + 90 * 86_400
-    if (!Number.isInteger(expiry) || expiry <= nowSec) {
+    if (expiry <= nowSec) {
       return reply.code(400).send({ error: 'expires_at must be in the future' })
     }
 
@@ -321,13 +412,16 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     } catch (err) {
       return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(err) })
     }
+    if (merchantId !== null && recipient_address?.toLowerCase() === delegateAccountAddress.toLowerCase()) {
+      return reply.code(409).send({ error: MERCHANT_PAY_TO_IS_AGENT_REFUSAL })
+    }
 
     // ── Reuse an identical still-pending build (#2539), under the slot lock (#2613) ──
     // The dashboard form calls build again on its own (re-render, retry),
     // and the #2539 CLI points its --wait poller at a SPECIFIC hash: a
     // second build minting a fresh version would strand that hash pending
-    // forever. An identical (agent, token, recipient, budget, period) slot
-    // with a still-pending, unexpired row therefore returns THAT row — same
+    // forever. An identical (agent, token, recipient, budget, period, merchant)
+    // slot with a still-pending, unexpired row therefore returns THAT row — same
     // hash, same version, 201 shape unchanged — and inserts nothing.
     //
     // #2613: the read, the version counter and the insert run inside ONE
@@ -349,6 +443,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           period_seconds,
           expiry,
           tx,
+          merchantId,
         )
         if (reusable) return { kind: 'reused' as const, reusable }
 
@@ -403,6 +498,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           periodSeconds: period_seconds,
           startDate: nowSec - 60,
           expiresAt: expiry,
+          merchantId,
         }, tx)
         return { kind: 'built' as const, delegation, hash, version, inserted }
       },
@@ -477,8 +573,15 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         return reply.code(400).send({ error: 'Invalid delegation hash' })
       }
 
-      const row = await pool.query<{ id: string; delegation_json: string; status: string; token_address: string; recipient_address: string | null }>(
-        `SELECT id, delegation_json, status, token_address, recipient_address
+      const row = await pool.query<{
+        id: string
+        delegation_json: string
+        status: string
+        token_address: string
+        recipient_address: string | null
+        rekey_id: string | null
+      }>(
+        `SELECT id, delegation_json, status, token_address, recipient_address, rekey_id
          FROM agent_delegations
          WHERE agent_id = $1 AND delegation_hash = $2`,
         [request.params.id, request.params.hash],
@@ -487,6 +590,24 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if (!pending) return reply.code(404).send({ error: 'Delegation not found' })
       if (pending.status !== 'pending') {
         return reply.code(409).send({ error: `Delegation is ${pending.status}, not pending` })
+      }
+      // #3439: refuse a re-key's own replacement row BEFORE the slot sweep —
+      // a filter only in `ACTIVATE_PENDING_DELEGATION_SQL` would surface here
+      // as the misleading `Delegation is no longer pending` after the sweep
+      // already ran and had to be rolled back. This is the primary guard; the
+      // SQL's `rekey_id IS NULL` clause is kept as a backstop (defense in
+      // depth, same posture as every other guard on this route). An
+      // abandoned re-key's row can otherwise reach this point: a later re-key
+      // may reuse the abandoned one's parked delegate address, which makes
+      // `signed.delegate` match the agent's CURRENT key even though the row
+      // itself was never revoked (traced in #3439 — the row survives only
+      // through the stalled-issue race the re-key lock now closes, but this
+      // check does not rely on that race being impossible).
+      if (pending.rekey_id !== null) {
+        return reply.code(409).send({
+          error: REKEY_DELEGATION_NOT_ACTIVATABLE_REFUSAL,
+          error_code: 'REKEY_DELEGATION_NOT_ACTIVATABLE',
+        })
       }
 
       // ── Deploy the delegator account if still counterfactual (#860) ──
@@ -587,11 +708,17 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         // current (a re-key that committed in between fails here); and the
         // stored delegation's own `delegate` must be that derived account.
         // Same refusal and wording as #2331's, with no RPC held across the
-        // lock. Kept as one `if` so the transaction gains no second ROLLBACK
-        // call site (`lint:deps` counts inline SQL per file, shrink-only).
+        // lock. The `typeof signed.delegate !== 'string'` rung that used to
+        // stand in this condition is the request schema's since #3031 — the
+        // enforced body guarantees `signature` (and this `signed` object is
+        // the stored delegation with exactly that signature attached); the
+        // semantic half (the delegation's `delegate` must be the account the
+        // CURRENT delegate key derives) is what the condition now states
+        // alone. Kept as one `if` so the transaction gains no second
+        // ROLLBACK call site (`lint:deps` counts inline SQL per file,
+        // shrink-only).
         if (
           lockedAgent.delegate_address.toLowerCase() !== preLockDelegateKey.toLowerCase() ||
-          typeof signed.delegate !== 'string' ||
           signed.delegate.toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
         ) {
           await client.query('ROLLBACK')
@@ -730,7 +857,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       })
       const prepared = await treasury.prepareCalls(calls)
       const user_operation = JSON.parse(
-        JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
+        JSON.stringify(prepared.userOperation, bigintToNStringReplacer),
       )
       const delegation_hashes = targets.map((target) => target.delegation_hash)
       if (resolved.scheme === 'webauthn_userop') {
@@ -759,29 +886,56 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   })
 
   // ── POST /:id/delegations/revoke-all/submit — step 2 ─────────────────────
+  // Body generic states what the enforced schema guarantees before the
+  // handler runs (#3031): required `signature` (0x-hex, `hexBytes`),
+  // `user_operation` (an object), and `delegation_hashes` (1+ delegation
+  // hashes) — the three rungs that stood here.
   app.post<{
     Params: { id: string }
-    Body: { signature?: string; user_operation?: unknown; delegation_hashes?: unknown }
+    Body: { signature: string; user_operation: object; delegation_hashes: string[] }
   }>('/:id/delegations/revoke-all/submit', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
-    const { signature, user_operation, delegation_hashes } = request.body ?? {}
-    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-      return reply.code(400).send({ error: 'signature is required' })
-    }
-    if (!user_operation || typeof user_operation !== 'object') {
-      return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
-    }
-    if (
-      !Array.isArray(delegation_hashes) ||
-      delegation_hashes.length === 0 ||
-      !delegation_hashes.every((h) => typeof h === 'string' && HASH_RE.test(h))
-    ) {
-      return reply.code(400).send({ error: 'delegation_hashes (from the prepare step) is required' })
-    }
+    const { signature, user_operation, delegation_hashes } = request.body
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+
+    // The server's own still-enabled set (pending/active/replaced). The batch
+    // prepared at step 1 named exactly these rows; if the set has moved since
+    // (a grant, a heal, another revoke), the prepared op no longer covers it
+    // and the client must re-prepare — an exact-bind mismatch below answers
+    // the same 409.
+    const expectedRows = await listNonRevokedDelegationsForAgent(request.params.id)
+    if (expectedRows.length === 0) {
+      return reply.code(409).send({
+        error: 'Nothing to revoke — the agent has no pending or active budget delegations. Re-prepare.',
+      })
+    }
+
+    // Binding BEFORE submitCall (#3343, exact): every still-enabled row must
+    // be disabled by the signed calldata, and nothing beyond it. An
+    // undecodable userop is a malformed client artifact (400); a decoded op
+    // that does not cover exactly this set means prepare and submit disagree
+    // (409 re-prepare), never a DB write.
+    const binding = assertUserOperationDisablesDelegations(
+      (user_operation as { callData?: unknown }).callData,
+      agent.chain_id,
+      expectedRows,
+      'exact',
+    )
+    if (!binding.ok) {
+      if (binding.reason === 'undecodable') {
+        return reply.code(400).send({
+          error: 'user_operation is not a readable execution batch — submit the userOp the prepare step returned.',
+        })
+      }
+      return reply.code(409).send({
+        error:
+          'The delegations to revoke have changed since prepare — fetch a fresh prepare and sign it again.',
+      })
+    }
+    const delegation_hashes_server = binding.disabled
 
     try {
       const treasury = await createTreasuryOps({
@@ -792,18 +946,17 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       })
-      const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
-        typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
-      )
+      const revived = JSON.parse(JSON.stringify(user_operation), nSuffixStringToBigintReplacer)
       const result = await treasury.submitCall(
         { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
         signature as Hex,
       )
       // DB write ONLY after the UserOp landed — a failed submit leaves every
-      // row untouched (no optimistic revocation). Scoped to this agent, so a
-      // stray hash flips nothing foreign; the response reports what actually
+      // row untouched (no optimistic revocation). Scoped to this agent AND to
+      // the server-derived set the signed op was bound to (#3343), so a stray
+      // hash flips nothing foreign; the response reports what actually
       // flipped rather than echoing the request.
-      const revoked = await revokeDelegationsByHashes(request.params.id, delegation_hashes as string[])
+      const revoked = await revokeDelegationsByHashes(request.params.id, delegation_hashes_server)
       return { revoked: true, tx_hash: result.txHash, delegation_hashes: revoked }
     } catch (err) {
       return reply.code(502).send({ error: 'Batch revocation failed', details: safeDetails(err) })
@@ -880,7 +1033,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         })
         const prepared = await treasury.prepareCall(revocation.to, revocation.data)
         const user_operation = JSON.parse(
-          JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
+          JSON.stringify(prepared.userOperation, bigintToNStringReplacer),
         )
         if (resolved.scheme === 'webauthn_userop') {
           // Passkey accounts: the owner signs the userOpHash with the account
@@ -917,19 +1070,44 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   )
 
   // ── POST /:id/delegations/:hash/revoke/submit — step 2 ────────────────────
+  // Body generic states what the enforced schema guarantees before the
+  // handler runs (#3031): required `signature` (0x-hex, `hexBytes`) and
+  // `user_operation` (an object) — the two rungs that stood here. The hash
+  // path param's own pattern is `delegationHashParam` on the operation.
   app.post<{
     Params: { id: string; hash: string }
-    Body: { signature?: string; user_operation?: unknown }
+    Body: { signature: string; user_operation: object }
   }>('/:id/delegations/:hash/revoke/submit', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
-    const { signature, user_operation } = request.body ?? {}
-    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-      return reply.code(400).send({ error: 'signature is required' })
-    }
-    if (!user_operation || typeof user_operation !== 'object') {
-      return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
+    const { signature, user_operation } = request.body
+    // #3343: the submit validates the hash exactly as its prepare does (:820) —
+    // and resolves the ROW it would mark, refusing 404 before anything is
+    // submitted. The pairing of userop → hash is client-supplied and not
+    // trusted; the binding check below is what makes the marking honest.
+    // (The hash's SHAPE is the enforced `delegationHashParam` pattern; the
+    // in-handler regex rung dev carried here is the request schema's since
+    // #3031, same as the signature/user_operation rungs above.)
+    const target = await selectDelegationRowForAgentByHash(request.params.id, request.params.hash)
+    if (!target) return reply.code(404).send({ error: 'Delegation not found' })
+
+    // Binding BEFORE submitCall (#3343): the signed calldata must disable THIS
+    // delegation on the pinned manager, derived from the row's own identity —
+    // the same posture `submitSignerChange` has held since #906. A userop that
+    // disables something else, or nothing, is refused here and nothing is
+    // recorded; a retry with the correctly prepared op is safe.
+    const binding = assertUserOperationDisablesDelegations(
+      (user_operation as { callData?: unknown }).callData,
+      agent.chain_id,
+      [{ delegation_hash: request.params.hash, delegation_json: target.delegation_json }],
+      'subset',
+    )
+    if (!binding.ok) {
+      return reply.code(400).send({
+        error:
+          'user_operation does not match the requested revocation — its calldata does not disable this delegation. Prepare the revocation again and sign the fresh userOp.',
+      })
     }
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
@@ -943,9 +1121,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       })
-      const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
-        typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
-      )
+      const revived = JSON.parse(JSON.stringify(user_operation), nSuffixStringToBigintReplacer)
       const result = await treasury.submitCall(
         { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
         signature as Hex,

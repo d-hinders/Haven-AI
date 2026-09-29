@@ -78,12 +78,59 @@ describe('assertRedeemsOwnBudgetDelegation — two-link task-budget chain (#3329
     )
   })
 
-  it('refuses a three-link chain', () => {
+  it('refuses a three-link chain whose leaf is self-delegated (a task child never chains two deep) (#3330)', () => {
     const leaf = buildDelegation({ delegate: own, delegator: own })
     const mid = buildDelegation({ delegate: own, delegator: THIRD_PARTY })
     const root = buildDelegation({ delegate: THIRD_PARTY, delegator: DEFAULT_DELEGATOR })
     expect(() => assertRedeemsOwnBudgetDelegation(redeemCallData([leaf, mid, root], own), own)).toThrow(
-      /3-link delegation chain/,
+      /leaf is delegated by this signer's OWN account/,
+    )
+  })
+
+  // ── Three-link sub-budget chain (#3330): [sub grant, parent child, budget] ─
+
+  it('accepts the three-link sub-budget chain (#3330)', () => {
+    // B's grant (delegate=B=own, delegator=A), A's parent-child (self), A's
+    // budget (delegate=A, delegator=treasury).
+    const grant = buildDelegation({ delegate: own, delegator: THIRD_PARTY })
+    const parentChild = buildDelegation({ delegate: THIRD_PARTY, delegator: THIRD_PARTY })
+    const budget = buildDelegation({ delegate: THIRD_PARTY, delegator: DEFAULT_DELEGATOR })
+    expect(() => assertRedeemsOwnBudgetDelegation(redeemCallData([grant, parentChild, budget], own), own)).not.toThrow()
+  })
+
+  it('refuses a three-link chain whose middle link is not the delegating agent self-delegated (#3330)', () => {
+    const grant = buildDelegation({ delegate: own, delegator: THIRD_PARTY })
+    const parentChild = buildDelegation({ delegate: THIRD_PARTY, delegator: DEFAULT_DELEGATOR }) // not self
+    const budget = buildDelegation({ delegate: THIRD_PARTY, delegator: DEFAULT_DELEGATOR })
+    expect(() => assertRedeemsOwnBudgetDelegation(redeemCallData([grant, parentChild, budget], own), own)).toThrow(
+      /middle link is delegated by/,
+    )
+  })
+
+  it('refuses a three-link chain whose middle link does not delegate to the delegating agent (#3330)', () => {
+    const grant = buildDelegation({ delegate: own, delegator: THIRD_PARTY })
+    const parentChild = buildDelegation({ delegate: DEFAULT_DELEGATOR, delegator: THIRD_PARTY })
+    const budget = buildDelegation({ delegate: THIRD_PARTY, delegator: DEFAULT_DELEGATOR })
+    expect(() => assertRedeemsOwnBudgetDelegation(redeemCallData([grant, parentChild, budget], own), own)).toThrow(
+      /middle link delegates to/,
+    )
+  })
+
+  it('refuses a three-link chain whose budget link does not delegate to the delegating agent (#3330)', () => {
+    const grant = buildDelegation({ delegate: own, delegator: THIRD_PARTY })
+    const parentChild = buildDelegation({ delegate: THIRD_PARTY, delegator: THIRD_PARTY })
+    const budget = buildDelegation({ delegate: own, delegator: DEFAULT_DELEGATOR })
+    expect(() => assertRedeemsOwnBudgetDelegation(redeemCallData([grant, parentChild, budget], own), own)).toThrow(
+      /budget link delegates to/,
+    )
+  })
+
+  it('refuses a three-link chain whose budget link is granted by the delegating agent (#3330)', () => {
+    const grant = buildDelegation({ delegate: own, delegator: THIRD_PARTY })
+    const parentChild = buildDelegation({ delegate: THIRD_PARTY, delegator: THIRD_PARTY })
+    const budget = buildDelegation({ delegate: THIRD_PARTY, delegator: THIRD_PARTY })
+    expect(() => assertRedeemsOwnBudgetDelegation(redeemCallData([grant, parentChild, budget], own), own)).toThrow(
+      /budget link is granted by the delegating agent's OWN/,
     )
   })
 

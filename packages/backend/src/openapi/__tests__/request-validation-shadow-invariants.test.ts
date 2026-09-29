@@ -177,12 +177,20 @@ const COERCION_TARGETS: Record<string, string> = {
   'GET /balances/{accountAddress} query:chain_id': 'integer',
   'GET /machine-payments/receipts query:limit': 'integer',
   'GET /portfolio/{accountAddress} query:chain_id': 'integer',
+  // #3333 receive side — every route reads chain_id through the shared
+  // `parseChainParam` (`Number(request.query.chain_id)`), which accepts the
+  // coerced number exactly as it accepts the wire string.
+  'GET /receive/{accountAddress} query:chain_id': 'integer',
   'GET /transactions query:limit': 'integer',
   'GET /transactions query:offset': 'integer',
   'GET /transactions/export.csv query:chainId': 'integer',
   'GET /transactions/{accountAddress} query:chain_id': 'integer',
   'GET /transactions/{accountAddress} query:limit': 'integer',
   'GET /transactions/{accountAddress} query:page': 'integer',
+  'POST /receive/{accountAddress}/ingest query:chain_id': 'integer',
+  'POST /receive/{accountAddress}/off-ramp/prepare query:chain_id': 'integer',
+  'POST /receive/{accountAddress}/receipt-drop query:chain_id': 'integer',
+  'PUT /receive/{accountAddress}/off-ramp-destination query:chain_id': 'integer',
 }
 
 describe('shadow-mutation invariants (#3135, partner finding S5)', () => {

@@ -28,6 +28,7 @@ import { x402CatalogGuidedPurchase } from './scenarios/x402-catalog-guided-purch
 import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 import { thrownErrorDetail } from './lib/thrown-error-detail.js'
 import { runPreflight, formatPreflight } from './lib/preflight.js'
+import { formatRunReport, type ScenarioOutcome } from './lib/run-report.js'
 
 // Deterministic, no-LLM scenarios run in order.
 //
@@ -182,7 +183,7 @@ async function main(): Promise<void> {
   }
   console.log('')
 
-  const results: { scenario: Scenario; result: ScenarioResult }[] = []
+  const results: ScenarioOutcome[] = []
   for (const scenario of SCENARIOS) {
     process.stdout.write(`• ${scenario.name} … `)
     let result: ScenarioResult
@@ -195,6 +196,7 @@ async function main(): Promise<void> {
     }
     const tag = result.skipped ? 'SKIP' : result.pass ? 'PASS' : 'FAIL'
     console.log(`${tag} — ${result.detail}`)
+    if (result.cleanupWarning) console.log(`  ⚠ cleanup: ${result.cleanupWarning}`)
     results.push({ scenario, result })
   }
 
@@ -231,19 +233,8 @@ async function main(): Promise<void> {
   console.log(`\n✓ all ${results.length} scenario(s) passed`)
 }
 
-function printRunReport(
-  apiUrl: string,
-  results: { scenario: Scenario; result: ScenarioResult }[],
-): void {
-  console.log('\n─── run report (paste into docs/bug-reports/) ───')
-  console.log(`# Money-flow QA run — ${new Date().toISOString()}`)
-  console.log(`Target: ${apiUrl} (Base Sepolia)\n`)
-  console.log('| Scenario | Invariant | Result | Detail |')
-  console.log('|---|---|---|---|')
-  for (const { scenario, result } of results) {
-    const status = result.skipped ? 'skip' : result.pass ? 'pass' : '**FAIL**'
-    console.log(`| ${scenario.name} | ${scenario.invariant} | ${status} | ${result.detail} |`)
-  }
+function printRunReport(apiUrl: string, results: ScenarioOutcome[]): void {
+  for (const line of formatRunReport(apiUrl, results)) console.log(line)
 }
 
 main().catch((e) => {

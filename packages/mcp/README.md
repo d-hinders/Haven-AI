@@ -121,21 +121,16 @@ Environment variable form:
 - `haven_close_task_budget` (#3329)
 - `haven_submit` (#3329 — relays a local signer signature by `task_budget_id`; a `payment_id` is refused on this runtime, which signs and submits payments inline)
 
-### `idempotencyKey` is deprecated — send `idempotency_key`
+### `idempotencyKey` is removed — send `idempotency_key`
 
 The tools that take an idempotency key (`haven_send`, `haven_pay_mcp_tool`,
-`haven_quote_x402`, `haven_pay_x402_quote`, `haven_pay_x402`) now accept
-**`idempotency_key`**, the spelling the hosted Haven MCP surface and every other
-Haven wire contract use. `idempotencyKey` still works and returns a deprecation
-warning; it will be removed in a future release.
+`haven_quote_x402`, `haven_pay_x402_quote`, `haven_pay_x402`) take
+**`idempotency_key`**, the spelling the hosted Haven MCP surface uses.
 
-Send **one** of them. Sending both with different values is refused
-(`AMBIGUOUS_IDEMPOTENCY_KEY`) with nothing contacted or spent — the key decides
-whether a retry is the same payment or a second one, so Haven will not guess
-which scope you meant. Sending both with the same value is fine.
-
-The warning arrives in an optional `warnings` array on the success result. It is
-additive: a caller that ignores it sees the response it always saw.
+The legacy `idempotencyKey` spelling is **refused**, not silently accepted or
+dropped: any call that sets it — alone or alongside `idempotency_key` — fails
+with `IDEMPOTENCY_KEY_RENAMED` before anything is contacted or spent. Send
+`idempotency_key` instead.
 
 ## First-launch consent
 
@@ -159,7 +154,7 @@ Tools this server will expose to your agent runtime:
 
 On-chain budget (the real spend gate — enforced by the agent's
 signed delegation, not by Haven):
-  • up to 50.000000 USDC per 1440 min
+  • up to 25 USDC per 1440 min
 
 Anything above the on-chain budget is declined before any money
 moves — it is not queued, and no one is asked to review it. If the

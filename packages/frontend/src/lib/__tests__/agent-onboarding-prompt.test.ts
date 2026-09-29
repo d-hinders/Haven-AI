@@ -53,7 +53,11 @@ describe('the onboarding prompt (#2535)', () => {
   it('names only commands that exist, and never asks for a password', () => {
     // #2535 makes this blocking: the prompt may name `haven login` (#2526) and
     // `haven agents connect` (#2527) only because both landed first.
-    expect(AGENT_ONBOARDING_PROMPT).toContain('npx @haven_ai/cli@<channel> login')
+    // #3430 rebased the first: the command is the manifest's own
+    // `packages.cli.one_liner`, because `packages.cli.channel` serves the
+    // full spec and a template filled from it produced `@@`.
+    expect(AGENT_ONBOARDING_PROMPT).toContain('<packages.cli.one_liner> login')
+    expect(AGENT_ONBOARDING_PROMPT).toContain('`packages.cli.channel` serves the full spec')
     expect(AGENT_ONBOARDING_PROMPT).toContain('haven agents connect --name')
     expect(AGENT_ONBOARDING_PROMPT).toContain('haven_get_agent')
     // The epic invariant no slice may weaken.
@@ -62,6 +66,14 @@ describe('the onboarding prompt (#2535)', () => {
 
   it('carries no secret and no setup token — it is shown before any setup exists', () => {
     expect(AGENT_ONBOARDING_PROMPT).not.toMatch(/sk_agent_|sk_live_|--setup /)
+  })
+
+  it('names no chain — this string is committed once and served from every deployment (#3431)', () => {
+    // Dev deploys Base Sepolia only; a bare "USDC on Base" here is the same
+    // funding-step trap #2591 already fixed in the runbook. Proven by
+    // mutation: putting the old text back must fail this (see the worker
+    // report).
+    expect(AGENT_ONBOARDING_PROMPT).not.toMatch(/USDC on Base\b/)
   })
 
   it('substitutes every origin placeholder', () => {

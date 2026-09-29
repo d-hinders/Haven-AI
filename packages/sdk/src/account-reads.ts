@@ -69,6 +69,24 @@ export function formatRemainingDisplay(tokenAddress: string, tokenSymbol: string
     : `${remainingAtomic} ${tokenSymbol} (atomic; unknown decimals)`
 }
 
+/**
+ * #3410: atomic → human token amount, ONE formatter for every consent-surface
+ * render (the same role `formatRemainingDisplay` plays for allowance reads).
+ * `decimals` must come from `resolveTokenBySymbol` or
+ * `resolveTokenFromAddress`; with neither resolving, the caller labels the
+ * atomic string explicitly instead of guessing. A whole number carries no
+ * trailing `.0` (`1000000` USDC atomic → `1`, matching connect's budget
+ * phrasing, not `1.0`); a fraction keeps its significant digits (`0.5`).
+ */
+export function formatTokenAmount(atomic: string, decimals: number): string {
+  const value = safeBigInt(atomic)
+  if (value < 0n) return '0' // same guard formatAtomicAmount applies; budgets are never negative
+  const digits = value.toString().padStart(decimals + 1, '0')
+  const intPart = digits.slice(0, digits.length - decimals) || '0'
+  const fracPart = digits.slice(digits.length - decimals).replace(/0+$/, '')
+  return fracPart ? `${intPart}.${fracPart}` : intPart
+}
+
 /** #3329: `RawTaskBudget` (snake_case wire) → `HavenTaskBudget` (camelCase). */
 export function mapTaskBudget(raw: RawTaskBudget): HavenTaskBudget {
   return {
@@ -106,6 +124,15 @@ function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummar
     recipientAddress: taskBudget.recipientAddress,
     expiresAt: taskBudget.expiresAt,
   }
+}
+
+/** #3423: a receipts-list row without its payload echoes (see `listReceiptsPage({ compact })`). */
+function compactReceipt(receipt: HavenPaymentReceipt): HavenPaymentReceipt {
+  const row: HavenPaymentReceipt = { ...receipt }
+  delete row.challengePayload
+  delete row.selectedPayment
+  delete row.protocolReceiptPayload
+  return row
 }
 
 /**
@@ -316,14 +343,21 @@ export class AccountReads {
   }
 
   /** #3128: one page with `total`, `hasMore` and `nextCursor` — see {@link HavenPaymentReceiptsPage}. */
-  async listReceiptsPage(options: { limit?: number; cursor?: string } = {}): Promise<HavenPaymentReceiptsPage> {
+  async listReceiptsPage(
+    options: { limit?: number; cursor?: string; compact?: boolean } = {},
+  ): Promise<HavenPaymentReceiptsPage> {
     const params = new URLSearchParams()
     if (options.limit) params.set('limit', String(options.limit))
     if (options.cursor) params.set('cursor', options.cursor)
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.transport.get<RawHavenPaymentReceiptsResponse>(`/machine-payments/receipts${query}`)
+    const receipts = raw.receipts.map(mapPaymentReceipt)
     return {
-      receipts: raw.receipts.map(mapPaymentReceipt),
+      // #3423 (owner decision, opt-in): `compact` drops the three bulky
+      // payload echoes (the merchant's full 402 challenge, the selected
+      // option, and the merchant's PAYMENT-RESPONSE) from each row. The keys
+      // are absent, not null, and the default shape is unchanged.
+      receipts: options.compact ? receipts.map(compactReceipt) : receipts,
       total: typeof raw.total === 'number' ? raw.total : null,
       hasMore: typeof raw.has_more === 'boolean' ? raw.has_more : null,
       nextCursor: typeof raw.next_cursor === 'string' ? raw.next_cursor : null,

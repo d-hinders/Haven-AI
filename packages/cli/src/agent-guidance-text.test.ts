@@ -56,8 +56,22 @@ describe('haven guide text (#2525)', () => {
     // #3304: +270 bytes, the "If something breaks" section — a `client_update`
     // on a result means update that client, and the release notes live at
     // /releases.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10877)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10790)
+    //
+    // #3412: +2 bytes / +6 UTF-16 units — that sentence now says to run
+    // `upgrade_command` as given and then any repair line it prints (the
+    // connector-installed packages' command became the connector doctor). The
+    // units move more than the bytes because the two em-dashes it replaced
+    // are 3 bytes but 1 unit each.
+    //
+    // #3430: −9 bytes / −9 units, and the first SHRINK of this string. Step 1
+    // told the agent to fill a `npx @haven_ai/cli@<channel>` template from
+    // `packages.cli.channel` — but the manifest serves the FULL spec under
+    // that name (`@haven_ai/cli@dev`), so the literal substitution produced
+    // `npx @haven_ai/cli@@haven_ai/cli@dev` (the 2026-09-28 cold run, finding
+    // 1). The command is now the manifest's own `packages.cli.one_liner`, run
+    // as given, so no raise was needed — the budget headroom grew instead.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10870)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10787)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

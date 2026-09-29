@@ -207,7 +207,7 @@ export async function failPendingX402Intent(
 // ── erc7710 settle handoff (#830) ────────────────────────────────────────────
 
 export const FIND_SETTLE_INTENT_SQL = `SELECT id, status, execution_rail, prepared_user_op, chain_id, x402_resource_url,
-                to_address, amount_raw, token_address, machine_metadata
+                to_address, amount_raw, token_address, machine_metadata, tx_hash
          FROM payment_intents
          WHERE id = $1 AND agent_id = $2`
 
@@ -228,6 +228,8 @@ export interface SettleIntentRow {
    * that hand it back raw, `null` for pre-#1355 intents.
    */
   machine_metadata: Record<string, unknown> | string | null
+  /** #3423: the settlement hash of a confirmed erc7710 row, for the already-settled answer. */
+  tx_hash: string | null
 }
 
 export async function findSettleIntent(

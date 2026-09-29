@@ -28,6 +28,8 @@ import {
   type IntentSettlementFields,
 } from '../../infra/repositories/machine-payments.js'
 import { findAgentDelegateAddress } from '../../infra/repositories/agents.js'
+import { buyerPartyFromJoin, type ViesStatus } from '../../infra/repositories/owner-company-details.js'
+import { config } from '../../config.js'
 import { getBookTimeCapture } from '../../infra/fiat-values.js'
 import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
@@ -160,6 +162,13 @@ export interface MachinePaymentEvidenceRow {
    * before #2960 and on the legacy rail, where no such account exists.
    */
   intent_delegate_account_address?: string | null
+  /** #3332: joined from `owner_company_details` on `user_id` — `OWNER_COMPANY_DETAILS_JOIN_COLUMNS`. */
+  buyer_legal_name?: string | null
+  buyer_country?: string | null
+  buyer_org_number?: string | null
+  buyer_vat_number?: string | null
+  buyer_vies_status?: ViesStatus | null
+  buyer_vies_checked_at?: string | null
 }
 
 interface PaymentIntentEvidenceRow extends MachinePaymentEvidenceSource {
@@ -701,6 +710,18 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       delegate_address: toCanonicalAddress(row.intent_delegate_address) ?? null,
       delegate_account_address: toCanonicalAddress(row.intent_delegate_account_address) ?? null,
       merchant_address: merchantAddress ?? null,
+      // #3332: additive, flag-gated — see `buyerPartyFromJoin`'s own doc.
+      buyer_details: buyerPartyFromJoin(
+        {
+          buyer_legal_name: row.buyer_legal_name ?? null,
+          buyer_country: row.buyer_country ?? null,
+          buyer_org_number: row.buyer_org_number ?? null,
+          buyer_vat_number: row.buyer_vat_number ?? null,
+          buyer_vies_status: row.buyer_vies_status ?? null,
+          buyer_vies_checked_at: row.buyer_vies_checked_at ?? null,
+        },
+        config.ownerCompanyDetailsEnabled,
+      ),
     },
   )
 }

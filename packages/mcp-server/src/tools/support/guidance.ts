@@ -12,6 +12,7 @@
  * capability module.
  */
 import {
+  AgentPaymentNextAction,
   HavenClient,
   createNextStepBuilder,
   type AgentNextStep,
@@ -22,6 +23,7 @@ import {
   type NextStepHandoff,
   type NextStepInput,
   type NextStepTarget,
+  X402Erc7710AlreadySettledError,
 } from '@haven_ai/sdk'
 import { z } from 'zod'
 import { toolSchemas } from '../contracts.js'
@@ -217,6 +219,99 @@ export function buildAgentGuidance(input: AgentGuidanceInput): AgentGuidanceEnve
 }
 
 /**
+ * #3417: the answer to a prepare whose idempotency_key already belongs to a
+ * SETTLED erc7710 payment to this merchant for this resource. The backend
+ * replays the confirmed intent (no child to sign), and the SDK surfaces it as
+ * `X402Erc7710AlreadySettledError` only after checking payee and resource; this
+ * is the answer an agent recovering from a crash should read — the original
+ * payment and its settlement hash, a done state that names no tool — instead
+ * of the "transient, retry" 500 it used to relay. Shared by the catalog and
+ * plain-HTTP prepare sites, which both reach `prepareX402Erc7710`.
+ *
+ * Unlike the settled arm of `haven_settle_mcp_tool` it carries no `delivered`:
+ * Haven cannot know whether the merchant's result reached the agent before a
+ * crash, and it cannot re-deliver it. `status` is the backend's own
+ * `confirmed`, echoed rather than renamed.
+ */
+/** #3423: the settle-side twin says what is true of a repeated settle (no key involved). */
+const SETTLED_TEXT = {
+  prepare: {
+    omitted: 'this idempotency_key already settled; there is nothing left to sign, settle or pay',
+    reason:
+      'Idempotent replay: this idempotency_key already paid this merchant for this resource, and ' +
+      'the payment settled on-chain. Nothing was signed and nothing new was charged. Haven cannot ' +
+      "re-deliver the merchant's result: if you received it earlier, report that purchase from " +
+      "payment_id and settlement_tx_hash; if you did not, tell the user it was paid but the result " +
+      'was not received. Amount and tool are not compared: if you reused this key for a different ' +
+      'tool or price at the same merchant, this is that earlier payment, not the new purchase. To ' +
+      'buy again, use a new idempotency_key.',
+  },
+  settle: {
+    omitted: 'this payment already settled; there is nothing left to sign, settle or pay',
+    reason:
+      'This payment already settled on-chain, so this was a repeated settle: nothing was signed and ' +
+      "nothing new was charged. Haven cannot re-deliver the merchant's result: if you received it " +
+      'earlier, report that purchase from payment_id and settlement_tx_hash; if you did not, tell the ' +
+      'user it was paid but the result was not received. Do not call the merchant again with a new payment.',
+  },
+} as const
+
+function settledReplayResponse(err: X402Erc7710AlreadySettledError, origin: 'prepare' | 'settle') {
+  const text = SETTLED_TEXT[origin]
+  const body = (err.body ?? {}) as Record<string, unknown>
+  const str = (key: string) => (typeof body[key] === 'string' ? { [key]: body[key] as string } : {})
+  return {
+    payment_id: err.paymentId,
+    status: 'confirmed',
+    settlement_scheme: 'erc7710' as const,
+    settled: true,
+    idempotent_replay: true,
+    settlement_tx_hash: err.txHash,
+    ...str('amount'),
+    ...str('token'),
+    ...str('merchant_to'),
+    ...str('resource_url'),
+    ...str('explorer_url'),
+    ...(typeof body.chain_id === 'number' ? { chain_id: body.chain_id } : {}),
+    ...buildAgentGuidance({
+      nextAction: AgentPaymentNextAction.None,
+      nextTool: null,
+      nextToolOmittedReason: text.omitted,
+      safeToContinue: true,
+      reason: text.reason,
+      summary: {
+        payment_id: err.paymentId,
+        status: 'confirmed',
+        ...str('amount'),
+        ...str('token'),
+      },
+    }),
+  }
+}
+
+/**
+ * #3417: the `.catch` for an erc7710 `prepareX402Erc7710` call. A settled
+ * replay becomes `{ settledReplay }` for the site to return as-is; any other
+ * failure is rethrown unchanged, so every existing refusal keeps its path.
+ */
+export function catchSettledReplay(err: unknown): { settledReplay: ReturnType<typeof settledReplayResponse> } {
+  if (err instanceof X402Erc7710AlreadySettledError) return { settledReplay: settledReplayResponse(err, 'prepare') }
+  throw err
+}
+
+/**
+ * #3423: the same done state for a repeated settle of an erc7710 payment that
+ * already settled — `haven_settle_mcp_tool` and `haven_submit` with
+ * `settlement_scheme: 'erc7710'` (the SDK's `submitX402Erc7710` throws
+ * `X402Erc7710AlreadySettledError` on the backend's typed 409). Any other
+ * failure is rethrown unchanged.
+ */
+export function catchSettledResettle(err: unknown): { settledReplay: ReturnType<typeof settledReplayResponse> } {
+  if (err instanceof X402Erc7710AlreadySettledError) return { settledReplay: settledReplayResponse(err, 'settle') }
+  throw err
+}
+
+/**
  * #1349: normalize only the small merchant display fields agents need to
  * report a purchase. Merchant content is deliberately never allowed to set
  * status, money, network, merchant identity, or transaction hashes.
@@ -227,8 +322,19 @@ export function buildPurchaseSummary(input: {
   fundingTxHash: string | null
   settlementTxHash: string | null
   allowance: AgentPurchaseSummary['allowance']
+  /**
+   * #3423 item 4: erc7710 has NO funding leg — the signature IS the
+   * settlement child, and `payment.txHash` (when present) is the SETTLEMENT
+   * transaction, not a funding one. Without this flag, the `?? input.payment
+   * ?.txHash` fallback below would back-fill that settlement hash into
+   * `funding_tx_hash`, mislabeling it. Defaults to `true` (the EIP-3009
+   * shape every existing caller has) so this is additive, not a silent
+   * behavior change for the bridge.
+   */
+  hasFundingLeg?: boolean
 }): AgentPurchaseSummary {
   const merchantSummary = merchantPurchaseMetadata(input.merchantResult)
+  const hasFundingLeg = input.hasFundingLeg ?? true
   return {
     status: 'settled',
     product: merchantSummary.product,
@@ -241,7 +347,7 @@ export function buildPurchaseSummary(input: {
       resource_url: input.payment?.resourceUrl ?? null,
     },
     invoice_id: merchantSummary.invoiceId,
-    funding_tx_hash: input.fundingTxHash ?? input.payment?.txHash ?? null,
+    funding_tx_hash: hasFundingLeg ? (input.fundingTxHash ?? input.payment?.txHash ?? null) : null,
     // The merchant's optional PAYMENT-RESPONSE receipt can name its own tx.
     // Preserve it as evidence, never as the source of the settled status.
     settlement_tx_hash: input.settlementTxHash,

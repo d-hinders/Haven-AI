@@ -415,6 +415,26 @@ describe('haven_list_receipts', () => {
     expect(result.data).toMatchObject({ total: 7, hasMore: true, nextCursor: 'rcpt_1' })
   })
 
+  it('compact: true drops challengePayload / selectedPayment / protocolReceiptPayload; the default keeps them (#3423)', async () => {
+    const body = { receipts: [{
+            id: 'rcpt_1', payment_id: 'pay_1', rail: 'x402', amount_human: '0.001',
+            challenge_payload: { payment_required: { accepts: [{ amount: '1000' }] } },
+            selected_payment: { scheme: 'exact' },
+            protocol_receipt_payload: { success: true },
+          }], total: 1, has_more: false, next_cursor: null }
+    stubFetch({ 'GET /machine-payments/receipts': { status: 200, body } })
+    const full = ok<{ receipts: Array<Record<string, unknown>> }>(await handlers().haven_list_receipts({}))
+    for (const key of ['challengePayload', 'selectedPayment', 'protocolReceiptPayload']) {
+      expect(full.data.receipts[0]).toHaveProperty(key)
+    }
+    stubFetch({ 'GET /machine-payments/receipts': { status: 200, body } })
+    const compact = ok<{ receipts: Array<Record<string, unknown>> }>(await handlers().haven_list_receipts({ compact: true }))
+    for (const key of ['challengePayload', 'selectedPayment', 'protocolReceiptPayload']) {
+      expect(compact.data.receipts[0]).not.toHaveProperty(key)
+    }
+    expect(compact.data.receipts[0]).toMatchObject({ id: 'rcpt_1', paymentId: 'pay_1' })
+  })
+
   it('forwards cursor and limit to the endpoint (#3128)', async () => {
     stubFetch({
       'GET /machine-payments/receipts': { status: 200, body: { receipts: [], total: 0, has_more: false, next_cursor: null } },
@@ -435,6 +455,61 @@ describe('haven_list_receipts', () => {
       await handlers().haven_list_receipts({}),
     )
     expect(result.data).toEqual({ receipts: [], total: null, hasMore: null, nextCursor: null })
+  })
+})
+
+// ── haven_verify_receipt (#3418) ──────────────────────────────────────────────
+
+// The two receipt tools must work together: feeding `haven_verify_receipt` a
+// `haven_list_receipts` row — which carries no signature, on any rail — used
+// to escape as UNKNOWN_ERROR with a raw TypeError. It now answers.
+describe('haven_verify_receipt (#3418) — a list row is not a signed bundle', () => {
+  // The shape `haven_list_receipts` returns for an erc7710 payment
+  // (`mapPaymentReceipt`'s output): no `authorization` key exists on it.
+  const erc7710Row = {
+    id: '50dec266-a3a5-4e5b-a8ef-8b2f3ad4c111',
+    paymentId: 'aa9ece55-9b0c-4f4d-a6b7-1c2d3e4f5a6b',
+    source: 'x402',
+    paymentProofStatus: 'protocol_receipt_attached',
+    txHash: null,
+    fundingTxHash: null,
+    settlementTxHash: '0xsettlement',
+    chainId: 84532,
+    x402ResourceUrl: 'https://merchant.example/resource',
+    x402MerchantAddress: '0x00000000000000000000000000000000000000aa',
+    payerAddress: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+    settlementAddress: '0x00000000000000000000000000000000000000bb',
+    tokenSymbol: 'USDC',
+    tokenAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    amountRaw: '1000000',
+    amount: '1.00',
+    challengeId: null,
+    idempotencyKey: null,
+    challengePayload: null,
+    selectedPayment: null,
+    paymentProofHeaderName: null,
+    protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
+    protocolReceiptPayload: '{}',
+    merchantStatus: null,
+    confirmedAt: '2026-09-28T10:00:00.000Z',
+    createdAt: '2026-09-28T10:00:00.000Z',
+    updatedAt: '2026-09-28T10:00:00.000Z',
+  }
+
+  it('an erc7710 list row returns verified false / not_a_signed_receipt — never UNKNOWN_ERROR', async () => {
+    const result = await handlers().haven_verify_receipt({ receipt: erc7710Row })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
+  })
+
+  it('null and non-object inputs answer the same way', async () => {
+    for (const receipt of [null, 'a row as a string', 42]) {
+      const result = await handlers().haven_verify_receipt({ receipt: receipt as never })
+      expect(result.success).toBe(true)
+      if (!result.success) throw new Error(`verify threw on ${String(receipt)}`)
+      expect(result.data).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
+    }
   })
 })
 
@@ -754,6 +829,32 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     // The signature went to settle, NOT to the funding relay.
     expect(recordedCalls().find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })
     expect(recordedCalls().find((c) => c.url.includes('/sign'))).toBeUndefined()
+  })
+
+  it('a repeated submit of a payment that already settled answers the same done state as haven_settle_mcp_tool (#3423)', async () => {
+    const TX = '0x' + '7d'.repeat(32)
+    stubFetch({
+      'POST /x402/pay_generic_7710/settle': {
+        status: 409,
+        body: {
+          error: 'Payment pay_generic_7710 already settled on-chain; nothing was signed or charged again.',
+          code: 'payment_already_settled',
+          payment_id: 'pay_generic_7710',
+          tx_hash: TX,
+        },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({ payment_id: 'pay_generic_7710', signature: SIG, settlement_scheme: 'erc7710' }),
+    ) as { data: Record<string, any> }
+    expect(res.data).toMatchObject({
+      payment_id: 'pay_generic_7710',
+      settled: true,
+      settlement_tx_hash: TX,
+      next_action: 'none',
+    })
+    expect(res.data).not.toHaveProperty('payment_header')
+    expect(res.data.next_tool_omitted_reason).toMatch(/this payment already settled/)
   })
 
   it('POSITIVE CONTROL — omitting settlement_scheme still relays a FUNDING signature, unchanged', async () => {

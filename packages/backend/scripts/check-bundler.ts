@@ -38,15 +38,16 @@ async function rpc(url: string, method: string, params: unknown[] = []): Promise
 
 async function main(): Promise<void> {
   // With ONE enabled chain the probe picks it; with several (8453 + 84532
-  // since #908) an implicit default would silently probe the wrong one — the
-  // single DELEGATION_RAIL_BUNDLER_URL is per-environment, so a Sepolia
-  // credential answering a "chain 8453" probe would read as healthy while
-  // proving nothing. Require the operator to say which chain they mean.
+  // since #908) an implicit default would silently probe the wrong one.
+  // Each chain's credential resolves separately since #3416
+  // (DELEGATION_RAIL_BUNDLER_URL_<chainId>, then the unsuffixed fallback), so
+  // the probe must be told which chain's credential it is proving. Run it once
+  // per chain the environment serves.
   const enabled = [...DELEGATION_RAIL_CHAIN_IDS]
   const explicit = process.env.CHECK_BUNDLER_CHAIN_ID
   if (!explicit && enabled.length > 1) {
     console.error(
-      `multiple delegation-rail chains enabled (${enabled.join(', ')}) — set CHECK_BUNDLER_CHAIN_ID to the one this environment's DELEGATION_RAIL_BUNDLER_URL targets`,
+      `multiple delegation-rail chains enabled (${enabled.join(', ')}) — set CHECK_BUNDLER_CHAIN_ID to the chain whose credential to probe (DELEGATION_RAIL_BUNDLER_URL_<chainId>, else DELEGATION_RAIL_BUNDLER_URL); run once per chain`,
     )
     process.exit(2)
   }

@@ -44,6 +44,29 @@ import {
   type RouteDefinition,
 } from '../test-support/hosted-mcp.js'
 
+
+/**
+ * #3417: the backend's confirmed-replay body for an erc7710 row paying the
+ * fixture merchant for `resourceUrl` — what `modules/x402/replay.ts` answers
+ * for a settled key. `to` is the row's payee (the merchant on erc7710).
+ */
+function settledReplayBody(resourceUrl: string, over: Record<string, unknown> = {}) {
+  return {
+    success: true,
+    payment_id: 'pay_settled_7710',
+    status: 'confirmed',
+    tx_hash: '0x' + '7d'.repeat(32),
+    to: PAYMENT_REQUIRED.accepts[0].payTo.toLowerCase(),
+    merchant_to: PAYMENT_REQUIRED.accepts[0].payTo.toLowerCase(),
+    resource_url: resourceUrl,
+    explorer_url: 'https://sepolia.basescan.org/tx/0x' + '7d'.repeat(32),
+    chain_id: 84532,
+    amount: '0.001',
+    token: 'USDC',
+    ...over,
+  }
+}
+
 installSharedFixtureLifecycle()
 
 beforeEach(() => {
@@ -371,6 +394,62 @@ describe('haven_quote_catalog_purchase', () => {
     expect(payload.code).toBe('CATALOG_ENTRY_NOT_FOUND')
     expect(payload.suggested_tool).toBe('haven_discover_tools')
     expect(recordedCalls()).toHaveLength(1)
+  })
+
+  // #3423 item 1: an http row (a plain-HTTP x402 paywall, no MCP tool_name)
+  // used to be refused with the mcp-only haven_pay_mcp_tool fallback, which
+  // an http row cannot follow (it has no tool_name). Discovery already names
+  // the right tool for the same row shape (discoveryHintFor).
+  it('hands off an http catalog row to haven_quote_x402, not haven_pay_mcp_tool', async () => {
+    stubFetch({
+      'GET /catalog/cat_http': {
+        status: 200,
+        body: { ...catalogEntry, id: 'cat_http', protocol: 'http', tool_name: null, resource_url: 'https://merchant.test/paid' },
+      },
+    })
+
+    const payload = await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_http' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    expect(payload.next_tool_name).toBe('haven_quote_x402')
+    expect(payload.next_arguments).toEqual({ url: 'https://merchant.test/paid' })
+    expect(payload.suggested_tool).toBe('haven_quote_x402')
+    // Exactly one network call: the catalog lookup. Nothing was contacted or reserved.
+    expect(recordedCalls()).toHaveLength(1)
+  })
+
+  // #3423 review round 1 (F4-1): a row that is BOTH a plain-HTTP paywall AND
+  // marked degraded must still hand off to haven_quote_x402 — the protocol
+  // check has to run FIRST, before the degraded/tool-name check that answers
+  // haven_pay_mcp_tool. Mutation: `entry.protocol !== 'mcp' && entry.status
+  // !== 'degraded'` on the first check must fail this test (the http+degraded
+  // row would then fall through to the second check and answer
+  // haven_pay_mcp_tool instead).
+  it('hands off a DEGRADED http catalog row to haven_quote_x402 too — the protocol check runs first', async () => {
+    stubFetch({
+      'GET /catalog/cat_http_degraded': {
+        status: 200,
+        body: {
+          ...catalogEntry,
+          id: 'cat_http_degraded',
+          protocol: 'http',
+          tool_name: null,
+          status: 'degraded',
+          resource_url: 'https://merchant.test/degraded-paid',
+        },
+      },
+    })
+
+    const payload = await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_http_degraded' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    expect(payload.next_tool_name).toBe('haven_quote_x402')
+    expect(payload.next_arguments).toEqual({ url: 'https://merchant.test/degraded-paid' })
+    expect(payload.suggested_tool).toBe('haven_quote_x402')
+    // Must NOT be the mcp-only degraded fallback.
+    expect(payload.suggested_tool).not.toBe('haven_pay_mcp_tool')
   })
 })
 
@@ -722,7 +801,35 @@ describe('haven_prepare_catalog_purchase', () => {
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
-    expect(payload.message).toMatch(/tool metadata/)
+    // #3423 review round 1 nit: only tool_name can be missing on this
+    // branch — protocol is already 'mcp' by this point.
+    expect(payload.message).toMatch(/tool_name/)
+  })
+
+  // #3423 item 1: same hand-off correction as haven_quote_catalog_purchase
+  // above — both tools share getUsableCatalogMcpEntry.
+  it('hands off an http catalog row to haven_quote_x402, not haven_pay_mcp_tool', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': {
+        status: 200,
+        body: { ...CATALOG_ENTRY_RESPONSE, protocol: 'http', tool_name: null, resource_url: 'https://merchant.test/paid' },
+      },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    expect(payload.next_tool_name).toBe('haven_quote_x402')
+    expect(payload.next_arguments).toEqual({ url: 'https://merchant.test/paid' })
+    expect(payload.suggested_tool).toBe('haven_quote_x402')
+    // Exactly one network call: the catalog lookup.
+    expect(recordedCalls()).toHaveLength(1)
   })
 
   it('warns CATALOG_PRICE_DIFFERS when the catalog price is stale relative to the live quote', async () => {
@@ -1088,6 +1195,40 @@ describe('haven_prepare_catalog_purchase', () => {
       const res = await prepare(erc7710Header, DELEGATION_AGENT_RESPONSE, true)
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(xBody()).not.toHaveProperty('idempotencyKey')
+    })
+
+    it('a replayed key whose payment already settled answers with the original payment (#3417)', async () => {
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
+        'POST /x402': { status: 200, body: settledReplayBody('http://merchant.test/mcp') },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_1',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-7710-settled',
+        }),
+      )
+      // #3417: the original payment as a done state — no retry, no signer, no
+      // second payment. Before the fix this was a 500 with "retry once".
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_settled_7710',
+        status: 'confirmed',
+        settled: true,
+        idempotent_replay: true,
+        settlement_tx_hash: '0x' + '7d'.repeat(32),
+        next_action: 'none',
+      })
+      expect(res.data.next_tool).toBeUndefined()
+      expect(res.data.next_tool_omitted_reason).toMatch(/already settled/)
+      expect(res.data.agent_summary).toMatchObject({ payment_id: 'pay_settled_7710', status: 'confirmed', amount: '0.001', token: 'USDC' })
+      expect(res.data).toMatchObject({ resource_url: expect.any(String), merchant_to: expect.any(String), explorer_url: expect.any(String), chain_id: 84532 })
+      expect(res.data).not.toHaveProperty('delivered')
+      expect(res.data.reason).toMatch(/cannot re-deliver/)
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
     })
 
     it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
@@ -1775,6 +1916,43 @@ describe('#2051 — cap binds the authorized option', () => {
       expect(x402Body()?.idempotencyKey).toBe('x402:pay-mcp-7710:k1')
     })
 
+    it('a replayed key whose payment already settled answers with the original payment (#3417)', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(merchant('3000000', '500000'))) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 200, body: settledReplayBody('http://merchant.test/mcp') },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '1',
+          idempotency_key: 'x402:pay-mcp-7710:settled',
+        }),
+      )
+      // #3417: the original payment as a done state — no retry, no signer, no
+      // second payment. Before the fix this was a 500 with "retry once".
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_settled_7710',
+        status: 'confirmed',
+        settled: true,
+        idempotent_replay: true,
+        settlement_tx_hash: '0x' + '7d'.repeat(32),
+        next_action: 'none',
+      })
+      expect(res.data.next_tool).toBeUndefined()
+      expect(res.data.next_tool_omitted_reason).toMatch(/already settled/)
+      expect(res.data.agent_summary).toMatchObject({ payment_id: 'pay_settled_7710', status: 'confirmed', amount: '0.001', token: 'USDC' })
+      expect(res.data).toMatchObject({ resource_url: expect.any(String), merchant_to: expect.any(String), explorer_url: expect.any(String), chain_id: 84532 })
+      expect(res.data).not.toHaveProperty('delivered')
+      expect(res.data.reason).toMatch(/cannot re-deliver/)
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
+    })
+
     // Review of #3043: `quote.idempotencyKey` is NEVER null on the MCP quote
     // path (the SDK derives a 5-minute-bucket key), so the 3009 branches'
     // `?? quote.idempotencyKey` would have switched bucket-dedupe on for
@@ -2158,7 +2336,8 @@ describe('#2054 — erc7710-only merchants', () => {
       )
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).toBe('PRICE_EXCEEDS_MAX')
-      expect((res as { message?: string }).message).toContain('max_amount_human 1 USDC')
+      // #3423 item 3: both sides in whole tokens, atomic in parentheses.
+      expect((res as { message?: string }).message).toContain('your cap 1 USDC (1000000 atomic)')
       expect(x402Body()).toBeUndefined()
     })
 

@@ -39,6 +39,7 @@ import AgentPassportCard from '@/components/AgentPassportCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import { ReplaceSigningKeyModal } from '@/components/agent-panel/ReplaceSigningKeyModal'
+import { TaxDeclarationToggle } from '@/components/agent-panel/TaxDeclarationToggle'
 import { useAgentPassport } from '@/hooks/useAgentPassport'
 import {
   DropdownMenu,
@@ -657,6 +658,19 @@ export default function AgentDetailClient({ agentId }: Props) {
             onBudgetChange={refetch}
           />
         </div>
+      </div>
+
+      {/* #3426: the per-agent x402 tax declaration opt-in. Renders ONLY when
+          company details are VIES-valid (the component reads
+          `GET /user/company-details` itself — a 404 there means the flag is
+          off, and hides the card). The opt-in is settings, not authority: it
+          changes no budget, no rule, and no key. */}
+      <div className="mt-6">
+        <TaxDeclarationToggle
+          agentId={agentId}
+          taxDeclarationEnabled={currentAgent.tax_declaration_enabled}
+          onAgentsChanged={() => void refetch()}
+        />
       </div>
 
       <>

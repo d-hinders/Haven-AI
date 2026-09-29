@@ -41,10 +41,11 @@ describe('hosted connector channel', () => {
     const { channel, server } = await loadWithChannel(undefined)
     expect(channel.HOSTED_CONNECTOR_CHANNEL).toBe('alpha')
     expect(channel.hostedConnectorRerunCommand()).toBe('npx @haven_ai/connect@alpha')
-    // Characterization of the instructions line as it stood before #2423 —
-    // an unconfigured deployment says exactly what it said yesterday.
+    expect(channel.hostedConnectorUpgradeCommand()).toBe('npx -y @haven_ai/connect@alpha --doctor')
+    // #3412: the instructions name the upgrade command, not the bare setup
+    // re-run that stops at "Missing --setup" on an existing install.
     expect(server.HOSTED_INSTRUCTIONS).toContain(
-      'npx @haven_ai/connect@alpha; nothing has been spent at that point.',
+      'npx -y @haven_ai/connect@alpha --doctor and the repair line it prints; nothing has been spent at that point.',
     )
   }, RELOAD_TIMEOUT_MS)
 
@@ -52,7 +53,7 @@ describe('hosted connector channel', () => {
     const { channel, server } = await loadWithChannel('dev')
     expect(channel.HOSTED_CONNECTOR_CHANNEL).toBe('dev')
     expect(server.HOSTED_INSTRUCTIONS).toContain(
-      'npx @haven_ai/connect@dev; nothing has been spent at that point.',
+      'npx -y @haven_ai/connect@dev --doctor and the repair line it prints; nothing has been spent at that point.',
     )
     // The literal that used to be hard-coded must be GONE, not merely joined by
     // a second one: a hint naming both channels is worse than either.
@@ -68,10 +69,21 @@ describe('hosted connector channel', () => {
     vi.stubEnv('HAVEN_CONNECTOR_CHANNEL', 'dev')
     const { signerCompatibilityNotice } = await import('./tools.js')
     const compat = signerCompatibilityNotice(2)
-    expect(compat.check).toContain('npx @haven_ai/connect@dev')
+    expect(compat.check).toContain('npx -y @haven_ai/connect@dev --doctor')
     expect(compat.check).not.toContain('connect@alpha')
-    expect(compat.fallback).toContain('npx @haven_ai/connect@dev')
+    expect(compat.fallback).toContain('npx -y @haven_ai/connect@dev --doctor')
     expect(compat.fallback).not.toContain('connect@alpha')
+  }, RELOAD_TIMEOUT_MS)
+
+  it('the direct-payment notice names the upgrade command, never the bare setup re-run (#3412)', async () => {
+    vi.resetModules()
+    vi.stubEnv('HAVEN_CONNECTOR_CHANNEL', 'dev')
+    const { directSignerCompatibilityNotice } = await import('./tools/support/signer-compat.js')
+    const notice = directSignerCompatibilityNotice()
+    for (const text of [notice.check, notice.fallback]) {
+      expect(text).toContain('npx -y @haven_ai/connect@dev --doctor')
+      expect(text).not.toContain('npx @haven_ai/connect@dev`')
+    }
   }, RELOAD_TIMEOUT_MS)
 
   it('treats an empty or whitespace value as unset', async () => {

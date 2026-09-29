@@ -49,6 +49,7 @@ export {
   CONNECTOR_PACKAGE_NAME,
   connectorSpec,
   connectorRerunCommand,
+  connectorUpgradeCommand,
   resolveConnectorChannel,
   isConnectorChannel,
 } from './connector-channel.js'
@@ -158,8 +159,10 @@ export {
   HavenApiError,
   AgentPaymentWarningCode,
   MerchantTimeoutError,
+  X402Erc7710AlreadySettledError,
   X402UnexpectedStatusError,
   X402AlreadySettledError,
+  X402TaskBudgetMismatchError,
   HavenPaymentStateError,
   HavenSigningError,
   HavenZeroSettlementHashError,
@@ -200,7 +203,17 @@ export {
   // Exported so a consumer holding only a payment OPTION (not a built quote)
   // resolves decimals through exactly the same table the quote used.
   resolveTokenFromAddress,
+  // #3410: symbol+chain decimals from the SAME registry, for the surfaces
+  // that carry no token address (the consent seed path). Null outside the
+  // registry — callers fall back to an explicit atomic label.
+  resolveTokenBySymbol,
 } from './x402.js'
+
+export {
+  // #3410: the one atomic→human formatter for consent-surface renders, so
+  // the consent block and the allowance reads cannot disagree.
+  formatTokenAmount,
+} from './account-reads.js'
 
 export type { X402PaymentHeaderContext, X402SchemeSelection } from './x402.js'
 export type { X402Erc7710Settlement } from './types.js'
@@ -246,6 +259,7 @@ export type {
 } from './sweep.js'
 export {
   DIRECT_SIGN_CONTEXT_VERSION,
+  TASK_SIGN_CONTEXT_VERSION,
   ENTRY_POINT_V07,
   HYBRID_DELEGATOR_DOMAIN_NAME,
   HYBRID_DELEGATOR_DOMAIN_VERSION,

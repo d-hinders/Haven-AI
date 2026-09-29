@@ -87,7 +87,7 @@ describe('ingestDiscoveredCatalog', () => {
     expect(result).toMatchObject({ scanned: 1, candidates: 1, ingested: 1, failedProbe: 0 })
     expect(inserts).toHaveLength(1)
     // name, description, category='api', resource_url, price_display, price_atomic,
-    // asset, network, asset_transfer_methods
+    // asset, network, asset_transfer_methods, merchant_id, pay_to (#3331)
     expect(inserts[0]).toEqual([
       'Weather API',
       'Per-call forecast data.',
@@ -99,6 +99,7 @@ describe('ingestDiscoveredCatalog', () => {
       'eip155:8453',
       'eip3009',
       'merchant-1',
+      '0x' + '11'.repeat(20),
     ])
   })
 

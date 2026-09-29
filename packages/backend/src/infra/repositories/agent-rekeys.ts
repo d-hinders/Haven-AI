@@ -55,6 +55,15 @@ export interface CarrySnapshotEntry {
   remaining_atomic: string
   /** False means the read fell back; the carry refuses these (see rekey-carry). */
   from_chain: boolean
+  /**
+   * @deprecated (#3386) No longer written into new snapshots — the issue
+   * step now reads the merchant label unconditionally off the old row by
+   * hash (`findDelegationTerms`), which stays current under `ON DELETE SET
+   * NULL` even if the merchant vanishes between metering and issue. Kept
+   * optional only so a `carry_snapshot` persisted before this deprecation
+   * still parses; nothing reads it any more — it is carried through as JSON.
+   */
+  merchant_id?: string | null
 }
 
 // ── Reads the re-key route needs, kept out of the route (#1698 review) ────
@@ -123,10 +132,12 @@ export interface DelegationTermsRow {
   period_seconds: number
   start_date: string
   expires_at: string
+  /** The merchant this delegation was issued for, if any (#3386). */
+  merchant_id: string | null
 }
 
 export const FIND_DELEGATION_TERMS_SQL = `SELECT token_address, recipient_address, budget_atomic, period_seconds,
-            start_date, expires_at
+            start_date, expires_at, merchant_id
        FROM agent_delegations WHERE agent_id = $1 AND delegation_hash = $2`
 
 export async function findDelegationTerms(
@@ -161,11 +172,21 @@ export async function nextDelegationVersion(
   return result.rows[0].next_version
 }
 
+// merchant_id is written via a subselect rather than the raw parameter
+// (#3386): the label is resolved from the OLD row moments before this insert
+// runs, and the merchant can be deleted in that window. `ON DELETE SET NULL`
+// keeps the FK satisfied for an existing row, but a raw INSERT referencing a
+// merchant id that no longer exists at insert time would still violate the
+// FK (23503) and fail that issue request, after the revoke (a retry would
+// re-read the old row, by then NULL). The subselect resolves to NULL instead
+// whenever the merchant is gone by the time this statement runs, so no issue
+// request fails on that race.
 export const INSERT_REKEY_DELEGATION_SQL = `INSERT INTO agent_delegations (
          agent_id, chain_id, token_address, recipient_address, delegation_hash,
          delegation_json, version, status, budget_atomic, period_seconds,
-         start_date, expires_at, rekey_id, carry_role
-       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13)
+         start_date, expires_at, rekey_id, carry_role, merchant_id
+       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13,
+         (SELECT m.id FROM merchants m WHERE m.id = $14))
        ON CONFLICT (delegation_hash) DO NOTHING`
 
 export async function insertRekeyDelegation(
@@ -184,6 +205,17 @@ export async function insertRekeyDelegation(
     expiresAt: number
     rekeyId: string
     carryRole: string
+    /**
+     * The merchant this replacement is FOR, resolved from the delegation it
+     * replaces (#3386). A label only — the recipient pin is unchanged, and
+     * the migration 101 CHECK (`merchant_id IS NULL OR recipient_address IS
+     * NOT NULL`) is satisfied the same way the original grant satisfied it:
+     * every merchant-locked delegation carries a recipient. Written through a
+     * subselect (see `INSERT_REKEY_DELEGATION_SQL`) so a merchant deleted
+     * between resolution and this insert resolves to NULL instead of
+     * throwing an FK violation.
+     */
+    merchantId: string | null
   },
   db: Executor = pool,
 ): Promise<boolean> {
@@ -193,6 +225,49 @@ export async function insertRekeyDelegation(
     // pending replacement exists and unlink refuses, or the unlinked agent
     // fails the delegation-rail eligibility check and no row is created.
     if (!(await lockOwnedAgentForRekeyDelegation(row.agentId, row.userId, tx))) return false
+    // #3439: `lockOwnedAgentForRekeyDelegation` only proves that SOME re-key
+    // of this agent is in flight — not THIS one. Without this re-check, a
+    // stalled issue request for an abandoned re-key R1 can resume while a
+    // successor R2 is in flight past its own revoke step: R2 satisfies the
+    // agent-level lock, so R1's insert proceeds and lands `pending` rows
+    // under R2's eventual delegate key, which `markIssued` (stage `metered`
+    // → `issued`) then refuses too late to undo. Locking THIS re-key's own
+    // row and requiring it still be `metered` — the stage the issue route
+    // checked before building these rows, and the only stage `markIssued`
+    // itself expects — closes the window: an abandon moves R1's own row to
+    // `abandoned` and fails this check; no other re-key's progress can move
+    // R1's row, so a sibling's stage never satisfies it. Locking the specific
+    // `agent_rekeys` row (not just the agent row) means a concurrent abandon
+    // of THIS re-key serializes against this transaction rather than racing
+    // it.
+    //
+    // Closed by this change (#3450): this re-check ALONE did not stop two
+    // CONCURRENT issue calls on one re-key from both inserting — the stage
+    // stays `metered` until one of them reaches `markIssued`, so a loser
+    // that read its version after the winner's first insert committed, but
+    // before the winner's `markIssued`, still passed this same `FOR UPDATE`
+    // (still `metered`) and landed its own row. The fix is the caller: the
+    // issue route now runs its whole piece loop plus `markIssued` inside ONE
+    // transaction (`withRekeyIssueTransaction` below), and every call this
+    // function makes inside that loop — including this one — runs on that
+    // SAME transaction client, not a fresh one. `withTransaction` recognises
+    // an already-checked-out client (by `release`, #3450) and runs inline
+    // instead of nesting a second BEGIN. Concretely: the first insert of the
+    // winning call takes this row's lock and holds it for the rest of the
+    // transaction, including `markIssued`'s stage flip to `issued`. A
+    // concurrent second call queues on `lockOwnedAgentForRekeyDelegation`'s
+    // agent-row lock above, and once the winner commits, re-runs THIS
+    // statement as a new READ COMMITTED statement against the now-committed
+    // `issued` row — so `rekeyLock.rowCount === 0` here for the loser,
+    // exactly as it already did for the stalled-issue case #3439 closed.
+    // This subsumes nothing: the check stays exactly as #3439 wrote it, and
+    // is now additionally correct for the concurrent-caller case because of
+    // where it runs, not because of anything new here.
+    const rekeyLock = await tx.query<{ id: string }>(
+      `SELECT id FROM agent_rekeys WHERE id = $1 AND agent_id = $2 AND stage = 'metered' FOR UPDATE`,
+      [row.rekeyId, row.agentId],
+    )
+    if (rekeyLock.rowCount === 0) return false
     await tx.query(INSERT_REKEY_DELEGATION_SQL, [
       row.agentId,
       row.chainId,
@@ -207,6 +282,7 @@ export async function insertRekeyDelegation(
       row.expiresAt,
       row.rekeyId,
       row.carryRole,
+      row.merchantId,
     ])
     return true
   })
@@ -368,6 +444,41 @@ export async function markIssued(
 ): Promise<AgentRekeyRow | null> {
   const result = await db.query<AgentRekeyRow>(MARK_ISSUED_SQL, [rekeyId, agentId])
   return result.rows[0] ?? null
+}
+
+/**
+ * Opens the ONE transaction the issue route's whole piece loop plus
+ * `markIssued` run inside (#3450). Exported from here — not called with
+ * `withTransaction`/`pool` directly from the route — for the same reason
+ * `completeRekey` below is the one place that already owns a dedicated
+ * client for the route: `dep-lint`'s pg-only-in-infra boundary keeps driver
+ * access inside `infra/`, and the route tests that mock this module wholesale
+ * (`vi.mock('.../agent-rekeys.js', ...)`) need one call to intercept rather
+ * than a raw `pool` import that would open a real connection under a
+ * fully-mocked test.
+ *
+ * The callback runs business logic (`planCarry`, `buildBudgetDelegation`,
+ * hash computation) interleaved with the DB calls, which is genuinely a
+ * route-layer concern — unlike every other transaction in this file, which
+ * wraps DB statements only. There is precedent for exactly this shape:
+ * `delegation-budgets.ts`'s `withDelegationBuildSlotLock` already hands its
+ * caller a query-only view of an open transaction so route-layer logic
+ * (`buildBudgetDelegation`, `delegationIdentity`) runs between the caller's
+ * reads and insert inside one lock scope. This function is the same move
+ * for the issue route's multi-piece loop — and unlike that precedent (whose
+ * version read is inline SQL in the route), it keeps every statement in
+ * this file. The alternative (moving the carry-planning and
+ * delegation-building calls into this repository module instead) would
+ * cross the module boundary the file header describes the other way,
+ * pulling `rails/delegation-policy.ts` and `modules/agents/rekey-carry.ts`
+ * into `infra/`; this function is the smallest surface that gives the route
+ * the transaction while keeping every actual SQL statement in this file,
+ * reachable from the real-DB harness.
+ */
+export async function withRekeyIssueTransaction<T>(
+  fn: (tx: Executor) => Promise<T>,
+): Promise<T> {
+  return withTransaction(pool, fn)
 }
 
 export const MARK_COMPLETED_SQL = `UPDATE agent_rekeys

@@ -18,6 +18,19 @@ function mapParties(raw: RawPaymentParties | undefined): PaymentParties | undefi
     delegate: raw.delegate,
     delegateAccount: raw.delegate_account,
     merchant: raw.merchant,
+    // #3332: additive — absent unless the wire shape carries it.
+    ...(raw.buyer
+      ? {
+          buyer: {
+            legalName: raw.buyer.legal_name,
+            country: raw.buyer.country,
+            orgNumber: raw.buyer.org_number,
+            vatNumber: raw.buyer.vat_number,
+            viesStatus: raw.buyer.vies_status,
+            viesCheckedAt: raw.buyer.vies_checked_at,
+          },
+        }
+      : {}),
   }
 }
 
@@ -70,6 +83,9 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     expiresAt: raw.expires_at,
     chainId: raw.chain_id,
     message: raw.message,
+    // #3420: the delivered half of the settle vocabulary, additive — absent
+    // from the raw payload (older backend) stays absent here.
+    ...(raw.delivered === true ? { delivered: true as const } : {}),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

@@ -41,7 +41,7 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { runTool, HostedToolError } from './support/errors.js'
-import { buildAgentGuidance, refusalNextStep } from './support/guidance.js'
+import { buildAgentGuidance, catchSettledResettle, refusalNextStep } from './support/guidance.js'
 import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
@@ -365,6 +365,9 @@ export function createStateDirectRecoveryHandlers(
             // #3378: the schema has accepted task_budget_id since #3329; this
             // handler dropped it, so the payment was charged to the whole budget.
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
+            // #3330: the schema accepts sub_budget_id (agent B pays through
+            // the sub-budget A granted it); carried like task_budget_id.
+            ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
           })
           return {
             payment_id: intent.paymentId,
@@ -421,6 +424,9 @@ export function createStateDirectRecoveryHandlers(
             // #3378: the schema has accepted task_budget_id since #3329; this
             // handler dropped it, so the payment was charged to the whole budget.
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
+            // #3330: the schema accepts sub_budget_id (agent B pays through
+            // the sub-budget A granted it); carried like task_budget_id.
+            ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
           })
           return {
             payment_id: intent.paymentId,
@@ -508,11 +514,15 @@ export function createStateDirectRecoveryHandlers(
           // less — leaving it as a raw error was the wrong asymmetry. The
           // mapping is scheme-agnostic (it keys on rail 'x402' + an expired
           // status behind a 410), so it applies unchanged.
-          const paymentHeader = await submitErc7710WithExpiryMapping(
+          const submitted = await submitErc7710WithExpiryMapping(
             haven,
             args.payment_id,
             args.signature,
-          )
+          ).catch(catchSettledResettle)
+          // #3423: a repeated submit of a settled payment gets the same done
+          // state as haven_settle_mcp_tool, not a client-failure refusal.
+          if (typeof submitted !== 'string') return submitted.settledReplay
+          const paymentHeader = submitted
           return {
             payment_id: args.payment_id,
             settlement_scheme: 'erc7710',
@@ -580,7 +590,8 @@ export function createStateDirectRecoveryHandlers(
         const args = parseStrict('haven_list_receipts', input)
         // #3128: the page object, not a bare array — total / hasMore /
         // nextCursor are what let the agent tell "none" from "cut here".
-        return haven.listReceiptsPage({ limit: args.limit, cursor: args.cursor })
+        // #3423: `compact` is passed through; the SDK strips the payloads.
+        return haven.listReceiptsPage({ limit: args.limit, cursor: args.cursor, compact: args.compact })
       }),
 
     haven_verify_receipt: async (input) =>

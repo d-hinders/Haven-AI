@@ -15,6 +15,34 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.7.0-alpha.0 — 2026-09-29
+
+### Added
+
+- **`haven_list_receipts` accepts `compact: true` (#3423).** Each row then leaves out `challengePayload`, `selectedPayment` and `protocolReceiptPayload`, the merchant's payload echoes. Omit it for the unchanged default shape. The hosted runtime accepts the same key.
+
+- **`sub_budget_id` on `haven_send`, `haven_pay_x402_quote` and `haven_pay_x402` (#3330).** A sub-agent pays under a sub-budget another agent granted it. The argument is mutually exclusive with `task_budget_id`. Additive and optional.
+
+- **Task-budget handoffs carry the old-signer recovery notice (#3419).** `haven_open_task_budget` and `haven_close_task_budget` results that hand off to `haven_sign { task_budget_id }` now carry `signer_compatibility` with `task_sign_context_version`, `min_signer_version` (`0.6.0-alpha.0`, the first signer with the `task_budget_id` form), and the recovery route as prose (`check`) and data (`fallback`): if `haven_sign` answers `SIGNING_ERROR` with a message starting "Pass payment_id (preferred for delegation-rail x402", the signer predates task budgets and signed nothing — close the pending budget with `haven_close_task_budget`, update via the connector doctor and its repair line, then reopen. There is no relay fallback for this signing context.
+
+### Removed
+
+- **BREAKING (#3411) — the legacy `idempotencyKey` argument spelling is refused, not accepted.** The #2366 deprecation window is closed: it was met when the warning first shipped on the `alpha`/`latest` channel in `0.1.35-alpha.0` (2026-09-07), several releases behind `latest`. `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`, `haven_pay_x402_quote` and `haven_pay_x402` still **declare** `idempotencyKey` in their schema (so the MCP SDK's default `z.object` strip mode cannot silently drop it before the handler runs — the #2348 double-spend this refusal exists to prevent), but any call that sets it now fails with `IDEMPOTENCY_KEY_RENAMED` before anything is contacted or spent, whether or not `idempotency_key` was also sent. Send `idempotency_key`. The public `toolSchemas` export changes meaning: `idempotencyKey` on it is no longer an accepted input, only a refused one.
+
+### Fixed
+
+- **`haven_verify_receipt` no longer throws on a `haven_list_receipts` row (#3418).** The two receipt tools now work together: passing a history row — which carries no signature — returns `{ verified: false, reason: 'not_a_signed_receipt' }` instead of `UNKNOWN_ERROR` with a raw `TypeError`. The tool takes the signed receipt bundle from `GET /payments/:id/receipt`; on erc7710 payments it now verifies (`verifiedOver: 'delegation_digest'`) where it previously reported `signer_mismatch` for genuine payments, and a direct or eip3009 bundle returns `not_verifiable_offline`. `verified: true` means only that the agent delegate signed the hash named by `verifiedOver` — the payment block is Haven-asserted and settlement is not proven; check `settlementTxHash` on an explorer.
+
+- The first-launch consent screen printed the agent's budget in atomic units
+  labelled as whole tokens (`up to 1000000 USDC` for a 1 USDC/day agent).
+  Budgets now render in whole tokens through the SDK token registry, and carry
+  an explicit `(atomic units)` label when the token's decimals cannot be
+  resolved. Display only: the consent hash still covers the atomic string, so
+  no installed sidecar acknowledgement is invalidated. (#3410)
+  Known limitation: the setup-time budget in the credential file is a
+  snapshot. If the wallet owner edits the budget after setup and the live
+  read then fails, the screen shows the old budget as current. (#3410)
+
 ## 0.6.0-alpha.0 — 2026-09-26
 
 ### Removed

@@ -73,6 +73,24 @@ belongs to a tier that does not exist yet, and using it early would be the whole
 failure mode: a merchant hearing "verified agent" reasonably concludes someone
 checked an identity. Nobody did.
 
+**Owner company details (#3332) are onboarding data, not a passport tier.**
+Behind `HAVEN_OWNER_COMPANY_DETAILS`, an owner can save a legal name, country,
+organisation number and VAT number, and Haven checks the VAT number against
+the EU's VIES service. None of that is a passport, is anchored on-chain, or
+changes an agent's governance status in any way — it lives entirely off-chain,
+keyed on the owner's own account, and is carried additively into Haven's
+payment-evidence `parties` block so a receipt can state who an agent is paying
+for. The same naming discipline applies: a VIES `valid` result is never
+rendered as "verified" anywhere this reaches (see
+[`docs/product/owner-company-details.md`](owner-company-details.md)) — it says
+the VAT number was checked against VIES, on that date, nothing more.
+
+**The buyer-side x402 tax declaration (#3426) is separate from the passport
+too.** An owner can opt an individual agent in to carrying a buyer-side tax
+declaration on EIP-3009 payments; the declaration is computed at read time
+from the owner's company details, signed by the SDK, sent only when the agent
+pays, and never written into the EAS passport schema or anchored on-chain.
+
 ## The assurance ladder
 
 Governance and identity are different questions, so they are different tiers.
@@ -145,6 +163,9 @@ whether or not those agents ever transact.
 
 - [Agent Passport schema and verification](../architecture/11-agent-passport-schema.md)
   — the technical contract: fields, verification, revocation, delivery.
+- [Owner company details](owner-company-details.md) — the onboarding data
+  described above: the flag, the VIES states, retention, and where it surfaces
+  on a receipt.
 - [Copy guidelines](copy-guidelines.md) — the terminology rules this page follows.
 - [CASP risk guardrails](../regulatory/casp-risk-guardrails.md) — the regulatory
   perimeter; a passport verifies no payment and settles nothing.

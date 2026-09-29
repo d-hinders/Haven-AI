@@ -239,6 +239,14 @@ describe('index.ts readers', () => {
       // agent-auth lifecycle, the first money-path module born enforced
       // (a brand-new module has no installed caller to shadow for).
       'routes/agent-task-budgets.ts',
+      // #3330: two born-enforced sub-budget modules — the agent-auth lifecycle
+      // and the owner read, same reasoning as task-budgets (#3329): a
+      // brand-new module has no installed caller to shadow for.
+      'routes/agent-sub-budgets.ts',
+      'routes/sub-budgets.ts',
+      // #3332: brand-new module, no installed caller — born ENFORCED on the
+      // same reasoning as task-budgets.ts.
+      'routes/owner-company-details.ts',
       'routes/task-budgets.ts',
       // Slice 2 (#3030): the 22 non-money modules and the inline index.ts pair.
       'index.ts',
@@ -265,9 +273,41 @@ describe('index.ts readers', () => {
       'routes/user.ts',
       'routes/user-accounts.ts',
       'routes/user-accounts-retired.ts',
-      // Slice 3 (#3031): the FIRST money-path module, and the only one the
-      // 2026-09-22 shadow reading proved conformant on every operation.
+      // Slice 3 (#3031): the money-path modules. #3221 flipped x402.ts — the
+      // only one the 2026-09-22 shadow reading proved on traffic alone; the
+      // remainder (payments, agent-delegations, machine-payments) joins on
+      // the epic's fallback instrument: the route suites assembled
+      // production-style (off-spec → the 400 envelope, every accepted shape
+      // byte-identical) plus that same reading (zero would_refuse,
+      // zero would_coerce across the 24.41 h window).
+      // Round 2 (owner decision, epic #3028 2026-09-24T21:24:44Z, closing
+      // #3223): `POST /machine-payments/reconciliation-events` is the NAMED
+      // RESIDUE and stays SHADOWED — it moved to its own file,
+      // `routes/machine-payments-reconciliation-events.ts` (one file = one
+      // enforcedModules entry, #3135/#3167), which is deliberately NOT in
+      // this list; its shadow residue is baselined instead. It is enforced
+      // the day a real merchant rejection (or a QA scenario that produces
+      // one) gives the shadow reading traffic to prove it.
+      'routes/payments.ts',
+      'routes/agent-delegations.ts',
+      'routes/machine-payments.ts',
       'routes/x402.ts',
+      // Slice 4 (#3032): the LAST five modules, and the default mode flips to
+      // `enforce` — from this slice on the list is the per-module rollback.
+      'routes/agents.ts',
+      // #3426: the agent tax-declaration module is born enforced — a brand-new
+      // module has no installed caller to shadow for. The GET (agent auth) is
+      // body-less with one uuid path parameter; the PUT (owner auth) takes the
+      // spec's UpsertAgentTaxDeclarationRequest.
+      'routes/agent-tax-declaration.ts',
+      'routes/agent-rekey.ts',
+      'routes/agent-connection-setups.ts',
+      'routes/agent-passports.ts',
+      'routes/hybrid-accounts.ts',
+      // #3333: the receive side is born enforced — the request-validation
+      // rollout is in `enforce` mode, so a new route file registers enforced
+      // from its first commit (one file = one enforcedModules entry).
+      'routes/receive.ts',
     ])
   })
 })

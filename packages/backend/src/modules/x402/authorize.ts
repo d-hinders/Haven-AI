@@ -21,6 +21,7 @@ import { runDelegationAuthorize } from './delegation-authorize.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 
 export interface AuthorizeX402Input {
+
   agent: AgentContext
   url: string
   payTo: string
@@ -41,6 +42,8 @@ export interface AuthorizeX402Input {
   paymentRequired?: Record<string, unknown>
   /** #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. */
   taskBudgetId?: string
+  /** #3330: an OPEN sub-budget (this agent is the sub-agent B) to authorize this settlement through. */
+  subBudgetId?: string
   log?: FastifyBaseLogger
 }
 
@@ -48,7 +51,7 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
   const {
     agent, url, payTo, merchantPayTo, amount, asset, network, category,
     idempotencyKey, maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses,
-    mcpCallContext, paymentRequired, taskBudgetId,
+    mcpCallContext, paymentRequired, taskBudgetId, subBudgetId,
   } = input
 
   // #2245: NOTHING rail-dependent runs above the rail gate below. The
@@ -141,6 +144,6 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
   return runDelegationAuthorize({
     agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
     maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
-    mcpCallContext, paymentRequired, taskBudgetId,
+    mcpCallContext, paymentRequired, taskBudgetId, subBudgetId,
   })
 }

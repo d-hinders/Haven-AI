@@ -46,12 +46,27 @@ import { CLIENT_RELEASE_DATA } from './client-releases.data.js'
  */
 export const RELEASE_NOTES_PATH = '/releases'
 
+/** One part of a note's summary: prose, or what was a code span in the CHANGELOG. */
+export interface ClientReleaseSummarySegment {
+  text: string
+  code: boolean
+}
+
 export interface ClientReleaseNote {
   version: string
   /** ISO date, `YYYY-MM-DD`. */
   date: string
-  /** One or two sentences — what changed, for someone deciding whether to update. Not the CHANGELOG. */
+  /**
+   * One or two sentences — what changed, for someone deciding whether to
+   * update. Not the CHANGELOG. Plain text: code spans keep their content,
+   * without backticks.
+   */
   summary: string
+  /**
+   * `summary` split into parts, so a renderer can show code as code (#3393).
+   * The texts join to exactly `summary`.
+   */
+  summary_segments: readonly ClientReleaseSummarySegment[]
   /**
    * True when a client must update to keep paying. Not the same as a breaking
    * change: BREAKING means "updating may break you", this means "not updating
@@ -76,7 +91,7 @@ export interface ClientRelease {
 export const CLIENT_RELEASES: Readonly<Record<PublishedClientPackage, ClientRelease>> = CLIENT_RELEASE_DATA
 
 /**
- * The command that updates `pkg` on the given connector channel (the npm
+ * The command that starts updating `pkg` on the given connector channel (the npm
  * dist-tag a deployment hands out). Moved here from the backend's
  * `client-compat` middleware (#3303) so the update hint and the public release
  * documents print one command, not two copies.
@@ -87,13 +102,18 @@ export function upgradeCommandFor(pkg: PublishedClientPackage, channel: string):
       return `npm install @haven_ai/sdk@${channel}`
     case '@haven_ai/cli':
       return `npx -y @haven_ai/cli@${channel}`
-    // The signer and the local MCP runtime are installed BY the connector; a
-    // connector re-run reinstalls the pinned runtime (the signer's own
-    // version-mismatch guidance says the same).
+    // The signer and the local MCP runtime are installed BY the connector, but
+    // a BARE connector re-run is a setup command: on an existing install it
+    // stops at "Missing --setup" (#3412). The flagless doctor works as pasted,
+    // diagnoses the outdated runtime and prints the exact `--doctor --repair`
+    // line — naming `--credentials-dir` when several agents share the machine.
+    // A copy of `connectorUpgradeCommand` in `@haven_ai/sdk`, which this private
+    // package cannot import; the backend's
+    // `connector-upgrade-command-parity.test.ts` fails if the two disagree.
     case '@haven_ai/signer':
     case '@haven_ai/mcp':
     case '@haven_ai/connect':
-      return `npx -y @haven_ai/connect@${channel}`
+      return `npx -y @haven_ai/connect@${channel} --doctor`
   }
 }
 

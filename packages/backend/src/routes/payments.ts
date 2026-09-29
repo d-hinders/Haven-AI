@@ -28,7 +28,7 @@ import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payme
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { classifyRevertForLedger, refuse } from '../modules/payments/index.js'
-import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
+import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).
@@ -45,6 +45,7 @@ import {
   allowanceModuleRailRetired,
   isRetiredAllowanceIntent,
 } from '../rails/execution-rail.js'
+import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../rails/delegation-rail.js'
 import {
   prepareDelegationPayment,
   submitDelegationPayment,
@@ -56,6 +57,15 @@ import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
 import { findForAgent as findTaskBudgetForAgent } from '../infra/repositories/task-budgets.js'
+import type { Delegation } from '../rails/delegation-policy.js'
+import {
+  findForAgent as findSubBudgetForAgent,
+  findOpenParentChildByHash,
+} from '../infra/repositories/sub-budgets.js'
+import {
+  resolveSubBudgetForPayment,
+  type SubBudgetPaymentRefusal,
+} from '../modules/sub-budgets/index.js'
 import {
   resolveTaskBudgetChildForPayment,
   type TaskBudgetPaymentRefusal,
@@ -76,6 +86,24 @@ const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
   task_budget_token_mismatch: "This payment's token does not match the task budget's token",
   task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
   task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
+}
+
+/** #3330 §3: the sub-budget refusal table's HTTP status per code. */
+const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> = {
+  sub_budget_not_found: 404,
+  sub_budget_not_open: 409,
+  sub_budget_token_mismatch: 409,
+  sub_budget_recipient_mismatch: 409,
+  sub_budget_parent_mismatch: 409,
+}
+
+const SUB_BUDGET_REFUSAL_MESSAGE: Record<SubBudgetPaymentRefusal, string> = {
+  sub_budget_not_found: 'Sub-budget not found',
+  sub_budget_not_open: 'Sub-budget is not open (closed, closing, pending, or expired)',
+  sub_budget_token_mismatch: "This payment's token does not match the sub-budget's token",
+  sub_budget_recipient_mismatch: "This payment's recipient does not match the sub-budget's pinned recipient",
+  sub_budget_parent_mismatch:
+    "The sub-budget's chain is broken — its parent-child link is closed or it was not carved from the budget delegation selected for this payment",
 }
 
 /**
@@ -116,6 +144,8 @@ interface CreatePaymentBody {
   idempotency_key?: string
   /** #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly. */
   task_budget_id?: string
+  /** #3330: an OPEN sub-budget (this agent is the sub-agent B) to authorize this payment through. Mutually exclusive with task_budget_id. */
+  sub_budget_id?: string
 }
 
 interface SignPaymentBody {
@@ -170,8 +200,7 @@ function resolveToken(chainId: number, symbol: string) {
 // ── Routes ────────────────────────────────────────────────────────
 
 /**
- * Idempotent-replay lookup for POST /payments (#1207) — the same contract
- * /machine-payments/send carries on the same key column (migration 020).
+ * Idempotent-replay lookup for POST /payments (#1207).
  *
  * A key that matches an existing row returns the FIRST request's result:
  * a still-signable intent replays its original sign_data (delegation-rail
@@ -196,7 +225,13 @@ function resolveToken(chainId: number, symbol: string) {
 async function findPaymentReplay(
   agent: AgentContext,
   idempotencyKey: string,
-  requested: { tokenAddress: string; toAddress: string; amountRaw: string },
+  requested: {
+    tokenAddress: string
+    toAddress: string
+    amountRaw: string
+    taskBudgetId: string | null
+    subBudgetId: string | null
+  },
 ): Promise<{ code: number; body: Record<string, unknown> } | null> {
   const statusReplay = async (paymentId: string) => {
     const status = await getAgentPaymentStatus(agent, paymentId)
@@ -208,10 +243,31 @@ async function findPaymentReplay(
       body: { payment_id: paymentId, error: 'Payment already exists but could not be loaded', idempotent_replay: true },
     }
   }
-  const mismatch = (row: { token_address: string; to_address: string; amount_raw: string }): string | null => {
+  const mismatch = (row: {
+    token_address: string
+    to_address: string
+    amount_raw: string
+    task_budget_id: string | null
+    sub_budget_id?: string | null
+  }): string | null => {
     if (row.token_address.toLowerCase() !== requested.tokenAddress) return 'token'
     if (row.to_address.toLowerCase() !== requested.toAddress) return 'recipient'
     if (row.amount_raw !== requested.amountRaw) return 'amount'
+    // #3392: the task budget the payment was charged to is part of the pin,
+    // exactly like token/recipient/amount. Lower-case both ids and treat
+    // "absent" as a value, so A→B, A→none and none→A all refuse. This runs
+    // before any task-budget lookup: a replay naming an id the stored row
+    // does not carry gets this 409 even when the id is malformed.
+    if ((row.task_budget_id ?? null) !== (requested.taskBudgetId ? requested.taskBudgetId.toLowerCase() : null)) {
+      return 'task_budget'
+    }
+    // #3330: the same pin for the sub-budget id.
+    if (
+      (row.sub_budget_id ?? null) !==
+      (requested.subBudgetId ? requested.subBudgetId.toLowerCase() : null)
+    ) {
+      return 'sub_budget'
+    }
     return null
   }
 
@@ -320,23 +376,29 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   app.post<{ Body: CreatePaymentBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
-    const { token, amount, to, idempotency_key, task_budget_id } = request.body
+    const { token, amount, to, idempotency_key, task_budget_id, sub_budget_id } = request.body
+    // #3330: exactly one authorizing child per payment — a body naming both
+    // is ambiguous about which chain to redeem, and ambiguity on a money
+    // path refuses rather than guesses.
+    if (task_budget_id && sub_budget_id) {
+      return reply.code(400).send({
+        error: 'Pass exactly one of task_budget_id or sub_budget_id — never both',
+      })
+    }
 
     // 1. Validate inputs
-    if (!token || typeof token !== 'string') {
-      return reply.code(400).send({ error: 'Token symbol is required' })
-    }
-    if (!amount || typeof amount !== 'string' || isNaN(Number(amount)) || Number(amount) <= 0) {
+    //
+    // #3031: the SHAPES — required `token`/`amount`/`to`, the recipient
+    // address pattern, and the 1–128 `idempotency_key` — are the request
+    // schema's job now (`CreatePaymentRequest`, enforced since this file
+    // joined `enforcedModules`). What stays here is what the schema cannot
+    // say: `Number(amount)` must PARSE and be POSITIVE — `parseTokenAmount`
+    // is the converter and the zero/negative refusal below is its own rung;
+    // the token-SYMBOL resolution against the chain's token list is semantic
+    // (the supported set is chain data, not a wire enum), and so is the rail
+    // gate behind it.
+    if (isNaN(Number(amount)) || Number(amount) <= 0) {
       return reply.code(400).send({ error: 'Amount must be a positive number' })
-    }
-    if (!to || !isValidAddress(to)) {
-      return reply.code(400).send({ error: 'Valid recipient address is required' })
-    }
-    if (
-      idempotency_key !== undefined &&
-      (typeof idempotency_key !== 'string' || idempotency_key.length === 0 || idempotency_key.length > 128)
-    ) {
-      return reply.code(400).send({ error: 'idempotency_key must be a non-empty string of at most 128 characters' })
     }
     // #3329: task_budget_id's shape (a non-empty string) is the spec's job
     // (`CreatePaymentRequest`) — this handler only reads the value.
@@ -407,15 +469,16 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
     // 4a. Idempotent replay (#1207): a retried request must return the FIRST
     // request's result, never mint a second transfer or a second approval —
-    // the same contract /machine-payments/send has carried since migration
-    // 020, on the same key column, so agents get one mechanism, not a
-    // per-route dialect. Before any chain read: a replay costs two indexed
-    // lookups.
+    // the same key column migration 020 introduced, so agents get one
+    // mechanism, not a per-route dialect. Before any chain read: a replay
+    // costs two indexed lookups.
     if (idempotency_key) {
       const replay = await findPaymentReplay(agent, idempotency_key, {
         tokenAddress: tokenAddress.toLowerCase(),
         toAddress: to.toLowerCase(),
         amountRaw: amountRaw.toString(),
+        taskBudgetId: (task_budget_id as string | undefined) ?? null,
+        subBudgetId: (sub_budget_id as string | undefined) ?? null,
       })
       if (replay) return reply.code(replay.code).send(replay.body)
     }
@@ -491,6 +554,67 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       taskBudgetParentDelegation = parentDelegation
     }
 
+    // ── Sub-budget (#3330, optional) ──────────────────────────────────────
+    // Agent B pays through the sub-budget agent A granted it: the redemption
+    // chain becomes [B grant, A parent-child, A budget] — THREE links, and
+    // the DelegationManager enforces all three in one redemption, so A's
+    // period budget binds every spend B makes. The same #3329 review finding
+    // E rule applies twice: the grant's `parent_delegation_hash` names A's
+    // parent-child row (read by hash, never re-derived), and that row's own
+    // `parent_delegation_hash` names A's budget delegation (read by hash
+    // again, and it must still resolve ACTIVE: revoking A's budget
+    // delegation flips that row to `revoked`, so this lookup answers null
+    // and B's child is stranded here — and reverts on-chain once the
+    // owner's disableDelegation UserOp lands).
+    let subBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetForPayment>>['childDelegation']
+    let subBudgetParentChildDelegation: Delegation | undefined
+    let subBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
+    if (sub_budget_id) {
+      const nowSec = Math.floor(Date.now() / 1000)
+      const grantRow = await findSubBudgetForAgent(sub_budget_id, agent.id)
+      if (!grantRow) {
+        return reply.code(404).send({ error: 'Sub-budget not found', error_code: 'sub_budget_not_found' })
+      }
+      const parentChildRow = await findOpenParentChildByHash(grantRow.parent_delegation_hash, nowSec)
+      if (!parentChildRow) {
+        // The middle link of the chain is closed or expired (A revoked its
+        // grant of B, A's own budget delegation was revoked, or it simply
+        // aged out) — B's child can never again be redeemed through.
+        return reply.code(409).send({
+          error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch,
+          error_code: 'sub_budget_parent_mismatch',
+        })
+      }
+      const parentDelegation = await selectActiveDelegationByHash(
+        parentChildRow.agent_id,
+        parentChildRow.parent_delegation_hash,
+      )
+      if (!parentDelegation) {
+        return reply.code(409).send({
+          error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch,
+          error_code: 'sub_budget_parent_mismatch',
+        })
+      }
+      const resolved = resolveSubBudgetForPayment(
+        grantRow,
+        parentChildRow,
+        tokenAddress,
+        to.toLowerCase(),
+        parentDelegation,
+        nowSec,
+      )
+      if (!resolved.ok) {
+        const code = resolved.refusal as SubBudgetPaymentRefusal
+        return reply.code(SUB_BUDGET_REFUSAL_STATUS[code]).send({
+          error: SUB_BUDGET_REFUSAL_MESSAGE[code],
+          error_code: code,
+        })
+      }
+      subBudgetGrant = resolved.childDelegation
+      subBudgetParentDelegation = parentDelegation
+      subBudgetParentChildDelegation = JSON.parse(parentChildRow.delegation_json) as Delegation
+    }
+
     let authorization
     try {
       authorization = await prepareDelegationPayment(
@@ -498,9 +622,17 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         tokenAddress,
         to.toLowerCase(),
         amountRaw,
-        taskBudgetChild && taskBudgetParentDelegation
-          ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
-          : undefined,
+        subBudgetGrant && subBudgetParentDelegation && subBudgetParentChildDelegation
+          ? {
+              subBudget: {
+                grantDelegation: subBudgetGrant,
+                parentChildDelegation: subBudgetParentChildDelegation,
+                parentDelegation: subBudgetParentDelegation,
+              },
+            }
+          : taskBudgetChild && taskBudgetParentDelegation
+            ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
+            : undefined,
       )
     } catch (err) {
       // Caveat rejection (budget/recipient/expiry) or bundler failure —
@@ -510,6 +642,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // failure is NOT a refusal (the guardrails refused nothing); the
       // classifier returns null for it and nothing is written. The
       // 502 the caller receives is unchanged either way.
+      // #3416: no bundler credential for this chain on this deployment — a
+      // typed, non-retryable 503, and nothing booked (nothing was refused).
+      if (err instanceof DelegationRailChainUnavailableError) {
+        return refuse(reply.code(503).send(railUnavailableRefusalBody(err)), null)
+      }
       const refusalReason = classifyRevertForLedger(err)
       // #3053: through the shared choke point; the ledger input is null when
       // the classification says NOT a refusal.
@@ -584,6 +721,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         preparedUserOp: serializeUserOp(authorization.prepared.userOperation),
         sendIdempotencyKey: idempotency_key ?? null,
         taskBudgetId: taskBudgetChild ? (task_budget_id as string) : null,
+        subBudgetId: subBudgetGrant ? (sub_budget_id as string) : null,
       })
     } catch (err) {
       // Lost the idempotency-key race with a concurrent request (migration
@@ -593,6 +731,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           tokenAddress: tokenAddress.toLowerCase(),
           toAddress: to.toLowerCase(),
           amountRaw: amountRaw.toString(),
+          taskBudgetId: (task_budget_id as string | undefined) ?? null,
+          subBudgetId: (sub_budget_id as string | undefined) ?? null,
         })
         if (replay) return reply.code(replay.code).send(replay.body)
       }
@@ -634,9 +774,13 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       const { id } = request.params
       const { signature } = request.body
 
-      if (!signature || typeof signature !== 'string' || !signature.startsWith('0x')) {
-        return reply.code(400).send({ error: 'Valid 0x-prefixed signature is required' })
-      }
+      // #3031: the `0x`-prefix + hex + minimum-length shape check moved to
+      // the request schema (`^0x[0-9a-fA-F]{100,}$` — the rung's exact
+      // floor, corrected from the spec's stricter `{130}` so 100–129-hex
+      // shapes the route always accepted stay accepted). The signature's
+      // VALIDITY is deliberately not checked here at all: the account's own
+      // EIP-1271/4337 validation at submit is the real validator (note
+      // below), so there is nothing between the schema and that.
 
       // 1. Load intent
       const intent = await findIntentForAgent(id, agent.id)
@@ -718,12 +862,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // validates in `validateUserOp`. That on-chain check IS the signature
       // verification — strictly stronger than a local recover, and it cannot
       // drift from the account's own rules. A bad signature is rejected by
-      // the bundler at submit; nothing moves. We therefore only shape-check
-      // here (a local EIP-712 reconstruction would add a second, weaker
-      // source of truth that could false-reject valid signatures).
-      if (!/^0x[0-9a-fA-F]{100,}$/.test(signature)) {
-        return reply.code(400).send({ error: 'Invalid signature format' })
-      }
+      // the bundler at submit; nothing moves. The shape check the first
+      // sentence refers to is the request schema's since #3031 (the rung
+      // that stood here answered `Invalid signature format`); a local
+      // EIP-712 reconstruction would add a second, weaker source of truth
+      // that could false-reject valid signatures.
 
       // #1482: refuse a MISDIRECTED erc7710 intent before anything is claimed.
       //

@@ -34,6 +34,26 @@ export interface Parties {
   delegate_account: string | null
   /** `payTo`. */
   merchant: string | null
+  /**
+   * #3332: the paying agent's OWNER's company details — additive, and
+   * ABSENT (never present-but-null) unless `HAVEN_OWNER_COMPANY_DETAILS` is
+   * on AND the owner has saved details. A merchant reading this on a receipt
+   * the agent chose to hand over sees who the agent is paying for; Haven
+   * never renders `vies_status: 'valid'` as "verified" anywhere this reaches
+   * (`docs/product/agent-passport.md`).
+   */
+  buyer?: PartiesBuyer
+}
+
+export interface PartiesBuyer {
+  legal_name: string
+  /** ISO 3166-1 alpha-2. */
+  country: string
+  /** For a sole trader this IS the personal identity number. */
+  org_number: string
+  vat_number: string | null
+  vies_status: 'pending' | 'valid' | 'invalid' | 'not_verifiable' | null
+  vies_checked_at: string | null
 }
 
 /**
@@ -51,6 +71,15 @@ export interface PartySourceFields {
   delegate_account_address: string | null
   /** Merchant / `payTo`. */
   merchant_address: string | null
+  /**
+   * #3332: the paying agent's owner's company details, when the caller has
+   * already decided they belong on the wire (flag on AND a row exists) —
+   * `undefined`/omitted means "leave `parties.buyer` absent", never `null`.
+   * Callers join `infra/repositories/owner-company-details.ts`'s
+   * `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` on the row's own `user_id` to get
+   * this.
+   */
+  buyer_details?: PartiesBuyer
 }
 
 /** The one mapper: derive `parties` from a row's party-bearing fields, additive alongside it. */
@@ -58,13 +87,14 @@ export function withParties<T extends object>(
   row: T,
   parties: PartySourceFields,
 ): T & { parties: Parties } {
+  const base: Parties = {
+    treasury_account: parties.account_address,
+    delegate: parties.delegate_address,
+    delegate_account: parties.delegate_account_address,
+    merchant: parties.merchant_address,
+  }
   return {
     ...row,
-    parties: {
-      treasury_account: parties.account_address,
-      delegate: parties.delegate_address,
-      delegate_account: parties.delegate_account_address,
-      merchant: parties.merchant_address,
-    },
+    parties: parties.buyer_details ? { ...base, buyer: parties.buyer_details } : base,
   }
 }

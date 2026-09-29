@@ -216,6 +216,40 @@ describe('payment result mappers', () => {
     })
   })
 
+  // #3332: additive `buyer` inside `parties` — camelCases the wire shape,
+  // absent (never present-and-undefined-fields) when the server omits it.
+  it('mapPaymentReceipt carries parties.buyer when present, absent when the server omits it', () => {
+    const withoutBuyer = mapPaymentReceipt(rawReceipt({
+      parties: { treasury_account: '0xTreasury', delegate: '0xDelegate', delegate_account: null, merchant: '0xMerchant' },
+    }))
+    expect(withoutBuyer.parties).not.toHaveProperty('buyer')
+
+    const withBuyer = mapPaymentReceipt(rawReceipt({
+      parties: {
+        treasury_account: '0xTreasury',
+        delegate: '0xDelegate',
+        delegate_account: null,
+        merchant: '0xMerchant',
+        buyer: {
+          legal_name: 'Acme AB',
+          country: 'SE',
+          org_number: '556677-8899',
+          vat_number: 'SE556677889901',
+          vies_status: 'valid',
+          vies_checked_at: '2026-09-20T10:00:00.000Z',
+        },
+      },
+    }))
+    expect(withBuyer.parties?.buyer).toEqual({
+      legalName: 'Acme AB',
+      country: 'SE',
+      orgNumber: '556677-8899',
+      vatNumber: 'SE556677889901',
+      viesStatus: 'valid',
+      viesCheckedAt: '2026-09-20T10:00:00.000Z',
+    })
+  })
+
   it('mapPaymentStatusResult carries parties when present, undefined when absent', () => {
     expect(mapPaymentStatusResult(paymentStatusResponse()).parties).toBeUndefined()
 

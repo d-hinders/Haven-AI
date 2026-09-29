@@ -1,4 +1,4 @@
-import { connectorRerunCommand } from '@haven_ai/sdk/edge'
+import { connectorUpgradeCommand } from '@haven_ai/sdk/edge'
 import {
   SUPPORTED_SWEEP_BINDING_VERSIONS,
   SUPPORTED_X402_EXPECTED_VERSIONS,
@@ -118,8 +118,8 @@ export function signerInstructions(): string {
     'Haven quote and prepare results report the expected-context version they will emit',
     '(signer_compatibility.x402_expected_context_version). If that version is not in the list',
     'above, this signer is out of date: STOP before signing, and tell the user to update',
-    `@haven_ai/signer by rerunning \`${connectorRerunCommand()}\`, which reinstalls the pinned`,
-    'MCP runtime. Do not edit the version field to a supported value — it is part of the',
+    `@haven_ai/signer: run \`${connectorUpgradeCommand()}\`, then the repair line it prints,`,
+    'which reinstalls the pinned MCP runtime. Do not edit the version field to a supported value — it is part of the',
     'Haven-signed binding message, so changing it invalidates the signature.',
     '',
     'A version-mismatch refusal from haven_sign / haven_sign_x402 / haven_sign_sweep_delegate is',
@@ -128,5 +128,11 @@ export function signerInstructions(): string {
     'refusal also carries the next-step family: next_tool_name + next_tool_server_role when a',
     'hosted tool follows (resolve the role against your own server names), else',
     'next_tool_omitted_reason saying why not.',
+    '',
+    'An undeclared top-level argument is refused, not stripped: haven_sign answers',
+    'UNSUPPORTED_ARGUMENT with unknown_arguments, signer_version and fallback (the update',
+    'command) instead of dropping the key and answering the generic signing error — if you see',
+    'that refusal, this signer predates the argument form you sent. Update the signer; nothing',
+    'was signed, fetched or audited.',
   ].join('\n')
 }

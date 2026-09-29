@@ -13,7 +13,7 @@
  * the exact encoding the #884 spike proved on-chain. Haven signs nothing.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Address } from 'viem'
 import { api } from '@/lib/api'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
@@ -82,6 +82,14 @@ export interface DelegationBudget {
   budget_atomic: string
   period_seconds: number
   expires_at: number
+  /**
+   * The merchant a merchant-locked budget (#3331) was issued for, or null for
+   * every other row (and after that merchant is deleted). All three travel
+   * together — a row either names all three or none.
+   */
+  merchant_id?: string | null
+  merchant_slug?: string | null
+  merchant_name?: string | null
 }
 
 interface BuildResponse {
@@ -113,6 +121,14 @@ export interface GrantInput {
   recipientAddress?: Address | null
   budgetAtomic: string
   periodSeconds: number
+  /**
+   * A merchant-locked budget (#3331): the server pins the recipient to this
+   * live merchant's verified payTo on the agent's chain and records the
+   * merchant on the row. `recipientAddress` MAY be sent alongside it; it must
+   * then equal the merchant's current verified payTo, or the build is a 409.
+   * Left omitted (or null), the server derives the recipient itself.
+   */
+  merchantSlug?: string
 }
 
 /**
@@ -120,10 +136,24 @@ export interface GrantInput {
  * an oversized batch by NAMING per-budget revocation as the remedy, and a
  * caller that flattens it into the generic failure strands the user on a
  * screen that repeats a refusal without ever saying what to do instead.
+ *
+ * `refused` is any NAMED build refusal the backend answers with a sentence —
+ * not only the merchant-locked build's four 409s (#3331: no verified payTo,
+ * not every offer ERC-7710, the payTo is one of the agent's own addresses, a
+ * sent recipient disagrees with the payTo), but also the ordinary grant
+ * refusals `POST /delegations/build` can answer for ANY caller (a revoked
+ * agent, an account off the delegation rail, a chain the rail is not enabled
+ * on, an in-flight re-key). `detail` is the backend's own sentence, the same
+ * shape `editBudget`'s `refused` already carries — a caller decides how much
+ * of it to show; `FundMerchantModal` maps the named ones to plain copy and
+ * falls back to a generic sentence for anything it does not recognise
+ * (`refusalCopy` in `components/marketplace/FundMerchantModal.tsx`).
+ * Additive: every existing caller that does not name it keeps folding it into
+ * its generic failure copy, exactly as it already does for `too_many`.
  */
 export type BudgetResult =
   | { ok: true }
-  | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' }
+  | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' | 'refused'; detail?: string }
 
 /**
  * The edit-in-place result (#3166). Distinct from `BudgetResult` because the
@@ -175,6 +205,37 @@ export function useDelegationBudget(
   const [signersError, setSignersError] = useState(false)
   const [budgetsError, setBudgetsError] = useState(false)
   const [busy, setBusy] = useState(false)
+  // #3331 review finding F4, corrected round 3 (doc F7): a caller can switch
+  // WHICH agent this same mounted hook instance is scoped to
+  // (`FundMerchantModal`'s agent picker) — a monotonic counter per read,
+  // bumped every time `reload`/`reloadSigners` actually runs, so a response
+  // for a PREVIOUS agentId that resolves after a newer request started is
+  // discarded rather than overwriting fresh state with stale data. Both reads
+  // (`/agents/:id/delegations`, `/agents/:id/account-signers`) are keyed on
+  // agentId ONLY, never chainId — see the reset effect below. Two independent
+  // counters: a budgets read and a signer-set read can be in flight on
+  // different schedules (polling reloads only the former).
+  const budgetsGeneration = useRef(0)
+  const signersGeneration = useRef(0)
+  // R2-4: a background silent poll and a manual (non-silent) `reload()` share
+  // the same generation counter above — without this flag, a poll tick that
+  // starts WHILE a manual retry is in flight bumps the generation past the
+  // manual call's `mine`, so the manual call's own (possibly successful)
+  // result is discarded as "stale" the moment it resolves — even though nothing
+  // else answered in between with fresher data. A manual reload is a direct
+  // response to the owner clicking Try again; it must never lose to a poll
+  // tick that fired for no reason the owner asked for. Silent ticks simply
+  // skip themselves while a manual reload is in flight (rather than racing it) —
+  // the next poll a few seconds later covers the same ground.
+  //
+  // #3331 round 3 finding F4: a COUNTER, not a boolean — a second manual
+  // reload can start before the first one's `finally` runs (a fast double
+  // click on "Try again", or two callers of this same hook instance sharing
+  // one agent). A boolean here would read `false` the instant either manual
+  // call finished, letting a poll tick through and race the OTHER manual call
+  // still in flight; the counter only reaches zero once every overlapping
+  // manual call has finished, so polls stay suppressed for the whole window.
+  const manualBudgetsReloadInFlight = useRef(0)
   // The ACCOUNT address scopes the signer lookup (#1079): without it the
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
@@ -197,15 +258,30 @@ export function useDelegationBudget(
   const reload = useCallback(
     async (silent = false) => {
       if (!enabled) return
+      // R2-4: never let a background poll tick race an in-flight manual
+      // reload — see the ref's own comment above.
+      if (silent && manualBudgetsReloadInFlight.current > 0) return
+      if (!silent) manualBudgetsReloadInFlight.current += 1
+      const mine = ++budgetsGeneration.current
       try {
         const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
+        if (mine !== budgetsGeneration.current) return // a newer read has since started (F4)
         // `?? []` — an absent key must degrade, not crash the route (#3093).
         setBudgets(res.delegations ?? [])
         setBudgetsError(false)
       } catch {
+        if (mine !== budgetsGeneration.current) return
         if (silent) return
         setBudgets(null)
         setBudgetsError(true)
+      } finally {
+        // #3331 round 3 finding F3: cleared here — in `finally`, on BOTH the
+        // success and failure paths — so a manual reload that rejects does
+        // not leave polling suppressed forever; only the success branch was
+        // ever exercised by the pre-existing test, which is why the earlier
+        // shape (a plain assignment reachable from either path) was never
+        // proven to cover the failure path until this round's test did.
+        if (!silent) manualBudgetsReloadInFlight.current -= 1
       }
     },
     [agentId, enabled],
@@ -217,13 +293,16 @@ export function useDelegationBudget(
   // at a permanent null.
   const reloadSigners = useCallback(async () => {
     if (!enabled) return
+    const mine = ++signersGeneration.current
     try {
       const res = await api.get<AccountSigners>(`/agents/${agentId}/account-signers`)
+      if (mine !== signersGeneration.current) return // a newer read has since started (F4)
       // `passkeys ?? []` — `pickSigningPath` reads `.length` during render;
       // an answer without the array must degrade, not crash the route (#3093).
       setSigners({ ...res, passkeys: res.passkeys ?? [] })
       setSignersError(false)
     } catch {
+      if (mine !== signersGeneration.current) return
       setSigners(null)
       setSignersError(true)
     }
@@ -241,6 +320,31 @@ export function useDelegationBudget(
     void reload()
     void reloadSigners()
   }, [enabled, reload, reloadSigners])
+
+  // #3331 review finding F4 (R2-1 correction): reset IMMEDIATELY when the
+  // AGENT changes — while the hook stays enabled (a caller that switches
+  // agent mid-flow inside one mounted hook, e.g. `FundMerchantModal`'s agent
+  // picker). Without this, the previous agent's budgets/signer set (and
+  // therefore `ready`/`signingPath`) stay loaded — and actionable — for
+  // the whole round trip of the new read, which is exactly the "signs with
+  // the wrong agent's data" risk on a money path. `reload`/`reloadSigners`
+  // above already refetch on this same change (their identity depends on
+  // `agentId`); this only clears what a render can see in between.
+  //
+  // Deliberately NOT `chainId`: `/agents/:id/delegations` and
+  // `/agents/:id/account-signers` are not chain-scoped — a chainId-only
+  // rerender (same agent, network switch) must keep the already-loaded
+  // budgets/signers on screen (and `ready` true) rather than blanking them
+  // for no data reason. `useActiveSigner` above still re-derives the signing
+  // path for the new chain from the SAME signer set.
+  useEffect(() => {
+    if (!enabled) return
+    setBudgets(null)
+    setBudgetsError(false)
+    setSigners(null)
+    setSignersError(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately NOT `enabled`/`chainId`: the effect above already resets on enable/disable; chainId is not part of this hook's read scope (see comment above).
+  }, [agentId])
 
   // #2732 visible-only polling — budgets only. The signer set is a DEVICE
   // fact, not payment state; polling it every 10s would churn the signing
@@ -260,12 +364,25 @@ export function useDelegationBudget(
     async (input: GrantInput): Promise<BudgetResult> => {
       setBusy(true)
       try {
-        const built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
-          token_address: input.tokenAddress,
-          recipient_address: input.recipientAddress ?? null,
-          budget_atomic: input.budgetAtomic,
-          period_seconds: input.periodSeconds,
-        })
+        let built: BuildResponse
+        try {
+          built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
+            token_address: input.tokenAddress,
+            recipient_address: input.recipientAddress ?? null,
+            budget_atomic: input.budgetAtomic,
+            period_seconds: input.periodSeconds,
+            ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
+          })
+        } catch (err) {
+          // Named build refusals (revoked agent, re-key in flight, off-rail
+          // account, and — #3331 — the merchant-locked refusals) carry the
+          // backend's own sentence; pass it through instead of the generic
+          // failure, exactly as `editBudget` already does for its build step.
+          if (err instanceof Error && err.message.trim()) {
+            return { ok: false, reason: 'refused', detail: err.message }
+          }
+          throw err
+        }
         let signature: string
         if (signingPath === 'passkey' && signers) {
           // ONE passkey ceremony — the kit signs the delegation itself; the
@@ -330,6 +447,12 @@ export function useDelegationBudget(
             recipient_address: input.recipientAddress ?? null,
             budget_atomic: input.budgetAtomic,
             period_seconds: input.periodSeconds,
+            // #3331 review finding F3: a merchant-locked budget's edit-in-place
+            // must keep naming the merchant — omitting this silently turned the
+            // replacement into a plain pinned budget (the label lost, the row
+            // dropped out of the merchant page) the moment `EditBudgetModal`
+            // wired an `input.merchantSlug` through.
+            ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
             ...(opts.expiresAt !== undefined ? { expires_at: opts.expiresAt } : {}),
           })
         } catch (err) {

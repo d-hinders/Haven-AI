@@ -65,7 +65,13 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { HostedToolError, paymentWindowExpiredError, runTool } from './support/errors.js'
-import { buildAgentGuidance, buildPurchaseSummary, type HostedHandoff, refusalNextStep } from './support/guidance.js'
+import {
+  buildAgentGuidance,
+  buildPurchaseSummary,
+  catchSettledResettle,
+  type HostedHandoff,
+  refusalNextStep,
+} from './support/guidance.js'
 import {
   parseMcpTransport,
   serializeMcpTransport,
@@ -758,7 +764,14 @@ export function createPaidMcpCompletionHandlers(
         // `payment_header` is what tells the two schemes apart, because the
         // 3009 path always carries one built by the local signer.
         if (!args.payment_header) {
-          const paymentHeader = await haven.submitX402Erc7710(args.payment_id, args.signature)
+          const submitted = await haven
+            .submitX402Erc7710(args.payment_id, args.signature)
+            .catch(catchSettledResettle)
+          // #3423: a second settle of a payment that already settled answers
+          // with the original settlement as a done state (the #3417 helper),
+          // and the merchant is NOT called again.
+          if (typeof submitted !== 'string') return submitted.settledReplay
+          const paymentHeader = submitted
           const merchant7710 = await deliverMerchantPayment(
             haven,
             { ...args, payment_header: paymentHeader },
@@ -783,6 +796,22 @@ export function createPaidMcpCompletionHandlers(
             merchant7710.evidence_outcome,
           )
           if (gate.outcome === 'settled') {
+            // #3423 item 4: erc7710 settle used to omit
+            // `agent_summary.purchase_summary` — only the EIP-3009 branch
+            // built one, but the skill's "Reporting after a purchase"
+            // section tells every agent to report from it. `hasFundingLeg:
+            // false` is load-bearing here (see the guidance.ts doc comment):
+            // without it, `buildPurchaseSummary` would back-fill
+            // `funding_tx_hash` from `summary7710.payment?.txHash`, which on
+            // this scheme is the SETTLEMENT hash, not a funding one.
+            const purchaseSummary = buildPurchaseSummary({
+              payment: summary7710.payment,
+              merchantResult: merchant7710.result,
+              fundingTxHash: null,
+              settlementTxHash: merchant7710.settlement_tx_hash,
+              allowance: summary7710.allowance,
+              hasFundingLeg: false,
+            })
             return {
               payment_id: args.payment_id,
               settlement_scheme: 'erc7710',
@@ -807,11 +836,16 @@ export function createPaidMcpCompletionHandlers(
                 safeToContinue: true,
                 reason:
                   'Settled directly from the treasury through the budget delegation — no funding ' +
-                  'leg, so the delegate wallet never held these funds and there is nothing to sweep.',
+                  'leg, so the delegate wallet never held these funds and there is nothing to sweep. ' +
+                  'Report the result to the user from agent_summary.purchase_summary.',
                 summary: {
                   payment_id: args.payment_id,
                   status: summary7710.payment?.status ?? 'settled',
+                  // #3423 review round 1 (F1): additive, not a replacement —
+                  // `product` stayed the field this summary carried before
+                  // this fix, and `purchase_summary` is new alongside it.
                   product: args.tool_name,
+                  purchase_summary: purchaseSummary,
                 },
                 warnings: summary7710.warnings,
               }),

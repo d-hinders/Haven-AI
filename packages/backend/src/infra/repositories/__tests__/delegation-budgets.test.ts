@@ -55,6 +55,8 @@ interface DelegationSeed {
   delegationHash?: string
   startDate?: number
   expiresAt?: number
+  /** #3331: the merchant a merchant-locked budget was issued for. */
+  merchantId?: string | null
 }
 
 async function seedDelegation(seed: DelegationSeed): Promise<string> {
@@ -62,9 +64,9 @@ async function seedDelegation(seed: DelegationSeed): Promise<string> {
     `INSERT INTO agent_delegations
        (agent_id, chain_id, token_address, recipient_address, delegation_hash,
         delegation_json, version, status, budget_atomic, period_seconds,
-        start_date, expires_at, created_at)
+        start_date, expires_at, created_at, merchant_id)
      VALUES ($1, 84532, $2, $3, $4, $5, 1, $6, $7, 86400, $9, $10,
-             COALESCE($8::timestamptz, NOW()))
+             COALESCE($8::timestamptz, NOW()), $11)
      RETURNING id`,
     [
       seed.agentId,
@@ -77,6 +79,7 @@ async function seedDelegation(seed: DelegationSeed): Promise<string> {
       seed.createdAt ?? null,
       seed.startDate ?? 0,
       seed.expiresAt ?? 9999999999,
+      seed.merchantId ?? null,
     ],
   )
   return result.rows[0].id
@@ -315,16 +318,24 @@ describeDb('batch revocation (#1400, real DB)', () => {
     await resetDb()
   })
 
-  it('lists pending AND active, never revoked/replaced; batch-revoke flips exactly the given hashes', async () => {
+  it('lists pending, active AND replaced (still-enabled authority, #3343); never revoked; batch-revoke flips exactly the given hashes', async () => {
     const agentId = await seedUserAndAgent('Batch agent')
     const otherAgent = await seedUserAndAgent('Other agent')
     const hActive = await seedDelegation({ agentId, status: 'active', tokenAddress: USDC })
     const hPending = await seedDelegation({ agentId, status: 'pending', tokenAddress: '0x' + '11'.repeat(20) })
+    // #3343: a replaced row is still ENABLED on-chain until its Stop userop
+    // lands, so the batch revocation list must carry it — skipping it is how
+    // a re-key completed with the old key's delegation left live.
+    const hReplaced = await seedDelegation({ agentId, status: 'replaced', tokenAddress: '0x' + '33'.repeat(20) })
     await seedDelegation({ agentId, status: 'revoked', tokenAddress: '0x' + '22'.repeat(20) })
     const hForeign = await seedDelegation({ agentId: otherAgent, status: 'active', tokenAddress: USDC })
 
     const targets = await listNonRevokedDelegationsForAgent(agentId)
-    expect(targets.map((t) => t.status).sort()).toEqual(['active', 'pending'])
+    expect(targets.map((t) => t.status).sort()).toEqual(['active', 'pending', 'replaced'])
+    const replacedHash = (await db.query<{ delegation_hash: string }>(
+      `SELECT delegation_hash FROM agent_delegations WHERE id = $1`, [hReplaced],
+    )).rows[0].delegation_hash
+    expect(targets.map((t) => t.delegation_hash)).toContain(replacedHash)
     const hashes = targets.map((t) => t.delegation_hash)
 
     // The foreign hash rides along in the request — the agent scope must
@@ -336,7 +347,7 @@ describeDb('batch revocation (#1400, real DB)', () => {
     expect(flipped.sort()).toEqual(hashes.sort())
 
     const after = await db.query<{ status: string }>(
-      `SELECT status FROM agent_delegations WHERE id = ANY($1)`, [[hActive, hPending]],
+      `SELECT status FROM agent_delegations WHERE id = ANY($1)`, [[hActive, hPending, hReplaced]],
     )
     expect(after.rows.every((r) => r.status === 'revoked')).toBe(true)
     const foreign = await db.query<{ status: string }>(
@@ -663,5 +674,137 @@ describeDb('delegation build slot lock (#2613)', () => {
       .toBe(delegationBuildSlotKey('a1', USDC, RECIPIENT.toUpperCase()))
     // Two agents never share a slot even on identical parameters.
     expect(open).not.toBe(delegationBuildSlotKey('a2', USDC, null))
+  })
+})
+
+describeDb('merchant-locked budgets (#3331, real DB)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  async function seedMerchant(slug: string): Promise<string> {
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO merchants (slug, name) VALUES ($1, $1) RETURNING id`,
+      [slug],
+    )
+    return rows[0].id
+  }
+
+  // The issue's uniqueness criterion: nothing enforces one active delegation
+  // per agent, so a merchant-locked budget and the open budget coexist — and
+  // the EXISTING selector already sends a payment to the merchant through the
+  // pinned one and everything else through the open one. No selection change
+  // ships with #3331; this pins that it did not need one.
+  it('CHARACTERIZATION: a merchant-locked budget coexists with the open one; the merchant is paid from the pinned one, anyone else from the open one', async () => {
+    const agent = await seedUserAndAgent()
+    const merchantId = await seedMerchant('coexist')
+    await seedDelegation({ agentId: agent, recipientAddress: null, createdAt: '2026-09-02T00:00:00Z' })
+    await seedDelegation({ agentId: agent, recipientAddress: RECIPIENT, merchantId, createdAt: '2026-09-01T00:00:00Z' })
+
+    expect((await listActiveDelegations([agent])).length).toBe(2)
+    expect((await selectDelegationForPayment(agent, USDC, RECIPIENT))!.recipient_address).toBe(RECIPIENT)
+    expect((await selectDelegationForPayment(agent, USDC, '0x' + 'bb'.repeat(20)))!.recipient_address).toBeNull()
+  })
+
+  it('build reuse is merchant-scoped: a plain pinned pending row is never re-handed to a merchant build, nor the reverse', async () => {
+    const agent = await seedUserAndAgent()
+    const merchantId = await seedMerchant('reuse')
+    const plain = await seedDelegation({ agentId: agent, recipientAddress: RECIPIENT, status: 'pending', budgetAtomic: '5000000' })
+
+    expect((await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0))!.id).toBe(plain)
+    expect(await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0, undefined, merchantId)).toBeNull()
+
+    const forMerchant = await seedDelegation({
+      agentId: agent, recipientAddress: RECIPIENT, status: 'pending', budgetAtomic: '5000000', merchantId,
+    })
+    expect((await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0, undefined, merchantId))!.id).toBe(forMerchant)
+    // …and the plain build still gets the plain row, not the merchant's.
+    expect((await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0))!.id).toBe(plain)
+  })
+})
+
+// ── ACTIVATE_PENDING_DELEGATION_SQL's rekey_id backstop (#3439) ────────────
+//
+// The PRIMARY guard against activating a re-key's own row is the route
+// check, before the slot sweep (`agent-delegations-rekey-row-guard.test.ts`
+// proves that one, on the real route). This block proves the SQL's
+// `AND rekey_id IS NULL` backstop in isolation, calling the repository
+// function directly with no route in front of it — so a future caller of
+// `activatePendingDelegation`/`activatePendingDelegationInSlot` that forgets
+// the route-level check still cannot activate a re-key row.
+import { activatePendingDelegation } from '../delegation-budgets.js'
+import { openRekey as openRekeyForBackstop } from '../agent-rekeys.js'
+
+describeDb('ACTIVATE_PENDING_DELEGATION_SQL rekey_id backstop (#3439)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  async function seedAgentWithDelegateAndAccount(): Promise<{ userId: string; agentId: string }> {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`u${++hashCounter}-${Date.now()}@test.example`],
+    )
+    const userId = user.rows[0].id
+    const account = await db.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
+       VALUES ($1, $2, 84532, 'delegation', 'delegator_hybrid') RETURNING id`,
+      [userId, `0x${String(hashCounter).padStart(40, 'a')}`],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, account_id, name, delegate_address, api_key_hash, api_key_prefix, status)
+       VALUES ($1, $2, 'Backstop agent', $3, $4, 'sk_bkstp', 'active') RETURNING id`,
+      [userId, account.rows[0].id, `0x${String(hashCounter).padStart(40, 'b')}`, `hash-bkstp-${hashCounter}-${Date.now()}`],
+    )
+    return { userId, agentId: agent.rows[0].id }
+  }
+
+  it("a pending row with rekey_id set is NOT activated by ACTIVATE_PENDING_DELEGATION_SQL, even called directly with no route in front of it", async () => {
+    const { userId, agentId } = await seedAgentWithDelegateAndAccount()
+    const rekey = await openRekeyForBackstop({
+      agentId,
+      userId,
+      oldDelegateAddress: `0x${String(hashCounter).padStart(40, 'b')}`,
+      newDelegateAddress: `0x${String(hashCounter).padStart(40, 'c')}`,
+      residualAtomic: '0',
+      residualTokenAddress: null,
+      residualDisposition: 'none',
+    })
+    const rekeyDelegationId = await db.query<{ id: string }>(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds,
+          start_date, expires_at, rekey_id, carry_role)
+       VALUES ($1, 84532, $2, NULL, $3, '{"signed":"capability"}', 1, 'pending', '1000000',
+               86400, 0, 9999999999, $4, 'steady') RETURNING id`,
+      [agentId, USDC, `0x${String(++hashCounter).padStart(64, '9')}`, rekey.id],
+    )
+
+    const activated = await activatePendingDelegation(
+      rekeyDelegationId.rows[0].id,
+      SIGNED_JSON,
+    )
+
+    // MUTATION TARGET: dropping `AND rekey_id IS NULL` from
+    // `ACTIVATE_PENDING_DELEGATION_SQL` turns this `true` and the row
+    // `active`.
+    expect(activated).toBe(false)
+    expect(await statusOf(rekeyDelegationId.rows[0].id)).toBe('pending')
+  })
+
+  it('an ordinary pending row (rekey_id NULL) still activates — the backstop is scoped, not a blanket refusal', async () => {
+    const agent = await seedUserAndAgent('Backstop control agent')
+    const plain = await seedDelegation({ agentId: agent, status: 'pending', delegationJson: '{"signed":"not yet"}' })
+
+    const activated = await activatePendingDelegation(plain, SIGNED_JSON)
+
+    expect(activated).toBe(true)
+    expect(await statusOf(plain)).toBe('active')
   })
 })

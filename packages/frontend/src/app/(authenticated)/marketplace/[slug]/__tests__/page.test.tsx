@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockUseMerchant, mockUseAgents, mockNotFound } = vi.hoisted(() => ({
+const { mockUseMerchant, mockUseAgents, mockUseMerchantBudgets, mockNotFound } = vi.hoisted(() => ({
   mockUseMerchant: vi.fn(),
   mockUseAgents: vi.fn(),
+  mockUseMerchantBudgets: vi.fn(),
   mockNotFound: vi.fn(),
 }))
 
@@ -16,13 +17,43 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
+vi.mock('@/hooks/useMerchantBudgets', () => ({
+  useMerchantBudgets: () => mockUseMerchantBudgets(),
+}))
+
 vi.mock('next/navigation', () => ({
   useParams: () => ({ slug: 'ampersend-demo-api' }),
   notFound: () => mockNotFound(),
 }))
 
 import MerchantPage from '../page'
-import type { CatalogEntry, Merchant } from '@/hooks/useCatalog'
+import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
+import type { Agent } from '@/hooks/useAgents'
+
+// #3331 review finding F6: the action needs at least one ELIGIBLE agent, not
+// just a qualifying chain — this fixture is the one Agent shape that
+// `eligibleFundingAgents` accepts for `verifiedErc7710Funding` below (chain
+// 84532, active, not archived).
+const eligibleAgent: Agent = {
+  id: 'agent-1',
+  name: 'Research Agent',
+  description: null,
+  delegate_address: '0x' + 'de'.repeat(20),
+  account_id: 'acc-1',
+  account_address: '0x' + 'aa'.repeat(20),
+  account_name: 'Haven wallet',
+  account_chain_id: 84532,
+  account_type: 'delegator_hybrid',
+  api_key_prefix: 'hv_abc',
+  status: 'active',
+  created_at: new Date().toISOString(),
+  allowances: [],
+  labels: [],
+  organization_id: null,
+  // #3426: the fixture is type-checked against the wire schema; the opt-in
+  // defaults OFF on every agent read.
+  tax_declaration_enabled: false,
+} as Agent
 
 const merchant: Merchant = {
   id: 'm-1',
@@ -74,9 +105,9 @@ function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
 
 describe('MerchantPage', () => {
   beforeEach(() => {
-    mockUseAgents.mockReturnValue({ agents: [] })
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
+    mockUseMerchantBudgets.mockReturnValue({ budgets: [], loading: false, error: null, forbidden: false, refetch: vi.fn() })
   })
 
   it('renders a loading state', () => {
@@ -210,5 +241,212 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.getByText('No offers listed yet')).toBeDefined()
+  })
+
+  // ── "Fund this merchant" (#3331) ──────────────────────────────────────────
+  const verifiedErc7710Funding: MerchantFundingTarget[] = [
+    { network: 'eip155:84532', chain_id: 84532, pay_to: '0x' + 'f0'.repeat(20), pay_to_status: 'verified', erc7710: true },
+  ]
+  const verifiedNotErc7710Funding: MerchantFundingTarget[] = [
+    { network: 'eip155:84532', chain_id: 84532, pay_to: '0x' + 'f0'.repeat(20), pay_to_status: 'verified', erc7710: false },
+  ]
+  const unstatedFunding: MerchantFundingTarget[] = [
+    { network: 'eip155:84532', chain_id: 84532, pay_to: null, pay_to_status: 'unstated', erc7710: false },
+  ]
+
+  it('renders the action when a listed chain has a verified, ERC-7710 payTo AND the owner has an eligible agent', () => {
+    mockUseAgents.mockReturnValue({ agents: [eligibleAgent] })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.getByRole('button', { name: 'Fund this merchant' })).toBeDefined()
+  })
+
+  // #3331 review finding F6: the chain qualifies but NONE of the owner's own
+  // agents do — the action must not show a Review that can only ever land on
+  // "no eligible agent", and the open-budget note (a DIFFERENT case: a
+  // verified payTo that is not ERC-7710) must not show here either.
+  //
+  // Round 2 review finding R2-5 (design 3): this used to leave the whole slot
+  // BLANK — now it says why, and how to fix it, with a link to /agents.
+  it('shows a plain "connect an agent" line (not the open-budget note) when a chain qualifies but the owner has no eligible agent', () => {
+    mockUseAgents.mockReturnValue({ agents: [], loading: false })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
+    expect(
+      screen.getByText(/Connect an agent on Base Sepolia to give it a budget for Ampersend Demo API\./),
+    ).toBeDefined()
+    // Design review round 3, finding C: the link text must not repeat
+    // "Connect an agent" — the sentence right before it already says that.
+    expect(screen.getByRole('link', { name: 'Go to Agents' }).getAttribute('href')).toBe('/agents')
+  })
+
+  // Design review round 3, finding C (code F5): a failed agents read reads
+  // `agents: []` from `useAgents`, identical to "no eligible agent" — the
+  // page must not claim "Connect an agent" over a read that simply failed.
+  it('shows a neutral line, not "Connect an agent", when useAgents itself errored', () => {
+    mockUseAgents.mockReturnValue({ agents: [], loading: false, error: 'boom' })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByText(/Connect an agent/)).toBeNull()
+    expect(screen.getByText(/Haven could not load your agents just now, so funding is unavailable\. Reload the page to try again\./)).toBeDefined()
+  })
+
+  // Design review round 3, finding C: several pinnable chains must each be
+  // named — the sentence used to always read the first chain only.
+  it('names every pinnable chain when the merchant qualifies on more than one', () => {
+    mockUseAgents.mockReturnValue({ agents: [], loading: false })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: [
+        ...verifiedErc7710Funding,
+        { network: 'eip155:100', chain_id: 100, pay_to: '0x' + '22'.repeat(20), pay_to_status: 'verified', erc7710: true },
+      ],
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.getByText(/Connect an agent on Base Sepolia or Gnosis Chain to give it a budget/)).toBeDefined()
+  })
+
+  it('shows neither the action nor the connect-agent note while agents are still loading — no flash (R2-5)', () => {
+    mockUseAgents.mockReturnValue({ agents: [], loading: true })
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByText(/Connect an agent on/)).toBeNull()
+  })
+
+  it('withholds the action, with open-budget copy, when the only verified payTo is not ERC-7710', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedNotErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.getByText(/use an agent's open budget/)).toBeDefined()
+  })
+
+  it('renders neither the action nor the open-budget copy with no verified payTo at all', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: unstatedFunding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
+  })
+
+  it('never renders the action for a coming_soon merchant, even with funding data', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant: { ...merchant, listing_status: 'coming_soon', offer_count: 0 },
+      offers: [],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+  })
+
+  it('renders merchant-locked budgets, with pin_status and #1319 provenance, when GET /merchants/:slug/budgets returns rows', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    mockUseMerchantBudgets.mockReturnValue({
+      budgets: [
+        {
+          agent_id: 'agent-1',
+          agent_name: 'Research Agent',
+          chain_id: 84532,
+          token_address: '0x' + 'aa'.repeat(20),
+          recipient_address: '0x' + 'f0'.repeat(20),
+          delegation_hash: '0x' + 'bb'.repeat(32),
+          budget_atomic: '10000000',
+          period_seconds: 2_592_000,
+          expires_at: '4102444800',
+          remaining_atomic: '10000000',
+          remaining_is_from_chain: false,
+          pin_status: 'stale',
+        },
+      ],
+      loading: false,
+      error: null,
+      forbidden: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.getByText('Research Agent')).toBeDefined()
+    expect(screen.getByText('Old address')).toBeDefined()
+    expect(screen.getByText(/could not confirm the live figure/)).toBeDefined()
+  })
+
+  it('renders no merchant-budgets section when there are none', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByTestId('merchant-budgets-list')).toBeNull()
   })
 })

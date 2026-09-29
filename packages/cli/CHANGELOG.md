@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.7.0-alpha.0 — 2026-09-29
+
+### Fixed
+
+- **The bundled agent runbook runs the CLI command the manifest serves (#3430, #3455).** It had told an agent to build `npx @haven_ai/cli@<channel>` from `packages.cli.channel`, which serves the full spec, so the command came out as `npx @haven_ai/cli@@haven_ai/cli@dev`. It now runs `packages.cli.one_liner` as given. The README's two quick-start lines say the same.
+
+- **The bundled agent runbook's `client_update` line promises `upgrade_command` runs as given (#3412).** It now says to run `upgrade_command` as given, then any repair line it prints, then retry — the connector-installed packages' command became the connector doctor, which works on an existing install. Text only; no command or flag changed.
+
 ## 0.6.0-alpha.0 — 2026-09-26
 
 - **`haven guide`: "If something breaks" (#3304, epic #3302).** The bundled agent runbook (a copy of `@haven_ai/sdk`'s) gains the section that sends an agent to a result's `client_update.upgrade_command` and to the `/releases` page. Text only; no command changes.

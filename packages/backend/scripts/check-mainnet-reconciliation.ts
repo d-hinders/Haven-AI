@@ -50,6 +50,7 @@ async function main(): Promise<void> {
   }
 
   let failed = false
+  let couldNotCheck = false
 
   // ── half 1: public health + authenticated relayer-monitor liveness ────────
   let health: { status?: string }
@@ -107,13 +108,22 @@ async function main(): Promise<void> {
     const { scanDelegateBalances } = await import('../src/infra/delegate-balance-monitor.js')
     const report = await scanDelegateBalances()
     const lingering = report.lingering
+    if (report.unread.length > 0) {
+      // #3458: unread delegates are not known to be clean — per this script's
+      // exit contract that is "could not check", never a green line.
+      console.error(
+        `✗ ${report.unread.length} delegate(s) UNREAD — the balance read failed; the lingering check is incomplete`,
+      )
+      for (const [chain, error] of Object.entries(report.chainErrors)) console.error(`   chain ${chain}: ${error}`)
+      couldNotCheck = true
+    }
     if (lingering.length > 0) {
       console.error(`✗ ${lingering.length} LINGERING delegate(s) — reconciliation debt the sweep should clear:`)
       for (const f of lingering) {
         console.error(`   agent ${f.agentId} — see ops:check-delegate-balances for detail`)
       }
       failed = true
-    } else {
+    } else if (!couldNotCheck) {
       console.log(`✅ no lingering delegates (${report.findings.length} scanned)`)
     }
   } else {
@@ -123,7 +133,8 @@ async function main(): Promise<void> {
     )
   }
 
-  process.exit(failed ? 1 : 0)
+  // Findings (1) outrank an incomplete check (2); an incomplete check is never 0.
+  process.exit(failed ? 1 : couldNotCheck ? 2 : 0)
 }
 
 void main()

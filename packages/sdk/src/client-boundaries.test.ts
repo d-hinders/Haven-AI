@@ -98,7 +98,7 @@ const boundary: ClientBoundary = {
     "async getTaskBudgetSignContext(id: string): Promise<TaskBudgetSignContext>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",
-    "async listReceiptsPage(options: { limit?: number; cursor?: string; } = {}): Promise<HavenPaymentReceiptsPage>",
+    "async listReceiptsPage(options: { limit?: number; cursor?: string; compact?: boolean; } = {}): Promise<HavenPaymentReceiptsPage>", // #3423 compact
     "async listTaskBudgets(options: { status?: 'open' | 'all'; } = {}): Promise<HavenTaskBudget[]>",
     "async openTaskBudget(request: { tokenAddress?: string; maxAmountAtomic: string; ttlSeconds: number; recipientAddress?: string; label?: string; }): Promise<OpenTaskBudgetResult>",
     "async pay(request: PaymentRequest): Promise<PaymentResult>",
@@ -109,7 +109,7 @@ const boundary: ClientBoundary = {
     // child delegation ([settlement, task, budget]) instead of the agent's budget delegation
     // directly. Forwarded to X402Erc7710.prepare unchanged; the erc7710 authorize body carries it
     // as the same camelCase `taskBudgetId` wire key `/x402` uses everywhere else.
-    "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
+    "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; subBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
     "async quoteMcpX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async quoteX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",
@@ -489,10 +489,16 @@ describe('HavenClient structural boundary', () => {
       'SWEEP_BASE_SEPOLIA_USDC_ADDRESS',
       'SWEEP_BASE_USDC_ADDRESS',
       'SignerRefusalCode',
+      // #3419: the task-budget sign-context version — the same single source
+      // the signer derives SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS from and the
+      // task-budget handoffs report in signer_compatibility.
+      'TASK_SIGN_CONTEXT_VERSION',
       'TRANSFER_WITH_AUTHORIZATION_TYPES',
       'TYPED_DATA_NOT_ALLOWED', // #3283
       'X402AlreadySettledError',
+      'X402Erc7710AlreadySettledError', // #3417
       'X402PaymentHeaderValidationError',
+      'X402TaskBudgetMismatchError', // #3392
       'X402UnexpectedStatusError',
       'X402_LEGACY_PAYMENT_HEADER_NAME',
       'X402_MAX_AUTHORIZATION_WINDOW_SECONDS',
@@ -514,6 +520,7 @@ describe('HavenClient structural boundary', () => {
       'composeDescription',
       'connectorRerunCommand',
       'connectorSpec',
+      'connectorUpgradeCommand', // #3412
       'createNextStepBuilder', // #3101
       'decodeBase64Json',
       'decodeBase64Utf8',
@@ -523,6 +530,7 @@ describe('HavenClient structural boundary', () => {
       'encodeBase64Json',
       'encodeBase64Utf8',
       'encodePaymentProof',
+      'formatTokenAmount', // #3410
       'hashDelegation', // #3329
       'havenClientIdentity', // #3303
       'havenTools',
@@ -543,6 +551,7 @@ describe('HavenClient structural boundary', () => {
       'readX402ReceiptPayer',
       'renderNextTool', // #3101
       'resolveConnectorChannel',
+      'resolveTokenBySymbol', // #3410
       'resolveTokenFromAddress',
       'resolveX402RetryTarget', // #3097
       'sameUrl',

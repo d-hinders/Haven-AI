@@ -9,6 +9,7 @@ covers:
   - scripts/ci/promotion-digest-metrics.mjs
   - scripts/ci/standing-issue-upsert.mjs
   - scripts/release-bump.mjs
+  - scripts/release-version-constants.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
 last-verified: "2026-09-26"
@@ -247,6 +248,15 @@ the epic when its last sub-issue lands on `dev`.
 > its warning and the gate are unchanged, and this document's "bypass is
 > `qa-override`" still holds. `last-verified` not bumped, for the reason in the
 > notes above.
+
+> **Re-verification (release-bump constant table, 2026-09-29):** coupled through
+> `scripts/release-bump.mjs`. The bump's table of self-reported version
+> constants moved into `scripts/release-version-constants.mjs`, and its
+> `SIGNER_VERSION` entry now names the signer's `tools.ts`, where #3454
+> moved the declaration. Before this fix, the 0.7.0-alpha.0 cut died part-way
+> through. The release still runs on a release branch into `dev` and publishes
+> on the `dev → main` promotion. No step, gate or merge rule in this document
+> moved.
 
 ## Promotion to production (`dev → main`)
 

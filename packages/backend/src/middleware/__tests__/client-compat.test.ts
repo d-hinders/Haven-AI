@@ -263,7 +263,7 @@ describe('never refused (owner decision 2026-09-25)', () => {
 })
 
 describe('hint', () => {
-  it('is absent for a current client and for the shipped all-null table', async () => {
+  it('is absent for a current client and for an all-null table', async () => {
     const { app } = await harness(table())
     const res = await app.inject({ method: 'GET', url: '/payments/pi-1', headers: { 'x-haven-client': MCP_OLD } })
     expect(res.json()).toEqual({ ok: true, handled: 'GET /payments/:id' })
@@ -313,10 +313,12 @@ describe('hint', () => {
 })
 
 describe('upgradeCommandFor', () => {
-  it('names the deployment channel, and routes the connector-installed runtimes through a connector re-run', () => {
-    expect(upgradeCommandFor('@haven_ai/signer', 'dev')).toBe('npx -y @haven_ai/connect@dev')
-    expect(upgradeCommandFor('@haven_ai/mcp', 'dev')).toBe('npx -y @haven_ai/connect@dev')
-    expect(upgradeCommandFor('@haven_ai/connect', 'alpha')).toBe('npx -y @haven_ai/connect@alpha')
+  it('names the deployment channel, and routes the connector-installed runtimes through the connector doctor', () => {
+    // #3412: a bare connector re-run stops at "Missing --setup" on an existing
+    // install; the doctor works as pasted and prints the targeted repair line.
+    expect(upgradeCommandFor('@haven_ai/signer', 'dev')).toBe('npx -y @haven_ai/connect@dev --doctor')
+    expect(upgradeCommandFor('@haven_ai/mcp', 'dev')).toBe('npx -y @haven_ai/connect@dev --doctor')
+    expect(upgradeCommandFor('@haven_ai/connect', 'alpha')).toBe('npx -y @haven_ai/connect@alpha --doctor')
     expect(upgradeCommandFor('@haven_ai/cli', 'alpha')).toBe('npx -y @haven_ai/cli@alpha')
     expect(upgradeCommandFor('@haven_ai/sdk', 'alpha')).toBe('npm install @haven_ai/sdk@alpha')
   })

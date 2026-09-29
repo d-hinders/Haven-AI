@@ -100,8 +100,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     // #1355: optional full 402 PaymentRequired — persisted so sign-context can
     // re-serve it and the signer needs only payment_id. Structural + size
     // bound only: it is verified against the Haven-signed expected context at
-    // the signer, never trusted as authority here. Oversized input is a 400
-    // (not a silent drop) so a client learns immediately, mirroring #1307.
+    // the signer, never trusted as authority here. Oversized input draws the
+    // 400 (not a silent drop) so a client learns immediately, mirroring #1307.
     const { paymentRequired } = request.body
     if (paymentRequired !== undefined) {
       if (Buffer.byteLength(JSON.stringify(paymentRequired), 'utf8') > 65536) {
@@ -114,7 +114,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     // #3329: an OPEN task budget to authorize this settlement through — the
     // spec (`X402AuthorizeRequest.taskBudgetId`) is the shape's authority;
     // the row lookup and every refusal live in `modules/x402/delegation-authorize.ts`.
-    const { taskBudgetId } = request.body
+    // #3330: `subBudgetId` is the same channel one level deeper (agent B
+    // pays through the sub-budget A granted it).
+    const { taskBudgetId, subBudgetId } = request.body
 
     const result = await authorizeX402({
       agent,
@@ -134,6 +136,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       mcpCallContext,
       paymentRequired,
       taskBudgetId,
+      subBudgetId,
       log: request.log,
     })
     return reply.code(result.code).send(result.body)

@@ -10,6 +10,7 @@ export function CodeBlock({
   filename,
   onCopy,
   onCopyFailed,
+  wrap = false,
 }: {
   language?: string
   children: string
@@ -23,6 +24,13 @@ export function CodeBlock({
    * gate stays locked silently and the user has no idea why.
    */
   onCopyFailed?: () => void
+  /**
+   * Wrap long lines instead of scrolling sideways. For single-line copy
+   * commands only, where a clipped tail hides the part that matters (the
+   * `--doctor` on `/releases`, #3434). Multi-line code samples keep the
+   * default: re-flowing them breaks their indentation.
+   */
+  wrap?: boolean
 }) {
   const { copied, markCopied } = useCopyTimeout(2000)
 
@@ -72,8 +80,28 @@ export function CodeBlock({
           </div>
         </div>
       )}
-      <pre className="px-5 py-4 text-[13px] leading-[1.65] text-white/90 font-mono overflow-x-auto v2-tabular">
-        <code>{children}</code>
+      <pre
+        className={`px-5 py-4 text-[13px] leading-[1.65] text-white/90 font-mono ${
+          wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'overflow-x-auto'
+        } v2-tabular`}
+      >
+        <code>
+          {wrap
+            ? // Each whitespace-separated token is one inline-block, so a line
+              // breaks only at a space: the browser would otherwise split a
+              // flag at its hyphens (`--` / `doctor`, #3434 design review). A
+              // token wider than the line still breaks, via overflow-wrap.
+              children.split(/(\s+)/).map((part, i) =>
+                /^\s+$/.test(part) || part === '' ? (
+                  part
+                ) : (
+                  <span key={i} className="inline-block max-w-full">
+                    {part}
+                  </span>
+                ),
+              )
+            : children}
+        </code>
       </pre>
     </div>
   )

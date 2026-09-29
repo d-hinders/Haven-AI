@@ -6,7 +6,8 @@
  * (every table in the worker schema is counted before and after), the replay
  * exemption reads the handlers' own idempotency lookups, and the retired-rail
  * exemption reads the handlers' own rail seam. The shipped `CLIENT_COMPAT`
- * table is all-null, so a minimum is flagged through `clientCompatDeps(table)`,
+ * table sets only a signer minimum (#3302), so each case flags its own
+ * minimum through `clientCompatDeps(table)`,
  * which keeps the production collaborators and swaps only the table.
  *
  * One mock, copied from `payments-direct-sign-context.test.ts` for the same
@@ -313,7 +314,11 @@ describeDb('client-version refusal on the real payment routes (#3303)', () => {
     expect(res.statusCode).toBe(426)
     expect(res.json()).not.toHaveProperty('sign_data')
     expectMatchesSpec('GET', '/payments/{id}/sign-context', res.json(), '426')
-    expect(res.json().client_update.upgrade_command).toMatch(/^npx -y @haven_ai\/connect@/)
+    // #3412: the doctor form — a bare connector re-run stops at "Missing --setup".
+    expect(res.json().client_update.upgrade_command).toMatch(/^npx -y @haven_ai\/connect@\S+ --doctor$/)
+    // The doctor alone changes nothing: the refusal names the repair step too.
+    expect(res.json().error).toContain('then the repair line it prints')
+    expect(res.json().next_tool_omitted_reason).toContain('then the repair line it prints')
     expect(await intentRow(id)).toEqual(before)
     expect(await tableCounts()).toEqual(counts)
   })

@@ -24,6 +24,7 @@ import {
   findIntentForAgent,
   findMachineIntentByKeyOrChallenge,
   findSendIntentByIdempotencyKey,
+  findSettledPaymentReceiptRow,
   getIntentStatus,
   insertDelegationIntent,
   insertMachineIntent,
@@ -32,6 +33,7 @@ import {
   listIntentsForAgent,
   releaseSubmittedClaim,
 } from '../payment-intents.js'
+import { upsertOwnerCompanyDetails, type BuyerJoinColumns } from '../owner-company-details.js'
 
 let seq = 0
 
@@ -281,6 +283,29 @@ describeDb('payment-intents repository (#1223)', () => {
     expect(await findSendIntentByIdempotencyKey(agentId, 'send-1')).not.toBeNull()
   })
 
+  it('FIND_SEND_INTENT_BY_KEY_SQL returns task_budget_id — the #3392 replay pin reads it from the lookup', async () => {
+    // The route's replay comparison never issues a second query: the pin's
+    // budget value must come back on the SAME row the lookup already
+    // returns. Null (no budget) and set (charging a task budget) are both
+    // values the comparison has to see verbatim.
+    const { agentId, userId } = await seedAgent()
+    const bare = await insertDelegationIntent(delegationInput(agentId, userId, { sendIdempotencyKey: 'send-bare' }))
+    expect((await findSendIntentByIdempotencyKey(agentId, 'send-bare'))?.task_budget_id).toBeNull()
+
+    const budget = await db.query<{ id: string }>(
+      `INSERT INTO agent_task_budgets
+         (agent_id, chain_id, token_address, recipient_address, parent_delegation_hash,
+          delegation_hash, delegation_json, max_atomic, status, expires_at)
+       VALUES ($1, 84532, '0x036cbd53842c5426634e7929541ec2318f3dcf7e', NULL,
+               '0x02', '0x03', '{}', '1000000', 'open', 9999999999)
+       RETURNING id`,
+      [agentId],
+    )
+    await insertDelegationIntent(delegationInput(agentId, userId, { sendIdempotencyKey: 'send-budgeted', taskBudgetId: budget.rows[0].id }))
+    expect((await findSendIntentByIdempotencyKey(agentId, 'send-budgeted'))?.task_budget_id).toBe(budget.rows[0].id)
+    expect(bare.id).not.toBe(await findSendIntentByIdempotencyKey(agentId, 'send-budgeted').then((r) => r?.id))
+  })
+
   it('insertMachineIntent honours an EXPLICIT id — the erc7710 child is salted from it (#2094)', async () => {
     // The wiring the whole of #2094 rests on. The settlement child's salt is
     // derived from the intent id BEFORE the row exists, so the id the caller
@@ -378,5 +403,109 @@ describeDb('payment-intents repository (#1223)', () => {
     expect(list.map((r) => r.id)).toEqual([b.id, a.id])
     expect(b.execution_rail).toBe('delegation')
     expect(await findIntentForAgent(a.id, other.agentId)).toBeNull()
+  })
+
+  // ── #3332 review M2: findSettledPaymentReceiptRow's OWNER_COMPANY_DETAILS_JOIN_COLUMNS ──
+  it('#3332: findSettledPaymentReceiptRow joins each intent\'s OWN owner\'s company details — no cross-owner mixing', async () => {
+    const ownerA = await seedAgent()
+    const ownerB = await seedAgent()
+
+    async function seedConfirmedIntent(agentId: string, userId: string, signHashSeed: string): Promise<string> {
+      const r = await db.query<{ id: string }>(
+        `INSERT INTO payment_intents
+           (agent_id, user_id, account_address, token_symbol, token_address, to_address,
+            amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+            status, expires_at)
+         VALUES ($1, $2, '0x00000000000000000000000000000000000001', 'USDC',
+                 '0x00000000000000000000000000000000000002', '0x00000000000000000000000000000000000003',
+                 '100000', '0.10', '0x00000000000000000000000000000000000004', 1, $3,
+                 'confirmed', NOW() + interval '10 minutes')
+         RETURNING id`,
+        [agentId, userId, `0x${signHashSeed.repeat(64)}`.slice(0, 66)],
+      )
+      return r.rows[0].id
+    }
+
+    const intentA = await seedConfirmedIntent(ownerA.agentId, ownerA.userId, 'a')
+    const intentB = await seedConfirmedIntent(ownerB.agentId, ownerB.userId, 'b')
+
+    // Before either owner has details: found, buyer columns null.
+    const beforeA = await findSettledPaymentReceiptRow(intentA, ownerA.agentId)
+    expect(beforeA?.id).toBe(intentA)
+    expect(beforeA?.buyer_legal_name).toBeNull()
+
+    await upsertOwnerCompanyDetails(ownerA.userId, {
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+    })
+    await upsertOwnerCompanyDetails(ownerB.userId, {
+      legal_name: 'Owner B GmbH',
+      country: 'DE',
+      org_number: '222',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+    })
+
+    const afterA = await findSettledPaymentReceiptRow(intentA, ownerA.agentId)
+    expect(afterA?.id).toBe(intentA) // row count/identity unchanged by the join
+    expect(afterA?.buyer_legal_name).toBe('Owner A AB')
+
+    const afterB = await findSettledPaymentReceiptRow(intentB, ownerB.agentId)
+    expect(afterB?.id).toBe(intentB)
+    expect(afterB?.buyer_legal_name).toBe('Owner B GmbH')
+  })
+
+  // ── #3418: the receipt SQL returns the two scheme columns ────────────────────
+  it('#3418: findSettledPaymentReceiptRow returns execution_rail and machine_metadata settlement_scheme', async () => {
+    const { agentId, userId } = await seedAgent()
+
+    async function seedConfirmedIntent(columns: Record<string, unknown>): Promise<string> {
+      const r = await db.query<{ id: string }>(
+        `INSERT INTO payment_intents
+           (agent_id, user_id, account_address, token_symbol, token_address, to_address,
+            amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+            status, expires_at${columns.execution_rail !== undefined ? ', execution_rail' : ''}${columns.settlement_scheme !== undefined ? ", machine_metadata" : ''})
+         VALUES ($1, $2, '0x00000000000000000000000000000000000001', 'USDC',
+                 '0x00000000000000000000000000000000000002', '0x00000000000000000000000000000000000003',
+                 '100000', '0.10', '0x00000000000000000000000000000000000004', 1,
+                 '0x${'ab'.repeat(31)}01',
+                 'confirmed', NOW() + interval '10 minutes'${columns.execution_rail !== undefined ? ', $3' : ''}${columns.settlement_scheme !== undefined ? ", $4::jsonb" : ''})
+         RETURNING id`,
+        [
+          agentId,
+          userId,
+          ...(columns.execution_rail !== undefined ? [columns.execution_rail] : []),
+          ...(columns.settlement_scheme !== undefined
+            ? [JSON.stringify({ settlement_scheme: columns.settlement_scheme })]
+            : []),
+        ],
+      )
+      return r.rows[0].id
+    }
+
+    // The erc7710 shape: delegation rail + settlement_scheme metadata.
+    const erc7710 = await seedConfirmedIntent({ execution_rail: 'delegation', settlement_scheme: 'erc7710' })
+    const erc7710Row = await findSettledPaymentReceiptRow(erc7710, agentId)
+    expect(erc7710Row?.execution_rail).toBe('delegation')
+    expect(erc7710Row?.settlement_scheme).toBe('erc7710')
+
+    // The eip3009 funding leg: delegation rail, eip3009 metadata.
+    const eip3009 = await seedConfirmedIntent({ execution_rail: 'delegation', settlement_scheme: 'eip3009' })
+    const eip3009Row = await findSettledPaymentReceiptRow(eip3009, agentId)
+    expect(eip3009Row?.execution_rail).toBe('delegation')
+    expect(eip3009Row?.settlement_scheme).toBe('eip3009')
+
+    // A row without the metadata (older intent): rail still returned,
+    // settlement_scheme null — buildPaymentReceipt then leaves the scheme
+    // absent on eip712_delegation for it, and the verifier falls back to raw.
+    const bare = await seedConfirmedIntent({ execution_rail: 'delegation' })
+    const bareRow = await findSettledPaymentReceiptRow(bare, agentId)
+    expect(bareRow?.execution_rail).toBe('delegation')
+    expect(bareRow?.settlement_scheme).toBeNull()
   })
 })

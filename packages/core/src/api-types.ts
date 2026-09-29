@@ -233,6 +233,54 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/user/company-details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the signed-in owner's company details.
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and ONLY then. When the feature is on and the owner has never saved details (or deleted them), 200 with a JSON `null` body, so a client can tell "feature off" from "nothing saved" by status alone. A row stuck `pending` for longer than a few minutes (a crash between the write and its VIES check completing, or a genuine DB failure recording the check's result) is re-checked asynchronously (an atomic claim, so concurrent reads start at most one check) as a side effect of this read; the response still reflects the row as read, `pending` included, not the re-check's eventual outcome.
+         */
+        get: operations["getCompanyDetails"];
+        /**
+         * Create or replace the company details.
+         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (`ownerProfileRateLimit`).
+         */
+        put: operations["putCompanyDetails"];
+        post?: never;
+        /**
+         * Delete the company details.
+         * @description The owner's erasure path — deliberately NOT gated by `HAVEN_OWNER_COMPANY_DETAILS` (every other route on this and the vies-check path answers 404 when the feature is off; this one does not), so an owner can always remove details they saved while the feature was on, even after an operator turns it back off. Deleting the Haven account itself would also remove these details (the table's `user_id` foreign key is `ON DELETE CASCADE`), but account deletion is an operator action today — there is no self-serve delete-my-account route — so this is the only erasure path that exists. The response is `{ ok: true }` whether or not a row existed.
+         */
+        delete: operations["deleteCompanyDetails"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/user/company-details/vies-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-run the VIES check for the saved VAT number.
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per session credential (`ownerProfileRateLimit`).
+         */
+        post: operations["recheckCompanyDetailsVies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents": {
         parameters: {
             query?: never;
@@ -274,6 +322,30 @@ export type paths = {
          * @description Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: revoke the agent, kill its budgets, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.
          */
         delete: operations["deleteAgent"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/tax-declaration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the unsigned buyer-side tax declaration content for this agent.
+         * @description The AGENT's own read (#3426, wg-tax #5 §2.1) — authenticated by this agent's API key. Answers 200 with the UNSIGNED §2.1 content when the deployment flag is on, this agent is opted in, and the owner's VAT number is VIES `valid` AT READ TIME: `version` (`x402-tax-1`), `jurisdiction` (the owner's saved country — never derived from the VAT number's prefix; a `GR…` VAT number with country `GR` declares `GR`, and Northern Ireland's `XI…` prefix declares the saved country), `taxableStatus` (`TAXABLE_PERSON`), `taxId` (the saved VAT number) and `validUntil` (integer MILLISECONDS, the lesser of now + 24h and the VIES check's completion time + 24h — the check's own freshness caps the declaration). Answers 200 with `{ available: false, reason }` otherwise — `feature_disabled` (flag off), `disabled` (this agent not opted in, or a foreign agent id), `no_company_details` (no VAT number saved) or `vies_not_valid` (VIES anything-but-valid right now, `pending` included). Availability is the body, not the status code: a temporarily unavailable declaration is a state to poll, not an error. The response is NEVER signed and carries no `signature`, `principalId` or `principalAttributionHash` — the SDK computes those locally (#3427) — and none of the company-details fields the declaration does not state. This slice sends nothing; the declaration is only ever carried on EIP-3009 payments (#3427).
+         */
+        get: operations["getAgentTaxDeclaration"];
+        /**
+         * Opt this agent in or out of the buyer-side x402 tax declaration.
+         * @description The OWNER's per-agent opt-in (#3426, wg-tax #5 §2.1). Opting IN is refused with a structured 409 unless the deployment has `HAVEN_OWNER_COMPANY_DETAILS` on and the owner's saved company details carry a VAT number whose VIES status is `valid` AT THE MOMENT of the write — the refusal names the reason (`feature_disabled`, `no_company_details` or `vies_not_valid`) and writes nothing. Opting OUT always succeeds: an owner whose VIES result dropped is exactly the owner who needs to withdraw the opt-in. The toggle changes only this agent's own opt-in bit — it grants no spending authority and sends nothing; the declaration itself is only ever carried on EIP-3009 payments (#3427). An agent API key is refused with a named 403: this is an owner-session surface, the same as the company-details routes.
+         */
+        put: operations["putAgentTaxDeclaration"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -455,7 +527,7 @@ export type paths = {
         put?: never;
         /**
          * Grant step 1: build an unsigned budget delegation for the owner to sign.
-         * @description Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.
+         * @description Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period, merchant) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.
          */
         post: operations["buildAgentDelegation"];
         delete?: never;
@@ -513,7 +585,10 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** Revoke step 2: submit the signed UserOp; the row flips only after it lands. */
+        /**
+         * Revoke step 2: submit the signed UserOp; the row flips only after it lands.
+         * @description The submitted user_operation is BOUND to the delegation being revoked (#3343): its calldata must disable THAT delegation on the pinned DelegationManager (identity comparison, signature excluded), checked before submission. A userop that disables something else — or nothing — is refused 400 and nothing is recorded. On success the delegation is disabled on-chain and the row is marked revoked.
+         */
         post: operations["submitDelegationRevocation"];
         delete?: never;
         options?: never;
@@ -536,6 +611,90 @@ export type paths = {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/sub-budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List this agent's sub-budget rows, newest first.
+         * @description Every row of the trees THIS agent issued (its parent-child narrowings and the grants nested under them) — the owner-facing twin of the agent-auth list at GET /sub-budgets. Scoped by BOTH agent id and the caller's ownership of it.
+         */
+        get: operations["listAgentSubBudgets"];
+        put?: never;
+        /**
+         * Issue a sub-budget: agent A re-delegates a narrower budget to agent B.
+         * @description Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (409 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side (sign-context, then relay each signature via POST /agents/{id}/sub-budgets/{sub}/sign). A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329).
+         */
+        post: operations["issueAgentSubBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/sub-budgets/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The parent→child sub-budget tree this agent issued.
+         * @description A's parent-child rows on top, each grant nested under the parent-child row its parent_sub_budget_id names (#3330 dashboard tree). Grants whose parent-child row is gone come back under `unattached` rather than being dropped.
+         */
+        get: operations["getAgentSubBudgetTree"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/sub-budgets/{sub}/sign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relay the delegating agent's signature over one pending sub-budget child.
+         * @description Owner relays step (#3330): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch.
+         */
+        post: operations["signAgentSubBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/sub-budgets/{sub}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke one sub-budget row (the parent-child, or a single grant).
+         * @description Authority-reducing only (#3329-2's rule): the delegating agent's own delegate account prepares disableDelegation of THIS row's child. Revoking a PARENT-CHILD row strands every grant under it (their chain's middle link dies — revoking A's budget delegation closes this row too, which is what makes B's child unredeemable); revoking a GRANT row ends B's slice and leaves A intact. status=pending or expired: closes immediately, nothing signed. status=open and live: returns the prepared close operation for the agent to sign (then relay via the agent close endpoint).
+         */
+        delete: operations["revokeAgentSubBudget"];
         options?: never;
         head?: never;
         patch?: never;
@@ -592,7 +751,7 @@ export type paths = {
         put?: never;
         /**
          * Re-key steps 1b + 2: land the revoke, THEN read the now-frozen meter (#1698).
-         * @description Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe.
+         * @description Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe. The revoked set is derived SERVER-side (#3343): every delegation this agent still holds enabled on-chain (pending, active and replaced rows), and the signed calldata must disable exactly that set before anything is recorded — a subset or stale op answers 409 re-prepare, an unreadable one 400, and the stage stays preflight either way.
          */
         post: operations["submitRekeyRevocation"];
         delete?: never;
@@ -692,7 +851,7 @@ export type paths = {
         put?: never;
         /**
          * Batch revoke step 2: submit the signed batch; rows flip only after the UserOp lands.
-         * @description The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.
+         * @description The revoked set is derived SERVER-side (#3343) — every delegation this agent still holds enabled on-chain (pending, active and replaced rows); the request's delegation_hashes is accepted for compatibility but does not decide anything. The signed calldata must disable exactly that set (checked before submission): a subset or stale op answers 409 re-prepare, an unreadable op 400. The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.
          */
         post: operations["submitRevokeAllDelegations"];
         delete?: never;
@@ -2253,6 +2412,103 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/sub-budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List sub-budgets this agent holds (it is the sub-agent).
+         * @description Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.
+         */
+        get: operations["listSubBudgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub-budgets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch one sub-budget this agent holds. */
+        get: operations["getSubBudget"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub-budgets/{id}/sign-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Re-servable, byte-free signing handoff for a pending or closing sub-budget row.
+         * @description DELEGATOR-scoped: both children of a tree (the parent-child narrowing AND the grant to the sub-agent) are signed by the DELEGATING agent's delegate key, so only the delegating agent authenticates here. purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for that row's child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.
+         */
+        get: operations["getSubBudgetSignContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub-budgets/{id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit the delegating agent signature — opens a pending child, or relays the signed close operation.
+         * @description status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409.
+         */
+        post: operations["submitSubBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub-budgets/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a sub-budget row — trivially if never signed or already expired, otherwise prepares the revocation.
+         * @description DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.
+         */
+        post: operations["closeSubBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/payments": {
         parameters: {
             query?: never;
@@ -2340,7 +2596,7 @@ export type paths = {
         };
         /**
          * Fetch a verifiable receipt for a settled payment.
-         * @description Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. The bundle is verifiable independently of Haven by recovering the signer from the authorization and confirming it is the agent delegate.
+         * @description Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. verification checks the delegate signature over the hash named by its verifiedOver field: on erc7710 payments the EIP-712 delegation digest (verifiedOver delegation_digest), on retired-rail history the raw sign_hash. verification is NOT proof the payment settled and does not bind the payment block: amount and recipient are Haven-asserted, and settlement is proven only by the on-chain transaction (settlementTxHash / onChain.txHash, check on an explorer). Direct-payment and eip3009-funding bundles carry authorization.signatureScheme eip712_userop and their verification returns not_verifiable_offline — the signed user operation is not part of the bundle.
          */
         get: operations["getPaymentReceipt"];
         put?: never;
@@ -2779,6 +3035,103 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/receive/{accountAddress}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receive ledger for one account: address, matched USDC balance, inbound rows. */
+        get: operations["getReceiveLedger"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/receive/{accountAddress}/off-ramp-destination": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save (or replace) the owner off-ramp destination for one account+chain.
+         * @description Owner-only by topology: the route sits behind the dashboard JWT and no agent route wraps it. One destination per account+chain; a PUT replaces it. This address is the ONLY recipient the off-ramp hand-off can prepare a transfer to.
+         */
+        put: operations["setOffRampDestination"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/receive/{accountAddress}/off-ramp/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepare the owner-signed USDC transfer to the saved off-ramp destination.
+         * @description Builds the UserOperation through the same prepareTransfer the owner send uses (#1083): Haven prepares, the OWNER signs with the account own signer, Haven relays. The token is the chain registry USDC and the recipient is the SAVED destination — neither comes from the request body. Submit goes through `/hybrid/{accountAddress}/transfers/submit`, which re-derives the calldata and refuses a user_operation that does not contain it. Not a sweep: the sweep is the agent-keyed stranded-delegate machinery.
+         */
+        post: operations["prepareOffRampHandoff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/receive/{accountAddress}/receipt-drop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A payer-signed receipt document for one inbound transfer (no authentication; signature IS the auth).
+         * @description A payer has no Haven account, so this route carries no auth middleware. The signer is RECOVERED from the EIP-191 signature over the exact drop payload (`haven:receipt-drop\ntx:<hash>\namount_raw:<atomic>`) and the drop is accepted only when the recovered address IS the payer the inbound transfer names, the amount matches the persisted transfer, and the transfer is still unmatched. The stored document is a reference that flips the row earned flag — it grants nothing and moves nothing.
+         */
+        post: operations["dropReceiptForTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/receive/{accountAddress}/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record one inbound USDC transfer in the account receive index.
+         * @description Owner-scoped ingestion hook (tests and the eventual indexer tick; the production indexer feeds the same repository). Idempotent per (chain, tx hash): a re-ingest returns `ingested: false` rather than double-counting.
+         */
+        post: operations["ingestInboundTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dashboard/overview": {
         parameters: {
             query?: never;
@@ -2995,11 +3348,31 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchants/{slug}/budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dashboard user's merchant-locked budgets for one merchant.
+         * @description Every ACTIVE, unexpired budget delegation the user issued for this merchant (#3331) on an agent that is not revoked, with what is left this period — read from the ERC20PeriodTransferEnforcer's storage, the same read GET /allowances makes (remaining_is_from_chain false = that read failed and remaining_atomic is the full budget) — and the pin against the merchant's current verified payTo. Dashboard session only: an agent key gets 403. 404 for an unknown or non-live merchant.
+         */
+        get: operations["listMerchantBudgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 };
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
-        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the exact command that updates it, on this deployment's channel. */
+        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. */
         ClientUpdate: {
             /** @example @haven_ai/mcp */
             package: string;
@@ -3008,7 +3381,7 @@ export type components = {
             recommended: string | null;
             min_version: string | null;
             required: boolean;
-            /** @example npx -y @haven_ai/connect@alpha */
+            /** @example npx -y @haven_ai/connect@alpha --doctor */
             upgrade_command: string;
             /** @description #3304: the public release notes page. Nullable for clients built before it existed. */
             notes_url: string | null;
@@ -3051,6 +3424,26 @@ export type components = {
             expires_at: string;
             /** Format: date-time */
             created_at: string;
+            /** @description The merchant a merchant-locked budget was issued for (#3331); null for every other row, and after that merchant is deleted. */
+            merchant_id: string | null;
+            /** @description That merchant’s slug, or null. */
+            merchant_slug: string | null;
+            /** @description That merchant’s display name, or null. */
+            merchant_name: string | null;
+        };
+        MerchantFundingTarget: {
+            /** @description CAIP-2, e.g. "eip155:84532". */
+            network: string;
+            chain_id: number;
+            /** @description The lowercased payTo every active, verified x402 offer of the merchant on this network names — non-null only when pay_to_status is `verified`. A merchant-locked budget pins its recipient here. */
+            pay_to: string | null;
+            /**
+             * @description `conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant’s non-delisted offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.
+             * @enum {string}
+             */
+            pay_to_status: "verified" | "conflicting" | "unstated" | "shared";
+            /** @description Every one of those offers advertises the ERC-7710 transfer method — the rail a pinned budget pays through. False: payments to this merchant use the open budget, so no merchant-locked budget is offered. */
+            erc7710: boolean;
         };
         TaskBudget: {
             /** Format: uuid */
@@ -3081,6 +3474,44 @@ export type components = {
             /** Format: date-time */
             closed_at: string | null;
             close_tx_hash: string | null;
+        };
+        SubBudget: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agent_id: string;
+            /** Format: uuid */
+            parent_agent_id: string;
+            parent_sub_budget_id: string | null;
+            chain_id: number;
+            /** @description Stored lowercase. */
+            token_address: string;
+            /** @description Lowercase recipient pin, or null when this sub-budget carries none. */
+            recipient_address: string | null;
+            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+            parent_delegation_hash: string;
+            /** @description This sub-budget's own child delegation hash. */
+            delegation_hash: string;
+            label: string | null;
+            period_amount_atomic: string;
+            /** @enum {string} */
+            status: "pending" | "open" | "closing" | "closed";
+            /** @description Unix seconds. */
+            expires_at: number;
+            /** @description Derived: expires_at <= now. */
+            is_expired: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            opened_at: string | null;
+            /** Format: date-time */
+            closed_at: string | null;
+            close_tx_hash: string | null;
+        };
+        /** @description One parent→child tree (#3330): the delegating agent's parent-child narrowing with its grants nested. */
+        SubBudgetTree: {
+            parent_child_sub_budget: components["schemas"]["SubBudget"];
+            grants: components["schemas"]["SubBudget"][];
         };
         Contact: {
             /** Format: uuid */
@@ -3154,7 +3585,7 @@ export type components = {
             price_atomic: string | null;
             asset: string | null;
             network: string | null;
-            /** @description Comma-separated set of x402 assetTransferMethods the merchant advertises (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null. */
+            /** @description Comma-separated set of x402 assetTransferMethods the merchant advertises on the recorded network (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null. */
             asset_transfer_methods: string | null;
             /** @enum {string} */
             status: "active" | "degraded" | "delisted";
@@ -3221,7 +3652,7 @@ export type components = {
          * @description Stable Haven agent payment state phase.
          * @enum {string}
          */
-        AgentPaymentPhase: "agent_signature_required" | "payment_submitted" | "payment_confirmed" | "user_approval_required" | "user_execution_required" | "waiting_for_additional_approvals" | "funding_sent" | "rejected" | "expired" | "failed" | "insufficient_funds" | "funded_but_unsettled";
+        AgentPaymentPhase: "agent_signature_required" | "payment_submitted" | "payment_confirmed" | "user_approval_required" | "user_execution_required" | "waiting_for_additional_approvals" | "funding_sent" | "rejected" | "expired" | "failed" | "insufficient_funds" | "funded_but_unsettled" | "delivered_unverified";
         /**
          * @description Stable next action an agent should take for a Haven payment state.
          * @enum {string}
@@ -3270,7 +3701,7 @@ export type components = {
             /** Format: uri */
             openapi_url: string;
             chains: {
-                /** @description Canonical Haven default chain id. */
+                /** @description This deployment's effective default chain id (#3431): the product default (`DEFAULT_CHAIN_ID`) when this deployment deploys on it, else the first chain it does deploy on, else the product default again if this deployment deploys on nothing (a misconfigured deployable set). Not necessarily the product-wide default — a deployment scoped to one chain (dev: Base Sepolia only) reports that chain here, not Base mainnet. Confirm the funding chain with `haven wallets funding` or the dashboard's Receive-funds screen before sending money. */
                 default: number;
                 deployable: number[];
                 supported: number[];
@@ -3296,14 +3727,21 @@ export type components = {
             recommended_version: string | null;
             /** @description Below this, the package's refusal points answer `client_outdated`. Null = never refused. */
             min_version: string | null;
-            /** @example npx -y @haven_ai/connect@alpha */
+            /** @example npx -y @haven_ai/connect@alpha --doctor */
             upgrade_command: string | null;
             /** @description Newest first. What changed, for deciding whether to update — not the full CHANGELOG. */
             notes: {
                 version: string;
                 /** Format: date */
                 date: string;
+                /** @description Plain text: code spans keep their content, without backticks. */
                 summary: string;
+                /** @description #3393: `summary` split into parts, so a renderer can show code as code. The texts join to exactly `summary`. */
+                summary_segments: {
+                    text: string;
+                    /** @description True when the part was a code span in the CHANGELOG. */
+                    code: boolean;
+                }[];
                 /** @description True when a client must update to keep paying. Not the same as a breaking change. */
                 action_required: boolean;
             }[];
@@ -3458,6 +3896,70 @@ export type components = {
         };
         DeleteOrganizationResponse: {
             ok: boolean;
+        };
+        CompanyDetails: {
+            legal_name: string;
+            /** @description ISO 3166-1 alpha-2. */
+            country: string;
+            /** @description For a sole trader this is the personal identity number — see docs/product/owner-company-details.md. */
+            org_number: string;
+            /** @description Normalised: uppercase, no spaces. */
+            vat_number: string | null;
+            /** @enum {string|null} */
+            vies_status: "pending" | "valid" | "invalid" | "not_verifiable" | null;
+            /** Format: date-time */
+            vies_checked_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        UpsertCompanyDetailsRequest: {
+            legal_name: string;
+            country: string;
+            org_number: string;
+            vat_number?: string | null;
+        };
+        DeleteCompanyDetailsResponse: {
+            ok: boolean;
+        };
+        UpsertAgentTaxDeclarationRequest: {
+            /** @description True opts THIS agent in; false withdraws the opt-in (never refused). */
+            tax_declaration_enabled: boolean;
+        };
+        AgentTaxDeclarationState: {
+            /** Format: uuid */
+            id: string;
+            tax_declaration_enabled: boolean;
+        };
+        /**
+         * @description Why no declaration content is available: the deployment flag is off, the agent is not opted in, no VAT number is saved, or VIES is anything-but-valid at read time.
+         * @enum {string}
+         */
+        AgentTaxDeclarationUnavailableReason: "feature_disabled" | "disabled" | "no_company_details" | "vies_not_valid";
+        AgentTaxDeclaration: {
+            /**
+             * @description The §2.1 version discriminator of the first profile.
+             * @enum {string}
+             */
+            version: "x402-tax-1";
+            /** @description ISO 3166-1 alpha-2 — the owner's saved country. Never derived from the VAT number's prefix. */
+            jurisdiction: string;
+            /** @enum {string} */
+            taxableStatus: "TAXABLE_PERSON";
+            /** @description The owner's saved VAT number, normalised (uppercase, no spaces). */
+            taxId: string;
+            /** @description Integer MILLISECONDS. The lesser of now + 24h and the VIES check's completion time + 24h — the check's own freshness caps the declaration. */
+            validUntil: number;
+        };
+        AgentTaxDeclarationContent: {
+            /** @enum {boolean} */
+            available: true;
+            declaration: components["schemas"]["AgentTaxDeclaration"];
+        } | {
+            /** @enum {boolean} */
+            available: false;
+            reason: components["schemas"]["AgentTaxDeclarationUnavailableReason"];
         };
         ReplaceAgentLabelsRequest: {
             label_ids: string[];
@@ -3730,6 +4232,7 @@ export type components = {
             allowances: components["schemas"]["AgentAllowance"][];
             labels: components["schemas"]["Label"][];
             organization_id: string | null;
+            tax_declaration_enabled: boolean;
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
@@ -3784,12 +4287,10 @@ export type components = {
             amount: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             to: string;
-            /** @description Optional dedupe key (#1207): a retried request with the same key returns the first request's result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send. */
+            /** @description Optional dedupe key (#1207): a retried request with the same key returns the first request's result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer — token, recipient, amount or task budget (#3392) — is a 409. */
             idempotency_key?: string;
-            /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. */
+            /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             task_budget_id?: string;
-        } & {
-            [key: string]: unknown;
         };
         SignablePaymentIntent: {
             /** Format: uuid */
@@ -3922,6 +4423,19 @@ export type components = {
             delegate_account: string | null;
             /** @description `payTo`. */
             merchant: string | null;
+            /** @description The paying agent's owner's company details, when the owner has saved them and the deployment has the feature on (#3332). Present only on `GET /payments/:id/receipt` and `GET /machine-payments/receipts` — never on `GET /machine-payments/:id/status` or the `POST /machine-payments/evidence` attach echo, even with the feature on (out of scope for #3332; see docs/product/owner-company-details.md). Absent otherwise. */
+            buyer?: components["schemas"]["PartiesBuyer"];
+        };
+        PartiesBuyer: {
+            legal_name: string;
+            /** @description ISO 3166-1 alpha-2. */
+            country: string;
+            org_number: string;
+            vat_number: string | null;
+            /** @enum {string|null} */
+            vies_status: "pending" | "valid" | "invalid" | "not_verifiable" | null;
+            /** Format: date-time */
+            vies_checked_at: string | null;
         };
         AgentPaymentStatus: {
             /** Format: uuid */
@@ -3952,6 +4466,8 @@ export type components = {
             expires_at: string;
             chain_id: number;
             message: string;
+            /** @description True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown. */
+            delivered?: boolean;
             fee?: {
                 amount: string;
                 token: string;
@@ -4054,7 +4570,7 @@ export type components = {
             paymentRequired?: {
                 [key: string]: unknown;
             };
-            /** @description #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget's signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent's delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. */
+            /** @description #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget's signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent's delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             taskBudgetId?: string;
         };
         X402MerchantCallContext: {
@@ -4245,6 +4761,22 @@ export type components = {
              * @enum {string}
              */
             execution_rail: "legacy" | "delegation";
+            /** @description Sub-budgets agent A granted this agent (B) (#3330): period-scoped ERC-7710 children of A’s own budget delegation. `period_amount_atomic` and `expires_at` are the EFFECTIVE (narrower) limits; `is_expired` is derived. Enforcement stays on-chain through the [grant, parent-child, budget] redemption chain. */
+            parent_sub_budgets?: {
+                /** Format: uuid */
+                sub_budget_id: string;
+                /** Format: uuid */
+                parent_agent_id: string;
+                parent_agent_name: string;
+                /** @example 0x1111111111111111111111111111111111111111 */
+                token_address: string;
+                recipient_address?: string | null;
+                period_amount_atomic: string;
+                expires_at: number;
+                /** @enum {string} */
+                status: "open" | "closing";
+                is_expired: boolean;
+            }[];
         };
         AllowanceSummary: {
             /** Format: uuid */
@@ -4375,7 +4907,6 @@ export type components = {
             paymentId: string;
             rail: string;
             txHash: string;
-            /** Format: uri */
             resourceUrl?: string;
             merchantStatus?: number;
             challengePayload?: {
@@ -4955,6 +5486,145 @@ export type components = {
                 note?: string;
             };
         };
+        /** @description The account receive ledger (#3333): the persisted inbound index, the matched balance, and the saved off-ramp destination. */
+        ReceiveLedgerResponse: {
+            /**
+             * @description The receiving account address.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            account_address: string;
+            chain_id: number;
+            /** @description The chain registry USDC contract, or null when the chain has none. */
+            usdc_address: string | null;
+            /** @description SUM of matched (balance_consumed) inbound rows, atomic units, as a numeric string. Unmatched rows are unearned and never counted. */
+            balance_atomic: string;
+            /** @description The balance in USDC human decimals (6). */
+            balance_formatted: string;
+            /** @description The owner-saved off-ramp destination, or null when none is saved yet. */
+            off_ramp_destination: components["schemas"]["OffRampDestination"] | null;
+            transfers: components["schemas"]["ReceiveLedgerTransfer"][];
+        };
+        ReceiveLedgerTransfer: {
+            tx_hash: string;
+            payer_address: string;
+            /** @description Atomic units, numeric string. */
+            amount_raw: string;
+            /** @description USDC human decimals (6). */
+            amount_formatted: string;
+            /** Format: date-time */
+            block_time: string;
+            /** @description How the row is linked to evidence: an x402 settlement the account was payTo for, or a supplied receipt. Null = unmatched = unearned. */
+            match_kind: ("x402_payto" | "receipt") | null;
+            /** @description The x402 settlement intent id, present only for x402_payto. Stored for audit; never a grant. */
+            matched_payment_intent_id: string | null;
+            /** @description The linked receipt document id, present only for the receipt kind. */
+            matched_receipt_id: string | null;
+            /** @description True once the row counts in balance_atomic. */
+            balance_consumed: boolean;
+            /** @description match_kind !== null. Unmatched = unearned; nothing is delivered on an unearned row. */
+            earned: boolean;
+        };
+        OffRampDestination: {
+            /**
+             * @description The deposit address at the venue (Safello, Coinbase, or a custody account).
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            destination_address: string;
+            /** @enum {string} */
+            destination_kind: "safello" | "coinbase" | "custody_deposit";
+            label: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        OffRampDestinationInput: {
+            /**
+             * @description The deposit address. The zero address is refused.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            destination_address: string;
+            /**
+             * @description Defaults to custody_deposit when omitted (handler fallback).
+             * @enum {string}
+             */
+            destination_kind?: "safello" | "coinbase" | "custody_deposit";
+        };
+        OffRampPrepareInput: {
+            /** @description The amount to move, atomic units. The recipient and token are NOT in the request: they are the saved destination and the chain registry USDC. */
+            amount_atomic: string;
+        };
+        OffRampPrepareResponse: {
+            /** @description The prepared UserOperation (same shape the owner send prepare returns) — what the OWNER signs with the account own signer. */
+            prepared: {
+                [key: string]: unknown;
+            };
+            submit: components["schemas"]["OffRampSubmitInstructions"];
+        };
+        OffRampSubmitInstructions: {
+            /** @description The submit route; it re-derives the calldata and refuses a user_operation that does not contain it. */
+            endpoint: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            token_address: string;
+            /**
+             * @description The saved destination — echoed so the owner signs what they verified.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            to: string;
+            destination_kind: string;
+            amount_atomic: string;
+            /**
+             * @description Only the account owner signs; no agent key can authorize this transfer.
+             * @enum {string}
+             */
+            signature_required_from: "owner";
+        };
+        ReceiptDropInput: {
+            /** @description The on-chain transfer the receipt is for — the match key. */
+            tx_hash: string;
+            /** @description Atomic units; must equal the persisted transfer amount. */
+            amount_raw: string;
+            /**
+             * @description The payer the transfer names; the signature must recover to it.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            payer_address: string;
+            /** @description EIP-191 personal signature over `haven:receipt-drop\ntx:<tx_hash>\namount_raw:<amount_raw>`. */
+            signature: string;
+        };
+        ReceiptDropResponse: {
+            /** @enum {boolean} */
+            matched: true;
+            /** @enum {string} */
+            match_kind: "x402_payto" | "receipt";
+            /** Format: uuid */
+            transfer_id: string;
+        };
+        InboundIngestInput: {
+            tx_hash: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            payer_address: string;
+            /** @description Atomic units. */
+            amount_raw: string;
+            /**
+             * @description Optional; defaults to the chain registry USDC — the receive index tracks USDC only.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            token_address?: string;
+            /**
+             * Format: date-time
+             * @description Defaults to now.
+             */
+            block_time?: string;
+            block_number?: string;
+        };
+        InboundIngestResponse: {
+            /** @description false when the (chain, tx hash) was already indexed — idempotent re-ingest. */
+            ingested: boolean;
+            /**
+             * Format: uuid
+             * @description The row id, or null when it already existed.
+             */
+            id: string | null;
+        };
         TransactionsResponse: {
             transactions: components["schemas"]["Transaction"][];
             total: number;
@@ -5513,6 +6183,300 @@ export interface operations {
             };
         };
     };
+    getCompanyDetails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The owner's saved company details, or `null` when none are saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyDetails"] | null;
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    putCompanyDetails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertCompanyDetailsRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved company details. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyDetails"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    deleteCompanyDetails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted (or there was nothing to delete). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteCompanyDetailsResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    recheckCompanyDetailsVies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The details, with `vies_status` now `pending`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyDetails"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     listAgents: {
         parameters: {
             query?: never;
@@ -5777,6 +6741,159 @@ export interface operations {
         responses: {
             /** @description Always. The message names the archive route to use instead. */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentTaxDeclaration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The declaration content, or the structured not-available answer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTaxDeclarationContent"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    putAgentTaxDeclaration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertAgentTaxDeclarationRequest"];
+            };
+        };
+        responses: {
+            /** @description The new state of the opt-in. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTaxDeclarationState"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The opt-in is not currently possible. The body carries `reason` (`feature_disabled`, `no_company_details` or `vies_not_valid`) and `available: false`; nothing was written. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6493,7 +7610,7 @@ export interface operations {
                     /** @example 0x1111111111111111111111111111111111111111 */
                     token_address: string;
                     /**
-                     * @description Optional recipient pin. Omit (or null) for an open budget.
+                     * @description Optional recipient pin. Omit (or null) for an open budget — unless merchant_slug is set, in which case the server pins it to the merchant's verified payTo.
                      * @example 0x1111111111111111111111111111111111111111
                      */
                     recipient_address?: string | null;
@@ -6503,6 +7620,8 @@ export interface operations {
                     period_seconds: number;
                     /** @description Unix seconds, must be in the future. Default: now + 90 days. */
                     expires_at?: number;
+                    /** @description A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury). */
+                    merchant_slug?: string | null;
                 };
             };
         };
@@ -6581,7 +7700,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409. */
+            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent’s own addresses, recipient_address differs from the current payTo). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6690,7 +7809,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. */
+            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key's own completion (#3439). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6909,7 +8028,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Delegation disabled on-chain and marked revoked. */
+            /** @description Delegation disabled on-chain and marked revoked. The recorded revocation was verified against the signed calldata (#3343). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7037,6 +8156,446 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listAgentSubBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sub-budget rows ordered by created_at DESC. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budgets: components["schemas"]["SubBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    issueAgentSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The sub-agent B — a different agent in the same account.
+                     */
+                    sub_agent_id: string;
+                    /**
+                     * @description Defaults to the chain USDC when omitted.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    token_address?: string;
+                    /** @description Per-period atomic amount; must be <= the parent budget period amount (checked pre-sign). */
+                    period_amount_atomic: string;
+                    /** @description Unix seconds; must be in the future and <= the parent budget expiry. */
+                    expires_at: number;
+                    /** @description Optional recipient pin; may only NARROW the parent pin, never widen it. */
+                    recipient_address?: string | null;
+                    label?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Both rows of the tree created pending. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        parent_child_sub_budget: components["schemas"]["SubBudget"];
+                        next_action: string;
+                        sign_targets: {
+                            /** Format: uuid */
+                            sub_budget_id: string;
+                            who: string;
+                            what: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentSubBudgetTree: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tree. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        agent_id: string;
+                        trees: {
+                            parent_child_sub_budget: components["schemas"]["SubBudget"];
+                            grants: components["schemas"]["SubBudget"][];
+                        }[];
+                        unattached: components["schemas"]["SubBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    signAgentSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                sub: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A's delegate-key signature over the row's sign-context typed data. */
+                    signature: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The opened sub-budget. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        /** @enum {string} */
+                        status: "open";
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    revokeAgentSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                sub: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The closed row, or the prepared close awaiting the agent signature. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        /** @enum {string} */
+                        status: "closed" | "closing";
+                        next_action?: string | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7525,7 +9084,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain. */
+            /** @description Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain. Also returned if this re-key stopped being `metered` between the stage check and an individual delegation insert — an abandon, or another issue call for the same re-key that already reached `issued`, including one still in flight CONCURRENTLY: the whole piece-build loop and the stage flip to `issued` run in one transaction (#3450), so a second call on the same re-key either loses on the first insert or — for a re-key whose snapshot has no pieces — on the stage flip itself, and inserts nothing either way (#3439, #3450). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13227,7 +14786,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize. */
+            /** @description Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize. Exception (#3423): an erc7710 payment that already settled answers code "payment_already_settled" with payment_id and tx_hash; nothing is signed, written or charged again. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14844,6 +16403,424 @@ export interface operations {
             };
         };
     };
+    listSubBudgets: {
+        parameters: {
+            query?: {
+                status?: "open" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sub-budgets held by this agent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budgets: components["schemas"]["SubBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sub-budget. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getSubBudgetSignContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sign context for whichever signature is currently pending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        sub_budget_id: string;
+                        /** @enum {string} */
+                        purpose: "open" | "close";
+                        /** @enum {integer} */
+                        sub_budget_sign_context_version: 1;
+                        typed_data: {
+                            [key: string]: unknown;
+                        };
+                        /** @description purpose=close only. */
+                        user_operation?: {
+                            [key: string]: unknown;
+                        };
+                        /** @description purpose=close only. */
+                        user_op_hash?: string;
+                        expected: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description sign_context_unavailable — the sub-budget has no signature currently pending. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    submitSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    signature: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Opened (from pending) or closed (from closing). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        /** @enum {string} */
+                        status: "open" | "closed";
+                        /** @description Present when status=closed. */
+                        close_tx_hash?: string;
+                    };
+                };
+            };
+            /** @description signature_mismatch, or a malformed signature. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    closeSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Closed trivially, or a close signature is now pending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        /**
+                         * @description Present on a trivial close.
+                         * @enum {string}
+                         */
+                        status?: "closed";
+                        /** @description Present when a live child needs a revocation signature. */
+                        sign_data?: {
+                            /** @enum {string} */
+                            signature_scheme?: "eip712_userop";
+                            typed_data?: {
+                                [key: string]: unknown;
+                            };
+                            user_op_hash?: string;
+                        };
+                        /** @enum {string} */
+                        next_action?: "sign_then_submit";
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Already closed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     listAgentPayments: {
         parameters: {
             query?: never;
@@ -14974,7 +16951,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Idempotency conflict: the key already belongs to a payment with a different token, recipient or amount, or it replays an intent that is mid-flight (pending_signature / submitted). Only `payment_intents` carry the key — the approval-queue replay fallback is gone with the table (#2055). */
+            /** @description Idempotency conflict: the key already belongs to a payment with a different token, recipient, amount or task budget (#3392), or it replays an intent that is mid-flight (pending_signature / submitted). Only `payment_intents` carry the key — the approval-queue replay fallback is gone with the table (#2055). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15004,7 +16981,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -15038,6 +17015,21 @@ export interface operations {
             };
             /** @description Preparation failed against the chain, or an idempotent replay of a request whose payment has failed. */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15242,7 +17234,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -15683,7 +17675,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -15717,6 +17709,21 @@ export interface operations {
             };
             /** @description Error response */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15831,7 +17838,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -16057,7 +18064,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -16091,6 +18098,21 @@ export interface operations {
             };
             /** @description Error response */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16346,7 +18368,12 @@ export interface operations {
     };
     getMachinePaymentBalanceCoverage: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description The ERC-20 contract address to check holdings of. */
+                token: string;
+                /** @description The amount the coverage question is asked about, in ATOMIC units, as a decimal string. Zero passes the schema and is refused by the handler (a sufficiency question about nothing has no honest answer). */
+                amount_atomic: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -16672,7 +18699,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. Run `client_update.upgrade_command` (for a connector-installed package it diagnoses the install and prints the exact repair line to run next), then retry the same request. */
             426: {
                 headers: {
                     [name: string]: unknown;
@@ -17581,6 +19608,382 @@ export interface operations {
             };
         };
     };
+    getReceiveLedger: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account receive ledger. `earned: false` rows are unmatched = unearned; nothing is delivered on them. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiveLedgerResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    setOffRampDestination: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OffRampDestinationInput"];
+            };
+        };
+        responses: {
+            /** @description The saved destination. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffRampDestination"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    prepareOffRampHandoff: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OffRampPrepareInput"];
+            };
+        };
+        responses: {
+            /** @description The prepared UserOperation plus the submit instructions the owner signs into. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffRampPrepareResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    dropReceiptForTransfer: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReceiptDropInput"];
+            };
+        };
+        responses: {
+            /** @description The transfer is matched and now earned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptDropResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    ingestInboundTransfer: {
+        parameters: {
+            query: {
+                chain_id: number;
+            };
+            header?: never;
+            path: {
+                accountAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboundIngestInput"];
+            };
+        };
+        responses: {
+            /** @description Recorded (`ingested: false` when the hash was already indexed). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundIngestResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     getDashboardOverview: {
         parameters: {
             query?: never;
@@ -18331,6 +20734,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         merchant: components["schemas"]["Merchant"];
+                        /** @description Where the merchant is paid on each listed chain that has an active, verified x402 offer (#3331). Empty when none does. */
+                        funding: components["schemas"]["MerchantFundingTarget"][];
                         offers: components["schemas"]["CatalogEntry"][];
                     };
                 };
@@ -18359,6 +20764,94 @@ export interface operations {
                     "application/json": {
                         error: string;
                         detail?: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchantBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Budgets, by agent name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        budgets: {
+                            /** Format: uuid */
+                            agent_id: string;
+                            agent_name: string;
+                            chain_id: number;
+                            token_address: string;
+                            recipient_address: string;
+                            delegation_hash: string;
+                            budget_atomic: string;
+                            period_seconds: number;
+                            /** @description Unix seconds as a string (BIGINT). */
+                            expires_at: string;
+                            remaining_atomic: string;
+                            remaining_is_from_chain: boolean;
+                            /**
+                             * @description `stale`: the merchant now names a different payTo (a rotation) — this budget pays only the old address, and payments to the new one use the open budget, if the agent has one. `unverified`: the merchant names no single payTo on that chain now (including a `shared` one). `not_erc7710`: the payTo still matches but not every offer there advertises ERC-7710, and a pinned budget pays only through ERC-7710.
+                             * @enum {string}
+                             */
+                            pin_status: "current" | "stale" | "unverified" | "not_erc7710";
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };

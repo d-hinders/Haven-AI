@@ -22,11 +22,14 @@ import discoveryRoutes from './routes/discovery.js'
 import { buildApiRootDocument } from './routes/root-document.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
+import ownerCompanyDetailsRoutes from './routes/owner-company-details.js'
 import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
+import receiveRoutes from './routes/receive.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import agentRoutes from './routes/agents.js'
+import agentTaxDeclarationRoutes from './routes/agent-tax-declaration.js'
 import labelRoutes from './routes/labels.js'
 import agentLabelRoutes from './routes/agent-labels.js'
 import agentOrganizationRoutes from './routes/agent-organizations.js'
@@ -65,11 +68,18 @@ import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import taskBudgetRoutes from './routes/task-budgets.js'
 import agentTaskBudgetsOwnerRoutes from './routes/agent-task-budgets.js'
+import subBudgetRoutes from './routes/sub-budgets.js'
+import agentSubBudgetsOwnerRoutes from './routes/agent-sub-budgets.js'
 import userAccountsRoutes from './routes/user-accounts.js'
 import userAccountsRetiredRoutes from './routes/user-accounts-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
+// #3031 round 2: `POST /machine-payments/reconciliation-events` in its own
+// file so it can STAY SHADOWED while the rest of the machine-payments
+// surface is enforced (owner decision, epic #3028 2026-09-24) — see that
+// file's header.
+import machinePaymentsReconciliationEventsRoutes from './routes/machine-payments-reconciliation-events.js'
 import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
 import catalogRoutes from './routes/catalog.js'
@@ -142,6 +152,18 @@ installRequestValidation(app, {
     // #3329: the owner-facing task-budget READ is non-money-path (GET only)
     // and born ENFORCED, same precedent as agent-organizations.ts above.
     'routes/agent-task-budgets.ts',
+    // #3330: sub-budgets — the owner-facing issuance/read routes are
+    // money-path-adjacent (they create the rows payments later redeem
+    // through) but carry no spend authority themselves (nothing is signed
+    // by Haven, nothing is redeemed here); born ENFORCED like the
+    // task-budget reads above. The agent-facing lifecycle in
+    // `routes/sub-budgets.ts` IS money-path-adjacent and born ENFORCED
+    // under the same brand-new-module rule as `routes/task-budgets.ts`.
+    'routes/agent-sub-budgets.ts',
+    'routes/sub-budgets.ts',
+    // #3332: a brand new module with no live caller yet, same reasoning as
+    // task-budgets.ts below — born ENFORCED, never shadow.
+    'routes/owner-company-details.ts',
     // #3329: `routes/task-budgets.ts` is a BRAND NEW module with no live
     // caller yet (unlike `routes/payments.ts` / `routes/agent-delegations.ts`
     // / `routes/machine-payments.ts`, which predate the request-validation
@@ -186,16 +208,73 @@ installRequestValidation(app, {
     'routes/user.ts',
     'routes/user-accounts.ts',
     'routes/user-accounts-retired.ts',
-    // #3031 (epic #3028 slice 3): the FIRST money-path module to enforce.
-    // Its five operations are the only ones the 2026-09-22 shadow reading
-    // proved conformant end to end — 24.41 h, zero would_refuse, zero
-    // would_coerce, traffic on all five (57 `POST /x402`, 57 `/authorize`,
-    // 48 `/{id}/settle`, 31 sign-context, 12 merchant-call-context). The
-    // slice's other three modules (`payments`, `agent-delegations`,
-    // `machine-payments`) keep 15 operations with NO traffic in that window
-    // and stay shadowed by owner decision (2026-09-22): a route printed
-    // NOT PROVEN is not enforced on a guess.
+    // #3031 (epic #3028 slice 3): the four MONEY-PATH route modules, the
+    // remainder after #3221 flipped `x402.ts` (the only one the 2026-09-22
+    // shadow reading proved on traffic alone — 24.41 h, zero would_refuse,
+    // zero would_coerce). These three (#3031's other three modules) carried
+    // 15 operations with NO traffic in that window and stayed shadowed by
+    // owner decision (2026-09-22): a route printed NOT PROVEN is not
+    // enforced on a guess. Six of the fifteen were then driven through the
+    // hosted QA MCP the same day (read-only; the one spend-shaped call made
+    // a payment INTENT with the recipient pinned to the agent's own
+    // treasury and deliberately produced no signature — nothing moved;
+    // evidence on epic #3028, 2026-09-22 17:26/17:31/20:56), which leaves
+    // nine that no client calls at all (#3223 — three unreachable by any
+    // client, four owner-session writes not worth driving, reconciliation
+    // events that must not be forced). This slice's instrument for them is
+    // the one the epic's fallback already set for slice 2 (#3030): the
+    // route tests — off-spec → the 400 envelope, every accepted shape
+    // byte-identical — and the #3208 reading pasted on #3028 (2026-09-22
+    // 14:51Z, corrected same day) still holds: zero would_refuse and zero
+    // would_coerce across the whole 24.41 h window. The semantic money-path
+    // refusals (budget, rail, scheme agreement, expiry, the uint96 cap)
+    // stay in the handlers; the schema takes only the SHAPE checks the
+    // spec already declares — see the per-route notes in the four files.
+    //
+    // #3031 round 2 (owner decision, epic #3028 2026-09-24T21:24:44Z,
+    // closing #3223): `POST /machine-payments/reconciliation-events` is the
+    // rollout's NAMED RESIDUE and STAYS SHADOWED — driving it synthetically
+    // would write a false record into a payment's ledger. It moved to its
+    // own route file (`routes/machine-payments-reconciliation-events.ts`)
+    // because enforcement is keyed on the file and the plugin has no
+    // per-operation opt-out; that file is deliberately NOT listed here. It
+    // is enforced the day a real rejection (or a QA scenario that produces
+    // one) gives the shadow reading traffic to prove it — the promotion
+    // checklist carries the note.
+    'routes/payments.ts',
+    'routes/agent-delegations.ts',
+    'routes/machine-payments.ts',
     'routes/x402.ts',
+    // #3032 (epic #3028 slice 4, the LAST slice): the remaining five modules
+    // join, and the default mode flips to `enforce`. Evidence per the owner's
+    // instrument decision (epic decision 8, #3208) and the #3223 ruling:
+    // the 2026-09-22 reading proved 3 of these 36 operations conformant with
+    // traffic and left 33 NOT PROVEN; the owner then decided (2026-09-24,
+    // on the epic) that routes a shadow reading can never prove are enforced
+    // on TEST evidence — per-route off-spec → 400-envelope and conformant →
+    // byte-identical pins, the same instrument decision 8 allowed for slice
+    // 2. The connector-path clients (published `@haven_ai/connect`, `cli`,
+    // dashboard) drive the highest-traffic of these routes; their five
+    // undeclared request fields were declared in #3276 with regenerated
+    // types. From this slice on `enforcedModules` is the per-module ROLLBACK
+    // list (epic decision 6): the default is enforce, and removing one file
+    // here returns exactly that module to shadow.
+    'routes/agents.ts',
+    // #3426: the agent-side tax-declaration READ is born ENFORCED — a genuinely
+    // new module never enters shadow (no existing caller a stricter schema
+    // could break). GET only: no request body, one uuid path parameter.
+    'routes/agent-tax-declaration.ts',
+    'routes/agent-rekey.ts',
+    'routes/agent-connection-setups.ts',
+    'routes/agent-passports.ts',
+    'routes/hybrid-accounts.ts',
+    // #3333: routes/receive.ts is born ENFORCED — the rule a genuinely new
+    // module never enters shadow (there is no existing caller a stricter
+    // schema could break). The file carries the receive side's owner surface
+    // (authMiddleware) and the payer's unauthenticated-but-signed receipt
+    // drop; the drop's body shape is exactly the enforced schema's, so a
+    // malformed drop is refused before any DB read.
+    'routes/receive.ts',
   ],
 })
 
@@ -367,14 +446,24 @@ logPassportReadiness(app.log)
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })
+// #3332: rides the /user prefix as its own route FILE, same reasoning as
+// agent-labels.ts on /agents — the request-validation rollout keys
+// enforcedModules on the file, not the mount prefix.
+await app.register(ownerCompanyDetailsRoutes, { prefix: '/user' })
 await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
+// #3333: the receive side — persisted inbound index, receipt matching and the
+// owner-signed off-ramp hand-off. Owner-scoped (authMiddleware inside the
+// file); no agent-auth route reaches it. `trustProxyHops` arms the receipt
+// drop's limiter — the receive side's one unauthenticated route (#794 tiers).
+await app.register(receiveRoutes, { prefix: '/receive', trustProxyHops: config.trustProxyHops })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 // #2847 (epic #1440): `GET /safe/:addr/details` and `POST /safe/exec` are
 // deleted. `/safe` no longer mounts anything here but the safe-deploy
 // tombstone below — the prefix survives only because that 410 does.
 await app.register(agentRoutes, { prefix: '/agents' })
+await app.register(agentTaxDeclarationRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentRekeyRoutes, { prefix: '/agents' })
@@ -403,6 +492,10 @@ await app.register(x402Routes, { prefix: '/x402' })
 // read at /agents/:id/task-budgets (same prefix as agent-delegations.ts).
 await app.register(taskBudgetRoutes, { prefix: '/task-budgets' })
 await app.register(agentTaskBudgetsOwnerRoutes, { prefix: '/agents' })
+// #3330: sub-budgets — agent-auth lifecycle at /sub-budgets, owner-auth
+// issue/sign/list/tree/revoke at /agents/:id/sub-budgets.
+await app.register(subBudgetRoutes, { prefix: '/sub-budgets' })
+await app.register(agentSubBudgetsOwnerRoutes, { prefix: '/agents' })
 // #2914 (naming P5, the contraction): the `/user/safes*` prefix stops
 // serving and answers 410 with the replacement path. It is registered as a
 // TOMBSTONE module rather than dropped, because an absent registration is a
@@ -413,6 +506,10 @@ await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
+// #3031 round 2: the reconciliation-events route, split out of
+// `machine-payments.ts` so it stays SHADOWED while that module is enforced
+// (owner decision, epic #3028 2026-09-24). Same prefix, one route.
+await app.register(machinePaymentsReconciliationEventsRoutes, { prefix: '/machine-payments' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 // #3078: the merchant layer over the catalog — read-only, same auth door.
@@ -727,6 +824,23 @@ const start = async () => {
           await phase('anchor-repair', async () => {
             const repairs = await repairAnchoredUids()
             if (repairs.attempted) app.log.info(repairs, 'Passport anchor UID repairs')
+            // #3342: every row the repair could not answer is reported BY
+            // AGENT — agent_id and reason — not folded into a count. These
+            // are the lines an operator checks first when a row refuses to
+            // converge (see docs/operations/stuck-revoke-alarm.md).
+            if (repairs.unrepairable) {
+              // #3395: a REPAIRED row is an answer, not a question — it left
+              // the queue on the same write (its marker is stamped), so it
+              // does not belong in the operator's unanswered set. Only
+              // `unrepairable` and `deferred` do.
+              app.log.warn(
+                {
+                  unrepairable: repairs.unrepairable,
+                  rows: repairs.rows.filter((r) => r.outcome !== 'confirmed' && r.outcome !== 'repaired'),
+                },
+                'Passport anchor UID repairs left rows unanswered — investigate the reasons',
+              )
+            }
           })
           await phase('revocation', async () => {
             const revocations = await reconcilePendingRevocations()

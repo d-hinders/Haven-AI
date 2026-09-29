@@ -1,6 +1,7 @@
 import {
   HavenApiError,
   HavenSigningError,
+  X402Erc7710AlreadySettledError,
 } from './types.js'
 import type {
   RawX402AuthorizeResponse,
@@ -181,6 +182,13 @@ export class X402Erc7710 {
        * `[settlement, task, budget]`.
        */
       taskBudgetId?: string
+      /**
+       * #3330: build the settlement chain under this open sub-budget's grant
+       * instead of the agent's budget delegation directly —
+       * `[settlement, grant, parent-child, budget]`. Agent B pays through the
+       * sub-budget agent A granted it. Mutually exclusive with `taskBudgetId`.
+       */
+      subBudgetId?: string
     } = {},
   ): Promise<{
     paymentId: string
@@ -267,10 +275,41 @@ export class X402Erc7710 {
       // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest`) — do not
       // switch this to `task_budget_id`, which is only the `POST /payments` key.
       ...(options.taskBudgetId ? { taskBudgetId: options.taskBudgetId } : {}),
+      // #3330: same camelCase channel one level deeper; mutually exclusive
+      // with `taskBudgetId` server-side.
+      ...(options.subBudgetId ? { subBudgetId: options.subBudgetId } : {}),
     })
 
     if (!raw.payment_id) {
       throw new HavenApiError('No payment_id returned from x402/authorize', 500, raw)
+    }
+    // #3417: an idempotent replay of a key whose payment is already confirmed.
+    // The backend answers with the stored intent and no `sign_data` — there is
+    // nothing left to sign — so this is not the scheme mismatch refused below.
+    // Checked first, and never signed: a confirmed payment must not yield a
+    // second child. The backend's lookup is keyed on the idempotency key alone,
+    // so the row is only THIS purchase when it pays this merchant (`to` is the
+    // merchant on an erc7710 row, the delegate on an EIP-3009 funding leg) for
+    // the resource this request names. Anything else is a key collision: a 409
+    // the caller must not retry with the same key, never "already settled".
+    if (raw.status === 'confirmed' && raw.tx_hash) {
+      const requestedUrl = options.resourceUrl ?? paymentRequired.resource?.url
+      const samePurchase =
+        typeof raw.to === 'string' &&
+        raw.to.toLowerCase() === merchantPayTo.toLowerCase() &&
+        raw.resource_url === requestedUrl
+      if (!samePurchase) {
+        throw new HavenApiError(
+          `Idempotency key already belongs to confirmed payment ${raw.payment_id}, which is not this ` +
+            'erc7710 purchase (different payee or resource). Nothing was signed and nothing was charged. ' +
+            "Check that payment's status before buying again: a funded but undelivered EIP-3009 payment " +
+            'is recovered, not paid twice. Otherwise use a new idempotency key for this purchase.',
+          409,
+          raw,
+          raw.payment_id,
+        )
+      }
+      throw new X402Erc7710AlreadySettledError(raw.payment_id, raw.tx_hash, raw)
     }
     const signData = raw.sign_data
     if (signData?.signature_scheme !== 'eip712_delegation' || !signData.typed_data) {
@@ -309,10 +348,30 @@ export class X402Erc7710 {
    * hosted boundary) is irrelevant here.
    */
   async submit(paymentId: string, signature: string): Promise<string> {
-    const settled = await this.post<RawX402SettleResponse>(
-      `/x402/${paymentId}/settle`,
-      { signature },
-    )
+    let settled: RawX402SettleResponse
+    try {
+      settled = await this.post<RawX402SettleResponse>(`/x402/${paymentId}/settle`, { signature })
+    } catch (err) {
+      // #3423: a second settle of an erc7710 payment that already settled.
+      // The backend answers 409 `payment_already_settled` with the settlement
+      // hash; surface it as the same typed error the authorize replay uses
+      // (#3417), so a caller reports the original settlement instead of
+      // reading a failure. Any other refusal propagates unchanged.
+      const body = err instanceof HavenApiError ? (err.body as Record<string, unknown> | undefined) : undefined
+      if (
+        err instanceof HavenApiError &&
+        err.statusCode === 409 &&
+        body?.code === 'payment_already_settled' &&
+        typeof body.tx_hash === 'string'
+      ) {
+        throw new X402Erc7710AlreadySettledError(
+          typeof body.payment_id === 'string' ? body.payment_id : paymentId,
+          body.tx_hash,
+          body,
+        )
+      }
+      throw err
+    }
     if (!settled.payment_header) {
       throw new HavenApiError(
         'x402 settle returned no payment_header — the merchant cannot be retried.',

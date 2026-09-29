@@ -161,6 +161,33 @@ function runtimeFlagFor(runtime: string): string {
   return normalizeRuntimeName(runtime) ? ` --runtime ${runtime}` : ''
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * #3412: ` --credentials-dir <dir>` for a repair line, or '' when no directory
+ * is named. A repair REWRITES the runtime config from one agent's stored
+ * credentials, and without the flag `runRepair` picks the newest credential
+ * directory by mtime — which on a machine with several agents is not
+ * necessarily the agent the doctor just described (2026-09-28: a repair meant
+ * for a dev agent re-wired a newer prod one). So every repair line names its
+ * directory whenever more than one agent lives here. Quoted for a POSIX shell
+ * only when it needs to be, so the common `~/.haven/agents/<id>` prints unquoted.
+ */
+function credentialsDirFlagFor(credentialsDir?: string): string {
+  if (!credentialsDir) return ''
+  const quoted = /^[\w@%+=:,./~-]+$/.test(credentialsDir)
+    ? credentialsDir
+    : `'${credentialsDir.replace(/'/g, `'\\''`)}'`
+  return ` --credentials-dir ${quoted}`
+}
+
 /**
  * #3210 review: the `--doctor --repair` command for a repair string. `--repair`
  * REQUIRES `--runtime` in the parser (it rewrites that runtime's config), so a
@@ -172,10 +199,11 @@ function runtimeFlagFor(runtime: string): string {
  * `suffix` may end with a period; the unknown branch drops it so the
  * explanatory clause reads on from the command.
  */
-function repairCommandFor(runtime: string, suffix = ''): string {
-  if (normalizeRuntimeName(runtime)) return `Run: ${RERUN} --doctor --repair --runtime ${runtime}${suffix}`
+function repairCommandFor(runtime: string, suffix = '', credentialsDir?: string): string {
+  const dirFlag = credentialsDirFlagFor(credentialsDir)
+  if (normalizeRuntimeName(runtime)) return `Run: ${RERUN} --doctor --repair --runtime ${runtime}${dirFlag}${suffix}`
   return (
-    `Run: ${RERUN} --doctor --repair --runtime <runtime>${suffix.replace(/\.$/, '')} — --repair needs the runtime named; ` +
+    `Run: ${RERUN} --doctor --repair --runtime <runtime>${dirFlag}${suffix.replace(/\.$/, '')} — --repair needs the runtime named; ` +
     `one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`
   )
 }
@@ -256,7 +284,7 @@ async function resolveDoctorRuntime(
 async function discoverCredentialDirectory(
   homeDir: string,
   explicit?: string,
-): Promise<{ directory?: string; others: string[]; parkedOnly: Set<string> }> {
+): Promise<{ directory?: string; others: string[]; parkedOnly: Set<string>; identityDirectories: string[] }> {
   // An explicit --credentials-dir names the agent DIRECTORY itself, so its
   // siblings live in its parent — never in the default root. Scanning the
   // default root under an explicit override would live-probe real keys in a
@@ -267,8 +295,8 @@ async function discoverCredentialDirectory(
     entries = await readdir(root)
   } catch {
     return explicit
-      ? { directory: explicit, others: [], parkedOnly: new Set() }
-      : { others: [], parkedOnly: new Set() }
+      ? { directory: explicit, others: [], parkedOnly: new Set(), identityDirectories: [explicit] }
+      : { others: [], parkedOnly: new Set(), identityDirectories: [] }
   }
   const candidates: Array<{ directory: string; mtimeMs: number }> = []
   // #1681: a directory whose keys were removed but that carries TOMBSTONE.json
@@ -301,21 +329,26 @@ async function discoverCredentialDirectory(
   }
   const parkedOnlySet = new Set(parkedOnly)
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
+  // #3412: every directory holding an identity.json — the agents a repair could
+  // land on. More than one means a repair line must name its directory.
+  const identityDirectories = candidates.map((c) => c.directory)
   if (explicit) {
     return {
       directory: explicit,
       others: [...candidates.map((c) => c.directory), ...tombstonedOnly, ...parkedOnly]
         .filter((d) => d !== explicit),
       parkedOnly: parkedOnlySet,
+      identityDirectories: [explicit, ...identityDirectories.filter((d) => d !== explicit)],
     }
   }
   if (candidates.length === 0 && tombstonedOnly.length === 0 && parkedOnly.length === 0) {
-    return { others: [], parkedOnly: parkedOnlySet }
+    return { others: [], parkedOnly: parkedOnlySet, identityDirectories }
   }
   return {
     directory: candidates[0]?.directory,
     others: [...candidates.slice(1).map((c) => c.directory), ...tombstonedOnly, ...parkedOnly],
     parkedOnly: parkedOnlySet,
+    identityDirectories,
   }
 }
 
@@ -582,6 +615,7 @@ async function runtimeSpecOverrideCheck(
   directory: string,
   sidecar: SignerRuntimeSidecar | null,
   env: NodeJS.ProcessEnv,
+  repairDir?: string,
 ): Promise<DoctorCheck | undefined> {
   const facts: string[] = []
   const installed = sidecar?.runtime_spec_override
@@ -616,7 +650,7 @@ async function runtimeSpecOverrideCheck(
     label: 'Runtime spec override',
     level: 'failed',
     detail: `runtime spec overridden — not the pinned manifest (${MCP_RUNTIME_MANIFEST.signerPackage}@${MCP_RUNTIME_MANIFEST.signerVersion}, ${MCP_RUNTIME_MANIFEST.sdkPackage}@${MCP_RUNTIME_MANIFEST.sdkVersion}). ${facts.join('. ')}.`,
-    repair: `Developer override (#2424). To return to the pinned manifest: unset ${variables}, then run ${RERUN} --doctor --repair --runtime <runtime>. If the override is intentional, this finding is the record of it.`,
+    repair: `Developer override (#2424). To return to the pinned manifest: unset ${variables}, then run ${RERUN} --doctor --repair --runtime <runtime>${credentialsDirFlagFor(repairDir)}. If the override is intentional, this finding is the record of it.`,
   })
 }
 
@@ -666,7 +700,7 @@ export function describeAccountAddressKey(
 /** Every per-agent check for ONE credential directory. */
 async function checksForAgent(
   entry: { directory: string; identity?: IdentityFile; sidecar: SignerRuntimeSidecar | null },
-  input: { runtime: string },
+  input: { runtime: string; repairDir?: string },
   deps: DoctorDeps,
 ): Promise<{ checks: DoctorCheck[]; signerCapabilities?: Record<string, unknown> }> {
   const verdicts = await verdictsForAgent(entry, input, deps)
@@ -678,7 +712,10 @@ async function checksForAgent(
 
 async function verdictsForAgent(
   entry: { directory: string; identity?: IdentityFile; sidecar: SignerRuntimeSidecar | null },
-  input: { runtime: string },
+  // #3412: `repairDir` is set when several agents share this machine or the
+  // caller named the directory with --credentials-dir, so each repair line
+  // names the directory it is about.
+  input: { runtime: string; repairDir?: string },
   deps: DoctorDeps,
 ): Promise<{ checks: CheckVerdict[]; signerCapabilities?: Record<string, unknown> }> {
   const { directory, identity, sidecar } = entry
@@ -712,7 +749,7 @@ async function verdictsForAgent(
       label: 'Signer runtime (preinstalled wrapper)',
       level: 'failed',
       detail: 'No signer-runtime.json sidecar — the pinned signer runtime was never prepared (or a pre-#1586 npx config).',
-      repair: repairCommandFor(input.runtime),
+      repair: repairCommandFor(input.runtime, '', input.repairDir),
     })
   } else if (sidecar.runtime_spec_override) {
     // #2424: an override install is compared against what the run that wrote
@@ -730,7 +767,7 @@ async function verdictsForAgent(
       detail: matches
         ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory} (override install — see runtime_spec_override)`
         : `Override runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
-      ...(matches ? {} : { repair: repairCommandFor(input.runtime, ' with the same HAVEN_*_SPEC variables set.') }),
+      ...(matches ? {} : { repair: repairCommandFor(input.runtime, ' with the same HAVEN_*_SPEC variables set.', input.repairDir) }),
     })
   } else {
     // #2963: two questions, two references. "Is the directory intact?" is
@@ -760,7 +797,7 @@ async function verdictsForAgent(
         : intact
           ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion} — intact, but outdated.`
           : `Runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
-      ...(ok ? {} : { repair: repairCommandFor(input.runtime) }),
+      ...(ok ? {} : { repair: repairCommandFor(input.runtime, '', input.repairDir) }),
     })
   }
 
@@ -772,7 +809,7 @@ async function verdictsForAgent(
   // truth (a HAVEN_*_SPEC variable is set right now, so a `--repair` from this
   // shell would install that instead of the pin). No override anywhere → no
   // check at all, so a production `--doctor` reads exactly as before.
-  const overrideCheck = await runtimeSpecOverrideCheck(directory, sidecar, deps.env ?? process.env)
+  const overrideCheck = await runtimeSpecOverrideCheck(directory, sidecar, deps.env ?? process.env, input.repairDir)
   if (overrideCheck) checks.push(overrideCheck)
 
   // ── Hosted MCP ────────────────────────────────────────────────────────────
@@ -906,7 +943,7 @@ async function verdictsForAgent(
         detail: probe.status === 'ok'
           ? `Signer started, listed ${probe.toolNames?.length ?? 0} tools${probe.serverInfo?.version ? ` (v${probe.serverInfo.version})` : ''}.${compatDetail}`
           : `Handshake failed: ${probe.status}.`,
-        ...(probe.status === 'ok' ? {} : { repair: repairCommandFor(input.runtime) }),
+        ...(probe.status === 'ok' ? {} : { repair: repairCommandFor(input.runtime, '', input.repairDir) }),
       })
     }
   } else {
@@ -915,7 +952,7 @@ async function verdictsForAgent(
       label: 'Signer stdio handshake',
       level: 'failed',
       detail: 'Skipped — no prepared signer runtime to probe.',
-      repair: repairCommandFor(input.runtime),
+      repair: repairCommandFor(input.runtime, '', input.repairDir),
     })
   }
 
@@ -930,7 +967,12 @@ export async function runDoctor(
   const checks: CheckVerdict[] = []
   let signerCapabilities: Record<string, unknown> | undefined
 
-  const { directory, others, parkedOnly } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  const { directory, others, parkedOnly, identityDirectories } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  // #3412: with several agents on the machine — or when the caller already
+  // named the directory with --credentials-dir — every repair line names the
+  // directory it is about, so the pasted repair cannot fall back to a scan of
+  // ~/.haven/agents and land on a different agent. See `credentialsDirFlagFor`.
+  const nameRepairDir = identityDirectories.length > 1 || Boolean(input.credentialsDir)
 
   // ── #3120: resolve the runtime BEFORE anything judges it ──────────────────
   // An absent flag used to flow through as '' and earn a fabricated green
@@ -1013,7 +1055,11 @@ export async function runDoctor(
       ...(rekeyPending ? { rekeyPending } : {}),
     }
     if (wired) {
-      const result = await checksForAgent({ directory: dir, identity, sidecar }, input2, deps)
+      const result = await checksForAgent(
+        { directory: dir, identity, sidecar },
+        { ...input2, ...(nameRepairDir ? { repairDir: dir } : {}) },
+        deps,
+      )
       entry.checks = result.checks
       capabilitiesByDirectory.set(dir, result.signerCapabilities)
     } else if (rekeyPending) {
@@ -1067,7 +1113,9 @@ export async function runDoctor(
       // anyway — the user pointed the doctor at this machine, and silence
       // about the selected directory would be the old heuristic's failure.
       const result = await checksForAgent(
-        { directory: primaryDirectory, identity: primaryIdentity, sidecar: primarySidecar }, input2, deps,
+        { directory: primaryDirectory, identity: primaryIdentity, sidecar: primarySidecar },
+        { ...input2, ...(nameRepairDir ? { repairDir: primaryDirectory } : {}) },
+        deps,
       )
       signerCapabilities = result.signerCapabilities
       for (const check of result.checks) primaryChecksById.set(check.id, check)
@@ -1132,7 +1180,7 @@ export async function runDoctor(
       label: 'Runtime MCP config',
       level: 'failed',
       detail: `No runtime config at ${configPath}.`,
-      repair: repairCommandFor(input2.runtime),
+      repair: repairCommandFor(input2.runtime, '', nameRepairDir ? primaryDirectory : undefined),
     })
   } else {
     const primaryIdentity = await readIdentity(primaryDirectory ?? '')
@@ -1154,7 +1202,7 @@ export async function runDoctor(
         : signerViaNpx
           ? `Config at ${configPath} still launches the signer via npx — the pre-#1586 shape that cannot start under a 120s startup timeout.`
           : `Config at ${configPath} is missing the Haven entries${primarySidecar && !wrapperReferenced ? ' (or references a different signer wrapper)' : ''}.`,
-      ...(ok ? {} : { repair: repairCommandFor(input2.runtime) }),
+      ...(ok ? {} : { repair: repairCommandFor(input2.runtime, '', nameRepairDir ? primaryDirectory : undefined) }),
     })
   }
 
@@ -1499,7 +1547,39 @@ export async function runRepair(
 ): Promise<RepairResult> {
   const homeDir = deps.homeDir ?? homedir()
   const messages: string[] = []
-  const { directory, others } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  const { directory, others, identityDirectories } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  // #3412: repair REWRITES the runtime config from ONE agent's stored
+  // credentials. With several agents on the machine and no --credentials-dir,
+  // "the newest directory by mtime" is a guess — and the doctor's primary is
+  // chosen differently (first wired agent), so the two could disagree. On
+  // 2026-09-28 exactly that re-wired a prod agent when a dev one was meant.
+  // Refuse the guess and hand back one exact command per agent instead.
+  if (!input.credentialsDir && identityDirectories.length > 1) {
+    const lines = await Promise.all(
+      identityDirectories.map(async (dir) => {
+        const identity = await readIdentity(dir)
+        const who = identity?.agent_id ? `agent ${identity.agent_id}` : 'agent (no agent_id recorded)'
+        // A retired directory (tombstoned, or its key stripped by --unwire /
+        // --replace) still COUNTS — otherwise one live agent beside a newer
+        // retired directory would fall back to the mtime guess — but it is
+        // never offered as a target: repairing it would re-wire a retired
+        // agent's credentials over its tombstone.
+        const retired = !identity?.api_key || (await pathExists(join(dir, TOMBSTONE_FILENAME)))
+        return retired
+          ? `  • ${who} (${dir}): retired — not a repair target`
+          : `  • ${who}: ${repairCommandFor(input.runtime, '', dir).replace(/^Run: /, '')}`
+      }),
+    )
+    return {
+      ok: false,
+      messages: [
+        `${identityDirectories.length} agent credential directories exist on this machine, and a repair rewrites the ` +
+          'runtime config from ONE of them. Name the agent to repair with --credentials-dir — nothing was changed:',
+        ...lines,
+        'Not sure which agent is which? Compare the agent ids against the Haven agent page, or run --doctor first.',
+      ],
+    }
+  }
   if (others.length > 0) {
     // Repair never touches the other directories — that is the doctor's
     // superseded_agents check's job to REPORT and the user's to act on.

@@ -11,8 +11,15 @@
  * through a real `HavenClient` over a mocked HTTP transport.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { TASK_SIGN_CONTEXT_VERSION } from '@haven_ai/sdk'
 import type { HavenClient } from '@haven_ai/sdk'
 import { createToolHandlers, toolSchemas } from '../tools.js'
+import { hostedConnectorUpgradeCommand } from '../connector-channel.js'
+import {
+  SIGNER_CAPABILITY_KEY,
+  TASK_BUDGET_MIN_SIGNER_VERSION,
+  taskSignerCompatibilityNotice,
+} from './support/signer-compat.js'
 
 const ALLOWANCES = {
   agentId: 'agt_1',
@@ -102,6 +109,43 @@ describe('haven_open_task_budget (#3329)', () => {
       next_arguments: { task_budget_id: 'tb_1' },
     })
     expect((result.data as { sign_data: unknown }).sign_data).toBeDefined()
+    // #3419: the handoff carries the old-signer recovery notice.
+    expect(result.data).toMatchObject({
+      signer_compatibility: {
+        task_sign_context_version: TASK_SIGN_CONTEXT_VERSION,
+        min_signer_version: TASK_BUDGET_MIN_SIGNER_VERSION,
+        signer_capability: SIGNER_CAPABILITY_KEY,
+      },
+    })
+    const notice = (result.data as { signer_compatibility: ReturnType<typeof taskSignerCompatibilityNotice> })
+      .signer_compatibility
+    // The recovery sentence exists as prose AND as data, names the release of
+    // the pending budget, the deployment's upgrade command and the reopen.
+    expect(notice.check).toContain('Pass payment_id (preferred for delegation-rail x402')
+    expect(notice.check).toContain('haven_close_task_budget')
+    expect(notice.check).toContain(hostedConnectorUpgradeCommand())
+    expect(notice.fallback).toContain('Pass payment_id (preferred for delegation-rail x402')
+    expect(notice.fallback).toContain('haven_close_task_budget')
+    expect(notice.fallback).toContain(hostedConnectorUpgradeCommand())
+    // It names NO relay fallback — unlike the #3277 direct-payment notice.
+    expect(notice.fallback).toContain('no relay fallback')
+    expect(notice.check).not.toMatch(/typed_data_b64|payload_hash/)
+  })
+
+  it('open WITHOUT sign_data carries no signer_compatibility (#3419 negative)', async () => {
+    const { haven } = stubHaven({
+      openTaskBudget: vi.fn(async () => ({
+        taskBudget: { id: 'tb_1', status: 'pending' },
+      })),
+    })
+    const result = await createToolHandlers(haven).haven_open_task_budget({
+      max_amount_human: '5',
+      ttl_minutes: 60,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect(result.data).not.toHaveProperty('signer_compatibility')
+    expect(result.data).not.toHaveProperty('sign_data')
   })
 
   it('refuses a token this agent holds no allowance for, before any reservation', async () => {
@@ -163,6 +207,19 @@ describe('haven_close_task_budget (#3329)', () => {
       next_arguments: { task_budget_id: 'tb_1' },
     })
     expect((result.data as { sign_data: unknown }).sign_data).toBeDefined()
+    // #3419: the CLOSING handoff carries the same notice from the same builder.
+    expect(result.data).toMatchObject({
+      signer_compatibility: taskSignerCompatibilityNotice(),
+    })
+  })
+
+  it('a CLOSED close result carries no signer_compatibility (#3419 negative)', async () => {
+    const { haven } = stubHaven()
+    const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect(result.data).toMatchObject({ status: 'closed' })
+    expect(result.data).not.toHaveProperty('signer_compatibility')
   })
 })
 

@@ -37,3 +37,9 @@ export {
   type ToolPayload,
   type ToolSuccess,
 } from './tools.js'
+
+export {
+  SIGNER_CAPABILITY_KEY,
+  TASK_BUDGET_MIN_SIGNER_VERSION,
+  taskSignerCompatibilityNotice,
+} from './signer-compat.js'

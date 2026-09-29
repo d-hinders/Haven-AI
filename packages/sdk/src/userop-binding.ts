@@ -32,6 +32,20 @@ import { HavenError } from './types.js'
 /** Version of the direct-payment sign context (`GET /payments/:id/sign-context`). */
 export const DIRECT_SIGN_CONTEXT_VERSION = 1
 
+/**
+ * #3419: version of the task-budget sign context (`GET
+ * /task-budgets/:id/sign-context`), the sign-then-submit envelope every
+ * `haven_sign { task_budget_id }` call fetches. The backend emits it
+ * (`task-budget-service.ts`, `task_sign_context_version: 1`); the signer
+ * derives its enforced set `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` from this
+ * constant — never a second literal — and the hosted/local task-budget
+ * handoffs report it in `signer_compatibility.task_sign_context_version`.
+ * The signer could not carry the single source itself (a published package
+ * cannot host a constant the backend also serves), so it lives beside the
+ * other binding constants here, exactly as `DIRECT_SIGN_CONTEXT_VERSION` does.
+ */
+export const TASK_SIGN_CONTEXT_VERSION = 1
+
 /** The HybridDeleGator EIP-712 domain, in the canonical EIP-712 field order. */
 const EIP712_DOMAIN_FIELDS = [
   { name: 'name', type: 'string' },

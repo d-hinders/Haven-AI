@@ -53,6 +53,8 @@ describe('route-modules.generated.ts (#3135)', () => {
         'routes/agent-labels.ts',
         // #3329: the owner-facing task-budget read shares the /agents mount too.
         'routes/agent-task-budgets.ts',
+        // #3330: the owner-facing sub-budget issue/list/revoke shares the /agents mount too.
+        'routes/agent-sub-budgets.ts',
       ]),
     )
   })

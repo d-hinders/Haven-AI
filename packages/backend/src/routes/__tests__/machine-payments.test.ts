@@ -388,6 +388,9 @@ describe('machine payment routes', () => {
       // #1306: AGENT fixture carries no execution_rail — buckets into legacy,
       // same as handleGetAllowances' own branch below.
       execution_rail: 'legacy',
+      // #3330: the agent's open sub-budget grants (additive — B's view of its
+      // parent's tree; empty for this legacy fixture).
+      parent_sub_budgets: [],
     })
   })
 

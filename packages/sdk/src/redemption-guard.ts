@@ -46,6 +46,19 @@
  * documents). Any OTHER two-link chain — a leaf delegated by a third party, a
  * leaf whose delegate is not this signer's own account, a chain longer than
  * two — is refused exactly as before.
+ *
+ * SUB-BUDGETS (#3330) widen it once more, to exactly ONE, TWO or THREE
+ * links: `[sub grant, sub parent-child, budget]` is the third shape. The
+ * signer here is agent B's signer (B redeems its own grant), so the leaf's
+ * `delegate` is this signer's own account and its `delegator` is agent A's
+ * account — a REAL grant from another account, not a self-delegation. The
+ * middle link is A's parent-child (delegate == A's account, delegator == A's
+ * account: A's SELF-narrowing, the task-child shape class), and the root
+ * keeps the one-link shape (delegate == A's account, delegator != A). The
+ * AND-only property again makes the three-link chain AS OR MORE restrictive
+ * than the two-hop task chain; a chain longer than three, a leaf whose
+ * delegate is not this signer, or a middle link that is not a self-delegation
+ * is refused exactly as before.
  */
 import {
   decodeAbiParameters,
@@ -106,8 +119,10 @@ export const SINGLE_DEFAULT_MODE: Hex = `0x${'00'.repeat(32)}`
 function refuse(detail: string): never {
   throw new HavenSigningError(
     `Refusing to sign: this UserOperation's redeemDelegations call ${detail}. This signer only ` +
-      "signs one of two shapes: a single grant to the agent's own account, or a self-delegated " +
-      'task-budget child redeemed under it (the two-link [task child, budget] chain).',
+      "signs one of three shapes: a single grant to the agent's own account, a self-delegated " +
+      'task-budget child redeemed under it (the two-link [task child, budget] chain), or a ' +
+      "sub-budget grant redeemed under its parent's self-narrowing (the three-link " +
+      '[sub grant, parent child, budget] chain, #3330).',
   )
 }
 
@@ -192,15 +207,16 @@ export function assertRedeemsOwnBudgetDelegation(redeemCalldata: Hex, ownAccount
         "and runs the paired execution as the account, with no caveat, budget or recipient pin",
     )
   }
-  // (2b) One OR TWO links (#3329). Haven's budget delegation is a single
-  // grant from the user's account to this agent's account (`delegations:
-  // [[delegation]]` in the backend's prepareRedemption) — one link. A task
-  // budget payment redeems `[task child, budget]` — two links, leaf first.
-  // Anything else is never emitted.
-  if (delegations.length !== 1 && delegations.length !== 2) {
+  // (2b) One, TWO (#3329) or THREE (#3330) links. Haven's budget delegation
+  // is a single grant from the user's account to this agent's account
+  // (`delegations: [[delegation]]` in the backend's prepareRedemption) — one
+  // link. A task budget payment redeems `[task child, budget]` — two links,
+  // leaf first. A sub-budget payment redeems `[sub grant, parent child,
+  // budget]` — three links, leaf first. Anything else is never emitted.
+  if (delegations.length !== 1 && delegations.length !== 2 && delegations.length !== 3) {
     refuse(
-      `carries a ${delegations.length}-link delegation chain, not the single budget grant or the ` +
-        'two-link [task child, budget] chain Haven emits',
+      `carries a ${delegations.length}-link delegation chain, not the single budget grant, the ` +
+        'two-link [task child, budget] chain, or the three-link [sub grant, parent child, budget] chain Haven emits',
     )
   }
 
@@ -245,6 +261,56 @@ export function assertRedeemsOwnBudgetDelegation(redeemCalldata: Hex, ownAccount
       refuse(
         "carries a two-link chain whose budget link is granted by this signer's OWN account — a " +
           'real budget delegation always comes from elsewhere',
+      )
+    }
+    return
+  }
+
+  if (delegations.length === 3) {
+    // #3330: the three-link sub-budget chain — [sub grant, parent child,
+    // budget], leaf first. This signer is agent B's signer.
+    //
+    // (i) The leaf is B's GRANT: delegated TO this signer's own account by
+    // agent A's account — a real grant from ELSEWHERE (never self; a
+    // self-delegated leaf under this signer is the task-budget shape, which
+    // only ever chains to exactly one parent).
+    if (leaf.delegator.toLowerCase() === ownAccount.toLowerCase()) {
+      refuse(
+        "carries a three-link chain whose leaf is delegated by this signer's OWN account — a " +
+          'sub-budget grant always comes from the delegating agent, never from the sub-agent itself',
+      )
+    }
+    // (ii) The middle link is agent A's parent-child: A's SELF-narrowing
+    // (delegate === delegator === A's account), the task-child shape class.
+    // It must chain under THIS signer's grant only via the leaf's authority,
+    // which the chain's hash links guarantee on-chain.
+    const parentChild = delegations[1]
+    const parentAccount = leaf.delegator
+    if (parentChild.delegate.toLowerCase() !== parentAccount.toLowerCase()) {
+      refuse(
+        `carries a three-link chain whose middle link delegates to ${parentChild.delegate}, not the ` +
+          `delegating agent's account the leaf names as its delegator (${parentAccount})`,
+      )
+    }
+    if (parentChild.delegator.toLowerCase() !== parentAccount.toLowerCase()) {
+      refuse(
+        `carries a three-link chain whose middle link is delegated by ${parentChild.delegator}, not the ` +
+          `delegating agent's own account (${parentAccount}) — the parent link is a self-delegated narrowing`,
+      )
+    }
+    // (iii) The root is agent A's budget delegation: granted to A's account
+    // by the treasury (or whoever granted A its budget) — never by A itself.
+    const budget = delegations[2]
+    if (budget.delegate.toLowerCase() !== parentAccount.toLowerCase()) {
+      refuse(
+        `carries a three-link chain whose budget link delegates to ${budget.delegate}, not the ` +
+          `delegating agent's account (${parentAccount})`,
+      )
+    }
+    if (budget.delegator.toLowerCase() === parentAccount.toLowerCase()) {
+      refuse(
+        "carries a three-link chain whose budget link is granted by the delegating agent's OWN " +
+          'account — a real budget delegation always comes from elsewhere',
       )
     }
     return

@@ -13,6 +13,7 @@ import {
   AGENT_JSON_MODE_SENTENCE,
   AGENT_SECRET_HYGIENE_SENTENCE,
 } from '../../../../sdk/src/agent-guidance'
+import { buildManifestFrom } from '../capability-manifest'
 import { PUBLIC_SURFACES } from '@/lib/discovery-surfaces'
 
 /**
@@ -168,6 +169,13 @@ describe('/for-agents.md (#2523)', () => {
     // setup re-run that stopped at "Missing --setup"). Trimmed
     // from a first draft about twice as long that also restated the manifest
     // path — `/releases` itself names it.
+    // #3430 SHRANK the page to 10870 bytes (at this commit), the first
+    // shrink: step 1 told the agent to fill a `npx @haven_ai/cli@<channel>`
+    // template from `packages.cli.channel`, but the manifest serves the FULL
+    // spec under that name, so the literal substitution produced
+    // `npx @haven_ai/cli@@haven_ai/cli@dev`. The command is now the
+    // manifest's own `packages.cli.one_liner`, run as given — so the change
+    // needed no raise, and the headroom grew instead.
     expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10900)
   })
 
@@ -290,14 +298,16 @@ describe('/for-agents.md (#2523)', () => {
     // this page told it to run.
     expect(served).toContain('--api <api-url>')
     expect(served).toContain('HAVEN_API_URL')
-    // #2617: the CLI login is TAGGED. A bare `npx @haven_ai/cli` resolves to
-    // the `latest` dist-tag, which is only ever coincidentally the build a
-    // deployment's runbook describes; the connector command was already
-    // tagged, and the CLI now follows the same rule — with the source of the
-    // tag named, so the agent reads it rather than picks one.
-    expect(served).toContain('npx @haven_ai/cli@<channel> login --api <api-url>')
-    expect(served).toContain('read it from `/.well-known/haven.json` (`packages.cli.channel`)')
-    expect(served).toContain('never a tag you pick')
+    // #2617 tagged the CLI login; #3430 REBASED that guarantee on the field
+    // that works. The manifest serves the full spec (`@haven_ai/cli@dev`)
+    // under `packages.cli.channel`, so a template filled from it is NOT
+    // runnable — the page now names the manifest's own runnable command
+    // (`packages.cli.one_liner`) instead, with the reason it must never be
+    // assembled from `packages.cli.channel`.
+    expect(served).toContain('<packages.cli.one_liner> login --api <api-url>')
+    expect(served).toContain("That command is the manifest's `packages.cli.one_liner`")
+    expect(served).toContain('run it as given')
+    expect(served).toContain('`packages.cli.channel` serves the full spec')
     // NOT "defaults to localhost". It does not — `commands.ts:22` sets
     // DEFAULT_API to Haven's hosted PRODUCTION backend, and has since #535
     // (2026-06-25). The CLI's own `--help` still says localhost, which is
@@ -355,5 +365,46 @@ describe('/for-agents.md (#2523)', () => {
     // wrong on both counts.
     expect(served).toContain("Run the prompt's version, not this one")
     expect(served).not.toMatch(/hv_setup_[0-9a-f]/)
+  })
+
+  it('renders a runnable step-1 command from a real manifest (#3430)', () => {
+    // The criterion, stated so it cannot pass on a copy of itself: the command
+    // TEMPLATE is taken from the served text, the VALUE from a manifest built
+    // the way `/.well-known/haven.json` builds one — no command literal is
+    // repeated here. The served file is byte-pinned to the SDK runbook above,
+    // so pinning the served copy pins the SDK constant too.
+    //
+    // The defect this closes: step 1 told the agent to fill a
+    // `npx @haven_ai/cli@<channel>` template from `packages.cli.channel`, but
+    // the manifest serves the FULL spec under that name — literal substitution
+    // produced `npx @haven_ai/cli@@haven_ai/cli@dev`, which one 2026-09-28
+    // cold agent noticed and the other ran as read. The template must compose
+    // with the manifest's own value into a command with no `@@`.
+    const manifest = buildManifestFrom('https://preview.test', {
+      hosted_mcp_url: 'https://mcp.test',
+      connector_package: '@haven_ai/connect@dev',
+      cli_package: '@haven_ai/cli@dev',
+      openapi_url: 'https://api.test/openapi.json',
+      chains: { default: 8453, deployable: [84532], supported: [8453, 84532] },
+    })
+    const oneLiner = manifest.packages.cli.one_liner
+    expect(oneLiner).toBeDefined()
+    // A real manifest serves a full spec under `channel` — the very value the
+    // old template mangled.
+    expect(manifest.packages.cli.channel).toBe('@haven_ai/cli@dev')
+
+    const step1 = served.split('\n').find((line) => /^\d+\. \*\*HUMAN — create the account\./.test(line))
+    expect(step1).toBeDefined()
+    const template = (step1?.match(/`[^`]*<packages\.cli\.one_liner>[^`]*`/g) ?? []).find((span) =>
+      span.endsWith('login --api <api-url>`'),
+    )
+    expect(template).toBeDefined()
+    const rendered = (template as string).slice(1, -1).replace('<packages.cli.one_liner>', oneLiner as string)
+    // Runnable: no `@@` from a spec filled into a tag slot, no unfilled
+    // placeholder, and the package the manifest entry names.
+    expect(rendered).not.toContain('@@')
+    expect(rendered).not.toContain('<packages.cli')
+    expect(rendered.startsWith('npx ')).toBe(true)
+    expect(rendered).toContain(`${manifest.packages.cli.name}@`)
   })
 })

@@ -1,14 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 
-const { mockQuery, mockGetTokenBalance } = vi.hoisted(() => ({
+const { mockQuery, mockGetTokenBalance, batchedReads, failingChains } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockGetTokenBalance: vi.fn(),
+  /** One entry per batched read the scan made: [chainId, holders]. */
+  batchedReads: [] as Array<[number, string[]]>,
+  /** Chains whose batched read throws outright (reader set-up failure). */
+  failingChains: new Set<number>(),
 }))
 
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
-vi.mock('../../infra/chain/relayer-reads.js', () => ({
-  getTokenBalance: (...a: unknown[]) => mockGetTokenBalance(...a),
+// #3458: the scan reads through the batched reader now. The seam moves there
+// and keeps the per-holder mock, so every assertion below is unchanged: a
+// rejected per-holder read maps to `null`, which is what the batched reader
+// returns for an unread holder. The batching itself is proven against a real
+// viem client in `chain/__tests__/batched-token-balances.test.ts`.
+vi.mock('../chain/batched-token-balances.js', () => ({
+  readTokenBalances: async (chainId: number, token: string, holders: string[]) => {
+    batchedReads.push([chainId, [...holders]])
+    if (failingChains.has(chainId)) throw new Error(`unsupported chainId ${chainId}`)
+    const out = new Map<string, bigint | null>()
+    for (const holder of holders) {
+      try {
+        out.set(holder, (await mockGetTokenBalance(chainId, holder, token)) as bigint)
+      } catch {
+        out.set(holder, null)
+      }
+    }
+    return out
+  },
 }))
 
 const {
@@ -58,6 +79,8 @@ function mockDelegates(rows: ReturnType<typeof delegateRow>[], freshAgentIds: st
 beforeEach(() => {
   mockQuery.mockReset()
   mockGetTokenBalance.mockReset()
+  batchedReads.length = 0
+  failingChains.clear()
   resetDelegateAlertStateForTests()
   delete process.env.DELEGATE_DUST_ALERT_USDC
   delete process.env.DELEGATE_ALERT_WEBHOOK_URL
@@ -182,6 +205,8 @@ describe('computeAlerts — edge-triggered, not spammy (#777)', () => {
       dustTotalAtomic: 0n,
       dustAlert: false,
       lingering: [],
+      unread: [],
+      chainErrors: {},
       scannedAt: '',
       ...overrides,
     } as never
@@ -401,6 +426,108 @@ describe('runDelegateBalanceMonitor — webhook delivery gates the edge (#3345)'
     fetchMock = vi.fn().mockResolvedValue(httpRes(true, 200))
     vi.stubGlobal('fetch', fetchMock)
     await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('scanDelegateBalances — one batched read per chain (#3458)', () => {
+  it('reads every delegate of a chain in ONE batched call, not one call per delegate', async () => {
+    const rows = [delegateRow(1), delegateRow(2, 84532), delegateRow(3), delegateRow(4, 84532), delegateRow(5)]
+    mockDelegates(rows)
+    mockGetTokenBalance.mockResolvedValue(0n)
+
+    const report = await scanDelegateBalances()
+
+    expect(batchedReads).toEqual([
+      [8453, [rows[0].delegate_address, rows[2].delegate_address, rows[4].delegate_address]],
+      [84532, [rows[1].delegate_address, rows[3].delegate_address]],
+    ])
+    // Findings keep the delegates' own order, whatever order the chains were read in.
+    expect(report.findings.map((f) => f.agentId)).toEqual(['agent-1', 'agent-2', 'agent-3', 'agent-4', 'agent-5'])
+  })
+
+  it('a chain whose reader cannot be set up skips only its delegates', async () => {
+    const rows = [delegateRow(1), delegateRow(2, 84532), delegateRow(3)]
+    mockDelegates(rows)
+    failingChains.add(84532)
+    mockGetTokenBalance.mockResolvedValue(ethers.parseUnits('2', 6))
+
+    const report = await scanDelegateBalances()
+
+    expect(report.findings.map((f) => f.agentId)).toEqual(['agent-1', 'agent-3'])
+    expect(report.lingering.map((f) => f.agentId)).toEqual(['agent-1', 'agent-3'])
+    // …and why: the set-up error is carried to the report (and the WARN).
+    expect(report.unread).toEqual([{ agentId: 'agent-2', chainId: 84532 }])
+    expect(report.chainErrors).toEqual({ 84532: 'unsupported chainId 84532' })
+  })
+})
+
+describe('unread delegates are visible, not silent (#3458)', () => {
+  it('a failed read is reported as unread and logged at WARN with a per-chain count', async () => {
+    mockDelegates([delegateRow(1), delegateRow(2, 84532), delegateRow(3)])
+    failingChains.add(84532)
+    mockGetTokenBalance.mockImplementation((_c: unknown, addr: unknown) =>
+      String(addr).startsWith('0x33') ? Promise.reject(new Error('429')) : Promise.resolve(0n),
+    )
+    const warn = vi.fn()
+    const info = vi.fn()
+
+    const report = await runDelegateBalanceMonitor({ info, warn })
+
+    expect(report.unread).toEqual([
+      { agentId: 'agent-2', chainId: 84532 },
+      { agentId: 'agent-3', chainId: 8453 },
+    ])
+    const unreadWarn = warn.mock.calls.find((c) => String(c[1]).startsWith('UNREAD'))
+    expect(unreadWarn?.[0]).toMatchObject({
+      unread: 2,
+      unreadByChain: { 8453: 1, 84532: 1 },
+      chainErrors: { 84532: 'unsupported chainId 84532' },
+    })
+    expect(info.mock.calls.find((c) => c[1] === 'delegate balance scan complete')?.[0]).toMatchObject({ unread: 2 })
+  })
+
+  it('a full read logs no UNREAD warning', async () => {
+    mockDelegates([delegateRow(1)])
+    mockGetTokenBalance.mockResolvedValue(0n)
+    const warn = vi.fn()
+    const report = await runDelegateBalanceMonitor({ info: vi.fn(), warn })
+    expect(report.unread).toEqual([])
+    expect(warn.mock.calls.some((c) => String(c[1]).startsWith('UNREAD'))).toBe(false)
+  })
+
+  it('a lingering delegate that goes unread for a round is NOT re-pinged when it is read again', async () => {
+    process.env.DELEGATE_ALERT_WEBHOOK_URL = WEBHOOK_URL
+    mockDelegates([delegateRow(4)])
+    const fetchMock = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock)
+
+    mockGetTokenBalance.mockResolvedValue(ethers.parseUnits('2', 6))
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() }) // pinged once
+    mockGetTokenBalance.mockRejectedValue(new Error('429'))
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() }) // unread: unknown, not cleared
+    mockGetTokenBalance.mockResolvedValue(ethers.parseUnits('2', 6))
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() }) // still the same episode
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a partial dust total from a scan with unread delegates does not re-arm the dust edge', async () => {
+    process.env.DELEGATE_ALERT_WEBHOOK_URL = WEBHOOK_URL
+    process.env.DELEGATE_DUST_ALERT_USDC = '0.01'
+    mockDelegates([delegateRow(5), delegateRow(6), delegateRow(7)])
+    const fetchMock = vi.fn().mockResolvedValue(httpRes(true, 200))
+    vi.stubGlobal('fetch', fetchMock)
+
+    mockGetTokenBalance.mockResolvedValue(ethers.parseUnits('0.004', 6)) // 0.012 ≥ 0.01: breach
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    mockGetTokenBalance.mockImplementation((_c: unknown, addr: unknown) =>
+      String(addr).startsWith('0x55') ? Promise.reject(new Error('429')) : Promise.resolve(ethers.parseUnits('0.004', 6)),
+    ) // 0.008 read + 1 unread: below threshold only because of the failed read
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+    mockGetTokenBalance.mockResolvedValue(ethers.parseUnits('0.004', 6))
+    await runDelegateBalanceMonitor({ info: vi.fn(), warn: vi.fn() })
+
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

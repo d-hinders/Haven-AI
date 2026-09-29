@@ -21,7 +21,15 @@ const ICONS: Record<string, string> = {
 async function main(): Promise<void> {
   const report = await scanDelegateBalances()
 
-  if (report.findings.length === 0) {
+  // #3458: a failed read leaves delegates UNREAD — not known to be clear. They
+  // are never reported as "nominal": the probe exits non-zero instead.
+  const unreadByChain: Record<number, number> = {}
+  for (const u of report.unread) unreadByChain[u.chainId] = (unreadByChain[u.chainId] ?? 0) + 1
+  const unreadLine = Object.entries(unreadByChain)
+    .map(([chain, n]) => `chain ${chain}: ${n}`)
+    .join(', ')
+
+  if (report.findings.length === 0 && report.unread.length === 0) {
     console.log('no active delegates to monitor')
     process.exit(0)
   }
@@ -39,11 +47,22 @@ async function main(): Promise<void> {
       `(alert at ${ethers.formatUnits(dustAlertThresholdAtomic(), 6)})${report.dustAlert ? ' 🚨 THRESHOLD PASSED' : ''}`,
   )
   console.log(`lingering:  ${report.lingering.length}`)
+  if (report.unread.length > 0) {
+    console.log(`unread:     ${report.unread.length} (${unreadLine}) — balance read FAILED; not known to be clear`)
+    for (const [chain, error] of Object.entries(report.chainErrors)) {
+      console.log(`            chain ${chain}: ${error}`)
+    }
+  }
 
   if (report.lingering.length > 0 || report.dustAlert) {
     console.log('')
     console.log('action: run the sweep for lingering balances / investigate settlement; see epic #713.')
     process.exit(1)
+  }
+  if (report.unread.length > 0) {
+    console.log('')
+    console.log('could not check every delegate: re-run, or check the RPC endpoint for the chains above.')
+    process.exit(2)
   }
   console.log('✅ all delegate balances nominal')
 }

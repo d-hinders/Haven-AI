@@ -27,7 +27,7 @@ const ALLOWLIST = {
   'packages/connect/src/doctor.ts': [1, '`RERUN` prefix constant; every use appends flags'],
   'packages/connect/src/runtime.ts': [1, '`RERUN_HINT` prefix constant for setup-time output'],
   'packages/connect/src/runtime-install.ts': [3, 'mid-setup retry: the user is running setup'],
-  'packages/signer/src/tools.ts': [2, 'identity restore: re-running setup is the fix'],
+  'packages/signer/src/tools.ts': [3, 'identity restore: re-running setup is the fix'],
   'packages/sdk/src/connector-channel.ts': [1, 'the helper\'s own doc comment'],
 }
 

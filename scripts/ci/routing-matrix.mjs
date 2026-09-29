@@ -200,9 +200,9 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/core/src/chains.ts'],
-    expect: ['code', 'core', 'frontend', 'backend'],
+    expect: ['code', 'core', 'frontend', 'backend', 'mcp_server'],
     kind: CONTRACT,
-    why: 'The shared kernel got its own job in #3005, and frontend and backend declare @haven_ai/core, so the table fans both out: the suites that consume core run on a core change WITHOUT the full matrix. Until #3005 this routed ALL — over-routing that ran cli and signer suites blind to core.',
+    why: 'The shared kernel got its own job in #3005, and frontend and backend declare @haven_ai/core, so the table fans both out: the suites that consume core run on a core change WITHOUT the full matrix. Until #3005 this routed ALL — over-routing that ran cli and signer suites blind to core. mcp_server joined in #3419: its hosted-signer-integration test pins CLIENT_RELEASES from core, its job runs that test, and its test/typecheck scripts build core first — the same "a dependency that can redden the job is a dependency for routing purposes" rule the table applies to its other devDependencies.',
   },
   {
     files: ['packages/qa-agent/src/run.ts'],

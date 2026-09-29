@@ -82,11 +82,12 @@ previous run**, so report it beside that number rather than alone.
 
 ### 4. Did it produce the two commands correctly?
 
-**Measured against the channel the manifest names, not `latest`
-([#2617](https://github.com/d-hinders/Haven-AI/issues/2617)).** The manifest at
-`/.well-known/haven.json` carries `packages.cli.channel`
-(e.g. `@haven_ai/cli@dev`); score 4 asks whether the agent ran THAT tag — read
-from the manifest, as the runbook now instructs — never a bare
+**Measured against the command the manifest serves, not `latest`
+([#2617](https://github.com/d-hinders/Haven-AI/issues/2617); #3430 rebased the
+field).** The manifest at `/.well-known/haven.json` serves the runnable CLI
+command as `packages.cli.one_liner` (e.g. `npx @haven_ai/cli@dev`);
+`packages.cli.channel` carries the full spec, not a bare tag. Score 4 asks
+whether the agent ran that command as the runbook instructs — never a bare
 `npx @haven_ai/cli`, which resolves to the `latest` dist-tag and may be an
 older build than the deployment describes.
 

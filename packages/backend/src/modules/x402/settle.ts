@@ -50,6 +50,8 @@ export async function settleX402(
       facilitatorAddresses?: string[]
       /** #3329: the task budget's signed child, when one authorized this settlement. */
       taskBudgetChild?: Parameters<typeof assembleSettlementPayload>[5]
+      /** #3330: the sub-budget's grant + parent-child, when one authorized this settlement. */
+      subBudget?: Parameters<typeof assembleSettlementPayload>[6]
     }
     // #946 guard: a 3009-mode funding intent stores a prepared UserOp, not
     // an erc7710 {child, budget} settlement state. Refuse it here
@@ -92,6 +94,7 @@ export async function settleX402(
       state.budget,
       state.delegateAccountAddress,
       state.taskBudgetChild,
+      state.subBudget,
     )
     // #2361: echo the stored challenge's `resource`/`extensions` into the
     // envelope. The #1355 verbatim `machine_metadata.payment_required` is the

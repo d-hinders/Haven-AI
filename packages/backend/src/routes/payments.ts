@@ -57,6 +57,15 @@ import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
 import { findForAgent as findTaskBudgetForAgent } from '../infra/repositories/task-budgets.js'
+import type { Delegation } from '../rails/delegation-policy.js'
+import {
+  findForAgent as findSubBudgetForAgent,
+  findOpenParentChildByHash,
+} from '../infra/repositories/sub-budgets.js'
+import {
+  resolveSubBudgetForPayment,
+  type SubBudgetPaymentRefusal,
+} from '../modules/sub-budgets/index.js'
 import {
   resolveTaskBudgetChildForPayment,
   type TaskBudgetPaymentRefusal,
@@ -77,6 +86,24 @@ const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
   task_budget_token_mismatch: "This payment's token does not match the task budget's token",
   task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
   task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
+}
+
+/** #3330 §3: the sub-budget refusal table's HTTP status per code. */
+const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> = {
+  sub_budget_not_found: 404,
+  sub_budget_not_open: 409,
+  sub_budget_token_mismatch: 409,
+  sub_budget_recipient_mismatch: 409,
+  sub_budget_parent_mismatch: 409,
+}
+
+const SUB_BUDGET_REFUSAL_MESSAGE: Record<SubBudgetPaymentRefusal, string> = {
+  sub_budget_not_found: 'Sub-budget not found',
+  sub_budget_not_open: 'Sub-budget is not open (closed, closing, pending, or expired)',
+  sub_budget_token_mismatch: "This payment's token does not match the sub-budget's token",
+  sub_budget_recipient_mismatch: "This payment's recipient does not match the sub-budget's pinned recipient",
+  sub_budget_parent_mismatch:
+    "The sub-budget's chain is broken — its parent-child link is closed or it was not carved from the budget delegation selected for this payment",
 }
 
 /**
@@ -117,6 +144,8 @@ interface CreatePaymentBody {
   idempotency_key?: string
   /** #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly. */
   task_budget_id?: string
+  /** #3330: an OPEN sub-budget (this agent is the sub-agent B) to authorize this payment through. Mutually exclusive with task_budget_id. */
+  sub_budget_id?: string
 }
 
 interface SignPaymentBody {
@@ -196,7 +225,13 @@ function resolveToken(chainId: number, symbol: string) {
 async function findPaymentReplay(
   agent: AgentContext,
   idempotencyKey: string,
-  requested: { tokenAddress: string; toAddress: string; amountRaw: string; taskBudgetId: string | null },
+  requested: {
+    tokenAddress: string
+    toAddress: string
+    amountRaw: string
+    taskBudgetId: string | null
+    subBudgetId: string | null
+  },
 ): Promise<{ code: number; body: Record<string, unknown> } | null> {
   const statusReplay = async (paymentId: string) => {
     const status = await getAgentPaymentStatus(agent, paymentId)
@@ -213,6 +248,7 @@ async function findPaymentReplay(
     to_address: string
     amount_raw: string
     task_budget_id: string | null
+    sub_budget_id?: string | null
   }): string | null => {
     if (row.token_address.toLowerCase() !== requested.tokenAddress) return 'token'
     if (row.to_address.toLowerCase() !== requested.toAddress) return 'recipient'
@@ -224,6 +260,13 @@ async function findPaymentReplay(
     // does not carry gets this 409 even when the id is malformed.
     if ((row.task_budget_id ?? null) !== (requested.taskBudgetId ? requested.taskBudgetId.toLowerCase() : null)) {
       return 'task_budget'
+    }
+    // #3330: the same pin for the sub-budget id.
+    if (
+      (row.sub_budget_id ?? null) !==
+      (requested.subBudgetId ? requested.subBudgetId.toLowerCase() : null)
+    ) {
+      return 'sub_budget'
     }
     return null
   }
@@ -333,7 +376,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   app.post<{ Body: CreatePaymentBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
-    const { token, amount, to, idempotency_key, task_budget_id } = request.body
+    const { token, amount, to, idempotency_key, task_budget_id, sub_budget_id } = request.body
+    // #3330: exactly one authorizing child per payment — a body naming both
+    // is ambiguous about which chain to redeem, and ambiguity on a money
+    // path refuses rather than guesses.
+    if (task_budget_id && sub_budget_id) {
+      return reply.code(400).send({
+        error: 'Pass exactly one of task_budget_id or sub_budget_id — never both',
+      })
+    }
 
     // 1. Validate inputs
     //
@@ -427,6 +478,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         toAddress: to.toLowerCase(),
         amountRaw: amountRaw.toString(),
         taskBudgetId: (task_budget_id as string | undefined) ?? null,
+        subBudgetId: (sub_budget_id as string | undefined) ?? null,
       })
       if (replay) return reply.code(replay.code).send(replay.body)
     }
@@ -502,6 +554,67 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       taskBudgetParentDelegation = parentDelegation
     }
 
+    // ── Sub-budget (#3330, optional) ──────────────────────────────────────
+    // Agent B pays through the sub-budget agent A granted it: the redemption
+    // chain becomes [B grant, A parent-child, A budget] — THREE links, and
+    // the DelegationManager enforces all three in one redemption, so A's
+    // period budget binds every spend B makes. The same #3329 review finding
+    // E rule applies twice: the grant's `parent_delegation_hash` names A's
+    // parent-child row (read by hash, never re-derived), and that row's own
+    // `parent_delegation_hash` names A's budget delegation (read by hash
+    // again, and it must still resolve ACTIVE: revoking A's budget
+    // delegation flips that row to `revoked`, so this lookup answers null
+    // and B's child is stranded here — and reverts on-chain once the
+    // owner's disableDelegation UserOp lands).
+    let subBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetForPayment>>['childDelegation']
+    let subBudgetParentChildDelegation: Delegation | undefined
+    let subBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
+    if (sub_budget_id) {
+      const nowSec = Math.floor(Date.now() / 1000)
+      const grantRow = await findSubBudgetForAgent(sub_budget_id, agent.id)
+      if (!grantRow) {
+        return reply.code(404).send({ error: 'Sub-budget not found', error_code: 'sub_budget_not_found' })
+      }
+      const parentChildRow = await findOpenParentChildByHash(grantRow.parent_delegation_hash, nowSec)
+      if (!parentChildRow) {
+        // The middle link of the chain is closed or expired (A revoked its
+        // grant of B, A's own budget delegation was revoked, or it simply
+        // aged out) — B's child can never again be redeemed through.
+        return reply.code(409).send({
+          error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch,
+          error_code: 'sub_budget_parent_mismatch',
+        })
+      }
+      const parentDelegation = await selectActiveDelegationByHash(
+        parentChildRow.agent_id,
+        parentChildRow.parent_delegation_hash,
+      )
+      if (!parentDelegation) {
+        return reply.code(409).send({
+          error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch,
+          error_code: 'sub_budget_parent_mismatch',
+        })
+      }
+      const resolved = resolveSubBudgetForPayment(
+        grantRow,
+        parentChildRow,
+        tokenAddress,
+        to.toLowerCase(),
+        parentDelegation,
+        nowSec,
+      )
+      if (!resolved.ok) {
+        const code = resolved.refusal as SubBudgetPaymentRefusal
+        return reply.code(SUB_BUDGET_REFUSAL_STATUS[code]).send({
+          error: SUB_BUDGET_REFUSAL_MESSAGE[code],
+          error_code: code,
+        })
+      }
+      subBudgetGrant = resolved.childDelegation
+      subBudgetParentDelegation = parentDelegation
+      subBudgetParentChildDelegation = JSON.parse(parentChildRow.delegation_json) as Delegation
+    }
+
     let authorization
     try {
       authorization = await prepareDelegationPayment(
@@ -509,9 +622,17 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         tokenAddress,
         to.toLowerCase(),
         amountRaw,
-        taskBudgetChild && taskBudgetParentDelegation
-          ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
-          : undefined,
+        subBudgetGrant && subBudgetParentDelegation && subBudgetParentChildDelegation
+          ? {
+              subBudget: {
+                grantDelegation: subBudgetGrant,
+                parentChildDelegation: subBudgetParentChildDelegation,
+                parentDelegation: subBudgetParentDelegation,
+              },
+            }
+          : taskBudgetChild && taskBudgetParentDelegation
+            ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
+            : undefined,
       )
     } catch (err) {
       // Caveat rejection (budget/recipient/expiry) or bundler failure —
@@ -600,6 +721,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         preparedUserOp: serializeUserOp(authorization.prepared.userOperation),
         sendIdempotencyKey: idempotency_key ?? null,
         taskBudgetId: taskBudgetChild ? (task_budget_id as string) : null,
+        subBudgetId: subBudgetGrant ? (sub_budget_id as string) : null,
       })
     } catch (err) {
       // Lost the idempotency-key race with a concurrent request (migration
@@ -610,6 +732,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           toAddress: to.toLowerCase(),
           amountRaw: amountRaw.toString(),
           taskBudgetId: (task_budget_id as string | undefined) ?? null,
+          subBudgetId: (sub_budget_id as string | undefined) ?? null,
         })
         if (replay) return reply.code(replay.code).send(replay.body)
       }

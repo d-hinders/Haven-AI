@@ -29,6 +29,7 @@ import receiveRoutes from './routes/receive.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import agentRoutes from './routes/agents.js'
+import agentTaxDeclarationRoutes from './routes/agent-tax-declaration.js'
 import labelRoutes from './routes/labels.js'
 import agentLabelRoutes from './routes/agent-labels.js'
 import agentOrganizationRoutes from './routes/agent-organizations.js'
@@ -259,6 +260,10 @@ installRequestValidation(app, {
     // list (epic decision 6): the default is enforce, and removing one file
     // here returns exactly that module to shadow.
     'routes/agents.ts',
+    // #3426: the agent-side tax-declaration READ is born ENFORCED — a genuinely
+    // new module never enters shadow (no existing caller a stricter schema
+    // could break). GET only: no request body, one uuid path parameter.
+    'routes/agent-tax-declaration.ts',
     'routes/agent-rekey.ts',
     'routes/agent-connection-setups.ts',
     'routes/agent-passports.ts',
@@ -458,6 +463,7 @@ await app.register(dashboardRoutes, { prefix: '/dashboard' })
 // deleted. `/safe` no longer mounts anything here but the safe-deploy
 // tombstone below — the prefix survives only because that 410 does.
 await app.register(agentRoutes, { prefix: '/agents' })
+await app.register(agentTaxDeclarationRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentRekeyRoutes, { prefix: '/agents' })

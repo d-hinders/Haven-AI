@@ -295,6 +295,11 @@ describe('index.ts readers', () => {
       // Slice 4 (#3032): the LAST five modules, and the default mode flips to
       // `enforce` — from this slice on the list is the per-module rollback.
       'routes/agents.ts',
+      // #3426: the agent tax-declaration module is born enforced — a brand-new
+      // module has no installed caller to shadow for. The GET (agent auth) is
+      // body-less with one uuid path parameter; the PUT (owner auth) takes the
+      // spec's UpsertAgentTaxDeclarationRequest.
+      'routes/agent-tax-declaration.ts',
       'routes/agent-rekey.ts',
       'routes/agent-connection-setups.ts',
       'routes/agent-passports.ts',

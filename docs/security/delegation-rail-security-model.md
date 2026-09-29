@@ -1959,3 +1959,23 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > enforced on-chain by the caveat enforcers exactly as before. Scope of this
 > note: `useDelegationBudget.ts`'s manual-reload counter. Nothing else in this
 > document was re-verified.
+>
+> **Re-verified unchanged (#3426, 2026-09-29, agent tax-declaration opt-in):**
+> this diff touches two files in this document's coverage list,
+> `infra/repositories/agents.ts` and `db/migrations/index.ts`, and both
+> changes are SETTINGS-only by construction. The migration adds
+> `agents.tax_declaration_enabled` (BOOLEAN NOT NULL DEFAULT false) and the
+> index registers `103_agent_tax_declaration_opt_in.ts`; no delegation,
+> budget, re-key, activation or signing query is touched. The repository
+> additions are one gated owner write and one agent-scoped read: the write's
+> WHERE clause gates only its own new column (switching ON requires the
+> owner's company-details row to hold a VIES-valid VAT number; switching OFF
+> is never gated) and the read LEFT JOINs `owner_company_details` to answer
+> the agent's own declaration content — the unsigned §2.1 fields, never
+> `principalId`/`principalAttributionHash` (the SDK computes those locally)
+> and never a signature. Nothing this document claims about authority,
+> custody or signing moves: no delegation graph shape, caveat enforcer,
+> redemption guard, settlement child or signer allowlist changes, and the
+> column feeds no path that authorises a payment. Scope of this note: the new
+> column, its migration registration, and the two new repository functions.
+> Nothing else in this document was re-verified.

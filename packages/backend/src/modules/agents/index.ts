@@ -13,3 +13,6 @@ export * from './entitlements.js'
 export * from './rekey-carry.js'
 export * from './rekey-guards.js'
 export * from './rekey-stages.js'
+// #3426: the per-agent x402 tax declaration rules (wg-tax #5 §2.1). Pure —
+// no db handle, no config, no clock — same shape as rekey-* above.
+export * from './tax-declaration.js'

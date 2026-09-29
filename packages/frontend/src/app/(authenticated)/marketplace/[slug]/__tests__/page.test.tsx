@@ -50,6 +50,9 @@ const eligibleAgent: Agent = {
   allowances: [],
   labels: [],
   organization_id: null,
+  // #3426: the fixture is type-checked against the wire schema; the opt-in
+  // defaults OFF on every agent read.
+  tax_declaration_enabled: false,
 } as Agent
 
 const merchant: Merchant = {

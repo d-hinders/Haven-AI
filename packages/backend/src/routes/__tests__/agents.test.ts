@@ -93,6 +93,7 @@ describe('agent routes', () => {
             status: 'active',
             created_at: '2026-05-25T12:00:00.000Z',
             organization_id: null,
+            tax_declaration_enabled: false,
             mcp_last_seen_at: null,
           }],
         }
@@ -216,6 +217,7 @@ describe('agent routes', () => {
             created_at: '2026-05-25T12:00:00.000Z',
             mcp_server_name: 'haven',
             organization_id: null,
+            tax_declaration_enabled: false,
             mcp_last_seen_at: null,
           }],
         }
@@ -450,7 +452,7 @@ describe('agent creation — passport opt-in never breaks creation', () => {
       if (/INSERT INTO agents/.test(sql)) {
         // Real uuids: the response-shape round trip below validates
         // `format: uuid` on `id` / `safe_id` (#2392; the columns are UUID PKs).
-        return { rows: [{ id: AGENT_UUID, name: 'A', description: null, delegate_address: VALID_DELEGATE, account_id: SAFE_UUID, api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', organization_id: null, mcp_last_seen_at: null }] }
+        return { rows: [{ id: AGENT_UUID, name: 'A', description: null, delegate_address: VALID_DELEGATE, account_id: SAFE_UUID, api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', organization_id: null, tax_declaration_enabled: false, mcp_last_seen_at: null }] }
       }
       if (/SELECT account_address, name AS account_name/.test(sql)) {
         return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', account_name: 'Main', account_chain_id: 84532 }] }

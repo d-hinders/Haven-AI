@@ -55,6 +55,9 @@ describe('route-modules.generated.ts (#3135)', () => {
         'routes/agent-task-budgets.ts',
         // #3330: the owner-facing sub-budget issue/list/revoke shares the /agents mount too.
         'routes/agent-sub-budgets.ts',
+        // #3426: the tax-declaration toggle+content routes share the /agents
+        // mount too.
+        'routes/agent-tax-declaration.ts',
       ]),
     )
   })

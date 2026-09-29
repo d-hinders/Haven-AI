@@ -431,7 +431,13 @@ Isolation rules that are non-negotiable for a payments product:
   the `/agents` prefix) and the agent-auth, money-path
   `routes/task-budgets.ts` (its own `/task-budgets` prefix): a module with no
   installed caller has no old shape to shadow for, so it is enforced from its
-  first commit even though it moves money. The `lint:request-schemas`
+  first commit even though it moves money. #3426's
+  `routes/agent-tax-declaration.ts` followed the same rule — the GET (agent
+  auth, one uuid path parameter, no body) and the PUT (owner auth) were both
+  added to `enforcedModules` in their first commit; the request schema comes
+  from the OpenAPI spec, so a body that is not exactly
+  `{ tax_declaration_enabled: boolean }` is refused before the handler. The
+  `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are
   still shadowed — with one stated limit, closed in #3030: the gate reads a
@@ -625,6 +631,25 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > untouched. The doc's other `index.ts` claims (boot flags through
   > `parseBooleanFlag`, the `installRequestValidation` options, the
   > non-money-route enumeration) were re-read against this tree and hold.
+
+  > **Re-verified #3426 (2026-09-29):** the PR's `index.ts` change registers
+  > ONE new route module — `app.register(agentTaxDeclarationRoutes, { prefix:
+  > '/agents' })` — the per-agent x402 tax-declaration toggle + content read
+  > (`routes/agent-tax-declaration.ts`). No new env variable (the module
+  > reads the existing `HAVEN_OWNER_COMPANY_DETAILS` through `config`), no
+  > plugin, no boot-order change. Request-validation claims hold unchanged:
+  > the module IS in `enforcedModules` from its first commit (a genuinely new
+  > module has no installed caller to shadow for — the born-ENFORCED rule
+  > above), and `route-modules.generated.ts` was regenerated in the same
+  > commit with both operations (`GET`/`PUT /agents/{id}/tax-declaration`)
+  > keyed to the new file. The PUT's request schema comes from the spec
+  > (`UpsertAgentTaxDeclarationRequest`), so the `lint:request-schemas`
+  > baseline does not grow. The GET is the only agent-auth surface in the
+  > module and carries no body; the PUT's hooks are route-level
+  > (`refuseAgentKey` then `authMiddleware`), deliberately NOT the
+  > instance-level `addHook` shape, so an agent key meets the named 403
+  > rather than `routes/agents.ts`' generic 401 — the module is mounted on
+  > its own app instance and shares only the prefix.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 

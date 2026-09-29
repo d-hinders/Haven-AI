@@ -895,6 +895,9 @@ export const FIXTURE_AGENTS = [
     // #3164: the showcase agent is unfiled (top level) — the screenshot
     // dataset carries no organizations, so the tree does not render here.
     organization_id: null,
+    // #3426: the opt-in defaults OFF; the /agents screenshot photographs the
+    // unchecked state.
+    tax_declaration_enabled: false,
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -930,6 +933,8 @@ export const FIXTURE_AGENTS = [
     // the /agents screenshot photographs a tree with two depths and a
     // mid-tree count.
     organization_id: 'org-devops',
+    // #3426: the opt-in defaults OFF on every agent.
+    tax_declaration_enabled: false,
   },
 ]
 
@@ -3507,6 +3512,57 @@ export const SCENARIOS = {
       await page.getByText('haven-data-feed', { exact: true }).first().waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'list')
+    },
+  },
+
+  'agent-tax-declaration': {
+    description:
+      'Agent detail with the per-agent tax-declaration opt-in VISIBLE — the card renders only when the owner\'s company details are VIES-valid (#3426). The plain fixture answers 404 for /user/company-details (flag off), so the hidden state is what every non-scenario capture of this page photographs; this scenario is the one place the reachable "VIES valid, opted in" state is captured.',
+    api(apiPath) {
+      if (apiPath === '/user/company-details') {
+        // A VIES-valid company-details row — the only state under which the
+        // agent page shows the toggle (TaxDeclarationToggle reads this route
+        // via useCompanyDetails; a 404 means flag-off and hides the card).
+        // Values follow the standing seed's conventions: the accounting
+        // fixture's company name, a normalised uppercase VAT number
+        // (migration 098), `vies_checked_at` in the past so the row is one
+        // the VIES sweep could have produced.
+        return {
+          legal_name: 'KOMMANDITBOLAGET TESTAREN 3',
+          country: 'SE',
+          org_number: '556677-8899',
+          vat_number: 'SE556677889901',
+          vies_status: 'valid',
+          vies_checked_at: '2026-09-28T09:12:00.000Z',
+          created_at: '2026-09-20T10:00:00.000Z',
+          updated_at: '2026-09-28T09:12:00.000Z',
+        }
+      }
+      if (apiPath === '/agents') {
+        // The agent-detail view reads the agent from the LIST response
+        // (AgentDetailClient: `agents.find(...)`), so the opted-in agent is
+        // seeded here, not on a single-agent read. The org tree rides the
+        // same override — the base fixture returns both keys together.
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.id === 'agent-research' ? { ...a, tax_declaration_enabled: true } : a,
+          ),
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // Both halves of the card, not just any rendered text: the heading
+      // names the card and the checkbox names the control — a capture that
+      // waited on one string could "prove" visibility with the wrong subtree.
+      await page.getByRole('heading', { name: 'Tax declaration', exact: true }).waitFor({ timeout: 20_000 })
+      await page.getByRole('checkbox', { name: 'Send a tax declaration with payments' }).waitFor({ timeout: 20_000 })
+
+      await shoot(page.locator('main').first(), 'visible')
     },
   },
   'design-system-buttons': {

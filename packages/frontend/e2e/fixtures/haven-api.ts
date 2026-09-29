@@ -100,6 +100,11 @@ export const testAgent = {
   // #3164: placement on the agents read. The default agent sits at the top
   // level, outside every organization.
   organization_id: null,
+  // #3426: the owner's per-agent x402 tax declaration opt-in, default OFF —
+  // the same fact the e2e default agent must carry (the fixture is
+  // schema-checked against `ApiSchema<'Agent'>`, so the new required boolean
+  // cannot be dropped silently here).
+  tax_declaration_enabled: false,
   // #2264: the DERIVED delegation-budget projection, which is what fills this
   // array on the live rail (`rails/delegation-budget-view.ts`): 250 USDC per
   // 30 days, `allowance_amount` HUMAN-formatted and `reset_period_min` in
@@ -403,7 +408,7 @@ export const accountingFeedAttention = {
   counts: { pending: 0, failed: 1, exhausted: 3 },
 }
 
-type JsonValue = Record<string, unknown> | unknown[]
+type JsonValue = Record<string, unknown> | unknown[] | null
 
 async function fulfillJson(route: Route, json: JsonValue, status = 200) {
   await route.fulfill({
@@ -960,6 +965,8 @@ export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: stri
  *    activity table and the audit-trail panel both render content;
  *  - stats matching those rows, so the two StatBlocks do not read 0 beside a
  *    non-empty activity table.
+ *  - the company-details read the #3426 toggle fires at mount, so the census
+ *    above is not re-failed by it (see the handler below).
  *
  * Scoped deliberately: everything else keeps falling back to the shared
  * fixture, so the agents LIST and every unrelated surface are untouched.
@@ -1121,6 +1128,29 @@ export async function serveAgentDetailResponses(page: Page, agentId: string) {
         this_week: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
         pending_approvals: 0,
       })
+      return
+    }
+
+    // #3426: AgentDetailClient now mounts TaxDeclarationToggle, whose
+    // useCompanyDetails read fires on every agent-detail page. The shared
+    // fixture DOES answer this route — 404 { error: 'Not found' }, the
+    // flag-gated default (#3332) — and that answer is correct everywhere a
+    // spec photographs the flag-off state. But a 404 response still makes
+    // Chromium log `Failed to load resource: ... 404` as a console error,
+    // and `agent-detail.mobile.spec.ts` counts unmocked API noise by census
+    // (`unexpectedBrowserErrors`), so the branch's own mount-time read
+    // failed that spec deterministically. A fulfilled 404 cannot silence
+    // the browser's own log line, so this overlay answers the route's OTHER
+    // documented state instead: 200 `null` — "flag on, nothing saved"
+    // (`routes/owner-company-details.ts`), which `useCompanyDetails` maps
+    // to `'empty'`. The toggle renders null for `'empty'` exactly as it
+    // does for `'off'` (`details.vies_status !== 'valid'`), so the page is
+    // unchanged and no baseline moves; the read just stops being API noise.
+    // Scoped HERE, not in `mockHavenApi`, so `/settings` — where
+    // `settings-company-details.visual.spec.ts` pins the empty and filled
+    // forms and the shared fixture's 404 hides the card — keeps its state.
+    if (path === '/user/company-details') {
+      await fulfillJson(route, null)
       return
     }
 

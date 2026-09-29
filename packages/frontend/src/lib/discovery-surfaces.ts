@@ -10,8 +10,8 @@
  * resolves to a real route or artifact), not the reverse. It does not fail a
  * public, unauthenticated page that exists but was never added here —
  * `/demo` (`src/app/demo/page.tsx`, #3477) is exactly that, deliberately: a
- * semi-private investor demo, reachable only by a link the team hands
- * investors, that must stay out of the sitemap, `robots.txt`, `llms.txt` and
+ * semi-private investor demo, not advertised; the team hands the link to
+ * invited investors. It must stay out of the sitemap, `robots.txt`, `llms.txt` and
  * every other discovery surface. `src/app/demo/__tests__/not-listed.test.ts`
  * pins its absence with its own assertions rather than relying on this file's
  * guard to catch a page it structurally cannot see.

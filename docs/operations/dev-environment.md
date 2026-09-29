@@ -26,6 +26,7 @@ covers:
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
   - packages/frontend/src/lib/demo-gate.ts
+  - packages/frontend/playwright.config.ts
 last-verified: "2026-09-28"
 ---
 
@@ -793,8 +794,8 @@ and `prod` are production; any other value is the deployment's own name.
 `/demo` and `/demo.md`'s production/testnet gate
 (`packages/frontend/src/lib/demo-gate.ts`) has one override: the server-only
 `HAVEN_DEMO_PAGE_VISIBLE` variable, read for the Playwright visual-regression
-server, which otherwise builds exactly like production (no `NEXT_PUBLIC_*`
-vars) and would 404 the page it needs to screenshot. **Never set
+server, which otherwise builds like production (no `NEXT_PUBLIC_HAVEN_ENV`)
+and would 404 the page it needs to screenshot. **Never set
 `HAVEN_DEMO_PAGE_VISIBLE` in either Vercel project.** Nothing in the dev or
 production Vercel env configuration sets it today, and `isDemoPageVisible`
 additionally ignores the override whenever Vercel's own `VERCEL` variable is

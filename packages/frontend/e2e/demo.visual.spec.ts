@@ -46,7 +46,7 @@ test.describe('/demo visual regression', () => {
         'Create your account',
         'Fund it with test USDC',
         'Connect an agent',
-        'Set and approve its budget with your passkey',
+        'Approve its budget with your passkey',
         "Check that it's connected",
         'Buy a joke',
         'Try to overspend',

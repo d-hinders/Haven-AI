@@ -106,7 +106,7 @@ export default function DemoPage() {
                 create your Haven account with your name, email and a password. You'll set up your passkey right
                 after, during onboarding — the same entry point every Haven signup uses. Keep{' '}
                 <strong>Base Sepolia</strong> selected under <strong>Network</strong> when onboarding creates your
-                account — Base mainnet is selectable there too, and this demo needs the test network.
+                account — this demo needs the test network.
               </p>
             </StepCard>
 

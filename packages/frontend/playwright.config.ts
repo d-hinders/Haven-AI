@@ -258,6 +258,14 @@ export default defineConfig({
       // NEXT_PUBLIC_ prefix, so it is never inlined client-side and
       // production's own env configuration never sets it.
       HAVEN_DEMO_PAGE_VISIBLE: '1',
+      // #3483: the Add funds modal reads the Coinbase onramp id at BUILD
+      // time, and the visual spec's mainnet assertion needs the id present
+      // in whatever build serves the run. On the CI path the build step
+      // already set it (ci.yml / update-visual-baselines.yml — the standalone
+      // bundle is already baked); this covers the non-CI `next dev` path,
+      // which inlines NEXT_PUBLIC_* from the server process's env on
+      // compile. Same fixed synthetic literal as those workflows.
+      NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: 'e2e-onramp-app-id-placeholder',
     },
   },
   // Both projects GATE on every frontend pull request (#1768). Before that,
@@ -331,11 +339,17 @@ export default defineConfig({
       // baselines (grid, merchant page, coming-soon, test-merchant, not-found).
       // #3332: settings-company-details.visual.spec.ts joins with two desktop
       // `-dark` baselines (empty, filled).
+      // #3483: add-funds-modal.visual.spec.ts joins with three desktop
+      // `-dark` baselines (testnet faucet, mainnet onramp, unresolved chain)
+      // — the spec seeds `haven.theme='dark'` itself and skips its mobile
+      // shots under this project (no mobile dark baseline), so only the three
+      // desktop clips ever compare here.
       testMatch: [
         '**/design-system.visual.spec.ts',
         '**/analytics.visual.spec.ts',
         '**/marketplace.visual.spec.ts',
         '**/settings-company-details.visual.spec.ts',
+        '**/add-funds-modal.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

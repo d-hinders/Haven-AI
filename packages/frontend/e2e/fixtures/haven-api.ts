@@ -868,6 +868,38 @@ export async function serveSekUser(page: Page) {
 }
 
 /**
+ * Overlay `/auth/me` (and only it) with the Add-funds account (#3483).
+ *
+ * The Add funds modal's layout is a function of the SELECTED ACCOUNT's chain
+ * (`AddFundsModal.tsx` #3478: faucet on a testnet account, onramp on a
+ * mainnet one), but the shared `testSafe` is pinned to 8453 for every other
+ * spec and baseline — so a spec that needs a different chain overlays
+ * `/auth/me` with a one-field-splice of it rather than mutating the shared
+ * object. The dashboard reads only `/auth/me` for the account list
+ * (`DashboardClient.tsx` → `user?.accounts`), yet BOTH safe-serving shapes
+ * stay consistent by construction: this derives from `testSafe` itself, so
+ * `/user/safes` cannot disagree about whether the account HAS a chain (the
+ * trap `add-funds-unresolved-chain` documents in `scripts/screenshot.mjs`).
+ *
+ * `chainId` may be `undefined`, which serves the account WITHOUT `chain_id` —
+ * the unresolved-chain state (the refusal copy, no network named). Register
+ * AFTER `mockHavenApi` (later-registered routes win); everything else falls
+ * through to the shared fixture untouched.
+ */
+export async function serveAddFundsAccount(page: Page, chainId?: number) {
+  const account = chainId === undefined ? { ...testSafe, chain_id: undefined } : { ...testSafe, chain_id: chainId }
+  await page.route('**/api/**', async (route: Route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/auth/me') {
+      await fulfillJson(route, { ...testUser, accounts: [account] })
+      return
+    }
+    await route.fallback()
+  })
+}
+
+/**
  * Serve one feed-status answer over the shared fixture (#2869), so a spec can
  * render `/accounting` and the sidebar in a chosen flag state. Registered
  * AFTER `mockHavenApi` (later routes win) and scoped to that one read —

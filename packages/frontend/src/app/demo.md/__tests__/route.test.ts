@@ -52,12 +52,15 @@ describe('/demo.md route handler', () => {
     expect(body).toMatch(/25 USDC.*override|override.*25 USDC/is)
   })
 
-  it('marks the human-only steps and tells the agent to stop and ask', async () => {
+  it('marks all four human-only steps (matching for-agents.md) and tells the agent to stop and ask', async () => {
     mockIsDemoPageVisible.mockReturnValue(true)
     const body = await GET().text()
-    expect(body).toMatch(/HUMAN-only/)
+    expect(body).toMatch(/Four steps are HUMAN-only/)
     expect(body).toMatch(/Signup/)
     expect(body).toMatch(/Funding/)
+    // The step the earlier draft omitted (F7): creating the agent and setting
+    // its budget is a human action too, same as for-agents.md's own step 3.
+    expect(body).toMatch(/[Cc]reating you as an agent and setting your budget/)
     expect(body).toMatch(/Budget approval/)
     expect(body).toMatch(/Stop and ask your user/)
   })
@@ -69,10 +72,15 @@ describe('/demo.md route handler', () => {
     expect(body).not.toContain('src=demo')
   })
 
-  it('names the step-7 refusal reason and recipient, and states the budget cap up front', async () => {
+  it('names the step-7 refusal signal accurately, and the recipient, and states the budget cap up front', async () => {
     mockIsDemoPageVisible.mockReturnValue(true)
     const body = await GET().text()
-    expect(body).toContain('delegation_budget_exceeded')
+    // The real signal `haven_send` → `POST /payments` returns: an on-chain
+    // policy error, not the `delegation_budget_exceeded` refusal-ledger code
+    // (that is written server-side, never returned to the caller here).
+    expect(body).toContain('transfer-amount-exceeded')
+    expect(body).not.toContain('delegation_budget_exceeded')
+    expect(body).toMatch(/not a balance/i)
     expect(body).toContain('0x0A5B4da361AfBc5109030010c3f1d0b64b60ba6C')
     expect(body).toMatch(/test USDC|TEST money|test network/i)
   })
@@ -81,5 +89,21 @@ describe('/demo.md route handler', () => {
     mockIsDemoPageVisible.mockReturnValue(true)
     const body = await GET().text()
     expect(body).toContain('(/demo)')
+  })
+
+  it("names the faucet in the funding link's own text, not the chain (L4)", async () => {
+    mockIsDemoPageVisible.mockReturnValue(true)
+    const body = await GET().text()
+    expect(body).toContain('[Circle\'s faucet](https://faucet.circle.com)')
+    expect(body).not.toContain('[Base Sepolia](https://faucet.circle.com)')
+  })
+
+  it('describes the #3478 Add funds modal faucet card, not "no faucet link"', async () => {
+    mockIsDemoPageVisible.mockReturnValue(true)
+    const body = await GET().text()
+    expect(body).toContain('Get test funds')
+    expect(body).toMatch(/Open\s+Circle's faucet/)
+    expect(body).not.toContain('no faucet link')
+    expect(body).not.toMatch(/Buy with card/)
   })
 })

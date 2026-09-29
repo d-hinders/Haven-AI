@@ -14,19 +14,28 @@ import { isDemoPageVisible } from '@/lib/demo-gate'
  * static `robots` metadata AND call `notFound()` before rendering anything —
  * neither is available from a client component.
  *
- * Semi-private: reachable by link, not advertised. It is deliberately absent
- * from `PUBLIC_SURFACES`, `SiteHeader`, `SiteFooter`, `llms.txt` and
- * `for-agents.md` — see `src/app/demo/__tests__/not-listed.test.ts`, which
- * pins that absence with a mutation-provable assertion rather than the
- * count-only "lists nothing else" guard in `discovery-surfaces.test.ts`.
+ * Semi-private: not advertised — the team hands the link to invited
+ * investors. It is deliberately absent from `PUBLIC_SURFACES`, `robots.txt`,
+ * `SiteHeader`, `SiteFooter`, `llms.txt` and `for-agents.md` — see
+ * `src/app/demo/__tests__/not-listed.test.ts`, which pins that absence with
+ * explicit assertions rather than the count-only "lists nothing else" guard
+ * in `discovery-surfaces.test.ts`.
  */
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
+// The production/faucet gate (`isDemoPageVisible`) is read at REQUEST time,
+// not build time — without this, Next prerenders the page once at build,
+// bakes in whatever the build-time env said (production, on CI), and every
+// later request gets that frozen 404 regardless of `HAVEN_DEMO_PAGE_VISIBLE`.
+// Same reasoning as `/releases` (`src/app/releases/page.tsx`), which reads
+// its own per-request signal (the reachable backend) the same way.
+export const dynamic = 'force-dynamic'
+
 const WHY_IT_MATTERS = {
   passkey: 'A passkey, not a seed phrase — nothing to write down, lose, or phish.',
-  nonCustodial: 'Haven never holds your funds. Your account holds them, and only you can move them.',
+  nonCustodial: 'Haven never holds your funds. Your account holds them, and they move only within limits you sign.',
   onChain: "Spending limits are enforced on-chain, by your account — not by a promise in Haven's database.",
   agentNative: 'Built for an agent to read and act on directly, not just for a human to click through.',
 } as const
@@ -95,37 +104,50 @@ export default function DemoPage() {
               <p>
                 Go to <a href="/signup" className="font-medium text-[var(--v2-brand)] hover:underline">Sign up</a> and
                 create your Haven account with your name, email and a password. You'll set up your passkey right
-                after, during onboarding — the same entry point every Haven signup uses.
+                after, during onboarding — the same entry point every Haven signup uses. Keep{' '}
+                <strong>Base Sepolia</strong> selected under <strong>Network</strong> when onboarding creates your
+                account — Base mainnet is selectable there too, and this demo needs the test network.
               </p>
             </StepCard>
 
             <StepCard number={2} title="Fund it with test USDC" whyItMatters={WHY_IT_MATTERS.nonCustodial}>
               <p>
-                From your dashboard, choose <strong>Add funds</strong>. On a Base Sepolia account, you'll see a{' '}
-                <strong>Get test funds</strong> card with an <strong>Open Circle's faucet</strong> button — click it.
-                Copy the <strong>Account address (Base Sepolia)</strong> shown above it first, since you'll need it
-                on Circle's site.
+                From your dashboard, choose <strong>Add funds</strong>. Copy the{' '}
+                <strong>Account address (Base Sepolia)</strong> shown there, then use the{' '}
+                <strong>Get test funds</strong> card below it — &ldquo;Get free Base Sepolia USDC from Circle's
+                faucet&rdquo; — and click <strong>Open Circle's faucet</strong>. Pick USDC and Base Sepolia there,
+                then paste in the address you copied.
               </p>
               <p>
-                On Circle's faucet, select <strong>Base Sepolia</strong> explicitly (not Ethereum Sepolia), paste in
-                the address you copied, and request test USDC. You don't need any ETH — Haven sponsors the gas.
+                Don't see that card, or want to open the faucet directly? Go to{' '}
+                <a
+                  href="https://faucet.circle.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-[var(--v2-brand)] hover:underline"
+                >
+                  faucet.circle.com
+                </a>{' '}
+                and select Base Sepolia explicitly (not Ethereum Sepolia) before requesting funds. You don't need
+                any ETH either way — Haven sponsors the gas.
               </p>
             </StepCard>
 
             <StepCard number={3} title="Connect an agent" whyItMatters={WHY_IT_MATTERS.agentNative}>
               <p>
-                From <strong>Agents</strong>, start the connect flow and paste the setup prompt it gives you into
-                Claude Code, Codex, or Hermes.
+                From <strong>Agents</strong>, start the connect flow. At its budget step, set{' '}
+                <strong>0.05 USDC, Daily</strong> — well under the 1 USDC send you'll try in step 7, so that step is
+                refused rather than going through. Then paste the setup prompt the flow gives you into Claude Code,
+                Codex, or Hermes.
               </p>
             </StepCard>
 
-            <StepCard number={4} title="Set and approve its budget with your passkey" whyItMatters={WHY_IT_MATTERS.onChain}>
+            <StepCard number={4} title="Approve its budget with your passkey" whyItMatters={WHY_IT_MATTERS.onChain}>
               <p>
-                Set the agent's budget to <strong>0.05 USDC, Daily</strong> — well under the 1 USDC send you'll try in
-                step 7, so that step is refused rather than going through. Don't add a recipient pin on the agent's
-                page afterward: an unpinned budget is what lets the agent pay a marketplace merchant in step 6.
+                Approve it with your passkey. Nothing can be spent until you do. Don't add a recipient pin on the
+                agent's page afterward: an unpinned budget is what lets the agent pay a marketplace merchant in
+                step 6.
               </p>
-              <p>Approve it with your passkey. Nothing can be spent until you do.</p>
             </StepCard>
 
             <StepCard number={5} title="Check that it's connected" whyItMatters={WHY_IT_MATTERS.agentNative}>
@@ -153,9 +175,10 @@ export default function DemoPage() {
                 budget is under 1 USDC — which it is, right after step 6.
               </p>
               <p>
-                Haven refuses it before any money moves, because it's over the agent's budget. And even if Haven
-                were compromised, the on-chain rules would reject it too — Haven can't move your funds. There's no
-                approval queue to clear and nothing to undo.
+                Haven refuses it before any money moves: checked against the rules in your account, it's over the
+                agent's budget, so nothing is submitted. Those rules live on-chain in your account, not in Haven's
+                database, so Haven can't move your funds outside the limits you approve. There's no approval queue
+                to clear and nothing to undo.
               </p>
               <p>
                 An agent that already knows its remaining budget (from step 5's check) may decline to even try this
@@ -165,9 +188,9 @@ export default function DemoPage() {
 
             <StepCard number={8} title="What you just saw" whyItMatters={WHY_IT_MATTERS.nonCustodial}>
               <p>
-                Your agent paid for something small, from a budget it never held custody of, and Haven refused a
-                payment over that budget before it could move any money — enforced on-chain, agent-native from the
-                first step. Questions? Ask the team.
+                Your agent paid for something small, from a budget you signed and it could not exceed, and Haven
+                refused a payment over that budget before it could move any money — enforced on-chain, agent-native
+                from the first step. Questions? Ask the team.
               </p>
             </StepCard>
           </div>

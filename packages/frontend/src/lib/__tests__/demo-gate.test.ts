@@ -56,12 +56,24 @@ describe('isDemoPageVisible (#3477)', () => {
   it('the HAVEN_DEMO_PAGE_VISIBLE override renders even under the production convention', async () => {
     // This is exactly the visual-regression Playwright server's shape: no
     // NEXT_PUBLIC_HAVEN_ENV, no NEXT_PUBLIC_HAVEN_CHAIN_ID — production by
-    // convention — with only the server-only override set.
+    // convention — with only the server-only override set, and no VERCEL
+    // (Playwright's server runs outside Vercel).
     vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
     vi.stubEnv('NEXT_PUBLIC_HAVEN_CHAIN_ID', '')
     vi.stubEnv('HAVEN_DEMO_PAGE_VISIBLE', '1')
+    vi.stubEnv('VERCEL', '')
     const { isDemoPageVisible } = await loadGate()
     expect(isDemoPageVisible()).toBe(true)
+  })
+
+  it('the override does nothing on Vercel, even if HAVEN_DEMO_PAGE_VISIBLE were set there by mistake', async () => {
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_CHAIN_ID', '')
+    vi.stubEnv('HAVEN_DEMO_PAGE_VISIBLE', '1')
+    // Vercel sets this on every build, in every one of its own environments.
+    vi.stubEnv('VERCEL', '1')
+    const { isDemoPageVisible } = await loadGate()
+    expect(isDemoPageVisible()).toBe(false)
   })
 
   it('is NOT a NEXT_PUBLIC_-prefixed variable — production config never sets it, and Next never inlines it client-side', () => {

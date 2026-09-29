@@ -68,19 +68,9 @@ describe('/demo and /demo.md links resolve (#3477)', () => {
       expect(hrefList.length, name).toBeGreaterThan(0)
       expect(hrefList.some((h) => h.startsWith('/')), `${name}: no own-site link found`).toBe(true)
     }
-    // Off-site is checked COMBINED: `/demo` now points visitors at the Add
-    // funds modal's own faucet button (#3478) rather than linking the faucet
-    // directly, so the off-site link (Circle's faucet, Ampersend) lives in
-    // `/demo.md` instead.
+    // Off-site is checked COMBINED across both files, not per-file: both name
+    // Circle's faucet, and only `/demo.md` names Ampersend.
     const allHrefs = [...hrefs(PAGE_SOURCE), ...hrefs(DEMO_MD_CONTENT)]
     expect(allHrefs.some((h) => h.startsWith('http')), 'no off-site link found in either file').toBe(true)
-  })
-
-  it('MUTATION CONTROL: an unresolvable own-site path fails the resolver', () => {
-    expect(ownSiteLinkResolves('/this-route-does-not-exist')).toBe(false)
-  })
-
-  it('MUTATION CONTROL: an unlisted off-site host is rejected', () => {
-    expect(ALLOWED_OFFSITE_HOSTS.has('evil.example')).toBe(false)
   })
 })

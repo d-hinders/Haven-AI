@@ -5,6 +5,8 @@ covers:
   - packages/demo-merchant-mcp/**
   - packages/backend/src/modules/accounting/**
   - packages/frontend/src/app/demo/page.tsx
+  - packages/frontend/src/lib/demo-md-content.ts
+  - packages/frontend/src/lib/demo-gate.ts
 last-verified: "2026-09-05"
 ---
 

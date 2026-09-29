@@ -703,8 +703,12 @@ export interface HavenAllowanceSummary {
  * (#1310). Read-only reporting — the on-chain policy remains the actual
  * spend gate either way, this only says what is left after the purchase.
  *
- * Deliberately the SAME rail-labeled field spelling as #1306's
- * catalog-purchase preflight `allowance` block (never a new spelling),
+ * #3464: the canonical key spelling is the ONE `haven_get_agent`'s
+ * `allowances[]` rows use — the read the server tells an agent to make
+ * first — with the figures named `remainingAtomic`, `remainingDisplay`,
+ * `resetPeriodMin`, `tokenSymbol`, `tokenAddress`. Deliberately the SAME
+ * spelling as #1306's catalog-purchase preflight `allowance` block (never a
+ * new spelling; the hosted result types carry the same names),
  * minus the preflight-only `sufficient` field: post-purchase reporting
  * answers "what is left", not "was this purchase covered". Read through the
  * exact same source as {@link HavenAllowanceSummary} / `haven_get_allowances`
@@ -712,19 +716,57 @@ export interface HavenAllowanceSummary {
  * `deriveDelegationBudgets`-backed enforcer read, never `agent_allowances`),
  * so this can never disagree with `haven_get_allowances` for the same
  * fixture.
+ *
+ * The snake_case keys below are DEPRECATED since #3464 and kept for one
+ * deprecation window so existing readers keep working; every value is also
+ * emitted under the camelCase name above. Removal condition: once
+ * `packages/qa-agent` reads the camelCase keys on a released qa-agent build,
+ * the snake_case keys go — tracked as the additive-window close, not a
+ * separate decision. The new keys stay OPTIONAL on this exported type so
+ * existing constructors keep type-checking unchanged.
  */
 export interface PostPurchaseAllowanceSummary {
-  /** Which on-chain policy primitive gates this agent's spend (#1306 labeling). */
-  rail: 'legacy' | 'delegation'
+  /**
+   * Which on-chain policy primitive gates this agent's spend (#1306
+   * labeling). #3464: `'legacy'` removed — unreachable since #1986/#2020
+   * (`GET /machine-payments/allowances` answers 410 before this summary is
+   * built), superseding #2265's keep-as-declared rationale; the public
+   * {@link HavenAgent.executionRail} keeps its declared union.
+   */
+  rail: 'delegation'
   /** Remaining atomic units, read through the same source as {@link HavenAllowance.onchain.remaining}. */
   remaining_atomic: string
-  /** Human-readable remaining, e.g. "4.96 USDC". Omitted when the token's decimals are unknown. */
+  /**
+   * @deprecated #3464 — use `remainingAtomic` (same value). Kept for the
+   * deprecation window; removed once `packages/qa-agent` reads the camelCase
+   * keys.
+   */
   remaining_display?: string
+  /** @deprecated #3464 — use `tokenSymbol` (same value). Same removal condition. */
   token_symbol?: string
+  /** @deprecated #3464 — use `tokenAddress` (same value). Same removal condition. */
   token_address?: string
-  /** Minutes — mirrors {@link HavenAllowance.resetPeriodMin} / the delegation's period. */
+  /** @deprecated #3464 — use `resetPeriodMin` (same value). Same removal condition. */
   reset_period?: number
-  source: 'allowance_module' | 'active_delegations'
+  /**
+   * Which source produced the figures. #3464: `'allowance_module'` removed
+   * for the same unreachability as `rail: 'legacy'` above.
+   */
+  source: 'active_delegations'
+  /** Remaining atomic units — the same figure `remaining_atomic` carries. Optional on the type, always emitted at runtime. */
+  remainingAtomic?: string
+  /**
+   * Human-readable remaining, formatted by the ONE shared formatter
+   * (`formatRemainingDisplay`) — always emitted at runtime, never omitted:
+   * an unknown-decimals token gets the same explicit atomic label
+   * `haven_get_agent`'s `allowances[]` rows carry. Optional on the type so
+   * existing constructors stay valid.
+   */
+  remainingDisplay?: string
+  /** Minutes — mirrors {@link HavenAllowance.resetPeriodMin} / the delegation's period. */
+  resetPeriodMin?: number
+  tokenSymbol?: string
+  tokenAddress?: string
 }
 
 /**

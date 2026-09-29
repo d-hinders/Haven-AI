@@ -94,7 +94,7 @@ export const toolDescriptions = {
     summary:
       'Fetch structured Haven payment status for agent recovery.',
     behavior:
-      'State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; delivered when the merchant answered; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified. delivered_unverified: terminal, stop.',
+      'State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; delivered when the merchant answered; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified. delivered_unverified: terminal, stop. For a settled x402 payment the response carries the post-purchase allowance block: remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress — the SAME names and values haven_get_agent reports — plus the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window (#3464).',
     nextActionGuidance: '',
   },
   getResumeState: {

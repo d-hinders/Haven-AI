@@ -489,10 +489,10 @@ describe('haven_prepare_catalog_purchase', () => {
     'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
   }
 
-  it('success (legacy rail, sufficient allowance): loads catalog, quotes live, creates the intent, returns the compact ready-to-sign shape + catalog fields + allowance block', async () => {
+  it('success (delegation rail, sufficient budget): loads catalog, quotes live, creates the intent, returns the compact ready-to-sign shape + catalog fields + allowance block', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -537,12 +537,15 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.catalog_name).toBe('CloudNest 50GB')
     expect(result.data.catalog_price_atomic).toBe('1500000')
     expect(result.data.catalog_price_is_indicative).toBe(true)
-    // Rail-aware allowance block.
+    // Rail-aware allowance block. #3464: narrowed to the delegation rail;
+    // remainingAtomic is the canonical spelling (the deprecated snake_case
+    // alias rides along for the deprecation window).
     expect(result.data.allowance).toEqual({
-      rail: 'legacy',
+      rail: 'delegation',
       sufficient: true,
       remaining_atomic: '5000000',
-      source: 'allowance_module',
+      source: 'active_delegations',
+      remainingAtomic: '5000000',
     })
     // #1308 guidance — next step is the SAME signer call as haven_pay_mcp_tool.
     expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
@@ -570,7 +573,7 @@ describe('haven_prepare_catalog_purchase', () => {
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', remaining_is_from_chain: true } },
     })
 
-    const result = ok<{ allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string } }>(
+    const result = ok<{ allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string; remainingAtomic?: string } | null }>(
       await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
     )
 
@@ -579,6 +582,7 @@ describe('haven_prepare_catalog_purchase', () => {
       sufficient: true,
       remaining_atomic: '5000000',
       source: 'active_delegations',
+      remainingAtomic: '5000000',
     })
     // The intent was still created — sufficient budget does not refuse.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
@@ -606,7 +610,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('rejects with PRICE_EXCEEDS_MAX before any funding intent when the live price exceeds max_amount', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -660,7 +664,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('passes a stored pending_approval intent through as a defined stop, with no signable payload', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '7500' } },
       // A pre-retirement row, echoed back — not a queue this rail could create.
       'POST /x402': { status: 202, body: { payment_id: 'over_1', status: 'pending_approval' } },
@@ -836,7 +840,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, price_atomic: '999999' } },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -853,16 +857,16 @@ describe('haven_prepare_catalog_purchase', () => {
   it('reports sufficient: null (never a fabricated guess) when the allowance/budget read fails — the preflight still succeeds', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
     })
 
     const result = ok<{
-      allowance: { rail: string; sufficient: boolean | null; source: string }
+      allowance: { rail: string; sufficient: boolean | null; source: string } | null
       warnings: Array<{ code: string }>
     }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
 
-    expect(result.data.allowance).toEqual({ rail: 'legacy', sufficient: null, source: 'allowance_module' })
+    expect(result.data.allowance).toEqual({ rail: 'delegation', sufficient: null, source: 'active_delegations' })
     expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
     // A failed read never fails the preflight — the intent was still created.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
@@ -926,7 +930,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('ROUND-TRIP BUDGET: a successful preflight makes exactly one call per Haven surface — no duplicate agent fetch (#1348)', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -948,7 +952,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('ROUND-TRIP BUDGET: the agent read is dispatched before the merchant probe resolves; the budget pre-check rides the SAME round-trip count the allowances read used (#1348, #3054)', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -1023,7 +1027,7 @@ describe('haven_prepare_catalog_purchase', () => {
     // optimistic read (the caveat enforcer re-checks at redemption), never a
     // failed read like ALLOWANCE_CHECK_UNAVAILABLE above.
     expect(result.data.allowance).toEqual({
-      rail: 'delegation', sufficient: true, remaining_atomic: '5000000', source: 'active_delegations',
+      rail: 'delegation', sufficient: true, remaining_atomic: '5000000', source: 'active_delegations', remainingAtomic: '5000000',
     })
     const warning = result.data.warnings.find((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')
     expect(warning).toBeDefined()
@@ -1049,10 +1053,10 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')).toBe(false)
   })
 
-  it('legacy rail: never warns ALLOWANCE_READ_OPTIMISTIC — the provenance flag is delegation-rail only', async () => {
+  it('an erc7710-optimistic provenance flag never warns on its own — only ALLOWANCE_READ_OPTIMISTIC distinguishes it', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -1066,7 +1070,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('passes idempotency_key through to the merchant quote and the funding intent (#1207 replay semantics apply unchanged)', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -2643,6 +2647,9 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
     fail_floor: 12,
     retry_after_s: 60,
   }
+  // #3464: the preflight's allowance block is delegation-only, so the
+  // prepare-leg stubs here read the delegation agent.
+  const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
 
   describe('haven_quote_mcp_tool', () => {
     async function quoteAgainstNotReadyMerchant() {
@@ -2732,7 +2739,7 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
           body: MERCHANT_NOT_READY_BODY,
           responseHeaders: { 'Retry-After': '60' },
         },
-        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
         'POST /machine-payments/budget-precheck': {
           status: 200,
           body: { sufficient: true, remaining_atomic: '5000000' },

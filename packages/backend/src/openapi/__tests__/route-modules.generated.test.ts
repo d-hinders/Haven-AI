@@ -53,6 +53,9 @@ describe('route-modules.generated.ts (#3135)', () => {
         'routes/agent-labels.ts',
         // #3329: the owner-facing task-budget read shares the /agents mount too.
         'routes/agent-task-budgets.ts',
+        // #3426: the tax-declaration toggle+content routes share the /agents
+        // mount too.
+        'routes/agent-tax-declaration.ts',
       ]),
     )
   })

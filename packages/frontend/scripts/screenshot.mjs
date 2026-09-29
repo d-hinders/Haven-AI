@@ -895,6 +895,9 @@ export const FIXTURE_AGENTS = [
     // #3164: the showcase agent is unfiled (top level) — the screenshot
     // dataset carries no organizations, so the tree does not render here.
     organization_id: null,
+    // #3426: the opt-in defaults OFF; the /agents screenshot photographs the
+    // unchecked state.
+    tax_declaration_enabled: false,
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -930,6 +933,8 @@ export const FIXTURE_AGENTS = [
     // the /agents screenshot photographs a tree with two depths and a
     // mid-tree count.
     organization_id: 'org-devops',
+    // #3426: the opt-in defaults OFF on every agent.
+    tax_declaration_enabled: false,
   },
 ]
 

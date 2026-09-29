@@ -138,7 +138,7 @@ describe('TaxDeclarationToggle copy', () => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
   })
 
-  it('does not overclaim: EIP-3009-only scope, pinned merchants excluded, nothing signed or submitted', () => {
+  it('does not overclaim: EIP-3009-only scope, pinned merchants excluded, nothing submitted', () => {
     render(
       <TaxDeclarationToggle
         agentId="agent-1"
@@ -147,8 +147,10 @@ describe('TaxDeclarationToggle copy', () => {
       />,
     )
     const help = screen.getByText(/checked against the EU's VIES register/).textContent ?? ''
+    // The EIP-3009-only sentence the issue requires, stated not implied.
+    expect(help).toContain('settle by EIP-3009')
     expect(help).toContain('pinned merchant never carry one')
-    expect(help).toContain('nothing is signed or submitted to an authority')
+    expect(help).toContain('Nothing is submitted to an authority')
     // The overclaim guard: the strongest word about the VAT number is
     // "checked" — never "verified" (docs/product/owner-company-details.md).
     expect(help.toLowerCase()).not.toContain('verified')

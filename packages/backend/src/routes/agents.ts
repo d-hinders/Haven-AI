@@ -1,4 +1,4 @@
-import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { FastifyInstance } from 'fastify'
 import crypto from 'crypto'
 import { isPgUniqueViolation } from '../infra/pg-errors.js'
 import { authMiddleware } from '../middleware/auth.js'
@@ -90,50 +90,7 @@ interface UpdateAgentBody {
   organization_id?: string | null
 }
 
-import {
-  getOwnerCompanyDetails,
-} from '../infra/repositories/owner-company-details.js'
-import type { TaxDeclarationUnavailableReason } from '../modules/agents/index.js'
-
-/**
- * #3426: the owner's per-agent tax-declaration opt-in body. The schema in
- * the OpenAPI spec (`UpsertAgentTaxDeclarationRequest`) is the only shape
- * the enforced request-validation plugin admits; this interface is the
- * handler's view of it.
- */
-interface TaxDeclarationToggleBody {
-  tax_declaration_enabled: boolean
-}
-
-/**
- * The toggle's structured 409 reasons, in the same closed vocabulary as the
- * agent content endpoint's `reason` (`TaxDeclarationUnavailableReason`).
- * `disabled` cannot occur on this route (the toggle writes the bit), so the
- * map narrows to the three that can — the type says so by construction.
- */
-const TAX_TOGGLE_ERRORS: Record<Exclude<TaxDeclarationUnavailableReason, 'disabled'>, string> = {
-  feature_disabled: 'The company-details feature is off in this deployment.',
-  no_company_details:
-    'Save your company details with a VAT number before opting an agent in to tax declarations.',
-  vies_not_valid:
-    'Your VAT number is not VIES-valid right now, so agents cannot be opted in to tax declarations.',
-}
-
-/**
- * Reads the owner's company-details facts and returns WHY an opt-in is not
- * currently possible — the same priority order `resolveTaxDeclaration`
- * uses, minus the opt-in bit this route is itself writing. Passing the flag
- * in (not reading config here) keeps the rule testable the same way.
- */
-async function taxToggleRefusalReason(
-  userId: string,
-  featureEnabled: boolean,
-): Promise<Exclude<TaxDeclarationUnavailableReason, 'disabled'>> {
-  if (!featureEnabled) return 'feature_disabled'
-  const row = await getOwnerCompanyDetails(userId)
-  if (!row || row.vat_number === null || row.vat_number === '') return 'no_company_details'
-  return 'vies_not_valid'
-}
+// ── Routes ─────────────────────────────────────────────────────────
 
 export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)

@@ -85,6 +85,12 @@ rendered as "verified" anywhere this reaches (see
 [`docs/product/owner-company-details.md`](owner-company-details.md)) — it says
 the VAT number was checked against VIES, on that date, nothing more.
 
+**The buyer-side x402 tax declaration (#3426) is separate from the passport
+too.** An owner can opt an individual agent in to carrying a buyer-side tax
+declaration on EIP-3009 payments; the declaration is computed at read time
+from the owner's company details, signed by the SDK, sent only when the agent
+pays, and never written into the EAS passport schema or anchored on-chain.
+
 ## The assurance ladder
 
 Governance and identity are different questions, so they are different tiers.

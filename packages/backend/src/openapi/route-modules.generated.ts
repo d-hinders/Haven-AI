@@ -179,7 +179,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "PUT /accounting/categories": "routes/accounting.ts",
   "PUT /agents/{id}": "routes/agents.ts",
   "PUT /agents/{id}/labels": "routes/agent-labels.ts",
-  "PUT /agents/{id}/tax-declaration": "routes/agents.ts",
+  "PUT /agents/{id}/tax-declaration": "routes/agent-tax-declaration.ts",
   "PUT /contacts/{id}": "routes/contacts.ts",
   "PUT /labels/{id}": "routes/labels.ts",
   "PUT /organizations/{id}": "routes/agent-organizations.ts",

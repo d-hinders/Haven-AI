@@ -501,6 +501,9 @@ export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, des
                    -- #3164: a brand-new agent starts at the top level; the
                    -- column default is the honest value on the create response.
                    organization_id,
+                   -- #3426: the opt-in is never settable at creation; the
+                   -- column default (false) is the honest value here.
+                   tax_declaration_enabled,
                    NULL::timestamptz AS mcp_last_seen_at,
                    -- #1878: an agent created straight through the API was never
                    -- wired by the connector, so it has no MCP server name. NULL
@@ -542,6 +545,10 @@ export interface CreatedAgent {
     // Declared for the same reason as mcp_server_name above: the query
     // returns it and the create response's Agent shape now requires it.
     | 'organization_id'
+    // #3426: always FALSE here — the opt-in is never settable at creation.
+    // Declared for the same reason: the query returns it (the column
+    // default) and the Agent shape requires it.
+    | 'tax_declaration_enabled'
   >
   accountInfo: AccountInfoRow
 }
@@ -597,6 +604,7 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
            WHERE id = $1 AND user_id = $2
            RETURNING id, name, description, delegate_address, account_id, api_key_prefix, status, created_at,
                      organization_id,
+                     tax_declaration_enabled,
                      mcp_server_name
          )
          SELECT updated.id, updated.name, updated.description, updated.delegate_address,
@@ -604,6 +612,9 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
                 us.account_type,
                 updated.api_key_prefix, updated.status, updated.created_at,
                 updated.organization_id,
+                -- #3426: carried unchanged by a profile update, but the
+                -- Agent response shape requires it — read it back.
+                updated.tax_declaration_enabled,
                 -- #1878/#1694: the display name is editable, the wiring name is
                 -- not. This UPDATE never touches mcp_server_name; reading it
                 -- back keeps the renamed agent's card showing the same pair.

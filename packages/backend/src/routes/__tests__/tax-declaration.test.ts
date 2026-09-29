@@ -229,6 +229,11 @@ describeDb('tax declaration routes (#3426)', () => {
         ...ownerAuth(userId),
         payload: { tax_declaration_enabled: true },
       })
+      if (res.statusCode !== 200) {
+        // Surface the body in the failure message — a bare 401 assertion has
+        // already cost one round trip.
+        expect([res.statusCode, res.payload]).toEqual([200, ''])
+      }
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ id: agent.id, tax_declaration_enabled: true })
       expect(await getTaxColumn(agent.id)).toBe(true)
@@ -423,7 +428,8 @@ describeDb('tax declaration routes (#3426)', () => {
       await db.query(`UPDATE agents SET tax_declaration_enabled = true WHERE id = $1`, [agent.id])
       // An old check: 20 hours ago — 4 hours of the 24h VIES age left, while
       // now + 24h would be far later. The VIES bound must win.
-      const checkedAt = new Date(Date.now() - 20 * 60 * 60 * 1000)
+      const checkedAtMs = Date.now() - 20 * 60 * 60 * 1000
+      const checkedAt = new Date(checkedAtMs)
       await db.query(`UPDATE owner_company_details SET vies_checked_at = $1 WHERE user_id = $2`, [
         checkedAt.toISOString(),
         agent.id,
@@ -441,7 +447,15 @@ describeDb('tax declaration routes (#3426)', () => {
       // In ms, not seconds: it must be within an hour of the computed bound,
       // a seconds-scaled value would be off by three orders of magnitude.
       expect(validUntil).toBeGreaterThan(Date.now())
-      expect(validUntil).toBeLessThanOrEqual(checkedAt.getTime() + TAX_DECLARATION_MAX_VIES_AGE_MS)
+      // The bound as the DB returned it (the write normalises precision), so
+      // the assertion compares the route's arithmetic against its own input.
+      const { rows: stored } = await db.query<{ vies_checked_at: string }>(
+        `SELECT vies_checked_at FROM owner_company_details WHERE user_id = (SELECT user_id FROM agents WHERE id = $1)`,
+        [agent.id],
+      )
+      const storedCheckedAtMs = Date.parse(stored[0].vies_checked_at)
+      expect(validUntil).toBeLessThanOrEqual(storedCheckedAtMs + TAX_DECLARATION_MAX_VIES_AGE_MS)
+      expect(validUntil).toBeGreaterThan(Date.now() - 1000)
       expect(validUntil).toBeLessThanOrEqual(Date.now() + TAX_DECLARATION_MAX_WINDOW_MS)
     })
 

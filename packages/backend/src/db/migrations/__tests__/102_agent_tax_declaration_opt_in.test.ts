@@ -52,7 +52,7 @@ async function seedAccount(userId: string): Promise<string> {
     `INSERT INTO smart_accounts (user_id, account_address, chain_id, account_type)
      VALUES ($1, $2, 8453, 'delegator_hybrid')
      RETURNING id`,
-    [userId, `0x${'b'.repeat(38)}${String(seq).padStart(4, '0')}`],
+    [userId, `0x${'b'.repeat(36)}${String(seq).padStart(4, '0')}`],
   )
   return rows[0].id
 }
@@ -71,7 +71,8 @@ async function seedAgent(userId: string, accountId: string, name = 'Tax agent'):
 async function columnDefault(): Promise<string | null> {
   const { rows } = await db.query<{ column_default: string | null }>(
     `SELECT column_default FROM information_schema.columns
-     WHERE table_name = 'agents' AND column_name = 'tax_declaration_enabled'`,
+     WHERE table_name = 'agents' AND column_name = 'tax_declaration_enabled'
+       AND table_schema = current_schema()`,
   )
   return rows[0]?.column_default ?? null
 }
@@ -79,7 +80,8 @@ async function columnDefault(): Promise<string | null> {
 async function columnExists(): Promise<number> {
   const { rows } = await db.query<{ count: string }>(
     `SELECT count(*) AS count FROM information_schema.columns
-     WHERE table_name = 'agents' AND column_name = 'tax_declaration_enabled'`,
+     WHERE table_name = 'agents' AND column_name = 'tax_declaration_enabled'
+       AND table_schema = current_schema()`,
   )
   return Number(rows[0].count)
 }

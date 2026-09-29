@@ -15,12 +15,14 @@
  *
  * ── Copy discipline ──────────────────────────────────────────────────────
  * The help text must not overclaim: the declaration is sent ONLY on
- * EIP-3009 payments. Agents whose recipient is pinned to a merchant are
- * ERC-7710-only, and so are merchants that accept ERC-7710 — so a pinned
- * agent never sends one, and the copy says so rather than implying every
- * payment carries the declaration. "checked" is the strongest word used:
- * VIES `valid` says the VAT number was checked against the EU's register on
- * a date, never that anything about the agent or owner is "verified" (see
+ * EIP-3009 payments, and the copy states that rail by name (the same
+ * convention `marketplace/PayWithHavenBlock.tsx` uses). Agents whose
+ * recipient is pinned to a merchant are ERC-7710-only, and so are merchants
+ * that accept ERC-7710 — so a pinned agent never sends one, and the copy
+ * says so rather than implying every payment carries the declaration.
+ * "checked" is the strongest word used: VIES `valid` says the VAT number
+ * was checked against the EU's register on a date, never that anything
+ * about the agent or owner is "verified" (see
  * docs/product/owner-company-details.md § The VIES states).
  *
  * ── Failure ──────────────────────────────────────────────────────────────
@@ -84,12 +86,12 @@ export function TaxDeclarationToggle({
         label="Send a tax declaration with payments"
         helperText={
           <>
-            When this is on, your saved VAT number — checked against the
-            EU&apos;s VIES register — can be declared to merchants that ask for
-            it, with payments your agent signs under a budget. Payments to a
-            pinned merchant never carry one. Only the declaration itself is
-            sent: nothing is signed or submitted to an authority, and you can
-            switch it off here at any time.
+            When this is on, your saved VAT number, checked against the
+            EU&apos;s VIES register, can be declared to merchants that ask
+            for it, with payments your agent signs under a budget. Only
+            payments that settle by EIP-3009 carry a declaration; payments to
+            a pinned merchant never carry one. Nothing is submitted to an
+            authority, and you can switch it off here at any time.
           </>
         }
         disabled={saving}

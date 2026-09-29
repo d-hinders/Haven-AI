@@ -750,16 +750,16 @@ describe('haven_get_payment_status: post-purchase allowance summary (#1310)', ()
   it('attaches allowance for a genuinely settled x402 payment (rail: x402, phase: payment_confirmed)', async () => {
     stubFetch({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, execution_rail: 'delegation' } },
       'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3000000') },
     })
 
-    const result = ok<{ allowance: { rail: string; remaining_atomic: string } | null }>(
+    const result = ok<{ allowance: { rail: string; remaining_atomic: string; remainingAtomic?: string } | null }>(
       await handlers().haven_get_payment_status({ payment_id: 'pay_x402' }),
     )
 
     expect(result.data.allowance).toEqual(
-      expect.objectContaining({ rail: 'legacy', remaining_atomic: '3000000' }),
+      expect.objectContaining({ rail: 'delegation', remaining_atomic: '3000000', remainingAtomic: '3000000' }),
     )
   })
 

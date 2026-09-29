@@ -540,7 +540,6 @@ export function createCatalogPurchaseHandlers(
           // degraded here the way the allowance read at step 5 can.
           const agent = await agentPromise
           const rail = agent.executionRail
-          const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
 
           // 4. Both halves of the #1450 rule: the merchant must advertise
           // erc7710 AND the account must be on the delegation rail. #1453's
@@ -601,13 +600,39 @@ export function createCatalogPurchaseHandlers(
           // as the failed allowances read did — the on-chain policy remains
           // the actual gate either way.
           const warnings: AgentPaymentWarning[] = []
+          // #3464: the preflight block is narrowed to the delegation rail —
+          // proven by exhaustion, not declared: POST /x402 answers 410 for
+          // every retired rail (#1986) and `budget-precheck` 410s them the
+          // same way (`budget-precheck-guards.ts`), so no retired-rail
+          // account can complete step 3's agent read and reach this block.
+          // The guard below keeps that proof machine-checked: if a retired
+          // rail ever reaches here on a stubbed or drifted backend, the
+          // preflight degrades to `sufficient: null` with a warning — never a
+          // fabricated 'legacy'/'allowance_module' row. `rail` above is read
+          // from `HavenAgent.executionRail`, whose declared union is untouched.
+          // On the settlement scheme this guard sits AFTER the selector
+          // (#2054): a legacy agent at an erc7710-only merchant still gets
+          // the selector's rail-named refusal, not a budget null.
           let allowanceBlock: {
-            rail: 'legacy' | 'delegation'
+            rail: 'delegation'
             sufficient: boolean | null
             remaining_atomic?: string
-            source: 'allowance_module' | 'active_delegations'
-          }
-          try {
+            source: 'active_delegations'
+            /** #3464: canonical camelCase names — the SAME spelling `haven_get_agent`'s `allowances[]` rows report. */
+            remainingAtomic?: string
+          } | null
+          if (rail !== 'delegation') {
+            allowanceBlock = null
+            warnings.push({
+              code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+              message:
+                `This agent's account is on the '${rail}' rail, which is retired and cannot purchase — ` +
+                'no preflight budget figure is reported. The on-chain policy remains the actual spend gate; ' +
+                're-onboard the account on the delegation rail to pay this merchant.',
+            })
+          } else {
+            const source = 'active_delegations' as const
+            try {
             // #2051: asked about the SELECTED option's asset and amount —
             // the option that will actually be authorized, not a cheap
             // standard entry sailing past a small budget while an expensive
@@ -630,6 +655,10 @@ export function createCatalogPurchaseHandlers(
               sufficient: precheck.sufficient,
               remaining_atomic: precheck.remaining_atomic,
               source,
+              // The settle-time summary and this block share ONE spelling
+              // (#3464): these are the same names `haven_get_agent`'s
+              // allowances[] rows carry for the same figures.
+              remainingAtomic: precheck.remaining_atomic,
             }
             // #1319: the pre-check above SUCCEEDED — distinct from the catch
             // below, which fires when it fails outright. On the delegation
@@ -676,6 +705,9 @@ export function createCatalogPurchaseHandlers(
                 remaining_atomic:
                   (err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ?? '0',
                 source,
+                remainingAtomic:
+                  ((err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ??
+                    '0') as string,
               }
             } else {
               allowanceBlock = { rail, sufficient: null, source }
@@ -688,6 +720,7 @@ export function createCatalogPurchaseHandlers(
               })
             }
           }
+          }
 
           // 6. Over-budget REVERTS at prepare and no approval queue exists
           // anywhere (#1090; the last one died with #2055) — refuse BEFORE any
@@ -697,7 +730,7 @@ export function createCatalogPurchaseHandlers(
           // server-side and the ledger row is already recorded); this shape
           // is the RELAY of that decision — byte-identical to the refusal
           // the local compare used to throw, characterized below.
-          if (rail === 'delegation' && allowanceBlock.sufficient === false) {
+          if (rail === 'delegation' && allowanceBlock?.sufficient === false) {
             throw new HostedToolError({
               code: 'DELEGATION_BUDGET_EXCEEDED',
               message:

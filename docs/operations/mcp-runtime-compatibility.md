@@ -120,6 +120,25 @@ last-verified: "2026-09-29"
 > consent-hash contracts are untouched. `last-verified` is not re-stamped:
 > this block is the scope. Nothing else in this document was re-verified.
 >
+> **Re-verified #3464 (2026-09-29, the four allowance spellings align on
+> `haven_get_agent`):** this diff touches three surfaces this document
+> covers — `packages/sdk/src/account-reads.ts`
+> (`getPostPurchaseAllowanceSummary` gains the canonical camelCase keys
+> `remainingAtomic`/`remainingDisplay`/`resetPeriodMin`/`tokenSymbol`/
+> `tokenAddress` beside the kept snake_case keys and takes its
+> `remainingDisplay` from the shared `formatRemainingDisplay`),
+> `packages/sdk/src/tool-descriptions.ts` (`getPaymentStatus` names the
+> allowance block and the deprecation window), and
+> `packages/mcp-server/src/tools/contracts.ts` (the settle/complete/
+> payment-status and catalog-preflight descriptions carry the same
+> spelling note). Additive, optional keys on the wire; the snake_case keys
+> are unchanged and marked deprecated — no tool is added, renamed or
+> re-shaped, no argument or input schema changes, and the version-skew and
+> consent-hash contracts do not move. The local stdio surface composes the
+> shared description verbatim (`packages/mcp/src/tools.ts` is otherwise
+> untouched). `last-verified` is not re-stamped: this block is the scope.
+> Nothing else in this document was re-verified.
+>
 > **Re-verified #3430 (2026-09-29, the runbook runs the manifest's own CLI
 > command):** the agent runbook (`HAVEN_AGENT_RUNBOOK_MD` in
 > `packages/sdk/src/agent-guidance.ts`, served as `/for-agents.md` and bundled

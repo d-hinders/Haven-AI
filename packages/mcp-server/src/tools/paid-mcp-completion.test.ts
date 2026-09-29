@@ -886,11 +886,11 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     return haven
   }
 
-  it('attaches the rail-aware post-purchase allowance summary (legacy rail)', async () => {
+  it('attaches the post-purchase allowance summary on the delegation rail — the canonical spellings match haven_get_agent', async () => {
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000', 'delegation') },
     })
 
     const result = ok<{
@@ -903,28 +903,40 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         token_address?: string
         reset_period?: number
         source: string
+        remainingAtomic?: string
+        remainingDisplay?: string
+        resetPeriodMin?: number
+        tokenSymbol?: string
+        tokenAddress?: string
       } | null
     }>(await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()))
 
     expect(result.data.settled).toBe(true)
-    // Deliberately the SAME rail-labeled shape as #1306's preflight `allowance`
-    // block, minus the preflight-only `sufficient` field.
+    // #3464: the settle summary and #1306's preflight `allowance` block share
+    // ONE spelling — the one haven_get_agent's allowances[] rows report —
+    // minus the preflight-only `sufficient` field. Exact toEqual, never
+    // loosened. The snake_case keys are the deprecated window spellings.
     expect(result.data.allowance).toEqual({
-      rail: 'legacy',
+      rail: 'delegation',
       remaining_atomic: '3500000',
       remaining_display: '3.5 USDC',
       token_symbol: 'USDC',
       token_address: USDC,
-      reset_period: 60,
-      source: 'allowance_module',
+      reset_period: 1440,
+      source: 'active_delegations',
+      remainingAtomic: '3500000',
+      remainingDisplay: '3.5 USDC',
+      resetPeriodMin: 1440,
+      tokenSymbol: 'USDC',
+      tokenAddress: USDC,
     })
   })
 
   it('returns a compact Haven-derived purchase_summary while preserving the merchant result as evidence', async () => {
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000', 'delegation') },
     })
     const merchantResult = {
       structuredContent: {
@@ -963,7 +975,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         invoice_id: 'INV-123',
         funding_tx_hash: '0xfund',
         settlement_tx_hash: '0xsettle',
-        allowance: { remaining_atomic: '3500000' },
+        allowance: { remaining_atomic: '3500000', remainingAtomic: '3500000' },
       },
     })
     expect(recordedCalls().filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(2)
@@ -972,8 +984,8 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
   it('does not infer settlement or metadata from a merchant result that merely claims payment', async () => {
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000', 'delegation') },
     })
     const merchantResult = { paid: true, status: 'confirmed', invoice_id: 'UNTRUSTED' }
     vi.spyOn(haven, 'getPaymentStatus')
@@ -1013,8 +1025,8 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
   it('keeps a merchant receipt transaction hash as optional evidence, not settlement truth', async () => {
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000', 'delegation') },
     })
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: {}, settlementTxHash: 'merchant-receipt-reference',
@@ -1047,15 +1059,15 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     )
   })
 
-  it('parity: remaining_atomic matches haven_get_allowances for the SAME fixture — same source, asserted as equality', async () => {
+  it('parity: remainingAtomic matches haven_get_allowances for the SAME fixture — same source, asserted as equality', async () => {
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('1234567') },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('1234567', 'delegation') },
     })
     const h = createToolHandlers(haven)
 
-    const settleResult = ok<{ allowance: { remaining_atomic: string; token_address?: string } | null }>(
+    const settleResult = ok<{ allowance: { remaining_atomic: string; remainingAtomic?: string; token_address?: string } | null }>(
       await h.haven_settle_mcp_tool(settleArgs()),
     )
     const allowancesResult = ok<{ allowances: Array<{ tokenAddress: string; onchain: { remaining: string } }> }>(
@@ -1064,13 +1076,15 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     const match = allowancesResult.data.allowances.find((a) => a.tokenAddress.toLowerCase() === USDC)
 
     expect(settleResult.data.allowance?.remaining_atomic).toBe(match?.onchain.remaining)
+    expect(settleResult.data.allowance?.remainingAtomic).toBe(match?.onchain.remaining)
     expect(settleResult.data.allowance?.remaining_atomic).toBe('1234567')
+    expect(settleResult.data.allowance?.remainingAtomic).toBe('1234567')
   })
 
   it('a failed allowance/budget read NEVER converts settled:true into failure — degrades to a null block + warning', async () => {
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
     })
 
@@ -1088,7 +1102,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
   it('keeps verified Haven payment fields when only the allowance read fails', async () => {
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
     })
 

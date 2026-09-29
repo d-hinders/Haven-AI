@@ -529,36 +529,80 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
     vi.restoreAllMocks()
   })
 
-  it('legacy rail: reports remaining_atomic through the SAME source as getAllowances (parity, not similarity)', async () => {
+  it('delegation rail: reports the settle summary with the SAME names AND values as get_agent allowance rows (parity, not similarity)', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const u = String(url)
       if (u.endsWith('/machine-payments/pay_1/status')) return paymentStatusResponse()
-      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
-      if (u.endsWith('/machine-payments/allowances')) return allowancesResponse({ remaining: '3500000' })
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active', 'delegation')
+      if (u.endsWith('/machine-payments/allowances')) {
+        return delegationAllowancesResponse([{ tokenAddress: USDC_BASE, tokenSymbol: 'USDC', budgetAtomic: '3500000' }])
+      }
       throw new Error(`unexpected fetch: ${u}`)
     })
 
-    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
-    const [summary, allowances] = await Promise.all([
+    const haven = new HavenClient({ apiKey: '«redacted»', baseUrl })
+    const [summary, allowances, agent] = await Promise.all([
       haven.getPostPurchaseAllowanceSummary('pay_1'),
       haven.getAllowances(),
+      haven.getAgentSummary(),
     ])
 
     expect(summary).toEqual({
       payment: expect.objectContaining({ paymentId: 'pay_1' }),
       allowance: {
-        rail: 'legacy',
+        rail: 'delegation',
         remaining_atomic: '3500000',
         remaining_display: '3.5 USDC',
         token_symbol: 'USDC',
         token_address: USDC_BASE,
-        reset_period: 60,
-        source: 'allowance_module',
+        reset_period: 1440,
+        source: 'active_delegations',
+        // The canonical spellings (#3464) — the SAME names and values
+        // haven_get_agent's allowances[] rows carry.
+        remainingAtomic: '3500000',
+        remainingDisplay: '3.5 USDC',
+        resetPeriodMin: 1440,
+        tokenSymbol: 'USDC',
+        tokenAddress: USDC_BASE,
       },
       warnings: [],
     })
     // Same source, asserted as equality against haven_get_allowances' own mapping.
     expect(summary.allowance?.remaining_atomic).toBe(allowances.allowances[0].onchain.remaining)
+    expect(summary.allowance?.remainingAtomic).toBe(allowances.allowances[0].onchain.remaining)
+    // #3464: get_agent and the settle summary report EQUAL names AND values
+    // for the same fixture — the canonical keys and the shared
+    // formatRemainingDisplay output, not two derivations of one figure.
+    const ga = agent.allowances[0]
+    expect(summary.allowance?.remainingAtomic).toBe(ga.remainingAtomic)
+    expect(summary.allowance?.remainingDisplay).toBe(ga.remainingDisplay)
+    expect(summary.allowance?.resetPeriodMin).toBe(ga.resetPeriodMin)
+    expect(summary.allowance?.tokenSymbol).toBe(ga.tokenSymbol)
+    expect(summary.allowance?.tokenAddress).toBe(ga.tokenAddress)
+  })
+
+  it('an unknown-decimals token still carries remainingDisplay — the shared formatter labels it atomic, exactly as get_agent does (#3464)', async () => {
+    const UNKNOWN = '0x00000000000000000000000000000000000d3464'
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_1/status')) return paymentStatusResponse({ asset: UNKNOWN })
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active', 'delegation')
+      if (u.endsWith('/machine-payments/allowances')) {
+        return delegationAllowancesResponse([{ tokenAddress: UNKNOWN, tokenSymbol: 'WEIRD', budgetAtomic: '4200000' }])
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const haven = new HavenClient({ apiKey: '«redacted»', baseUrl })
+    const [summary, agent] = await Promise.all([
+      haven.getPostPurchaseAllowanceSummary('pay_1'),
+      haven.getAgentSummary(),
+    ])
+
+    const labeled = '4200000 WEIRD (atomic; unknown decimals)'
+    expect(summary.allowance?.remainingDisplay).toBe(labeled)
+    expect(summary.allowance?.remainingDisplay).toBe(agent.allowances[0].remainingDisplay)
+    expect(summary.allowance?.remainingAtomic).toBe(agent.allowances[0].remainingAtomic)
   })
 
   it('delegation rail: reports source: active_delegations, derived via #1090 (never agent_allowances)', async () => {

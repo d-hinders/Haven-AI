@@ -327,23 +327,50 @@ export interface HostedSettleMcpToolResult {
    * not a degraded read; the two are distinguishable by `'allowance' in`.
    */
   allowance?: {
-    rail: 'legacy' | 'delegation'
+    /**
+     * #3464: narrowed to 'delegation' — unreachable otherwise (GET
+     * /machine-payments/allowances answers 410 for both retired rails before
+     * this summary is built, #1986/#2020).
+     */
+    rail: 'delegation'
+    /** @deprecated #3464 — use `remainingAtomic` (same value). Kept for a deprecation window. */
     remaining_atomic: string
+    /** @deprecated #3464 — use `remainingDisplay` (same value). Same removal condition. */
     remaining_display?: string
+    /** @deprecated #3464 — use `tokenSymbol` (same value). Same removal condition. */
     token_symbol?: string
+    /** @deprecated #3464 — use `tokenAddress` (same value). Same removal condition. */
     token_address?: string
+    /** @deprecated #3464 — use `resetPeriodMin` (same value). Same removal condition. */
     reset_period?: number
-    source: 'allowance_module' | 'active_delegations'
+    /** #3464: 'allowance_module' removed — unreachable since #1986/#2020. */
+    source: 'active_delegations'
+    /** Canonical spelling — the SAME name `haven_get_agent`'s allowances[] rows report (#3464). */
+    remainingAtomic?: string
+    remainingDisplay?: string
+    resetPeriodMin?: number
+    tokenSymbol?: string
+    tokenAddress?: string
   } | null
   warnings?: Array<{ code: string; message: string }>
 }
 
 /** The rail-aware allowance/budget block `haven_prepare_catalog_purchase` reports (#1306). */
 export interface HostedCatalogAllowanceBlock {
-  rail: 'legacy' | 'delegation'
+  /**
+   * #3464: narrowed to 'delegation' — unreachable otherwise (POST /x402
+   * answers 410 for both retired rails, #1986, and `budget-precheck` 410s
+   * them the same way), so the declared type no longer carries the
+   * unreachable arms.
+   */
+  rail: 'delegation'
   sufficient: boolean | null
+  /** @deprecated #3464 — use `remainingAtomic` (same value). Kept for a deprecation window. */
   remaining_atomic?: string
-  source: 'allowance_module' | 'active_delegations'
+  /** #3464: 'allowance_module' removed — unreachable since #1986/#2020. */
+  source: 'active_delegations'
+  /** Canonical spelling — the SAME name `haven_get_agent`'s allowances[] rows report (#3464). */
+  remainingAtomic?: string
 }
 
 /**
@@ -388,7 +415,7 @@ export interface HostedPrepareCatalogPurchaseResult {
   catalog_price_atomic?: string
   catalog_price_display?: string
   catalog_price_is_indicative?: boolean
-  allowance?: HostedCatalogAllowanceBlock
+  allowance?: HostedCatalogAllowanceBlock | null
   /** #1308 machine-readable next-step contract. */
   next_action?: string
   next_tool?: string

@@ -473,6 +473,11 @@ export const toolSchemas = {
     limit: z.number().int().min(1).max(100).optional(),
     /** #3128: the previous page's next_cursor (a receipt id). */
     cursor: z.string().min(1).optional(),
+    /** #3423: drop each row's payload echoes; the default shape is unchanged. */
+    compact: z
+      .boolean()
+      .optional()
+      .describe('true drops challengePayload, selectedPayment and protocolReceiptPayload from each row; omit for the full row.'),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
@@ -818,7 +823,7 @@ export const STRICT_INPUT_TOOLS = {
     'The resume state is rehydrated by payment_id alone; nothing else selects it. Any other ' +
     'key used to be dropped in silence.',
   haven_list_receipts:
-    'This list takes limit and cursor (the previous page\'s next_cursor) only. An offset, page, ' +
+    'This list takes limit, cursor (the previous page\'s next_cursor) and compact only. An offset, page, ' +
     'status or token filter sent here used to be dropped in silence and the first page came ' +
     'back looking filtered.',
   haven_verify_receipt:

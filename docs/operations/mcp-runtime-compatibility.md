@@ -79,6 +79,23 @@ last-verified: "2026-09-29"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified (#3423 slice C, 2026-09-29, `haven_list_receipts` gains
+> `compact`):** both surfaces declare an optional `compact: boolean` on
+> `haven_list_receipts`, and with it each row omits `challengePayload`,
+> `selectedPayment` and `protocolReceiptPayload`. The stripping is in the SDK's
+> `listReceiptsPage({ compact })`, which both runtimes call. The default,
+> without the key, is byte-identical. Version skew differs by surface. A hosted
+> server older than this change refuses `compact` by name through its strict
+> input schema (the transport's `.strict()` and the handler's `parseStrict`,
+> both with the declared-keys message); an agent that gets
+> that refusal should drop the key, and no data is lost. A local
+> `@haven_ai/mcp` older than this change parses input non-strictly
+> (`objectInput` strips unknown keys), so it silently ignores `compact` and
+> returns full rows. The local consent hash
+> covers tool names, not their inputs (`packages/mcp/src/consent.ts`), so
+> adding the key does not ask for a new acknowledgement. Nothing else in this
+> document was re-verified.
+
 > **Re-verified unchanged (#3423 slice A, 2026-09-28, hosted agent-surface
 > polish):** this diff touches `packages/mcp-server/src/tools/{support/catalog-entry,support/cap-price,paid-mcp-completion,support/guidance}.ts`
 > and `packages/sdk/src/skill-content.ts`, all under this doc's covered trees.

@@ -290,6 +290,38 @@ describe('agent info helpers', () => {
     expect(seen[1]).not.toContain('cursor')
   })
 
+  it('#3423: compact drops the three payload echoes from each row; the default keeps them', async () => {
+    const receipt = {
+      id: 'receipt-1', payment_id: 'payment-1', rail: 'x402', proof_status: 'payment_confirmed', tx_hash: `0x${'ab'.repeat(32)}`,
+      chain_id: 84532, resource_url: 'https://paid.example/data', merchant_address: '0xMerchant', payer_address: '0xTreasury',
+      settlement_address: '0xMerchant', token_symbol: 'USDC', token_address: '0xToken', amount_raw: '1000', amount_human: '0.001',
+      challenge_id: null, idempotency_key: 'x402:test',
+      challenge_payload: { payment_required: { accepts: [{ amount: '1000' }] } },
+      selected_payment: { scheme: 'exact' },
+      protocol_receipt_payload: { success: true, transaction: `0x${'ab'.repeat(32)}` },
+      payment_proof_header_name: 'PAYMENT-SIGNATURE', protocol_receipt_header_name: 'PAYMENT-RESPONSE', merchant_status: 200,
+      confirmed_at: '2026-09-28T12:00:00.000Z', created_at: '2026-09-28T12:00:01.000Z', updated_at: '2026-09-28T12:00:01.000Z',
+    }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ receipts: [receipt], total: 1, has_more: false, next_cursor: null }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      }),
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const full = await haven.listReceiptsPage()
+    expect(full.receipts[0]).toHaveProperty('challengePayload')
+    expect(full.receipts[0]).toHaveProperty('selectedPayment')
+    expect(full.receipts[0]).toHaveProperty('protocolReceiptPayload')
+    const compact = await haven.listReceiptsPage({ compact: true })
+    for (const key of ['challengePayload', 'selectedPayment', 'protocolReceiptPayload']) {
+      expect(compact.receipts[0]).not.toHaveProperty(key)
+    }
+    // Everything else on the row, and the page fields, are untouched.
+    const { challengePayload: _c, selectedPayment: _s, protocolReceiptPayload: _p, ...rest } = full.receipts[0]
+    expect(compact.receipts[0]).toEqual(rest)
+    expect(compact).toMatchObject({ total: 1, hasMore: false, nextCursor: null })
+  })
+
   it('#3128: against a backend without the page fields, total / hasMore / nextCursor are null (unknown), never 0 / false', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(JSON.stringify({ receipts: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),

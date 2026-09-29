@@ -984,8 +984,15 @@ export class HavenClient {
     return this.accountReads.listReceipts(options)
   }
 
-  /** #3128: one page of receipts with `total`, `hasMore` and `nextCursor`. */
-  async listReceiptsPage(options: { limit?: number; cursor?: string } = {}): Promise<HavenPaymentReceiptsPage> {
+  /**
+   * One page of receipts with `total`, `hasMore` and `nextCursor` (#3128).
+   * `compact: true` (#3423) drops each row's
+   * `challengePayload`, `selectedPayment` and `protocolReceiptPayload`; the
+   * default shape is unchanged.
+   */
+  async listReceiptsPage(
+    options: { limit?: number; cursor?: string; compact?: boolean } = {},
+  ): Promise<HavenPaymentReceiptsPage> {
     return this.accountReads.listReceiptsPage(options)
   }
 

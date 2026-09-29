@@ -1745,6 +1745,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `redemption-guard.ts`, `sub-budget-guards.ts`, `settlement-child.ts`'s
 > shape predicates, `signer/tools.ts`'s new `sub_budget_id` channel, and the
 > allowlist bullets above. Nothing else in this document was re-read for it,
+
+> **Re-verified (#3423 slice C, 2026-09-29):** the SDK's
+> `listReceiptsPage` (and `haven_list_receipts` on both surfaces) gains an
+> opt-in `compact` that drops three verbatim payload echoes from each
+> read-only history row. No authority moves: no signature, key role,
+> delegation, caveat or on-chain surface changes, and the default output is
+> unchanged. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
 > **Re-verified (#3417, 2026-09-28):** the SDK's erc7710 `prepare()` now
 > recognises `delegationReplay`'s confirmed-200 answer (`status: 'confirmed'`
 > with a `tx_hash` and no `sign_data`) before its scheme check. It used to throw

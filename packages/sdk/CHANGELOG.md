@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **`listReceiptsPage({ compact: true })` (#3423).** Drops each row's `challengePayload`, `selectedPayment` and `protocolReceiptPayload`, which echo the merchant's 402 challenge, the selected option and the merchant's response verbatim. The keys are absent, not null. The default shape is unchanged, so no update needed.
+
 - **`TASK_SIGN_CONTEXT_VERSION` (#3419).** The version of the task-budget sign context (`GET /task-budgets/:id/sign-context`), exported from the edge entry beside `DIRECT_SIGN_CONTEXT_VERSION`. Single source for the number the backend emits, the signer's `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` enforces, and the task-budget handoffs' `signer_compatibility.task_sign_context_version` reports. Additive; no behavior change.
 
 ### Fixed

@@ -586,7 +586,8 @@ export function createStateDirectRecoveryHandlers(
         const args = parseStrict('haven_list_receipts', input)
         // #3128: the page object, not a bare array — total / hasMore /
         // nextCursor are what let the agent tell "none" from "cut here".
-        return haven.listReceiptsPage({ limit: args.limit, cursor: args.cursor })
+        // #3423: `compact` is passed through; the SDK strips the payloads.
+        return haven.listReceiptsPage({ limit: args.limit, cursor: args.cursor, compact: args.compact })
       }),
 
     haven_verify_receipt: async (input) =>

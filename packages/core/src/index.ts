@@ -37,6 +37,7 @@ export {
   CHAIN_REGISTRY,
   REGISTRY_CHAIN_IDS,
   DEFAULT_CHAIN_ID,
+  effectiveDefaultChainId,
   getChainData,
   getFaucetUrl,
   isRegisteredChain,

@@ -331,6 +331,16 @@ Next: [your agent hit a 402](/402.md) · [everything agent-readable](/llms.txt)
  * it names exists at merge time — `haven login` (#2526) and
  * `haven agents connect` (#2527) both landed before this shipped, which is the
  * condition #2535 made blocking.
+ *
+ * ## No chain name (#3431)
+ *
+ * The funding line says "USDC", never "USDC on Base": this string is committed
+ * once and served from every deployment, and dev deploys Base Sepolia only —
+ * naming Base here would be the same funding-step trap #2591 already fixed in
+ * `HAVEN_AGENT_RUNBOOK_MD` above. This prompt does not re-teach the chain: it
+ * tells the agent to read `/for-agents.md` first, and that page names the
+ * SOURCE of the chain (`haven wallets funding`, the dashboard's Receive-funds
+ * screen) rather than guessing.
  */
 export const AGENT_ONBOARDING_PROMPT = `I have a Haven account and I am signed in at {{HAVEN_ORIGIN}}. Please set up Haven so you can pay for things within a budget I approve.
 
@@ -343,6 +353,6 @@ Then:
 3. ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
 4. Once I have approved the budget, verify with the \`haven_get_agent\` tool: \`ready\` means you can pay, \`needs_approval\` means my approval has not landed yet.
 
-Two things only I can do: approving that budget with my passkey, and funding the account with USDC on Base — no ETH, Haven sponsors the gas. Tell me if either is missing rather than working around it.
+Two things only I can do: approving that budget with my passkey, and funding the account with USDC — no ETH, Haven sponsors the gas. Tell me if either is missing rather than working around it.
 
 ${AGENT_SECRET_HYGIENE_SENTENCE}`

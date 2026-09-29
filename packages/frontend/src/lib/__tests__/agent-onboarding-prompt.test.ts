@@ -68,6 +68,14 @@ describe('the onboarding prompt (#2535)', () => {
     expect(AGENT_ONBOARDING_PROMPT).not.toMatch(/sk_agent_|sk_live_|--setup /)
   })
 
+  it('names no chain — this string is committed once and served from every deployment (#3431)', () => {
+    // Dev deploys Base Sepolia only; a bare "USDC on Base" here is the same
+    // funding-step trap #2591 already fixed in the runbook. Proven by
+    // mutation: putting the old text back must fail this (see the worker
+    // report).
+    expect(AGENT_ONBOARDING_PROMPT).not.toMatch(/USDC on Base\b/)
+  })
+
   it('substitutes every origin placeholder', () => {
     const rendered = buildAgentOnboardingPrompt('https://app.example.com')
     expect(rendered).not.toContain(HAVEN_ORIGIN_PLACEHOLDER)

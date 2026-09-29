@@ -3677,7 +3677,7 @@ export type components = {
             /** Format: uri */
             openapi_url: string;
             chains: {
-                /** @description Canonical Haven default chain id. */
+                /** @description This deployment's effective default chain id (#3431): the product default (`DEFAULT_CHAIN_ID`) when this deployment deploys on it, else the first chain it does deploy on, else the product default again if this deployment deploys on nothing (a misconfigured deployable set). Not necessarily the product-wide default — a deployment scoped to one chain (dev: Base Sepolia only) reports that chain here, not Base mainnet. Confirm the funding chain with `haven wallets funding` or the dashboard's Receive-funds screen before sending money. */
                 default: number;
                 deployable: number[];
                 supported: number[];

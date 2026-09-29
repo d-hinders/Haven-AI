@@ -46,10 +46,19 @@
  * the agent the same non-throwing way `haven_pay_x402_quote` already does and
  * feeds it to the shared helper, so this quote can never predict a scheme its
  * own sibling handler would select differently.
+ *
+ * #3476 adds the `allowance` block to `haven_pay_x402_quote`'s successful
+ * results — the budget visibility `haven_prepare_catalog_purchase`'s preflight
+ * already provides, for the plain-HTTP sibling. The read is capability-local
+ * (`delegationAllowanceBlock` below): on current dev the catalog tool no
+ * longer runs a client-side budget read at all (the #3054 compare moved
+ * server-side into `POST /machine-payments/budget-precheck`), so there is no
+ * shared helper left to extract and the ownership map is untouched.
  */
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  AgentPaymentWarningCode,
   HavenClient,
   HavenPaymentStateError,
   selectErc7710PaymentOption,
@@ -58,6 +67,7 @@ import {
   normalizePaymentRequired,
   resolveX402RetryTarget,
   isSecureX402RetryTarget,
+  type AgentPaymentWarning,
   type X402RetryTarget,
   type X402Quote,
   type X402ResumeState,
@@ -101,6 +111,163 @@ function differsFromRequest(target: X402RetryTarget): { resource_url_differs_fro
   return target.resourceUrlDiffersFromRequest === undefined
     ? {}
     : { resource_url_differs_from_request: target.resourceUrlDiffersFromRequest }
+}
+
+/**
+ * #3476 — the delegation-rail allowance block `haven_pay_x402_quote` attaches
+ * to its successful results, the budget visibility the catalog preflight's
+ * `allowance` field already provides on the guided path. Visibility ONLY:
+ * this never refuses. The tool's own over-budget answer is the backend's
+ * (`pending_approval` / the typed 403 on each settlement leg, both after this
+ * block has been computed), and the on-chain enforcer remains the actual
+ * spend gate regardless of what this block reports.
+ *
+ * Data source is deliberately `haven.getAllowances()` — `GET
+ * /machine-payments/allowances`, the same derived-budget read
+ * (`deriveDelegationBudgets` + the #1145 enforcer read, never
+ * `agent_allowances`) behind `haven_get_allowances`, the settle-time
+ * allowance summary and the old catalog preflight — NOT
+ * `POST /machine-payments/budget-precheck`. The precheck is the #3054
+ * DECISION surface: Haven refuses through the #3053 choke point there and
+ * books a `payment_refusals` row (source `hosted_prepare`). A quote that
+ * pre-checks through it would book a second, contradictory row — the ledger
+ * would record a refusal while the tool proceeded to mint the intent the
+ * plain-HTTP backend then answers itself — so this block reports the budget
+ * figures through the pure read instead, and the #2706/#2082 pre-checks keep
+ * owning the decision on both legs. In exchange the ledger stays a record of
+ * what Haven decided, and the agent still sees `remaining_atomic` before
+ * signing.
+ *
+ * Degradation mirrors the catalog block's own posture exactly
+ * (`catalog-purchase.ts`, since #3464): a failed read is `sufficient: null`
+ * plus an ALLOWANCE_CHECK_UNAVAILABLE warning — never an error, never a
+ * refusal; a succeeded read whose remaining figure is the #1145 optimistic
+ * fallback carries ALLOWANCE_READ_OPTIMISTIC. Non-delegation rails answer
+ * `null` with the unavailable warning, matching the #3464 exhaustion proof:
+ * a retired rail cannot purchase through the hosted tools at all, so there
+ * is no budget figure to fabricate for it.
+ */
+export interface DelegationAllowanceBlock {
+  rail: 'delegation'
+  sufficient: boolean | null
+  remaining_atomic?: string
+  source: 'active_delegations'
+  /** #3464: canonical camelCase twin of `remaining_atomic`, the spelling `haven_get_agent`'s `allowances[]` rows report. */
+  remainingAtomic?: string
+}
+
+async function delegationAllowanceBlock(
+  haven: HavenClient,
+  agent: Awaited<ReturnType<HavenClient['getAgent']>> | undefined,
+  amountAtomic: string,
+  token: string,
+): Promise<{ allowance: DelegationAllowanceBlock | null; warnings: AgentPaymentWarning[] }> {
+  // The tool's own prefetch is REUSED, never repeated: a second getAgent
+  // here would break the #1348 round-trip budget this file pins ("exactly
+  // ONE agent fetch" per pay). `undefined` means the prefetch's non-throwing
+  // `.then(a => a, () => undefined)` caught a failed read — the same
+  // convention that yields the 3009 path — and degrades here too. A block
+  // present on the result is never fabricated: it is either the real read or
+  // the catalog's degraded `sufficient: null` shape, never an error and
+  // never a refusal.
+  if (!agent) {
+    return {
+      // Rail unknown — no block at all rather than one stamped 'delegation'
+      // (the #3464 rule: never fabricate a rail-labeled row). The warning
+      // carries the degrade.
+      allowance: null,
+      warnings: [
+        {
+          code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+          message:
+            'Could not read the agent record, so the execution rail — and with it the ' +
+            'delegation budget figure — is unknown. Proceeding without a budget figure — ' +
+            'the on-chain policy remains the actual spend gate; this only affects the guidance shown here.',
+        },
+      ],
+    }
+  }
+  if (agent.executionRail !== 'delegation') {
+    // Two distinct reasons, two messages: a rail the backend NAMED is retired
+    // (the #3464 wording), an absent one could not be read at all. Neither
+    // fabricates a delegation-rail block.
+    const railName: string = agent.executionRail ?? 'unknown'
+    return {
+      allowance: null,
+      warnings: [
+        {
+          code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+          message:
+            railName === 'unknown'
+              ? 'The agent record carries no execution rail, so no delegation budget figure is ' +
+                'reported. The on-chain policy remains the actual spend gate; this only affects ' +
+                'the guidance shown here.'
+              : `This agent's account is on the '${railName}' rail, which is retired and cannot purchase — ` +
+                'no budget figure is reported. The on-chain policy remains the actual spend gate; ' +
+                're-onboard the account on the delegation rail to pay this merchant.',
+        },
+      ],
+    }
+  }
+  try {
+    const summary = await haven.getAllowances()
+    const match = summary.allowances.find(
+      (entry: { tokenAddress: string }) => entry.tokenAddress.toLowerCase() === token.toLowerCase(),
+    )
+    if (!match) {
+      return {
+        allowance: { rail: 'delegation', sufficient: false, remaining_atomic: '0', source: 'active_delegations', remainingAtomic: '0' },
+        warnings: [
+          {
+            code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+            message:
+              'No active delegation budget row covers the asset this payment authorizes, so the ' +
+              'reported remaining budget is zero and this amount will be declined at prepare — ' +
+              'ask the wallet owner to grant a budget in Haven. The on-chain policy remains the ' +
+              'actual spend gate either way.',
+          },
+        ],
+      }
+    }
+    const warnings: AgentPaymentWarning[] = []
+    if (match.onchain.remainingIsFromChain === false) {
+      warnings.push({
+        code: AgentPaymentWarningCode.AllowanceReadOptimistic,
+        message:
+          'The reported remaining delegation budget could not be read live from chain, so ' +
+          `${match.onchain.remaining} atomic is the configured full budget, not a confirmed ` +
+          'live figure. The on-chain policy (the budget caveat enforcer) remains the actual ' +
+          'spend gate at redemption regardless of this report.',
+      })
+    }
+    return {
+      allowance: {
+        rail: 'delegation',
+        sufficient: BigInt(match.onchain.remaining) >= BigInt(amountAtomic),
+        remaining_atomic: match.onchain.remaining,
+        source: 'active_delegations',
+        remainingAtomic: match.onchain.remaining,
+      },
+      warnings,
+    }
+  } catch (err) {
+    // Degradation is the catalog's own catch shape: the block stays present
+    // with `sufficient: null` and no remaining figure, plus the unavailable
+    // warning — never an error, never a refusal. The on-chain policy remains
+    // the actual spend gate either way.
+    return {
+      allowance: { rail: 'delegation', sufficient: null, source: 'active_delegations' },
+      warnings: [
+        {
+          code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+          message:
+            'Could not read the active delegation budget ' +
+            `for this agent (${err instanceof Error ? err.message : String(err)}). Proceeding without a budget figure — ` +
+            'the on-chain policy remains the actual spend gate; this only affects the guidance shown here.',
+        },
+      ],
+    }
+  }
 }
 
 /**
@@ -380,6 +547,14 @@ export function createPlainHttpX402Handlers(
             // #3417: a replayed key whose payment already settled is a done state,
             // not the transient 500 it used to surface as — answer with the original.
             if ('settledReplay' in prepared) return prepared.settledReplay
+            // #3476: same block on the erc7710 branch, built from the settlement
+            // child's own asset/amount — the entry the selector actually chose.
+            const allowance = await delegationAllowanceBlock(
+              haven,
+              prefetchedAgent,
+              prepared.settlement.amountAtomic,
+              prepared.settlement.asset,
+            )
             return {
               payment_id: prepared.paymentId,
               status: 'pending_signature',
@@ -401,6 +576,7 @@ export function createPlainHttpX402Handlers(
               // merchant's declaration.
               retry_url: retryTarget.url,
               ...differsFromRequest(retryTarget),
+              ...(allowance.allowance ? { allowance: allowance.allowance } : {}),
               // #1275/#1351: the optional-cap nudge applies on both schemes.
               ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
               ...buildAgentGuidance({
@@ -426,10 +602,13 @@ export function createPlainHttpX402Handlers(
                   // scheme, not the intent's — no quote-expiry warning applies.
                   expires_at: undefined,
                 },
-                warnings: quoteWarnings({
-                  capped: cap.kind !== 'none',
-                  expiresAt: undefined,
-                }),
+                warnings: [
+                  ...allowance.warnings,
+                  ...quoteWarnings({
+                    capped: cap.kind !== 'none',
+                    expiresAt: undefined,
+                  }),
+                ],
               }),
             }
           }
@@ -445,11 +624,25 @@ export function createPlainHttpX402Handlers(
               ? { delegateAddress: prefetchedAgent.delegateAddress }
               : {}),
           })
+          // #3476: the budget block rides the 3009 shape too — the plain-HTTP
+          // sibling must answer with the same visibility the catalog preflight
+          // gives its agents on the delegation rail. The amount/token compared
+          // are `createX402Intent`'s OWN authorization facts
+          // (x402AuthorizationAmount(option) over the selected entry's asset),
+          // so the figure can never describe a different option than the one
+          // this intent funds.
+          const allowance = await delegationAllowanceBlock(
+            haven,
+            prefetchedAgent,
+            intent.amountAtomic,
+            intent.asset,
+          )
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
             // #3097: see the erc7710 branch — the retry goes to the caller's URL.
             retry_url: retryTarget.url,
             ...differsFromRequest(retryTarget),
+            ...(allowance.allowance ? { allowance: allowance.allowance } : {}),
             // #1275: optional-cap soft nudge for this generic x402 flow.
             // #1351: either spelling of the cap clears it.
             ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
@@ -480,10 +673,13 @@ export function createPlainHttpX402Handlers(
                 network: intent.network,
                 expires_at: intent.expiresAt,
               },
-              warnings: quoteWarnings({
-                capped: cap.kind !== 'none',
-                expiresAt: intent.expiresAt,
-              }),
+              warnings: [
+                ...allowance.warnings,
+                ...quoteWarnings({
+                  capped: cap.kind !== 'none',
+                  expiresAt: intent.expiresAt,
+                }),
+              ],
             }),
           }
         } catch (err) {

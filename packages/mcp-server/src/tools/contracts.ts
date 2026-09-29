@@ -452,7 +452,9 @@ export const toolSchemas = {
     // #2972: the remedy #2970's guidance could not name — an erc7710 agent
     // holding the merchant's real settlement transaction hash
     // (PAYMENT-RESPONSE.transaction, or a prior settle/complete result's
-    // settlement_tx_hash) while Haven holds none. Nothing else is taken: the
+    // settlement_tx_hash) while Haven holds none. #3475: equally an eip3009
+    // agent holding the PAYMENT-RESPONSE.transaction of a plain-HTTP merchant
+    // it retried itself. Nothing else is taken: the
     // payment's rail, amount, and merchant are read from Haven's own record,
     // scoped to this agent, exactly like haven_report_x402_outcome.
     payment_id: z.string().min(1),

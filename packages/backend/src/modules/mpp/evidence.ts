@@ -16,6 +16,7 @@
  */
 import {
   attachEvidenceProof,
+  findEvidenceForIntent,
   findIntentEvidenceSource,
   findIntentForEvidenceScoped,
   getIntentSettlementFields,
@@ -36,12 +37,33 @@ import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
 import { observeErc7710Settlement } from '../x402/settlement-observed.js'
+import {
+  isFundedEip3009Payment,
+  observeEip3009MerchantSettlement,
+} from '../x402/eip3009-settlement-evidence.js'
 import { withParties } from '../../openapi/party-model.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
 import { isZeroSettlementTxHash } from '@haven_ai/sdk'
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * #3475: a settlement-report refusal that knows its scheme and why. `message`
+ * is the same marker the plain `Error`s carry, so every existing marker check
+ * still matches; the handler reads `scheme` and `reason` to say what actually
+ * happened instead of the erc7710 wording.
+ */
+export class SettlementReportRefusal extends Error {
+  constructor(
+    marker: 'settlement_unobservable' | 'settlement_unverified',
+    readonly scheme: 'eip3009',
+    readonly reason: string,
+  ) {
+    super(marker)
+    this.name = 'SettlementReportRefusal'
+  }
+}
 
 export type PaymentProofStatus =
   | 'payment_confirmed'
@@ -162,6 +184,12 @@ export interface MachinePaymentEvidenceRow {
    * before #2960 and on the legacy rail, where no such account exists.
    */
   intent_delegate_account_address?: string | null
+  /**
+   * #3475: `payment_intents.machine_metadata->>'merchant_settlement_tx_hash'`,
+   * the eip3009 merchant settlement an agent reported and Haven verified
+   * on-chain (`modules/x402/eip3009-settlement-evidence.ts`). Null until one is.
+   */
+  verified_merchant_settlement_tx_hash?: string | null
   /** #3332: joined from `owner_company_details` on `user_id` — `OWNER_COMPANY_DETAILS_JOIN_COLUMNS`. */
   buyer_legal_name?: string | null
   buyer_country?: string | null
@@ -468,6 +496,42 @@ export async function attachMachinePaymentEvidence(
     payment = reloaded
   }
 
+  // #3475: the eip3009 twin of the seam above. A funded eip3009 payment
+  // reported with a hash that is NOT its funding hash is the agent handing
+  // Haven the merchant's settlement (`PAYMENT-RESPONSE.transaction`), which on
+  // the plain-HTTP path nothing else ever carries back. Verified on-chain and
+  // recorded beside the funding hash, which stays. The row's proof status is
+  // left exactly as it was: a verified settlement proves the merchant pulled
+  // the funds, not that it delivered, and `merchant_leg_reported` reads that
+  // status. So the row is echoed as it stands instead of re-attached.
+  //
+  // Scoped to exactly that payment, so every other payment keeps the gate
+  // order below (`payment_not_confirmed`, then `tx_hash_mismatch`, …).
+  if (observation.outcome === 'not_applicable' && isFundedEip3009Payment(payment, input.txHash)) {
+    // The input gates the attach path applies below, run BEFORE anything is
+    // written, since this branch returns without reaching them.
+    if (railForPayment(payment) !== input.rail) throw new Error('rail_mismatch')
+    if (input.resourceUrl && input.resourceUrl !== resourceUrlForPayment(payment)) {
+      throw new Error('resource_mismatch')
+    }
+    // The base row first: if it cannot exist (no resource URL), refuse before
+    // the hash is committed rather than commit it and answer "not found".
+    const base = await recordMachinePaymentEvidenceBase(payment)
+    if (base.status === 'failed' && base.reason === 'missing_resource_url') throw new Error('resource_missing')
+    if (base.status !== 'recorded') throw new Error(`evidence_base_${base.reason}`)
+    const settled = await observeEip3009MerchantSettlement(payment, input.txHash)
+    if (settled.outcome === 'unverified') {
+      throw new SettlementReportRefusal(
+        settled.retryable ? 'settlement_unobservable' : 'settlement_unverified',
+        'eip3009',
+        settled.reason,
+      )
+    }
+    if (settled.outcome === 'recorded') {
+      return findEvidenceForIntent<MachinePaymentEvidenceRow>(payment.id, input.agentId)
+    }
+  }
+
   if (payment.status !== expectedStatusForPayment(payment) || !payment.tx_hash) {
     throw new Error('payment_not_confirmed')
   }
@@ -610,12 +674,17 @@ export async function reconcileDelegateResidueAfterSettlement(
  * hosted gate uses (a demo-merchant "delivered, not settled" marker, never
  * a real transaction) — applied here so `settlement_tx_hash` never surfaces
  * that placeholder as if it were one.
+ *
+ * #3475: on eip3009, a settlement hash the agent reported and Haven verified
+ * on-chain (`verified_merchant_settlement_tx_hash`) wins over the merchant's
+ * own echo, which is unverified and absent entirely on the plain-HTTP path.
  */
 function deriveReceiptTxHashes(row: {
   tx_hash: string
   rail: string
   settlement_scheme?: string | null
   protocol_receipt_payload: Record<string, unknown> | null
+  verified_merchant_settlement_tx_hash?: string | null
 }): { funding_tx_hash: string | null; settlement_tx_hash: string | null } {
   if (row.settlement_scheme === 'erc7710') {
     return { funding_tx_hash: null, settlement_tx_hash: row.tx_hash }
@@ -631,6 +700,10 @@ function deriveReceiptTxHashes(row: {
     return { funding_tx_hash: null, settlement_tx_hash: row.tx_hash }
   }
 
+  const verified = row.verified_merchant_settlement_tx_hash
+  if (typeof verified === 'string' && TX_HASH_RE.test(verified)) {
+    return { funding_tx_hash: row.tx_hash, settlement_tx_hash: verified }
+  }
   const candidate = row.protocol_receipt_payload?.transaction
   const settlementTxHash =
     typeof candidate === 'string' && TX_HASH_RE.test(candidate) && !isZeroSettlementTxHash(candidate)
@@ -815,6 +888,10 @@ export async function attachEvidenceHandler(
     // transaction is not mined yet; report it again", while 409 says "that
     // transaction does not settle this payment, and reporting it again will
     // not change that". Neither confirmed anything.
+    // #3475: an eip3009 refusal names its reason, and must not repeat the
+    // erc7710 wording: that payment IS confirmed (by its funding), and a
+    // hash already recorded elsewhere does match this payment on-chain.
+    const refusal = err instanceof SettlementReportRefusal ? err : null
     if (marker === 'settlement_unobservable') {
       return {
         statusCode: 503,
@@ -822,6 +899,18 @@ export async function attachEvidenceHandler(
           error:
             'The reported settlement transaction could not be verified on-chain yet — ' +
             'the payment is unchanged; retry once it is mined',
+          ...(refusal ? { reason: refusal.reason } : {}),
+        },
+      }
+    }
+    if (marker === 'settlement_unverified' && refusal) {
+      return {
+        statusCode: 409,
+        body: {
+          error:
+            'The reported settlement transaction was not recorded for this payment — ' +
+            'the payment is unchanged',
+          reason: refusal.reason,
         },
       }
     }
@@ -840,6 +929,12 @@ export async function attachEvidenceHandler(
     }
     if (marker === 'rail_mismatch') {
       return { statusCode: 409, body: { error: 'rail does not match payment intent' } }
+    }
+    if (marker === 'resource_missing') {
+      return {
+        statusCode: 409,
+        body: { error: 'This payment has no resource URL, so no evidence can be recorded for it' },
+      }
     }
     if (marker === 'resource_mismatch') {
       return { statusCode: 409, body: { error: 'resourceUrl does not match payment intent' } }

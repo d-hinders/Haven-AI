@@ -592,9 +592,18 @@ export class MerchantCompletion {
    * every one of those cases the agent may be holding the merchant's own
    * `PAYMENT-RESPONSE.transaction` while Haven has nothing.
    *
+   * #3475: the same call carries an eip3009 merchant settlement. After a
+   * plain-HTTP purchase the agent retried the merchant itself, so the
+   * merchant's `PAYMENT-RESPONSE.transaction` reaches Haven only this way.
+   * The backend verifies the delegate → merchant transfer and records it
+   * beside the funding hash (`eip3009-settlement-evidence.ts`); the payment
+   * itself was already confirmed by funding.
+   *
    * Reuses `reportEvidence` — same backend seam
-   * (`POST /machine-payments/evidence` → `observeErc7710Settlement`,
-   * fail-closed — see `settlement-observed.ts`), same three-outcome contract.
+   * (`POST /machine-payments/evidence` → `observeErc7710Settlement`, or
+   * `observeEip3009MerchantSettlement` on eip3009, both fail-closed — see
+   * `settlement-observed.ts` / `eip3009-settlement-evidence.ts`), same
+   * three-outcome contract.
    * `resourceUrl` and `merchantStatus` are omitted: this call has no fresh
    * merchant HTTP exchange to read either from, and both are optional at the
    * backend (see the parameter doc on `reportEvidence`).

@@ -163,8 +163,15 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * 22,586 UTF-8 bytes; the absolute pin moves to that measured value,
  * shrink-only from here. The mean pin stays HELD at 875: 22,586 / 26 =
  * 868.69, still below the ceiling.
+ *
+ * **Shrunk — #3475 (2026-09-29).** `haven_report_settlement_evidence` now
+ * also takes an eip3009 merchant settlement, so its shared description drops
+ * the "an erc7710 payment's" scoping and "confirm the payment" (an eip3009
+ * payment is already confirmed; the hash is recorded beside it): −11 UTF-8
+ * bytes. Measured total 22,575 across 26 tools; the absolute pin follows it
+ * down. The mean pin stays HELD at 875: 22,575 / 26 = 868.27.
  */
-const MAX_TOTAL_BYTES = 22_586
+const MAX_TOTAL_BYTES = 22_575
 // Mean pin: HELD at the #3329 ceiling (21,000 / 24 = 875.0), not re-derived —
 // the composed surface's actual mean (22,173 / 26 = 852.81) already sits
 // BELOW the ceiling, so the held value is the stricter pin, and re-deriving

@@ -237,9 +237,9 @@ export const toolDescriptions = {
   },
   reportSettlementEvidence: {
     summary:
-      'Report an erc7710 payment\'s real settlement transaction hash so Haven can verify it on-chain and confirm the payment.',
+      'Report a payment\'s real merchant settlement transaction hash so Haven can verify it on-chain and record it.',
     behavior:
-      'Pass payment_id and settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Haven verifies on-chain before confirming; a zero, mismatched, or reverted hash is refused. Your own payments only.',
+      'Pass payment_id and settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Haven verifies on-chain before recording; a zero, mismatched, or reverted hash is refused. Your own payments only.',
     nextActionGuidance:
       'code DELIVERED_UNSETTLED: did not verify, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.',
   },

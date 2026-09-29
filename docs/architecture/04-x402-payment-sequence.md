@@ -1378,14 +1378,18 @@ in the SDK, the same spelling `AgentPurchaseSummary` already uses):
 `funding_tx_hash` is `tx_hash` on eip3009 (and on scheme-less retired-x402
 rows) and `null` on erc7710 and on scheme-less retired mpp-rail rows (one
 direct account → merchant transaction); `settlement_tx_hash` is `tx_hash`
-itself on erc7710 and on those retired mpp rows, and on eip3009 is
+itself on erc7710 and on those retired mpp rows. On eip3009 it is, first,
+the merchant settlement an agent reported and Haven verified on-chain (#3475,
+`machine_metadata.merchant_settlement_tx_hash`: a delegate → merchant
+Transfer of exactly the amount, mined after this payment's funding, through
+`haven_report_settlement_evidence`); otherwise
 `protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed
-32-byte hash, else `null` — the merchant has not reported a settlement, or
+32-byte hash; else `null` — the merchant has not reported a settlement, or
 reported the zero-hash "delivered, not settled" marker `isZeroSettlementTxHash`
-recognizes elsewhere in the SDK. The trust level differs: on erc7710 Haven
-verified the settlement hash on-chain before the receipt existed; on eip3009
-it is the merchant's claim as relayed in `PAYMENT-RESPONSE`, not verified
-on-chain by Haven — cite it as such. `tx_hash` /
+recognizes elsewhere in the SDK. The trust level differs: on erc7710, and on
+eip3009 when the hash is the verified report, Haven verified it on-chain; the
+eip3009 fallback is the merchant's claim as relayed in `PAYMENT-RESPONSE`, not
+verified on-chain by Haven — cite it as such. `tx_hash` /
 `txHash` are unchanged and kept for wire compatibility, marked deprecated in
 their OpenAPI/SDK description only.
 

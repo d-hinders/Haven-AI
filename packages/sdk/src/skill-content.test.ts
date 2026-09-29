@@ -373,3 +373,16 @@ describe('onboarding and setup section (#2537)', () => {
     expect(section).toMatch(/cannot approve a\s+budget, rotate a key, change a signer or move money/)
   })
 })
+
+describe('plain-HTTP settlement report (#3475)', () => {
+  it("tells the agent to hand the merchant's PAYMENT-RESPONSE transaction to haven_report_settlement_evidence", () => {
+    const start = HAVEN_SKILL_MD.indexOf('**Direct transfer / non-MCP paywall:**')
+    const end = HAVEN_SKILL_MD.indexOf('**Catalog tool arguments:**')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const paragraph = HAVEN_SKILL_MD.slice(start, end)
+    expect(paragraph).toContain('PAYMENT-RESPONSE')
+    expect(paragraph).toContain('mcp__haven__haven_report_settlement_evidence')
+    expect(paragraph).toContain('settlement_tx_hash')
+  })
+})

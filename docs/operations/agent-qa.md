@@ -852,7 +852,7 @@ printed in the job log rather than silently dropped.
 
 This exists because the exemption's absence made the gate unusable in the one
 place it is most needed. Every release bump rewrites `SIGNER_VERSION` into
-`packages/signer/src/server.ts` and the version field in
+the signer package's source (its `tools.ts` declaration since #3454) and the version field in
 `packages/signer/package.json` — both money-path — and, since #2300 widened the
 perimeter to `packages/mcp-server/src/**`, `HOSTED_SERVER_VERSION` into
 `packages/mcp-server/src/server.ts` on the same footing; always *after* the last

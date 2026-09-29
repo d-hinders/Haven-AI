@@ -236,7 +236,7 @@ git add packages/sdk/package.json packages/signer/package.json \
         packages/mcp/package.json packages/mcp/src/server.ts \
         packages/connect/package.json packages/connect/src/runtime-manifest.ts \
         packages/cli/package.json packages/cli/src/commands.ts \
-        packages/signer/src/server.ts packages/mcp-server/package.json \
+        packages/signer/src/tools.ts packages/mcp-server/package.json \
         packages/mcp-server/src/server.ts packages/connect/src/runtime.ts \
         packages/sdk/src/client-identity.ts \
         docs/operations/mcp-runtime-compatibility.md \

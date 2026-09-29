@@ -78,6 +78,7 @@ import {
   renderClientReleaseDataFile,
 } from './release-client-data.mjs'
 import { snapshotModeViolation } from './release-snapshot-version.mjs'
+import { SOURCE_VERSION_CONSTANT_FILES, versionConstantPattern } from './release-version-constants.mjs'
 import { backwardsVersionViolation, resolveSemver } from './release-version-order.mjs'
 
 const execAsync = promisify(execFile)
@@ -148,14 +149,11 @@ const CONNECTOR_CHANNEL_TS = join(ROOT, ...CONNECTOR_CHANNEL_FILE.split('/'))
 // versions (MCP/server handshake `version` field, connector `--version`),
 // not dependency ranges — but they drift on every release if not rewritten
 // here, so the bump is only atomic if the script owns them all.
-const SOURCE_VERSION_CONSTANTS = [
-  { name: 'SIGNER_VERSION',        file: join(ROOT, 'packages', 'signer', 'src', 'server.ts'),     label: 'packages/signer/src/server.ts' },
-  { name: 'HOSTED_SERVER_VERSION', file: join(ROOT, 'packages', 'mcp-server', 'src', 'server.ts'), label: 'packages/mcp-server/src/server.ts' },
-  { name: 'CONNECTOR_VERSION',     file: join(ROOT, 'packages', 'connect', 'src', 'runtime.ts'),   label: 'packages/connect/src/runtime.ts' },
-  { name: 'CLI_VERSION',           file: join(ROOT, 'packages', 'cli', 'src', 'commands.ts'),      label: 'packages/cli/src/commands.ts' },
-  // #3303: the SDK's own `X-Haven-Client` identity for a bare embedder.
-  { name: 'SDK_VERSION',           file: join(ROOT, 'packages', 'sdk', 'src', 'client-identity.ts'), label: 'packages/sdk/src/client-identity.ts' },
-]
+const SOURCE_VERSION_CONSTANTS = SOURCE_VERSION_CONSTANT_FILES.map(([name, rel]) => ({
+  name,
+  file: join(ROOT, ...rel.split('/')),
+  label: rel,
+}))
 
 // ── Semver helpers ────────────────────────────────────────────────────────────
 
@@ -233,7 +231,7 @@ async function updateDepPin(packageName, depName, newVersion) {
 async function updateSourceVersionConstant({ name, file, label }, newVersion) {
   const source = await readFile(file, 'utf8')
   const updated = source.replace(
-    new RegExp(`^(export const ${name}\\s*=\\s*)(['"]).*?\\2`, 'm'),
+    versionConstantPattern(name),
     `$1$2${newVersion}$2`,
   )
   if (updated === source) {

@@ -146,7 +146,7 @@ jobs:
       # a release diff that must be nothing but version strings, and a guard
       # nobody tests can start passing vacuously.
       - name: Release-bump lockfile self-test
-        run: node --test scripts/release-bump.test.mjs
+        run: node --test scripts/release-bump.test.mjs scripts/release-version-constants.test.mjs
 
       # #2724: the release-scope measurement runs on a release-cutter's machine
       # for the same reason the bump does, and gets its self-test here for the

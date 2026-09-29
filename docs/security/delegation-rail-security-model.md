@@ -28,6 +28,7 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/infra/repositories/agent-rekeys.ts
+  - packages/backend/src/infra/transaction.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/infra/repositories/agent-organizations.ts
   - packages/backend/src/db/migrations/094_agent_organizations.ts
@@ -320,8 +321,12 @@ successor re-key is the one actually in flight (#3439).
 > `markIssued`, so a second call whose `nextDelegationVersion` read landed
 > after the first call's own insert but before that first call's
 > `markIssued` still passed the same re-check and landed a genuine duplicate
-> `pending` row (reproduced on real Postgres: dev 23/40 trials, #3439's head
-> 11/40). The issue route now runs its whole piece-build loop plus
+> `pending` row — per the #3450 spec review's uncommitted scratch test (40
+> staggered trials per tree, 0–19ms stagger), dev 23/40 and #3439's head
+> 11/40; reproduced deterministically (not statistically) in the shipped
+> suite by `agent-rekey-issue-concurrent.test.ts`, which pins the exact
+> interleaving with a control point rather than relying on timing luck. The
+> issue route now runs its whole piece-build loop plus
 > `markIssued` inside ONE transaction
 > (`withRekeyIssueTransaction`/`withTransaction`), so the first call's insert
 > takes the `agents` row lock and holds it — together with every lock and

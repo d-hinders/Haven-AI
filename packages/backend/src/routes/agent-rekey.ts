@@ -1095,7 +1095,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
             error: 'carry_refused',
             code: err.code,
             delegation_hash: err.delegationHash,
-            detail: err.message,
+            detail: err.detail,
           })
         }
         if (err instanceof IssueBuildFailedError) {

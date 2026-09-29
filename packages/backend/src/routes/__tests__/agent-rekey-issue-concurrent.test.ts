@@ -95,6 +95,46 @@ const FAKE_SIG = ('0x' + 'ab'.repeat(65)) as `0x${string}`
 
 let seq = 0
 
+/**
+ * Poll for a session genuinely BLOCKED on a lock rather than sleeping a fixed
+ * duration (#3450 round-1 review F2: a fixed `setTimeout(20)` was flaky under
+ * load — proven by re-running this test with the second call's own `findRekey`
+ * read artificially delayed 100ms, which reproduced the failure on the FIXED
+ * tree every time with the old fixed sleep, and passed every time with this
+ * poll).
+ *
+ * `pg_stat_activity.wait_event_type = 'Lock'` — not a `pg_locks` join on a
+ * specific relation/locktype — because a `SELECT ... FOR UPDATE` takes both a
+ * relation-level `RowShareLock` (always granted, harmless, present even with
+ * no contention at all) and a tuple-level lock (the one that actually blocks
+ * a second waiter); guessing which `pg_locks` row means "this backend is
+ * stuck" is exactly the kind of Postgres-internals assumption this fix is
+ * meant to remove. `wait_event_type = 'Lock'` is true precisely when a
+ * backend is parked waiting for ANY lock to be released, independent of lock
+ * type or shape.
+ *
+ * Returns `true` if it saw contention, `false` if the bounded timeout elapsed
+ * first — the pre-#3450 trees never block here at all, since nothing holds
+ * the transaction open across pieces, so the caller proceeds either way; see
+ * the call site.
+ */
+async function waitForAgentsRowLockContention(timeoutMs = 2_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    // A backend genuinely blocked on ANY lock reports `wait_event_type =
+    // 'Lock'` in `pg_stat_activity` — a more direct signal than joining
+    // `pg_locks` on a specific relation/locktype, which has to guess the
+    // exact lock shape `SELECT ... FOR UPDATE` takes.
+    const { rows } = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+    )
+    if (rows[0].n > 0) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((r) => setTimeout(r, 5))
+  }
+}
+
 describeDb('two concurrent issue calls on one re-key (#3450)', () => {
   let app: FastifyInstance
 
@@ -199,12 +239,17 @@ describeDb('two concurrent issue calls on one re-key (#3450)', () => {
       await firstInsertStartedPromise
 
       const secondCall = app.inject({ method: 'POST', url: issuePath, headers, payload: {} })
-      // Give the second call a moment to actually reach Postgres and (under
-      // the fix) block on the row lock the paused call is holding — not load
-      // bearing for correctness (real row locks serialise regardless of exact
-      // JS scheduling), but it keeps the interleaving close to the AC's
-      // wording.
-      await new Promise((r) => setTimeout(r, 20))
+      // Poll for genuine lock contention rather than a fixed sleep (see
+      // `waitForAgentsRowLockContention`'s own doc comment for the round-1
+      // review finding this replaces). On the FIXED tree, the second call
+      // blocks on the exact row lock the paused first call is holding
+      // (`lockOwnedAgentForRekeyDelegation`'s `SELECT ... FOR UPDATE`), so
+      // this returns almost immediately. On a PRE-FIX tree nothing blocks —
+      // the second call races straight through — so this returns once the
+      // bounded timeout elapses and the test proceeds regardless; the poll
+      // only removes an arbitrary fixed delay, it does not require blocking
+      // to occur for the test to be meaningful on that tree too.
+      await waitForAgentsRowLockContention()
       resumeWinner()
 
       const [firstRes, secondRes] = await Promise.all([firstCall, secondCall])
@@ -223,9 +268,11 @@ describeDb('two concurrent issue calls on one re-key (#3450)', () => {
       expect(success).toBeDefined()
       expect(failure).toBeDefined()
       expect(failure!.statusCode).toBe(409)
-      expect(failure!.json().error).toBe(
-        'This re-key can no longer receive new budget delegations',
-      )
+      // Whole body, not just `error` (round-1 review F1: a partial check on
+      // one field can pass while another field in the same reply is wrong).
+      expect(failure!.json()).toEqual({
+        error: 'This re-key can no longer receive new budget delegations',
+      })
 
       const delegations = success!.json().delegations as Array<{
         delegation_hash: string

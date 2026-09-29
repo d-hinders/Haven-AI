@@ -241,7 +241,7 @@ export async function insertRekeyDelegation(
     // of THIS re-key serializes against this transaction rather than racing
     // it.
     //
-    // #3450 (closed): this re-check ALONE did not stop two CONCURRENT issue
+    // Closed by this change (#3450): this re-check ALONE did not stop two CONCURRENT issue
     // calls on one re-key from both inserting — the stage stays `metered`
     // until one of them reaches `markIssued`, so a loser that read its
     // version after the winner's first insert committed, but before the
@@ -460,13 +460,16 @@ export async function markIssued(
  * The callback runs business logic (`planCarry`, `buildBudgetDelegation`,
  * hash computation) interleaved with the DB calls, which is genuinely a
  * route-layer concern — unlike every other transaction in this file, which
- * wraps DB statements only. That is the deliberate trade #3450 makes: the
- * alternative (moving the carry-planning and delegation-building calls into
- * this repository module) would cross the module boundary the file header
- * describes the other way, pulling `rails/delegation-policy.ts` and
- * `modules/agents/rekey-carry.ts` into `infra/`. A transaction boundary that
- * must span business logic AND storage is the one case #1698's "no SQL in
- * the route" rule cannot keep both properties at once; this function is the
+ * wraps DB statements only. There is precedent for exactly this shape:
+ * `delegation-budgets.ts`'s `withDelegationBuildSlotLock` already hands its
+ * caller a query-only view of an open transaction so the caller's own
+ * business logic (the reuse read, the version read, the insert) can run
+ * inside one lock scope without those calls living in `infra/`. This
+ * function is the same move for the issue route's longer, multi-piece loop.
+ * The alternative (moving the carry-planning and delegation-building calls
+ * into this repository module instead) would cross the module boundary the
+ * file header describes the other way, pulling `rails/delegation-policy.ts`
+ * and `modules/agents/rekey-carry.ts` into `infra/`; this function is the
  * smallest surface that gives the route the transaction while keeping every
  * actual SQL statement in this file, reachable from the real-DB harness.
  */

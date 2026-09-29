@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+- **`haven_pay_x402`'s paid retry carries the buyer tax declaration (#3427).** The local MCP reaches the merchant through the SDK's `fetch`, `payX402Quote` and `resumeX402Payment` paths, so when the owner opted the agent in (#3426) the paid EIP-3009 retry now also carries `X-Tax-Declaration: <base64url(JSON)>` — signed locally by the agent's own delegate key (wg-tax #5 §2.2), sent to the seller only, and omitted on the erc7710 scheme, the first unpaid request, a "not available" content answer, or a 404 from the content endpoint (older backend). Tool descriptions for `haven_pay_x402` and `haven_resume_x402_payment` document the new header. No update needed otherwise: without the opt-in the wire is unchanged.
+
 ## 0.7.0-alpha.0 — 2026-09-29
 
 ### Added

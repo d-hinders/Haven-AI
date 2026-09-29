@@ -30,6 +30,22 @@ import type { X402PaymentOption, X402PaymentRequired } from './types.js'
 
 const DELEGATE_KEY = `0x${'01'.repeat(32)}`
 const DELEGATE = addressFromKey(DELEGATE_KEY) as Address
+
+/**
+ * #3427: the agent identity the paid-retry tax-declaration resolution reads
+ * (GET /machine-payments/agent). One shape shared by every fetch chain in
+ * this file that runs a paid retry.
+ */
+const AGENT_RESPONSE = {
+  id: 'agent_3375',
+  name: 'pin agent',
+  status: 'active',
+  account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+  delegate_address: DELEGATE,
+  chain_id: 8453,
+  execution_rail: 'delegation',
+}
+
 const OWN_ACCOUNT = deriveDelegateAccountAddress(DELEGATE)
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as Address
 const ATTACKER = '0x7777777777777777777777777777777777777777' as Address
@@ -171,6 +187,11 @@ describe('payX402Quote forwards taskBudgetId to /x402 (#3378)', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       payment_id: 'pay_3378', status: 'confirmed', tx_hash: `0x${'ab'.repeat(32)}`, chain_id: 8453,
     }), { status: 200 }))
+    // 3b. #3427: the paid-retry tax-declaration resolution reads the agent id,
+    // then #3426's content endpoint. Unavailable here — these tests pin the
+    // /x402 body, not the header.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(AGENT_RESPONSE), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 }))
     // 4. The merchant's paid answer.
     fetchMock.mockResolvedValueOnce(new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
 

@@ -1621,6 +1621,28 @@ signer imports:
   (`assertOwnSubBudgetCloseUserOp`), byte-shape-identical to the task
   budget's.
 
+- **The x402 buyer tax declaration (#3427)** — a new EIP-712 shape, signed
+  in-process by the SDK's `HavenClient` through a builder on the
+  `@haven_ai/sdk/edge` entry beside the other shared signing guards
+  (`tax-declaration.ts`; `@haven_ai/sdk` does not depend on
+  `@haven_ai/signer`, so the signer imports the guard with everything else).
+  The declaration is attestation only — it moves no funds, authorises nothing,
+  and rides the paid EIP-3009 merchant retry to the SELLER as
+  `X-Tax-Declaration: <base64url(JSON)>` (never to Haven, never in the payment
+  payload, never on erc7710). The local builder assembles the typed data over
+  exactly the §2.1 fields; content arriving with `principalId`,
+  `principalAttributionHash` or any unknown field is REFUSED
+  (`TAX_DECLARATION_REFUSED`), never stripped and signed — the same
+  locally-built-shape discipline as the funding leg, with the chain scoped
+  from the accepted payment option's `network`, never from configuration, and
+  the provisional domain/types pinned by a fixed JCS-vector test. Because the
+  declaration self-attributes to the same delegate EOA that signs the payment
+  authorization (wg-tax #5 §2.2 signer-is-payer), it cannot widen what the key
+  may do; its only power is the owner's own onboarding data attested under the
+  owner's own opt-in. The hosted, keyless `completeX402MerchantCall`
+  construction binds neither the resolver nor a delegate key, so it is
+  structurally header-free.
+
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
 Haven's binding key declared anything else. Every refusal on the shape checks,
 the settlement child's (malformed children included), is

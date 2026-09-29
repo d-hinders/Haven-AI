@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **`TASK_SIGN_CONTEXT_VERSION` (#3419).** The version of the task-budget sign context (`GET /task-budgets/:id/sign-context`), exported from the edge entry beside `DIRECT_SIGN_CONTEXT_VERSION`. Single source for the number the backend emits, the signer's `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` enforces, and the task-budget handoffs' `signer_compatibility.task_sign_context_version` reports. Additive; no behavior change.
+
 ### Fixed
 
 - **A replayed key whose erc7710 payment already settled is reported as settled, not as a 500 (#3417).** `prepareX402Erc7710()` now throws the new typed `X402Erc7710AlreadySettledError` (code `PAYMENT_ALREADY_SETTLED`, with `paymentId` and `txHash`) when `POST /x402` replays a key whose confirmed payment pays this request's merchant for its resource. A confirmed payment under the key that pays anyone else, such as an EIP-3009 funding leg, is refused with a 409 `HavenApiError` ("use a new idempotency key"). Before, both threw a `HavenApiError` 500 saying the backend "did not return an erc7710 settlement child". Nothing is signed on any of these answers. A confirmed answer without a transaction hash still gets the scheme refusal. (`settleX402Erc7710()` shares the check, but its typed options carry no idempotency key.) The new error extends `HavenError`, not `HavenApiError`: code that matched this case by the old message, by `instanceof HavenApiError` or by status 500 must switch to the new class. No update needed otherwise.

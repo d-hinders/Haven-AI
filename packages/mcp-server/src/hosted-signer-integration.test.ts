@@ -51,6 +51,7 @@ import {
   SIGNER_CAPABILITY_KEY,
   deriveDelegateAccountAddress,
 } from '@haven_ai/signer'
+import { CLIENT_RELEASES } from '@haven_ai/core'
 import directPaymentUserOpFixture from '../../sdk/src/__fixtures__/direct-payment-userop.json' with { type: 'json' }
 
 /**
@@ -88,7 +89,12 @@ function rebuildRealFixtureForSender(newSender: `0x${string}`) {
 }
 import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
 import { createHostedHavenClient } from './server.js'
-import { directSignerCompatibilityNotice } from './tools/support/signer-compat.js'
+import {
+  directSignerCompatibilityNotice,
+  taskSignerCompatibilityNotice,
+  TASK_BUDGET_MIN_SIGNER_VERSION,
+} from './tools/support/signer-compat.js'
+import { hostedConnectorUpgradeCommand } from './connector-channel.js'
 
 // ── Test keys (well-known Hardhat accounts, never used for real funds) ────────
 // Hosted MCP delegate key is intentionally NOT included — simulates keyless server.
@@ -1243,5 +1249,90 @@ describe('#2291 — the emitted guidance chain is executable', () => {
     })
     expect(oldGuidanceStep.success).toBe(false)
     expect(JSON.stringify(oldGuidanceStep)).toContain('already used')
+  })
+})
+
+/**
+ * #3419 — cross-package pins for the task-budget old-signer recovery notice.
+ *
+ * The hosted handoff (`taskBudgetSignHandoff`) reports data an OLD signer is
+ * supposed to match on; the things it reports live in three other packages
+ * (the signer's supported versions, the historic refusals the trigger
+ * matches, the release record the min version names). Each pin here fails
+ * when its source moves, so the notice can never quietly become a lie:
+ *
+ * - the trigger substring appears VERBATIM in both frozen historic refusal
+ *   strings (fixtures quoted exactly as the release commits emitted them,
+ *   each with provenance) — rewording either historic message, or rewording
+ *   the notice so it no longer matches them, turns red;
+ * - `task_sign_context_version` is a version the signer package actually
+ *   supports;
+ * - `fallback` names the budget release and this deployment's upgrade
+ *   command;
+ * - `min_signer_version` is the ONE exported constant, tied to the first
+ *   `@haven_ai/signer` release note that names `task_budget_id`;
+ * - the local `@haven_ai/mcp` builder agrees field-for-field (same SDK
+ *   constant), so the two surfaces cannot drift.
+ */
+describe('#3419 — the task-budget notice is pinned to the packages it describes', () => {
+  // 0.4.0-alpha.0 (release commit 9c548158):packages/signer/src/tools.ts:495 —
+  // frozen verbatim. The pre-task-budget haven_sign threw exactly this when
+  // the SDK had stripped the unknown task_budget_id key.
+  const HISTORIC_040_REFUSAL = 'Pass payment_id (preferred for delegation-rail x402) or payload_hash.'
+  // 0.5.0-alpha.0 / 0.5.0-alpha.1 (release commit f6bd8a63):packages/signer/src/tools.ts:684 —
+  // frozen verbatim. Same path, widened wording.
+  const HISTORIC_050_REFUSAL =
+    'Pass payment_id (preferred for delegation-rail x402 or direct payments) or payload_hash.'
+
+  it('the trigger matches BOTH historic refusals verbatim (fixtures pinned, provenance in comments)', () => {
+    // The fixtures themselves are the refusal strings the old signers emit —
+    // mutate either one here and the includes() below stops pinning reality.
+    expect(HISTORIC_040_REFUSAL).toContain('Pass payment_id (preferred for delegation-rail x402')
+    expect(HISTORIC_050_REFUSAL).toContain('Pass payment_id (preferred for delegation-rail x402')
+    // The notice carries the trigger in both its surfaces.
+    const notice = taskSignerCompatibilityNotice()
+    expect(notice.check).toContain('Pass payment_id (preferred for delegation-rail x402')
+    expect(notice.fallback).toContain('Pass payment_id (preferred for delegation-rail x402')
+    // And the trigger is EXACTLY the common prefix of both historic strings —
+    // an old signer's answer starts with it, a current signer's task call
+    // never produces it (its answers are signed results or named refusals).
+    expect(HISTORIC_040_REFUSAL.startsWith('Pass payment_id (preferred for delegation-rail x402')).toBe(true)
+    expect(HISTORIC_050_REFUSAL.startsWith('Pass payment_id (preferred for delegation-rail x402')).toBe(true)
+    expect(notice.fallback.indexOf(HISTORIC_040_REFUSAL)).toBe(-1) // the trigger is the PREFIX, not the whole 0.4 string
+  })
+
+  it('task_sign_context_version is in the signer package SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS', () => {
+    const notice = taskSignerCompatibilityNotice()
+    const supported = signerCompatibility().task_sign_context_versions
+    expect(supported).toContain(notice.task_sign_context_version)
+  })
+
+  it('fallback names the budget release, the upgrade command and the reopen — and no relay fallback', () => {
+    const notice = taskSignerCompatibilityNotice()
+    expect(notice.fallback).toContain('haven_close_task_budget')
+    expect(notice.fallback).toContain(hostedConnectorUpgradeCommand())
+    expect(notice.fallback).toContain('open the budget again')
+    // The #3277-style relay is deliberately absent: a task-budget context is
+    // an eip712_delegation payload the old allowlists refuse.
+    expect(notice.fallback).toContain('no relay fallback')
+    expect(notice.fallback).not.toContain('typed_data_b64')
+  })
+
+  it('min_signer_version is the exported constant, tied to the first release note naming task_budget_id', () => {
+    const signerReleases = CLIENT_RELEASES['@haven_ai/signer' as keyof typeof CLIENT_RELEASES]
+    expect(signerReleases).toBeDefined()
+    const firstNoteNamingTaskBudgetId = signerReleases.notes.find((n) => n.summary.includes('task_budget_id'))
+    expect(firstNoteNamingTaskBudgetId, 'the release record must still name the task_budget_id form').toBeDefined()
+    expect(firstNoteNamingTaskBudgetId!.version).toBe(TASK_BUDGET_MIN_SIGNER_VERSION)
+    const notice = taskSignerCompatibilityNotice()
+    expect(notice.min_signer_version).toBe(TASK_BUDGET_MIN_SIGNER_VERSION)
+    expect(notice.signer_capability).toBe(SIGNER_CAPABILITY_KEY)
+  })
+
+  it('the local @haven_ai/mcp builder agrees field-for-field with the hosted one', async () => {
+    const { taskSignerCompatibilityNotice: localNotice } = await import('@haven_ai/mcp')
+    const hosted = taskSignerCompatibilityNotice()
+    const local = localNotice()
+    expect(local).toEqual(hosted)
   })
 })

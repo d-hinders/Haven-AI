@@ -27,6 +27,7 @@ import {
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
+import { taskSignerCompatibilityNotice } from './signer-compat.js'
 import { z } from 'zod/v3'
 
 const headersSchema = z.record(z.string(), z.string()).optional()
@@ -96,6 +97,12 @@ export const toolSchemas = {
     idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
+    /**
+     * #3330: spend against an open sub-budget this agent HOLDS (it is the
+     * sub-agent B) instead of the agent's own budget. Mutually exclusive
+     * with task_budget_id — the backend refuses a body naming both.
+     */
+    sub_budget_id: z.string().min(1).optional(),
   },
   haven_pay_mcp_tool: {
     merchant_url: z.string().url(),
@@ -121,6 +128,8 @@ export const toolSchemas = {
     idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
+    /** #3330: spend against an open sub-budget this agent holds (it is sub-agent B). Mutually exclusive with task_budget_id. */
+    sub_budget_id: z.string().min(1).optional(),
   },
   haven_pay_x402: {
     url: z.string().url(),
@@ -132,6 +141,8 @@ export const toolSchemas = {
     idempotencyKey: z.string().optional().describe('REMOVED (#3411): refused — send idempotency_key'),
     /** #3329: spend against an open task budget instead of the agent's period budget. */
     task_budget_id: z.string().min(1).optional(),
+    /** #3330: spend against an open sub-budget this agent holds (it is sub-agent B). Mutually exclusive with task_budget_id. */
+    sub_budget_id: z.string().min(1).optional(),
   },
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
@@ -337,6 +348,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
             // #3329: spend against an open task budget instead of the
             // agent's period budget, when the caller names one.
             ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
+            // #3330: spend through a sub-budget this agent holds (it is
+            // sub-agent B). Exactly one of the two ids, never both.
+            ...(typeof args.sub_budget_id === 'string' ? { subBudgetId: args.sub_budget_id } : {}),
           })
           return {
             payment_id: result.paymentId,
@@ -484,6 +498,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
         const response = await haven.payX402Quote(args.quote as X402Quote, {
           idempotencyKey: args.resolvedIdempotencyKey,
           ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
+          ...(typeof args.sub_budget_id === 'string' ? { subBudgetId: args.sub_budget_id } : {}),
         })
         return responsePayload(response)
       }, warnings)
@@ -497,6 +512,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
         const response = await haven.fetch(args.url, requestInit(args), {
           idempotencyKey: args.resolvedIdempotencyKey,
           ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
+          ...(typeof args.sub_budget_id === 'string' ? { subBudgetId: args.sub_budget_id } : {}),
         })
         return responsePayload(response)
       }, warnings)
@@ -639,11 +655,16 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           recipientAddress: typeof args.recipient === 'string' ? args.recipient : undefined,
           label: typeof args.label === 'string' ? args.label : undefined,
         })
+        // #3419: the same recovery notice the hosted task-budget handoffs
+        // carry (same builder, the SDK's TASK_SIGN_CONTEXT_VERSION) — an old
+        // signer strips the unknown task_budget_id key exactly the same way
+        // on the local surface.
         return {
           task_budget: result.taskBudget,
           next_action: 'sign',
           next_tool: 'mcp__haven-signer__haven_sign',
           next_arguments: { task_budget_id: result.taskBudget.id },
+          signer_compatibility: taskSignerCompatibilityNotice(),
         }
       })
     },
@@ -655,11 +676,14 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
         if (result.status === 'closed') {
           return { task_budget: result.taskBudget, status: 'closed' as const }
         }
+        // #3419: same notice as the open handoff above — this result also
+        // hands the agent to haven_sign { task_budget_id }.
         return {
           task_budget: result.taskBudget,
           next_action: 'sign',
           next_tool: 'mcp__haven-signer__haven_sign',
           next_arguments: { task_budget_id: args.task_budget_id },
+          signer_compatibility: taskSignerCompatibilityNotice(),
         }
       })
     },

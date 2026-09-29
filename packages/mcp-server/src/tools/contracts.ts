@@ -208,6 +208,10 @@ export const toolSchemas = {
     // #3329: spend against an open task budget instead of the agent's
     // period budget.
     task_budget_id: z.string().min(1).optional(),
+    // #3330: spend against an open sub-budget this agent HOLDS (it is the
+    // sub-agent B). Mutually exclusive with task_budget_id — the backend
+    // refuses a body naming both.
+    sub_budget_id: z.string().min(1).optional(),
   },
   haven_pay: {
     token: z.string().min(1),
@@ -217,6 +221,9 @@ export const toolSchemas = {
     // #3329: spend against an open task budget instead of the agent's
     // period budget.
     task_budget_id: z.string().min(1).optional(),
+    // #3330: spend against an open sub-budget this agent holds (it is
+    // sub-agent B). Mutually exclusive with task_budget_id.
+    sub_budget_id: z.string().min(1).optional(),
   },
   haven_submit: {
     // #3329: exactly one of payment_id / task_budget_id — never both, never
@@ -1161,14 +1168,16 @@ const OPEN_TASK_BUDGET_DESCRIPTION = [
   'Pass max_amount_human (whole tokens), ttl_minutes (1-1440), optional recipient (pins',
   'every payment to one address; x402 then only by direct settlement), label, token (default',
   'USDC). Returns { task_budget, sign_data, next_action } — sign, then relay with haven_submit',
-  '(task_budget_id). Over-cap, late or wrong-recipient spend is declined; nothing is queued.',
+  '(task_budget_id); signer_compatibility carries the recovery route if the signer predates',
+  'task budgets. Over-cap, late or wrong-recipient spend is declined; nothing is queued.',
 ].join(' ')
 
 const CLOSE_TASK_BUDGET_DESCRIPTION = [
   'End a task budget early, releasing its unspent cap back to the agent\'s own budget.',
   'Pass task_budget_id. A never-signed or already-expired budget ends immediately with',
   '{ task_budget, status: "closed" }; otherwise returns { task_budget, sign_data, next_action } —',
-  'sign, then relay with haven_submit (task_budget_id).',
+  'sign, then relay with haven_submit (task_budget_id); signer_compatibility carries the',
+  'recovery route if the signer predates task budgets.',
 ].join(' ')
 
 const CHECK_FUNDS_DESCRIPTION = [

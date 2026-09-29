@@ -5,6 +5,7 @@ import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
+import { findOpenGrantsForAgent, type AgentParentSubBudget } from '../infra/repositories/sub-budgets.js'
 import {
   handleGetAllowances,
   handleBalanceCoverage,
@@ -66,6 +67,20 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       }
     }
 
+    // #3330: this agent's OPEN sub-budget grants — additive only. When agent
+    // A re-delegated a narrower budget to THIS agent (B), B learns its parent
+    // agent and the effective (narrower) limits here; an agent holding no
+    // grants gets an empty array, and every pre-existing field is unchanged.
+    // A read failure degrades to an empty array rather than failing the
+    // identity read — the same reconciliation-metadata-not-authority rule the
+    // delegate-account derivation above follows.
+    let parent_sub_budgets: AgentParentSubBudget[] = []
+    try {
+      parent_sub_budgets = await findOpenGrantsForAgent(agent.id)
+    } catch {
+      parent_sub_budgets = []
+    }
+
     return ({
       id: agent.id,
       name: agent.name,
@@ -86,6 +101,20 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       // reporting only, same two-value bucketing handleGetAllowances already
       // branches on below.
       execution_rail: agentExecutionRailLabel(agent.execution_rail),
+      // #3330 (additive only): the sub-budget grants this agent holds — each
+      // names its parent agent and the effective (narrower) limits. Empty
+      // unless agent A actually re-delegated to this agent.
+      parent_sub_budgets: parent_sub_budgets.map((g) => ({
+        sub_budget_id: g.sub_budget_id,
+        parent_agent_id: g.parent_agent_id,
+        parent_agent_name: g.parent_agent_name,
+        token_address: g.token_address,
+        recipient_address: g.recipient_address,
+        period_amount_atomic: g.period_amount_atomic,
+        expires_at: Number(g.expires_at),
+        status: g.status,
+        is_expired: g.is_expired,
+      })),
     })
   })
 

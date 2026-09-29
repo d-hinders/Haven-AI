@@ -128,5 +128,11 @@ export function signerInstructions(): string {
     'refusal also carries the next-step family: next_tool_name + next_tool_server_role when a',
     'hosted tool follows (resolve the role against your own server names), else',
     'next_tool_omitted_reason saying why not.',
+    '',
+    'An undeclared top-level argument is refused, not stripped: haven_sign answers',
+    'UNSUPPORTED_ARGUMENT with unknown_arguments, signer_version and fallback (the update',
+    'command) instead of dropping the key and answering the generic signing error — if you see',
+    'that refusal, this signer predates the argument form you sent. Update the signer; nothing',
+    'was signed, fetched or audited.',
   ].join('\n')
 }

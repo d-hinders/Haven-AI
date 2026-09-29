@@ -198,7 +198,8 @@ export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS
             execution_rail,
             delegation_hash,
             created_at,
-            confirmed_at
+            confirmed_at,
+            expires_at
      FROM payment_intents
      WHERE id = $1
        AND ($2::UUID IS NULL OR agent_id = $2)
@@ -247,6 +248,12 @@ export interface EvidenceSourceRow {
   /** #2092: authorize time — the origin of the erc7710 settlement window. */
   created_at: string | null
   confirmed_at: string | null
+  /**
+   * #3475: the signing deadline. On the eip3009 leg the merchant's
+   * EIP-3009 authorization is signed no later than this, so its settlement
+   * is mined no later than this plus the authorization's bounded lifetime.
+   */
+  expires_at: string | null
 }
 
 /**
@@ -275,7 +282,8 @@ export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS ki
             execution_rail,
             delegation_hash,
             created_at,
-            confirmed_at
+            confirmed_at,
+            expires_at
      FROM payment_intents
      WHERE id = $1 AND agent_id = $2
      LIMIT 1`
@@ -389,6 +397,7 @@ export async function attachEvidenceProof<R extends QueryRow>(
 // first page.
 export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
               pi.machine_metadata->>'delegate_account_address' AS intent_delegate_account_address,
+              pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_merchant_settlement_tx_hash,
               pi.budget_delegation_hash,
               pi.delegate_address AS intent_delegate_address,
               ${OWNER_COMPANY_DETAILS_JOIN_COLUMNS}
@@ -436,7 +445,8 @@ export async function countEvidenceReceiptsForAgent(agentId: string, db: Executo
 // receipts list report the same truth.
 export const GET_INTENT_SETTLEMENT_FIELDS_SQL = `SELECT machine_metadata->>'settlement_scheme' AS settlement_scheme, budget_delegation_hash,
              delegate_address AS intent_delegate_address,
-             machine_metadata->>'delegate_account_address' AS intent_delegate_account_address
+             machine_metadata->>'delegate_account_address' AS intent_delegate_account_address,
+             machine_metadata->>'merchant_settlement_tx_hash' AS verified_merchant_settlement_tx_hash
              FROM payment_intents WHERE id = $1`
 
 export interface IntentSettlementFields {
@@ -444,6 +454,8 @@ export interface IntentSettlementFields {
   budget_delegation_hash: string | null
   intent_delegate_address: string | null
   intent_delegate_account_address: string | null
+  /** #3475: the eip3009 merchant settlement hash Haven verified on-chain, if any. */
+  verified_merchant_settlement_tx_hash: string | null
 }
 
 /** Echo enrichment for the evidence 202 (#1118 review NB2). */
@@ -604,6 +616,27 @@ export async function findReconciliationEvent(
     FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL,
     [paymentId, agentId, eventType],
   )
+  return result.rows[0] ?? null
+}
+
+/**
+ * #3475: the evidence row of one intent, read as it stands. The eip3009
+ * settlement report records its hash on the intent and must not rewrite the
+ * row's proof status (a verified settlement is not a merchant response), so it
+ * echoes the row through this read instead of through the attach UPDATE.
+ */
+export const FIND_EVIDENCE_FOR_INTENT_SQL = `SELECT *
+     FROM machine_payment_evidence
+     WHERE payment_intent_id = $1
+       AND agent_id = $2
+     LIMIT 1`
+
+export async function findEvidenceForIntent<R extends QueryRow>(
+  paymentIntentId: string,
+  agentId: string,
+  db: Executor = pool,
+): Promise<R | null> {
+  const result = await db.query<R>(FIND_EVIDENCE_FOR_INTENT_SQL, [paymentIntentId, agentId])
   return result.rows[0] ?? null
 }
 

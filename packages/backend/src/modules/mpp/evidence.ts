@@ -16,6 +16,7 @@
  */
 import {
   attachEvidenceProof,
+  findEvidenceForIntent,
   findIntentEvidenceSource,
   findIntentForEvidenceScoped,
   getIntentSettlementFields,
@@ -36,6 +37,7 @@ import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
 import { observeErc7710Settlement } from '../x402/settlement-observed.js'
+import { observeEip3009MerchantSettlement } from '../x402/eip3009-settlement-evidence.js'
 import { withParties } from '../../openapi/party-model.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
@@ -89,6 +91,8 @@ export interface MachinePaymentEvidenceSource {
   x402_idempotency_key?: string | null
   machine_metadata?: Record<string, unknown> | string | null
   confirmed_at?: string | null
+  /** #3475: signing deadline — the far edge of an eip3009 settlement's window. */
+  expires_at?: string | null
 }
 
 export interface AttachMachinePaymentEvidenceInput {
@@ -162,6 +166,12 @@ export interface MachinePaymentEvidenceRow {
    * before #2960 and on the legacy rail, where no such account exists.
    */
   intent_delegate_account_address?: string | null
+  /**
+   * #3475: `payment_intents.machine_metadata->>'merchant_settlement_tx_hash'`,
+   * the eip3009 merchant settlement an agent reported and Haven verified
+   * on-chain (`modules/x402/eip3009-settlement-evidence.ts`). Null until one is.
+   */
+  verified_merchant_settlement_tx_hash?: string | null
   /** #3332: joined from `owner_company_details` on `user_id` — `OWNER_COMPANY_DETAILS_JOIN_COLUMNS`. */
   buyer_legal_name?: string | null
   buyer_country?: string | null
@@ -468,6 +478,31 @@ export async function attachMachinePaymentEvidence(
     payment = reloaded
   }
 
+  // #3475: the eip3009 twin of the seam above. A funded eip3009 payment
+  // reported with a hash that is NOT its funding hash is the agent handing
+  // Haven the merchant's settlement (`PAYMENT-RESPONSE.transaction`), which on
+  // the plain-HTTP path nothing else ever carries back. Verified on-chain and
+  // recorded beside the funding hash, which stays. The row's proof status is
+  // left exactly as it was: a verified settlement proves the merchant pulled
+  // the funds, not that it delivered, and `merchant_leg_reported` reads that
+  // status. So the row is echoed as it stands instead of re-attached.
+  if (observation.outcome === 'not_applicable') {
+    // The same input gates the attach path applies below, run BEFORE anything
+    // is written, since this branch returns without reaching them.
+    if (railForPayment(payment) !== input.rail) throw new Error('rail_mismatch')
+    if (input.resourceUrl && input.resourceUrl !== resourceUrlForPayment(payment)) {
+      throw new Error('resource_mismatch')
+    }
+    const settled = await observeEip3009MerchantSettlement(payment, input.txHash)
+    if (settled.outcome === 'unverified') {
+      throw new Error(settled.retryable ? 'settlement_unobservable' : 'settlement_unverified')
+    }
+    if (settled.outcome === 'recorded') {
+      await recordMachinePaymentEvidenceBase(payment)
+      return findEvidenceForIntent<MachinePaymentEvidenceRow>(payment.id, input.agentId)
+    }
+  }
+
   if (payment.status !== expectedStatusForPayment(payment) || !payment.tx_hash) {
     throw new Error('payment_not_confirmed')
   }
@@ -610,12 +645,17 @@ export async function reconcileDelegateResidueAfterSettlement(
  * hosted gate uses (a demo-merchant "delivered, not settled" marker, never
  * a real transaction) — applied here so `settlement_tx_hash` never surfaces
  * that placeholder as if it were one.
+ *
+ * #3475: on eip3009, a settlement hash the agent reported and Haven verified
+ * on-chain (`verified_merchant_settlement_tx_hash`) wins over the merchant's
+ * own echo, which is unverified and absent entirely on the plain-HTTP path.
  */
 function deriveReceiptTxHashes(row: {
   tx_hash: string
   rail: string
   settlement_scheme?: string | null
   protocol_receipt_payload: Record<string, unknown> | null
+  verified_merchant_settlement_tx_hash?: string | null
 }): { funding_tx_hash: string | null; settlement_tx_hash: string | null } {
   if (row.settlement_scheme === 'erc7710') {
     return { funding_tx_hash: null, settlement_tx_hash: row.tx_hash }
@@ -631,6 +671,10 @@ function deriveReceiptTxHashes(row: {
     return { funding_tx_hash: null, settlement_tx_hash: row.tx_hash }
   }
 
+  const verified = row.verified_merchant_settlement_tx_hash
+  if (typeof verified === 'string' && TX_HASH_RE.test(verified)) {
+    return { funding_tx_hash: row.tx_hash, settlement_tx_hash: verified }
+  }
   const candidate = row.protocol_receipt_payload?.transaction
   const settlementTxHash =
     typeof candidate === 'string' && TX_HASH_RE.test(candidate) && !isZeroSettlementTxHash(candidate)

@@ -190,8 +190,11 @@ export type SettlementVerification =
    * check 8 also ran and matched — i.e. whether the pinned DelegationManager
    * itself named THIS intent's child. Only a bound settlement may be treated
    * as attributable to one intent rather than to any look-alike of it.
+   * `blockTimestampSec` is the mined block's timestamp, already checked
+   * against the window; #3475's eip3009 look-alike guard compares it with
+   * other payments' windows.
    */
-  | { outcome: 'verified'; delegationBound: boolean }
+  | { outcome: 'verified'; delegationBound: boolean; blockTimestampSec: number }
   /** Unknown hash, or not mined yet on this chain. Retryable. */
   | { outcome: 'not_found'; reason: string }
   /** Mined and reverted. Permanent — nothing settled. */
@@ -304,7 +307,7 @@ export async function verifySettlementTransferTx(
     if ((parsed.args.from as string).toLowerCase() !== from) continue
     if ((parsed.args.to as string).toLowerCase() !== to) continue
     if ((parsed.args.value as bigint) !== amount) continue
-    return { outcome: 'verified', delegationBound }
+    return { outcome: 'verified', delegationBound, blockTimestampSec }
   }
 
   return {

@@ -75,11 +75,15 @@ function fakeNode(opts: {
         // Yield so a parallel fan-out would overlap and raise the peak.
         await new Promise((r) => setTimeout(r, 5))
         if (opts.failRequests?.has(callIndex)) throw new Error('429 Too Many Requests')
-        const [{ data }] = params as [{ data: Hex }]
+        const [{ data, to }] = params as [{ data: Hex; to: string }]
+        if (getAddress(to) !== getAddress(baseSepolia.contracts.multicall3.address)) {
+          throw new Error(`eth_call to ${to}, not Multicall3`)
+        }
         const { functionName, args } = decodeFunctionData({ abi: multicall3Abi, data })
         if (functionName !== 'aggregate3') throw new Error(`unexpected ${functionName}`)
         const calls = args[0] as ReadonlyArray<{ target: string; callData: Hex }>
-        const results = calls.map(({ callData }) => {
+        const results = calls.map(({ target, callData }) => {
+          if (getAddress(target) !== getAddress(USDC)) throw new Error(`sub-call to ${target}, not the token`)
           const decoded = decodeFunctionData({ abi: erc20Abi, data: callData })
           const who = getAddress(decoded.args![0] as string)
           if (opts.revert?.has(who)) return { success: false, returnData: '0x' as Hex }
@@ -197,8 +201,33 @@ describe('readTokenBalances — batched, sequential, per-holder failure (#3458)'
 
   it('every chain Haven serves has Multicall3 in its viem definition (the fallback is for a future chain)', async () => {
     const { chainForId } = await import('../../../rails/delegation-contracts.js')
-    for (const id of [100, 8453, 84532]) {
+    const { SUPPORTED_CHAIN_IDS } = await import('../../../domain/chains.js')
+    expect(SUPPORTED_CHAIN_IDS.length).toBeGreaterThan(0)
+    for (const id of SUPPORTED_CHAIN_IDS) {
       expect(chainForId(id).contracts?.multicall3?.address, `chain ${id}`).toMatch(/^0x[0-9a-fA-F]{40}$/)
     }
+  })
+
+  it('a chain viem does not know falls back to one read per holder — scanned, not dropped', async () => {
+    const readOne = vi.fn(async (_c: number, h: string) => balanceOf(getAddress(h)))
+    const out = await readTokenBalances(999_999, USDC, [holder(1), holder(2)], { readOne })
+    expect(readOne).toHaveBeenCalledTimes(2)
+    expect(out.get(holder(2))).toBe(balanceOf(getAddress(holder(2))))
+  })
+
+  it('a delegate address listed twice is read once', async () => {
+    const node = fakeNode({ balances: balanceOf })
+    const readOne = vi.fn(async (_c: number, h: string) => balanceOf(getAddress(h)))
+    const noMulticall = { ...baseSepolia, contracts: {} } as unknown as Chain
+    await readTokenBalances(baseSepolia.id, USDC, [holder(1), holder(1), holder(2)], { chain: noMulticall, readOne })
+    expect(readOne).toHaveBeenCalledTimes(2)
+    const out = await readTokenBalances(baseSepolia.id, USDC, [holder(1), holder(1)], { chain: baseSepolia, transport: node.transport })
+    expect(out.get(holder(1))).toBe(balanceOf(getAddress(holder(1))))
+  })
+
+  it('refuses a zero/native token instead of reading it two different ways', async () => {
+    await expect(
+      readTokenBalances(baseSepolia.id, '0x0000000000000000000000000000000000000000', [holder(1)], { chain: baseSepolia }),
+    ).rejects.toThrow(/ERC-20/)
   })
 })

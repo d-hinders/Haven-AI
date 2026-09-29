@@ -20,23 +20,30 @@
  *   control: a lagging fallback node answering "zero" would be a silent miss,
  *   so no second node may answer (`dedicatedOnly`, as the `disabledDelegations`
  *   reader does). `retryCount: 0` keeps the request count bounded by the chunk
- *   count; a failed chunk is skipped and the next hourly tick reads it again —
- *   the same degradation the per-call loop had for one failed read.
+ *   count. That is a deliberate change from the ethers reader, whose fetch
+ *   layer retried an HTTP 429 with backoff: now a rate-limited or failed
+ *   chunk is not re-sent, its holders are reported unread for the round, and
+ *   the next hourly tick reads them again.
  * - **Per-holder failure, never per-scan.** `allowFailure` isolates a reverted
  *   sub-call to its own holder, and a failed chunk (network, rate limit) marks
  *   only that chunk's holders unread. The caller skips unread holders this
  *   round, exactly as it skipped a failed single read before.
  *
- * A chain whose viem definition carries no Multicall3 falls back to one read
- * per holder, so it is still scanned rather than silently dropped. Every chain
- * served today (100, 8453, 84532) has the canonical deployment in viem's
- * definitions.
+ * A chain with no viem definition, or whose definition carries no Multicall3,
+ * falls back to one read per holder through the ethers reader the monitor
+ * used before, so it is still scanned rather than silently dropped. Every
+ * chain served today has the canonical deployment in viem's definitions (a
+ * test pins that against `SUPPORTED_CHAIN_IDS`).
+ *
+ * ERC-20 only: a zero/native token is refused, because `balanceOf` at the
+ * zero address and the fallback's native-balance branch would disagree.
  */
 
 import { createPublicClient, erc20Abi, getAddress, isAddress, type Chain, type Transport } from 'viem'
 import { chainForId } from '../../rails/delegation-contracts.js'
 import { rpcTransport } from './rpc-transport.js'
 import { getTokenBalance } from './relayer-reads.js'
+import { assertErc20TokenAddress } from './token-address-guard.js'
 
 /**
  * Holders per `aggregate3` request. A `balanceOf` sub-call is a few thousand
@@ -59,7 +66,8 @@ export interface BatchedBalanceDeps {
 /**
  * Read `token` balances for `holders` on `chainId`. The result maps each
  * holder (as given) to its balance, or to `null` when it could not be read
- * this round. Never throws for a read failure.
+ * this round. Never throws for a read failure; throws only for a token that
+ * is not an ERC-20 contract address.
  */
 export async function readTokenBalances(
   chainId: number,
@@ -67,13 +75,23 @@ export async function readTokenBalances(
   holders: string[],
   deps: BatchedBalanceDeps = {},
 ): Promise<Map<string, bigint | null>> {
+  assertErc20TokenAddress(token)
   const out = new Map<string, bigint | null>()
-  if (holders.length === 0) return out
+  // Two agents sharing a delegate on one chain need one read, not two.
+  const unique = [...new Set(holders)]
+  if (unique.length === 0) return out
 
-  const chain = deps.chain ?? chainForId(chainId)
-  if (!chain.contracts?.multicall3?.address) {
+  let chain: Chain | undefined = deps.chain
+  if (!chain) {
+    try {
+      chain = chainForId(chainId)
+    } catch {
+      chain = undefined // no viem definition: read per holder below
+    }
+  }
+  if (!chain?.contracts?.multicall3?.address) {
     const readOne = deps.readOne ?? getTokenBalance
-    for (const holder of holders) {
+    for (const holder of unique) {
       try {
         out.set(holder, await readOne(chainId, holder, token))
       } catch {
@@ -92,7 +110,7 @@ export async function readTokenBalances(
   // A malformed stored address fails alone, before any request is built,
   // instead of taking its whole chunk down with it.
   const readable: string[] = []
-  for (const holder of holders) {
+  for (const holder of unique) {
     if (isAddress(holder, { strict: false })) readable.push(holder)
     else out.set(holder, null)
   }

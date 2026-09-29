@@ -55,6 +55,12 @@ export interface DelegateBalanceReport {
   /** True when dustTotalAtomic passed the alert threshold. */
   dustAlert: boolean
   lingering: DelegateBalanceFinding[]
+  /**
+   * Delegates whose balance could not be read this round (#3458): a failed
+   * chunk or chain now leaves up to a whole chunk unread, so the count is
+   * reported and logged rather than silently shrinking `findings`.
+   */
+  unread: Array<{ agentId: string; chainId: number }>
   scannedAt: string
 }
 
@@ -131,10 +137,16 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
   }
 
   const findings: DelegateBalanceFinding[] = []
+  const unread: DelegateBalanceReport['unread'] = []
   for (const delegate of delegates) {
-    const balanceAtomic = balancesByChain.get(delegate.chain_id)?.get(delegate.delegate_address)
-    // No entry: chain without USDC. `null`: RPC hiccup — skip this delegate this round.
-    if (balanceAtomic === undefined || balanceAtomic === null) continue
+    const balances = balancesByChain.get(delegate.chain_id)
+    if (!balances) continue // chain without USDC — nothing to monitor
+    const balanceAtomic = balances.get(delegate.delegate_address)
+    if (balanceAtomic === undefined || balanceAtomic === null) {
+      // RPC hiccup: skip this delegate this round, but say so.
+      unread.push({ agentId: delegate.agent_id, chainId: delegate.chain_id })
+      continue
+    }
     findings.push({
       agentId: delegate.agent_id,
       agentName: delegate.agent_name,
@@ -154,6 +166,7 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
     dustTotalAtomic,
     dustAlert: dustTotalAtomic >= dustAlertThresholdAtomic(),
     lingering: findings.filter((f) => f.state === 'lingering'),
+    unread,
     scannedAt: new Date().toISOString(),
   }
 }
@@ -204,10 +217,21 @@ export async function runDelegateBalanceMonitor(log: MonitorLogger): Promise<Del
     )
   }
 
+  if (report.unread.length > 0) {
+    const byChain: Record<number, number> = {}
+    for (const u of report.unread) byChain[u.chainId] = (byChain[u.chainId] ?? 0) + 1
+    log.warn(
+      { scope: 'delegate-balance-monitor', unread: report.unread.length, unreadByChain: byChain },
+      'UNREAD delegate balances — the balance read failed for these delegates this round; ' +
+        'they are NOT known to be clear, and the next scan retries them',
+    )
+  }
+
   log.info(
     {
       scope: 'delegate-balance-monitor',
       scanned: report.findings.length,
+      unread: report.unread.length,
       lingering: report.lingering.length,
       dustTotalUsdc: usdc(report.dustTotalAtomic),
     },
@@ -314,11 +338,19 @@ async function dispatchAlerts(report: DelegateBalanceReport, log: MonitorLogger)
   // Sync the edge state to the report unconditionally — a condition that
   // cleared re-arms (its next appearance pings again) whether or not anything
   // was delivered, exactly like the pre-#3345 state machine.
-  const currentKeys = new Set(report.lingering.map(lingeringKey))
+  //
+  // #3458: a delegate that was NOT read this round has not cleared — it is
+  // unknown. Its lingering key is kept, so a failed read does not re-ping it
+  // on the next successful scan, and a partial dust total from a scan with
+  // unread delegates does not re-arm the dust edge.
+  const currentKeys = new Set([
+    ...report.lingering.map(lingeringKey),
+    ...report.unread.map((u) => `${u.agentId}:${u.chainId}`),
+  ])
   moduleAlertState.lingeringKeys = new Set(
     [...moduleAlertState.lingeringKeys].filter((k) => currentKeys.has(k)),
   )
-  if (!report.dustAlert) moduleAlertState.dustActive = false
+  if (!report.dustAlert && report.unread.length === 0) moduleAlertState.dustActive = false
 
   if (messages.length === 0) return
 

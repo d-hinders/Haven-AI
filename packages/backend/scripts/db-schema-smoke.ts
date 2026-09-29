@@ -166,6 +166,8 @@ import {
   RESUME_AGENT_SQL,
   REVOKE_AGENT_SQL,
   ROTATE_AGENT_API_KEY_SQL,
+  SET_AGENT_TAX_DECLARATION_ENABLED_SQL,
+  GET_AGENT_TAX_DECLARATION_SQL,
   UPDATE_AGENT_PROFILE_SQL,
 } from '../src/infra/repositories/agents.js'
 import {
@@ -423,6 +425,11 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: rotate API key', sql: ROTATE_AGENT_API_KEY_SQL },
   { name: 'agents: pause', sql: PAUSE_AGENT_SQL },
   { name: 'agents: resume', sql: RESUME_AGENT_SQL },
+  // #3426: the per-agent x402 tax-declaration opt-in. IMPORTED, like the rest
+  // of the agents aggregate — the toggle's gate lives in the WHERE clause, so
+  // a column or owner_company_details drift would only surface here.
+  { name: 'agents: tax-declaration toggle (owner-scoped, VIES-gated, #3426)', sql: SET_AGENT_TAX_DECLARATION_ENABLED_SQL },
+  { name: 'agents: tax-declaration content row (agent read, #3426)', sql: GET_AGENT_TAX_DECLARATION_SQL },
   // Smart-account aggregate (#988). IMPORTED from the repository — verbatim from
   // the account routes module. Nine statements left with #1988 (epic #1440): the
   // four approver-metadata ones, the three import-path writes/reads, and the

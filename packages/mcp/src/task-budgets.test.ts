@@ -14,6 +14,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { HavenClient } from '@haven_ai/sdk'
 import { createToolHandlers, toolSchemas } from './tools.js'
+import { taskSignerCompatibilityNotice } from './signer-compat.js'
 
 const ALLOWANCES = {
   agentId: 'agt_1',
@@ -121,6 +122,17 @@ describe('haven_open_task_budget (#3329)', () => {
       next_tool: 'mcp__haven-signer__haven_sign',
       next_arguments: { task_budget_id: 'tb_1' },
     })
+    // #3419: the local handoff carries the same recovery notice the hosted
+    // handoffs carry — same fields, same trigger sentence, same route.
+    expect(result.data).toMatchObject({
+      signer_compatibility: taskSignerCompatibilityNotice(),
+    })
+    const notice = (result.data as { signer_compatibility: ReturnType<typeof taskSignerCompatibilityNotice> })
+      .signer_compatibility
+    expect(notice.check).toContain('Pass payment_id (preferred for delegation-rail x402')
+    expect(notice.fallback).toContain('Pass payment_id (preferred for delegation-rail x402')
+    expect(notice.fallback).toContain('haven_close_task_budget')
+    expect(notice.fallback).toContain('no relay fallback')
   })
 
   it('refuses a token this agent holds no allowance for, before any reservation', async () => {
@@ -176,7 +188,18 @@ describe('haven_close_task_budget (#3329)', () => {
       next_action: 'sign',
       next_tool: 'mcp__haven-signer__haven_sign',
       next_arguments: { task_budget_id: 'tb_1' },
+      // #3419: the CLOSING handoff carries the same notice from the same builder.
+      signer_compatibility: taskSignerCompatibilityNotice(),
     })
+  })
+
+  it('a CLOSED close result carries no signer_compatibility (#3419 negative)', async () => {
+    const { haven } = stubHaven()
+    const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect(result.data).toMatchObject({ status: 'closed' })
+    expect(result.data).not.toHaveProperty('signer_compatibility')
   })
 })
 

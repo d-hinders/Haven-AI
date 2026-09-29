@@ -47,4 +47,9 @@ export {
   resolveResumeState,
   wrongTool,
 } from './quote-response.js'
-export { SIGNER_CAPABILITY_KEY, signerCompatibilityNotice } from './signer-compat.js'
+export {
+  SIGNER_CAPABILITY_KEY,
+  TASK_BUDGET_MIN_SIGNER_VERSION,
+  signerCompatibilityNotice,
+  taskSignerCompatibilityNotice,
+} from './signer-compat.js'

@@ -47,6 +47,28 @@ import {
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
 /**
+ * The signer's wire identity. Declared HERE, in the tools/handlers module —
+ * `server.ts` (the MCP wiring) imports them from this module, keeping the
+ * import graph one-directional (tools.ts ← server.ts, never the reverse);
+ * `server.ts` re-exports them, so the package's public API is unchanged.
+ */
+export const SIGNER_NAME = '@haven_ai/signer'
+export const SIGNER_VERSION = '0.6.0-alpha.0'
+
+/**
+ * #3419: the marker the tool layer prefixes the undeclared-argument refusal
+ * with. The strict re-parse lives in THIS module (`parseStrictFor`, below) —
+ * the same module as the `normalizeError` branch that shapes the refusal — so
+ * the marker, the message and the structured fields are one unit and cannot
+ * drift. The registration in `server.ts` is passthrough (the issue's "schema
+ * that keeps unknown keys"): the SDK layer lets an undeclared key through and
+ * the tool layer refuses it here, where the full structured refusal
+ * (`UNSUPPORTED_ARGUMENT` with `unknown_arguments`, `signer_version`,
+ * `fallback`) is still expressible as JSON on the result.
+ */
+export const UNSUPPORTED_ARGUMENT_MARKER = 'HavenSignerUnsupportedArgument:'
+
+/**
  * #3271: structured refusal for a direct-payment `PackedUserOperation` whose
  * typed data does not recompute to its own `payload_hash` — the payload was
  * altered between the Haven result and this call (a language model relaying
@@ -514,6 +536,14 @@ export interface ToolFailure {
    */
   fallback?: string
   /**
+   * #3419: present on `UNSUPPORTED_ARGUMENT` — the undeclared top-level
+   * argument names the caller sent (the strict schema's `unrecognized_keys`),
+   * so an agent can see exactly what this signer does not accept.
+   */
+  unknown_arguments?: string[]
+  /** #3419: present on `UNSUPPORTED_ARGUMENT` — this signer's own package version. */
+  signer_version?: string
+  /**
    * #3001: present on `SIGN_CONTEXT_REFUSED` — the HTTP status the backend
    * answered the sign-context fetch with (404, 410, …) — the x402 fetch, or
    * the direct `/payments/:id/sign-context` fetch since #3271.
@@ -763,7 +793,7 @@ export function createToolHandlers(
   return {
     haven_sign: async (input) =>
       runTool(async () => {
-        const args = parse('haven_sign', coerceX402Expected(input))
+        const args = parseStrictFor('haven_sign', coerceX402Expected(input))
         if (args.task_budget_id) {
           if (args.payment_id || args.payload_hash) {
             throw new z.ZodError([
@@ -892,7 +922,7 @@ export function createToolHandlers(
         // string. Coerce it back to an object BEFORE Zod validation so the
         // tightened schema doesn't reject it (else `.accepts` would be undefined
         // → "No compatible payment option found").
-        const args = parse('haven_x402_sign_header', coercePaymentRequired(input))
+        const args = parseStrictFor('haven_x402_sign_header', coercePaymentRequired(input))
         const result = await signer.buildX402PaymentHeader(
           args.payment_required as X402PaymentRequired,
           args.x402_binding,
@@ -909,7 +939,7 @@ export function createToolHandlers(
         // Coerce a stringified payment_required (same transport guard as
         // haven_x402_sign_header) and unwrap a whole-`x402`-object x402_expected
         // before validation.
-        const args = parse('haven_sign_x402', coerceX402Expected(coercePaymentRequired(input)))
+        const args = parseStrictFor('haven_sign_x402', coerceX402Expected(coercePaymentRequired(input)))
         // #3271: haven_sign_x402 NEVER falls back to the direct-payment
         // sign-context — a payment_id that names a direct payment has no
         // x402 context to fund a merchant retry with, so it is refused here
@@ -973,7 +1003,7 @@ export function createToolHandlers(
 
     haven_sign_sweep_delegate: async (input) =>
       runTool(async () => {
-        const args = parse('haven_sign_sweep_delegate', input)
+        const args = parseStrictFor('haven_sign_sweep_delegate', input)
         const result = await signer.signSweepAuthorization({
           authorization: args.authorization,
           expectedAuth: args.expected_auth,
@@ -1011,8 +1041,35 @@ export function createToolHandlers(
   }
 }
 
-function parse<TName extends SignerToolName>(name: TName, input: unknown): Record<string, any> {
-  return z.object(toolSchemas[name]).parse(input ?? {})
+/**
+ * #3419 (Option B): `parse` with unknown TOP-LEVEL keys REFUSED, not stripped
+ * — the second line of defence behind the passthrough registration
+ * (`server.ts`), exactly as the hosted server's `parseStrict` sits behind its
+ * strict registration. The registration passes an undeclared key through and
+ * the SDK hands it here; a bare `z.object` would silently strip it (the exact
+ * old-signer failure this issue fixes) and the handler would answer the
+ * generic SIGNING_ERROR. Top-level keys only: a nested `unrecognized_keys`
+ * issue (none of the signer schemas is nested-strict today, but a future
+ * `.strict()` object field would raise one) falls through to the plain
+ * `ZodError` branch of `normalizeError`, never this marker.
+ */
+function parseStrictFor<TName extends SignerToolName>(name: TName, input: unknown): Record<string, any> {
+  const result = z.object(toolSchemas[name]).strict().safeParse(input ?? {})
+  if (result.success) return result.data
+  const topLevelUnknown = result.error.issues.flatMap((issue) =>
+    issue.code === 'unrecognized_keys' && issue.path.length === 0 ? issue.keys : [],
+  )
+  if (topLevelUnknown.length === 0) throw result.error
+  const unknown = [...new Set(topLevelUnknown)]
+  const err = new Error(
+    `${UNSUPPORTED_ARGUMENT_MARKER} ${name} does not accept ${unknown.map((k) => `"${k}"`).join(', ')} — ` +
+      'this signer predates that argument form. Nothing was signed or fetched.',
+  )
+  // `normalizeError` recognises the marker and shapes the structured
+  // UNSUPPORTED_ARGUMENT refusal; the keys ride the quoted names in the
+  // message, and the dedupe above keeps the array faithful for the
+  // one-key-per-name shapes every real call produces.
+  throw err
 }
 
 /**
@@ -1072,6 +1129,34 @@ async function runTool<T>(fn: () => Promise<T>): Promise<ToolPayload<T>> {
 }
 
 function normalizeError(err: unknown): ToolFailure {
+  // #3419 (Option B): the undeclared-argument refusal `parseStrictFor` throws.
+  // Because the registration is PASSTHROUGH (the schema keeps unknown keys),
+  // the SDK layer lets the call reach this handler and THIS branch is the
+  // wire answer — the full structured refusal is expressible as JSON on the
+  // result, which a strict registration could never deliver (the SDK's own
+  // validation would fail the call first and answer plain McpError text). The
+  // same refusal shapes the direct-embedder path (`createToolHandlers` called
+  // without a transport). No signature, no audit entry, nothing fetched — the
+  // call refused before any of that.
+  if (err instanceof Error && err.message.startsWith(UNSUPPORTED_ARGUMENT_MARKER)) {
+    const unknown = [...err.message.matchAll(/"([^"]+)"/g)].map((m) => m[1])
+    return {
+      success: false,
+      code: 'UNSUPPORTED_ARGUMENT',
+      message: err.message.replace(`${UNSUPPORTED_ARGUMENT_MARKER} `, ''),
+      unknown_arguments: unknown,
+      signer_version: SIGNER_VERSION,
+      fallback: connectorUpgradeCommand(),
+      next_action: AgentPaymentNextAction.StopAndTellUser,
+      ...nextStepWireFields(
+        signerRefusalStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason: `update @haven_ai/signer: run ${connectorUpgradeCommand()} and the repair line it prints, then repeat the same call`,
+        }),
+      ),
+    }
+  }
   if (err instanceof z.ZodError) {
     return {
       success: false,

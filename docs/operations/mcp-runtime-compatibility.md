@@ -2716,6 +2716,56 @@ production runs the signer at `@haven_ai/connect@alpha`'s exact pin
 the compatibility story. Merging to `dev` waits for the promotion carrying
 #3271 to publish a connect/signer pair that includes the direct sign-context.
 
+## Task-budget signing handoff and old-signer recovery (#3419, 2026-09-28)
+
+The hosted `haven_open_task_budget` / `haven_close_task_budget` results that
+hand off to the signer (an open with `sign_data`; a close in the `closing`
+state) carry a `signer_compatibility` notice, the #3277 pattern applied to the
+`haven_sign { task_budget_id }` form: `task_sign_context_version` (the SDK's
+`TASK_SIGN_CONTEXT_VERSION`, the same constant the backend's
+`GET /task-budgets/:id/sign-context` serves and the signer's
+`SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` derives from — never a literal),
+`min_signer_version: '0.6.0-alpha.0'` (one exported constant,
+`TASK_BUDGET_MIN_SIGNER_VERSION` — the first signer release whose
+`haven_sign` accepts the `task_budget_id` form, #3329), `signer_capability`
+(the existing capability key), and `check` + `fallback` carrying the recovery
+sentence both as prose and as data.
+
+The failure it recovers from: every 0.4.x / 0.5.x signer predates the
+`task_budget_id` argument. Its MCP schema does not declare the key, the SDK
+strips it before the handler runs, and the call answers the generic
+`SIGNING_ERROR` "Pass payment_id (preferred for delegation-rail x402" … —
+signed nothing, fetched nothing. Unlike the direct-payment case there is NO
+relay fallback: the task-budget context is an `eip712_delegation` payload the
+0.5.x unbound allowlist refuses and a 0.4.x signer must not be steered into.
+The notice says instead: close the pending budget with
+`haven_close_task_budget { task_budget_id }` to release it, update by running
+the deployment's upgrade command (`npx -y @haven_ai/connect@<channel>
+--doctor`, #3412) and then the repair line it prints, then open the budget
+again. The handoff `reason` points at the notice rather than restating the
+steps. The local `@haven_ai/mcp` handoffs carry the same notice from the same
+builder shape (local `mcp` has no dependency on the hosted package, so the
+fields are built from the same SDK constant; the cross-package pins in
+`hosted-signer-integration.test.ts` hold them together). The historic refusal
+strings the trigger matches on are pinned verbatim in that test, with their
+release-commit provenance (`9c548158`, `f6bd8a63`), so rewording either
+historic message fails the build instead of silently disarming the recovery.
+
+Stopping the NEXT occurrence (#3419 Option B): the signer registers its tools
+through `registerTool` with a passthrough input schema (keeps unknown keys, so
+the tool layer stays the refusal point — deliberately NOT the #2312 strict
+registration, which would fail the call in the SDK before any handler and
+answer plain McpError text that can carry no structured fields), and the
+handler's strict re-parse refuses an undeclared top-level argument — the next
+`haven_sign` form a signer predates, starting with #3444's `sub_budget_id` —
+with the structured `UNSUPPORTED_ARGUMENT` (`unknown_arguments`,
+`signer_version`, `fallback` naming the update command,
+`next_action: stop_and_tell_user`; no signature, no audit entry) instead of
+being stripped into the generic signing error.
+The `initialize` instructions name it. This helps only signers at or past the
+release that ships it — which is why the hosted notice above carries the
+installed base.
+
 ## Client-version signal (#3303, epic #3302)
 
 Every published client names itself on each Haven API request with

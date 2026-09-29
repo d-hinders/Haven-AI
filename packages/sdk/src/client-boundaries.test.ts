@@ -489,6 +489,10 @@ describe('HavenClient structural boundary', () => {
       'SWEEP_BASE_SEPOLIA_USDC_ADDRESS',
       'SWEEP_BASE_USDC_ADDRESS',
       'SignerRefusalCode',
+      // #3419: the task-budget sign-context version — the same single source
+      // the signer derives SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS from and the
+      // task-budget handoffs report in signer_compatibility.
+      'TASK_SIGN_CONTEXT_VERSION',
       'TRANSFER_WITH_AUTHORIZATION_TYPES',
       'TYPED_DATA_NOT_ALLOWED', // #3283
       'X402AlreadySettledError',

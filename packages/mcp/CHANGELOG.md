@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **Task-budget handoffs carry the old-signer recovery notice (#3419).** `haven_open_task_budget` and `haven_close_task_budget` results that hand off to `haven_sign { task_budget_id }` now carry `signer_compatibility` with `task_sign_context_version`, `min_signer_version` (`0.6.0-alpha.0`, the first signer with the `task_budget_id` form), and the recovery route as prose (`check`) and data (`fallback`): if `haven_sign` answers `SIGNING_ERROR` with a message starting "Pass payment_id (preferred for delegation-rail x402", the signer predates task budgets and signed nothing — close the pending budget with `haven_close_task_budget`, update via the connector doctor and its repair line, then reopen. There is no relay fallback for this signing context.
+
 ### Removed
 
 - **BREAKING (#3411) — the legacy `idempotencyKey` argument spelling is refused, not accepted.** The #2366 deprecation window is closed: it was met when the warning first shipped on the `alpha`/`latest` channel in `0.1.35-alpha.0` (2026-09-07), several releases behind `latest`. `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`, `haven_pay_x402_quote` and `haven_pay_x402` still **declare** `idempotencyKey` in their schema (so the MCP SDK's default `z.object` strip mode cannot silently drop it before the handler runs — the #2348 double-spend this refusal exists to prevent), but any call that sets it now fails with `IDEMPOTENCY_KEY_RENAMED` before anything is contacted or spent, whether or not `idempotency_key` was also sent. Send `idempotency_key`. The public `toolSchemas` export changes meaning: `idempotencyKey` on it is no longer an accepted input, only a refused one.

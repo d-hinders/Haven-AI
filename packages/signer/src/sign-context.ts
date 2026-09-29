@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path'
 import {
   AgentPaymentNextAction,
   DIRECT_SIGN_CONTEXT_VERSION,
+  TASK_SIGN_CONTEXT_VERSION,
   HAVEN_CLIENT_HEADER,
   HavenSigningError,
   readClientUpdate,
@@ -555,11 +556,16 @@ export async function fetchDirectSignContext(
 
 /**
  * #3329: `task_sign_context_version`s this signer install understands.
- * Pinned locally — task budgets have no SDK-side version constant, the way
- * `DIRECT_SIGN_CONTEXT_VERSION` pins the direct-payment fetch — because the
- * signer, not the SDK, is what enforces this version at the fetch boundary.
+ * #3419: derived from the SDK's `TASK_SIGN_CONTEXT_VERSION` — the same
+ * constant the hosted/local task-budget handoffs report in
+ * `signer_compatibility.task_sign_context_version` — never a second literal.
+ * (This comment used to say task budgets have no SDK-side constant; #3419
+ * moved the single source there, the way `DIRECT_SIGN_CONTEXT_VERSION` pins
+ * the direct-payment fetch. The signer still ENFORCES the version at the
+ * fetch boundary — deriving from the SDK changes where the number lives,
+ * not who refuses a skew.)
  */
-export const SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS: readonly number[] = [1]
+export const SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS: readonly number[] = [TASK_SIGN_CONTEXT_VERSION]
 
 /** `GET /task-budgets/:id/sign-context`, `purpose: 'open'` shape. */
 export interface FetchedTaskBudgetOpenSignContext {

@@ -236,19 +236,19 @@ describe('the fan-out the issue specifies', () => {
     // Both are terminal consumers — nothing consumes them — but each declares
     // @haven_ai/core (#3005), so a CORE change fans out to both. Their own
     // changes still fan out to nothing, which is the leaf property asserted
-    // below.
+    // below. mcp_server joined core's dependents in #3419: its
+    // hosted-signer-integration test pins CLIENT_RELEASES.
     assert.deepEqual(thenFor('frontend'), [], 'frontend still has no dependents')
     assert.deepEqual(thenFor('backend'), [], 'backend still has no dependents')
-    assert.deepEqual(dependentsOf('core').sort(), ['backend', 'frontend'])
+    assert.deepEqual(dependentsOf('core').sort(), ['backend', 'frontend', 'mcp_server'])
   })
 
-  test('core fans out to frontend and backend; qa_agent to nothing', () => {
+  test('core fans out to frontend, backend and mcp_server; qa_agent to nothing', () => {
     // core CONSUMES nothing (declares no @haven_ai/* dependency) but is
-    // CONSUMED BY frontend and backend, so a core change runs exactly those
-    // two suites — the replacement for the full matrix the packages/*
-    // catch-all forced before #3005. qa_agent consumes sdk and signer and is
-    // consumed by nobody, so it is a leaf.
-    assert.deepEqual(thenFor('core').sort(), ['backend', 'frontend'])
+    // CONSUMED BY frontend, backend and (since #3419) mcp_server, so a core
+    // change runs exactly those three suites. qa_agent consumes sdk and
+    // signer and is consumed by nobody, so it is a leaf.
+    assert.deepEqual(thenFor('core').sort(), ['backend', 'frontend', 'mcp_server'])
     assert.deepEqual(thenFor('qa_agent'), [])
   })
 

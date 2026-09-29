@@ -27,6 +27,7 @@ import {
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
+import { taskSignerCompatibilityNotice } from './signer-compat.js'
 import { z } from 'zod/v3'
 
 const headersSchema = z.record(z.string(), z.string()).optional()
@@ -639,11 +640,16 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           recipientAddress: typeof args.recipient === 'string' ? args.recipient : undefined,
           label: typeof args.label === 'string' ? args.label : undefined,
         })
+        // #3419: the same recovery notice the hosted task-budget handoffs
+        // carry (same builder, the SDK's TASK_SIGN_CONTEXT_VERSION) — an old
+        // signer strips the unknown task_budget_id key exactly the same way
+        // on the local surface.
         return {
           task_budget: result.taskBudget,
           next_action: 'sign',
           next_tool: 'mcp__haven-signer__haven_sign',
           next_arguments: { task_budget_id: result.taskBudget.id },
+          signer_compatibility: taskSignerCompatibilityNotice(),
         }
       })
     },
@@ -655,11 +661,14 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
         if (result.status === 'closed') {
           return { task_budget: result.taskBudget, status: 'closed' as const }
         }
+        // #3419: same notice as the open handoff above — this result also
+        // hands the agent to haven_sign { task_budget_id }.
         return {
           task_budget: result.taskBudget,
           next_action: 'sign',
           next_tool: 'mcp__haven-signer__haven_sign',
           next_arguments: { task_budget_id: args.task_budget_id },
+          signer_compatibility: taskSignerCompatibilityNotice(),
         }
       })
     },

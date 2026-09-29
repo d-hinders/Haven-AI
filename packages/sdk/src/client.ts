@@ -227,6 +227,8 @@ export class HavenClient {
    * charged to another budget's payment.
    */
   private readonly inFlightX402TaskBudget = new Map<string, string | undefined>()
+  /** #3330: the sub-budget each in-flight entry was created under, same pin as `inFlightX402TaskBudget`. */
+  private readonly inFlightX402SubBudget = new Map<string, string | undefined>()
   /**
    * The EIP-3009 funding-leg lifecycle (#1618). The facade holds a reference
    * and delegates; it does not reimplement any of it.
@@ -374,6 +376,9 @@ export class HavenClient {
       to: request.to,
       ...(request.idempotencyKey ? { idempotency_key: request.idempotencyKey } : {}),
       ...(request.taskBudgetId ? { task_budget_id: request.taskBudgetId } : {}),
+      // #3330: `POST /payments` is snake_case — agent B pays through the
+      // sub-budget A granted it; the backend refuses a body naming both ids.
+      ...(request.subBudgetId ? { sub_budget_id: request.subBudgetId } : {}),
     })
 
     // Haven returns HTTP 202 with this status when the requested amount
@@ -457,6 +462,9 @@ export class HavenClient {
       // `POST /payments`'s snake_case `task_budget_id` above — the two
       // surfaces use different conventions, so this key is NOT `task_budget_id`.
       ...(options.taskBudgetId ? { taskBudgetId: options.taskBudgetId } : {}),
+      // #3330: same camelCase channel one level deeper (`X402AuthorizeRequest`);
+      // mutually exclusive with `taskBudgetId` server-side.
+      ...(options.subBudgetId ? { subBudgetId: options.subBudgetId } : {}),
     })
 
     // Anything other than a signable funding intent (pending_approval,
@@ -1157,20 +1165,26 @@ export class HavenClient {
     }
 
     const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
-    // #3392: the cache and the in-flight map record the taskBudgetId each
-    // entry was created under; a call naming a different one throws the typed
-    // error BEFORE any network call instead of returning (or joining) a
-    // receipt paid under another budget. Absent-vs-absent hits as before.
-    const cached = this.fundingLeg.cachedReceipt(idempotencyKey, options.taskBudgetId)
+    // #3392: the cache and the in-flight map record the authorizing budget
+    // id(s) each entry was created under — `taskBudgetId` since #3329, and
+    // since #3330 `subBudgetId` (agent B's grant); a call naming a different
+    // combination throws the typed error BEFORE any network call instead of
+    // returning (or joining) a receipt paid under another budget.
+    // Absent-vs-absent hits as before.
+    const cached = this.fundingLeg.cachedReceipt(idempotencyKey, options.taskBudgetId, options.subBudgetId)
     if (cached) return cached
 
     const inFlight = this.inFlightX402.get(idempotencyKey)
     if (inFlight) {
-      if (!sameX402TaskBudget(this.inFlightX402TaskBudget.get(idempotencyKey), options.taskBudgetId)) {
+      if (
+        !sameX402TaskBudget(this.inFlightX402TaskBudget.get(idempotencyKey), options.taskBudgetId) ||
+        !sameX402TaskBudget(this.inFlightX402SubBudget.get(idempotencyKey), options.subBudgetId)
+      ) {
         throw new X402TaskBudgetMismatchError(
           `The x402 idempotency key '${idempotencyKey}' has an in-flight payment created under a ` +
-            `different task budget ('${this.inFlightX402TaskBudget.get(idempotencyKey) ?? 'none'}' vs ` +
-            `'${options.taskBudgetId ?? 'none'}'). Pass a new idempotencyKey to pay under this budget.`,
+            `different authorizing budget (task '${this.inFlightX402TaskBudget.get(idempotencyKey) ?? 'none'}' vs ` +
+            `'${options.taskBudgetId ?? 'none'}', sub '${this.inFlightX402SubBudget.get(idempotencyKey) ?? 'none'}' vs ` +
+            `'${options.subBudgetId ?? 'none'}'). Pass a new idempotencyKey to pay under this budget.`,
           idempotencyKey,
           this.inFlightX402TaskBudget.get(idempotencyKey),
           options.taskBudgetId,
@@ -1179,9 +1193,16 @@ export class HavenClient {
       return inFlight
     }
 
-    const promise = this.fundingLeg.authorize(paymentRequired, option, idempotencyKey, options.taskBudgetId)
+    const promise = this.fundingLeg.authorize(
+      paymentRequired,
+      option,
+      idempotencyKey,
+      options.taskBudgetId,
+      options.subBudgetId,
+    )
     this.inFlightX402.set(idempotencyKey, promise)
     this.inFlightX402TaskBudget.set(idempotencyKey, options.taskBudgetId)
+    this.inFlightX402SubBudget.set(idempotencyKey, options.subBudgetId)
 
     try {
       return await promise
@@ -1196,6 +1217,7 @@ export class HavenClient {
     } finally {
       this.inFlightX402.delete(idempotencyKey)
       this.inFlightX402TaskBudget.delete(idempotencyKey)
+      this.inFlightX402SubBudget.delete(idempotencyKey)
     }
   }
 
@@ -1377,6 +1399,14 @@ export class HavenClient {
        * `[settlement, task, budget]`.
        */
       taskBudgetId?: string
+      /**
+       * #3330: build the settlement chain under this open sub-budget's grant
+       * instead of the agent's budget delegation directly —
+       * `[settlement, grant, parent-child, budget]`. Agent B pays through the
+       * sub-budget agent A granted it. Mutually exclusive with `taskBudgetId`
+       * (the backend refuses a body naming both).
+       */
+      subBudgetId?: string
     } = {},
   ): Promise<{
     paymentId: string

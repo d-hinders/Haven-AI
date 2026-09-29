@@ -91,6 +91,14 @@ export interface PaymentRequest {
    * token/recipient/parent disagree with this request.
    */
   taskBudgetId?: string
+  /**
+   * #3330: redeem against this open sub-budget's grant (this agent is the
+   * sub-agent B) instead of the agent's budget delegation directly —
+   * `[grant, parent-child, budget]`. The backend refuses (404/409) when the
+   * id is unknown, not open, or its token/recipient/parent disagree with
+   * this request. Mutually exclusive with `taskBudgetId`.
+   */
+  subBudgetId?: string
 }
 
 export interface SignData {
@@ -341,6 +349,17 @@ export interface X402AuthorizationOptions {
    * new key instead.
    */
   taskBudgetId?: string
+  /**
+   * #3330: redeem against this open sub-budget's grant (this agent is the
+   * sub-agent B) for the funding leg / erc7710 settlement instead of the
+   * agent's budget delegation directly. Same refusal contract as
+   * `PaymentRequest.subBudgetId`; mutually exclusive with `taskBudgetId`.
+   * The receipt cache and in-flight map pin this id per entry exactly as
+   * they pin `taskBudgetId` (#3392) — a key reused under a different
+   * authorizing child throws the typed mismatch error before any network
+   * call.
+   */
+  subBudgetId?: string
 }
 
 /**

@@ -16,6 +16,8 @@ import {
   isSettlementChildTypedData,
   assertOwnTaskChild,
   assertOwnTaskBudgetCloseUserOp,
+  assertOwnSubBudgetChild,
+  assertOwnSubBudgetCloseUserOp,
   type HavenClientUpdate,
   type X402PaymentRequired,
 } from '@haven_ai/sdk/edge'
@@ -37,12 +39,14 @@ import type {
 import {
   fetchDirectSignContext,
   fetchTaskBudgetSignContext,
+  fetchSubBudgetSignContext,
   fetchX402SignContext,
   HavenSignContextError,
   type HavenIdentity,
   type FetchedDirectSignContext,
   type FetchedSignContext,
   type FetchedTaskBudgetSignContext,
+  type FetchedSubBudgetSignContext,
 } from './sign-context.js'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
@@ -297,6 +301,12 @@ export const toolSchemas = {
     // handler, since Zod's object-level refine on a raw shape used by
     // several call sites is not the shape this schema is composed as).
     task_budget_id: z.string().min(1).optional(),
+    // #3330: sign a sub-budget's own child delegation or its early-close
+    // UserOp — same fetch-verify-sign channel as task_budget_id, against
+    // `GET /sub-budgets/:id/sign-context`. Mutually exclusive with
+    // payment_id / payload_hash AND with task_budget_id (checked in the
+    // handler).
+    sub_budget_id: z.string().min(1).optional(),
   },
   haven_x402_sign_header: {
     // The parsed HTTP 402 PaymentRequired from the merchant. Typed as an object
@@ -790,6 +800,85 @@ export function createToolHandlers(
     }
   }
 
+  /**
+   * #3330: resolve + verify + sign a `sub_budget_id` call — the sub-budget
+   * analog of `signTaskBudget`, against `GET /sub-budgets/:id/sign-context`.
+   * The SAME signer (the delegating agent's key) signs both rows of a tree,
+   * so the guard here verifies delegator == own account and delegate == the
+   * declared child delegate (A's account on the parent-child row, B's on the
+   * grant row), and refuses the task-budget hard-cap shape.
+   */
+  async function signSubBudget(
+    subBudgetId: string,
+  ): Promise<{ signature: string; sub_budget_id: string; purpose: 'open' | 'close'; next_tool_name: string; next_tool_server_role: 'hosted'; next_arguments: Record<string, unknown> }> {
+    const identity = (await options.signContext?.loadIdentity()) ?? null
+    if (!identity) {
+      throw new HavenSigningError(
+        'sub_budget_id signing needs the agent identity (identity.json next to the signer ' +
+          `credentials), which this signer could not load. Re-run \`${connectorRerunCommand()}\` to restore it.`,
+      )
+    }
+    const ctx: FetchedSubBudgetSignContext = await fetchSubBudgetSignContext(
+      identity,
+      subBudgetId,
+      options.signContext?.fetchImpl,
+      undefined,
+      options.signContext?.clientIdentity,
+    )
+    let signature: string
+    if (ctx.purpose === 'open') {
+      try {
+        assertOwnSubBudgetChild(
+          ctx.typedData,
+          {
+            chainId: ctx.expected.chainId,
+            tokenAddress: ctx.expected.tokenAddress,
+            periodAmountAtomic: ctx.expected.periodAmountAtomic,
+            periodDurationSeconds: ctx.expected.periodDurationSeconds,
+            startDate: ctx.expected.startDate,
+            recipientAddress: ctx.expected.recipientAddress,
+            expiresAt: ctx.expected.expiresAt,
+            parentDelegationHash: ctx.expected.parentDelegationHash,
+            delegateAccount: ctx.expected.delegateAccount,
+            childDelegateAccount: ctx.expected.childDelegateAccount,
+          },
+          signer.delegateAddress,
+        )
+      } catch (err) {
+        if (err instanceof HavenTypedDataRefusedError) throw err
+        throw new HavenTypedDataRefusedError(err instanceof Error ? err.message : String(err))
+      }
+      signature = await signer.signDelegationTypedData(ctx.typedData)
+    } else {
+      try {
+        assertUserOpTypedDataBinding(ctx.typedData, ctx.userOpHash)
+      } catch (err) {
+        if (err instanceof HavenUserOpBindingError) throw new HavenUserOpBindingRefusedError(err.message)
+        throw err
+      }
+      try {
+        assertOwnSubBudgetCloseUserOp(
+          ctx.typedData,
+          { delegationHash: ctx.expected.delegationHash },
+          signer.delegateAddress,
+        )
+      } catch (err) {
+        if (err instanceof HavenTypedDataRefusedError) throw err
+        throw new HavenTypedDataRefusedError(err instanceof Error ? err.message : String(err))
+      }
+      signature = await signer.signDelegationTypedData(ctx.typedData)
+    }
+    await auditSigning('haven_sign', hashTypedData(ctx.typedData as Parameters<typeof hashTypedData>[0]))
+    return {
+      signature,
+      sub_budget_id: ctx.subBudgetId,
+      purpose: ctx.purpose,
+      next_tool_name: 'haven_submit',
+      next_tool_server_role: 'hosted',
+      next_arguments: { sub_budget_id: ctx.subBudgetId, signature },
+    }
+  }
+
   return {
     haven_sign: async (input) =>
       runTool(async () => {
@@ -805,7 +894,30 @@ export function createToolHandlers(
               },
             ])
           }
+          if (args.sub_budget_id) {
+            throw new z.ZodError([
+              {
+                code: z.ZodIssueCode.custom,
+                path: ['sub_budget_id'],
+                message:
+                  'task_budget_id is mutually exclusive with sub_budget_id — pass exactly one.',
+              },
+            ])
+          }
           return signTaskBudget(args.task_budget_id)
+        }
+        if (args.sub_budget_id) {
+          if (args.payment_id || args.payload_hash) {
+            throw new z.ZodError([
+              {
+                code: z.ZodIssueCode.custom,
+                path: ['sub_budget_id'],
+                message:
+                  'sub_budget_id is mutually exclusive with payment_id / payload_hash — pass exactly one.',
+              },
+            ])
+          }
+          return signSubBudget(args.sub_budget_id)
         }
         // #3271: only haven_sign falls back to the direct-payment
         // sign-context; haven_sign_x402 never does (below).

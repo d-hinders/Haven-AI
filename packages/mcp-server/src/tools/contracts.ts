@@ -208,6 +208,10 @@ export const toolSchemas = {
     // #3329: spend against an open task budget instead of the agent's
     // period budget.
     task_budget_id: z.string().min(1).optional(),
+    // #3330: spend against an open sub-budget this agent HOLDS (it is the
+    // sub-agent B). Mutually exclusive with task_budget_id — the backend
+    // refuses a body naming both.
+    sub_budget_id: z.string().min(1).optional(),
   },
   haven_pay: {
     token: z.string().min(1),
@@ -217,6 +221,9 @@ export const toolSchemas = {
     // #3329: spend against an open task budget instead of the agent's
     // period budget.
     task_budget_id: z.string().min(1).optional(),
+    // #3330: spend against an open sub-budget this agent holds (it is
+    // sub-agent B). Mutually exclusive with task_budget_id.
+    sub_budget_id: z.string().min(1).optional(),
   },
   haven_submit: {
     // #3329: exactly one of payment_id / task_budget_id — never both, never

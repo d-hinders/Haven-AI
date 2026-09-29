@@ -1295,6 +1295,11 @@ export const openapiSpec = {
     { name: 'Transactions' },
     { name: 'Delegations' },
     {
+      name: 'SubBudgets',
+      description:
+        'Sub-budgets (#3330): a budget one agent re-delegates to another agent in the same account, as an ERC-7710 child of the delegating agent\'s own budget delegation. Payments authorized through one redeem the three-link chain [grant, parent child, budget].',
+    },
+    {
       name: 'Webhooks',
       description:
         'Inbound provider callbacks (#3019). Authenticated by a per-connection capability URL token plus the provider HMAC signature — never a session.',
@@ -2471,6 +2476,234 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
+        },
+      },
+    },
+    // ── Sub-budgets (owner-facing, #3330) ──────────────────────────────────
+    // The owner governs issuance and revocation; the AGENT-facing half of
+    // this surface (list/get/sign-context/submit/close with the agent API
+    // key) is at /sub-budgets* further down. Responses reuse the SubBudget
+    // component schema; the wire shape is `toWire` in routes/agent-sub-budgets.ts.
+    '/agents/{id}/sub-budgets': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'issueAgentSubBudget',
+        summary: 'Issue a sub-budget: agent A re-delegates a narrower budget to agent B.',
+        description:
+          "Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (409 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side (sign-context, then relay each signature via POST /agents/{id}/sub-budgets/{sub}/sign). A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329).",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['sub_agent_id', 'period_amount_atomic', 'expires_at'],
+                properties: {
+                  sub_agent_id: { ...uuid, description: 'The sub-agent B — a different agent in the same account.' },
+                  token_address: { ...address, description: 'Defaults to the chain USDC when omitted.' },
+                  period_amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'Per-period atomic amount; must be <= the parent budget period amount (checked pre-sign).' },
+                  expires_at: { type: 'integer', description: 'Unix seconds; must be in the future and <= the parent budget expiry.' },
+                  recipient_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', description: 'Optional recipient pin; may only NARROW the parent pin, never widen it.' },
+                  label: { type: ['string', 'null'], maxLength: 120 },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Both rows of the tree created pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'parent_child_sub_budget', 'next_action', 'sign_targets'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    parent_child_sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    next_action: { type: 'string' },
+                    sign_targets: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['sub_budget_id', 'who', 'what'],
+                        properties: {
+                          sub_budget_id: uuid,
+                          who: { type: 'string' },
+                          what: { type: 'string' },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'listAgentSubBudgets',
+        summary: "List this agent's sub-budget rows, newest first.",
+        description:
+          "Every row of the trees THIS agent issued (its parent-child narrowings and the grants nested under them) — the owner-facing twin of the agent-auth list at GET /sub-budgets. Scoped by BOTH agent id and the caller's ownership of it.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'Sub-budget rows ordered by created_at DESC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budgets'],
+                  properties: {
+                    sub_budgets: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/sub-budgets/tree': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'getAgentSubBudgetTree',
+        summary: 'The parent→child sub-budget tree this agent issued.',
+        description:
+          "A's parent-child rows on top, each grant nested under the parent-child row its parent_sub_budget_id names (#3330 dashboard tree). Grants whose parent-child row is gone come back under `unattached` rather than being dropped.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The tree.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['agent_id', 'trees', 'unattached'],
+                  properties: {
+                    agent_id: uuid,
+                    trees: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['parent_child_sub_budget', 'grants'],
+                        properties: {
+                          parent_child_sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                          grants: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                    unattached: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/sub-budgets/{sub}/sign': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'signAgentSubBudget',
+        summary: "Relay the delegating agent's signature over one pending sub-budget child.",
+        description:
+          "Owner relays step (#3330): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { $ref: '#/components/parameters/AgentId' },
+          { name: 'sub', in: 'path', required: true, schema: uuid },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: {
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: "A's delegate-key signature over the row's sign-context typed data." },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The opened sub-budget.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'status'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['open'] },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/sub-budgets/{sub}': {
+      delete: {
+        tags: ['SubBudgets'],
+        operationId: 'revokeAgentSubBudget',
+        summary: 'Revoke one sub-budget row (the parent-child, or a single grant).',
+        description:
+          "Authority-reducing only (#3329-2's rule): the delegating agent's own delegate account prepares disableDelegation of THIS row's child. Revoking a PARENT-CHILD row strands every grant under it (their chain's middle link dies — revoking A's budget delegation closes this row too, which is what makes B's child unredeemable); revoking a GRANT row ends B's slice and leaves A intact. status=pending or expired: closes immediately, nothing signed. status=open and live: returns the prepared close operation for the agent to sign (then relay via the agent close endpoint).",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { $ref: '#/components/parameters/AgentId' },
+          { name: 'sub', in: 'path', required: true, schema: uuid },
+        ],
+        responses: {
+          '200': {
+            description: 'The closed row, or the prepared close awaiting the agent signature.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'status'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['closed', 'closing'] },
+                    next_action: { type: ['string', 'null'] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
         },
       },
     },
@@ -6035,6 +6268,192 @@ export const openapiSpec = {
         },
       },
     },
+    '/sub-budgets': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'listSubBudgets',
+        summary: 'List sub-budgets this agent holds (it is the sub-agent).',
+        description:
+          "Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['open', 'all'] },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Sub-budgets held by this agent.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budgets'],
+                  properties: {
+                    sub_budgets: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'getSubBudget',
+        summary: 'Fetch one sub-budget this agent holds.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The sub-budget.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget'],
+                  properties: { sub_budget: { $ref: '#/components/schemas/SubBudget' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}/sign-context': {
+      get: {
+        tags: ['SubBudgets'],
+        operationId: 'getSubBudgetSignContext',
+        summary: 'Re-servable, byte-free signing handoff for a pending or closing sub-budget row.',
+        description:
+          "DELEGATOR-scoped: both children of a tree (the parent-child narrowing AND the grant to the sub-agent) are signed by the DELEGATING agent's delegate key, so only the delegating agent authenticates here. purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for that row's child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The sign context for whichever signature is currently pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget_id', 'purpose', 'sub_budget_sign_context_version', 'typed_data', 'expected'],
+                  properties: {
+                    sub_budget_id: uuid,
+                    purpose: { type: 'string', enum: ['open', 'close'] },
+                    sub_budget_sign_context_version: { type: 'integer', enum: [1] },
+                    typed_data: { type: 'object', additionalProperties: true },
+                    user_operation: { type: 'object', additionalProperties: true, description: 'purpose=close only.' },
+                    user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'purpose=close only.' },
+                    expected: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'sign_context_unavailable — the sub-budget has no signature currently pending.' },
+        },
+      },
+    },
+    '/sub-budgets/{id}/submit': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'submitSubBudget',
+        summary: 'Submit the delegating agent signature — opens a pending child, or relays the signed close operation.',
+        description:
+          "status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: { signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Opened (from pending) or closed (from closing).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget', 'status'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['open', 'closed'] },
+                    close_tx_hash: { type: 'string', description: 'Present when status=closed.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'signature_mismatch, or a malformed signature.' },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/sub-budgets/{id}/close': {
+      post: {
+        tags: ['SubBudgets'],
+        operationId: 'closeSubBudget',
+        summary: 'Close a sub-budget row — trivially if never signed or already expired, otherwise prepares the revocation.',
+        description:
+          "DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'Closed trivially, or a close signature is now pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sub_budget'],
+                  properties: {
+                    sub_budget: { $ref: '#/components/schemas/SubBudget' },
+                    status: { type: 'string', enum: ['closed'], description: 'Present on a trivial close.' },
+                    sign_data: {
+                      type: 'object',
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        typed_data: { type: 'object', additionalProperties: true },
+                        user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' },
+                      },
+                      description: 'Present when a live child needs a revocation signature.',
+                    },
+                    next_action: { type: 'string', enum: ['sign_then_submit'] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'Already closed.' },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
     '/payments': {
       get: {
         tags: ['Payments'],
@@ -8075,6 +8494,63 @@ export const openapiSpec = {
         },
       },
       /**
+       * #3330: one row of a sub-budget tree — either A's self-delegated
+       * PARENT-CHILD (`parent_sub_budget_id: null`) or B's GRANT nested under
+       * one (`parent_sub_budget_id` naming it). `toWire` in
+       * `routes/agent-sub-budgets.ts` selects exactly these columns.
+       */
+      SubBudget: {
+        type: 'object',
+        required: [
+          'id', 'agent_id', 'parent_agent_id', 'parent_sub_budget_id', 'chain_id',
+          'token_address', 'recipient_address', 'parent_delegation_hash',
+          'delegation_hash', 'label', 'period_amount_atomic', 'status',
+          'expires_at', 'is_expired', 'created_at', 'opened_at', 'closed_at',
+          'close_tx_hash',
+        ],
+        properties: {
+          id: uuid,
+          agent_id: uuid,
+          parent_agent_id: uuid,
+          parent_sub_budget_id: { anyOf: [uuid, { type: 'null' }] },
+          chain_id: { type: 'integer' },
+          token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Stored lowercase.' },
+          recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description: 'Lowercase recipient pin, or null when this sub-budget carries none.',
+          },
+          parent_delegation_hash: delegationHash,
+          delegation_hash: { ...delegationHash, description: "This sub-budget's own child delegation hash." },
+          label: { type: ['string', 'null'], maxLength: 120 },
+          period_amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          status: { type: 'string', enum: ['pending', 'open', 'closing', 'closed'] },
+          expires_at: { type: 'integer', description: 'Unix seconds.' },
+          is_expired: { type: 'boolean', description: 'Derived: expires_at <= now.' },
+          created_at: { type: 'string', format: 'date-time' },
+          opened_at: { type: ['string', 'null'], format: 'date-time' },
+          closed_at: { type: ['string', 'null'], format: 'date-time' },
+          close_tx_hash: { type: ['string', 'null'] },
+        },
+      },
+      /**
+       * #3330: one parent→child tree from `GET /agents/{id}/sub-budgets/tree`
+       * — A's parent-child narrowing with B's grants nested under it. Named
+       * here (not hand-written in the hook) so the frontend imports the wire
+       * shape instead of restating it (#1447 wire-type gauge).
+       */
+      SubBudgetTree: {
+        type: 'object',
+        description:
+          "One parent→child tree (#3330): the delegating agent's parent-child narrowing with its grants nested.",
+        required: ['parent_child_sub_budget', 'grants'],
+        properties: {
+          parent_child_sub_budget: { $ref: '#/components/schemas/SubBudget' },
+          grants: { type: 'array', items: { $ref: '#/components/schemas/SubBudget' } },
+        },
+        additionalProperties: false,
+      },
+      /**
        * #1446: an address-book label. `LIST_CONTACTS_FOR_USER_SQL` and both
        * RETURNING clauses in `infra/repositories/contacts.ts` select exactly
        * these five columns, so every one is required.
@@ -10075,6 +10551,37 @@ export const openapiSpec = {
               'read it as "this account cannot pay until it re-onboards via POST /accounts/hybrid", ' +
               'not as a second live policy primitive. Reporting only; the enum keeps both values ' +
               'because a retired-rail account can still read its own identity here.',
+          },
+          /**
+           * #3330 (additive only): the OPEN sub-budget grants this agent
+           * holds — empty unless another agent re-delegated a narrower budget
+           * to this one. Each entry names the parent agent and the effective
+           * (narrower) limits; enforcement stays on-chain (the three-link
+           * chain B redeems), so these fields are reporting only.
+           */
+          parent_sub_budgets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['sub_budget_id', 'parent_agent_id', 'parent_agent_name', 'token_address', 'period_amount_atomic', 'expires_at', 'status', 'is_expired'],
+              properties: {
+                sub_budget_id: uuid,
+                parent_agent_id: uuid,
+                parent_agent_name: { type: 'string' },
+                token_address: address,
+                recipient_address: { anyOf: [address, { type: 'null' }] },
+                period_amount_atomic: { type: 'string' },
+                expires_at: { type: 'integer' },
+                status: { type: 'string', enum: ['open', 'closing'] },
+                is_expired: { type: 'boolean' },
+              },
+              additionalProperties: false,
+            },
+            description:
+              'Sub-budgets agent A granted this agent (B) (#3330): period-scoped ERC-7710 children ' +
+              'of A\u2019s own budget delegation. `period_amount_atomic` and `expires_at` are the ' +
+              'EFFECTIVE (narrower) limits; `is_expired` is derived. Enforcement stays on-chain ' +
+              'through the [grant, parent-child, budget] redemption chain.',
           },
         },
         additionalProperties: false,

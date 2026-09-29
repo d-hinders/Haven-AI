@@ -592,6 +592,90 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agents/{id}/sub-budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List this agent's sub-budget rows, newest first.
+         * @description Every row of the trees THIS agent issued (its parent-child narrowings and the grants nested under them) — the owner-facing twin of the agent-auth list at GET /sub-budgets. Scoped by BOTH agent id and the caller's ownership of it.
+         */
+        get: operations["listAgentSubBudgets"];
+        put?: never;
+        /**
+         * Issue a sub-budget: agent A re-delegates a narrower budget to agent B.
+         * @description Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (409 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side (sign-context, then relay each signature via POST /agents/{id}/sub-budgets/{sub}/sign). A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329).
+         */
+        post: operations["issueAgentSubBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/sub-budgets/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The parent→child sub-budget tree this agent issued.
+         * @description A's parent-child rows on top, each grant nested under the parent-child row its parent_sub_budget_id names (#3330 dashboard tree). Grants whose parent-child row is gone come back under `unattached` rather than being dropped.
+         */
+        get: operations["getAgentSubBudgetTree"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/sub-budgets/{sub}/sign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relay the delegating agent's signature over one pending sub-budget child.
+         * @description Owner relays step (#3330): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch.
+         */
+        post: operations["signAgentSubBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/sub-budgets/{sub}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke one sub-budget row (the parent-child, or a single grant).
+         * @description Authority-reducing only (#3329-2's rule): the delegating agent's own delegate account prepares disableDelegation of THIS row's child. Revoking a PARENT-CHILD row strands every grant under it (their chain's middle link dies — revoking A's budget delegation closes this row too, which is what makes B's child unredeemable); revoking a GRANT row ends B's slice and leaves A intact. status=pending or expired: closes immediately, nothing signed. status=open and live: returns the prepared close operation for the agent to sign (then relay via the agent close endpoint).
+         */
+        delete: operations["revokeAgentSubBudget"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/{id}/rekey": {
         parameters: {
             query?: never;
@@ -2304,6 +2388,103 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/sub-budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List sub-budgets this agent holds (it is the sub-agent).
+         * @description Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.
+         */
+        get: operations["listSubBudgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub-budgets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch one sub-budget this agent holds. */
+        get: operations["getSubBudget"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub-budgets/{id}/sign-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Re-servable, byte-free signing handoff for a pending or closing sub-budget row.
+         * @description DELEGATOR-scoped: both children of a tree (the parent-child narrowing AND the grant to the sub-agent) are signed by the DELEGATING agent's delegate key, so only the delegating agent authenticates here. purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for that row's child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.
+         */
+        get: operations["getSubBudgetSignContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub-budgets/{id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit the delegating agent signature — opens a pending child, or relays the signed close operation.
+         * @description status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409.
+         */
+        post: operations["submitSubBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sub-budgets/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a sub-budget row — trivially if never signed or already expired, otherwise prepares the revocation.
+         * @description DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.
+         */
+        post: operations["closeSubBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/payments": {
         parameters: {
             query?: never;
@@ -3269,6 +3450,44 @@ export type components = {
             /** Format: date-time */
             closed_at: string | null;
             close_tx_hash: string | null;
+        };
+        SubBudget: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agent_id: string;
+            /** Format: uuid */
+            parent_agent_id: string;
+            parent_sub_budget_id: string | null;
+            chain_id: number;
+            /** @description Stored lowercase. */
+            token_address: string;
+            /** @description Lowercase recipient pin, or null when this sub-budget carries none. */
+            recipient_address: string | null;
+            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+            parent_delegation_hash: string;
+            /** @description This sub-budget's own child delegation hash. */
+            delegation_hash: string;
+            label: string | null;
+            period_amount_atomic: string;
+            /** @enum {string} */
+            status: "pending" | "open" | "closing" | "closed";
+            /** @description Unix seconds. */
+            expires_at: number;
+            /** @description Derived: expires_at <= now. */
+            is_expired: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            opened_at: string | null;
+            /** Format: date-time */
+            closed_at: string | null;
+            close_tx_hash: string | null;
+        };
+        /** @description One parent→child tree (#3330): the delegating agent's parent-child narrowing with its grants nested. */
+        SubBudgetTree: {
+            parent_child_sub_budget: components["schemas"]["SubBudget"];
+            grants: components["schemas"]["SubBudget"][];
         };
         Contact: {
             /** Format: uuid */
@@ -4479,6 +4698,22 @@ export type components = {
              * @enum {string}
              */
             execution_rail: "legacy" | "delegation";
+            /** @description Sub-budgets agent A granted this agent (B) (#3330): period-scoped ERC-7710 children of A’s own budget delegation. `period_amount_atomic` and `expires_at` are the EFFECTIVE (narrower) limits; `is_expired` is derived. Enforcement stays on-chain through the [grant, parent-child, budget] redemption chain. */
+            parent_sub_budgets?: {
+                /** Format: uuid */
+                sub_budget_id: string;
+                /** Format: uuid */
+                parent_agent_id: string;
+                parent_agent_name: string;
+                /** @example 0x1111111111111111111111111111111111111111 */
+                token_address: string;
+                recipient_address?: string | null;
+                period_amount_atomic: string;
+                expires_at: number;
+                /** @enum {string} */
+                status: "open" | "closing";
+                is_expired: boolean;
+            }[];
         };
         AllowanceSummary: {
             /** Format: uuid */
@@ -7705,6 +7940,446 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listAgentSubBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sub-budget rows ordered by created_at DESC. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budgets: components["schemas"]["SubBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    issueAgentSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The sub-agent B — a different agent in the same account.
+                     */
+                    sub_agent_id: string;
+                    /**
+                     * @description Defaults to the chain USDC when omitted.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    token_address?: string;
+                    /** @description Per-period atomic amount; must be <= the parent budget period amount (checked pre-sign). */
+                    period_amount_atomic: string;
+                    /** @description Unix seconds; must be in the future and <= the parent budget expiry. */
+                    expires_at: number;
+                    /** @description Optional recipient pin; may only NARROW the parent pin, never widen it. */
+                    recipient_address?: string | null;
+                    label?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Both rows of the tree created pending. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        parent_child_sub_budget: components["schemas"]["SubBudget"];
+                        next_action: string;
+                        sign_targets: {
+                            /** Format: uuid */
+                            sub_budget_id: string;
+                            who: string;
+                            what: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentSubBudgetTree: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tree. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        agent_id: string;
+                        trees: {
+                            parent_child_sub_budget: components["schemas"]["SubBudget"];
+                            grants: components["schemas"]["SubBudget"][];
+                        }[];
+                        unattached: components["schemas"]["SubBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    signAgentSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                sub: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A's delegate-key signature over the row's sign-context typed data. */
+                    signature: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The opened sub-budget. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        /** @enum {string} */
+                        status: "open";
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    revokeAgentSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                sub: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The closed row, or the prepared close awaiting the agent signature. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        /** @enum {string} */
+                        status: "closed" | "closing";
+                        next_action?: string | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15416,6 +16091,424 @@ export interface operations {
                 content: {
                     "application/json": {
                         task_budget: components["schemas"]["TaskBudget"];
+                        /**
+                         * @description Present on a trivial close.
+                         * @enum {string}
+                         */
+                        status?: "closed";
+                        /** @description Present when a live child needs a revocation signature. */
+                        sign_data?: {
+                            /** @enum {string} */
+                            signature_scheme?: "eip712_userop";
+                            typed_data?: {
+                                [key: string]: unknown;
+                            };
+                            user_op_hash?: string;
+                        };
+                        /** @enum {string} */
+                        next_action?: "sign_then_submit";
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Already closed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listSubBudgets: {
+        parameters: {
+            query?: {
+                status?: "open" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sub-budgets held by this agent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budgets: components["schemas"]["SubBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sub-budget. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getSubBudgetSignContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sign context for whichever signature is currently pending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        sub_budget_id: string;
+                        /** @enum {string} */
+                        purpose: "open" | "close";
+                        /** @enum {integer} */
+                        sub_budget_sign_context_version: 1;
+                        typed_data: {
+                            [key: string]: unknown;
+                        };
+                        /** @description purpose=close only. */
+                        user_operation?: {
+                            [key: string]: unknown;
+                        };
+                        /** @description purpose=close only. */
+                        user_op_hash?: string;
+                        expected: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description sign_context_unavailable — the sub-budget has no signature currently pending. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    submitSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    signature: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Opened (from pending) or closed (from closing). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
+                        /** @enum {string} */
+                        status: "open" | "closed";
+                        /** @description Present when status=closed. */
+                        close_tx_hash?: string;
+                    };
+                };
+            };
+            /** @description signature_mismatch, or a malformed signature. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    closeSubBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Closed trivially, or a close signature is now pending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sub_budget: components["schemas"]["SubBudget"];
                         /**
                          * @description Present on a trivial close.
                          * @enum {string}

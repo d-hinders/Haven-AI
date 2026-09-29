@@ -365,6 +365,9 @@ export function createStateDirectRecoveryHandlers(
             // #3378: the schema has accepted task_budget_id since #3329; this
             // handler dropped it, so the payment was charged to the whole budget.
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
+            // #3330: the schema accepts sub_budget_id (agent B pays through
+            // the sub-budget A granted it); carried like task_budget_id.
+            ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
           })
           return {
             payment_id: intent.paymentId,
@@ -421,6 +424,9 @@ export function createStateDirectRecoveryHandlers(
             // #3378: the schema has accepted task_budget_id since #3329; this
             // handler dropped it, so the payment was charged to the whole budget.
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
+            // #3330: the schema accepts sub_budget_id (agent B pays through
+            // the sub-budget A granted it); carried like task_budget_id.
+            ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
           })
           return {
             payment_id: intent.paymentId,

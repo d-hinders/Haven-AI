@@ -372,6 +372,10 @@ export function createPlainHttpX402Handlers(
               // #3378: build the settlement child under the task budget the
               // caller named (#3329) — this handler used to drop it.
               ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
+              // #3330: build the settlement chain under the sub-budget the
+              // caller named (it is sub-agent B). Mutually exclusive with
+              // task_budget_id server-side.
+              ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
             }).catch(catchSettledReplay)
             // #3417: a replayed key whose payment already settled is a done state,
             // not the transient 500 it used to surface as — answer with the original.
@@ -434,6 +438,9 @@ export function createPlainHttpX402Handlers(
             idempotencyKey: args.idempotency_key,
             // #3378: fund the leg under the task budget the caller named (#3329).
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
+            // #3330: fund the leg under the sub-budget the caller named (it is
+            // sub-agent B). Mutually exclusive with task_budget_id server-side.
+            ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
             ...(prefetchedAgent?.delegateAddress
               ? { delegateAddress: prefetchedAgent.delegateAddress }
               : {}),

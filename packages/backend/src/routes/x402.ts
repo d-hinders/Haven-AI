@@ -114,7 +114,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     // #3329: an OPEN task budget to authorize this settlement through — the
     // spec (`X402AuthorizeRequest.taskBudgetId`) is the shape's authority;
     // the row lookup and every refusal live in `modules/x402/delegation-authorize.ts`.
-    const { taskBudgetId } = request.body
+    // #3330: `subBudgetId` is the same channel one level deeper (agent B
+    // pays through the sub-budget A granted it).
+    const { taskBudgetId, subBudgetId } = request.body
 
     const result = await authorizeX402({
       agent,
@@ -134,6 +136,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       mcpCallContext,
       paymentRequired,
       taskBudgetId,
+      subBudgetId,
       log: request.log,
     })
     return reply.code(result.code).send(result.body)

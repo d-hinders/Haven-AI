@@ -702,6 +702,16 @@ export async function mockHavenApi(page: Page) {
       await fulfillJson(route, { task_budgets: [] })
       return
     }
+    // #3330: the budget card also reads the sub-budget trees the agent ISSUES
+    // (`useSubBudgetTrees`). No fixture agent has issued one, so every agent
+    // gets the empty list the API returns in that state (`useSubBudgetTrees`
+    // tolerates the absent `unattached` key) — the card renders unchanged, and
+    // the read is no longer an "Unmocked API route" that
+    // `unexpectedBrowserErrors` fails the mobile agent-detail spec on.
+    if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/sub-budgets/tree')) {
+      await fulfillJson(route, { trees: [] })
+      return
+    }
     if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/delegations')) {
       const forTestAgent = path === `/agents/${testAgent.id}/delegations`
       await fulfillJson(route, {

@@ -47,6 +47,10 @@ import {
 import { hashDelegation, SIGNABLE_DELEGATION_TYPED_DATA } from '@metamask/smart-accounts-kit/utils'
 import { getDelegationContracts } from './delegation-contracts.js'
 
+// Routes may not import the kit directly (dep-lint: chain-sdk-not-in-routes) —
+// re-export the ERC-7710 Delegation type from this rails module instead.
+export type { Delegation } from '@metamask/smart-accounts-kit'
+
 const ERC20_IFACE = new Interface(['function transfer(address to, uint256 amount) returns (bool)'])
 
 /**

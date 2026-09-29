@@ -49,10 +49,10 @@ appeared to allow it:
 1. **Signup** — creating the Haven account (name, email, password) and the
    passkey that secures it. Send your user to
    [\`/signup?next=/agents&via=agent\`](/signup?next=/agents&via=agent).
-2. **Funding** — sending test USDC from the
-   [Circle faucet](https://faucet.circle.com) (Base Sepolia selected
-   explicitly) to their Haven account address. You cannot hold or move it for
-   them.
+2. **Funding** — on their dashboard's Add funds modal, clicking **Open
+   Circle's faucet** in the **Get test funds** card, then selecting
+   [Base Sepolia](https://faucet.circle.com) explicitly and pasting in their
+   Haven account address. You cannot hold or move funds for them.
 3. **Budget approval** — approving your 0.05 USDC/day budget with their
    passkey. Nothing you do is authorized until they sign.
 

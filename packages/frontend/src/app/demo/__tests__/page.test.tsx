@@ -66,11 +66,10 @@ describe('/demo page', () => {
     }
     expect(screen.getAllByText(/Why it matters:/).length).toBe(8)
 
-    // Step 2: Base Sepolia named explicitly, and the faucet link.
-    expect(screen.getByRole('link', { name: 'Circle faucet' })).toHaveAttribute(
-      'href',
-      'https://faucet.circle.com',
-    )
+    // Step 2: Base Sepolia named explicitly, pointing at the Add funds
+    // modal's own faucet button (#3478) rather than a bare faucet link.
+    expect(screen.getByText(/Get test funds/)).toBeInTheDocument()
+    expect(screen.getByText(/Open Circle's faucet/)).toBeInTheDocument()
     expect(screen.getAllByText(/Base Sepolia/).length).toBeGreaterThan(0)
 
     // Step 4: the exact budget, and "don't add a recipient pin", not "open".

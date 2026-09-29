@@ -58,15 +58,22 @@ describe('/demo and /demo.md links resolve (#3477)', () => {
     },
   )
 
-  it('found at least one own-site and one off-site link in each (guard against a vacuous pass)', () => {
+  it('found at least one own-site link in each, and at least one off-site link overall (guard against a vacuous pass)', () => {
+    // Per-file, not just combined, for own-site links: each of these pages
+    // must itself navigate somewhere on this site.
     for (const [name, hrefList] of [
       ['page', hrefs(PAGE_SOURCE)],
       ['demo.md', hrefs(DEMO_MD_CONTENT)],
     ] as const) {
       expect(hrefList.length, name).toBeGreaterThan(0)
       expect(hrefList.some((h) => h.startsWith('/')), `${name}: no own-site link found`).toBe(true)
-      expect(hrefList.some((h) => h.startsWith('http')), `${name}: no off-site link found`).toBe(true)
     }
+    // Off-site is checked COMBINED: `/demo` now points visitors at the Add
+    // funds modal's own faucet button (#3478) rather than linking the faucet
+    // directly, so the off-site link (Circle's faucet, Ampersend) lives in
+    // `/demo.md` instead.
+    const allHrefs = [...hrefs(PAGE_SOURCE), ...hrefs(DEMO_MD_CONTENT)]
+    expect(allHrefs.some((h) => h.startsWith('http')), 'no off-site link found in either file').toBe(true)
   })
 
   it('MUTATION CONTROL: an unresolvable own-site path fails the resolver', () => {

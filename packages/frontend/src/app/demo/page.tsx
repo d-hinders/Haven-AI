@@ -101,22 +101,14 @@ export default function DemoPage() {
 
             <StepCard number={2} title="Fund it with test USDC" whyItMatters={WHY_IT_MATTERS.nonCustodial}>
               <p>
-                From your dashboard, choose <strong>Add funds</strong>, then{' '}
-                <strong>Transfer from another wallet</strong> — not "Buy with card", which is a real-money path even
-                on this test network. Copy the <strong>Account address (Base Sepolia)</strong> shown there.
+                From your dashboard, choose <strong>Add funds</strong>. On a Base Sepolia account, you'll see a{' '}
+                <strong>Get test funds</strong> card with an <strong>Open Circle's faucet</strong> button — click it.
+                Copy the <strong>Account address (Base Sepolia)</strong> shown above it first, since you'll need it
+                on Circle's site.
               </p>
               <p>
-                Open the{' '}
-                <a
-                  href="https://faucet.circle.com"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-[var(--v2-brand)] hover:underline"
-                >
-                  Circle faucet
-                </a>
-                , select <strong>Base Sepolia</strong> explicitly (not Ethereum Sepolia), and send test USDC to the
-                address you copied. You don't need any ETH — Haven sponsors the gas.
+                On Circle's faucet, select <strong>Base Sepolia</strong> explicitly (not Ethereum Sepolia), paste in
+                the address you copied, and request test USDC. You don't need any ETH — Haven sponsors the gas.
               </p>
             </StepCard>
 

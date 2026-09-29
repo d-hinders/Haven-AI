@@ -7,8 +7,9 @@
  * client-side, so non-custody holds even in QA. The isolation argument is the
  * same one delegation-lifecycle established: the standing QA identity's open
  * budget is what every other leg depends on, so scenarios that need to
- * mutate or exhaust authority provision their own identity and abandon it —
- * which also makes QA_MAX_ATTEMPTS retries trivially safe.
+ * mutate or exhaust authority provision their own identity — which also makes
+ * QA_MAX_ATTEMPTS retries trivially safe — and revoke its agent when they end
+ * (#3459).
  *
  * Errors return as values rather than throws, matching the scenarios'
  * pass/fail idiom: the caller turns them into `fail(...)` with its own
@@ -18,6 +19,8 @@
 import { ethers } from 'ethers'
 import { signUserOpTypedDataForDelegation } from '@haven_ai/sdk'
 import { SEPOLIA_USDC } from './chain.js'
+import { thrownErrorDetail } from './thrown-error-detail.js'
+import { fail, type ScenarioResult } from '../scenarios/types.js'
 
 export interface TypedData {
   domain: Record<string, unknown>
@@ -51,12 +54,79 @@ export interface ThrowawayIdentity {
   grantHash: string
   /** Build + owner-sign + activate a replacement grant in the same slot. */
   grantAndActivate(): Promise<{ hash: string } | { error: string }>
+  /**
+   * `POST /agents/:id/revoke` as the throwaway user (#3459). Never throws;
+   * resolves to a warning naming the agent id when the revoke did not land.
+   */
+  revoke(): Promise<string | null>
+}
+
+/** Provisioning failed; `cleanupWarning` is set when the half-built agent could not be revoked. */
+export interface ThrowawayError {
+  error: string
+  cleanupWarning?: string
+}
+
+/**
+ * Revoke a throwaway agent as its owning user (#3459). Every qa-dev run
+ * otherwise leaves active agents behind, and each one is scanned by the
+ * background monitors forever. Returns a warning rather than throwing — a
+ * failed cleanup must never change a scenario's verdict.
+ */
+export async function revokeThrowawayAgent(
+  apiUrl: string,
+  token: string,
+  agentId: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(`${apiUrl}/agents/${agentId}/revoke`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      // A JSON content type with no body is refused by Fastify before the
+      // route runs (400 FST_ERR_CTP_EMPTY_JSON_BODY) — the frontend sends `{}`
+      // for the same reason.
+      body: '{}',
+    })
+    if (res.ok) return null
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    return `throwaway agent ${agentId} was NOT revoked (${res.status}): ${body.error ?? ''}`
+  } catch (e) {
+    return `throwaway agent ${agentId} was NOT revoked: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
+/**
+ * The only way a scenario should hold a throwaway identity: provision, run
+ * the leg, and revoke the agent when it ends — pass, fail or throw — AFTER
+ * the leg's own assertions. A thrown error is turned into the failing result
+ * the harness would have made of it, so the cleanup warning has a result to
+ * ride on. A failed revoke only sets `cleanupWarning`; verdict and `detail`
+ * are the leg's own.
+ */
+export async function withThrowawayIdentity(
+  apiUrl: string,
+  options: { chainId: number; budgetAtomic: string; label: string },
+  leg: (identity: ThrowawayIdentity) => Promise<ScenarioResult>,
+): Promise<ScenarioResult> {
+  const identity = await provisionThrowawayIdentity(apiUrl, options)
+  if ('error' in identity) {
+    const failed = fail(identity.error)
+    return identity.cleanupWarning ? { ...failed, cleanupWarning: identity.cleanupWarning } : failed
+  }
+  let result: ScenarioResult
+  try {
+    result = await leg(identity)
+  } catch (e) {
+    result = fail(thrownErrorDetail(e))
+  }
+  const warning = await identity.revoke()
+  return warning ? { ...result, cleanupWarning: warning } : result
 }
 
 export async function provisionThrowawayIdentity(
   apiUrl: string,
   options: { chainId: number; budgetAtomic: string; label: string },
-): Promise<ThrowawayIdentity | { error: string }> {
+): Promise<ThrowawayIdentity | ThrowawayError> {
   const owner = ethers.Wallet.createRandom()
   const delegate = ethers.Wallet.createRandom()
   const email = `qa-${options.label}-${Math.random().toString(36).slice(2, 10)}@haven.test`
@@ -132,8 +202,13 @@ export async function provisionThrowawayIdentity(
     return { hash: built.json.delegation_hash }
   }
 
-  const grant = await grantAndActivate()
-  if ('error' in grant) return grant
+  // The agent exists from here on, and the caller never receives its id on an
+  // error return: revoke it on the way out (#3459).
+  const grant = await grantAndActivate().catch((e): { error: string } => ({ error: thrownErrorDetail(e) }))
+  if ('error' in grant) {
+    const cleanupWarning = await revokeThrowawayAgent(apiUrl, token, agentId)
+    return cleanupWarning ? { error: grant.error, cleanupWarning } : { error: grant.error }
+  }
 
   return {
     owner,
@@ -146,6 +221,7 @@ export async function provisionThrowawayIdentity(
     delegateAccountAddress,
     grantHash: grant.hash,
     grantAndActivate,
+    revoke: () => revokeThrowawayAgent(apiUrl, token, agentId),
   }
 }
 

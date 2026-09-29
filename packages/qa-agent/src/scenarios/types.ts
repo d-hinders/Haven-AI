@@ -16,6 +16,13 @@ export interface ScenarioResult {
   detail: string
   /** Set when the scenario could not run (e.g. a missing dependency), not a failure. */
   skipped?: boolean
+  /**
+   * Set when a throwaway agent this scenario created could NOT be revoked
+   * (#3459). Never part of the verdict or `detail` — a leaked agent is
+   * visible in the run report without turning a green leg red. Names the
+   * agent id so the leak can be cleaned up by hand.
+   */
+  cleanupWarning?: string
 }
 
 export interface Scenario {

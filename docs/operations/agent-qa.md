@@ -166,6 +166,20 @@ document (`GET /` / `GET /.well-known/haven-demo-merchant`) all carry it on
 this specific purchase settles nothing on-chain and its receipt will read
 "Delivered — not confirmed on-chain".
 
+Since #3421, the Sepolia `storage_50gb` catalog row is **delisted** (migration
+`102_delist_skip_settle_catalog_row`) — an agent reaching this fixture through
+`GET /catalog` would have no way to know, before spending, that its purchase
+never settles; the QA hook now stays reachable only by calling the merchant
+directly (as the sweep scenario already does), never through catalog
+discovery — `x402-catalog-guided-purchase` buys NordShield VPN Basic THROUGH
+the catalog, never this fixture. `x402-catalog-guided-purchase` carries the
+tripwire that keeps it that way — see below.
+
+**Rule:** the product named in `MERCHANT_SKIP_SETTLE_PRODUCT` must have no
+non-delisted `merchant_catalog` row on the dev host. Moving the env var to a
+different product needs a delisting migration FIRST, and
+`x402-catalog-guided-purchase`'s tripwire enforces it on every qa-dev run.
+
 ### Preflight: resources every run consumes (#1530)
 
 Before the first leg, the harness reports every consumable resource and refuses
@@ -355,7 +369,7 @@ The deterministic harness runs fourteen scenarios in order:
 | `x402-erc7710-hosted` | The same settlement through the **default topology** — hosted MCP + local edge signer, what `npx @haven_ai/connect@alpha` installs (#1457). The two legs above cover the raw API and the SDK; neither exercises the hosted boundary, where the server must never hold a delegate key and the signature has to come from the local signer. Asserts the hosted quote **reports** `settlement_scheme: erc7710` (a silent reroute to the 3009 bridge would still deliver the goods), that settle reports **no funding tx**, and that the delegate EOA is unchanged. Signs with `haven_sign` rather than `haven_sign_x402` — the latter builds an EIP-3009 header this scheme has no use for. Ordered right after `x402-hosted-mcp-signer` so a failure is diagnosable against a topology that leg has already shown healthy |
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 | `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*`. **Skips** (#1441) when the hosted quote comes back **erc7710-shaped**: #1450's preference rule selects erc7710 whenever the merchant advertises it, and this leg's invariant is the FUNDING-LEG one, so against such a merchant it is unreachable rather than violated. Nothing goes uncovered — hosted erc7710 is `x402-erc7710-hosted`, and `x402-catalog-guided-purchase` is scheme-aware since #1547 (erc7710 expected on dev, the 3009 two-leg proof kept as its fallback shape; same topology, zero residual either way). What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT on the funding path; point it at a merchant that does not advertise erc7710 to exercise that, and note `QA_REQUIRE_ALL_LEGS=1` turns the skip into a run failure |
-| `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, then branches on the preflight's `settlement_scheme` (#1547 — the guided prepare runs the #1450 preference): on **erc7710** (expected on dev) it signs via `haven_sign` by **`payment_id`** alone and settles with **only `payment_id` + `signature`** — no `payment_header` (Haven assembles it at settle), money proof inverted (a `funding_tx_hash` is a FAILURE, treasury debit = merchant credit, delegate untouched); on the **eip3009 fallback shape** it signs via `haven_sign_x402` by `payment_id` alone (#1549 — the compact preflight no longer echoes `payment_required`; the signer fetches it by payment_id, and the leg FAILS if the echo reappears) and settles with **only `payment_id` + `signature` + `payment_header`**. Neither shape ever re-sends `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy) |
+| `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, then branches on the preflight's `settlement_scheme` (#1547 — the guided prepare runs the #1450 preference): on **erc7710** (expected on dev) it signs via `haven_sign` by **`payment_id`** alone and settles with **only `payment_id` + `signature`** — no `payment_header` (Haven assembles it at settle), money proof inverted (a `funding_tx_hash` is a FAILURE, treasury debit = merchant credit, delegate untouched); on the **eip3009 fallback shape** it signs via `haven_sign_x402` by `payment_id` alone (#1549 — the compact preflight no longer echoes `payment_required`; the signer fetches it by payment_id, and the leg FAILS if the echo reappears) and settles with **only `payment_id` + `signature` + `payment_header`**. Neither shape ever re-sends `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy). **FAILS (never skips)**, before any of that, if the merchant's discovery document is unreachable, a `qa_fixture` product it names has a listed catalog row on this host, or a `qa_fixture` product cannot be mapped to a catalog `(tool_name, tool_arguments)` pair (#3421 tripwire) |
 
 The harness exits non-zero if any non-skipped scenario fails. **A skip IS a
 failure (#1066).** Since every leg's identity is provisioned (#1063) and the
@@ -569,6 +583,24 @@ the same settling product `x402-hosted-mcp-signer` uses — **never** CloudNest
 (`x402-delegation-3009-sweep`'s fixture): funds would strand on the delegate by
 design, and this leg's zero-residual assertion would be asserting a lie.
 
+**#3421 — the qa_fixture tripwire.** Before any money moves, this leg reads
+the demo merchant's own `/.well-known/haven-demo-merchant` discovery document
+and fails if ANY product it marks `qa_fixture` (today, only `storage_50gb` on
+Sepolia) has a listed (non-delisted) `merchant_catalog` row on that same host.
+The Sepolia CloudNest 50 GB row was itself the fixture that had drifted this
+way — catalog-discoverable while also being the merchant's skip-settle
+fixture — and migration `102_delist_skip_settle_catalog_row` delisted it (the
+owner's decision: delist, not relabel in the style of migration 064's
+Minifetch precedent). This tripwire is what keeps it delisted: it fails the
+moment a re-seed, a hand-edit, or a future `MERCHANT_SKIP_SETTLE_PRODUCT`
+reassignment lists a `qa_fixture` product again, rather than relying on
+someone noticing. On prod the fixture is irrelevant — `MERCHANT_SKIP_SETTLE_
+PRODUCT` is chain-gated to Base Sepolia (84532): a merchant on any other
+chain refuses to start with it set (`x402.ts`), so the prod merchant cannot
+carry it. The tripwire runs on qa-dev only; prod's copy of the Sepolia row
+(058 seeds every environment's DB) is handled by the migration itself and by
+the owner's read-only query in the CASP shard.
+
 **#2970 — the skip-settle fixture's new observable.** Buying the fixture
 through the hosted erc7710 settle/complete tools no longer reads as a normal
 purchase: the merchant's confirmation and invoice say "delivered — not
@@ -612,6 +644,13 @@ code defect:
   recognizes the MCP SDK's own "tool not found" JSON-RPC error and treats it
   as a deploy-skew skip, not a failure — any OTHER error calling the tool
   (a real refusal, a transport fault) still fails the leg normally.
+
+Neither skip condition can mask the #3421 tripwire: it runs FIRST, before
+either check above, so it FAILS (never skips) if the merchant's discovery
+document is unreachable, if a `qa_fixture` product it names has a listed
+catalog row on this host, or if a `qa_fixture` product cannot be mapped to a
+catalog `(tool_name, tool_arguments)` pair — even on a run where no VPN Basic catalog row
+exists and the two conditions above would otherwise have skipped the leg.
 
 ### Run locally
 

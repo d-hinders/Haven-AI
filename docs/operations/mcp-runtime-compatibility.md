@@ -120,18 +120,20 @@ last-verified: "2026-09-29"
 > re-verified.
 >
 > **Re-verified #3431 (2026-09-29, no chain name in the onboarding prompt):**
-> `AGENT_ONBOARDING_PROMPT` in `packages/sdk/src/agent-guidance.ts` (the
-> dashboard's setup-prompt template, distinct from `HAVEN_AGENT_RUNBOOK_MD`
-> above) said "funding the account with USDC on Base" — wrong on any
-> deployment that does not deploy Base mainnet (dev deploys Base Sepolia
-> only). Made chain-neutral: "funding the account with USDC". Prose only, in
-> the same file this doc already covers for the runbook and the sentence
-> constants — no tool, argument, schema, description or consent input
-> changes, and the version-skew and consent-hash contracts do not move. The
-> frontend's byte-pinned copy (`packages/frontend/src/lib/agent-onboarding-prompt.ts`,
-> not in this doc's covered trees) was edited identically and its parity test
-> re-run. `last-verified` is not re-stamped: this block is the scope. Nothing
-> else in this document was re-verified.
+> `AGENT_ONBOARDING_PROMPT` in `packages/sdk/src/agent-guidance.ts` — the
+> dashboard's onboarding prompt (static; distinct from the per-agent setup
+> prompt and from `HAVEN_AGENT_RUNBOOK_MD` above; see
+> `docs/product/copy-guidelines.md` § Agent-facing vocabulary) — said
+> "funding the account with USDC on Base" — wrong on any deployment that does
+> not deploy Base mainnet (dev deploys Base Sepolia only). Made chain-neutral:
+> "funding the account with USDC". Prose only, in the same file this doc
+> already covers for the runbook and the sentence constants — no tool,
+> argument, schema, description or consent input changes, and the
+> version-skew and consent-hash contracts do not move. The frontend's
+> byte-pinned copy (`packages/frontend/src/lib/agent-onboarding-prompt.ts`,
+> added to this doc's `covers:` by this change) was edited identically and
+> its parity test re-run. `last-verified` is not re-stamped: this block is
+> the scope. Nothing else in this document was re-verified.
 >
 > **Re-verified #3418 (2026-09-28, the receipt verifier stops throwing and
 > verifies the delegation digest):** this diff touches three surfaces this

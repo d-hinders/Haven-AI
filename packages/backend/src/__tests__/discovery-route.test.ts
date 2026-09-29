@@ -96,7 +96,7 @@ describe('GET /discovery', () => {
     expect(doc.openapi_url).toBe('https://preview.test/openapi.json')
   })
 
-  it('reports the canonical default chain alongside the deployment chain lists', () => {
+  it('reports DEFAULT_CHAIN_ID when the deployment deploys on it (test env: every supported chain)', () => {
     expect(buildDiscoveryDocument(req()).chains.default).toBe(DEFAULT_CHAIN_ID)
   })
 
@@ -111,6 +111,16 @@ describe('GET /discovery', () => {
       const doc = buildDiscoveryDocument(req())
       expect(doc.chains.default).toBe(8453)
       expect(doc.chains.default).toBe(DEFAULT_CHAIN_ID)
+    })
+
+    it('DEFAULT_CHAIN_ID NOT first in the deployable list still wins (#3431 review F1)', () => {
+      // Every other case here lists 8453 first (or omits it) — deleting the
+      // `includes(DEFAULT_CHAIN_ID)` preference and falling straight through
+      // to "the first deployable chain" would still pass them all. This is
+      // the one fixture that distinguishes the two rules.
+      vi.mocked(chainsDomain.deployableChainIds).mockReturnValueOnce([84532, 8453])
+      const doc = buildDiscoveryDocument(req())
+      expect(doc.chains.default).toBe(8453)
     })
 
     it('dev shape [84532]: a deployable list that excludes DEFAULT_CHAIN_ID reports a default that IS deployable', () => {

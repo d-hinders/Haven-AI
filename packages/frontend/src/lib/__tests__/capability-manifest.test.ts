@@ -34,12 +34,15 @@ const ORIGIN = 'https://preview.test'
 // `default: DEFAULT_CHAIN_ID` beside `deployable: [84532]` is a shape the
 // backend itself never sends after #3431 (`/discovery` reports the
 // deployment's EFFECTIVE default, which would be 84532 here) — deliberately
-// kept anyway, because this suite tests `buildManifestFrom`'s PASS-THROUGH of
-// whatever `chains.default` the backend sent, not the backend's own
-// derivation (that is `effectiveDefaultChainId` in `@haven_ai/core`,
-// covered by `packages/core/src/chains.test.ts`). Fixing the fixture would
-// make this suite blind to a manifest that silently recomputed the field
-// instead of relaying it.
+// kept anyway, because most of this file exercises OTHER fields against this
+// fixture and DEFAULT_CHAIN_ID is a convenient constant to assert against.
+// It does NOT by itself prove `buildManifestFrom` relays `chains.default`
+// rather than recomputing it — DEFAULT_CHAIN_ID here equals what a
+// hard-coded `default: 8453` would also produce. That property has its own
+// test below ("relays chains.default exactly as the backend sent it"),
+// which uses a value distinct from DEFAULT_CHAIN_ID for exactly this reason.
+// The backend's own derivation is `effectiveDefaultChainId` in
+// `@haven_ai/core`, covered by `packages/core/src/chains.test.ts`.
 const FACTS: DiscoveryFacts = {
   hosted_mcp_url: 'https://mcp.test',
   connector_package: '@haven_ai/connect@dev',
@@ -153,6 +156,17 @@ describe('capability manifest', () => {
       'approve_budget',
     ])
     expect(HUMAN_ONLY_STEPS).toContain('approve_budget')
+  })
+
+  it('relays chains.default exactly as the backend sent it, never a literal (#3431 review F2)', () => {
+    // FACTS.chains.default happens to equal DEFAULT_CHAIN_ID, so a
+    // `default: 8453` hard-coded straight into `buildManifestFrom` would pass
+    // every other assertion in this file. A distinct sentinel that is
+    // neither DEFAULT_CHAIN_ID nor deployable[0]'s usual companion isolates
+    // the pass-through property — proven by mutation (see the worker
+    // report).
+    const facts = { ...FACTS, chains: { ...FACTS.chains, default: 84532 } }
+    expect(buildManifestFrom(ORIGIN, facts).chains?.default).toBe(84532)
   })
 
   it('takes the environment-dependent values from the backend, never a literal', () => {

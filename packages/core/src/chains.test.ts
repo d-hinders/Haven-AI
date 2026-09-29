@@ -57,6 +57,16 @@ describe('effectiveDefaultChainId (#3431)', () => {
     expect(effectiveDefaultChainId([8453])).toBe(8453)
   })
 
+  it('DEFAULT_CHAIN_ID NOT first in the deployable list still wins — the includes() check, not "first"', () => {
+    // Every other fixture in this file lists 8453 first (or omits it), so
+    // deleting the `includes(DEFAULT_CHAIN_ID)` short-circuit and falling
+    // straight through to `deployable[0]` would still pass them all. This is
+    // the one case that distinguishes "prefer DEFAULT_CHAIN_ID when it is
+    // deployable" from "prefer whichever chain is listed first" — proven by
+    // mutation (see the worker report).
+    expect(effectiveDefaultChainId([84532, 8453])).toBe(8453)
+  })
+
   it('a deployment whose deployable list excludes DEFAULT_CHAIN_ID reports a default that IS deployable', () => {
     // Dev's shape: Base Sepolia only. This is the funding-step trap #3431
     // found — the fixture is the one a bad fix would still fail on.

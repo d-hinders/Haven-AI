@@ -200,11 +200,11 @@ export const DEFAULT_CHAIN_ID = 8453
  * calls it with `deployableChainIds()` rather than restating the rule.
  *
  * `deployable` empty — a misconfigured `HAVEN_DEPLOY_CHAIN_IDS` naming no
- * registered chain (`deployableChainIds()`'s own doc calls this "backward
- * compat" for an unset var, but a SET var that resolves to nothing is a
- * config error, not that case) — falls back to `DEFAULT_CHAIN_ID` itself:
- * an answer the deployment cannot currently back is still a chain id, never
- * `undefined`.
+ * registered chain (`isDeployableChain`'s doc, `domain/chains.ts`, calls an
+ * UNSET var "backward-compat" for "all supported"; a SET var that resolves
+ * to nothing is a config error, not that case) — falls back to
+ * `DEFAULT_CHAIN_ID` itself: an answer the deployment cannot currently back
+ * is still a chain id, never `undefined`.
  *
  * Deliberately takes `deployable` as a parameter rather than importing
  * `deployableChainIds()`: that function reads backend config (`config.ts`),

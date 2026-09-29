@@ -339,8 +339,8 @@ Next: [your agent hit a 402](/402.md) · [everything agent-readable](/llms.txt)
  * naming Base here would be the same funding-step trap #2591 already fixed in
  * `HAVEN_AGENT_RUNBOOK_MD` above. This prompt does not re-teach the chain: it
  * tells the agent to read `/for-agents.md` first, and that page names the
- * SOURCE of the chain (`haven wallets funding`, the dashboard funding card)
- * rather than guessing.
+ * SOURCE of the chain (`haven wallets funding`, the dashboard's Receive-funds
+ * screen) rather than guessing.
  */
 export const AGENT_ONBOARDING_PROMPT = `I have a Haven account and I am signed in at {{HAVEN_ORIGIN}}. Please set up Haven so you can pay for things within a budget I approve.
 

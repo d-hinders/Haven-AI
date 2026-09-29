@@ -1,5 +1,5 @@
 /**
- * Real-Postgres proof for migration 102 — per-agent x402 tax declaration
+ * Real-Postgres proof for migration 103 — per-agent x402 tax declaration
  * opt-in (#3426). No mocks — #1219's rule.
  *
  * Pins: the column exists on `agents` with DEFAULT false, `down()` drops
@@ -15,7 +15,7 @@ import {
   initDbHarness,
   resetDb,
 } from '../../../infra/__tests__/helpers/db-harness.js'
-import { down, up, version } from '../102_agent_tax_declaration_opt_in.js'
+import { down, up, version } from '../103_agent_tax_declaration_opt_in.js'
 
 async function runUp(): Promise<void> {
   const client = await db.connect()
@@ -86,7 +86,7 @@ async function columnExists(): Promise<number> {
   return Number(rows[0].count)
 }
 
-describeDb('migration 102_agent_tax_declaration_opt_in', () => {
+describeDb('migration 103_agent_tax_declaration_opt_in', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
@@ -98,7 +98,7 @@ describeDb('migration 102_agent_tax_declaration_opt_in', () => {
   })
 
   it('declares the migration version', () => {
-    expect(version).toBe('102_agent_tax_declaration_opt_in')
+    expect(version).toBe('103_agent_tax_declaration_opt_in')
   })
 
   it('defaults the column OFF for EXISTING agents (a row that predates the column)', async () => {

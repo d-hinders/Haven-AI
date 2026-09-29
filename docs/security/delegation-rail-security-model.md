@@ -1827,7 +1827,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `infra/repositories/agents.ts` and `db/migrations/index.ts`, and both
 > changes are SETTINGS-only by construction. The migration adds
 > `agents.tax_declaration_enabled` (BOOLEAN NOT NULL DEFAULT false) and the
-> index registers `102_agent_tax_declaration_opt_in.ts`; no delegation,
+> index registers `103_agent_tax_declaration_opt_in.ts`; no delegation,
 > budget, re-key, activation or signing query is touched. The repository
 > additions are one gated owner write and one agent-scoped read: the write's
 > WHERE clause gates only its own new column (switching ON requires the

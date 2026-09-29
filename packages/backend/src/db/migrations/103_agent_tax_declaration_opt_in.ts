@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg'
 
 /**
- * 102 — per-agent x402 tax declaration opt-in (#3426, wg-tax #5 §2.1).
+ * 103 — per-agent x402 tax declaration opt-in (#3426, wg-tax #5 §2.1).
  *
  * `agents.tax_declaration_enabled` is the OWNER's opt-in for ONE agent to
  * carry a buyer-side x402 tax declaration on its x402 payments (the shape
@@ -27,7 +27,7 @@ import type { PoolClient } from 'pg'
  * issue): the declaration is separate from the passport, computed at read
  * time from data that already exists.
  */
-export const version = '102_agent_tax_declaration_opt_in'
+export const version = '103_agent_tax_declaration_opt_in'
 
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`

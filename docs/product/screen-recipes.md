@@ -241,12 +241,17 @@ Money and risk clarity:
   implying Haven operates an on-ramp.
 - On a **testnet account** (the selected account's chain, never the
   deployment's default — both Base and Base Sepolia are offered as an account
-  chain in every environment), hide the card-purchase on-ramp entirely rather
-  than disabling it: buying testnet USDC by card has no real answer. Show a
-  faucet link instead, naming Circle as its source and stating plainly that
-  the funds are test funds with no value — never that Haven sends or holds
-  them. A mainnet account gets the on-ramp (when configured) and no faucet
-  link ([#3478](https://github.com/d-hinders/Haven-AI/issues/3478)).
+  network in every environment), hide the card-purchase on-ramp entirely
+  rather than disabling it: buying testnet USDC by card has no real answer.
+  Show a faucet link instead, once the address it points at is actually on
+  screen — the faucet card is gated on the same condition as the address
+  card, since its copy says "from above". It names Circle as the source and
+  says plainly the money has no value; the claim that it comes from Circle,
+  not Haven, is scoped to that one link, not restated as a product-wide
+  claim that Haven never touches funds. A mainnet account (and any other
+  registered network with no faucet, e.g. Gnosis) gets the on-ramp (when
+  configured) and no faucet link
+  ([#3478](https://github.com/d-hinders/Haven-AI/issues/3478)).
 - If the account's network cannot be confirmed, name no network, withhold the
   deposit address and the on-ramp, and say plainly that the network is unknown.
   A funding surface with a missing network refuses to instruct rather than

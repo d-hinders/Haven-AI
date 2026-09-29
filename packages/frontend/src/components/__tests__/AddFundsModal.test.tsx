@@ -87,7 +87,9 @@ describe('AddFundsModal', () => {
     expect(screen.queryByText('Buy with card')).toBeNull()
 
     // The faucet link: external, named Circle, names Base Sepolia, and says
-    // the funds have no value. Never claims Haven sends or holds funds.
+    // the money has no value. The "comes from Circle, not Haven" claim is
+    // scoped to this link, not restated as a Haven-never-touches-funds
+    // product-wide claim (review round 1 M1).
     const link = screen.getByRole('link', { name: /Open Circle's faucet/i })
     expect(link).toHaveAttribute('href', 'https://faucet.circle.com')
     expect(link).toHaveAttribute('target', '_blank')
@@ -95,20 +97,43 @@ describe('AddFundsModal', () => {
     expect(link.getAttribute('rel')).toMatch(/noreferrer/)
 
     const dialog = screen.getByRole('dialog')
-    expect(dialog.textContent).toMatch(/Circle/)
-    expect(dialog.textContent).toMatch(/Select Base Sepolia there/)
+    expect(dialog.textContent).toMatch(/Get free Base Sepolia USDC from Circle's faucet/)
+    expect(dialog.textContent).toMatch(/it comes from Circle, not Haven/)
     expect(dialog.textContent).toMatch(/no value/i)
-    expect(dialog.textContent).not.toMatch(/Haven (sends|holds|sends or holds)/i)
+    expect(dialog.textContent).toMatch(/Pick USDC and Base Sepolia there/)
+    expect(dialog.textContent).toMatch(/paste your account address from above/)
   })
 
-  // Gnosis (100) is registered but carries no `faucetUrl` in core — a testnet
-  // account with no faucet must not render one, and it is not treated as a
-  // testnet by the onramp gate either (`isTestnetChain` requires a faucet).
-  it('shows no faucet link for a registered chain with no faucet (Gnosis, 100)', () => {
+  // M2 (review round 1): the faucet copy says "from above", which is only
+  // true once the address card actually renders. Gated on
+  // `depositInstructionsAvailable` — the SAME condition as the address card
+  // — not merely on the chain being a testnet, so a testnet account with no
+  // address yet does not promise an address that is not on screen.
+  it('shows no faucet card on a Base Sepolia account with no address yet', () => {
+    render(
+      <AddFundsModal open onClose={vi.fn()} onReceive={vi.fn()} chainId={BASE_SEPOLIA} />,
+    )
+
+    expect(screen.queryByRole('link', { name: /Open Circle's faucet/i })).toBeNull()
+    expect(screen.queryByText(/paste your account address from above/i)).toBeNull()
+    // The receive handoff is still the right next action here, same as any
+    // other no-address state.
+    expect(screen.getByRole('button', { name: /Show receive address/ })).toBeInTheDocument()
+  })
+
+  // Gnosis (100) is a registered MAINNET chain — it carries no `faucetUrl` in
+  // core, so it gets no faucet, and it keeps the onramp when configured
+  // (`isTestnetChain` requires a faucet, and Gnosis has none — it is not a
+  // testnet, not merely "a testnet with no faucet"). Asserting the onramp
+  // IS shown is what makes this test able to fail: without it, a gate that
+  // wrongly treated Gnosis as a testnet would still pass by accident, since
+  // the faucet assertions alone hold either way once the onramp is hidden.
+  it('shows the onramp and no faucet link on a Gnosis account (100, a mainnet)', () => {
     render(
       <AddFundsModal open onClose={vi.fn()} accountAddress={SAFE_ADDRESS} chainId={GNOSIS} />,
     )
 
+    expect(screen.getByRole('button', { name: /Buy with card/ })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Open Circle's faucet/i })).toBeNull()
     expect(screen.queryByText(/faucet\.circle\.com/i)).toBeNull()
   })

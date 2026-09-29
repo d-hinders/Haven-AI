@@ -206,6 +206,7 @@ describe('computeAlerts — edge-triggered, not spammy (#777)', () => {
       dustAlert: false,
       lingering: [],
       unread: [],
+      chainErrors: {},
       scannedAt: '',
       ...overrides,
     } as never
@@ -455,6 +456,9 @@ describe('scanDelegateBalances — one batched read per chain (#3458)', () => {
 
     expect(report.findings.map((f) => f.agentId)).toEqual(['agent-1', 'agent-3'])
     expect(report.lingering.map((f) => f.agentId)).toEqual(['agent-1', 'agent-3'])
+    // …and why: the set-up error is carried to the report (and the WARN).
+    expect(report.unread).toEqual([{ agentId: 'agent-2', chainId: 84532 }])
+    expect(report.chainErrors).toEqual({ 84532: 'unsupported chainId 84532' })
   })
 })
 
@@ -475,7 +479,11 @@ describe('unread delegates are visible, not silent (#3458)', () => {
       { agentId: 'agent-3', chainId: 8453 },
     ])
     const unreadWarn = warn.mock.calls.find((c) => String(c[1]).startsWith('UNREAD'))
-    expect(unreadWarn?.[0]).toMatchObject({ unread: 2, unreadByChain: { 8453: 1, 84532: 1 } })
+    expect(unreadWarn?.[0]).toMatchObject({
+      unread: 2,
+      unreadByChain: { 8453: 1, 84532: 1 },
+      chainErrors: { 84532: 'unsupported chainId 84532' },
+    })
     expect(info.mock.calls.find((c) => c[1] === 'delegate balance scan complete')?.[0]).toMatchObject({ unread: 2 })
   })
 

@@ -174,6 +174,10 @@ Read-only, requires no signing key, and moves nothing. It verifies:
   from a laptop the script says so and skips it. A lingering delegate is a
   funded delegate with no fresh in-flight payment: reconciliation debt the
   gasless sweep exists to clear — investigate before widening anything.
+  A delegate whose balance read failed is reported **UNREAD** — not known to
+  be clean — and the script exits **2** ("could not check"), never green; the
+  monitor reads through Multicall3 with no retries, so one failed request can
+  leave a whole chunk of delegates unread (#3458). Re-run it.
 
 The delegate-balance monitor itself WARNs hourly in prod logs (leader-locked,
 #714); the check above is the pull-based complement an operator can run on

@@ -61,6 +61,12 @@ export interface DelegateBalanceReport {
    * reported and logged rather than silently shrinking `findings`.
    */
   unread: Array<{ agentId: string; chainId: number }>
+  /**
+   * Chains whose reader could not even be set up, with the error (#3458).
+   * Only a configuration fault reaches this (a non-ERC-20 USDC address): a
+   * retry will not fix it, so the reason is carried to the log.
+   */
+  chainErrors: Record<number, string>
   scannedAt: string
 }
 
@@ -126,12 +132,15 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
     holdersByChain.set(delegate.chain_id, holders)
   }
   const balancesByChain = new Map<number, Map<string, bigint | null>>()
+  const chainErrors: Record<number, string> = {}
   for (const [chainId, holders] of holdersByChain) {
     try {
       balancesByChain.set(chainId, await readTokenBalances(chainId, usdcAddressFor(chainId)!, holders))
-    } catch {
-      // A chain the reader cannot even set up (no viem definition, say) skips
-      // its delegates this round; the other chains are still scanned.
+    } catch (err) {
+      // The reader throws only for a token it refuses (a misconfigured USDC
+      // address). That chain's delegates are unread and the reason is kept;
+      // the other chains are still scanned.
+      chainErrors[chainId] = err instanceof Error ? err.message : String(err)
       balancesByChain.set(chainId, new Map(holders.map((h) => [h, null])))
     }
   }
@@ -167,6 +176,7 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
     dustAlert: dustTotalAtomic >= dustAlertThresholdAtomic(),
     lingering: findings.filter((f) => f.state === 'lingering'),
     unread,
+    chainErrors,
     scannedAt: new Date().toISOString(),
   }
 }
@@ -221,7 +231,12 @@ export async function runDelegateBalanceMonitor(log: MonitorLogger): Promise<Del
     const byChain: Record<number, number> = {}
     for (const u of report.unread) byChain[u.chainId] = (byChain[u.chainId] ?? 0) + 1
     log.warn(
-      { scope: 'delegate-balance-monitor', unread: report.unread.length, unreadByChain: byChain },
+      {
+        scope: 'delegate-balance-monitor',
+        unread: report.unread.length,
+        unreadByChain: byChain,
+        ...(Object.keys(report.chainErrors).length > 0 ? { chainErrors: report.chainErrors } : {}),
+      },
       'UNREAD delegate balances — the balance read failed for these delegates this round; ' +
         'they are NOT known to be clear, and the next scan retries them',
     )
@@ -273,7 +288,7 @@ export function newAlertState(): AlertState {
 
 const moduleAlertState = newAlertState()
 
-function lingeringKey(f: DelegateBalanceFinding): string {
+function lingeringKey(f: { agentId: string; chainId: number }): string {
   return `${f.agentId}:${f.chainId}`
 }
 
@@ -342,10 +357,13 @@ async function dispatchAlerts(report: DelegateBalanceReport, log: MonitorLogger)
   // #3458: a delegate that was NOT read this round has not cleared — it is
   // unknown. Its lingering key is kept, so a failed read does not re-ping it
   // on the next successful scan, and a partial dust total from a scan with
-  // unread delegates does not re-arm the dust edge.
+  // unread delegates does not re-arm the dust edge. The trade-off: while ANY
+  // delegate stays unread — indefinitely, for a malformed stored address or a
+  // chain whose RPC stays down — a dust episode that cleared cannot re-arm.
+  // The hourly UNREAD warning is what keeps that state visible.
   const currentKeys = new Set([
     ...report.lingering.map(lingeringKey),
-    ...report.unread.map((u) => `${u.agentId}:${u.chainId}`),
+    ...report.unread.map(lingeringKey),
   ])
   moduleAlertState.lingeringKeys = new Set(
     [...moduleAlertState.lingeringKeys].filter((k) => currentKeys.has(k)),

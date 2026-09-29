@@ -94,7 +94,7 @@ export const toolDescriptions = {
     summary:
       'Fetch structured Haven payment status for agent recovery.',
     behavior:
-      'State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified.',
+      'State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; delivered when the merchant answered; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified. delivered_unverified: terminal, stop.',
     nextActionGuidance: '',
   },
   getResumeState: {

@@ -2028,9 +2028,17 @@ is the request schema's, and with ajv coercion on, a numeric STRING (`"300"`)
 is now accepted and coerced to `300` instead of refused (#3031's shard records
 the three inputs that widened); and
 `delegationRailBundlerUrl()` asserts that a chain-scoped bundler URL names the
-chain being requested. `DELEGATION_RAIL_BUNDLER_URL` is a single value while two
-chains are enabled, so a mismatched env now fails at first use with a config
+chain being requested, so a mismatched env fails at first use with a config
 error instead of quietly routing a payment at the wrong chain's bundler.
+Since #3416 the credential resolves per chain:
+`DELEGATION_RAIL_BUNDLER_URL_<chainId>` first, then the unsuffixed
+`DELEGATION_RAIL_BUNDLER_URL`. Before that, one value served both enabled
+chains, so a deployment could only ever serve the chain its URL named. A chain
+with no usable credential throws `DelegationRailChainUnavailableError`, which
+the x402 funding leg and `POST /payments` answer as a typed 503
+`rail_unavailable_for_chain` (no ledger row: nothing was refused). The hosted
+MCP maps that to `RAIL_UNAVAILABLE_FOR_CHAIN` with `stop_and_tell_user`, not
+the 5xx "retry once".
 
 ## Task budgets — a time-boxed child budget for one run (#3329)
 

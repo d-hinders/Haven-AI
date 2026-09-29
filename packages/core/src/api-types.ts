@@ -3409,7 +3409,7 @@ export type components = {
          * @description Stable Haven agent payment state phase.
          * @enum {string}
          */
-        AgentPaymentPhase: "agent_signature_required" | "payment_submitted" | "payment_confirmed" | "user_approval_required" | "user_execution_required" | "waiting_for_additional_approvals" | "funding_sent" | "rejected" | "expired" | "failed" | "insufficient_funds" | "funded_but_unsettled";
+        AgentPaymentPhase: "agent_signature_required" | "payment_submitted" | "payment_confirmed" | "user_approval_required" | "user_execution_required" | "waiting_for_additional_approvals" | "funding_sent" | "rejected" | "expired" | "failed" | "insufficient_funds" | "funded_but_unsettled" | "delivered_unverified";
         /**
          * @description Stable next action an agent should take for a Haven payment state.
          * @enum {string}
@@ -4184,6 +4184,8 @@ export type components = {
             expires_at: string;
             chain_id: number;
             message: string;
+            /** @description True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown. */
+            delivered?: boolean;
             fee?: {
                 amount: string;
                 token: string;
@@ -15717,6 +15719,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
         };
     };
     getPaymentIntent: {
@@ -16396,6 +16413,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
         };
     };
     getX402SignContext: {
@@ -16757,6 +16789,21 @@ export interface operations {
             };
             /** @description Error response */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

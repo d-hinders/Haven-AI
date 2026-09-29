@@ -957,6 +957,21 @@ const errorResponse = {
 } as const
 
 /**
+ * #3416: this deployment has no delegation-rail bundler credential for the
+ * agent's chain. A configuration state, not a transient failure — retrying
+ * gets the same answer until an operator provisions the chain. Nothing was
+ * signed, written or charged, and no refusal is booked.
+ */
+const railUnavailableResponse = {
+  ...errorResponse,
+  description:
+    'This deployment has no delegation-rail bundler credential for the agent\'s chain (#3416). ' +
+    'The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a ' +
+    'retry gets the same answer until an operator provisions the chain. Nothing was signed, ' +
+    'written or charged.',
+} as const
+
+/**
  * #2918: the accounting connection routes gate on `config.hosted &&
  * config.accountingEnabled` — NOT the account entitlement, which stays the
  * feed's gate (#2861). Same 404 body shape as `requireAccountingFeed`
@@ -1181,6 +1196,11 @@ const agentPaymentStatus = {
     expires_at: isoDateTime,
     chain_id: { type: 'integer' },
     message: { type: 'string' },
+    // #3420: the delivered half of the settle vocabulary, additive alongside
+    // `delivered: true` on the settle/complete tool answers. Present (true)
+    // only when a machine_payment_evidence row records the merchant's
+    // response; omitted — never false — when the backend does not know.
+    delivered: { type: 'boolean', description: 'True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown.' },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
     fee: {
@@ -6120,6 +6140,7 @@ export const openapiSpec = {
               'Preparation failed against the chain, or an idempotent replay of a request whose ' +
               'payment has failed.',
           },
+          '503': railUnavailableResponse,
         },
       },
     },
@@ -6374,6 +6395,7 @@ export const openapiSpec = {
           '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
           '502': errorResponse,
+          '503': railUnavailableResponse,
         },
       },
     },
@@ -6494,6 +6516,7 @@ export const openapiSpec = {
           },
           '429': errorResponse,
           '502': errorResponse,
+          '503': railUnavailableResponse,
         },
       },
     },

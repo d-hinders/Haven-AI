@@ -3,12 +3,16 @@ import {
   watchOnlyDelegateOwner,
   delegationRailBundlerUrl,
   readDisabledDelegationHashes,
+  DelegationRailChainUnavailableError,
+  railUnavailableRefusalBody,
 } from '../delegation-rail.js'
 
 const DELEGATE = ('0x' + '11'.repeat(20)) as `0x${string}`
 
 afterEach(() => {
   delete process.env.DELEGATION_RAIL_BUNDLER_URL
+  delete process.env.DELEGATION_RAIL_BUNDLER_URL_84532
+  delete process.env.DELEGATION_RAIL_BUNDLER_URL_8453
 })
 
 describe('watchOnlyDelegateOwner — non-custody (#824 invariant 5)', () => {
@@ -68,5 +72,76 @@ describe('delegationRailBundlerUrl — one credential choke point (#824 invarian
   it('fails closed on a chain without pinned contracts', () => {
     process.env.DELEGATION_RAIL_BUNDLER_URL = 'https://bundler.example/x?apikey=d'
     expect(() => delegationRailBundlerUrl(1)).toThrow(/not enabled/)
+  })
+})
+
+/**
+ * #3416: both chains are enabled on every deployment, but a bundler URL is
+ * chain-scoped by its path. With one unsuffixed variable, a deployment whose
+ * URL named one chain could never serve the other chain's bundler legs: every
+ * EIP-3009 funding leg, `/payments` and task budget there failed with a
+ * generic 502. The credential now resolves per chain, with the unsuffixed
+ * variable as the fallback.
+ */
+describe('delegationRailBundlerUrl — a credential per chain (#3416)', () => {
+  const MAINNET = 'https://api.pimlico.io/v2/8453/rpc?apikey=main-secret'
+  const SEPOLIA = 'https://api.pimlico.io/v2/84532/rpc?apikey=sepolia-secret'
+
+  it('serves the second chain from its own variable while the fallback serves the first', () => {
+    process.env.DELEGATION_RAIL_BUNDLER_URL = MAINNET
+    process.env.DELEGATION_RAIL_BUNDLER_URL_84532 = SEPOLIA
+    expect(delegationRailBundlerUrl(8453)).toBe(MAINNET)
+    expect(delegationRailBundlerUrl(84532)).toBe(SEPOLIA)
+  })
+
+  it('prefers the per-chain variable over the fallback for the same chain', () => {
+    process.env.DELEGATION_RAIL_BUNDLER_URL = 'https://api.pimlico.io/v2/84532/rpc?apikey=old'
+    process.env.DELEGATION_RAIL_BUNDLER_URL_84532 = SEPOLIA
+    expect(delegationRailBundlerUrl(84532)).toBe(SEPOLIA)
+  })
+
+  it('without a per-chain variable, the fallback still serves its own chain', () => {
+    process.env.DELEGATION_RAIL_BUNDLER_URL = SEPOLIA
+    expect(delegationRailBundlerUrl(84532)).toBe(SEPOLIA)
+  })
+
+  it('the fallback naming another chain is a typed chain-unavailable error that names the variable to set', () => {
+    process.env.DELEGATION_RAIL_BUNDLER_URL = MAINNET
+    let err: unknown
+    try {
+      delegationRailBundlerUrl(84532)
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(DelegationRailChainUnavailableError)
+    expect((err as DelegationRailChainUnavailableError).chainId).toBe(84532)
+    expect((err as Error).message).toMatch(/DELEGATION_RAIL_BUNDLER_URL_84532/)
+    expect((err as Error).message).not.toContain('main-secret')
+  })
+
+  it('a per-chain variable holding another chain\'s URL is refused, not used', () => {
+    process.env.DELEGATION_RAIL_BUNDLER_URL_8453 = SEPOLIA
+    expect(() => delegationRailBundlerUrl(8453)).toThrow(DelegationRailChainUnavailableError)
+    expect(() => delegationRailBundlerUrl(8453)).toThrow(/DELEGATION_RAIL_BUNDLER_URL_8453 targets a different chain/)
+    expect(() => delegationRailBundlerUrl(8453)).toThrow(/DELEGATION_RAIL_BUNDLER_URL_8453 must hold a chain-8453 URL/)
+  })
+
+  it('no credential at all is the same typed error (a configuration state, not a transient failure)', () => {
+    expect(() => delegationRailBundlerUrl(84532)).toThrow(DelegationRailChainUnavailableError)
+  })
+
+  it('the refusal body is machine-readable and never carries the URL', () => {
+    process.env.DELEGATION_RAIL_BUNDLER_URL = MAINNET
+    let body: ReturnType<typeof railUnavailableRefusalBody> | undefined
+    try {
+      delegationRailBundlerUrl(84532)
+    } catch (e) {
+      body = railUnavailableRefusalBody(e as DelegationRailChainUnavailableError)
+    }
+    expect(body).toMatchObject({ error_code: 'rail_unavailable_for_chain', chain_id: 84532 })
+    // The operator instruction (which variable to set) is not agent-facing.
+    expect(JSON.stringify(body)).not.toContain('DELEGATION_RAIL_BUNDLER_URL')
+    expect(JSON.stringify(body)).not.toContain('main-secret')
+    expect(JSON.stringify(body)).not.toContain('pimlico.io')
   })
 })

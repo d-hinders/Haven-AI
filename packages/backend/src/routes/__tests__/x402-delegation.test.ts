@@ -29,6 +29,7 @@ import { delegationSigningPayload } from '../../rails/delegation-policy.js'
 import { settlementSalt, typedDataDigest } from '../../modules/x402/x402-delegation.js'
 import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
+import { DelegationRailChainUnavailableError } from '../../rails/delegation-rail.js'
 const DELEGATE_SIGNER = privateKeyToAccount(('0x' + '11'.repeat(32)) as `0x${string}`)
 async function signChild(child: unknown): Promise<`0x${string}`> {
   const payload = delegationSigningPayload(child as never, 84532)
@@ -690,6 +691,33 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.json().error).toMatch(/funding authorization failed/)
       expect(res.json().details).toContain('aa_sendUserOperation timeout')
       expect(mockCreateIntent).not.toHaveBeenCalled()
+    })
+
+    it('a chain this deployment has no bundler credential for is a typed, non-retryable 503, not the generic 502 (#3416)', async () => {
+      // Observed live on prod 2026-09-28: the single bundler URL named the
+      // other chain, so every Base Sepolia funding leg 502'd with "funding
+      // authorization failed", which hosted agents read as "retry once".
+      primeFundingLeg()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      mockPrepareFunding.mockRejectedValueOnce(
+        new DelegationRailChainUnavailableError(
+          84532,
+          'DELEGATION_RAIL_BUNDLER_URL targets a different chain than 84532 — the credential is chain-scoped; set DELEGATION_RAIL_BUNDLER_URL_84532 to serve this chain',
+        ),
+      )
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(503)
+      expect(res.json()).toMatchObject({ error_code: 'rail_unavailable_for_chain', chain_id: 84532 })
+      expectMatchesSpec('POST', '/x402/authorize', res.json(), '503')
+      expect(res.json().error).not.toMatch(/funding authorization failed/)
+      expect(res.json().error).toMatch(/retrying will get the same answer/)
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+      // Nothing was refused on policy grounds, so nothing is booked.
+      expect(mockRecordRefusal).not.toHaveBeenCalled()
     })
 
     // #3052 (epic #3056 slice 1) THE DEGRADED-READ PROMOTION BOX. The

@@ -239,6 +239,14 @@ Money and risk clarity:
   licensed provider flow with the selected Haven wallet as destination; the
   provider handles KYC and funds. When unavailable, route to `Receive` without
   implying Haven operates an on-ramp.
+- On a **testnet account** (the selected account's chain, never the
+  deployment's default — both Base and Base Sepolia are offered as an account
+  chain in every environment), hide the card-purchase on-ramp entirely rather
+  than disabling it: buying testnet USDC by card has no real answer. Show a
+  faucet link instead, naming Circle as its source and stating plainly that
+  the funds are test funds with no value — never that Haven sends or holds
+  them. A mainnet account gets the on-ramp (when configured) and no faucet
+  link ([#3478](https://github.com/d-hinders/Haven-AI/issues/3478)).
 - If the account's network cannot be confirmed, name no network, withhold the
   deposit address and the on-ramp, and say plainly that the network is unknown.
   A funding surface with a missing network refuses to instruct rather than

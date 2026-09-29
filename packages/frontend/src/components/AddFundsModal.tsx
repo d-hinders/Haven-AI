@@ -1,12 +1,14 @@
 'use client'
 
-import { ArrowLeftRight, Check, Clipboard, CreditCard, X } from 'lucide-react'
+import { ArrowLeftRight, Check, Clipboard, CreditCard, Droplet, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useRef, useState, useCallback } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { Button } from '@/components/ui/Button'
 import { resolveChainOrNull } from '@/lib/chains'
+import { getFaucetUrl } from '@haven_ai/core'
+import { isTestnetChain } from '@/lib/marketplace'
 
 interface Props {
   open: boolean
@@ -51,8 +53,20 @@ export default function AddFundsModal({ open, onClose, onReceive, accountAddress
   // environment-correct but still unreadable as a guess from the screen.
   const chainConfig = resolveChainOrNull(chainId)
   const chainName = chainConfig?.name ?? null
-  const onrampAvailable = Boolean(ONRAMP_APP_ID && accountAddress && chainConfig)
   const depositInstructionsAvailable = Boolean(accountAddress && chainConfig)
+
+  // #3478: the faucet and the onramp are gated on the SELECTED ACCOUNT's
+  // chain (`chainId`, passed in from `selectedActionAccount?.chain_id`),
+  // never on the deployment's `NEXT_PUBLIC_HAVEN_CHAIN_ID` default — both
+  // Base and Base Sepolia are offered as an account chain in every
+  // environment, so a deployment-level gate would show a faucet for a
+  // Base-mainnet account on dev, or hide it for a Base Sepolia account on
+  // production. `isTestnetChain` fails closed on an unregistered id (it
+  // checks `isRegisteredChain` before it ever calls `getFaucetUrl`, which
+  // itself throws on one), so this never needs a try/catch to stay safe.
+  const isTestnet = chainId != null && isTestnetChain(chainId)
+  const faucetUrl = isTestnet ? getFaucetUrl(chainId as number) : undefined
+  const onrampAvailable = Boolean(ONRAMP_APP_ID && accountAddress && chainConfig) && !isTestnet
 
   const handleCopy = useCallback(async () => {
     if (!accountAddress) return
@@ -214,6 +228,37 @@ export default function AddFundsModal({ open, onClose, onReceive, accountAddress
               saying so.
             */}
           </div>
+
+          {/* Faucet — testnet accounts only (#3478). Circle is named as the
+              source and the copy states plainly these are test funds with no
+              value; it never says Haven sends or holds funds. */}
+          {isTestnet && faucetUrl && (
+            <div className="rounded-lg border border-[var(--v2-border)] p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+                  <Icon icon={Droplet} className="h-4 w-4 text-[var(--v2-ink-2)]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">Get test funds</p>
+                  <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+                    Circle's faucet gives out free {chainName} test funds with no value — Haven
+                    never sends or holds funds. Select {chainName} there, then paste in the
+                    selected account's address on that account's chain, shown above.
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                className="mt-3 w-full"
+                href={faucetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                trailingIcon
+              >
+                Open Circle&apos;s faucet
+              </Button>
+            </div>
+          )}
 
           {/* Fallback when provider unavailable and no account */}
           {!onrampAvailable && !accountAddress && onReceive && (

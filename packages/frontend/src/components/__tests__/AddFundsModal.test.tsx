@@ -6,8 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // below; setting it in `beforeEach` would be too late and the onramp card would
 // never render, which would make the "no onramp offered" assertion pass for the
 // wrong reason.
+//
+// `NEXT_PUBLIC_HAVEN_CHAIN_ID` is set here too (#3478), to `84532` — the
+// DEPLOYMENT default the faucet gate must NOT read. If the gate accidentally
+// keyed off this env var instead of the `chainId` prop, the 8453 case below
+// would show a faucet (wrong) and the 84532 case would still pass, hiding the
+// defect. Setting it opposite to what each test's `chainId` prop implies is
+// what makes the account-chain gate provable rather than merely plausible.
 vi.hoisted(() => {
   process.env.NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID = 'onramp-app-id-fixture'
+  process.env.NEXT_PUBLIC_HAVEN_CHAIN_ID = '84532'
 })
 
 vi.mock('@/hooks/useEscapeToClose', () => ({
@@ -17,7 +25,10 @@ vi.mock('@/hooks/useEscapeToClose', () => ({
 import AddFundsModal from '@/components/AddFundsModal'
 
 const SAFE_ADDRESS = '0xa0e99A227fc546017Fd68D49711C1857208F0eB9'
+const BASE = 8453
 const BASE_SEPOLIA = 84532
+const GNOSIS = 100
+const UNREGISTERED = 999_999
 
 describe('AddFundsModal', () => {
   let openSpy: ReturnType<typeof vi.fn>
@@ -31,10 +42,37 @@ describe('AddFundsModal', () => {
     vi.unstubAllGlobals()
   })
 
-  // The resolved path. Without this, the unresolved-chain test below only
-  // proves the assertions can pass — not that they can distinguish the two
-  // states.
-  it('names the network and offers the onramp when the chain resolves', () => {
+  // The resolved MAINNET path: the onramp is offered and no faucet renders.
+  // `chainId={BASE}` here, deliberately the opposite of the module-scope
+  // `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` set above — this is the 8453 case named
+  // by the acceptance criteria, and it is the one that proves the faucet/onramp
+  // gate reads the ACCOUNT's chain (the `chainId` prop), not the deployment's
+  // default. A gate that read the env var instead would fail this test: it
+  // would show a faucet for this Base-mainnet account and hide its onramp.
+  it('offers the onramp and shows no faucet on a Base mainnet account (8453), even with the deployment default set to Base Sepolia', () => {
+    render(
+      <AddFundsModal open onClose={vi.fn()} accountAddress={SAFE_ADDRESS} chainId={BASE} />,
+    )
+
+    expect(
+      screen.getByText(`Send USDC to your account address on Base.`),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Account address (Base)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Buy with card/ })).toBeInTheDocument()
+    expect(screen.getByText(SAFE_ADDRESS)).toBeInTheDocument()
+
+    // No faucet: mainnet USDC has real value, and Circle's faucet only ever
+    // serves Base Sepolia.
+    expect(screen.queryByRole('link', { name: /Circle/i })).toBeNull()
+    expect(screen.queryByText(/faucet\.circle\.com/i)).toBeNull()
+  })
+
+  // The resolved TESTNET path: the faucet is offered and the onramp is hidden
+  // entirely (owner decision on #3478 — "Buying Sepolia USDC by card is
+  // meaningless"). Paired with the 8453 test above: the two together are the
+  // acceptance criteria's "one clean test" — 84532 shows the faucet and no
+  // onramp, 8453 shows the onramp and no faucet.
+  it('shows the Circle faucet link and hides the onramp on a Base Sepolia account (84532)', () => {
     render(
       <AddFundsModal open onClose={vi.fn()} accountAddress={SAFE_ADDRESS} chainId={BASE_SEPOLIA} />,
     )
@@ -43,15 +81,43 @@ describe('AddFundsModal', () => {
       screen.getByText(`Send USDC to your account address on Base Sepolia.`),
     ).toBeInTheDocument()
     expect(screen.getByText('Account address (Base Sepolia)')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Buy with card/ })).toBeInTheDocument()
-    expect(screen.getByText(SAFE_ADDRESS)).toBeInTheDocument()
+
+    // Onramp entirely absent — not just disabled — on a testnet account.
+    expect(screen.queryByRole('button', { name: /Buy with card/ })).toBeNull()
+    expect(screen.queryByText('Buy with card')).toBeNull()
+
+    // The faucet link: external, named Circle, names Base Sepolia, and says
+    // the funds have no value. Never claims Haven sends or holds funds.
+    const link = screen.getByRole('link', { name: /Open Circle's faucet/i })
+    expect(link).toHaveAttribute('href', 'https://faucet.circle.com')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link.getAttribute('rel')).toMatch(/noopener/)
+    expect(link.getAttribute('rel')).toMatch(/noreferrer/)
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.textContent).toMatch(/Circle/)
+    expect(dialog.textContent).toMatch(/Select Base Sepolia there/)
+    expect(dialog.textContent).toMatch(/no value/i)
+    expect(dialog.textContent).not.toMatch(/Haven (sends|holds|sends or holds)/i)
+  })
+
+  // Gnosis (100) is registered but carries no `faucetUrl` in core — a testnet
+  // account with no faucet must not render one, and it is not treated as a
+  // testnet by the onramp gate either (`isTestnetChain` requires a faucet).
+  it('shows no faucet link for a registered chain with no faucet (Gnosis, 100)', () => {
+    render(
+      <AddFundsModal open onClose={vi.fn()} accountAddress={SAFE_ADDRESS} chainId={GNOSIS} />,
+    )
+
+    expect(screen.queryByRole('link', { name: /Open Circle's faucet/i })).toBeNull()
+    expect(screen.queryByText(/faucet\.circle\.com/i)).toBeNull()
   })
 
   // #1844: the guard. An unresolved chain used to default to Base MAINNET, in
   // the deposit copy AND in Coinbase Onramp's `defaultNetwork` — a preconfigured
   // fiat purchase delivered on the guessed chain. A funds surface with no chain
   // must refuse to instruct rather than guess.
-  it('names no network and offers no onramp when the chain is unresolved', () => {
+  it('names no network, offers no onramp and shows no faucet when the chain is unresolved', () => {
     render(
       <AddFundsModal
         open
@@ -84,6 +150,9 @@ describe('AddFundsModal', () => {
     expect(screen.queryByRole('button', { name: /Buy with card/ })).toBeNull()
     expect(openSpy).not.toHaveBeenCalled()
 
+    // No faucet either — an unresolved chain is not a known testnet.
+    expect(screen.queryByRole('link', { name: /Open Circle's faucet/i })).toBeNull()
+
     // No deposit instruction: no address to copy, and copy that says so.
     expect(screen.queryByText(SAFE_ADDRESS)).toBeNull()
     expect(
@@ -112,10 +181,12 @@ describe('AddFundsModal', () => {
   // chain_id that is PRESENT but not in the frontend registry. `getChainConfig`
   // throws on it, so before `resolveChainOrNull` this rendered nothing at all —
   // it took the modal down through the error boundary rather than refusing.
+  // `getFaucetUrl` (core) throws on the same unregistered id; the faucet gate
+  // must survive it exactly like the onramp/deposit gates do (#3478).
   it('refuses rather than throwing when the chain is present but unregistered', () => {
     expect(() =>
       render(
-        <AddFundsModal open onClose={vi.fn()} accountAddress={SAFE_ADDRESS} chainId={999_999} />,
+        <AddFundsModal open onClose={vi.fn()} accountAddress={SAFE_ADDRESS} chainId={UNREGISTERED} />,
       ),
     ).not.toThrow()
 
@@ -124,6 +195,7 @@ describe('AddFundsModal', () => {
     expect(dialog.textContent).not.toMatch(/999999|999,999/)
     expect(screen.queryByRole('button', { name: /Buy with card/ })).toBeNull()
     expect(screen.queryByText(SAFE_ADDRESS)).toBeNull()
+    expect(screen.queryByRole('link', { name: /Open Circle's faucet/i })).toBeNull()
   })
 
   // The no-account case, which is a DIFFERENT state that also has no chain:

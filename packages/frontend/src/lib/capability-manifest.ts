@@ -33,8 +33,8 @@ import { havenEnvironment } from './env'
  * wrong relative to the documented meaning, not the other way round. What
  * DID say "canonical" and was wrong were two descriptions, both corrected in
  * the same change: the OpenAPI `DiscoveryDocument.chains.default` schema
- * description, and `agent-discovery-listings.md`'s `discovery facts` row
- * (:52), which called it "the canonical `chains.default`". A key's TYPE and
+ * description, and `agent-discovery-listings.md`'s `discovery facts` row,
+ * which called it "the canonical `chains.default`". A key's TYPE and
  * PRESENCE are unchanged, and production's value is unchanged (`8453` is
  * deployable there) — only a scoped deployment's number moves to one it can
  * actually back.

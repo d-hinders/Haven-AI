@@ -36,11 +36,12 @@ const ORIGIN = 'https://preview.test'
 // deployment's EFFECTIVE default, which would be 84532 here) — deliberately
 // kept anyway, because most of this file exercises OTHER fields against this
 // fixture and DEFAULT_CHAIN_ID is a convenient constant to assert against.
-// It does NOT by itself prove `buildManifestFrom` relays `chains.default`
-// rather than recomputing it — DEFAULT_CHAIN_ID here equals what a
-// hard-coded `default: 8453` would also produce. That property has its own
-// test below ("relays chains.default exactly as the backend sent it"),
-// which uses a value distinct from DEFAULT_CHAIN_ID for exactly this reason.
+// The impossible shape is also useful: a manifest that RECOMPUTED `default`
+// from `deployable` would give 84532 and fail the "takes the
+// environment-dependent values from the backend" test. What this fixture
+// cannot catch is a hard-coded `default: 8453`, because it equals
+// DEFAULT_CHAIN_ID. The relay test below ("relays chains.default exactly as
+// the backend sent it") catches that one.
 // The backend's own derivation is `effectiveDefaultChainId` in
 // `@haven_ai/core`, covered by `packages/core/src/chains.test.ts`.
 const FACTS: DiscoveryFacts = {
@@ -161,10 +162,10 @@ describe('capability manifest', () => {
   it('relays chains.default exactly as the backend sent it, never a literal (#3431 review F2)', () => {
     // FACTS.chains.default happens to equal DEFAULT_CHAIN_ID, so a
     // `default: 8453` hard-coded straight into `buildManifestFrom` would pass
-    // every other assertion in this file. A distinct sentinel that is
-    // neither DEFAULT_CHAIN_ID nor deployable[0]'s usual companion isolates
-    // the pass-through property — proven by mutation (see the worker
-    // report).
+    // every other assertion in this file. A default other than 8453 catches
+    // that literal. (84532 also equals FACTS.chains.deployable[0], so this
+    // test cannot catch a recompute-from-deployable; the "takes the
+    // environment-dependent values" test above does.)
     const facts = { ...FACTS, chains: { ...FACTS.chains, default: 84532 } }
     expect(buildManifestFrom(ORIGIN, facts).chains?.default).toBe(84532)
   })

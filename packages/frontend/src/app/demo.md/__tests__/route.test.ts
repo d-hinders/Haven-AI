@@ -80,9 +80,28 @@ describe('/demo.md route handler', () => {
     // (that is written server-side, never returned to the caller here).
     expect(body).toContain('transfer-amount-exceeded')
     expect(body).not.toContain('delegation_budget_exceeded')
-    expect(body).toMatch(/not a balance/i)
+    // \s+ rather than a literal space: this text wraps across lines in the
+    // template literal, and the phrase must still be findable regardless of
+    // exactly where the wrap falls.
+    expect(body).toMatch(/not a\s+balance/i)
     expect(body).toContain('0x0A5B4da361AfBc5109030010c3f1d0b64b60ba6C')
     expect(body).toMatch(/test USDC|TEST money|test network/i)
+  })
+
+  it('describes the refusal message shape the hosted MCP actually returns (review round 2, n1/n2)', async () => {
+    mockIsDemoPageVisible.mockReturnValue(true)
+    const body = await GET().text()
+    // n1: the agent never sees a separate `details` field through the hosted
+    // MCP — the SDK folds it into the message as "<error>: <details>". The
+    // doc must describe ONE message string, not a message plus a details
+    // field the agent could read separately.
+    expect(body).toContain('Delegation-rail authorization failed (on-chain')
+    expect(body).not.toMatch(/its\s+`details`\s+carry/i)
+    expect(body).toContain('ERC20PeriodTransferEnforcer:transfer-amount-exceeded')
+    // n2: normalizeError tells the agent to retry once on a 5xx — the doc
+    // must say that retry lands on the same refusal.
+    expect(body).toMatch(/retry/i)
+    expect(body).toMatch(/same refusal/i)
   })
 
   it('links back to /demo', async () => {

@@ -168,7 +168,7 @@ export default function DemoPage() {
             <StepCard number={7} title="Try to overspend" whyItMatters={WHY_IT_MATTERS.onChain}>
               <p>
                 Ask your agent to send 1 USDC to a harmless address —{' '}
-                <code className="rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-xs">
+                <code className="break-all rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-xs">
                   0x0A5B4da361AfBc5109030010c3f1d0b64b60ba6C
                 </code>{' '}
                 (Haven's own address) works well. This only demonstrates a refusal while your agent's remaining

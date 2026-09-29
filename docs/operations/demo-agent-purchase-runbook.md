@@ -9,6 +9,13 @@ last-verified: "2026-09-05"
 
 # Demo Runbook — Agent Purchase, End to End (incl. Fortnox/SIE)
 
+> **Self-serve counterpart (#3477):** `/demo` (`packages/frontend/src/app/demo/page.tsx`,
+> plus its agent-readable companion `/demo.md`) is the link the team sends an
+> outside investor to try the same non-custodial, budget-and-refusal story
+> themselves, on the same dev environment, without an operator driving. It
+> does not replace this runbook — this one stays the operator-run
+> presentation script, Fortnox/SIE included.
+
 The presentation flow: an AI agent buys a real service from the demo merchant
 with on-chain-enforced guardrails, and the purchase lands in bookkeeping —
 both as a **Fortnox draft with the receipt attached** (the live feed) and as a

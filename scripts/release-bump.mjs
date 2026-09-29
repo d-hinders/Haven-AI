@@ -341,8 +341,10 @@ async function updateRuntimeManifest(newVersion) {
  * the script had already written and already verified.
  *
  * What this does NOT do, deliberately: satisfy the contract-doc gate on its own.
- * The gate implicates THREE contract docs (this write clears one of them by
- * presence; `package-dev-channel.md` and the CASP shard are hand-written), and
+ * The gate implicates FIVE contract docs (this write clears one of them by
+ * presence; `package-dev-channel.md`, `delegation-rail-security-model.md` and
+ * the CASP shard are hand-written, and the shard also clears
+ * `04-x402-payment-sequence.md`), and
  * the shard remains entirely hand-written — as does this doc's own `last-verified` note, which says what
  * the release carries and why the perimeter is unaffected. Those are the parts
  * that need judgement; a table of four identical version strings is not.
@@ -936,8 +938,10 @@ async function main() {
   log('  Next steps — publishing is NOT one of them:')
   log('')
   log('    1. git diff --stat            review the bump')
-  log('    2. Write the TWO remaining contract docs, or the blocking gate fails.')
-  log('       A release implicates three; this bump already cleared the first:')
+  log('    2. Write the remaining contract docs, or the blocking gate fails.')
+  log('       A release implicates FIVE; this bump already cleared the first,')
+  log('       and the shard below clears casp-risk-guardrails.md and')
+  log('       04-x402-payment-sequence.md (both carry satisfied-by):')
   log('         docs/operations/mcp-runtime-compatibility.md  [cleared by this bump]')
   log('           the manifest table is ALREADY re-pinned and verified against the')
   log('           source constants, which satisfies the gate by presence. Still')
@@ -949,6 +953,10 @@ async function main() {
   log('           this bump just rewrote. NOT written for you. A scoped note on')
   log('           what you re-verified; a bare date bump satisfies the gate but')
   log('           is the rubber stamp #1366 rates worse than a stale date.')
+  log('         docs/security/delegation-rail-security-model.md')
+  log('           coupled by SIGNER_VERSION in signer/src/tools.ts (moved there')
+  log('           by #3454), which this bump just rewrote. NOT written for you.')
+  log('           A scoped Re-verified note: the edit is the version literal only.')
   // #1789: named for the VERSION, never the PR number. The shard must exist
   // before the PR is opened — the coupling gate blocks the PR without it — so a
   // PR-numbered name cannot be written at the moment it is needed. This line is

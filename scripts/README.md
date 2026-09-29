@@ -320,11 +320,16 @@ The count is the gate's, not a memory:
 
 ```sh
 node scripts/docs/coupling-gate.mjs --strict \
-  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/server.ts
-# BLOCKING: 3 contract doc(s) …
+  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/tools.ts
+# BLOCKING: 5 contract doc(s) …
 ```
 
-Two are edited directly; the third is cleared by the shard:
+Five since #3454 moved `SIGNER_VERSION` into the signer's `tools.ts`, which
+`04-x402-payment-sequence.md` and `delegation-rail-security-model.md` cover.
+Three are edited directly: the two below and
+`docs/security/delegation-rail-security-model.md`, which takes a scoped note
+that the release touches only the version literal in `tools.ts`. The shard
+clears the other two, since both carry `satisfied-by`:
 
 1. **`docs/operations/mcp-runtime-compatibility.md`** — the *Supported Runtime
    Manifest* table is **re-pinned by the bump** ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)),

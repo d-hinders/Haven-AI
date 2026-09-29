@@ -1925,6 +1925,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > document claims about authority, custody or signing changes. Scope of this
 > note: which dashboard load writes the daily row. Nothing else in this
 > document was re-verified.
+>
+> **Re-verified (0.7.0-alpha.0 release, 2026-09-29):** the release bump touches
+> one file in this document's coverage list, `packages/signer/src/tools.ts`. It
+> rewrites the self-reported `SIGNER_VERSION` string literal to
+> `0.7.0-alpha.0` and nothing else. No signing check, refusal or allowlist
+> moves in that edit. The release's changes to the signing surface (#3330,
+> #3419) were each re-verified here when they merged. Nothing else in this
+> document was re-verified.
 
 > **Re-verified #3331 frontend (2026-09-27, round 2 review fixes):** this diff
 > touches `hooks/useDelegationBudget.ts` only. `reload`/`reloadSigners` read

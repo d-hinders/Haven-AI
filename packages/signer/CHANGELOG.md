@@ -15,7 +15,11 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.7.0-alpha.0 — 2026-09-29
+
 ### Added
+
+- **`haven_sign` signs sub-budget opens and closes (#3330).** `{ sub_budget_id }` alone fetches the pending sub-budget's sign context (`GET /sub-budgets/:id/sign-context`, `purpose` `open` or `close`). Before signing an open, it checks the child Delegation against the sign context: the known DelegationManager domain and chain, this agent's own account as delegator, the pinned delegate and parent authority, and the period amount, duration, start date, expiry, token and recipient. Before signing a close, it checks the UserOp binding and the `delegationHash` of the delegation being closed. Any mismatch is refused before a signature. The backend refuses a child wider than its parent (`sub_budget_wider_than_parent`) before a context is ever issued. The context version this install understands is `SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS` (`[1]`). No update needed for agents that do not use sub-budgets.
 
 - **An undeclared top-level argument is refused, not stripped (#3419).** Signer tools register through `registerTool` with a passthrough input schema (keeps unknown keys, so the tool layer stays the refusal point), and the handler's strict re-parse refuses an argument this signer does not declare — the next `haven_sign` form it predates, e.g. #3444's `sub_budget_id` — with the structured refusal `UNSUPPORTED_ARGUMENT`: `unknown_arguments`, `signer_version` and `fallback` (the update command), `next_action: stop_and_tell_user`, and no signature or audit entry. Previously the MCP SDK stripped the key silently and the handler answered the generic `SIGNING_ERROR` "Pass payment_id … or payload_hash.", which says nothing about the version. The advertised JSON Schema changes in one claim only: strip mode emitted `additionalProperties: false`, passthrough emits `true` — the schema no longer says unknown keys are impossible, because they are now refused by name. Properties and the required list are unchanged. The `initialize` instructions name the refusal.
 

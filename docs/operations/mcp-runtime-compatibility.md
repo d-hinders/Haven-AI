@@ -1321,6 +1321,36 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.7.0-alpha.0 release, 2026-09-29):** the manifest table
+> above is re-pinned by the bump to `0.7.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from the
+> published `0.6.0-alpha.0` is **MINOR** for three breaks:
+> - #3411 (#3447) closes the #2366 window. Five local tools now **refuse** the
+>   legacy `idempotencyKey` spelling by name instead of accepting it with a
+>   warning: `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
+>   `haven_pay_x402_quote` and `haven_pay_x402`.
+> - The SDK's `ReceiptVerification` `reason` union widens (#3418).
+> - The SDK's settled-replay error changes class (#3417).
+>
+> **Surfaces this release moves:**
+> - **Tool arguments.** `sub_budget_id` is added, optional, on local `haven_send`,
+>   `haven_pay_x402_quote` and `haven_pay_x402` (#3330). No local tool is added
+>   or removed.
+> - **The signer handshake.** It gains `SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS`
+>   (`[1]`) and a `{ sub_budget_id }` form of `haven_sign` (#3330). Its
+>   redemption allowlist admits the three-link `[grant, parent-child, budget]`
+>   chain.
+> - **Signer input.** The signer now refuses an undeclared top-level argument
+>   rather than stripping it (#3419, via #3454).
+> - **Client minimum.** The first `CLIENT_COMPAT` minimum is live since #3428:
+>   `@haven_ai/signer` `min_version` `0.6.0-alpha.0`. A signer below it is
+>   refused with `client_outdated` at the payment and x402 sign-context reads.
+>   The task-budget and sub-budget sign-context reads are not refusal points.
+>   A signer at `0.7.0-alpha.0` clears it.
+>
+> **Re-read, not rubber-stamped.** The Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` is not bumped.
+
 > **Re-verification (0.6.0-alpha.0 release, 2026-09-26):** the manifest table
 > above is re-pinned by the bump to `0.6.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from the
@@ -1537,10 +1567,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.6.0-alpha.0` |
-| `@haven_ai/mcp` | `0.6.0-alpha.0` |
-| `@haven_ai/sdk` | `0.6.0-alpha.0` |
-| `@haven_ai/signer` | `0.6.0-alpha.0` |
+| `@haven_ai/connect` | `0.7.0-alpha.0` |
+| `@haven_ai/mcp` | `0.7.0-alpha.0` |
+| `@haven_ai/sdk` | `0.7.0-alpha.0` |
+| `@haven_ai/signer` | `0.7.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

@@ -15,8 +15,48 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.6.0-alpha.0",
+    "released_version": "0.7.0-alpha.0",
     "notes": [
+      {
+        "version": "0.7.0-alpha.0",
+        "date": "2026-09-29",
+        "summary": "listReceiptsPage({ compact: true }). Drops each row's challengePayload, selectedPayment and protocolReceiptPayload, which echo the merchant's 402 challenge, the selected option and the merchant's response verbatim. Includes a breaking change. (+14 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "listReceiptsPage({ compact: true })",
+            "code": true
+          },
+          {
+            "text": ". Drops each row's ",
+            "code": false
+          },
+          {
+            "text": "challengePayload",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "selectedPayment",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "protocolReceiptPayload",
+            "code": true
+          },
+          {
+            "text": ", which echo the merchant's 402 challenge, the selected option and the merchant's response verbatim. Includes a breaking change. (+14 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
@@ -84,18 +124,35 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
+      }
+    ]
+  },
+  "@haven_ai/signer": {
+    "released_version": "0.7.0-alpha.0",
+    "notes": [
       {
-        "version": "0.5.0-alpha.1",
-        "date": "2026-09-25",
-        "summary": "Client identity on Haven API requests. Every Haven API request now carries X-Haven-Client: <package>/<version>, @haven_ai/sdk/<version> by default.",
+        "version": "0.7.0-alpha.0",
+        "date": "2026-09-29",
+        "summary": "haven_sign signs sub-budget opens and closes. { sub_budget_id } alone fetches the pending sub-budget's sign context (GET /sub-budgets/:id/sign-context, purpose open or close). (+3 more in the changelog)",
         "summary_segments": [
           {
-            "text": "Client identity on Haven API requests. Every Haven API request now carries ",
+            "text": "haven_sign",
+            "code": true
+          },
+          {
+            "text": " signs sub-budget opens and closes. ",
             "code": false
           },
           {
-            "text": "X-Haven-Client: <package>/<version>",
+            "text": "{ sub_budget_id }",
+            "code": true
+          },
+          {
+            "text": " alone fetches the pending sub-budget's sign context (",
+            "code": false
+          },
+          {
+            "text": "GET /sub-budgets/:id/sign-context",
             "code": true
           },
           {
@@ -103,21 +160,32 @@ export const CLIENT_RELEASE_DATA = {
             "code": false
           },
           {
-            "text": "@haven_ai/sdk/<version>",
+            "text": "purpose",
             "code": true
           },
           {
-            "text": " by default.",
+            "text": " ",
+            "code": false
+          },
+          {
+            "text": "open",
+            "code": true
+          },
+          {
+            "text": " or ",
+            "code": false
+          },
+          {
+            "text": "close",
+            "code": true
+          },
+          {
+            "text": "). (+3 more in the changelog)",
             "code": false
           }
         ],
         "action_required": false
-      }
-    ]
-  },
-  "@haven_ai/signer": {
-    "released_version": "0.6.0-alpha.0",
-    "notes": [
+      },
       {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
@@ -181,40 +249,60 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.1",
-        "date": "2026-09-25",
-        "summary": "Client identity at sign-context; client_outdated refusal. Both sign-context reads send X-Haven-Client: @haven_ai/signer/<version>.",
-        "summary_segments": [
-          {
-            "text": "Client identity at sign-context; ",
-            "code": false
-          },
-          {
-            "text": "client_outdated",
-            "code": true
-          },
-          {
-            "text": " refusal. Both sign-context reads send ",
-            "code": false
-          },
-          {
-            "text": "X-Haven-Client: @haven_ai/signer/<version>",
-            "code": true
-          },
-          {
-            "text": ".",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.6.0-alpha.0",
+    "released_version": "0.7.0-alpha.0",
     "notes": [
+      {
+        "version": "0.7.0-alpha.0",
+        "date": "2026-09-29",
+        "summary": "haven_list_receipts accepts compact: true. Each row then leaves out challengePayload, selectedPayment and protocolReceiptPayload, the merchant's payload echoes. Includes a breaking change. (+5 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "haven_list_receipts",
+            "code": true
+          },
+          {
+            "text": " accepts ",
+            "code": false
+          },
+          {
+            "text": "compact: true",
+            "code": true
+          },
+          {
+            "text": ". Each row then leaves out ",
+            "code": false
+          },
+          {
+            "text": "challengePayload",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "selectedPayment",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "protocolReceiptPayload",
+            "code": true
+          },
+          {
+            "text": ", the merchant's payload echoes. Includes a breaking change. (+5 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
@@ -306,40 +394,28 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.1",
-        "date": "2026-09-25",
-        "summary": "Client identity and update hint. Haven API requests name @haven_ai/mcp/<version> in X-Haven-Client.",
-        "summary_segments": [
-          {
-            "text": "Client identity and update hint. Haven API requests name ",
-            "code": false
-          },
-          {
-            "text": "@haven_ai/mcp/<version>",
-            "code": true
-          },
-          {
-            "text": " in ",
-            "code": false
-          },
-          {
-            "text": "X-Haven-Client",
-            "code": true
-          },
-          {
-            "text": ".",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.6.0-alpha.0",
+    "released_version": "0.7.0-alpha.0",
     "notes": [
+      {
+        "version": "0.7.0-alpha.0",
+        "date": "2026-09-29",
+        "summary": "--repair cannot land on a different agent.",
+        "summary_segments": [
+          {
+            "text": "--repair",
+            "code": true
+          },
+          {
+            "text": " cannot land on a different agent.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
@@ -391,40 +467,48 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.1",
-        "date": "2026-09-25",
-        "summary": "Client identity. Every request the connector's API client makes (setup resolve/register, status reports, the agent identity read) carries X-Haven-Client: @haven_ai/connect/<version> (CONNECTOR_CLIENT_IDENTITY), so the backend can tell an outdated connector what to run.",
-        "summary_segments": [
-          {
-            "text": "Client identity. Every request the connector's API client makes (setup resolve/register, status reports, the agent identity read) carries ",
-            "code": false
-          },
-          {
-            "text": "X-Haven-Client: @haven_ai/connect/<version>",
-            "code": true
-          },
-          {
-            "text": " (",
-            "code": false
-          },
-          {
-            "text": "CONNECTOR_CLIENT_IDENTITY",
-            "code": true
-          },
-          {
-            "text": "), so the backend can tell an outdated connector what to run.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.6.0-alpha.0",
+    "released_version": "0.7.0-alpha.0",
     "notes": [
+      {
+        "version": "0.7.0-alpha.0",
+        "date": "2026-09-29",
+        "summary": "The bundled agent runbook runs the CLI command the manifest serves. It had told an agent to build npx @haven_ai/cli@<channel> from packages.cli.channel, which serves the full spec, so the command came out as npx @haven_ai/cli@@haven_ai/cli@dev. (+1 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The bundled agent runbook runs the CLI command the manifest serves. It had told an agent to build ",
+            "code": false
+          },
+          {
+            "text": "npx @haven_ai/cli@<channel>",
+            "code": true
+          },
+          {
+            "text": " from ",
+            "code": false
+          },
+          {
+            "text": "packages.cli.channel",
+            "code": true
+          },
+          {
+            "text": ", which serves the full spec, so the command came out as ",
+            "code": false
+          },
+          {
+            "text": "npx @haven_ai/cli@@haven_ai/cli@dev",
+            "code": true
+          },
+          {
+            "text": ". (+1 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.6.0-alpha.0",
         "date": "2026-09-26",
@@ -460,34 +544,6 @@ export const CLIENT_RELEASE_DATA = {
           },
           {
             "text": " page. (+1 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.5.0-alpha.1",
-        "date": "2026-09-25",
-        "summary": "Client identity. Every Haven API request the CLI makes carries X-Haven-Client: @haven_ai/cli/<version> (CLI_CLIENT_IDENTITY), so the backend can tell an outdated CLI what to run.",
-        "summary_segments": [
-          {
-            "text": "Client identity. Every Haven API request the CLI makes carries ",
-            "code": false
-          },
-          {
-            "text": "X-Haven-Client: @haven_ai/cli/<version>",
-            "code": true
-          },
-          {
-            "text": " (",
-            "code": false
-          },
-          {
-            "text": "CLI_CLIENT_IDENTITY",
-            "code": true
-          },
-          {
-            "text": "), so the backend can tell an outdated CLI what to run.",
             "code": false
           }
         ],

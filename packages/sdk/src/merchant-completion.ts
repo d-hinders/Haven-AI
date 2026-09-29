@@ -22,10 +22,11 @@ import {
   extractMcpPaymentRequired,
   mcpSettlementFromToolResult,
 } from './mcp-merchant-transport.js'
-import { x402PaymentHeaderNamesSent } from './x402.js'
+import { x402PaymentHeaderNamesSent, x402PaymentHeaderNamesFor } from './x402.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
 import { decodeBase64Json } from './base64.js'
+import { X_TAX_DECLARATION_HEADER, withTaxDeclarationHeader, type TaxDeclarationHeaderResolver } from './client-tax-declaration.js'
 
 /**
  * Merchant delivery and the evidence trail behind it (#1620, epic #1613).
@@ -102,6 +103,22 @@ export interface MerchantCompletionOptions {
   getAgent: AgentReader
   delegateAddress: string | undefined
   x402Wallet: string | undefined
+  /**
+   * #3427: resolve the buyer-side `X-Tax-Declaration` header value for the
+   * paid EIP-3009 retry, or `undefined` to proceed without it (content
+   * unavailable, endpoint absent, erc7710 scheme). The CLIENT wires this
+   * only when it holds a delegate key — the hosted, keyless
+   * `completeX402MerchantCall` path never sets it, so the header cannot
+   * reach the merchant from a process with no signing key.
+   */
+  getTaxDeclarationHeader?: TaxDeclarationHeaderResolver
+  /**
+   * The agent's local delegate key, present ONLY on the local client. The
+   * hosted, keyless path leaves both this and the resolver unset, so no
+   * declaration can be resolved, let alone signed, without the key that
+   * signs the payment authorization itself.
+   */
+  delegateKey?: string | undefined
   /** Injectable only so tests do not spend the real backoff. */
   sleep?: (ms: number) => Promise<void>
 }
@@ -113,6 +130,8 @@ export class MerchantCompletion {
   private readonly getAgent: AgentReader
   private readonly delegateAddress: string | undefined
   private readonly x402Wallet: string | undefined
+  private readonly getTaxDeclarationHeader: TaxDeclarationHeaderResolver | undefined
+  private readonly delegateKey: string | undefined
   private readonly sleep: (ms: number) => Promise<void>
 
   constructor(options: MerchantCompletionOptions) {
@@ -123,6 +142,8 @@ export class MerchantCompletion {
     this.getAgent = options.getAgent
     this.delegateAddress = options.delegateAddress
     this.x402Wallet = options.x402Wallet
+    this.getTaxDeclarationHeader = options.getTaxDeclarationHeader
+    this.delegateKey = options.delegateKey
   }
 
   async retryRequest(
@@ -138,6 +159,39 @@ export class MerchantCompletion {
       throw new HavenApiError('No x402 payment header was returned for payment retry', 500)
     }
 
+    // #3427: the buyer-side tax declaration rides the PAID retry only, and
+    // only on the EIP-3009 scheme. The scheme test is the same one the wire
+    // already uses for the payment header names (`x402PaymentHeaderNamesFor`
+    // → `isErc7710Option` on the decoded `accepted` entry), so the two
+    // scheme decisions cannot drift apart. Resolution happens here — the one
+    // seam `fetch`, `payX402Quote` and `resumeX402Payment` all reach — with
+    // a resolved `undefined` (not available / older backend / erc7710)
+    // meaning the retry proceeds exactly as before. The header is attached
+    // to the caller's `init` AFTER any captured-request snapshot was taken,
+    // so it never lands in a resume state, a Haven-API body, or the payment
+    // payload: `deliverPayment` forwards `init.headers` verbatim to the
+    // merchant, and nothing else reads them.
+    let retryInit = initialInit
+    if (this.getTaxDeclarationHeader && this.delegateKey) {
+      const scheme = x402PaymentHeaderNamesFor(receipt.paymentHeader)
+      const isEip3009 = scheme.length > 1
+      if (isEip3009) {
+        // A refusal thrown by the builder (content not exactly the local
+        // shape, an unnamable network, a bad key) propagates as the signing
+        // error it is — the payment aborts loudly rather than proceeding
+        // with a declaration that failed its guard.
+        const resolved = await this.getTaxDeclarationHeader({
+          accepted: receipt.accepted,
+          delegateKey: this.delegateKey,
+        })
+        retryInit = withTaxDeclarationHeader(initialInit, resolved.header)
+      } else {
+        // Not EIP-3009 (erc7710): never resolve, and never leave a stale
+        // header the caller's own init might already carry.
+        retryInit = withTaxDeclarationHeader(initialInit, undefined)
+      }
+    }
+
     // 5. Retry with a merchant-verifiable x402 EIP-3009 payment header.
     // #3171: if the merchant's session is gone (expired, or it restarted
     // between the challenge and this retry) and it SAYS nothing was settled,
@@ -145,7 +199,7 @@ export class MerchantCompletion {
     // 404 as a rejection after funding.
     const retryResponse = await this.merchantTransport.deliverPaymentRecoveringSession(
       url,
-      initialInit,
+      retryInit,
       receipt.paymentHeader,
       () => this.merchantTransport.initialize(url, initialInit),
     )

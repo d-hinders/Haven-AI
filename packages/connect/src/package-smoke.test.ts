@@ -559,7 +559,11 @@ async function installPackedRuntimeFromTarballs(homeDir: string, sdkTarball: str
   const runtimeNodeModules = join(runtimeDirectory, 'node_modules')
   await extractPackageTarball(sdkTarball, join(runtimeNodeModules, '@haven_ai', 'sdk'))
   await extractPackageTarball(mcpTarball, join(runtimeNodeModules, '@haven_ai', 'mcp'))
-  for (const dependency of ['@modelcontextprotocol', 'ethers', 'viem', 'x402', 'zod']) {
+  // @noble resolves @noble/curves, a declared @haven_ai/sdk dependency the
+  // packed SDK's index graph imports at module load after #3427 moved edge
+  // signing into the shared chunk; a real npm install resolves it from sdk's
+  // package.json, the hand-rolled smoke layout must link it explicitly.
+  for (const dependency of ['@modelcontextprotocol', '@noble', 'ethers', 'viem', 'x402', 'zod']) {
     await linkWorkspaceDependency(runtimeNodeModules, dependency)
   }
 }

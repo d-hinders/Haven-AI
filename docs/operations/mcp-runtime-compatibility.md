@@ -80,6 +80,36 @@ last-verified: "2026-09-29"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified #3427 (2026-09-29, the paid x402 retry carries the buyer tax
+> declaration):** this diff touches files under covered trees —
+> `packages/sdk/src/client.ts`, `merchant-completion.ts`, `edge.ts`,
+> `tool-descriptions.ts` and `skill-content.ts`, and
+> `packages/mcp/src/tools.test.ts`. The SDK edge entry gains
+> `buildSignedTaxDeclaration`: the EIP-712 tax declaration is built LOCALLY over
+> exactly the wg-tax PR #5 §2.1 fields and signed by the same delegate key that
+> signs the EIP-3009 payment authorization (§2.2: the signer is the payer);
+> content arriving with `principalId`, `principalAttributionHash` or any unknown
+> field is refused. `MerchantCompletion.retryRequest` — the seam shared by
+> `fetch`, `payX402Quote` and `resumeX402Payment` — attaches
+> `X-Tax-Declaration: <base64url(JSON)>` to the SELLER request on the paid
+> EIP-3009 retry, only when the owner opted the agent in (#3426 content
+> endpoint); it is omitted on the erc7710 scheme, on the first unpaid request,
+> on a "not available" content answer, and on a 404 from the content endpoint.
+> Runtime-compatibility contracts do not move: no tool is added, renamed or
+> re-shaped on either surface, `haven_pay_x402` and `haven_resume_x402_payment`
+> keep their input schemas (the attach happens inside the SDK below the MCP tool
+> layer, driven by the #3426 opt-in, and `deliverPayment` — the hosted keyless
+> path — is untouched, so a hosted runtime never attaches a declaration), the
+> local consent hash covers tool names, not their inputs
+> (`packages/mcp/src/consent.ts`), and the header is seller-bound only — it
+> never reaches Haven's API or the payment payload, so what a newer client may
+> send an older runtime is unchanged. The two tools' descriptions gain one
+> sentence about the header (description text only), and the payment skill's
+> prose mirrors it into the frontend bundle byte-for-byte (its parity test is
+> re-run green). No update needed without the opt-in: the wire is unchanged.
+> `last-verified` is not re-stamped: this block is the scope. Nothing else in
+> this document was re-verified.
+>
 > **Re-verified (#3423 slice C, 2026-09-29, `haven_list_receipts` gains
 > `compact`):** both surfaces declare an optional `compact: boolean` on
 > `haven_list_receipts`, and with it each row omits `challengePayload`,

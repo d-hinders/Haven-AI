@@ -238,6 +238,11 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       .mockResolvedValueOnce(fundingPendingSignature())
       // 4: Haven sign → confirmed
       .mockResolvedValueOnce(fundingConfirmed())
+      // 4b/4c (#3427): the paid-retry tax-declaration resolution reads the
+      // agent id, then #3426's content endpoint. Unavailable here — this test
+      // pins the MCP session threading, not the header.
+      .mockResolvedValueOnce(agentResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 }))
       // 5: paid retry → SSE JSON-RPC result
       .mockResolvedValueOnce(sseResponse(
         sse({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'an image' }] } }),
@@ -255,7 +260,7 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       body: toolCall,
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(7)
+    expect(fetchMock).toHaveBeenCalledTimes(9)
 
     // Initialize ran first, against the merchant, with a real handshake body.
     expect(String(fetchMock.mock.calls[0][0])).toBe(mcpUrl)
@@ -275,7 +280,7 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
 
     // Session id + SSE Accept threaded onto both the probe and the retry.
     const probeHeaders = headersOf(fetchMock.mock.calls[2])
-    const retryHeaders = headersOf(fetchMock.mock.calls[5])
+    const retryHeaders = headersOf(fetchMock.mock.calls[7])
     expect(probeHeaders.get('mcp-session-id')).toBe('sess-abc')
     expect(retryHeaders.get('mcp-session-id')).toBe('sess-abc')
     expect(probeHeaders.get('mcp-session-id')).toBe(retryHeaders.get('mcp-session-id'))
@@ -303,6 +308,8 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequiredFor(mcpUrl)), { status: 402, headers: { 'Content-Type': 'application/json' } })) // 2 probe
       .mockResolvedValueOnce(fundingPendingSignature())         // 3 authorize
       .mockResolvedValueOnce(fundingConfirmed())                // 4 sign → confirmed
+      .mockResolvedValueOnce(agentResponse())                   // 4b (#3427) agent id read
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 })) // 4c (#3427) tax content
       .mockResolvedValueOnce(sessionNotFound404())              // 5 paid retry → the merchant restarted / expired the session
       .mockResolvedValueOnce(initializeOk('sess-new'))          // 6 re-initialize
       .mockResolvedValueOnce(notificationAccepted())            // 7 initialized
@@ -318,10 +325,10 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'create_image' } }),
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(10)
-    expect(isInitializeCall(fetchMock.mock.calls[6])).toBe(true)
-    const first = headersOf(fetchMock.mock.calls[5])
-    const second = headersOf(fetchMock.mock.calls[8])
+    expect(fetchMock).toHaveBeenCalledTimes(12)
+    expect(isInitializeCall(fetchMock.mock.calls[8])).toBe(true)
+    const first = headersOf(fetchMock.mock.calls[7])
+    const second = headersOf(fetchMock.mock.calls[10])
     expect(first.get('mcp-session-id')).toBe('sess-abc')
     expect(second.get('mcp-session-id')).toBe('sess-new')
     expect(first.get('X-PAYMENT')).toBeTruthy()
@@ -339,6 +346,8 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequiredFor(mcpUrl)), { status: 402, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(fundingPendingSignature())
       .mockResolvedValueOnce(fundingConfirmed())
+      .mockResolvedValueOnce(agentResponse()) // 4b (#3427) agent id read
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 })) // 4c (#3427) tax content
       .mockResolvedValueOnce(sessionNotFound404(false))
       .mockResolvedValueOnce(reconciliationAccepted())
 
@@ -448,6 +457,9 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       // 2-3: Haven authorize + sign
       .mockResolvedValueOnce(fundingPendingSignature())
       .mockResolvedValueOnce(fundingConfirmed())
+      // 3b/3c (#3427): tax-declaration resolution reads, unavailable here
+      .mockResolvedValueOnce(agentResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 }))
       // 4: plain JSON retry (no SSE)
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
       // 5: evidence
@@ -460,12 +472,12 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       body: JSON.stringify({ hello: 'world' }),
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock).toHaveBeenCalledTimes(8)
     // Handshake was attempted...
     expect(isInitializeCall(fetchMock.mock.calls[0])).toBe(true)
     // ...but failed, so no MCP headers leak onto the probe or the retry.
     expect(headersOf(fetchMock.mock.calls[1]).has('mcp-session-id')).toBe(false)
-    expect(headersOf(fetchMock.mock.calls[4]).has('mcp-session-id')).toBe(false)
+    expect(headersOf(fetchMock.mock.calls[6]).has('mcp-session-id')).toBe(false)
 
     // Standard x402 result passes through untouched (not SSE-collapsed).
     expect(response.status).toBe(200)
@@ -487,6 +499,9 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       }))
       .mockResolvedValueOnce(fundingPendingSignature())
       .mockResolvedValueOnce(fundingConfirmed())
+      // (#3427) tax-declaration resolution reads, unavailable here
+      .mockResolvedValueOnce(agentResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
       .mockResolvedValueOnce(evidenceAccepted())
 
@@ -513,6 +528,9 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       // 3-4: Haven authorize + sign
       .mockResolvedValueOnce(fundingPendingSignature(genericUrl))
       .mockResolvedValueOnce(fundingConfirmed())
+      // 4b/4c (#3427): tax-declaration resolution reads, unavailable here
+      .mockResolvedValueOnce(agentResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 }))
       // 5: SSE retry
       .mockResolvedValueOnce(sseResponse(
         sse({ jsonrpc: '2.0', id: 2, result: { ok: true } }),
@@ -523,7 +541,7 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     const haven = newClient()
     const response = await haven.fetch(genericUrl, { method: 'POST', body: JSON.stringify({}) })
 
-    expect(fetchMock).toHaveBeenCalledTimes(7)
+    expect(fetchMock).toHaveBeenCalledTimes(9)
     // The probe came first and could not have carried a session id...
     expect(String(fetchMock.mock.calls[0][0])).toBe(genericUrl)
     expect(headersOf(fetchMock.mock.calls[0]).has('mcp-session-id')).toBe(false)
@@ -531,7 +549,7 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     expect(isInitializeCall(fetchMock.mock.calls[1])).toBe(true)
     expect(isInitializedNotificationCall(fetchMock.mock.calls[2])).toBe(true)
     // ...so the paid retry is authorized with the freshly issued session id.
-    expect(headersOf(fetchMock.mock.calls[5]).get('mcp-session-id')).toBe('sess-bazaar')
+    expect(headersOf(fetchMock.mock.calls[7]).get('mcp-session-id')).toBe('sess-bazaar')
     await expect(response.json()).resolves.toEqual({ ok: true })
   })
 
@@ -544,6 +562,9 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       }))
       .mockResolvedValueOnce(fundingPendingSignature())
       .mockResolvedValueOnce(fundingConfirmed())
+      // (#3427) tax-declaration resolution reads, unavailable here
+      .mockResolvedValueOnce(agentResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
       .mockResolvedValueOnce(evidenceAccepted())
 
@@ -551,7 +572,7 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     const response = await haven.fetch(genericUrl, { method: 'POST', body: JSON.stringify({}) })
 
     // No initialize call anywhere, and no MCP headers on any request.
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchMock).toHaveBeenCalledTimes(7)
     expect(fetchMock.mock.calls.some(isInitializeCall)).toBe(false)
     expect(fetchMock.mock.calls.every((call) => !headersOf(call).has('mcp-session-id'))).toBe(true)
     await expect(response.json()).resolves.toEqual({ ok: true })

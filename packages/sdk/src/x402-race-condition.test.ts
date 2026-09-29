@@ -123,6 +123,22 @@ function evidenceResponse() {
   return new Response(JSON.stringify({ evidence: { id: 'ev-321' } }), { status: 202 })
 }
 
+/**
+ * #3427: the two Haven reads the paid-retry tax-declaration resolution adds
+ * (agent id, then #3426's content endpoint). Unavailable here — these tests
+ * pin the funding-wait behaviour, not the header.
+ */
+const AGENT_RESPONSE = {
+  id: 'agent_321',
+  name: 'wait agent',
+  status: 'active',
+  account_address: safeAddress,
+  delegate_address: delegateAddress,
+  chain_id: 8453,
+  execution_rail: 'delegation',
+}
+const TAX_UNAVAILABLE_RESPONSE = { available: false, reason: 'disabled' }
+
 describe('x402 funding tx confirmation wait (#321)', () => {
   afterEach(() => {
     vi.clearAllMocks()
@@ -138,6 +154,8 @@ describe('x402 funding tx confirmation wait (#321)', () => {
       }))
       .mockResolvedValueOnce(authorizeResponse())
       .mockResolvedValueOnce(signResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify(AGENT_RESPONSE), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(TAX_UNAVAILABLE_RESPONSE), { status: 200 }))
       .mockResolvedValueOnce(merchantSuccessResponse())
       .mockResolvedValueOnce(evidenceResponse())
 
@@ -194,6 +212,8 @@ describe('x402 funding tx confirmation wait (#321)', () => {
       }))
       .mockResolvedValueOnce(authorizeResponse())
       .mockResolvedValueOnce(signResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify(AGENT_RESPONSE), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(TAX_UNAVAILABLE_RESPONSE), { status: 200 }))
       .mockResolvedValueOnce(merchantSuccessResponse())
       .mockResolvedValueOnce(evidenceResponse())
 

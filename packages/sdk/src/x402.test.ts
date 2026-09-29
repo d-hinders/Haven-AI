@@ -60,6 +60,22 @@ const paymentRequired: X402PaymentRequired = {
 const delegateAddress = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
 const safeAddress = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 
+/**
+ * #3427: the agent identity the paid-retry tax-declaration resolution reads
+ * (GET /machine-payments/agent). Shared by every fetch chain in this file
+ * that runs a paid retry.
+ */
+const X402_AGENT_RESPONSE = {
+  id: 'agent_x402',
+  name: 'x402 agent',
+  status: 'active',
+  account_address: safeAddress,
+  delegate_address: delegateAddress,
+  chain_id: 8453,
+  execution_rail: 'delegation',
+}
+const X402_TAX_UNAVAILABLE = { available: false, reason: 'disabled' }
+
 function decodeHeader(header: string): unknown {
   return JSON.parse(atob(header))
 }
@@ -507,6 +523,8 @@ describe('x402 helpers', () => {
         to: delegateAddress,
         explorer_url: 'https://basescan.org/tx/0xabc',
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: {
@@ -533,7 +551,8 @@ describe('x402 helpers', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    // 402 + funding POST + confirm + (#3427) agent-id read + tax-content read + paid retry + evidence
+    expect(fetchMock).toHaveBeenCalledTimes(7)
 
     const fundingInit = fetchMock.mock.calls[1][1] as RequestInit
     expect(JSON.parse(fundingInit.body as string)).toMatchObject({
@@ -550,7 +569,7 @@ describe('x402 helpers', () => {
       settlementScheme: 'eip3009',
     })
 
-    const retryInit = fetchMock.mock.calls[3][1] as RequestInit
+    const retryInit = fetchMock.mock.calls[5][1] as RequestInit
     const retryHeaders = new Headers(retryInit.headers)
     const x402Header = retryHeaders.get('X-PAYMENT') ?? ''
     const payment = decodeHeader(x402Header)
@@ -621,8 +640,8 @@ describe('x402 helpers', () => {
     expect(payment).not.toHaveProperty('network')
     expect(payment).not.toHaveProperty('extensions')
 
-    expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/evidence`)
-    const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
+    expect(fetchMock.mock.calls[6][0]).toBe(`${backendUrl}/machine-payments/evidence`)
+    const evidenceInit = fetchMock.mock.calls[6][1] as RequestInit
     expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
       paymentId: 'pay_123',
       rail: 'x402',
@@ -722,6 +741,8 @@ describe('x402 helpers', () => {
         amount: '0.02',
         to: delegateAddress,
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Missing session ID' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', 'X-Soundside-Trace': 'trace-789' },
@@ -745,9 +766,9 @@ describe('x402 helpers', () => {
       }),
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(5)
-    expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/reconciliation-events`)
-    const reportInit = fetchMock.mock.calls[4][1] as RequestInit
+    expect(fetchMock).toHaveBeenCalledTimes(7)
+    expect(fetchMock.mock.calls[6][0]).toBe(`${backendUrl}/machine-payments/reconciliation-events`)
+    const reportInit = fetchMock.mock.calls[6][1] as RequestInit
     expect(JSON.parse(reportInit.body as string)).toMatchObject({
       paymentId: 'pay_123',
       rail: 'x402',
@@ -802,6 +823,11 @@ describe('x402 helpers', () => {
       amount: '0.02',
       to: delegateAddress,
     }), { status: 200 }),
+    // #3427: the paid-retry tax-declaration resolution reads the agent id,
+    // then #3426's content endpoint. Unavailable here — these tests pin the
+    // rejection capture, not the header.
+    new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }),
+    new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }),
   ]
 
   it.each([
@@ -1302,6 +1328,8 @@ describe('x402 helpers', () => {
         chain_id: 8453,
         message: 'Retry the original x402 request.',
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: {
@@ -1327,14 +1355,14 @@ describe('x402 helpers', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/x402'))).toBe(false)
 
-    const retryInit = fetchMock.mock.calls[1][1] as RequestInit
+    const retryInit = fetchMock.mock.calls[3][1] as RequestInit
     const retryHeaders = new Headers(retryInit.headers)
     expect(retryHeaders.get('X-PAYMENT')).toBeTruthy()
 
-    const evidenceInit = fetchMock.mock.calls[2][1] as RequestInit
+    const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
     expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
       paymentId: 'approval-123',
       rail: 'x402',
@@ -1367,6 +1395,8 @@ describe('x402 helpers', () => {
         chain_id: 8453,
         message: 'Retry the original x402 request.',
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 }))
 
@@ -1402,12 +1432,12 @@ describe('x402 helpers', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
     expect(fetchMock.mock.calls[0][0]).toBe('https://haven.example/machine-payments/approval-123/status')
 
-    const retryInit = fetchMock.mock.calls[1][1] as RequestInit
+    const retryInit = fetchMock.mock.calls[3][1] as RequestInit
     const retryHeaders = new Headers(retryInit.headers)
-    expect(fetchMock.mock.calls[1][0]).toBe(paymentRequired.resource.url)
+    expect(fetchMock.mock.calls[3][0]).toBe(paymentRequired.resource.url)
     expect(retryInit.method).toBe('POST')
     expect(retryInit.body).toBe(body)
     expect(retryHeaders.get('mcp-session-id')).toBe('session-123')
@@ -1952,6 +1982,11 @@ describe('merchant receipt capture (#956)', () => {
       payment_id: 'pay_956', status: 'confirmed', tx_hash: txHash, chain_id: 8453,
       token: 'USDC', amount: '0.02', to: delegateAddress,
     }), { status: 200 }))
+    // #3427: the paid-retry tax-declaration resolution reads the agent id,
+    // then #3426's content endpoint. Unavailable here — these tests pin the
+    // merchant-receipt capture, not the header.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
     fetchMock.mockResolvedValueOnce(new Response('paid content', { status: 200, headers: retryHeaders }))
     // evidence report + (maybe) receipt report:
     fetchMock.mockResolvedValue(new Response('{}', { status: 200 }))

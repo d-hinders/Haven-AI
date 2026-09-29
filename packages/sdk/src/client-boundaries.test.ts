@@ -149,6 +149,7 @@ const boundary: ClientBoundary = {
   localImports: [
     './account-reads.js',
     './client-identity.js', // #3303: the HavenClientUpdate type clientUpdate() returns
+    './client-tax-declaration.js', // #3427: the buyer tax declaration resolution the paid EIP-3009 retry attaches
     './delegate-sweep.js',
     './direct-payment-guard.js', // #3283: the signing-surface allowlist signForData runs
     './haven-api-transport.js',

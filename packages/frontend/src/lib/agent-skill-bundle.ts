@@ -259,7 +259,11 @@ failed purchase reads as complete for fifteen minutes. If the merchant's
 \`settlement_tx_hash\`): Haven verifies it on-chain, and the receipt then shows
 the merchant's settlement, not only the funding transaction. (The SDK's own
 \`haven_pay_x402\` tool does perform the merchant retry itself; that tool is
-not part of the hosted MCP surface.) If the process
+not part of the hosted MCP surface.) On this SDK path, when the owner opted the
+agent in, the paid EIP-3009 retry also carries the agent-signed buyer tax
+declaration to the seller (\`X-Tax-Declaration\`, #3427) — signed locally by the
+same delegate key, omitted when unavailable or on the erc7710 scheme; nothing
+for you to sign or send. If the process
 crashes after payment, a later \`mcp__haven__haven_get_payment_status\` call
 may report \`nextAction: 'retry_original_x402_request'\` — only then call
 \`mcp__haven__haven_resume_x402_payment\` with the preserved resume state or

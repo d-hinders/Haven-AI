@@ -73,7 +73,10 @@ export async function getUsableCatalogMcpEntry(
         `Catalog entry "${entry.id}" (${entry.name}) is ` +
         (entry.status === 'degraded'
           ? 'marked degraded — Haven has not been able to verify its live price recently. '
-          : 'missing the MCP tool metadata (protocol/tool_name) this guided preflight needs. ') +
+          // #3423 review round 1 nit: by this point `entry.protocol === 'mcp'`
+          // already (the http check above threw otherwise), so `tool_name`
+          // is the only metadata that can be missing here.
+          : 'missing the MCP tool_name this guided preflight needs. ') +
         'Use haven_pay_mcp_tool directly with an explicit merchant_url and tool_name instead.',
       statusCode: 409,
       nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),

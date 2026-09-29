@@ -1097,7 +1097,10 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      // No human-unit framing on the atomic path — the message reads as before.
+      // #3423 review round 1 nit: the message now states both sides in whole
+      // tokens (item 3), so this is no longer "reads as before" — but the
+      // atomic-cap framing this test pins is unchanged: "max_amount 1", never
+      // relabeled as "max_amount_human".
       expect(payload.message).toContain('max_amount 1')
       expect(payload.message).not.toContain('max_amount_human')
       expect(fundingCall()).toBeUndefined()

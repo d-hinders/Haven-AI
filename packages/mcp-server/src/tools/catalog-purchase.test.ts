@@ -418,6 +418,39 @@ describe('haven_quote_catalog_purchase', () => {
     // Exactly one network call: the catalog lookup. Nothing was contacted or reserved.
     expect(recordedCalls()).toHaveLength(1)
   })
+
+  // #3423 review round 1 (F4-1): a row that is BOTH a plain-HTTP paywall AND
+  // marked degraded must still hand off to haven_quote_x402 — the protocol
+  // check has to run FIRST, before the degraded/tool-name check that answers
+  // haven_pay_mcp_tool. Mutation: `entry.protocol !== 'mcp' && entry.status
+  // !== 'degraded'` on the first check must fail this test (the http+degraded
+  // row would then fall through to the second check and answer
+  // haven_pay_mcp_tool instead).
+  it('hands off a DEGRADED http catalog row to haven_quote_x402 too — the protocol check runs first', async () => {
+    stubFetch({
+      'GET /catalog/cat_http_degraded': {
+        status: 200,
+        body: {
+          ...catalogEntry,
+          id: 'cat_http_degraded',
+          protocol: 'http',
+          tool_name: null,
+          status: 'degraded',
+          resource_url: 'https://merchant.test/degraded-paid',
+        },
+      },
+    })
+
+    const payload = await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_http_degraded' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    expect(payload.next_tool_name).toBe('haven_quote_x402')
+    expect(payload.next_arguments).toEqual({ url: 'https://merchant.test/degraded-paid' })
+    expect(payload.suggested_tool).toBe('haven_quote_x402')
+    // Must NOT be the mcp-only degraded fallback.
+    expect(payload.suggested_tool).not.toBe('haven_pay_mcp_tool')
+  })
 })
 
 describe('haven_prepare_catalog_purchase', () => {
@@ -768,7 +801,9 @@ describe('haven_prepare_catalog_purchase', () => {
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
-    expect(payload.message).toMatch(/tool metadata/)
+    // #3423 review round 1 nit: only tool_name can be missing on this
+    // branch — protocol is already 'mcp' by this point.
+    expect(payload.message).toMatch(/tool_name/)
   })
 
   // #3423 item 1: same hand-off correction as haven_quote_catalog_purchase

@@ -42,32 +42,18 @@ export type MaxAmountCap =
   | { kind: 'human'; value: string }
 
 /**
- * Pre-funding price guard. `authorizedAtomic` is the MERCHANT's own quoted
- * ceiling for the call — `maxAmountRequired ?? amount`, read straight off the
- * merchant's 402 response by the SDK's `x402AuthorizationAmount`
- * (`packages/sdk/src/x402.ts`). **Haven authorizes nothing here** (#2334,
- * #2347): the figure is what the merchant may settle up to, i.e. the user's
- * worst-case spend, which is the right figure to cap. "Authorization" in this
- * function's names is the x402/EIP-3009 FUNDING LEG the amount travels into,
- * never a grant of spend authority — that comes only from the owner-signed
- * `erc20PeriodTransfer` delegation (`rails/delegation-policy.ts`, built
- * unsigned and signed by the account owner) and the on-chain
- * `ERC20PeriodTransferEnforcer` caveat it is redeemed under.
- * Throws a typed PRICE_EXCEEDS_MAX (preserved by
- * normalizeError) when it exceeds the agent's cap, so the call fails
- * BEFORE any funding transfer. The on-chain allowance is still the hard gate;
- * this is an extra agent affordance against surprise overcharges within budget.
- * Compared in atomic BigInt units.
- */
-/**
- * #3423 item 3: the PRICE_EXCEEDS_MAX message used to mix units — the
- * authorized side was atomic-only, the cap side was half human (the cap
- * label), and a single trailing "(TOKEN, atomic units)" was stapled onto a
- * sentence that was not atomic-only. When `decimals` is known (the real
- * callers always resolve it before pricing), state BOTH sides in whole
- * tokens, with the atomic figure in parentheses, and never say "atomic
- * units" at all. When `decimals` is unknown, fall back to the old atomic-only
- * phrasing, with "atomic units" appearing exactly once.
+ * #3423 item 3 (review round 1, D5): moved above the JSDoc it was separated
+ * from — this helper's only caller is `assertWithinMaxAmount` immediately
+ * below. The PRICE_EXCEEDS_MAX message used to mix units — the authorized
+ * side was atomic-only, the cap side was half human (the cap label), and a
+ * single trailing "(TOKEN, atomic units)" was stapled onto a sentence that
+ * was not atomic-only. When `decimals` is known (the asset is in Haven's
+ * token registry — `resolveTokenFromAddress` in `priceSelectedOption` below
+ * resolves it from the merchant's 402 `accepts[]` entry; an asset Haven does
+ * not recognise leaves it `null`, so "known" is not "always"), state BOTH
+ * sides in whole tokens, with the atomic figure in parentheses, and never say
+ * "atomic units" at all. When `decimals` is unknown, fall back to the old
+ * atomic-only phrasing, with "atomic units" appearing exactly once.
  */
 function priceExceedsMaxMessage(input: {
   authorizedAtomic: string
@@ -102,6 +88,24 @@ function priceExceedsMaxMessage(input: {
   )
 }
 
+/**
+ * Pre-funding price guard. `authorizedAtomic` is the MERCHANT's own quoted
+ * ceiling for the call — `maxAmountRequired ?? amount`, read straight off the
+ * merchant's 402 response by the SDK's `x402AuthorizationAmount`
+ * (`packages/sdk/src/x402.ts`). **Haven authorizes nothing here** (#2334,
+ * #2347): the figure is what the merchant may settle up to, i.e. the user's
+ * worst-case spend, which is the right figure to cap. "Authorization" in this
+ * function's names is the x402/EIP-3009 FUNDING LEG the amount travels into,
+ * never a grant of spend authority — that comes only from the owner-signed
+ * `erc20PeriodTransfer` delegation (`rails/delegation-policy.ts`, built
+ * unsigned and signed by the account owner) and the on-chain
+ * `ERC20PeriodTransferEnforcer` caveat it is redeemed under.
+ * Throws a typed PRICE_EXCEEDS_MAX (preserved by
+ * normalizeError) when it exceeds the agent's cap, so the call fails
+ * BEFORE any funding transfer. The on-chain allowance is still the hard gate;
+ * this is an extra agent affordance against surprise overcharges within budget.
+ * Compared in atomic BigInt units.
+ */
 export function assertWithinMaxAmount(
   authorizedAtomic: string,
   maxAmount: string | undefined,

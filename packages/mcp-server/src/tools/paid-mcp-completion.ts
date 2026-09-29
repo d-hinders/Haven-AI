@@ -828,6 +828,10 @@ export function createPaidMcpCompletionHandlers(
                 summary: {
                   payment_id: args.payment_id,
                   status: summary7710.payment?.status ?? 'settled',
+                  // #3423 review round 1 (F1): additive, not a replacement —
+                  // `product` stayed the field this summary carried before
+                  // this fix, and `purchase_summary` is new alongside it.
+                  product: args.tool_name,
                   purchase_summary: purchaseSummary,
                 },
                 warnings: summary7710.warnings,

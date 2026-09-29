@@ -83,13 +83,16 @@ last-verified: "2026-09-28"
 > Four fixes, none touching a tool's name, schema, input shape or the
 > version-skew/consent-hash contracts: (1) a `protocol: 'http'` catalog row's
 > refusal now names `haven_quote_x402` instead of the mcp-only
-> `haven_pay_mcp_tool` — refusal wording and `next_tool`/`next_arguments`
-> content, no new refusal code, no schema change; (2) the `PRICE_EXCEEDS_MAX`
-> message states both sides in whole tokens instead of mixing units — message
-> text only, same code/status/`retry_with_new_quote`; (3) the erc7710 settled
-> branch of `haven_settle_mcp_tool` now includes
-> `agent_summary.purchase_summary` — an additive read-only field built from
-> values the handler already held, no new call, no wire shape removed; (4) the
+> `haven_pay_mcp_tool`, with `next_action: retry_with_explicit_context`
+> (was `stop_and_tell_user`) — refusal wording, code and `next_action`/
+> `next_tool`/`next_arguments` content change; no new refusal CODE, no schema
+> change; (2) the `PRICE_EXCEEDS_MAX` message states both sides in whole
+> tokens instead of mixing units — message text only, same
+> code/status/`retry_with_new_quote`; (3) the erc7710 settled branch of
+> `haven_settle_mcp_tool` now ALSO includes `agent_summary.purchase_summary`
+> alongside the `agent_summary.product` field it already carried (additive,
+> review round 1 F1) — a read-only field built from values the handler
+> already held, no new call, no wire shape removed; (4) the
 > skill's catalog Signing/Settle prose now names both settlement shapes
 > instead of only EIP-3009 — prose only, mirrored byte-for-byte into the
 > frontend skill bundle, which its own parity test enforces. No runtime is

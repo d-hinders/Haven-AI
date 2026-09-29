@@ -1693,7 +1693,31 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > backend is untouched, and no signature, key role, delegation, caveat or
 > on-chain surface changes. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.
-
+>
+> **Re-verified (#3419, 2026-09-29):** this diff touches two files in this
+> document's coverage list, `packages/sdk/src/userop-binding.ts` and
+> `packages/signer/src/tools.ts`. `TASK_SIGN_CONTEXT_VERSION` is a new
+> exported constant beside `DIRECT_SIGN_CONTEXT_VERSION`: additive data — the
+> backend's task sign-context version, now single-sourced for the signer's
+> `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` and the hosted/local
+> `signer_compatibility` notices — that moves no signing check. In `tools.ts`
+> every handler's parse became the strict re-parse `parseStrictFor` (the
+> registration keeps unknown keys, so the tool layer is the refusal point)
+> and `normalizeError` gained the `UNSUPPORTED_ARGUMENT` branch. An undeclared
+> top-level argument produced no signature and no audit entry before — the
+> old strip-mode parse dropped it before any fetch, so the call either signed
+> from the declared keys alone or was refused for missing ones — and still
+> produces none; what changes is only what that refusal says: structured
+> `UNSUPPORTED_ARGUMENT` (`unknown_arguments`, `signer_version`, `fallback`,
+> `next_action: stop_and_tell_user`) where the generic `SIGNING_ERROR` used
+> to be, and where the declared keys alone were sufficient the strict parse
+> now refuses a call the old signer signed without the key — a change that
+> can only narrow what this signer signs. No signature, key role, delegation,
+> caveat, allowlist, binding or redemption-guard claim in this document
+> moves: the allowlist, the #3271 binding, the #3375 recipient pin and the
+> redemption guards all run unchanged, after the parse. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.
+>
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this diff renames backend-internal identifiers to account vocabulary in the
 > files this document spans: `userSafeId` → `accountId`

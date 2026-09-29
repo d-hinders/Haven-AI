@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **`reportSettlementEvidence()` also takes an eip3009 merchant settlement (#3475).** After a plain-HTTP x402 purchase on the EIP-3009 funding leg, pass the merchant's `PAYMENT-RESPONSE.transaction`: the backend verifies the delegate → merchant transfer on-chain and records it, and receipts then show it as `settlementTxHash` beside the unchanged funding hash. The method's signature and outcomes are unchanged; an older backend refuses the report (`refused`, 409) and writes nothing. The shared `haven_report_settlement_evidence` description is now scheme-neutral, and the bundled skill's plain-HTTP paragraph tells the agent to make this report. No update needed.
+
 ## 0.7.0-alpha.0 — 2026-09-29
 
 ### Added

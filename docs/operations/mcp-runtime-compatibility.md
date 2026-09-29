@@ -1056,6 +1056,30 @@ last-verified: "2026-09-29"
 > obtain. On a refusal the tool reads the payment's status for its summary
 > rather than asserting one (`unknown` when the read itself is refused).
 >
+> **Re-verified (#3475, 2026-09-29):** `haven_report_settlement_evidence` now
+> also takes an **eip3009** payment's merchant settlement, per the owner
+> decision on #3475 (`haven_report_x402_outcome` keeps its no-hash contract).
+> After a plain-HTTP purchase the agent retried the merchant itself, so the
+> merchant's `PAYMENT-RESPONSE.transaction` reaches Haven only this way. The
+> tool's input schema, strictness and response shape are unchanged; the
+> backend seam behind the same `POST /machine-payments/evidence` decides by
+> the payment. A funded eip3009 intent reported with a hash that is not its
+> funding hash goes to `observeEip3009MerchantSettlement`, which verifies a
+> delegate → merchant transfer of exactly the amount, mined between funding
+> confirmation and `expires_at` plus the SDK's authorization lifetime, and
+> records it as `machine_metadata.merchant_settlement_tx_hash`. The funding
+> `tx_hash` and the evidence row's proof status do not move. Receipts
+> (`haven_list_receipts`) then show that hash as `settlementTxHash`, ahead of
+> the merchant's unverified echo. A refused report still classifies as
+> `DELIVERED_UNSETTLED` or `SETTLEMENT_PENDING` (the same three outcomes; an
+> eip3009 refusal leaves an already-confirmed payment as it was). The shared
+> description drops its erc7710-only wording (−11 bytes, the #1591 total pin
+> moves to 22,575), and the skill's plain-HTTP paragraph now tells the agent
+> to report the transaction. Version skew: an older backend treats the report
+> as the funding-hash attach and answers 409 `tx_hash_mismatch`, which the
+> tool reports as `DELIVERED_UNSETTLED`; nothing is written either way. No
+> local-runtime twin, so the consent hash and the local signer are unchanged.
+>
 > **Recent re-verification (#2968):** the response vocabulary is completed at
 > the agent-facing surface, additively. `deliverMerchantPayment` now collapses
 > a zero/placeholder `settlementTxHash` (the demo merchant's `ZERO_TX_HASH`

@@ -1772,6 +1772,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > shape predicates, `signer/tools.ts`'s new `sub_budget_id` channel, and the
 > allowlist bullets above. Nothing else in this document was re-read for it,
 
+> **Re-verified (#3475, 2026-09-29):** an agent can report an eip3009
+> payment's merchant settlement hash (`haven_report_settlement_evidence`). The
+> backend verifies it on-chain with the existing
+> `verifySettlementTransferTx` (a Transfer of exactly the amount, in the
+> token, from the payment's delegate EOA to its merchant, mined inside the
+> payment's funding-to-authorization-expiry window) and records it on the
+> intent's metadata. Nothing is signed, submitted or moved, the intent's
+> status and funding hash stay, and the one write is serialized per hash with
+> the erc7710 confirm's advisory lock, so a transaction can back at most one
+> payment. Same-shaped overlapping payments are attributed oldest-funded
+> first, because Haven never sees the EIP-3009 nonce on this path. No
+> signature, key role, delegation, caveat or on-chain surface changes. The
+> rest of this document was not re-read for it, and `last-verified` is not
+> bumped.
+
 > **Re-verified (#3423 slice C, 2026-09-29):** the SDK's
 > `listReceiptsPage` (and `haven_list_receipts` on both surfaces) gains an
 > opt-in `compact` that drops three verbatim payload echoes from each

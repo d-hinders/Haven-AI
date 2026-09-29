@@ -519,7 +519,7 @@ test.describe('design-system visual regression', () => {
 
       // #3441: bring the clip to a whole-pixel position — see the doc comment
       // on `snapToWholePixel` for why this, and not scroll or transform, holds.
-      await snapToWholePixel(wide)
+      await snapToWholePixel(wide, 'the wide sample')
 
       await expect(wide).toHaveScreenshot(`design-system-stacked-bar-chart-${vp.name}${schemeSuffix}.png`, {
         animations: 'disabled',
@@ -555,7 +555,7 @@ test.describe('design-system visual regression', () => {
       await assertFitsViewport(narrow, vp.height, 'the narrow sample')
 
       // #3441: see `snapToWholePixel`'s doc comment.
-      await snapToWholePixel(narrow)
+      await snapToWholePixel(narrow, 'the narrow sample')
 
       await expect(narrow).toHaveScreenshot(`design-system-stacked-bar-chart-narrow-${vp.name}${schemeSuffix}.png`, {
         animations: 'disabled',
@@ -585,7 +585,7 @@ test.describe('design-system visual regression', () => {
       await assertFitsViewport(swatchList, vp.height, 'the swatch list')
 
       // #3441: see `snapToWholePixel`'s doc comment.
-      await snapToWholePixel(swatchList)
+      await snapToWholePixel(swatchList, 'the swatch list')
 
       await expect(swatchList).toHaveScreenshot(`design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, {
         animations: 'disabled',
@@ -599,54 +599,77 @@ test.describe('design-system visual regression', () => {
   /**
    * ── Snapping a clip to a whole pixel before capture (#3441) ─────────────────
    *
-   * These three clips moved by a pure 1px vertical shift three times
-   * (#3198, #3312, #3437) whenever unrelated content ABOVE the showcase on
-   * `/design-system` changed height by a fraction of a pixel — the showcase
-   * itself never changed. The showcase sits below the fold at both viewports
-   * (see the split rationale above), so it renders inside the shell's inner
-   * scroll root (`#main-content`, `overflow-y-auto`) at whatever fractional
-   * CSS position the page's cumulative height puts it at; Playwright's
-   * element clip then rounds that fraction to a whole pixel, and which way it
-   * rounds flips with the fraction.
+   * These three clips could flip by a pure 1px vertical shift whenever
+   * unrelated content ABOVE the showcase on `/design-system` changed height
+   * by a fraction of a pixel — the showcase itself never changed. It
+   * happened three times, each hitting a different subset: #3198 moved only
+   * the 6 mobile clips, #3312 moved only the 6 desktop clips, and #3437
+   * shifted all 12 without committing new baselines (which is what broke
+   * `dev`). The showcase sits below the fold at both viewports (see the
+   * split rationale above), so it renders inside the shell's inner scroll
+   * root (`#main-content`, `overflow-y-auto`) at whatever fractional CSS
+   * position the page's cumulative height puts it at; Playwright's element
+   * clip then rounds that fraction to a whole pixel, and which way it rounds
+   * flips with the fraction.
    *
-   * Fixing this by SCROLLING was tried and measured to fail: `#main-content
-   * .scrollTop` is a `long` in Chromium — reading it back after assigning a
-   * fractional value always returns an integer (`0.25` read back as `0`,
-   * `0.5` as `1`, `0.75` as `2` in a repeated-delta probe), so a scroll
-   * adjustment can only ever move a clipped element by a WHOLE number of
-   * pixels. It can change WHICH whole pixel a fractional position rounds to;
-   * it cannot cancel the fraction itself. (This is the "does Chromium keep a
-   * fractional scroll offset" question the issue flagged as unverified — it
-   * does not, at least not through `scrollTop`.)
+   * Fixing this by SCROLLING was tried and measured to fail: Chromium snaps
+   * `#main-content.scrollTop` to whole pixels at DPR 1 — a fresh direct
+   * assignment reads back `0.25` as `0`, `0.5` as `1`, and `0.75` as `1`
+   * (not `2`; measured, and re-measured to confirm), and four repeated
+   * `scrollTop += 0.25` steps from `0` all read back `0`. Either way, a
+   * scroll adjustment can only ever move a clipped element by a WHOLE number
+   * of pixels — it can change WHICH whole pixel a fractional position rounds
+   * to, but it cannot cancel the fraction itself. (This is the "does
+   * Chromium keep a fractional scroll offset" question the issue flagged as
+   * unverified — it does not, at least not through `scrollTop`.)
    *
-   * A CSS `transform` was tried next and also measured to fail, in a more
-   * interesting way: `translateY(-fracPart)` DOES move `getBoundingClientRect()`
-   * to a whole pixel (transforms paint with full float precision), but the
-   * capture still moved under a page-height perturbation, because `transform`
-   * is a PAINT-time operation — the HTML tick labels' subpixel text hinting is
-   * decided at LAYOUT time, against the element's PRE-transform fractional
-   * position, so shifting the already-hinted text a second time at paint time
-   * re-introduces a fraction instead of removing one. This is the concrete
-   * shape of the doc comment above the clips: "the HTML tick labels ... do
-   * not move in lockstep with the SVG" — because text hinting and SVG
-   * geometry resolve their subpixel position at different times.
+   * A CSS `transform` was tried next and also measured to fail:
+   * `translateY(-fracPart)` DOES move `getBoundingClientRect()` to a whole
+   * pixel (transforms paint with full float precision), but the capture
+   * still moved under a page-height perturbation. The likely mechanism —
+   * not itself measured, only the failure was — is that `transform` is a
+   * PAINT-time operation, while the HTML tick labels' subpixel text hinting
+   * is decided at LAYOUT time against the element's PRE-transform fractional
+   * position, so shifting the already-hinted text a second time at paint
+   * time would re-introduce a fraction instead of removing one. That would
+   * match the issue's own observation (#3441) that the tick labels do not
+   * move in lockstep with the chart's SVG.
    *
-   * `margin-top` is what worked, measured stable (byte-identical clip PNGs)
-   * across a 0/.25/.5/.75px sweep on both viewports: it is a LAYOUT property,
-   * so setting it triggers reflow and the element's descendants — the tick
-   * labels included — get their final position, and therefore their text
-   * hinting, computed AFTER the correction rather than before it.
+   * `margin-top` is what held: measured stable (byte-identical clip PNGs)
+   * locally across a 0/.25/.5/.75px sweep on both viewports, and now pinned
+   * on every CI run by the fractional-spacer guard test below — it is a
+   * LAYOUT property, so setting it triggers reflow and the element's
+   * descendants — the tick labels included — get their final position, and
+   * therefore their text hinting, computed AFTER the correction rather than
+   * before it.
    */
-  async function snapToWholePixel(locator: Locator): Promise<void> {
-    await locator.evaluate((el) => {
+  async function snapToWholePixel(locator: Locator, what: string): Promise<void> {
+    await locator.evaluate((el, whatArg) => {
       const rect = el.getBoundingClientRect()
       const fracPart = rect.top - Math.floor(rect.top)
       // Epsilon guards a rect that is already whole (or float noise close
       // enough to it) from picking up a no-op negative margin.
       if (fracPart > 1e-3 && fracPart < 1 - 1e-3) {
-        ;(el as HTMLElement).style.marginTop = `${-fracPart}px`
+        const htmlEl = el as HTMLElement
+        // ADD to the element's own margin-top rather than overwrite it — the
+        // swatch list ships `mt-3` (12px), and overwriting it collapsed that
+        // spacing and pushed the list up into the narrow chart's box.
+        const existing = parseFloat(getComputedStyle(htmlEl).marginTop) || 0
+        htmlEl.style.marginTop = `${existing - fracPart}px`
       }
-    })
+      // Re-measure and refuse to pass silently: a collapse, a centring rule,
+      // or a transformed ancestor could all make this correction land
+      // somewhere other than where `getBoundingClientRect` said it would.
+      const after = el.getBoundingClientRect().top
+      const afterFrac = after - Math.floor(after)
+      if (afterFrac > 1e-3 && afterFrac < 1 - 1e-3) {
+        throw new Error(
+          `${whatArg}: snapToWholePixel left a ${afterFrac.toFixed(4)}px fraction after correction — ` +
+            `margin-top is not reaching this element's rendered position (collapse, centring, or an ` +
+            `ancestor transform is a likely cause)`,
+        )
+      }
+    }, what)
   }
 
   /**
@@ -665,5 +688,98 @@ test.describe('design-system visual regression', () => {
       box.height,
       `${what} grew past the ${viewportHeight}px viewport (${box.height}px) — the showcase no longer fits the fold; shrink the sample or split this clip`,
     ).toBeLessThanOrEqual(viewportHeight)
+  }
+
+  /**
+   * ── Regression guard: stable under a fractional page-height perturbation (#3441) ──
+   *
+   * Self-comparing, not baseline-comparing. Every other assertion in this
+   * file needs a committed Linux-rendered PNG, which is why the pixel
+   * comparison is skipped outside CI (see the header). This guard needs no
+   * baseline at all — it renders the SAME element twice in the SAME run and
+   * compares the two captures byte-for-byte — so it produces the identical
+   * verdict on a developer's macOS and on Linux CI, and IS the proof (run on
+   * Linux, in CI) that `snapToWholePixel` keeps holding.
+   *
+   * For each sample: one reference capture with `snapToWholePixel` applied,
+   * then three more captures of the SAME element after a fractional-height
+   * spacer (`0.25`/`0.5`/`0.75px`) is inserted immediately before the
+   * showcase section — the same perturbation #3198/#3312/#3437 each made by
+   * accident, made here on purpose. A regression in `snapToWholePixel` (or a
+   * new ancestor it does not reach) fails this the same way it broke `dev`
+   * three times, instead of waiting for the next unrelated page edit to
+   * surface it.
+   *
+   * Desktop, light scheme only: the mechanism under test is per-element
+   * geometry, not per-viewport or per-palette (the wide/narrow/swatch-list
+   * tests above already cover both viewports and both schemes for the
+   * shipped renders), so one project is the cheapest sufficient witness.
+   */
+  const GUARD_SPACER_FRACTIONS_PX = [0.25, 0.5, 0.75]
+
+  const GUARD_SAMPLES = [
+    { name: 'wide', label: 'the wide sample' },
+    { name: 'narrow', label: 'the narrow sample' },
+    { name: 'swatchList', label: 'the swatch list' },
+  ] as const
+
+  for (const sample of GUARD_SAMPLES) {
+    test(`/design-system StackedBarChart ${sample.label} clip holds under a fractional page-height perturbation (#3441)`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(
+        testInfo.project.name !== 'chromium-desktop',
+        'desktop, light scheme only — see the doc comment above this block',
+      )
+
+      const vp = VIEWPORTS.find((v) => v.name === 'desktop')!
+
+      async function renderAndCapture(spacerPx: number | null): Promise<Buffer> {
+        await page.setViewportSize({ width: vp.width, height: vp.height })
+        await page.goto('/design-system')
+        await page.evaluate(() => document.fonts.ready)
+        await page.waitForLoadState('networkidle')
+
+        if (spacerPx !== null) {
+          await page.evaluate(
+            ({ h, sectionTestId }) => {
+              const section = document.querySelector(`[data-testid="${sectionTestId}"]`)
+              if (!section?.parentElement) {
+                throw new Error(`guard: could not find [data-testid="${sectionTestId}"] to perturb`)
+              }
+              const spacer = document.createElement('div')
+              spacer.setAttribute('data-testid', 'experiment-3441-guard-spacer')
+              spacer.style.height = `${h}px`
+              section.parentElement.insertBefore(spacer, section)
+            },
+            { h: spacerPx, sectionTestId: SECTION_TEST_ID },
+          )
+        }
+
+        const section = page.getByTestId(SECTION_TEST_ID)
+        await expect(section).toHaveCount(1)
+
+        let target: Locator
+        if (sample.name === 'swatchList') {
+          target = page.getByTestId('ds-stacked-bar-swatch-list')
+        } else {
+          const charts = section.getByTestId('stacked-bar-chart')
+          await expect(charts).toHaveCount(2)
+          target = sample.name === 'wide' ? charts.nth(0) : charts.nth(1)
+        }
+
+        await snapToWholePixel(target, sample.label)
+        return target.screenshot({ animations: 'disabled', caret: 'hide' })
+      }
+
+      const reference = await renderAndCapture(null)
+      for (const spacerPx of GUARD_SPACER_FRACTIONS_PX) {
+        const perturbed = await renderAndCapture(spacerPx)
+        expect(
+          perturbed.equals(reference),
+          `${sample.label} changed under a ${spacerPx}px page-height perturbation — snapToWholePixel regressed`,
+        ).toBe(true)
+      }
+    })
   }
 })

@@ -2752,12 +2752,16 @@ release-commit provenance (`9c548158`, `f6bd8a63`), so rewording either
 historic message fails the build instead of silently disarming the recovery.
 
 Stopping the NEXT occurrence (#3419 Option B): the signer registers its tools
-through `registerTool` with a strict schema (the #2312 hosted pattern), so an
-undeclared top-level argument — the next `haven_sign` form a signer predates,
-starting with #3444's `sub_budget_id` — is refused with the structured
-`UNSUPPORTED_ARGUMENT` (`unknown_arguments`, `signer_version`, `fallback`
-naming the update command, `next_action: stop_and_tell_user`; no signature,
-no audit entry) instead of being stripped into the generic signing error.
+through `registerTool` with a passthrough input schema (keeps unknown keys, so
+the tool layer stays the refusal point — deliberately NOT the #2312 strict
+registration, which would fail the call in the SDK before any handler and
+answer plain McpError text that can carry no structured fields), and the
+handler's strict re-parse refuses an undeclared top-level argument — the next
+`haven_sign` form a signer predates, starting with #3444's `sub_budget_id` —
+with the structured `UNSUPPORTED_ARGUMENT` (`unknown_arguments`,
+`signer_version`, `fallback` naming the update command,
+`next_action: stop_and_tell_user`; no signature, no audit entry) instead of
+being stripped into the generic signing error.
 The `initialize` instructions name it. This helps only signers at or past the
 release that ships it — which is why the hosted notice above carries the
 installed base.

@@ -1892,6 +1892,14 @@ describe('haven_discover_tools (#349)', () => {
         payment_id: 'pay_349', status: 'confirmed', tx_hash: txHash, chain_id: 8453,
         token: 'USDC', amount: '0.02', to: delegateAddress,
       }))
+      // #3427: the paid-retry tax-declaration resolution reads the agent id,
+      // then #3426's content endpoint. Unavailable here — this test pins the
+      // discover→pay chain, not the declaration header.
+      .mockResolvedValueOnce(jsonResponse({
+        id: 'agent_x402', name: 'x402 agent', status: 'active',
+        account_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+      }))
+      .mockResolvedValueOnce(jsonResponse({ available: false, reason: 'disabled' }))
       // 5. merchant retry succeeds
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
         status: 200,

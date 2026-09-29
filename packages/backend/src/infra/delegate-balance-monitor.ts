@@ -29,7 +29,7 @@ import {
 } from './repositories/delegate-monitoring.js'
 import { config } from '../config.js'
 import { getChain } from '../domain/chains.js'
-import { getTokenBalance } from '../infra/chain/relayer-reads.js'
+import { readTokenBalances } from './chain/batched-token-balances.js'
 import { sendDelegateAlertWebhook } from './delegate-alert-webhook.js'
 
 const USDC_DECIMALS = 6
@@ -110,16 +110,31 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
   const fresh = await loadAgentsWithFreshPendingPayments(delegates.map((d) => d.agent_id))
   const floor = sweepFloorAtomic()
 
+  // #3458: one batched read per chain (Multicall3, sequential chunks) instead
+  // of one `eth_call` per delegate — see `infra/chain/batched-token-balances.ts`.
+  const holdersByChain = new Map<number, string[]>()
+  for (const delegate of delegates) {
+    if (!usdcAddressFor(delegate.chain_id)) continue // chain without USDC — nothing to monitor
+    const holders = holdersByChain.get(delegate.chain_id) ?? []
+    holders.push(delegate.delegate_address)
+    holdersByChain.set(delegate.chain_id, holders)
+  }
+  const balancesByChain = new Map<number, Map<string, bigint | null>>()
+  for (const [chainId, holders] of holdersByChain) {
+    try {
+      balancesByChain.set(chainId, await readTokenBalances(chainId, usdcAddressFor(chainId)!, holders))
+    } catch {
+      // A chain the reader cannot even set up (no viem definition, say) skips
+      // its delegates this round; the other chains are still scanned.
+      balancesByChain.set(chainId, new Map(holders.map((h) => [h, null])))
+    }
+  }
+
   const findings: DelegateBalanceFinding[] = []
   for (const delegate of delegates) {
-    const usdc = usdcAddressFor(delegate.chain_id)
-    if (!usdc) continue // chain without USDC — nothing to monitor
-    let balanceAtomic: bigint
-    try {
-      balanceAtomic = await getTokenBalance(delegate.chain_id, delegate.delegate_address, usdc)
-    } catch {
-      continue // RPC hiccup: skip this delegate this round
-    }
+    const balanceAtomic = balancesByChain.get(delegate.chain_id)?.get(delegate.delegate_address)
+    // No entry: chain without USDC. `null`: RPC hiccup — skip this delegate this round.
+    if (balanceAtomic === undefined || balanceAtomic === null) continue
     findings.push({
       agentId: delegate.agent_id,
       agentName: delegate.agent_name,

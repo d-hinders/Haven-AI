@@ -15719,6 +15719,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
         };
     };
     getPaymentIntent: {
@@ -16398,6 +16413,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
         };
     };
     getX402SignContext: {
@@ -16759,6 +16789,21 @@ export interface operations {
             };
             /** @description Error response */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -176,6 +176,11 @@ function stateErrorNextStep(nextAction: string, paymentId: string | undefined): 
   })
 }
 
+/** #3416: the backend's `error_code` for a chain this deployment cannot serve a bundler leg on. */
+const RAIL_UNAVAILABLE_ERROR_CODE = 'rail_unavailable_for_chain'
+const RAIL_UNAVAILABLE_OMITTED_REASON =
+  "this Haven deployment cannot serve this chain's payments until its operator provisions it; retrying gets the same answer, so tell the user"
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -223,6 +228,29 @@ export function normalizeError(err: unknown): ToolFailure {
       // status read, sweep_stranded_funds → the sweep) and says why none
       // follows otherwise — so no hosted refusal carries a bare next_action.
       ...nextStepWireFields(stateErrorNextStep(err.nextAction, err.paymentId)),
+    }
+  }
+  // #3416: the backend's typed "this deployment has no bundler credential for
+  // this chain" refusal. It is a 5xx (503), but it is NOT transient: retrying
+  // gets the same answer until an operator provisions the chain. So it must
+  // not fall into the 5xx branch below, which tells the agent to retry once.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === RAIL_UNAVAILABLE_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: RAIL_UNAVAILABLE_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'RAIL_UNAVAILABLE_FOR_CHAIN',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
     }
   }
   if (err instanceof HavenApiError) {

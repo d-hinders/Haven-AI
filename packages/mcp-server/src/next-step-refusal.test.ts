@@ -116,3 +116,30 @@ describe('the generic refusal branches carry a typed step (#3214)', () => {
     expect(out.next_tool_omitted_reason).toBeDefined()
   })
 })
+
+describe('the typed rail-unavailable 503 is a stop with its own code (#3416)', () => {
+  const railUnavailable = () =>
+    new HavenApiError('This Haven deployment cannot serve delegation-rail bundler payments on chain 84532 yet.', 503, {
+      error: 'This Haven deployment cannot serve delegation-rail bundler payments on chain 84532 yet.',
+      error_code: 'rail_unavailable_for_chain',
+      chain_id: 84532,
+    })
+
+  it('carries the machine-readable code RAIL_UNAVAILABLE_FOR_CHAIN, not the generic API_ERROR', () => {
+    const out = normalizeError(railUnavailable())
+    expect(out.code).toBe('RAIL_UNAVAILABLE_FOR_CHAIN')
+    expect(out.statusCode).toBe(503)
+  })
+
+  it('says stop, never the 5xx "retry once" (retrying cannot succeed until an operator provisions the chain)', () => {
+    const out = normalizeError(railUnavailable())
+    expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(out.next_action).not.toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+  })
+
+  it('any other 503 keeps the generic transient-retry step', () => {
+    const out = normalizeError(new HavenApiError('bundler timeout', 503, { error: 'bundler timeout' }))
+    expect(out.code).toBe('API_ERROR')
+    expect(out.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+  })
+})

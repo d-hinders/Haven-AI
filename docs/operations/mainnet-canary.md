@@ -30,10 +30,12 @@ operator-configured `HAVEN_OPS_TOKEN`, in addition to the prod API URL; it
 does not require any signing key or wallet credential.
 
 1. **Bundler credential targets 8453.**
-   `DELEGATION_RAIL_BUNDLER_URL` is chain-scoped by its URL path
-   (`…/v2/8453/rpc?...`) — a Sepolia credential cannot serve mainnet, and the
-   runtime assertion (#1053) only fires when someone tries to pay. Check it
-   BEFORE the first payment:
+   The credential for chain 8453 is `DELEGATION_RAIL_BUNDLER_URL_8453` if set,
+   else the unsuffixed `DELEGATION_RAIL_BUNDLER_URL` (#3416). Either is
+   chain-scoped by its URL path (`…/v2/8453/rpc?...`): a Sepolia credential
+   cannot serve mainnet, and the runtime assertion (#1053) only fires when
+   someone tries to pay. Check it BEFORE the first payment (the probe resolves
+   through the same per-chain resolver):
 
    ```bash
    CHECK_BUNDLER_CHAIN_ID=8453 npm run ops:check-bundler -w packages/backend
@@ -50,8 +52,8 @@ does not require any signing key or wallet credential.
 
    ```bash
    node --input-type=module -e '
-   const url = process.env.DELEGATION_RAIL_BUNDLER_URL
-   if (!url) { console.error("exit 2: DELEGATION_RAIL_BUNDLER_URL is not configured"); process.exit(2) }
+   const url = process.env.DELEGATION_RAIL_BUNDLER_URL_8453 || process.env.DELEGATION_RAIL_BUNDLER_URL
+   if (!url) { console.error("exit 2: no bundler credential for 8453 (DELEGATION_RAIL_BUNDLER_URL_8453, else DELEGATION_RAIL_BUNDLER_URL)"); process.exit(2) }
    if (/\/v2\/\d+\//.test(url) && !url.includes("/v2/8453/")) {
      console.error("exit 2: credential targets a DIFFERENT chain than 8453"); process.exit(2)
    }
@@ -66,9 +68,10 @@ does not require any signing key or wallet credential.
    '
    ```
 
-   From a laptop the real script works as written above — export the prod
-   value without echoing (`read -rs DELEGATION_RAIL_BUNDLER_URL && export …`,
-   run, then `unset`).
+   From a laptop the real script works as written above — export the value
+   prod resolves for 8453 without echoing (`read -rs
+   DELEGATION_RAIL_BUNDLER_URL_8453 && export DELEGATION_RAIL_BUNDLER_URL_8453`,
+   run, then `unset`); the per-chain name wins in the resolver either way.
 
 2. **Sponsorship policy bound and capped.** In the Pimlico dashboard, confirm
    `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` (prod env) names a policy that is

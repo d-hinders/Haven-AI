@@ -59,6 +59,9 @@ export const EMISSION_SITES = [
 
 const A = AgentPaymentNextAction
 const F = AgentPaymentFailureCode
+/** #3416: pinned verbatim here, not imported, so a reworded reason reddens the fixture. */
+const RAIL_UNAVAILABLE_OMITTED_REASON =
+  "this Haven deployment cannot serve this chain's payments until its operator provisions it; retrying gets the same answer, so tell the user"
 const RETRY = 're-call the same tool with the explicit context this message names; no tool can be named until you supply it'
 const STOP = 'the user has to decide before anything is called again'
 const STOP_SUG = 'the user has to decide before anything is called again; suggested_tool names the tool for after that'
@@ -84,10 +87,10 @@ type Site = {
   thrown?: unknown
 }
 
-/** Refusal fixtures: 32 HostedToolError sites (31 + the #3213 symbol-resolution refusal, the eip3009 rejection carrying a live-state branch) + the 4 generic normalizeError branches #3214 added. */
-export const REFUSAL_SITE_COUNT = 36
-/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal). */
-export const REFUSAL_STEP_CALLS = 45
+/** Refusal fixtures: 32 HostedToolError sites (31 + the #3213 symbol-resolution refusal, the eip3009 rejection carrying a live-state branch) + the 4 generic normalizeError branches #3214 added + #3416's typed rail-unavailable branch. */
+export const REFUSAL_SITE_COUNT = 37
+/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503). */
+export const REFUSAL_STEP_CALLS = 46
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },
@@ -124,6 +127,8 @@ export const REFUSAL_SITES: Site[] = [
   { site: 'mcp-context.ts mcp_transport unrecognised', base: { code: 'INVALID_INPUT', message: 'm', statusCode: 400, status: 'invalid_input', phase: 'not_started', rail: 'x402' }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: RETRY }, expect: { next_action: 'retry_with_explicit_context', ...OMIT(RETRY) } },
   // #3214: the four GENERIC normalizeError branches — no HostedToolError site; `thrown` is what the test throws.
   { site: 'errors.ts normalizeError: HavenApiError 5xx', base: { code: 'API_ERROR', message: 'Expected an x402 quote response with HTTP 402, got HTTP 500.', statusCode: 500 }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: RETRY_API }, thrown: new HavenApiError('Expected an x402 quote response with HTTP 402, got HTTP 500.', 500), expect: { next_action: 'retry_with_explicit_context', ...OMIT(RETRY_API) } },
+  // #3416: the typed chain-unavailable 503 is a stop, not the 5xx retry above.
+  { site: 'errors.ts normalizeError: rail unavailable for chain (typed 503)', base: { code: 'RAIL_UNAVAILABLE_FOR_CHAIN', message: 'cannot serve chain 84532', statusCode: 503 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: RAIL_UNAVAILABLE_OMITTED_REASON }, thrown: new HavenApiError('cannot serve chain 84532', 503, { error_code: 'rail_unavailable_for_chain', chain_id: 84532 }), expect: { next_action: 'stop_and_tell_user', ...OMIT(RAIL_UNAVAILABLE_OMITTED_REASON) } },
   { site: 'errors.ts normalizeError: HavenApiError 4xx', base: { code: 'API_ERROR', message: 'refused as made', statusCode: 404 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_API }, thrown: new HavenApiError('refused as made', 404), expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_API) } },
   { site: 'errors.ts normalizeError: HavenError', base: { code: 'CONFIG_ERROR', message: 'cfg broke', statusCode: 500 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_HAVEN }, thrown: new HavenError('cfg broke', 'CONFIG_ERROR', 500), expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_HAVEN) } },
   { site: 'errors.ts normalizeError: UNKNOWN_ERROR (thrown non-Error)', base: { code: 'UNKNOWN_ERROR', message: 'a string failure' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_UNKNOWN }, thrown: 'a string failure', expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_UNKNOWN) } },

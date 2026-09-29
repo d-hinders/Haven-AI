@@ -424,6 +424,33 @@ describe('settleX402Erc7710 (#1454)', () => {
       })
     })
 
+    it('submit maps the backend\'s 409 payment_already_settled to X402Erc7710AlreadySettledError (#3423)', async () => {
+      const { client } = harness()
+      const TX = '0x' + '7d'.repeat(32)
+      vi.spyOn(client as never, 'post').mockRejectedValue(
+        new HavenApiError('Payment pay_1 already settled on-chain', 409, {
+          code: 'payment_already_settled',
+          payment_id: 'pay_1',
+          tx_hash: TX,
+        }) as never,
+      )
+      const err = await client.submitX402Erc7710('pay_1', '0x' + '11'.repeat(65)).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(X402Erc7710AlreadySettledError)
+      expect((err as X402Erc7710AlreadySettledError).paymentId).toBe('pay_1')
+      expect((err as X402Erc7710AlreadySettledError).txHash).toBe(TX)
+    })
+
+    it('submit leaves any other settle 409 as the HavenApiError it was (#3423)', async () => {
+      const { client } = harness()
+      vi.spyOn(client as never, 'post').mockRejectedValue(
+        new HavenApiError('Payment is submitted, expected pending_signature', 409, { error: 'Payment is submitted' }) as never,
+      )
+      const err = await client.submitX402Erc7710('pay_1', '0x' + '11'.repeat(65)).catch((e: unknown) => e)
+      expect(err).not.toBeInstanceOf(X402Erc7710AlreadySettledError)
+      expect(err).toBeInstanceOf(HavenApiError)
+      expect((err as HavenApiError).statusCode).toBe(409)
+    })
+
     it('refuses when settle returns no payment_header', async () => {
       const { client } = harness()
       vi.spyOn(client as never, 'post').mockImplementation((async (...args: unknown[]) =>

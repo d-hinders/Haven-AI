@@ -14570,7 +14570,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize. */
+            /** @description Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize. Exception (#3423): an erc7710 payment that already settled answers code "payment_already_settled" with payment_id and tx_hash; nothing is signed, written or charged again. */
             409: {
                 headers: {
                     [name: string]: unknown;

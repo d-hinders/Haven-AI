@@ -5637,7 +5637,7 @@ export const openapiSpec = {
           '400': { ...errorResponse, description: 'A delegate signature is required.' },
           '401': errorResponse,
           '404': { ...errorResponse, description: 'Payment not found.' },
-          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize.' },
+          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize. Exception (#3423): an erc7710 payment that already settled answers code "payment_already_settled" with payment_id and tx_hash; nothing is signed, written or charged again.' },
           '429': { ...errorResponse, description: 'Money-path rate limit.' },
           '502': { ...errorResponse, description: 'Settlement state was lost — re-authorize.' },
         },

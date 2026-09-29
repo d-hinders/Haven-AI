@@ -137,6 +137,8 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // #3417: the settled-replay answer for an erc7710 prepare — the catalog
   // slice's two prepare sites and the plain-HTTP slice's one.
   catchSettledReplay: { module: 'guidance', slices: ['s2810', 's2811'] },
+  // #3423: its settle-side twin, used only by the paid-MCP completion slice.
+  catchSettledResettle: { module: 'guidance', slices: ['s2812'] },
   // #3101: the status handoff for a refusal that may not know its payment id —
   // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
   paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
@@ -235,6 +237,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  * support helper and are expected to remain shared even after the carve-out.
  */
 const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
+  // #3423: the settle-side twin of catchSettledReplay.
+  catchSettledResettle:
+    'DELIBERATE: it is one line over settledReplayResponse, the private builder it shares with ' +
+    'catchSettledReplay (s2810/s2811). Moving it into paid-mcp-completion.ts would mean exporting ' +
+    'the builder or forking the done-state shape, and the prepare and settle answers for the same ' +
+    'settled payment must not drift.',
   // s2810 (#2810 catalog/quote/prepare capability — LANDED; each of the four
   // was re-argued rather than moved, the way #2809 re-argued its own):
   isMerchantEndpointMiss:
@@ -399,6 +407,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'buildAgentGuidance',
     'buildPurchaseSummary',
     'catchSettledReplay',
+    'catchSettledResettle',
     'paymentStatusHandoff',
     'refusalNextStep',
     'taskBudgetNextStep',

@@ -80,20 +80,18 @@ last-verified: "2026-09-29"
 > **Re-verified #3430 (2026-09-29, the runbook runs the manifest's own CLI
 > command):** the agent runbook (`HAVEN_AGENT_RUNBOOK_MD` in
 > `packages/sdk/src/agent-guidance.ts`, served as `/for-agents.md` and bundled
-> into `haven guide`) and the onboarding prompt
-> (`packages/frontend/src/lib/agent-onboarding-prompt.ts`) replace the step-1
-> CLI template `npx @haven_ai/cli@<channel>` — which, filled from
+> into `haven guide`) and the dashboard onboarding prompt template replace the
+> step-1 CLI template `npx @haven_ai/cli@<channel>` — which, filled from
 > `packages.cli.channel` as instructed, produced the broken
 > `npx @haven_ai/cli@@haven_ai/cli@dev` of the 2026-09-28 cold run — with the
-> manifest's own `packages.cli.one_liner`, run as given. This document covers
-> both files. Text only: no tool is added, renamed or re-shaped, no argument,
-> schema, description or consent input changes, and the CLI login flow the
-> command starts is the same device-approval handshake as before, so the
-> version-skew and consent-hash contracts do not move. The byte-pinned CLI
-> copy (`packages/cli/src/agent-guidance-text.ts`) is regenerated from the SDK
-> canonical via `packages/cli/scripts/sync-agent-guidance.mjs` with its parity
-> test and size pins updated — the #2719 mechanism. Nothing else in this
-> document was re-verified.
+> manifest's own `packages.cli.one_liner`, run as given. Text only: no tool is
+> added, renamed or re-shaped, no argument, schema, description or consent
+> input changes, and the CLI login flow the command starts is the same
+> device-approval handshake as before, so the version-skew and consent-hash
+> contracts do not move. The CLI's byte-pinned bundled runbook copy was
+> regenerated from the SDK canonical with its parity test and size pins
+> updated — the #2719 mechanism. Nothing else in this document was
+> re-verified.
 >
 > **Re-verified #3418 (2026-09-28, the receipt verifier stops throwing and
 > verifies the delegation digest):** this diff touches three surfaces this

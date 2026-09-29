@@ -145,6 +145,12 @@ export const SCAN_FILES = [
   // this allowlist's own defect: a copy the gate cannot see.
   'packages/sdk/src/agent-guidance.ts',
   'packages/frontend/public/for-agents.md',
+  // `/demo.md`'s body (#3477): served verbatim by
+  // `src/app/demo.md/route.ts`, a Route Handler under `src/app` that the
+  // directory scan DOES cover — but the route handler only imports this
+  // constant, so the actual prose lives here, one level outside SCAN_DIRS,
+  // exactly like the skill bundle and onboarding prompt above.
+  'packages/frontend/src/lib/demo-md-content.ts',
 ]
 
 // ── The naming convention behind the allowlist (#2333) ───────────────────────

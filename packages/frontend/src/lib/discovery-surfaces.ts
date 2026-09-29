@@ -6,6 +6,16 @@
  * public page and forgetting to advertise it is a test failure rather than a
  * silent omission (#2521).
  *
+ * Precisely: the guard only checks list → filesystem (every entry here
+ * resolves to a real route or artifact), not the reverse. It does not fail a
+ * public, unauthenticated page that exists but was never added here —
+ * `/demo` (`src/app/demo/page.tsx`, #3477) is exactly that, deliberately: a
+ * semi-private investor demo, not advertised; the team hands the link to
+ * invited investors. It must stay out of the sitemap, `robots.txt`, `llms.txt` and
+ * every other discovery surface. `src/app/demo/__tests__/not-listed.test.ts`
+ * pins its absence with its own assertions rather than relying on this file's
+ * guard to catch a page it structurally cannot see.
+ *
  * The 2026-09-04 cold test found `llms.txt`, `402.md` and the OpenAPI spec only
  * by guessing the convention; nothing in the served HTML pointed at them. See
  * `docs/bug-reports/agent-first-cold-test-2026-09-04.md`.

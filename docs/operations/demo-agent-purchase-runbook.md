@@ -4,10 +4,20 @@ status: current
 covers:
   - packages/demo-merchant-mcp/**
   - packages/backend/src/modules/accounting/**
+  - packages/frontend/src/app/demo/page.tsx
+  - packages/frontend/src/lib/demo-md-content.ts
+  - packages/frontend/src/lib/demo-gate.ts
 last-verified: "2026-09-05"
 ---
 
 # Demo Runbook — Agent Purchase, End to End (incl. Fortnox/SIE)
+
+> **Self-serve counterpart (#3477):** `/demo` (`packages/frontend/src/app/demo/page.tsx`,
+> plus its agent-readable companion `/demo.md`) is the link the team sends an
+> outside investor to try the same non-custodial, budget-and-refusal story
+> themselves, on the same dev environment, without an operator driving. It
+> does not replace this runbook — this one stays the operator-run
+> presentation script, Fortnox/SIE included.
 
 The presentation flow: an AI agent buys a real service from the demo merchant
 with on-chain-enforced guardrails, and the purchase lands in bookkeeping —

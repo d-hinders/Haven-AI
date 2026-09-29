@@ -252,6 +252,12 @@ export default defineConfig({
       // release bump never moves its visual baselines. Server-only; read by
       // src/app/releases/release-source.ts and nothing else.
       HAVEN_RELEASES_FIXTURE: path.join(__dirname, 'e2e', 'fixtures', 'releases-fixture.json'),
+      // #3477: this server otherwise builds exactly like production for
+      // /demo's purposes (no NEXT_PUBLIC_HAVEN_ENV set), and /demo 404s on
+      // production by design (src/lib/demo-gate.ts). Server-only — no
+      // NEXT_PUBLIC_ prefix, so it is never inlined client-side and
+      // production's own env configuration never sets it.
+      HAVEN_DEMO_PAGE_VISIBLE: '1',
     },
   },
   // Both projects GATE on every frontend pull request (#1768). Before that,

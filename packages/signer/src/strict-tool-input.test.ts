@@ -94,27 +94,33 @@ describe('#3419 — the signer refuses an undeclared top-level argument (real tr
     expect(JSON.stringify(payload)).not.toContain('pay_1_fetch')
   })
 
-  it('refuses the NEXT argument form by name — the #3444 sub_budget_id shape', async () => {
+  it('refuses task_budget_id together with sub_budget_id — mutually exclusive (#3444)', async () => {
+    // Since #3444 landed on dev, sub_budget_id IS a declared haven_sign
+    // argument (it signs a sub-budget's own delegation/early-close). The
+    // exclusion of the pair is now a HANDLER rule, so the refusal comes back
+    // as INVALID_INPUT naming the offending field — not UNSUPPORTED_ARGUMENT.
     const result = (await client.callTool({
       name: 'haven_sign',
       arguments: { task_budget_id: 'tb_1', sub_budget_id: 'sbt_1' },
     })) as ToolCallResult
 
-    // task_budget_id IS declared on this signer; only the undeclared one is
-    // named. (The handler never runs, so the call can't reach any fetch.)
+    expect(result.isError).toBe(true)
     const payload = payloadOf(result)
-    expect(payload.code).toBe('UNSUPPORTED_ARGUMENT')
-    expect(payload.unknown_arguments).toEqual(['sub_budget_id'])
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(JSON.stringify(payload)).toContain('sub_budget_id')
+    expect(JSON.stringify(payload)).toContain('mutually exclusive')
   })
 
-  it('names every undeclared key on a multi-key violation', async () => {
+  it('still names an UNDECLARED key alongside declared ones', async () => {
+    // sub_budget_id is declared post-#3444, so only `bogus` is unknown.
     const result = (await client.callTool({
       name: 'haven_sign',
       arguments: { payment_id: 'pay_1', sub_budget_id: 'sbt_1', bogus: 'x' },
     })) as ToolCallResult
 
     const payload = payloadOf(result)
-    expect(payload.unknown_arguments).toEqual(['sub_budget_id', 'bogus'])
+    expect(payload.code).toBe('UNSUPPORTED_ARGUMENT')
+    expect(payload.unknown_arguments).toEqual(['bogus'])
   })
 
   it('still accepts its own arguments — haven_sign { payment_id } passes the strict re-parse', async () => {

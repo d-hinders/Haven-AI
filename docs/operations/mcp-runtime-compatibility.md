@@ -68,7 +68,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-28"
+last-verified: "2026-09-29"
 ---
 
 # MCP Runtime Compatibility
@@ -76,6 +76,22 @@ last-verified: "2026-09-28"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Re-verified #3430 (2026-09-29, the runbook runs the manifest's own CLI
+> command):** the agent runbook (`HAVEN_AGENT_RUNBOOK_MD` in
+> `packages/sdk/src/agent-guidance.ts`, served as `/for-agents.md` and bundled
+> into `haven guide`) and the dashboard onboarding prompt template replace the
+> step-1 CLI template `npx @haven_ai/cli@<channel>` — which, filled from
+> `packages.cli.channel` as instructed, produced the broken
+> `npx @haven_ai/cli@@haven_ai/cli@dev` of the 2026-09-28 cold run — with the
+> manifest's own `packages.cli.one_liner`, run as given. Text only: no tool is
+> added, renamed or re-shaped, no argument, schema, description or consent
+> input changes, and the CLI login flow the command starts is the same
+> device-approval handshake as before, so the version-skew and consent-hash
+> contracts do not move. The CLI's byte-pinned bundled runbook copy was
+> regenerated from the SDK canonical with its parity test and size pins
+> updated — the #2719 mechanism. Nothing else in this document was
+> re-verified.
 >
 > **Re-verified #3418 (2026-09-28, the receipt verifier stops throwing and
 > verifies the delegation digest):** this diff touches three surfaces this

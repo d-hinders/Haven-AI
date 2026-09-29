@@ -1300,6 +1300,32 @@ input, same id/verify_token/status output). It writes a submission row only —
 no outbound request, no token reuse, no authority — and domain-ownership proof
 plus the read-only quote probe still gate any listing on the backend.
 
+> **Additive response field (#3476, 2026-09-29):** the hosted
+> `haven_pay_x402_quote` gains an optional `allowance` block on its
+> successful results, both settlement branches — `{ rail: 'delegation',
+> sufficient: boolean | null, remaining_atomic?: string,
+> remainingAtomic?: string, source: 'active_delegations' }`, the same shape
+> and the same `GET /machine-payments/allowances` source the catalog
+> preflight's allowance field and the settle-time summary report from. It is
+> VISIBILITY ONLY: the block never refuses, a failed budget read degrades to
+> `sufficient: null` plus an `ALLOWANCE_CHECK_UNAVAILABLE` warning exactly
+> like the catalog block's, and an optimistic remaining (the #1145 fallback)
+> carries `ALLOWANCE_READ_OPTIMISTIC`. An account whose rail is not
+> delegation gets NO block (never a fabricated row) with the same warning,
+> and an over-budget payment is still declined exactly as before — the
+> tool's own prepare-time answers and the on-chain enforcer are unchanged.
+> Additive on the read side only: no tool name, schema, argument,
+> strict-input decision, error code, refusal text or signing boundary
+> changes, the #1348 one-agent-fetch round-trip budget is kept (the block
+> reuses the handler's existing agent read), and the block reads
+> `GET /machine-payments/allowances` — one extra read-only GET per
+> successful quote, never `POST /machine-payments/budget-precheck` (that
+> endpoint is the #3054 decision surface and books a `payment_refusals` row;
+> the quote must only report). The local stdio runtime has no handler-level
+> response shaping and gains nothing. Old agents ignore the new key; new
+> agents against an older backend omit it (the allowances read fails, the
+> block degrades to `sufficient: null` with the warning).
+
 ```text
 ~/.haven/agents/<agent-id>/bin/haven-mcp
 ```

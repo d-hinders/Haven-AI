@@ -50,6 +50,7 @@ export {
 export { addressFromKey, signHash, verifySignature } from './edge-signing.js'
 export {
   DIRECT_SIGN_CONTEXT_VERSION,
+  TASK_SIGN_CONTEXT_VERSION,
   ENTRY_POINT_V07,
   HavenUserOpBindingError,
   assertUserOpTypedDataBinding,
@@ -97,3 +98,11 @@ export {
   type TaskBudgetCloseExpectation,
   type DelegationForHashing,
 } from './task-budget-guards.js'
+export {
+  ERC20_PERIOD_TRANSFER_ENFORCER,
+  assertOwnSubBudgetChild,
+  assertOwnSubBudgetCloseUserOp,
+  hashSubBudgetDelegation,
+  type SubBudgetChildTypedData,
+  type SubBudgetChildExpectation,
+} from './sub-budget-guards.js'

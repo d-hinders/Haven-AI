@@ -112,6 +112,16 @@ export interface X402SettlementRequest {
    * parent.
    */
   taskBudgetChild?: Delegation
+  /**
+   * #3330: when a SUB-BUDGET authorizes this settlement, the middle of the
+   * chain is TWO delegations — agent B's grant AND agent A's signed
+   * parent-child — so the redemption chain becomes
+   * `[settlement, grant, parentChild, budget]` (four links, leaf first).
+   * `taskBudgetChild` and `subBudget` are mutually exclusive by
+   * construction: one settlement is authorized by exactly one child
+   * instrument.
+   */
+  subBudget?: { grantDelegation: Delegation; parentChildDelegation: Delegation }
   asset: Address
   /** Exact atomic amount from the 402 requirements. */
   amountAtomic: bigint
@@ -178,7 +188,12 @@ export function buildSettlementDelegation(req: X402SettlementRequest): BuiltSett
     // #3329: a task budget's child stands in as the immediate parent when
     // one authorizes this settlement — the redemption chain becomes
     // [settlement, taskChild, budget] (see assembleSettlementPayload).
-    parentDelegation: req.taskBudgetChild ?? req.budgetDelegation,
+    // #3330: a sub-budget puts TWO delegations between the settlement child
+    // and the budget — [settlement, grant, parentChild, budget] — and the
+    // grant (whose delegate is B's account) is the immediate parent.
+    parentDelegation: req.subBudget
+      ? req.subBudget.grantDelegation
+      : (req.taskBudgetChild ?? req.budgetDelegation),
     scope: {
       type: 'erc20TransferAmount',
       tokenAddress: req.asset,
@@ -208,11 +223,13 @@ export interface X402Erc7710Payload {
 /**
  * Assemble the X-PAYMENT payload once the agent has signed the child. The
  * permission context is the encoded CHAIN, leaf first: `[settlement, budget]`
- * ordinarily, or `[settlement, taskChild, budget]` (#3329) when a task
- * budget's SIGNED child sat between them — pass it as `taskBudgetChild` when
+ * ordinarily, `[settlement, taskChild, budget]` (#3329) when a task
+ * budget's SIGNED child sat between them, or `[settlement, grant,
+ * parentChild, budget]` (#3330) when a sub-budget authorized it — pass the
+ * sub-budget's `{ grantDelegation, parentChildDelegation }` when
  * `buildSettlementDelegation` was given one (the settlement child's
- * `authority` then names the task child, so the chain must include it or
- * every enforcer on that hop reverts).
+ * `authority` then names the grant, so the chain must include every link or
+ * an enforcer on a missing hop reverts).
  */
 export function assembleSettlementPayload(
   chainId: number,
@@ -221,11 +238,14 @@ export function assembleSettlementPayload(
   budgetDelegation: Delegation,
   delegateAccountAddress: Address,
   taskBudgetChild?: Delegation,
+  subBudget?: { grantDelegation: Delegation; parentChildDelegation: Delegation },
 ): X402Erc7710Payload {
   const signedChild: Delegation = { ...child, signature: childSignature } as Delegation
-  const chain: Delegation[] = taskBudgetChild
-    ? [signedChild, taskBudgetChild, budgetDelegation]
-    : [signedChild, budgetDelegation]
+  const chain: Delegation[] = subBudget
+    ? [signedChild, subBudget.grantDelegation, subBudget.parentChildDelegation, budgetDelegation]
+    : taskBudgetChild
+      ? [signedChild, taskBudgetChild, budgetDelegation]
+      : [signedChild, budgetDelegation]
   return {
     delegationManager: getDelegationContracts(chainId).delegationManager,
     permissionContext: encodeDelegations(chain),

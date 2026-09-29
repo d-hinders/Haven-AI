@@ -2084,6 +2084,98 @@ short explanation above the task-budget list —
 an open child reserves nothing on-chain, so the two figures are shown apart
 rather than netted into a number the chain would not agree with.
 
+## Sub-agent budgets — an agent re-delegates a narrower budget to another agent (#3330)
+
+A **sub-budget** is agent A re-delegating a narrower budget to agent B in the
+same account: agent A's delegate account carves a PERIOD-scoped narrowing of
+its own budget delegation (the parent-child), then grants it to agent B's
+delegate account (the grant). Both children are `erc20PeriodTransfer`-scoped
+with the SAME periodDuration and startDate as the parent — a slice of the same
+window, never a different clock — and are issued owner-governed (the owner
+co-signs each sub-budget; A's delegate key only signs within the
+owner-approved envelope, decision log 2026-09-27). The chain agent B redeems
+is three links, leaf first:
+
+```
+treasury ──(budget delegation: period budget, recipient?, expiry)──▶ A account
+A account ──(parent-child: periodAmount ≤ parent's, SAME window,
+            expiry ≤ parent's, self-delegated)──▶ A account
+A account ──(grant: to B's delegate account — the ONLY redeemer,
+            periodAmount ≤ its parent-child's)──▶ B account
+```
+
+Every hop's caveats run in ONE `redeemDelegations` redemption, so the PARENT's
+period enforcer binds any spend B makes even within B's own allowance — the
+chain is the enforcement. An erc7710 settlement child built under the grant
+makes the merchant-redeemed context `[settlement, grant, parent-child,
+budget]` (four links). An erc7710 `POST /x402`/`POST /payments` by agent B
+itself redeems `[grant, parent-child, budget]` (three links).
+
+**Lifecycle** (`packages/backend/src/modules/sub-budgets/`,
+`routes/agent-sub-budgets.ts`, `routes/sub-budgets.ts`, migration 100):
+
+1. `POST /agents/:id/sub-budgets` (the OWNER) issues
+   `{ period_amount_human, period, expiry, recipient? }` for agent B; the API
+   decodes the parent budget delegation and refuses a child wider than the
+   parent in amount, expiry or recipient BEFORE signing
+   (`sub_budget_wider_than_parent`), and both rows are stored `pending`
+   (`agent_sub_budgets`: A's parent-child + B's grant, one identity root,
+   `haven-sub-budget:<id>` salts).
+2. A's delegate key signs both rows — `haven_sign` with `sub_budget_id`
+   fetches the exact bytes from `GET /sub-budgets/:id/sign-context`
+   (delegator-scoped: only A can fetch; A signs both) and runs the SDK's
+   `assertOwnSubBudgetChild`; `POST /sub-budgets/:id/submit` (A) and the
+   owner's `POST /agents/:id/sub-budgets/:id/sign` flip each row
+   `pending`→`open` as its signature lands. B's grant is redeemable only
+   once BOTH rows are open.
+3. Agent B names the budget: `sub_budget_id` on `POST /payments`,
+   `subBudgetId` on `POST /x402/authorize`. The backend refuses before
+   building the chain when the grant or its parent-child row is not open
+   (`sub_budget_not_open` — A revoked its grant, A's own budget delegation
+   was revoked, or expiry), the token or pinned recipient disagrees, or the
+   grant was not carved from the budget delegation selected for the payment
+   (`sub_budget_parent_mismatch`) — the parent delegation is then used
+   VERBATIM by hash, the #3329 review-finding-E rule applied twice. Revoking
+   B's child leaves A intact; revoking A's budget delegation strands B's
+   child (its chain root no longer resolves active by hash, and reverts
+   on-chain once the owner's disable lands) — surfaced as the structured 409
+   above.
+4. `DELETE /agents/:id/sub-budgets/:sub` (owner) or `POST
+   /sub-budgets/:id/close` (the owning agent, A or B) prepares a sponsored
+   `disableDelegation(child)` UserOp from the closing agent's OWN delegate
+   account — authority-reducing only (`assertOwnSubBudgetCloseUserOp`), the
+   same shape class the task budget's close learned. A closing its
+   parent-child strands B's grant; B closing its grant leaves A intact.
+
+**The issue's open questions, answered in this slice:**
+
+- *Two-party flow:* owner-governed issuance (the owner picks B, amount,
+  expiry, pin; the API refuses wider-than-parent pre-sign), then A's delegate
+  key signs both already-built children within that owner-approved envelope
+  and the owner relays each signature (`POST /agents/:id/sub-budgets/:id/sign`,
+  decision log 2026-09-27).
+- *A's rekey:* A's rekey revokes A's budget delegation, so B's child dies with
+  it — surfaced, not hidden: the parent-child's chain root stops resolving
+  active by hash and B's payments answer the structured 409 above, and the
+  on-chain disable lands whenever the owner submits it. Re-issue on rekey is a
+  deliberate non-goal: the replacement delegation has a different hash, so
+  every existing child would be stale anyway.
+- *Budget selection when B also holds a treasury-issued budget:* the caller
+  names one — `sub_budget_id` and `task_budget_id` are mutually exclusive on
+  the payment body (400 when both), and with neither named the payment runs on
+  the agent's own budget delegation. A sub-budget is never silently chosen.
+- *Concrete `to` on the child (preferred) over a redeemer caveat:* the grant's
+  `to` IS B's delegate account, so only B's delegate can redeem — no
+  `RedeemerEnforcer` caveat is needed (the account that signs the redemption
+  must be the delegation's `delegate`).
+- *Children under a multi-token parent:* out of scope for v1 — the builder
+  refuses any parent whose scope is not a single-token
+  `erc20PeriodTransfer` (`parent_not_period_scoped`); widening is a future
+  slice.
+
+On the agent page, `haven_get_agent` for B names its parent agent and the
+effective (narrower) limits, and the dashboard shows the parent→child tree.
+
 ## Guardrails
 
 - Data access for this flow lives in `packages/backend/src/infra/repositories/`

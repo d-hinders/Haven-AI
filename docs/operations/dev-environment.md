@@ -448,6 +448,19 @@ Isolation rules that are non-negotiable for a payments product:
   (#3196) was exactly that for a morning; the gate reads bare registrations
   as prefix `''` now.
 
+  > **Re-verified #3330 (2026-09-28):** the born-ENFORCED rule above gained
+  > two more followers — the owner-auth `routes/agent-sub-budgets.ts` and the
+  > agent-auth, money-path-adjacent `routes/sub-budgets.ts` (sub-budget
+  > issue/sign/list/tree/revoke), both listed in `index.ts`'s
+  > `enforcedModules` with their own key, both registered under existing
+  > prefixes (`/agents`, `/sub-budgets`), and `route-modules.generated.ts`
+  > regenerated for both. Same reasoning as #3329's pair: brand-new modules
+  > with no installed caller have no old shape to shadow for, so they are
+  > enforced from their first commit. The backend suite's request-validation
+  > envelopes for both files are green, and `check:route-modules` passes at
+  > the merged head. Nothing in this section's mode/rollback semantics
+  > moved.
+
   **How to take a shadow reading (#3208).** Not from `/health/ops` alone:
   its `request_validation` counters are in-process — they start at `since`
   (the plugin install) and dev redeploys on every merge, so the 2026-09-21

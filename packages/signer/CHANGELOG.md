@@ -15,9 +15,15 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **An undeclared top-level argument is refused, not stripped (#3419).** Signer tools register through `registerTool` with a passthrough input schema (keeps unknown keys, so the tool layer stays the refusal point), and the handler's strict re-parse refuses an argument this signer does not declare — the next `haven_sign` form it predates, e.g. #3444's `sub_budget_id` — with the structured refusal `UNSUPPORTED_ARGUMENT`: `unknown_arguments`, `signer_version` and `fallback` (the update command), `next_action: stop_and_tell_user`, and no signature or audit entry. Previously the MCP SDK stripped the key silently and the handler answered the generic `SIGNING_ERROR` "Pass payment_id … or payload_hash.", which says nothing about the version. The advertised JSON Schema changes in one claim only: strip mode emitted `additionalProperties: false`, passthrough emits `true` — the schema no longer says unknown keys are impossible, because they are now refused by name. Properties and the required list are unchanged. The `initialize` instructions name the refusal.
+
 ### Fixed
 
 - **Update hints name the connector doctor, not a bare re-run (#3412).** The `initialize` instructions, the out-of-date version refusal (its message and its `next_tool_omitted_reason`) and the `client_outdated` refusal's relay of `upgrade_command` now tell the user to run `npx -y @haven_ai/connect@<channel> --doctor` and then the repair line it prints. The previous bare `npx @haven_ai/connect@<channel>` is a setup command that stops at "Missing --setup" on an existing install. Identity-restore hints still name the setup command, which is the fix there.
+
+- **`SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` derives from `@haven_ai/sdk`'s new `TASK_SIGN_CONTEXT_VERSION` (#3419)** — the same constant the backend emits and the task-budget handoffs report in `signer_compatibility.task_sign_context_version` — instead of a hand-pinned literal. No enforced value changes.
 
 ## 0.6.0-alpha.0 — 2026-09-26
 

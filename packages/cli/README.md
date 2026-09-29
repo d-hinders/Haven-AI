@@ -33,10 +33,11 @@ the newest *published* release and nothing guarantees it matches the channel a
 given deployment serves (owner decision 2026-09-04 put the mechanism behind a
 release; issue [#2617](https://github.com/d-hinders/Haven-AI/issues/2617) is
 the reason the runbook and the manifest now name the channel explicitly). The
-runbook (`/for-agents.md`, printed by `haven guide`) and the manifest
-(`/.well-known/haven.json`, field `packages.cli.channel`) name the channel the
-deployment serves as `@<channel>`: read the tag from there, never pick one.
-`<channel>` below is that tag; `@alpha` is only a concrete example.
+runbook (`/for-agents.md`, printed by `haven guide`) tells an agent to run the
+command the manifest serves as `packages.cli.one_liner`
+(`/.well-known/haven.json`) as given — `packages.cli.channel` under the same
+name serves the full spec, not a bare tag (#3430). `<channel>` below is the
+tag that deployment serves; `@alpha` is only a concrete example.
 
 The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 `--api <url>` or `HAVEN_API_URL` (e.g. a local backend at
@@ -57,7 +58,8 @@ are your user's; these are the two that are yours.
 ```bash
 # 1. Get a scoped session. Prints a code and a link for your user to approve in
 #    a browser — you never see or ask for their password. @alpha is an example:
-#    run the tag your deployment names (see "Install" above).
+#    run the command your deployment's manifest serves as
+#    `packages.cli.one_liner` (see "Install" above).
 npx -y @haven_ai/cli@alpha login --api <api-url>
 
 # 2. Create the agent and its budget. Prints the connector command the backend

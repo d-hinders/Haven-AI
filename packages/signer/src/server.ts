@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { z } from 'zod'
 import { defaultSigningAuditPath } from './audit.js'
 import { signerCapabilityAdvertisement, signerInstructions } from './capabilities.js'
 import {
@@ -12,6 +13,8 @@ import { createEdgeSigner, type EdgeSigner } from './core.js'
 import { loadSignerCredentials, type SignerCredentials } from './credentials.js'
 import {
   createToolHandlers,
+  SIGNER_NAME,
+  SIGNER_VERSION,
   toolDescriptions,
   toolSchemas,
   type SignerToolName,
@@ -19,8 +22,12 @@ import {
 } from './tools.js'
 import { loadHavenIdentity } from './sign-context.js'
 
-export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.6.0-alpha.0'
+// SIGNER_NAME / SIGNER_VERSION are declared in `tools.ts` (next to the
+// handlers that use them) and re-exported here — the package's public API and
+// every `index.ts` consumer are unchanged, and the import graph stays
+// one-directional (tools.ts ← server.ts). Pinned from BOTH sides in
+// `strict-tool-input.test.ts` so a move that breaks the re-export turns red.
+export { SIGNER_NAME, SIGNER_VERSION }
 
 export interface SignerOptions {
   /** Path to a Haven credential JSON file (delegate_key is read from it). */
@@ -144,18 +151,50 @@ export function buildSignerMcpServer(
       clientIdentity: havenClientIdentity(SIGNER_NAME, SIGNER_VERSION),
     },
   })
+  // #3419 (Option B): register through `registerTool`, NOT the fluent
+  // `.tool(name, description, schema, handler)` overload this used — the same
+  // move #2312 made on the hosted server. `.tool`'s schema position accepts
+  // only a raw shape and validates with strip-mode `z.object(shape)`, so an
+  // undeclared top-level argument (the NEXT `haven_sign` form this signer
+  // predates, e.g. #3444's `sub_budget_id`) was silently dropped before the
+  // handler ran and the call answered the generic SIGNING_ERROR instead of
+  // saying the signer is too old.
+  //
+  // The registered schema KEEPS UNKNOWN KEYS (`.passthrough()`), per the
+  // issue's fix shape — deliberately the opposite of the hosted server's
+  // `.strict()` registration. A strict schema makes the SDK's own
+  // `validateToolInput` fail the call before any handler runs, and that
+  // failure is a plain `McpError` string: no `code`, no `unknown_arguments`,
+  // no `fallback` — the structured fields the refusal is required to carry
+  // would be unexpressible on the wire. Passthrough lets the tool layer be
+  // the refusal point: `parseStrictFor` (tools.ts) raises the marked error
+  // and `normalizeError` shapes it into `UNSUPPORTED_ARGUMENT` with
+  // `unknown_arguments`, `signer_version`, `fallback` and the stop-and-tell
+  // next step — as JSON on the result, over the wire and on the direct
+  // embedder path alike.
+  //
+  // Advertisement cost, measured on this SDK's converter
+  // (`toJsonSchemaCompat`): strip and strict both emit
+  // `additionalProperties: false`; passthrough emits `true`. The properties,
+  // required list and description are unchanged — what moves is the claim
+  // that unknown keys are impossible, which this signer no longer makes
+  // because it now REFUSES them by name instead.
   const registerTool = (server as unknown as {
-    tool: (
+    registerTool: (
       name: string,
-      description: string,
-      schema: unknown,
+      config: { description: string; inputSchema: unknown },
       handler: (args: unknown) => Promise<unknown>,
     ) => void
-  }).tool.bind(server)
+  }).registerTool.bind(server)
 
   for (const name of Object.keys(toolSchemas) as SignerToolName[]) {
-    registerTool(name, toolDescriptions[name], toolSchemas[name], async (args: unknown) =>
-      toMcpResult(await handlers[name](args)),
+    registerTool(
+      name,
+      {
+        description: toolDescriptions[name],
+        inputSchema: z.object(toolSchemas[name]).passthrough(),
+      },
+      async (args: unknown) => toMcpResult(await handlers[name](args)),
     )
   }
 

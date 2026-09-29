@@ -98,7 +98,9 @@ import * as agentPassportsUidRepairConfirmedAt from './096_agent_passports_uid_r
 import * as inboundTransfers from './097_inbound_transfers.js'
 import * as ownerCompanyDetails from './098_owner_company_details.js'
 import * as agentPassportsUidRepairNextAt from './099_agent_passports_uid_repair_next_at.js'
+import * as agentSubBudgets from './100_agent_sub_budgets.js'
 import * as merchantPayTo from './101_merchant_pay_to.js'
+import * as delistSkipSettleCatalogRow from './102_delist_skip_settle_catalog_row.js'
 import * as agentTaxDeclarationOptIn from './103_agent_tax_declaration_opt_in.js'
 
 /**
@@ -257,6 +259,8 @@ export const migrations: Migration[] = [
   inboundTransfers,
   ownerCompanyDetails,
   agentPassportsUidRepairNextAt,
+  agentSubBudgets,
   merchantPayTo,
+  delistSkipSettleCatalogRow,
   agentTaxDeclarationOptIn,
 ]

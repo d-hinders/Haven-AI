@@ -14,6 +14,7 @@ import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
 import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
+import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import EditBudgetModal from './EditBudgetModal'
 import { Card } from './ui/Card'
@@ -64,6 +65,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   // here must never take the budgets list down with it, so `taskBudgets`
   // stays `null` (nothing rendered) rather than surfacing its own error UI.
   const { taskBudgets } = useTaskBudgets(agentId)
+  // #3330: the parent→child sub-budget trees this agent ISSUES, read the
+  // same defensive way — `trees` stays `null` (nothing rendered) on failure.
+  const { trees: subBudgetTrees } = useSubBudgetTrees(agentId)
   const openTaskBudgets = useMemo(() => {
     const nowSec = Math.floor(Date.now() / 1000)
     return (taskBudgets ?? []).filter((t) => t.status === 'open' && !t.is_expired && t.expires_at > nowSec)
@@ -347,6 +351,27 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         </Card.Section>
       ) : null}
 
+      {/* #3330: sub-budget trees — slices of a budget above re-delegated to
+          ANOTHER agent in this account. Listed here only when at least one
+          tree exists, never as an empty section, AFTER the task-budget
+          section so the two carve-outs read narrowest-first. The chain is
+          the enforcement: stopping the budget above strands every row here
+          (stated in the copy, not implied). */}
+      {subBudgetTrees && subBudgetTrees.length > 0 ? (
+        <Card.Section divided className="mt-4">
+          <div className="py-2">
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Sub-agent budgets</p>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+              Slices of the budget above that another of your agents spends through. Each stays inside the slice and
+              inside the budget above it; stopping the budget above stops them too.
+            </p>
+          </div>
+          {subBudgetTrees.map((tree) => (
+            <SubBudgetTreeRow key={tree.parent_child_sub_budget.id} tree={tree} tokens={tokens} />
+          ))}
+        </Card.Section>
+      ) : null}
+
       {/* #3166: edit-in-place for one active budget. Kept mounted here — the
           modal owns its own `enabled: open` hook instance, so idle cost is one
           closed portal. */}
@@ -458,6 +483,53 @@ function TaskBudgetRow({ taskBudget, tokens }: { taskBudget: TaskBudget; tokens:
   return (
     <div className="py-3">
       <Row density="flush" title={taskBudget.label || 'Task budget'} subtitle={parts.join(' · ')} />
+    </div>
+  )
+}
+
+/**
+ * One sub-budget tree (#3330): the parent agent's own narrowing row with the
+ * grants to sub-agents nested under it. Reuses the `Row` primitive (the
+ * third row-of-a-list shape in this file); the parent-child row and its
+ * grants render as an indented pair so the tree reads without jargon.
+ */
+function SubBudgetTreeRow({ tree, tokens }: { tree: SubBudgetTree; tokens: TokenOption[] }) {
+  const parent = tree.parent_child_sub_budget
+  const t = tokens.find((x) => x.address.toLowerCase() === parent.token_address.toLowerCase())
+  const amount = t ? formatUnits(BigInt(parent.period_amount_atomic), t.decimals) : parent.period_amount_atomic
+  const nowSec = Math.floor(Date.now() / 1000)
+  const parentParts = [
+    `${amount} ${t?.symbol ?? ''}`.trim(),
+    parent.expires_at > nowSec ? `ends ${timeUntil(parent.expires_at * 1000)}` : 'ended',
+  ]
+  if (parent.recipient_address) parentParts.push(`to ${truncateAddress(parent.recipient_address)}`)
+  return (
+    <div className="py-3">
+      <Row density="flush" title={parent.label || 'Sub-agent budget'} subtitle={parentParts.join(' · ')} />
+      {tree.grants.length > 0 ? (
+        <div className="ml-4 border-l border-[var(--v2-border)] pl-3">
+          {tree.grants.map((g) => (
+            <SubBudgetGrantRow key={g.id} grant={g} tokens={tokens} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** One grant to a sub-agent (#3330) — the leaf of a sub-budget tree. */
+function SubBudgetGrantRow({ grant, tokens }: { grant: SubBudgetTree['grants'][number]; tokens: TokenOption[] }) {
+  const t = tokens.find((x) => x.address.toLowerCase() === grant.token_address.toLowerCase())
+  const amount = t ? formatUnits(BigInt(grant.period_amount_atomic), t.decimals) : grant.period_amount_atomic
+  const nowSec = Math.floor(Date.now() / 1000)
+  const parts = [
+    `up to ${amount} ${t?.symbol ?? ''}`.trim(),
+    grant.expires_at > nowSec ? `ends ${timeUntil(grant.expires_at * 1000)}` : 'ended',
+  ]
+  if (grant.recipient_address) parts.push(`to ${truncateAddress(grant.recipient_address)}`)
+  return (
+    <div className="py-2">
+      <Row density="flush" title={grant.label || 'Sub-agent slice'} subtitle={parts.join(' · ')} />
     </div>
   )
 }

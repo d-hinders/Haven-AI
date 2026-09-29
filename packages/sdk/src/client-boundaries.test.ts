@@ -109,7 +109,7 @@ const boundary: ClientBoundary = {
     // child delegation ([settlement, task, budget]) instead of the agent's budget delegation
     // directly. Forwarded to X402Erc7710.prepare unchanged; the erc7710 authorize body carries it
     // as the same camelCase `taskBudgetId` wire key `/x402` uses everywhere else.
-    "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
+    "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; subBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
     "async quoteMcpX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async quoteX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",
@@ -489,6 +489,10 @@ describe('HavenClient structural boundary', () => {
       'SWEEP_BASE_SEPOLIA_USDC_ADDRESS',
       'SWEEP_BASE_USDC_ADDRESS',
       'SignerRefusalCode',
+      // #3419: the task-budget sign-context version — the same single source
+      // the signer derives SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS from and the
+      // task-budget handoffs report in signer_compatibility.
+      'TASK_SIGN_CONTEXT_VERSION',
       'TRANSFER_WITH_AUTHORIZATION_TYPES',
       'TYPED_DATA_NOT_ALLOWED', // #3283
       'X402AlreadySettledError',

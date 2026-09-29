@@ -9,7 +9,7 @@ covers:
   - scripts/ci/vocabulary-map.json
   - scripts/ci/vocabulary-divergence.mjs
   - packages/sdk/src/payment-mappers.ts
-last-verified: "2026-09-20"
+last-verified: "2026-09-30"
 ---
 
 # CLI `--json` conventions
@@ -263,3 +263,20 @@ Every command that fails returns the same shape, whatever it was doing:
 
 `hint` is optional. This is the shape an agent parses most often, so it is worth
 branching on `ok` before anything else.
+
+Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
+needed rewriting. `npm run lint:vocabulary` exits green at this head with the
+same census the doc describes (31 receipt fields, 35 transaction fields, 11
+declared concepts, 0 open, 17 CLI envelope emitters). Re-read in code: the
+`wallets balances` `chainId` re-map is still the one CLI-chosen casing on a
+forwarded value (`commands.ts` `emit(d, …, { …, chainId: safe.chain_id, … })`);
+the auth envelope's mixed `expires_at` beside `apiBaseUrl`, the pure-snake
+`--no-wait` device envelope, `guide`'s `{ ok, format: 'markdown', content }`,
+`agents connect --run`'s `connector_command`/`connector_exit_code`/`relay`
+snake result, and the grant/revoke prepared-action key sets are all verbatim
+as documented; the CSV header row is unchanged (all twelve names, in order);
+the `safe_address` permanent fallback in the connector's doctor
+(`doctor.ts` `has('safe_address')` path) is as written. The covered-file
+commits since the last verification touched no envelope: `#3415` changed
+upgrade-hint TEXT only, and the 0.7.0-alpha.0 release bump is the version
+constant.

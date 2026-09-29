@@ -25,7 +25,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-09-21"
+last-verified: "2026-09-30"
 ---
 
 # Haven — System Context
@@ -228,3 +228,17 @@ flowchart LR
   intervening commits (#3167 agent labels, #3127 currency preference, #3173
   signer cold start, #3202 marketplace prospects) touched covered files but
   moved no custody boundary this diagram describes.
+- Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`): the
+  custody claims re-checked at this head — `middleware/agentAuth.ts` and
+  `routes/agents.ts` still store only `delegate_address` (never a private
+  key), `config.ts` still resolves `RELAYER_PRIVATE_KEY_<chainId>` over the
+  global fallback, `POST /safe/exec` stays deleted (`routes/safe-deploy.ts`
+  and `index.ts` record the #2847 removal), `lib/safe-tx.ts` is still absent,
+  the hosted MCP facade stays keyless (the `tools/**` capability modules
+  compose in `tools.ts`, unchanged), and `lib/signer.ts` still mirrors the
+  Hybrid DeleGator signer-set read. The week's drift (#3444 sub-budgets — an
+  agent re-delegating a narrower budget to another agent, still owner-signed
+  at the root and metered by the same caveat enforcers; #3423 receive-side
+  slices; #3479 settlement recording; #3485 allowance-summary alignment)
+  widened what a delegate may redeem but moved no custody boundary, actor or
+  trust edge this diagram names.

@@ -274,9 +274,24 @@ Isolation rules that are non-negotiable for a payments product:
   ethers providers batch up to 100 calls per ~10 ms), the `pending` block tag,
   `eth_sendRawTransaction` accepted as a method (a zero-balance throwaway key,
   refused for funds, never mined) and a burst of 20 without a 429. dRPC's free
-  plan, the September 2026 dev primary, fails the batch and the `pending` tag;
-  the shared public node can fail the burst — it is what a dedicated endpoint
-  replaces.
+  plan (the dev primary 2026-09-24 → 2026-09-28) failed the batch and the
+  `pending` tag; the shared public node can fail the burst — it is what a
+  dedicated endpoint replaces.
+
+  > Corrected 2026-09-30 (#3413 audit): the bullet's provider example called
+  > dRPC's free plan "the September 2026 dev primary", stale since 2026-09-28
+  > (#3262) — dRPC left both environments, and dev's primary is Infura's free
+  > Core plan with Alchemy as the fallback. Infura failed the #3336 burst
+  > check twice on 2026-09-29 (20/20, then 14/20 rate-limited; the fallback
+  > passed all five), and the owner decided (#3456) to keep the arrangement
+  > and cut Haven's own RPC usage first (epic #3457) before re-probing — so
+  > the primary in place today is known to miss this bar. The paragraph's
+  > post-change rewrite with the dated probe result is #3456's acceptance
+  > criterion, which owns the fuller rewrite; the two stale code comments it
+  > also lists (`relayer.ts`, `outbound-queue.test.ts`) are code files and
+  > stay out of a docs audit. Only the provider example above was edited;
+  > nothing else in this file's covered claims was re-read, so
+  > `last-verified` is deliberately not bumped.
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over
   in order: `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA`, then the optional

@@ -33,7 +33,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-09-21"
+last-verified: "2026-09-30"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -275,4 +275,21 @@ delegate address and API-key hash only (`middleware/agentAuth.ts`), and
 `signer/src/core.ts` still holds the delegate key locally. The intervening
 commits (#3167 labels, #3127 currency preference, #3151 `--unwire`
 recovery-credential guard) touched covered files and none moved a custody
+boundary; nothing here needed rewriting.
+
+Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`): the
+custody claims re-checked at this head — `routes/agents.ts` and
+`middleware/agentAuth.ts` still handle `delegate_address` + API-key
+hash/prefix only; `connect/src/rekey.ts` and `routes/agent-rekey.ts` still
+exist with the explicit `refuseAgentCaller` guard (an agent still cannot
+re-key itself); `infra/repositories/user-passkeys.ts` still stores
+`credential_id`, `public_key_x/y`, signer address, chain and the raw
+attestation unverified (POC, as written); `disableDelegation` still backs
+revocation and revoke-all in `routes/agent-delegations.ts`; the signer-set
+ops still live in `rails/hybrid-signer-actions.ts` behind existing-signer
+signing; and `signer/src/core.ts` still keeps the delegate key local. The
+week's drift (#3444 sub-budgets — the stored delegation graph now also holds
+child re-delegations, protected like the parent copies; #3423 receive-side;
+#3479 settlement recording; #3451 re-key activation; #3386 re-key merchant
+label) widened the delegation surface but moved no zone, invariant or custody
 boundary; nothing here needed rewriting.

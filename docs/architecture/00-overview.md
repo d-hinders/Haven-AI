@@ -66,7 +66,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-09-21"
+last-verified: "2026-09-30"
 ---
 
 # Haven — Architecture Overview
@@ -199,3 +199,24 @@ vocabulary convergence at the mapper, #3173 signer cold start and
 `@haven_ai/sdk/edge`, #3155 the x402 MCP transport profile, #3167 agent
 labels, #3127 currency preference, #3202 marketplace prospects) changed the
 packages' internals without moving any boundary this overview states.
+
+Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
+needed rewriting. Re-checked at this head: the package table against
+`packages/*` (no package added or removed; the one-liners' custody split —
+keyless mcp-server, signing signer, opt-in local mcp, private core — still
+matches each package's README and facade); the accounting connectors
+(`registry.ts` still `fortnox` + `accounted` live, others `coming_soon`);
+the delegation-rail lines (one live rail, sponsored UserOp, no funding leg;
+retired rails still answer 410 at the payment paths, `routes/payments.ts`);
+the frontend `delegator_hybrid` filter; the connect-flow tool names
+(`haven_get_agent`, `haven_get_allowances` still the pre-payment reads in
+`mcp-server/src/tools/state-direct-recovery.ts`); the nine runtime profiles
+in `connect/src/runtime-registry.ts` and the Hermes credential paths
+(`HERMES_HOME`/`~/.hermes` in `connect/src/config-writers.ts`); the chain
+facts (the shared core registry still registers 8453/84532/100 — the file
+doc 01's covers list implicates) and the
+erc7710-with-EIP-3009-fallback settlement shape. The week's heavy drift
+(#3444 sub-budgets, #3423 receive-side slices, #3479 settlement recording,
+#3471 discovery default chain, #3482 faucet/onramp) moved internals —
+including the default-chain derivation this doc's chain line does not
+state — without touching any boundary, actor or custody split named here.

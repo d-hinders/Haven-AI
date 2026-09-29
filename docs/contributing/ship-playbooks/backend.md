@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/openapi/**
-last-verified: "2026-09-18"
+last-verified: "2026-09-30"
 ---
 
 # Backend / API playbook
@@ -12,7 +12,7 @@ Loaded by `ship-next` for `area:backend` issues.
 
 - **OpenAPI drift.** Keep `packages/backend/src/openapi/spec.test.ts` green — a route on the agent-payment surface must be documented in `openapi/spec.ts` or carry a `because:` entry in the allowlist (now `KNOWN_UNDOCUMENTED_ROUTES` in `openapi/route-coverage.ts`). Adding a route means updating the spec.
 - **Route coverage, wider than the above (#1443).** `openapi/route-coverage.test.ts` gates **every route module the server registers**, not just the seven agent-payment files — it derives its scope from `index.ts`'s registration table, so a brand-new route file is covered from its first commit. A new route is accounted for by documenting it, by a per-route `KNOWN_UNDOCUMENTED_ROUTES` entry, or — for a module whose whole surface is deferred to the #1446 backfill — by `UNDOCUMENTED_MODULES`. Both lists sit under **shrink-only ceilings**: raising one is the failure the gate exists to catch, so document the route instead. Keeping `spec.test.ts` green is no longer sufficient on its own.
-- **Response shape vs. the spec (#1444).** `check:api-types` proves the spec agrees with types generated from the spec — never that a route returns what the spec promises. When you add or change a documented route's response, assert it: `expectMatchesSpec('GET', '/agents/{id}', response.json())` from `openapi/response-shape.js`, after `app.inject`. It catches a missing required field, a wrong type, a bad enum value and a malformed uuid/timestamp; it does **not** catch an extra undeclared field on a schema that sets `additionalProperties: true`. Fixtures on asserted paths must look like real rows — a fixture id of `'agent-1'` fails the uuid format, correctly. Scope and mutation proofs: `docs/architecture/05-agent-api-openapi.md`.
+- **Response shape vs. the spec (#1444).** `check:api-types` proves the spec agrees with types generated from the spec — never that a route returns what the spec promises. When you add or change a documented route's response, assert it: `expectMatchesSpec('GET', '/agents/{id}', response.json())` from `openapi/response-shape.ts`, after `app.inject`. It catches a missing required field, a wrong type, a bad enum value and a malformed uuid/timestamp; it does **not** catch an extra undeclared field on a schema that sets `additionalProperties: true`. Fixtures on asserted paths must look like real rows — a fixture id of `'agent-1'` fails the uuid format, correctly. Scope and mutation proofs: `docs/architecture/05-agent-api-openapi.md`.
 - **Adding a route also regenerates the route-module table (#3135).** The
   request-validation plugin resolves its per-module enforcement list
   (`enforcedModules`, keyed on the route FILE) through the generated
@@ -34,3 +34,21 @@ Loaded by `ship-next` for `area:backend` issues.
 - **Money path.** If the change carries the `money-path` label or touches any file matched by [`.github/money-path-globs.json`](../../../.github/money-path-globs.json) — the **authoritative, CI-enforced perimeter** (`scripts/ci/money-path.test.mjs` keeps the labeler in lockstep with it; e.g. `modules/x402/`, `modules/mpp/`, `routes/payments.ts`, the `rails/` files, `middleware/agentAuth.ts`, `db/migrations/`) — also load [`money.md`](money.md): characterization tests first, CASP guardrails. This playbook deliberately does **not** restate the file list; a second copy drifts the moment a refactor moves a file (this bullet named the dissolved `routes/machine-payments.ts` for a week after #997 dissolved it, #1168). The canonical skill's [Merge Gate](../../../.agents/skills/ship-next/SKILL.md#merge-gate) keeps an annotated list for the *why* behind each group — that copy is test-enforced to **match** the JSON in both directions (`money-path.test.mjs`); this one had no such guard, hence the pointer. It was a one-way subset check until #1892, which is how `routes/agent-rekey.ts` sat in neither list: subset in one direction is not agreement. Since #1024 the classification no longer pauses the merge.
 - **Dependency boundaries (#982, absolute since #999).** `npm run lint:deps` is a **blocking** step in CI's *Backend checks*. It enforces the module-boundary rules in [`10-module-boundaries.md`](../../architecture/10-module-boundaries.md) **unconditionally** — the ratcheting baseline was driven to zero and retired by #999, so the linter simply passes or fails and new code complies from its first commit. New SQL goes in `infra/repositories/` (convention: that directory's `README.md`). **The fix is the boundary** — the only escape hatch is an inline `// dep-lint-exempt: <concrete reason>` comment on the offending import, reserved for a reviewed, deliberate exception ("bootstraps the pool before repositories exist"), never "legacy"/"TODO" (reasons under 20 chars are rejected). `no-circular` can never be waived: a cycle must be broken, not grandfathered. The lint also gauges inline-SQL call sites (`.query(` outside `infra/repositories/`) and fails if the count grows past the shrink-only ceiling in `packages/backend/dep-lint-callsite-ceiling.json` (#1166) — lock in a shrink with `node scripts/dep-lint.mjs --update-ceiling` (it refuses to raise). Rules live in `.dependency-cruiser.cjs`, which is **authoritative over the prose** in the architecture doc.
 - **Docs.** If the diff touches code a doc's `covers:` maps to, the coupling gate flags it; update those docs (see [`docs.md`](docs.md)).
+
+Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). One
+reference needed fixing: the response-shape bullet named
+`openapi/response-shape.js`; the module has been `response-shape.ts` since it
+landed (#1460, 2026-08-15) — a stale extension, not a moved file. Everything
+else re-checked at this head: `spec.test.ts`, `route-coverage.ts` /
+`route-coverage.test.ts` (both `KNOWN_UNDOCUMENTED_ROUTES` and
+`UNDOCUMENTED_MODULES` present), `route-modules.generated.ts` and the
+`generate:`/`check:route-modules` scripts, `generate:api-types` +
+`check:api-types`, `scripts/db-schema-smoke.ts` with the `db:schema-smoke`
+script, `migrate.ts`'s `transactional = false` / `nonTransactionalReason`
+opt-out, `.github/money-path-globs.json` (still the CI-enforced perimeter the
+money-path bullet points at instead of copying), the dep-lint bullet's
+machinery (re-verified in depth under `10-module-boundaries.md` this audit),
+and the openapi/ commits since the last verification (#3479, #3461, #3471,
+#3469, #3470, #3444, #3452, #3453) each carried their spec/route-module
+regeneration with the code, which is exactly the workflow this playbook
+prescribes.

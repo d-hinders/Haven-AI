@@ -65,7 +65,13 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { HostedToolError, paymentWindowExpiredError, runTool } from './support/errors.js'
-import { buildAgentGuidance, buildPurchaseSummary, type HostedHandoff, refusalNextStep } from './support/guidance.js'
+import {
+  buildAgentGuidance,
+  buildPurchaseSummary,
+  catchSettledResettle,
+  type HostedHandoff,
+  refusalNextStep,
+} from './support/guidance.js'
 import {
   parseMcpTransport,
   serializeMcpTransport,
@@ -758,7 +764,14 @@ export function createPaidMcpCompletionHandlers(
         // `payment_header` is what tells the two schemes apart, because the
         // 3009 path always carries one built by the local signer.
         if (!args.payment_header) {
-          const paymentHeader = await haven.submitX402Erc7710(args.payment_id, args.signature)
+          const submitted = await haven
+            .submitX402Erc7710(args.payment_id, args.signature)
+            .catch(catchSettledResettle)
+          // #3423: a second settle of a payment that already settled answers
+          // with the original settlement as a done state (the #3417 helper),
+          // and the merchant is NOT called again.
+          if (typeof submitted !== 'string') return submitted.settledReplay
+          const paymentHeader = submitted
           const merchant7710 = await deliverMerchantPayment(
             haven,
             { ...args, payment_header: paymentHeader },

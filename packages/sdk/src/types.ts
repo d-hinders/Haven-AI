@@ -2366,7 +2366,7 @@ export class X402Erc7710AlreadySettledError extends HavenError {
     public readonly body?: unknown,
   ) {
     super(
-      `Payment ${paymentId} already settled on-chain (tx ${txHash}); this idempotency key is spent. ` +
+      `Payment ${paymentId} already settled on-chain (tx ${txHash}). ` +
         'Nothing was signed and nothing new was charged.',
       'PAYMENT_ALREADY_SETTLED',
       undefined,

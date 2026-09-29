@@ -348,10 +348,30 @@ export class X402Erc7710 {
    * hosted boundary) is irrelevant here.
    */
   async submit(paymentId: string, signature: string): Promise<string> {
-    const settled = await this.post<RawX402SettleResponse>(
-      `/x402/${paymentId}/settle`,
-      { signature },
-    )
+    let settled: RawX402SettleResponse
+    try {
+      settled = await this.post<RawX402SettleResponse>(`/x402/${paymentId}/settle`, { signature })
+    } catch (err) {
+      // #3423: a second settle of an erc7710 payment that already settled.
+      // The backend answers 409 `payment_already_settled` with the settlement
+      // hash; surface it as the same typed error the authorize replay uses
+      // (#3417), so a caller reports the original settlement instead of
+      // reading a failure. Any other refusal propagates unchanged.
+      const body = err instanceof HavenApiError ? (err.body as Record<string, unknown> | undefined) : undefined
+      if (
+        err instanceof HavenApiError &&
+        err.statusCode === 409 &&
+        body?.code === 'payment_already_settled' &&
+        typeof body.tx_hash === 'string'
+      ) {
+        throw new X402Erc7710AlreadySettledError(
+          typeof body.payment_id === 'string' ? body.payment_id : paymentId,
+          body.tx_hash,
+          body,
+        )
+      }
+      throw err
+    }
     if (!settled.payment_header) {
       throw new HavenApiError(
         'x402 settle returned no payment_header — the merchant cannot be retried.',

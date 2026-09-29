@@ -655,7 +655,8 @@ treat them as proof of purchase rather than retrying:
   path) and carries `err.receipt`.
 - `X402Erc7710AlreadySettledError` extends `HavenError`, **not**
   `HavenApiError` (no status; code `PAYMENT_ALREADY_SETTLED`; erc7710
-  `prepareX402Erc7710()`), and carries `err.paymentId` and `err.txHash`. An
+  `prepareX402Erc7710()`, and since #3423 `submitX402Erc7710()` on a repeated
+  settle), and carries `err.paymentId` and `err.txHash`. An
   `instanceof HavenApiError` branch does not catch it.
 
 See [Idempotency](#idempotency-what-the-key-guarantees-and-what-it-costs).

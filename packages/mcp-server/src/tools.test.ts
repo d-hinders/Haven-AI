@@ -1528,6 +1528,60 @@ describe('hosted erc7710 (#1456)', () => {
     ).toBe(1)
   })
 
+  it('a second settle of a payment that already settled answers with the original settlement, and the merchant is not called (#3423)', async () => {
+    const TX = '0x' + '7d'.repeat(32)
+    stubFetch({
+      'POST /x402/pay_7710/settle': {
+        status: 409,
+        body: {
+          error: 'Payment pay_7710 already settled on-chain; nothing was signed or charged again.',
+          code: 'payment_already_settled',
+          payment_id: 'pay_7710',
+          tx_hash: TX,
+        },
+      },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const res = ok(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data).toMatchObject({
+      payment_id: 'pay_7710',
+      settled: true,
+      settlement_tx_hash: TX,
+      next_action: 'none',
+    })
+    expect(res.data.next_tool).toBeUndefined()
+    expect(res.data.next_tool_omitted_reason).toMatch(/this payment already settled/)
+    expect(res.data.reason).toMatch(/nothing new was charged/)
+    expect(merchant).not.toHaveBeenCalled()
+  })
+
+  it('a settle 409 for a payment that is only submitted keeps the refusal (not settled) (#3423)', async () => {
+    stubFetch({
+      'POST /x402/pay_7710/settle': { status: 409, body: { error: 'Payment is submitted, expected pending_signature' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const res = (await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_7710',
+      signature: SIG7710,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })) as Record<string, any>
+    expect(res.success).toBe(false)
+    expect(JSON.stringify(res)).not.toContain('"settled":true')
+  })
+
   it('settle exchanges the signature for the header, with NO funding relay and NO preflight', async () => {
     // The sequence inversion this issue turns on: on 3009 the signature funds
     // the delegate; here it IS the settlement child.

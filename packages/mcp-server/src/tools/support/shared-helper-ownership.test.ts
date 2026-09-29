@@ -137,6 +137,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // #3417: the settled-replay answer for an erc7710 prepare — the catalog
   // slice's two prepare sites and the plain-HTTP slice's one.
   catchSettledReplay: { module: 'guidance', slices: ['s2810', 's2811'] },
+  // #3423: its settle-side twin — haven_settle_mcp_tool (s2812) and
+  // haven_submit's erc7710 branch (s2809).
+  catchSettledResettle: { module: 'guidance', slices: ['s2809', 's2812'] },
   // #3101: the status handoff for a refusal that may not know its payment id —
   // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
   paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
@@ -399,6 +402,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'buildAgentGuidance',
     'buildPurchaseSummary',
     'catchSettledReplay',
+    'catchSettledResettle',
     'paymentStatusHandoff',
     'refusalNextStep',
     'taskBudgetNextStep',

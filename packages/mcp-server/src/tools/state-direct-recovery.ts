@@ -41,7 +41,7 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { runTool, HostedToolError } from './support/errors.js'
-import { buildAgentGuidance, refusalNextStep } from './support/guidance.js'
+import { buildAgentGuidance, catchSettledResettle, refusalNextStep } from './support/guidance.js'
 import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
@@ -514,11 +514,15 @@ export function createStateDirectRecoveryHandlers(
           // less — leaving it as a raw error was the wrong asymmetry. The
           // mapping is scheme-agnostic (it keys on rail 'x402' + an expired
           // status behind a 410), so it applies unchanged.
-          const paymentHeader = await submitErc7710WithExpiryMapping(
+          const submitted = await submitErc7710WithExpiryMapping(
             haven,
             args.payment_id,
             args.signature,
-          )
+          ).catch(catchSettledResettle)
+          // #3423: a repeated submit of a settled payment gets the same done
+          // state as haven_settle_mcp_tool, not a client-failure refusal.
+          if (typeof submitted !== 'string') return submitted.settledReplay
+          const paymentHeader = submitted
           return {
             payment_id: args.payment_id,
             settlement_scheme: 'erc7710',

@@ -41,6 +41,7 @@ const {
   mockMarkIssued,
   mockComputeAddress,
   mockFindDelegationTerms,
+  FAKE_TX,
 } = vi.hoisted(() => ({
   mockFindOwnedRekeyAgent: vi.fn(),
   mockFindRekey: vi.fn(),
@@ -49,11 +50,19 @@ const {
   mockMarkIssued: vi.fn(),
   mockComputeAddress: vi.fn(),
   mockFindDelegationTerms: vi.fn(),
+  // A fixed marker object (#3450), not `pool`/`undefined` — proves the route
+  // threads its transaction client through rather than falling back to the
+  // default executor.
+  FAKE_TX: {},
 }))
 
 // The pool is deliberately not stubbed — every query is behind a repository
 // module, mocked by name. Data-layer behaviour is proven on the real-Postgres
 // harness (`infra/repositories/__tests__/agent-rekeys.test.ts`), not here.
+//
+// `withRekeyIssueTransaction` is mocked too (#3450): the real implementation
+// opens a real Postgres transaction (`withTransaction(pool, fn)`), which this
+// file — a pure mocked-repository unit test — must not depend on.
 vi.mock('../../middleware/auth.js', () => ({
   authMiddleware: async (request: { user?: unknown }) => {
     request.user = { sub: 'user-1' }
@@ -71,6 +80,7 @@ vi.mock('../../infra/repositories/agent-rekeys.js', async (importOriginal) => {
     // #3386: issue reads the merchant label off the old row; these tests
     // exercise the clock, not the label, so the old row carries none.
     findDelegationTerms: (...a: unknown[]) => mockFindDelegationTerms(...a),
+    withRekeyIssueTransaction: (fn: (tx: unknown) => Promise<unknown>) => fn(FAKE_TX),
   }
 })
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
@@ -392,5 +402,23 @@ describe('#1849 re-key issue — the carry is planned on the metering clock', ()
     expect(res.json().error).toBe('rekey_out_of_order')
     expect(mockInsertRekeyDelegation).not.toHaveBeenCalled()
     expect(mockMarkIssued).not.toHaveBeenCalled()
+  })
+
+  // ── #3450: the `markIssued` sentinel mapping, whole body ─────────────────
+
+  it('maps a markIssued failure (stage already moved) to the bare rekey_out_of_order body', async () => {
+    // `markIssued` returns `null` when its own conditional UPDATE
+    // (`WHERE stage = 'metered'`) touches no row — the re-key's stage moved
+    // between `loadStep`'s unlocked read and this call (e.g. a concurrent
+    // abandon on a snapshot that itself built no pieces, so nothing else in
+    // this call ever contended for a lock). `IssueMarkIssuedFailedError`
+    // maps this to `{ error: 'rekey_out_of_order' }` with NO other fields —
+    // asserted here as the WHOLE body, not `.error` alone, the same
+    // discipline the round-1 review (F1) applied to the other three mapped
+    // replies.
+    mockMarkIssued.mockResolvedValue(null)
+    const { status, body } = await issueAt(START + 3600, START + 4200)
+    expect(status).toBe(409)
+    expect(body).toEqual({ error: 'rekey_out_of_order' })
   })
 })

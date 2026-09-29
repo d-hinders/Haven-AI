@@ -29,6 +29,7 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/infra/repositories/agent-rekeys.ts
+  - packages/backend/src/infra/transaction.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/infra/repositories/agent-organizations.ts
   - packages/backend/src/db/migrations/094_agent_organizations.ts
@@ -314,6 +315,31 @@ re-key's OWN stage (must still be `metered`) under the agent-row lock, not
 merely that *some* re-key of the agent is in flight, so a stalled issue
 request for an abandoned re-key can no longer insert rows while a different,
 successor re-key is the one actually in flight (#3439).
+
+> **Re-verified (#3450, 2026-09-28):** #3439's own re-check did not by itself
+> stop two CONCURRENT issue calls on one (not abandoned) re-key from both
+> inserting — the stage stays `metered` until one of them reaches
+> `markIssued`, so a second call whose `nextDelegationVersion` read landed
+> after the first call's own insert but before that first call's
+> `markIssued` still passed the same re-check and landed a genuine duplicate
+> `pending` row — per the #3450 spec review's uncommitted scratch test (40
+> staggered trials per tree, 0–19ms stagger), dev 23/40 and #3439's head
+> 11/40; reproduced deterministically (not statistically) in the shipped
+> suite by `agent-rekey-issue-concurrent.test.ts`, which pins the exact
+> interleaving with a control point rather than relying on timing luck. The
+> issue route now runs its whole piece-build loop plus
+> `markIssued` inside ONE transaction
+> (`withRekeyIssueTransaction`/`withTransaction`), so the first call's insert
+> takes the `agents` row lock and holds it — together with every lock and
+> row this re-key's own pieces take — until that call's `markIssued` commits.
+> A second call blocks on that same lock and, once released, re-runs
+> #3439's `stage = 'metered'` re-check as a fresh READ COMMITTED statement
+> against the now-committed `issued` row, so it inserts nothing. The re-check
+> itself is unchanged; only the transaction it now runs inside is new. No
+> authority moves and no new network call runs inside the transaction — the
+> one RPC this route makes (`computeHybridAccountAddress`) still runs before
+> the loop opens. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
 
 **Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
 ordinary recipient-pinned budget whose pin the server fills with the

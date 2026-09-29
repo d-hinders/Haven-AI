@@ -25,11 +25,6 @@ function hrefs(text: string): string[] {
 
 /** An own-site path resolves to a real route, a public artifact, or itself (/demo, /demo.md). */
 function ownSiteLinkResolves(path: string): boolean {
-  // A bare fragment ("#", SiteFooter's own placeholder for an unwired nav
-  // item — see page.tsx's "Ask the team" link) always resolves: it stays on
-  // the current page. Checked explicitly so it is never accidentally scored
-  // against `bare === ''` falling through to the homepage's route below.
-  if (path === '#') return true
   const bare = path.split(/[?#]/)[0]
   if (bare === '/') return existsSync(join(FRONTEND_ROOT, 'src/app/page.tsx'))
   if (bare === '/demo') return existsSync(join(FRONTEND_ROOT, 'src/app/demo/page.tsx'))

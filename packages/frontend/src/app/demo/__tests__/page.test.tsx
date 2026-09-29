@@ -68,7 +68,7 @@ describe('/demo page', () => {
     expect(screen.getByText(/passkey-capable device/)).toBeInTheDocument()
     // "harness" jargon dropped (design review round 4, nit 6).
     expect(pageText).not.toMatch(/harness/i)
-    expect(screen.getByText(/One AI agent \(Claude Code, Codex, or Hermes\)/)).toBeInTheDocument()
+    expect(screen.getByText(/One AI agent, such as Claude Code, Codex, or Hermes/)).toBeInTheDocument()
 
     // All eight steps, in order.
     const stepTitles = [
@@ -127,11 +127,11 @@ describe('/demo page', () => {
     // funds the agent's delegate transiently (review round 1, F4).
     expect(screen.getByText(/budget you signed and it could not exceed/)).toBeInTheDocument()
     expect(screen.queryByText('8')).not.toBeInTheDocument()
-    // "Questions? Ask the team" links out (design review round 4, nit 5) —
-    // SiteFooter's own "Contact" nav item is itself an unwired "#" (no real
-    // destination exists in this codebase to point at instead), so this
-    // matches it faithfully rather than inventing one.
-    expect(screen.getByRole('link', { name: 'Ask the team' })).toHaveAttribute('href', '#')
+    // "Questions? Ask the team." is plain text: no contact destination exists
+    // (SiteFooter's Contact is an unwired "#"), and a link that goes nowhere
+    // reads as broken on an investor page.
+    expect(screen.getByText(/Questions\? Ask the team\./)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Ask the team/ })).not.toBeInTheDocument()
 
     // Signup link carries no ?src=demo tracking param (owner decision).
     const signupLink = screen.getByRole('link', { name: 'Sign up' })

@@ -119,7 +119,7 @@ export default function DemoPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">Before you start</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--v2-ink-2)]">
                   <li>A passkey-capable device (Face ID, Touch ID, Windows Hello, or a device PIN).</li>
-                  <li>One AI agent (Claude Code, Codex, or Hermes).</li>
+                  <li>One AI agent, such as Claude Code, Codex, or Hermes.</li>
                   <li>About 10 minutes.</li>
                 </ul>
               </Card>
@@ -143,7 +143,7 @@ export default function DemoPage() {
               <StepCard
                 number={2}
                 title="Fund it with test USDC"
-                whyItMatters="This test USDC comes from Circle, not Haven — Haven never touches funds moving into your account."
+                whyItMatters="This test USDC comes from Circle straight to your account — Haven isn't part of that transfer and never holds it."
               >
                 <p>
                   From your dashboard, choose <strong>Add funds</strong>. Copy the{' '}
@@ -181,17 +181,17 @@ export default function DemoPage() {
               <StepCard
                 number={4}
                 title="Approve its budget with your passkey"
-                whyItMatters="This signature — not a Haven approval — is what authorizes any spending at all."
+                whyItMatters="This signature — not a Haven approval — is what gives the agent any spending authority at all."
               >
                 <p>
                   Approve it with your passkey. Nothing can be spent until you do. Leave the budget as set —
-                  that's what lets your agent pay a marketplace merchant in step 6.
+                  that's what lets your agent pay Ampersend in step 6.
                 </p>
               </StepCard>
 
               <StepCard number={5} title="Check that it's connected">
                 <p>
-                  Follow the restart instruction your agent's connect flow showed, then ask your agent:{' '}
+                  Follow any restart instruction your agent's connect flow showed, then ask your agent:{' '}
                   <em>&ldquo;What's my Haven budget?&rdquo;</em> An answer with your remaining budget confirms the
                   Haven tools are loaded.
                 </p>
@@ -200,7 +200,7 @@ export default function DemoPage() {
               <StepCard
                 number={6}
                 title="Buy a joke"
-                whyItMatters="Proves a 0.001 USDC payment can happen with no human click, inside the budget you signed."
+                whyItMatters="Proves your agent can pay 0.001 USDC with no Haven approval step, inside the budget you signed."
                 accent
               >
                 <p>
@@ -243,15 +243,11 @@ export default function DemoPage() {
                   from the first step.
                 </p>
                 <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-                  Why it matters: Every rule above was enforced by your account on-chain — Haven relayed the
-                  payments, but never held or authorized them.
+                  Why it matters: Every limit above was enforced by your account on-chain — Haven relayed account
+                  operations within those limits, but never held your funds or authorized a payment.
                 </p>
                 <p className="mt-4 text-sm text-[var(--v2-ink-2)]">
-                  Questions?{' '}
-                  <a href="#" className="font-medium text-[var(--v2-brand)] hover:underline">
-                    Ask the team
-                  </a>
-                  .
+                  Questions? Ask the team.
                 </p>
               </Card>
             </div>

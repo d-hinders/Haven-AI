@@ -28,10 +28,10 @@
 import { ethers } from 'ethers'
 import { HavenApi } from '../lib/haven-api.js'
 import { merchant402Reason } from '../lib/merchant-402.js'
-import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
+import { type Scenario, type ScenarioContext, type ScenarioResult, pass, fail, skip } from './types.js'
 import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, describeObserverRpc } from '../lib/chain.js'
 import { MCP_HEADERS, decodeChallenge, mcpBody, readMcpOutcome } from '../lib/merchant-mcp.js'
-import { provisionThrowawayIdentity, payViaDelegation, signTyped } from '../lib/throwaway-identity.js'
+import { withThrowawayIdentity, payViaDelegation, signTyped, type ThrowawayIdentity } from '../lib/throwaway-identity.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 const CHAIN_ID = 84532
@@ -73,204 +73,217 @@ export const x402Erc7710FreshAgent: Scenario = {
     "A brand-new agent's FIRST-EVER payment can be erc7710 direct settlement: authorize deploys " +
     'the counterfactual delegate account, and the merchant redemption settles treasury→merchant.',
   async run(ctx: ScenarioContext) {
-    if (!ctx.cfg.demoMerchantUrl) {
+    const { demoMerchantUrl, delegationAgentApiKey, delegationDelegateKey } = ctx.cfg
+    if (!demoMerchantUrl) {
       return skip('QA_DEMO_MERCHANT_URL not set — erc7710 settlement needs the dev demo-merchant')
     }
-    if (!ctx.cfg.delegationAgentApiKey || !ctx.cfg.delegationDelegateKey) {
+    if (!delegationAgentApiKey || !delegationDelegateKey) {
       return skip(
         'QA_DELEGATION_AGENT_API_KEY / QA_DELEGATION_DELEGATE_PRIVATE_KEY not set — ' +
           'the fresh-agent leg needs the standing identity as its funding source (#1063)',
       )
     }
 
-    const apiUrl = ctx.cfg.apiUrl
-    const provider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC)
-    const usdc = new ethers.Contract(SEPOLIA_USDC, USDC_ABI, provider)
-    const mcpUrl = `${ctx.cfg.demoMerchantUrl}/mcp`
-
     // ── 1. Fresh identity: random delegate key → counterfactual account ─────
-    const identity = await provisionThrowawayIdentity(apiUrl, {
-      chainId: CHAIN_ID, budgetAtomic: BUDGET_ATOMIC, label: 'fresh7710',
-    })
-    if ('error' in identity) return fail(identity.error)
-
-    // The whole point of the leg: prove the delegate hybrid account has NO
-    // code before the first payment. The address comes from the grant build
-    // (it is the budget delegation's delegate), so this reads the chain at a
-    // moment when no payment of any kind has existed for this agent.
-    if (!identity.delegateAccountAddress) {
-      return fail(
-        'grant build returned no delegate_account_address — cannot assert the counterfactual ' +
-          'precondition this leg exists for',
-      )
-    }
-    const codeBefore = await provider.getCode(identity.delegateAccountAddress)
-    if (codeBefore !== '0x') {
-      return fail(
-        `delegate account ${identity.delegateAccountAddress} already has code before any payment — ` +
-          'the fixture is not fresh, so this run proves nothing about the counterfactual path',
-      )
-    }
-
-    // ── 2. Fund the throwaway treasury from the standing identity ────────────
-    const funding = await payViaDelegation(
-      apiUrl, ctx.cfg.delegationAgentApiKey, ctx.cfg.delegationDelegateKey,
-      identity.accountAddress, FUND_HUMAN,
-    )
-    if (!funding.ok) return fail(`funding the throwaway treasury failed: ${funding.error}`)
-
-    // ── 3. The 402 challenge ─────────────────────────────────────────────────
-    const challengeRes = await fetch(mcpUrl, { method: 'POST', headers: MCP_HEADERS, body: mcpBody(1) })
-    const challengeText = await challengeRes.text()
-    const challenge = decodeChallenge(challengeRes.headers.get('PAYMENT-REQUIRED'), challengeText)
-    if (!challenge?.accepts?.length) {
-      return fail(`no x402 challenge from the merchant (HTTP ${challengeRes.status})`)
-    }
-    const erc7710Entry = challenge.accepts.find(
-      (entry) => entry.extra?.assetTransferMethod === 'erc7710',
-    )
-    if (!erc7710Entry) {
-      return skip(
-        'demo-merchant does not advertise erc7710 — set MERCHANT_X402_ERC7710=1 + ' +
-          'MERCHANT_ERC7710_DELEGATION_MANAGER on the dev merchant (see dev-environment.md)',
-      )
-    }
-    const amountAtomic = BigInt(erc7710Entry.amount ?? '0')
-    const merchant = erc7710Entry.payTo
-    if (!merchant || amountAtomic <= 0n) {
-      return fail(`unusable erc7710 accepts entry: ${JSON.stringify(erc7710Entry).slice(0, 160)}`)
-    }
-
-    const [treasuryBefore, merchantBefore, delegateBefore] = (await Promise.all([
-      usdc.balanceOf(identity.accountAddress),
-      usdc.balanceOf(merchant),
-      usdc.balanceOf(identity.delegate.address),
-    ])) as [bigint, bigint, bigint]
-
-    // ── 4. FIRST-EVER payment: authorize must deploy the account (#1667) ─────
-    const api = new HavenApi(ctx.cfg, identity.agentApiKey)
-    const auth = await api.authorizeX402({
-      url: challenge.resource?.url ?? mcpUrl,
-      payTo: merchant,
-      amount: amountAtomic.toString(),
-      asset: erc7710Entry.asset ?? SEPOLIA_USDC,
-      network: erc7710Entry.network ?? 'base-sepolia',
-      maxTimeoutSeconds: erc7710Entry.maxTimeoutSeconds,
-      facilitatorAddresses: erc7710Entry.extra?.facilitatorAddresses?.length
-        ? erc7710Entry.extra.facilitatorAddresses
-        : undefined,
-      // #2373: same challenge passthrough as x402-erc7710-settle — the stored
-      // copy feeds the settle-side resource/extensions echo (#2361).
-      paymentRequired: challenge as unknown as Record<string, unknown>,
-    })
-    if (!auth.ok || !auth.data.payment_id) {
-      return fail(`fresh-agent authorize failed (${auth.status}): ${JSON.stringify(auth.data).slice(0, 200)}`)
-    }
-    const signData = auth.data.sign_data
-    if (signData?.signature_scheme !== 'eip712_delegation' || !signData.typed_data) {
-      return fail(
-        `authorize did not return the erc7710 child payload — signature_scheme was ` +
-          `${JSON.stringify(signData?.signature_scheme)}`,
-      )
-    }
-
-    // Between authorize and settle: the account must have code NOW. This pins
-    // WHERE the deploy happens — authorize, fail-closed before the intent row
-    // (#1667) — not as a side effect of redemption, which would revert first.
-    //
-    // POLLED to a deadline, like every other on-chain assertion in this suite
-    // (#2445). The harness reads `QA_RPC_URL_BASE_SEPOLIA` (defaulting to the
-    // public endpoint) while the backend writes
-    // through `RPC_URL_BASE_SEPOLIA` — two different nodes — against a deploy
-    // the backend confirmed at ONE confirmation, so a single unpolled read can
-    // land on a node that has not caught up yet.
-    let codeAfterAuthorize = '0x'
-    const codeDeadline = Date.now() + TIMING.deployVisibleWaitMs
-    for (;;) {
-      codeAfterAuthorize = await provider.getCode(identity.delegateAccountAddress)
-      if (codeAfterAuthorize !== '0x' || Date.now() >= codeDeadline) break
-      await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
-    }
-    if (codeAfterAuthorize === '0x') {
-      // Say only what is known. Authorize is fail-closed on the deploy —
-      // `ensureHybridDeployed` throws on an unconfirmed or reverted deploy and
-      // `modules/x402/delegation-authorize.ts` turns that into a 502 — so a
-      // 200 means the BACKEND's node saw the account deployed. "The deploy did
-      // not run" is therefore the one conclusion this read cannot support, and
-      // asserting it sent triage into #1667's code instead of at the read.
-      return fail(
-        `authorize returned 200 — so the backend's node saw ${identity.delegateAccountAddress} ` +
-          `deployed (the deploy leg is fail-closed: an unconfirmed or reverted deploy 502s) — but ` +
-          `the harness's own observer node [${describeObserverRpc()}] still reports no code after ` +
-          `${TIMING.deployVisibleWaitMs / 1000}s of polling. The harness deliberately reads a ` +
-          `SECOND node (the backend writes through RPC_URL_BASE_SEPOLIA), so the direct reading is ` +
-          `that this node has not caught up. Settlement is not attempted: against an account this ` +
-          `run cannot see code on, a redemption failure would be uninterpretable`,
-      )
-    }
-
-    // ── 5. Sign the child, settle, merchant retry ────────────────────────────
-    const signature = await signTyped(identity.delegate, signData.typed_data)
-    const settle = await api.settleX402(auth.data.payment_id, signature)
-    if (!settle.ok || !settle.data.payment_header) {
-      return fail(`settle failed (${settle.status}): ${JSON.stringify(settle.data).slice(0, 200)}`)
-    }
-
-    const paid = await fetch(mcpUrl, {
-      method: 'POST',
-      headers: {
-        ...MCP_HEADERS,
-        // erc7710 is always x402 v2, and its header carries a whole
-        // delegation chain — sending the v1 alias too pushed the request past
-        // the merchant's header-size limit (HTTP 431, #2341). v2 name only
-        // here; the EIP-3009 scenarios still send both.
-        'PAYMENT-SIGNATURE': settle.data.payment_header,
-      },
-      body: mcpBody(2),
-    })
-    if (paid.status === 402) {
-      return fail(`merchant still returned 402 with the erc7710 header${await merchant402Reason(paid)}`)
-    }
-    const outcome = readMcpOutcome(await paid.text())
-    if (outcome.rejection !== undefined) {
-      return fail(`merchant rejected the fresh agent's erc7710 payment: ${outcome.rejection.slice(0, 160)}`)
-    }
-    if (!outcome.served) return fail('merchant response unparseable')
-
-    // ── 6. Money proof: direct settlement, no funding leg ────────────────────
-    const deadline = Date.now() + TIMING.settleWaitMs
-    let treasuryAfter = treasuryBefore
-    let merchantAfter = merchantBefore
-    for (;;) {
-      ;[treasuryAfter, merchantAfter] = (await Promise.all([
-        usdc.balanceOf(identity.accountAddress),
-        usdc.balanceOf(merchant),
-      ])) as [bigint, bigint]
-      if (treasuryAfter !== treasuryBefore || Date.now() >= deadline) break
-      await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
-    }
-    const fmt = (value: bigint) => ethers.formatUnits(value, 6)
-    if (treasuryBefore - treasuryAfter !== amountAtomic) {
-      return fail(
-        `treasury moved ${fmt(treasuryBefore - treasuryAfter)} USDC, expected exactly ${fmt(amountAtomic)}`,
-      )
-    }
-    if (merchantAfter - merchantBefore !== amountAtomic) {
-      return fail(
-        `merchant received ${fmt(merchantAfter - merchantBefore)} USDC, expected exactly ${fmt(amountAtomic)}`,
-      )
-    }
-    const delegateAfter = (await usdc.balanceOf(identity.delegate.address)) as bigint
-    if (delegateAfter !== delegateBefore) {
-      return fail(
-        `delegate EOA balance changed ${fmt(delegateBefore)} → ${fmt(delegateAfter)} — a funding leg ran`,
-      )
-    }
-
-    return pass(
-      `fresh agent's first-ever payment settled via erc7710: account ${identity.delegateAccountAddress} ` +
-        `counterfactual → deployed by authorize; merchant paid exactly ${fmt(amountAtomic)} USDC ` +
-        `treasury-direct; delegate EOA untouched`,
+    // Through the cleanup wrapper (#3459): the agent is revoked when the leg
+    // ends, after every assertion below.
+    return withThrowawayIdentity(
+      ctx.cfg.apiUrl,
+      { chainId: CHAIN_ID, budgetAtomic: BUDGET_ATOMIC, label: 'fresh7710' },
+      (identity) => freshAgentLeg(ctx, identity, {
+        demoMerchantUrl, apiKey: delegationAgentApiKey, delegateKey: delegationDelegateKey,
+      }),
     )
   },
+}
+
+/** The cold-start leg proper, on an already-provisioned throwaway identity. */
+async function freshAgentLeg(
+  ctx: ScenarioContext,
+  identity: ThrowawayIdentity,
+  standing: { demoMerchantUrl: string; apiKey: string; delegateKey: string },
+): Promise<ScenarioResult> {
+  const apiUrl = ctx.cfg.apiUrl
+  const provider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC)
+  const usdc = new ethers.Contract(SEPOLIA_USDC, USDC_ABI, provider)
+  const mcpUrl = `${standing.demoMerchantUrl}/mcp`
+
+  // The whole point of the leg: prove the delegate hybrid account has NO
+  // code before the first payment. The address comes from the grant build
+  // (it is the budget delegation's delegate), so this reads the chain at a
+  // moment when no payment of any kind has existed for this agent.
+  if (!identity.delegateAccountAddress) {
+    return fail(
+      'grant build returned no delegate_account_address — cannot assert the counterfactual ' +
+        'precondition this leg exists for',
+    )
+  }
+  const codeBefore = await provider.getCode(identity.delegateAccountAddress)
+  if (codeBefore !== '0x') {
+    return fail(
+      `delegate account ${identity.delegateAccountAddress} already has code before any payment — ` +
+        'the fixture is not fresh, so this run proves nothing about the counterfactual path',
+    )
+  }
+
+  // ── 2. Fund the throwaway treasury from the standing identity ────────────
+  const funding = await payViaDelegation(
+    apiUrl, standing.apiKey, standing.delegateKey,
+    identity.accountAddress, FUND_HUMAN,
+  )
+  if (!funding.ok) return fail(`funding the throwaway treasury failed: ${funding.error}`)
+
+  // ── 3. The 402 challenge ─────────────────────────────────────────────────
+  const challengeRes = await fetch(mcpUrl, { method: 'POST', headers: MCP_HEADERS, body: mcpBody(1) })
+  const challengeText = await challengeRes.text()
+  const challenge = decodeChallenge(challengeRes.headers.get('PAYMENT-REQUIRED'), challengeText)
+  if (!challenge?.accepts?.length) {
+    return fail(`no x402 challenge from the merchant (HTTP ${challengeRes.status})`)
+  }
+  const erc7710Entry = challenge.accepts.find(
+    (entry) => entry.extra?.assetTransferMethod === 'erc7710',
+  )
+  if (!erc7710Entry) {
+    return skip(
+      'demo-merchant does not advertise erc7710 — set MERCHANT_X402_ERC7710=1 + ' +
+        'MERCHANT_ERC7710_DELEGATION_MANAGER on the dev merchant (see dev-environment.md)',
+    )
+  }
+  const amountAtomic = BigInt(erc7710Entry.amount ?? '0')
+  const merchant = erc7710Entry.payTo
+  if (!merchant || amountAtomic <= 0n) {
+    return fail(`unusable erc7710 accepts entry: ${JSON.stringify(erc7710Entry).slice(0, 160)}`)
+  }
+
+  const [treasuryBefore, merchantBefore, delegateBefore] = (await Promise.all([
+    usdc.balanceOf(identity.accountAddress),
+    usdc.balanceOf(merchant),
+    usdc.balanceOf(identity.delegate.address),
+  ])) as [bigint, bigint, bigint]
+
+  // ── 4. FIRST-EVER payment: authorize must deploy the account (#1667) ─────
+  const api = new HavenApi(ctx.cfg, identity.agentApiKey)
+  const auth = await api.authorizeX402({
+    url: challenge.resource?.url ?? mcpUrl,
+    payTo: merchant,
+    amount: amountAtomic.toString(),
+    asset: erc7710Entry.asset ?? SEPOLIA_USDC,
+    network: erc7710Entry.network ?? 'base-sepolia',
+    maxTimeoutSeconds: erc7710Entry.maxTimeoutSeconds,
+    facilitatorAddresses: erc7710Entry.extra?.facilitatorAddresses?.length
+      ? erc7710Entry.extra.facilitatorAddresses
+      : undefined,
+    // #2373: same challenge passthrough as x402-erc7710-settle — the stored
+    // copy feeds the settle-side resource/extensions echo (#2361).
+    paymentRequired: challenge as unknown as Record<string, unknown>,
+  })
+  if (!auth.ok || !auth.data.payment_id) {
+    return fail(`fresh-agent authorize failed (${auth.status}): ${JSON.stringify(auth.data).slice(0, 200)}`)
+  }
+  const signData = auth.data.sign_data
+  if (signData?.signature_scheme !== 'eip712_delegation' || !signData.typed_data) {
+    return fail(
+      `authorize did not return the erc7710 child payload — signature_scheme was ` +
+        `${JSON.stringify(signData?.signature_scheme)}`,
+    )
+  }
+
+  // Between authorize and settle: the account must have code NOW. This pins
+  // WHERE the deploy happens — authorize, fail-closed before the intent row
+  // (#1667) — not as a side effect of redemption, which would revert first.
+  //
+  // POLLED to a deadline, like every other on-chain assertion in this suite
+  // (#2445). The harness reads `QA_RPC_URL_BASE_SEPOLIA` (defaulting to the
+  // public endpoint) while the backend writes
+  // through `RPC_URL_BASE_SEPOLIA` — two different nodes — against a deploy
+  // the backend confirmed at ONE confirmation, so a single unpolled read can
+  // land on a node that has not caught up yet.
+  let codeAfterAuthorize = '0x'
+  const codeDeadline = Date.now() + TIMING.deployVisibleWaitMs
+  for (;;) {
+    codeAfterAuthorize = await provider.getCode(identity.delegateAccountAddress)
+    if (codeAfterAuthorize !== '0x' || Date.now() >= codeDeadline) break
+    await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+  }
+  if (codeAfterAuthorize === '0x') {
+    // Say only what is known. Authorize is fail-closed on the deploy —
+    // `ensureHybridDeployed` throws on an unconfirmed or reverted deploy and
+    // `modules/x402/delegation-authorize.ts` turns that into a 502 — so a
+    // 200 means the BACKEND's node saw the account deployed. "The deploy did
+    // not run" is therefore the one conclusion this read cannot support, and
+    // asserting it sent triage into #1667's code instead of at the read.
+    return fail(
+      `authorize returned 200 — so the backend's node saw ${identity.delegateAccountAddress} ` +
+        `deployed (the deploy leg is fail-closed: an unconfirmed or reverted deploy 502s) — but ` +
+        `the harness's own observer node [${describeObserverRpc()}] still reports no code after ` +
+        `${TIMING.deployVisibleWaitMs / 1000}s of polling. The harness deliberately reads a ` +
+        `SECOND node (the backend writes through RPC_URL_BASE_SEPOLIA), so the direct reading is ` +
+        `that this node has not caught up. Settlement is not attempted: against an account this ` +
+        `run cannot see code on, a redemption failure would be uninterpretable`,
+    )
+  }
+
+  // ── 5. Sign the child, settle, merchant retry ────────────────────────────
+  const signature = await signTyped(identity.delegate, signData.typed_data)
+  const settle = await api.settleX402(auth.data.payment_id, signature)
+  if (!settle.ok || !settle.data.payment_header) {
+    return fail(`settle failed (${settle.status}): ${JSON.stringify(settle.data).slice(0, 200)}`)
+  }
+
+  const paid = await fetch(mcpUrl, {
+    method: 'POST',
+    headers: {
+      ...MCP_HEADERS,
+      // erc7710 is always x402 v2, and its header carries a whole
+      // delegation chain — sending the v1 alias too pushed the request past
+      // the merchant's header-size limit (HTTP 431, #2341). v2 name only
+      // here; the EIP-3009 scenarios still send both.
+      'PAYMENT-SIGNATURE': settle.data.payment_header,
+    },
+    body: mcpBody(2),
+  })
+  if (paid.status === 402) {
+    return fail(`merchant still returned 402 with the erc7710 header${await merchant402Reason(paid)}`)
+  }
+  const outcome = readMcpOutcome(await paid.text())
+  if (outcome.rejection !== undefined) {
+    return fail(`merchant rejected the fresh agent's erc7710 payment: ${outcome.rejection.slice(0, 160)}`)
+  }
+  if (!outcome.served) return fail('merchant response unparseable')
+
+  // ── 6. Money proof: direct settlement, no funding leg ────────────────────
+  const deadline = Date.now() + TIMING.settleWaitMs
+  let treasuryAfter = treasuryBefore
+  let merchantAfter = merchantBefore
+  for (;;) {
+    ;[treasuryAfter, merchantAfter] = (await Promise.all([
+      usdc.balanceOf(identity.accountAddress),
+      usdc.balanceOf(merchant),
+    ])) as [bigint, bigint]
+    if (treasuryAfter !== treasuryBefore || Date.now() >= deadline) break
+    await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+  }
+  const fmt = (value: bigint) => ethers.formatUnits(value, 6)
+  if (treasuryBefore - treasuryAfter !== amountAtomic) {
+    return fail(
+      `treasury moved ${fmt(treasuryBefore - treasuryAfter)} USDC, expected exactly ${fmt(amountAtomic)}`,
+    )
+  }
+  if (merchantAfter - merchantBefore !== amountAtomic) {
+    return fail(
+      `merchant received ${fmt(merchantAfter - merchantBefore)} USDC, expected exactly ${fmt(amountAtomic)}`,
+    )
+  }
+  const delegateAfter = (await usdc.balanceOf(identity.delegate.address)) as bigint
+  if (delegateAfter !== delegateBefore) {
+    return fail(
+      `delegate EOA balance changed ${fmt(delegateBefore)} → ${fmt(delegateAfter)} — a funding leg ran`,
+    )
+  }
+
+  return pass(
+    `fresh agent's first-ever payment settled via erc7710: account ${identity.delegateAccountAddress} ` +
+      `counterfactual → deployed by authorize; merchant paid exactly ${fmt(amountAtomic)} USDC ` +
+      `treasury-direct; delegate EOA untouched`,
+  )
 }

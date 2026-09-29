@@ -49,7 +49,10 @@ vi.mock('../lib/throwaway-identity.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/throwaway-identity.js')>()
   return {
     ...actual,
-    provisionThrowawayIdentity: mockProvision,
+    // The leg's provisioning is scripted here; the cleanup wrapper itself is
+    // exercised, unmocked, in throwaway-cleanup.test.ts (#3459).
+    withThrowawayIdentity: async (_api: string, _opts: unknown, leg: (i: unknown) => Promise<unknown>) =>
+      leg(await mockProvision()),
     payViaDelegation: mockPay,
   }
 })

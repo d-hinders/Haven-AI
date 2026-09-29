@@ -310,11 +310,13 @@ form for a second attempt at a version that failed to publish.
 
 ### The contract-doc gate
 
-**Three** contract docs are coupled to the published packages, and the blocking
-`Contract-doc coupling` check fails until a PR that touches those packages also
-satisfies each. A version bump touches all five packages, so **every release PR
-needs all three** — not optional, not conditional, and **this paragraph said
-"two" until 2026-09-16**, having silently dropped `package-dev-channel.md`.
+**Five** contract docs are coupled to the files every version bump writes, and
+the blocking `Contract-doc coupling` check fails until a PR that touches those
+files also satisfies each. A version bump touches all five packages, so **every
+release PR needs all five**. None is optional or conditional. **This paragraph
+said "two" until 2026-09-16**, having silently dropped `package-dev-channel.md`,
+and "three" until 2026-09-29, when #3454's move of `SIGNER_VERSION` into
+the signer's `tools.ts` added two more.
 
 The count is the gate's, not a memory:
 

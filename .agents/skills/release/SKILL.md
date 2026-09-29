@@ -329,7 +329,13 @@ clears them); the other two are cleared by the shard you write anyway:
    `last-verified` already reads today from an earlier change, say so and do
    NOT re-stamp it, because a rubber-stamped date is worse than a stale one
    (#1366).
-3. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
+3. `docs/security/delegation-rail-security-model.md`: the bump rewrites
+   `SIGNER_VERSION` in `packages/signer/src/tools.ts`, which this doc covers.
+   It has no `satisfied-by:`, so add a scoped *Re-verified* note saying that
+   the release's edit to that file is the version literal only. Name any
+   signing-surface change in the range as already re-verified where it merged,
+   or re-verify it now.
+4. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
    shard ending in a perimeter verdict. The **version**, not the PR number
    (#1789): the shard must exist before the PR is opened, because the gate blocks
    the PR without it, so a PR-numbered name cannot be written when it is needed.
@@ -337,12 +343,6 @@ clears them); the other two are cleared by the shard you write anyway:
    `docs/architecture/04-x402-payment-sequence.md`, whose front matter both
    declare `satisfied-by: docs/regulatory/casp-changelog/**`. That is why
    neither needs an edit of its own.
-4. `docs/security/delegation-rail-security-model.md`: the bump rewrites
-   `SIGNER_VERSION` in `packages/signer/src/tools.ts`, which this doc covers.
-   It has no `satisfied-by:`, so add a scoped *Re-verified* note saying that
-   the release's edit to that file is the version literal only. Name any
-   signing-surface change in the range as already re-verified where it merged,
-   or re-verify it now.
 
 **Do not take this list on faith either.** Run the command above at the top of
 the release: it is the gate's own reckoning against the current front matter,

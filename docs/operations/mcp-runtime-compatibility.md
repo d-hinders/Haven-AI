@@ -84,10 +84,10 @@ last-verified: "2026-09-28"
 > version-skew/consent-hash contracts: (1) a `protocol: 'http'` catalog row's
 > refusal now names `haven_quote_x402` instead of the mcp-only
 > `haven_pay_mcp_tool`, with `next_action: retry_with_explicit_context`
-> (was `stop_and_tell_user`) — refusal wording, code and `next_action`/
-> `next_tool`/`next_arguments` content change; no new refusal CODE, no schema
-> change; (2) the `PRICE_EXCEEDS_MAX` message states both sides in whole
-> tokens instead of mixing units — message text only, same
+> (was `stop_and_tell_user`) — refusal wording and `next_action`/
+> `next_tool`/`next_arguments` content change; `CATALOG_ENTRY_UNUSABLE` is
+> unchanged, no schema change; (2) the `PRICE_EXCEEDS_MAX` message states
+> both sides in whole tokens instead of mixing units — message text only, same
 > code/status/`retry_with_new_quote`; (3) the erc7710 settled branch of
 > `haven_settle_mcp_tool` now ALSO includes `agent_summary.purchase_summary`
 > alongside the `agent_summary.product` field it already carried (additive,

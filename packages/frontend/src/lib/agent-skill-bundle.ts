@@ -189,8 +189,8 @@ hard-code a choice. **erc7710** (direct settlement — chosen per merchant when
 its 402 advertises \`assetTransferMethod: "erc7710"\` AND your account is on
 the delegation rail; never a blanket default): \`mcp__haven-signer__haven_sign\`
 with \`payment_id\` ONLY; the signer fetches the settlement child itself.
-**EIP-3009** (the bridge — used when the merchant does not advertise
-erc7710): \`mcp__haven-signer__haven_sign_x402\` with \`payment_id\` ONLY —
+**EIP-3009** (the bridge — used otherwise, whenever the merchant offers a
+standard entry): \`mcp__haven-signer__haven_sign_x402\` with \`payment_id\` ONLY —
 the local signer fetches the exact signing bytes AND \`payment_required\`
 itself, so never relay \`typed_data\` or the 402 blob yourself. A merchant
 that advertises ONLY erc7710 against an account that is NOT on the

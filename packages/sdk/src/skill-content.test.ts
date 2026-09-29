@@ -151,6 +151,22 @@ describe('generic skill content', () => {
     expect(signing).toContain('does not fall back to EIP-3009')
   })
 
+  // #3423 review round 2 (N1): "used when the merchant does not advertise
+  // erc7710" was too narrow — `selectX402SettlementScheme` also picks
+  // EIP-3009 for a merchant that advertises BOTH, when the account is off
+  // the delegation rail (delegationRail is checked first; the standard
+  // fallback runs whenever no erc7710 selection was made, not only when none
+  // was offered). The corrected sentence says "used otherwise, whenever the
+  // merchant offers a standard entry" instead of naming just one condition.
+  it('does not narrow EIP-3009 to "merchant does not advertise erc7710" — it is the otherwise case (#3423 N1)', () => {
+    const signing = HAVEN_SKILL_MD.slice(
+      HAVEN_SKILL_MD.indexOf('**Signing:**'),
+      HAVEN_SKILL_MD.indexOf('**Settle:**'),
+    )
+    expect(signing).toMatch(/EIP-3009[\s\S]*?used otherwise[\s\S]*?standard entry/i)
+    expect(signing).not.toMatch(/used when the merchant does not advertise/i)
+  })
+
   // #3423 review round 1 (D4): `settled: false` means something different per
   // scheme — EIP-3009 has a funding leg that can fail to confirm; erc7710 has
   // none, so `settled: false` there means unverified settlement, not funding.

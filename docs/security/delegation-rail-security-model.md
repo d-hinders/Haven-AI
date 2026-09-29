@@ -1745,6 +1745,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `redemption-guard.ts`, `sub-budget-guards.ts`, `settlement-child.ts`'s
 > shape predicates, `signer/tools.ts`'s new `sub_budget_id` channel, and the
 > allowlist bullets above. Nothing else in this document was re-read for it,
+
 > **Re-verified (#3423 slice C, 2026-09-29):** the SDK's
 > `listReceiptsPage` (and `haven_list_receipts` on both surfaces) gains an
 > opt-in `compact` that drops three verbatim payload echoes from each

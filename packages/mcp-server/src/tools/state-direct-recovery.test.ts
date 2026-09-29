@@ -424,8 +424,9 @@ describe('haven_list_receipts', () => {
           }], total: 1, has_more: false, next_cursor: null }
     stubFetch({ 'GET /machine-payments/receipts': { status: 200, body } })
     const full = ok<{ receipts: Array<Record<string, unknown>> }>(await handlers().haven_list_receipts({}))
-    expect(full.data.receipts[0]).toHaveProperty('challengePayload')
-    expect(full.data.receipts[0]).toHaveProperty('protocolReceiptPayload')
+    for (const key of ['challengePayload', 'selectedPayment', 'protocolReceiptPayload']) {
+      expect(full.data.receipts[0]).toHaveProperty(key)
+    }
     stubFetch({ 'GET /machine-payments/receipts': { status: 200, body } })
     const compact = ok<{ receipts: Array<Record<string, unknown>> }>(await handlers().haven_list_receipts({ compact: true }))
     for (const key of ['challengePayload', 'selectedPayment', 'protocolReceiptPayload']) {

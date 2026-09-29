@@ -126,14 +126,6 @@ function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummar
   }
 }
 
-/**
- * Internal read-only account boundary for HavenClient.
- *
- * It owns authenticated account/allowance/receipt reads and intentionally has
- * no signer, merchant delivery, or payment-state mutation capability. Exported
- * from this module for direct tests and composition only; it is not exported by
- * the SDK entrypoint.
- */
 /** #3423: a receipts-list row without its payload echoes (see `listReceiptsPage({ compact })`). */
 function compactReceipt(receipt: HavenPaymentReceipt): HavenPaymentReceipt {
   const row: HavenPaymentReceipt = { ...receipt }
@@ -143,6 +135,14 @@ function compactReceipt(receipt: HavenPaymentReceipt): HavenPaymentReceipt {
   return row
 }
 
+/**
+ * Internal read-only account boundary for HavenClient.
+ *
+ * It owns authenticated account/allowance/receipt reads and intentionally has
+ * no signer, merchant delivery, or payment-state mutation capability. Exported
+ * from this module for direct tests and composition only; it is not exported by
+ * the SDK entrypoint.
+ */
 export class AccountReads {
   private readonly transport: HavenApiTransport
   private readonly getPaymentStatus: PaymentStatusReader

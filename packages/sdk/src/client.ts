@@ -984,9 +984,9 @@ export class HavenClient {
     return this.accountReads.listReceipts(options)
   }
 
-  /** #3128: one page of receipts with `total`, `hasMore` and `nextCursor`. */
   /**
-   * One page of this agent's receipts. `compact: true` (#3423) drops each row's
+   * One page of receipts with `total`, `hasMore` and `nextCursor` (#3128).
+   * `compact: true` (#3423) drops each row's
    * `challengePayload`, `selectedPayment` and `protocolReceiptPayload`; the
    * default shape is unchanged.
    */

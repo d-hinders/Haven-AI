@@ -86,7 +86,8 @@ last-verified: "2026-09-29"
 > `listReceiptsPage({ compact })`, which both runtimes call. The default,
 > without the key, is byte-identical. Version skew differs by surface. A hosted
 > server older than this change refuses `compact` by name through its strict
-> input (`parseStrict`, with the declared-keys message); an agent that gets
+> input schema (the transport's `.strict()` and the handler's `parseStrict`,
+> both with the declared-keys message); an agent that gets
 > that refusal should drop the key, and no data is lost. A local
 > `@haven_ai/mcp` older than this change parses input non-strictly
 > (`objectInput` strips unknown keys), so it silently ignores `compact` and

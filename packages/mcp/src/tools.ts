@@ -172,7 +172,10 @@ export const toolSchemas = {
     /** #3128: the previous page's next_cursor (a receipt id). */
     cursor: z.string().min(1).optional(),
     /** #3423: drop each row's payload echoes; the default shape is unchanged. */
-    compact: z.boolean().optional(),
+    compact: z
+      .boolean()
+      .optional()
+      .describe('true drops challengePayload, selectedPayment and protocolReceiptPayload from each row; omit for the full row.'),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),

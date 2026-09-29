@@ -10,6 +10,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
   - .env.dev.example
+  - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
   - packages/backend/src/config.ts
@@ -801,6 +802,24 @@ production Vercel env configuration sets it today, and `isDemoPageVisible`
 additionally ignores the override whenever Vercel's own `VERCEL` variable is
 present — belt-and-suspenders against it ever doing anything on a Vercel
 deployment even if that changed.
+
+### `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright builds (#3483)
+
+The Add funds modal reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
+(`packages/frontend/src/components/AddFundsModal.tsx`), so the app a visual
+spec's server serves shows the "Buy with card" onramp card only when the BUILD
+that produced it carried the id. Every CI surface that builds or serves the app
+for Playwright therefore sets it: `ci.yml`'s frontend_checks build (whose
+uploaded artifact the design_visual job downloads),
+`update-visual-baselines.yml`'s build and both regenerate steps (under `CI=1`
+the webServer boots that standalone build; the non-CI branch runs `next dev`,
+which inlines the constant from `playwright.config.ts`'s `webServer.env`). All
+of them set the same fixed synthetic literal, `e2e-onramp-app-id-placeholder`.
+**It is CI-only by construction: nothing in the repo sets it anywhere else** —
+no `.env*` file, no other workflow, no Docker or hosting config (the literal is
+grep-unique, so the leak check is mechanical), and it is not a secret: the id
+is never rendered, only its PRESENCE gates the card, so a fixed value keeps
+renders deterministic across key rotations.
 
 ## Inspecting the dev environment
 

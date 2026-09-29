@@ -745,6 +745,17 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
+          # #3483: the Add funds modal reads the Coinbase onramp id at BUILD
+          # time (AddFundsModal.tsx — a NEXT_PUBLIC_ bundle constant), so the
+          # design_visual job's baselines can only exist when the build that
+          # produced its downloaded `frontend-next-build` artifact carried
+          # it. Same fixed synthetic literal as update-visual-baselines.yml:
+          # the id is never rendered (only its PRESENCE gates the card), so
+          # no secret is needed and a fixed value keeps renders deterministic
+          # across key rotations. CI-only env — no deployment config reads
+          # this literal (grepped the repo: nothing outside these two
+          # workflows and the e2e spec references it).
+          NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
 
       - name: Upload frontend build
         uses: actions/upload-artifact@v4

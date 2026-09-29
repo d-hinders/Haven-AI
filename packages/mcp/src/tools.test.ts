@@ -2168,6 +2168,28 @@ describe('haven_list_receipts (#3128) — the local runtime returns the page, no
     expect(u).toContain('cursor=rcpt_0')
   })
 
+  it('compact: true drops the three payload echoes; the default keeps them (#3423)', async () => {
+    const body = { receipts: [{
+            id: 'rcpt_1', payment_id: 'pay_1', rail: 'x402', amount_human: '0.001',
+            challenge_payload: { payment_required: { accepts: [{ amount: '1000' }] } },
+            selected_payment: { scheme: 'exact' },
+            protocol_receipt_payload: { success: true },
+          }], total: 1, has_more: false, next_cursor: null }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse(body))
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl, x402Wallet: safeAddress })
+    const handlers = createToolHandlers(haven)
+    const full = await handlers.haven_list_receipts({})
+    const compact = await handlers.haven_list_receipts({ compact: true })
+    if (!full.success || !compact.success) throw new Error('list failed')
+    const fullRow = (full.data as { receipts: Array<Record<string, unknown>> }).receipts[0]
+    const compactRow = (compact.data as { receipts: Array<Record<string, unknown>> }).receipts[0]
+    expect(fullRow).toHaveProperty('challengePayload')
+    for (const key of ['challengePayload', 'selectedPayment', 'protocolReceiptPayload']) {
+      expect(compactRow).not.toHaveProperty(key)
+    }
+    expect(compactRow).toMatchObject({ paymentId: 'pay_1' })
+  })
+
   it('against a backend without the page fields the three are null, never a fabricated 0 / false', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ receipts: [] }))
     const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl, x402Wallet: safeAddress })

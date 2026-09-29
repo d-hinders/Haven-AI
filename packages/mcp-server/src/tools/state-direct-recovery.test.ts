@@ -415,6 +415,25 @@ describe('haven_list_receipts', () => {
     expect(result.data).toMatchObject({ total: 7, hasMore: true, nextCursor: 'rcpt_1' })
   })
 
+  it('compact: true drops challengePayload / selectedPayment / protocolReceiptPayload; the default keeps them (#3423)', async () => {
+    const body = { receipts: [{
+            id: 'rcpt_1', payment_id: 'pay_1', rail: 'x402', amount_human: '0.001',
+            challenge_payload: { payment_required: { accepts: [{ amount: '1000' }] } },
+            selected_payment: { scheme: 'exact' },
+            protocol_receipt_payload: { success: true },
+          }], total: 1, has_more: false, next_cursor: null }
+    stubFetch({ 'GET /machine-payments/receipts': { status: 200, body } })
+    const full = ok<{ receipts: Array<Record<string, unknown>> }>(await handlers().haven_list_receipts({}))
+    expect(full.data.receipts[0]).toHaveProperty('challengePayload')
+    expect(full.data.receipts[0]).toHaveProperty('protocolReceiptPayload')
+    stubFetch({ 'GET /machine-payments/receipts': { status: 200, body } })
+    const compact = ok<{ receipts: Array<Record<string, unknown>> }>(await handlers().haven_list_receipts({ compact: true }))
+    for (const key of ['challengePayload', 'selectedPayment', 'protocolReceiptPayload']) {
+      expect(compact.data.receipts[0]).not.toHaveProperty(key)
+    }
+    expect(compact.data.receipts[0]).toMatchObject({ id: 'rcpt_1', paymentId: 'pay_1' })
+  })
+
   it('forwards cursor and limit to the endpoint (#3128)', async () => {
     stubFetch({
       'GET /machine-payments/receipts': { status: 200, body: { receipts: [], total: 0, has_more: false, next_cursor: null } },

@@ -134,6 +134,15 @@ function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummar
  * from this module for direct tests and composition only; it is not exported by
  * the SDK entrypoint.
  */
+/** #3423: a receipts-list row without its payload echoes (see `listReceiptsPage({ compact })`). */
+function compactReceipt(receipt: HavenPaymentReceipt): HavenPaymentReceipt {
+  const row: HavenPaymentReceipt = { ...receipt }
+  delete row.challengePayload
+  delete row.selectedPayment
+  delete row.protocolReceiptPayload
+  return row
+}
+
 export class AccountReads {
   private readonly transport: HavenApiTransport
   private readonly getPaymentStatus: PaymentStatusReader
@@ -334,14 +343,21 @@ export class AccountReads {
   }
 
   /** #3128: one page with `total`, `hasMore` and `nextCursor` — see {@link HavenPaymentReceiptsPage}. */
-  async listReceiptsPage(options: { limit?: number; cursor?: string } = {}): Promise<HavenPaymentReceiptsPage> {
+  async listReceiptsPage(
+    options: { limit?: number; cursor?: string; compact?: boolean } = {},
+  ): Promise<HavenPaymentReceiptsPage> {
     const params = new URLSearchParams()
     if (options.limit) params.set('limit', String(options.limit))
     if (options.cursor) params.set('cursor', options.cursor)
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.transport.get<RawHavenPaymentReceiptsResponse>(`/machine-payments/receipts${query}`)
+    const receipts = raw.receipts.map(mapPaymentReceipt)
     return {
-      receipts: raw.receipts.map(mapPaymentReceipt),
+      // #3423 (owner decision, opt-in): `compact` drops the three bulky
+      // payload echoes (the merchant's full 402 challenge, the selected
+      // option, and the merchant's PAYMENT-RESPONSE) from each row. The keys
+      // are absent, not null, and the default shape is unchanged.
+      receipts: options.compact ? receipts.map(compactReceipt) : receipts,
       total: typeof raw.total === 'number' ? raw.total : null,
       hasMore: typeof raw.has_more === 'boolean' ? raw.has_more : null,
       nextCursor: typeof raw.next_cursor === 'string' ? raw.next_cursor : null,

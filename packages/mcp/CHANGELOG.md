@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **`haven_list_receipts` accepts `compact: true` (#3423).** Each row then leaves out `challengePayload`, `selectedPayment` and `protocolReceiptPayload`, the merchant's payload echoes. Omit it for the unchanged default shape. The hosted runtime accepts the same key.
+
 - **Task-budget handoffs carry the old-signer recovery notice (#3419).** `haven_open_task_budget` and `haven_close_task_budget` results that hand off to `haven_sign { task_budget_id }` now carry `signer_compatibility` with `task_sign_context_version`, `min_signer_version` (`0.6.0-alpha.0`, the first signer with the `task_budget_id` form), and the recovery route as prose (`check`) and data (`fallback`): if `haven_sign` answers `SIGNING_ERROR` with a message starting "Pass payment_id (preferred for delegation-rail x402", the signer predates task budgets and signed nothing — close the pending budget with `haven_close_task_budget`, update via the connector doctor and its repair line, then reopen. There is no relay fallback for this signing context.
 
 ### Removed

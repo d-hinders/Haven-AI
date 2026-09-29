@@ -473,6 +473,8 @@ export const toolSchemas = {
     limit: z.number().int().min(1).max(100).optional(),
     /** #3128: the previous page's next_cursor (a receipt id). */
     cursor: z.string().min(1).optional(),
+    /** #3423: drop each row's payload echoes; the default shape is unchanged. */
+    compact: z.boolean().optional(),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),

@@ -29,7 +29,7 @@ import {
 } from './repositories/delegate-monitoring.js'
 import { config } from '../config.js'
 import { getChain } from '../domain/chains.js'
-import { getTokenBalance } from '../infra/chain/relayer-reads.js'
+import { readTokenBalances } from './chain/batched-token-balances.js'
 import { sendDelegateAlertWebhook } from './delegate-alert-webhook.js'
 
 const USDC_DECIMALS = 6
@@ -55,6 +55,18 @@ export interface DelegateBalanceReport {
   /** True when dustTotalAtomic passed the alert threshold. */
   dustAlert: boolean
   lingering: DelegateBalanceFinding[]
+  /**
+   * Delegates whose balance could not be read this round (#3458): a failed
+   * chunk or chain now leaves up to a whole chunk unread, so the count is
+   * reported and logged rather than silently shrinking `findings`.
+   */
+  unread: Array<{ agentId: string; chainId: number }>
+  /**
+   * Chains whose reader could not even be set up, with the error (#3458).
+   * Only a configuration fault reaches this (a non-ERC-20 USDC address): a
+   * retry will not fix it, so the reason is carried to the log.
+   */
+  chainErrors: Record<number, string>
   scannedAt: string
 }
 
@@ -110,15 +122,39 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
   const fresh = await loadAgentsWithFreshPendingPayments(delegates.map((d) => d.agent_id))
   const floor = sweepFloorAtomic()
 
-  const findings: DelegateBalanceFinding[] = []
+  // #3458: one batched read per chain (Multicall3, sequential chunks) instead
+  // of one `eth_call` per delegate — see `infra/chain/batched-token-balances.ts`.
+  const holdersByChain = new Map<number, string[]>()
   for (const delegate of delegates) {
-    const usdc = usdcAddressFor(delegate.chain_id)
-    if (!usdc) continue // chain without USDC — nothing to monitor
-    let balanceAtomic: bigint
+    if (!usdcAddressFor(delegate.chain_id)) continue // chain without USDC — nothing to monitor
+    const holders = holdersByChain.get(delegate.chain_id) ?? []
+    holders.push(delegate.delegate_address)
+    holdersByChain.set(delegate.chain_id, holders)
+  }
+  const balancesByChain = new Map<number, Map<string, bigint | null>>()
+  const chainErrors: Record<number, string> = {}
+  for (const [chainId, holders] of holdersByChain) {
     try {
-      balanceAtomic = await getTokenBalance(delegate.chain_id, delegate.delegate_address, usdc)
-    } catch {
-      continue // RPC hiccup: skip this delegate this round
+      balancesByChain.set(chainId, await readTokenBalances(chainId, usdcAddressFor(chainId)!, holders))
+    } catch (err) {
+      // The reader throws only for a token it refuses (a misconfigured USDC
+      // address). That chain's delegates are unread and the reason is kept;
+      // the other chains are still scanned.
+      chainErrors[chainId] = err instanceof Error ? err.message : String(err)
+      balancesByChain.set(chainId, new Map(holders.map((h) => [h, null])))
+    }
+  }
+
+  const findings: DelegateBalanceFinding[] = []
+  const unread: DelegateBalanceReport['unread'] = []
+  for (const delegate of delegates) {
+    const balances = balancesByChain.get(delegate.chain_id)
+    if (!balances) continue // chain without USDC — nothing to monitor
+    const balanceAtomic = balances.get(delegate.delegate_address)
+    if (balanceAtomic === undefined || balanceAtomic === null) {
+      // RPC hiccup: skip this delegate this round, but say so.
+      unread.push({ agentId: delegate.agent_id, chainId: delegate.chain_id })
+      continue
     }
     findings.push({
       agentId: delegate.agent_id,
@@ -139,6 +175,8 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
     dustTotalAtomic,
     dustAlert: dustTotalAtomic >= dustAlertThresholdAtomic(),
     lingering: findings.filter((f) => f.state === 'lingering'),
+    unread,
+    chainErrors,
     scannedAt: new Date().toISOString(),
   }
 }
@@ -189,10 +227,26 @@ export async function runDelegateBalanceMonitor(log: MonitorLogger): Promise<Del
     )
   }
 
+  if (report.unread.length > 0) {
+    const byChain: Record<number, number> = {}
+    for (const u of report.unread) byChain[u.chainId] = (byChain[u.chainId] ?? 0) + 1
+    log.warn(
+      {
+        scope: 'delegate-balance-monitor',
+        unread: report.unread.length,
+        unreadByChain: byChain,
+        ...(Object.keys(report.chainErrors).length > 0 ? { chainErrors: report.chainErrors } : {}),
+      },
+      'UNREAD delegate balances — the balance read failed for these delegates this round; ' +
+        'they are NOT known to be clear, and the next scan retries them',
+    )
+  }
+
   log.info(
     {
       scope: 'delegate-balance-monitor',
       scanned: report.findings.length,
+      unread: report.unread.length,
       lingering: report.lingering.length,
       dustTotalUsdc: usdc(report.dustTotalAtomic),
     },
@@ -234,7 +288,7 @@ export function newAlertState(): AlertState {
 
 const moduleAlertState = newAlertState()
 
-function lingeringKey(f: DelegateBalanceFinding): string {
+function lingeringKey(f: { agentId: string; chainId: number }): string {
   return `${f.agentId}:${f.chainId}`
 }
 
@@ -299,11 +353,22 @@ async function dispatchAlerts(report: DelegateBalanceReport, log: MonitorLogger)
   // Sync the edge state to the report unconditionally — a condition that
   // cleared re-arms (its next appearance pings again) whether or not anything
   // was delivered, exactly like the pre-#3345 state machine.
-  const currentKeys = new Set(report.lingering.map(lingeringKey))
+  //
+  // #3458: a delegate that was NOT read this round has not cleared — it is
+  // unknown. Its lingering key is kept, so a failed read does not re-ping it
+  // on the next successful scan, and a partial dust total from a scan with
+  // unread delegates does not re-arm the dust edge. The trade-off: while ANY
+  // delegate stays unread — indefinitely, for a malformed stored address or a
+  // chain whose RPC stays down — a dust episode that cleared cannot re-arm.
+  // The hourly UNREAD warning is what keeps that state visible.
+  const currentKeys = new Set([
+    ...report.lingering.map(lingeringKey),
+    ...report.unread.map(lingeringKey),
+  ])
   moduleAlertState.lingeringKeys = new Set(
     [...moduleAlertState.lingeringKeys].filter((k) => currentKeys.has(k)),
   )
-  if (!report.dustAlert) moduleAlertState.dustActive = false
+  if (!report.dustAlert && report.unread.length === 0) moduleAlertState.dustActive = false
 
   if (messages.length === 0) return
 

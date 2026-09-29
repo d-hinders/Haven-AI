@@ -236,7 +236,7 @@ git add packages/sdk/package.json packages/signer/package.json \
         packages/mcp/package.json packages/mcp/src/server.ts \
         packages/connect/package.json packages/connect/src/runtime-manifest.ts \
         packages/cli/package.json packages/cli/src/commands.ts \
-        packages/signer/src/server.ts packages/mcp-server/package.json \
+        packages/signer/src/tools.ts packages/mcp-server/package.json \
         packages/mcp-server/src/server.ts packages/connect/src/runtime.ts \
         packages/sdk/src/client-identity.ts \
         docs/operations/mcp-runtime-compatibility.md \
@@ -310,21 +310,28 @@ form for a second attempt at a version that failed to publish.
 
 ### The contract-doc gate
 
-**Three** contract docs are coupled to the published packages, and the blocking
-`Contract-doc coupling` check fails until a PR that touches those packages also
-satisfies each. A version bump touches all five packages, so **every release PR
-needs all three** — not optional, not conditional, and **this paragraph said
-"two" until 2026-09-16**, having silently dropped `package-dev-channel.md`.
+**Five** contract docs are coupled to the files every version bump writes, and
+the blocking `Contract-doc coupling` check fails until a PR that touches those
+files also satisfies each. A version bump touches all five packages, so **every
+release PR needs all five**. None is optional or conditional. **This paragraph
+said "two" until 2026-09-16**, having silently dropped `package-dev-channel.md`,
+and "three" until 2026-09-29, when #3454's move of `SIGNER_VERSION` into
+the signer's `tools.ts` added two more.
 
 The count is the gate's, not a memory:
 
 ```sh
 node scripts/docs/coupling-gate.mjs --strict \
-  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/server.ts
-# BLOCKING: 3 contract doc(s) …
+  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/tools.ts
+# BLOCKING: 5 contract doc(s) …
 ```
 
-Two are edited directly; the third is cleared by the shard:
+Five since #3454 moved `SIGNER_VERSION` into the signer's `tools.ts`, which
+`04-x402-payment-sequence.md` and `delegation-rail-security-model.md` cover.
+Three are edited directly: the two below and
+`docs/security/delegation-rail-security-model.md`, which takes a scoped note
+that the release touches only the version literal in `tools.ts`. The shard
+clears the other two, since both carry `satisfied-by`:
 
 1. **`docs/operations/mcp-runtime-compatibility.md`** — the *Supported Runtime
    Manifest* table is **re-pinned by the bump** ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)),

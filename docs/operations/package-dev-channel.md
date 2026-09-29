@@ -7,6 +7,7 @@ covers:
   - scripts/release-snapshot-version.mjs
   - scripts/release-channel.mjs
   - scripts/release-bump.mjs
+  - scripts/release-version-constants.mjs
   - scripts/release-version-order.mjs
   - packages/sdk/src/connector-channel.ts
   - packages/mcp-server/src/connector-channel.ts
@@ -859,3 +860,11 @@ compatibility contract — the manifest table, version skew, `--doctor`'s checks
 > validation regex, or any field this document names; nothing about channel
 > selection, dist-tag resolution, or the snapshot path moves. Scope of this
 > note: confirming that. Nothing else in this document was re-verified.
+
+> **Re-verification (release-bump constant table, 2026-09-29):** coupled
+> through `scripts/release-bump.mjs`. The snapshot path is untouched: it
+> rewrites the same constants, now read from
+> `scripts/release-version-constants.mjs`, with `SIGNER_VERSION` in
+> the signer's `tools.ts` since #3454. The snapshot version format, the
+> guards, `HAVEN_CONNECTOR_CHANNEL` and the `dev` dist-tag publish did not
+> move.

@@ -297,21 +297,24 @@ rather than greps. If the guard fires, read what it names.
 
 ## Satisfy The Contract-Doc Gate
 
-**A bump implicates THREE contract docs, not two, and this step said two until
-2026-09-16.** The blocking `Contract-doc coupling` check fails without all
-three, and forgetting is the single most common way a release PR goes red.
+**A bump implicates FIVE contract docs.** This step said two until
+2026-09-16, and three until 2026-09-29, when #3454 moved `SIGNER_VERSION` into
+the signer's `tools.ts`, which two more docs cover. The blocking
+`Contract-doc coupling` check fails without all five, and forgetting one is the
+single most common way a release PR goes red.
 Measured rather than remembered — the gate's own answer for the files every
 bump writes:
 
 ```sh
 node scripts/docs/coupling-gate.mjs --strict \
-  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/server.ts
-# BLOCKING: 3 contract doc(s) … mcp-runtime-compatibility.md,
-#           package-dev-channel.md, casp-risk-guardrails.md
+  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/tools.ts
+# BLOCKING: 5 contract doc(s) … 04-x402-payment-sequence.md,
+#           mcp-runtime-compatibility.md, package-dev-channel.md,
+#           casp-risk-guardrails.md, delegation-rail-security-model.md
 ```
 
-Two must be **edited directly** (neither carries `satisfied-by:`, so no shard
-clears them); the third is cleared by the shard you write anyway:
+Three must be **edited directly** (none carries `satisfied-by:`, so no shard
+clears them); the other two are cleared by the shard you write anyway:
 
 1. `docs/operations/mcp-runtime-compatibility.md` — the *Supported Runtime
    Manifest* table is re-pinned by the bump (#1790); update its
@@ -326,17 +329,24 @@ clears them); the third is cleared by the shard you write anyway:
    `last-verified` already reads today from an earlier change, say so and do
    NOT re-stamp it, because a rubber-stamped date is worse than a stale one
    (#1366).
-3. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
+3. `docs/security/delegation-rail-security-model.md`: the bump rewrites
+   `SIGNER_VERSION` in `packages/signer/src/tools.ts`, which this doc covers.
+   It has no `satisfied-by:`, so add a scoped *Re-verified* note saying that
+   the release's edit to that file is the version literal only. Name any
+   signing-surface change in the range as already re-verified where it merged,
+   or re-verify it now.
+4. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
    shard ending in a perimeter verdict. The **version**, not the PR number
    (#1789): the shard must exist before the PR is opened, because the gate blocks
    the PR without it, so a PR-numbered name cannot be written when it is needed.
-   This shard is what clears `casp-risk-guardrails.md`, whose front matter
-   declares `satisfied-by: docs/regulatory/casp-changelog/**` — which is why
-   the third contract doc needs no edit of its own.
+   This shard is what clears `casp-risk-guardrails.md` and
+   `docs/architecture/04-x402-payment-sequence.md`, whose front matter both
+   declare `satisfied-by: docs/regulatory/casp-changelog/**`. That is why
+   neither needs an edit of its own.
 
 **Do not take this list on faith either.** Run the command above at the top of
 the release: it is the gate's own reckoning against the current front matter,
-and it is what a fourth doc joining the set would show first.
+and it is what a sixth doc joining the set would show first.
 
 `scripts/README.md` § *The contract-doc gate* has the required content of each.
 

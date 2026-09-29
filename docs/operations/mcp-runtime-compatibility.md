@@ -35,6 +35,8 @@ covers:
   - packages/sdk/package.json
   - packages/sdk/tsup.config.ts
   - scripts/release-bump.mjs
+  - scripts/release-version-constants.mjs
+  - scripts/release-version-constants.test.mjs
   - scripts/release-bump.test.mjs
   - scripts/verify-connect-bundle.mjs
   - scripts/README.md
@@ -3838,3 +3840,13 @@ to call next in structured fields, and those fields are typed end to end
 > so: `PaymentReceipt['payment'].parties: RawPaymentParties`). Scope of this
 > note: that one field, and this one precision about which surfaces are mapped.
 > Nothing else in this document was re-verified.
+
+> **Re-verification (release-bump constant table, 2026-09-29):** coupled
+> through `scripts/release-bump.mjs`, `scripts/README.md` and
+> `.github/workflows/ci.yml`. The bump rewrites the same six version constants
+> and re-pins the same Supported Runtime Manifest table. Only the file it
+> rewrites `SIGNER_VERSION` in changed, to `packages/signer/src/tools.ts`
+> (#3454 moved it). CI now also runs `scripts/release-version-constants.test.mjs`,
+> which fails when a constant the bump owns is no longer declared in the file
+> the table names. No tool, capability, version-skew rule or manifest value
+> moved.

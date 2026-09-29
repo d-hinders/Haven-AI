@@ -32,6 +32,10 @@ covers:
   - scripts/release-version-order.mjs
   - packages/core/src/client-releases.ts
   - packages/core/src/chains.ts
+  - packages/frontend/src/app/demo/page.tsx
+  - packages/frontend/src/app/demo.md/route.ts
+  - packages/frontend/src/lib/demo-gate.ts
+  - packages/frontend/src/app/demo/__tests__/not-listed.test.ts
 last-verified: "2026-09-08"
 ---
 

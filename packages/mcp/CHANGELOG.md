@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **`haven_pay_x402`'s paid retry carries the buyer tax declaration (#3427).** The local MCP reaches the merchant through the SDK's `fetch`, `payX402Quote` and `resumeX402Payment` paths, so when the owner opted the agent in (#3426) the paid EIP-3009 retry now also carries `X-Tax-Declaration: <base64url(JSON)>` — signed locally by the agent's own delegate key (wg-tax #5 §2.2), sent to the seller only, and omitted on the erc7710 scheme, the first unpaid request, a "not available" content answer, or a 404 from the content endpoint (older backend). Tool descriptions for `haven_pay_x402` and `haven_resume_x402_payment` document the new header. No update needed otherwise: without the opt-in the wire is unchanged.
+
 - **Task-budget handoffs carry the old-signer recovery notice (#3419).** `haven_open_task_budget` and `haven_close_task_budget` results that hand off to `haven_sign { task_budget_id }` now carry `signer_compatibility` with `task_sign_context_version`, `min_signer_version` (`0.6.0-alpha.0`, the first signer with the `task_budget_id` form), and the recovery route as prose (`check`) and data (`fallback`): if `haven_sign` answers `SIGNING_ERROR` with a message starting "Pass payment_id (preferred for delegation-rail x402", the signer predates task budgets and signed nothing — close the pending budget with `haven_close_task_budget`, update via the connector doctor and its repair line, then reopen. There is no relay fallback for this signing context.
 
 ### Removed

@@ -304,6 +304,15 @@ redemption guard, the account derivation and the settlement-child verifier
 are one implementation in `@haven_ai/sdk` (imported here from
 `@haven_ai/sdk/edge`), which the SDK's own `HavenClient.signForData` runs too.
 
+The edge entry also hosts the x402 buyer tax-declaration builder (#3427,
+`tax-declaration.ts`): the delegate key signs the wg-tax #5 §2.1 declaration
+content — typed data assembled locally, refusing any `principalId`/
+`principalAttributionHash`/unknown field that arrives pre-set — and the
+signature rides the paid EIP-3009 merchant retry to the seller only as
+`X-Tax-Declaration`. It is an attestation, not an authority: nothing is
+redeemed, spent or unlocked by it, so it sits beside the guards rather than in
+their allowlist.
+
 **An over-budget direct payment is DECLINED, not queued** (#2130). The old text
 here said the result carries `payload_hash: null` and told the agent to "wait
 for the user to approve and execute the Safe payment" — an approval that cannot

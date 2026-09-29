@@ -49,6 +49,21 @@ export {
 } from './sweep.js'
 export { addressFromKey, signHash, verifySignature } from './edge-signing.js'
 export {
+  TAX_DECLARATION_DOMAIN,
+  TAX_DECLARATION_TYPES,
+  TAX_DECLARATION_PRIMARY_TYPE,
+  X_TAX_DECLARATION_HEADER,
+  TaxDeclarationRefusedError,
+  buildSignedTaxDeclaration,
+  encodeTaxDeclarationHeader,
+  principalAttributionHash,
+  taxPrincipalId,
+  verifyTaxDeclarationSignature,
+  type SignedTaxDeclaration,
+  type SignedTaxDeclarationResult,
+  type TaxDeclarationContent,
+} from './tax-declaration.js'
+export {
   DIRECT_SIGN_CONTEXT_VERSION,
   TASK_SIGN_CONTEXT_VERSION,
   ENTRY_POINT_V07,

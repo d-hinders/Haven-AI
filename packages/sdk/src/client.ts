@@ -100,6 +100,7 @@ import type {
   SweepSubmitResponse,
 } from './sweep.js'
 import { HavenApiTransport } from './haven-api-transport.js'
+import { resolveTaxDeclarationHeader } from './client-tax-declaration.js'
 import type { HavenClientUpdate } from './client-identity.js'
 import {
   mapPaymentResult,
@@ -290,6 +291,21 @@ export class HavenClient {
       getAgent: () => this.getAgent(),
       delegateAddress: this.delegateAddress,
       x402Wallet: this.x402Wallet,
+      // #3427: the buyer-side tax declaration is resolved (and signed) only
+      // by the local, key-holding client. The resolver is bound ONLY when a
+      // delegate key exists, so the hosted, keyless construction of this
+      // class — `completeX402MerchantCall`'s `MerchantCompletion` — cannot
+      // resolve a declaration at all, let alone sign one.
+      ...(config.delegateKey
+        ? {
+            getTaxDeclarationHeader: (input) =>
+              resolveTaxDeclarationHeader(
+                { getAgent: () => this.getAgent(), get: (path) => this.get(path) },
+                input,
+              ),
+            delegateKey: config.delegateKey,
+          }
+        : {}),
     })
     this.erc7710 = new X402Erc7710({
       delegateKey: this.delegateKey,

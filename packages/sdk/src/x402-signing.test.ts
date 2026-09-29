@@ -61,6 +61,20 @@ const DELEGATE_KEY = `0x${'01'.repeat(32)}`
 const DELEGATE_ADDRESS = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
 const SAFE_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 
+/**
+ * #3427: the agent identity the paid-retry tax-declaration resolution reads
+ * (GET /machine-payments/agent). Used by the nonce-reuse flow chain.
+ */
+const X402_SIGNING_AGENT_RESPONSE = {
+  id: 'agent_signing',
+  name: 'signing agent',
+  status: 'active',
+  account_address: SAFE_ADDRESS,
+  delegate_address: DELEGATE_ADDRESS,
+  chain_id: 8453,
+  execution_rail: 'delegation',
+}
+
 // Base USDC, verbatim checksummed — case matters for EIP-712 (see header note).
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
@@ -288,6 +302,11 @@ describe('nonce reuse across retries (same idempotency key)', () => {
         to: DELEGATE_ADDRESS,
         explorer_url: 'https://basescan.org/tx/0xabc',
       }), { status: 200 }))
+      // (#3427) the paid-retry tax-declaration resolution reads the agent id,
+      // then #3426's content endpoint. Unavailable here — this test pins the
+      // nonce-reuse invariant, not the header.
+      .mockResolvedValueOnce(new Response(JSON.stringify(X402_SIGNING_AGENT_RESPONSE), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: {
@@ -305,7 +324,7 @@ describe('nonce reuse across retries (same idempotency key)', () => {
     const response = await haven.payX402Quote(quote)
     expect(response.status).toBe(200)
 
-    const retryInit = fetchMock.mock.calls[3][1] as RequestInit
+    const retryInit = fetchMock.mock.calls[5][1] as RequestInit
     const sentHeader = new Headers(retryInit.headers).get('X-PAYMENT') ?? ''
     const sentNonce = decodeHeader(sentHeader).payload.authorization.nonce
 

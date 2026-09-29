@@ -403,4 +403,22 @@ describe('#1849 re-key issue — the carry is planned on the metering clock', ()
     expect(mockInsertRekeyDelegation).not.toHaveBeenCalled()
     expect(mockMarkIssued).not.toHaveBeenCalled()
   })
+
+  // ── #3450: the `markIssued` sentinel mapping, whole body ─────────────────
+
+  it('maps a markIssued failure (stage already moved) to the bare rekey_out_of_order body', async () => {
+    // `markIssued` returns `null` when its own conditional UPDATE
+    // (`WHERE stage = 'metered'`) touches no row — the re-key's stage moved
+    // between `loadStep`'s unlocked read and this call (e.g. a concurrent
+    // abandon on a snapshot that itself built no pieces, so nothing else in
+    // this call ever contended for a lock). `IssueMarkIssuedFailedError`
+    // maps this to `{ error: 'rekey_out_of_order' }` with NO other fields —
+    // asserted here as the WHOLE body, not `.error` alone, the same
+    // discipline the round-1 review (F1) applied to the other three mapped
+    // replies.
+    mockMarkIssued.mockResolvedValue(null)
+    const { status, body } = await issueAt(START + 3600, START + 4200)
+    expect(status).toBe(409)
+    expect(body).toEqual({ error: 'rekey_out_of_order' })
+  })
 })

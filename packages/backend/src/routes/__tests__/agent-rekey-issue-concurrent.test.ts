@@ -56,6 +56,13 @@ let firstInsertStarted!: () => void
 let firstInsertStartedPromise: Promise<void>
 let resumeWinner!: () => void
 let resumeWinnerPromise: Promise<void>
+/**
+ * The winner's own Postgres backend pid, captured on its own still-open
+ * transaction client the moment it pauses (#3450 round-2 review F2': see
+ * `waitUntilBlockedByWinner`'s doc comment for why this — not "any lock in
+ * the database" — is what the poll must scope to).
+ */
+let winnerBackendPid: number | null = null
 
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
@@ -77,6 +84,15 @@ vi.mock('../../infra/repositories/agent-rekeys.js', async (importOriginal) => {
       const myIndex = insertCallCount
       const result = await actual.insertRekeyDelegation(...args)
       if (pauseFirstInsert && myIndex === 1) {
+        // Captured on `args[1]` — the SAME transaction client the route just
+        // called `insertRekeyDelegation` with, still open (nothing has
+        // committed yet) — so this is the exact backend pid the row lock is
+        // held on, not merely "some connection in the pool".
+        const tx = args[1]
+        if (tx) {
+          const pidResult = await tx.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+          winnerBackendPid = pidResult.rows[0].pid
+        }
         firstInsertStarted()
         await resumeWinnerPromise
       }
@@ -96,40 +112,51 @@ const FAKE_SIG = ('0x' + 'ab'.repeat(65)) as `0x${string}`
 let seq = 0
 
 /**
- * Poll for a session genuinely BLOCKED on a lock rather than sleeping a fixed
- * duration (#3450 round-1 review F2: a fixed `setTimeout(20)` was flaky under
- * load — proven by re-running this test with the second call's own `findRekey`
- * read artificially delayed 100ms, which reproduced the failure on the FIXED
- * tree every time with the old fixed sleep, and passed every time with this
- * poll).
+ * Poll until some backend is blocked SPECIFICALLY BY `blockingPid` rather
+ * than sleeping a fixed duration or counting any lock wait in the database
+ * (#3450 round-2 review F2': the round-1 fix, `wait_event_type = 'Lock' AND
+ * datname = current_database()`, counted ANY waiter in the whole database —
+ * vitest workers share one Postgres role and one database, and
+ * `db-harness-reset-contention.test.ts` deliberately creates lock waits of
+ * its own. The code reviewer proved it: a second `haven` session merely
+ * waiting on an unrelated table's lock made this test fail 3/3 with
+ * `rekey_out_of_order`, because the poll returned `true` immediately —
+ * before the SECOND call's own request had even reached Postgres — and
+ * `resumeWinner()` fired too early. That is the same class of bug F2
+ * (round 1) fixed for a fixed sleep: a signal that can be satisfied by
+ * something OTHER than the specific contention this test cares about).
  *
- * `pg_stat_activity.wait_event_type = 'Lock'` — not a `pg_locks` join on a
- * specific relation/locktype — because a `SELECT ... FOR UPDATE` takes both a
- * relation-level `RowShareLock` (always granted, harmless, present even with
- * no contention at all) and a tuple-level lock (the one that actually blocks
- * a second waiter); guessing which `pg_locks` row means "this backend is
- * stuck" is exactly the kind of Postgres-internals assumption this fix is
- * meant to remove. `wait_event_type = 'Lock'` is true precisely when a
- * backend is parked waiting for ANY lock to be released, independent of lock
- * type or shape.
+ * `pg_blocking_pids(pid)` returns the pids CURRENTLY BLOCKING session `pid`.
+ * So `$1 = ANY(pg_blocking_pids(pg_stat_activity.pid))`, scanned over every
+ * row of `pg_stat_activity`, is true exactly when some backend is blocked BY
+ * `blockingPid` — not "blocked by anything". `blockingPid` is the WINNER's
+ * own backend pid (`winnerBackendPid`, captured via `pg_backend_pid()` on the
+ * winner's own still-open transaction client the moment it pauses), so this
+ * is scoped to the ONE lock relationship the test is actually about,
+ * independent of whatever else the shared database and role are doing.
  *
- * Returns `true` if it saw contention, `false` if the bounded timeout elapsed
- * first — the pre-#3450 trees never block here at all, since nothing holds
- * the transaction open across pieces, so the caller proceeds either way; see
- * the call site.
+ * Returns `true` if it saw that specific contention, `false` if the bounded
+ * timeout elapsed first — the pre-#3450 trees never block here at all, since
+ * nothing holds the transaction open across pieces (and `blockingPid` is
+ * `null` there, since the un-fixed `insertRekeyDelegation` is never called
+ * with a transaction client to capture a pid from), so the caller proceeds
+ * either way; see the call site.
  */
-async function waitForAgentsRowLockContention(timeoutMs = 2_000): Promise<boolean> {
+async function waitUntilBlockedByWinner(
+  blockingPid: number | null,
+  timeoutMs = 2_000,
+): Promise<boolean> {
+  if (blockingPid === null) {
+    await new Promise((r) => setTimeout(r, timeoutMs))
+    return false
+  }
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    // A backend genuinely blocked on ANY lock reports `wait_event_type =
-    // 'Lock'` in `pg_stat_activity` — a more direct signal than joining
-    // `pg_locks` on a specific relation/locktype, which has to guess the
-    // exact lock shape `SELECT ... FOR UPDATE` takes.
-    const { rows } = await db.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+    const { rowCount } = await db.query(
+      `SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`,
+      [blockingPid],
     )
-    if (rows[0].n > 0) return true
+    if ((rowCount ?? 0) > 0) return true
     if (Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, 5))
   }
@@ -154,6 +181,7 @@ describeDb('two concurrent issue calls on one re-key (#3450)', () => {
     resumeWinnerPromise = new Promise<void>((resolve) => {
       resumeWinner = resolve
     })
+    winnerBackendPid = null
     mockComputeAddress.mockReset()
     mockComputeAddress.mockResolvedValue(DELEGATE_ACCOUNT)
   })
@@ -239,17 +267,19 @@ describeDb('two concurrent issue calls on one re-key (#3450)', () => {
       await firstInsertStartedPromise
 
       const secondCall = app.inject({ method: 'POST', url: issuePath, headers, payload: {} })
-      // Poll for genuine lock contention rather than a fixed sleep (see
-      // `waitForAgentsRowLockContention`'s own doc comment for the round-1
-      // review finding this replaces). On the FIXED tree, the second call
-      // blocks on the exact row lock the paused first call is holding
+      // Poll for contention SPECIFICALLY blocked by the winner's own pid
+      // rather than a fixed sleep or "any lock in the database" (see
+      // `waitUntilBlockedByWinner`'s own doc comment for the round-2 review
+      // finding this replaces). On the FIXED tree, the second call blocks on
+      // the exact row lock the paused first call is holding
       // (`lockOwnedAgentForRekeyDelegation`'s `SELECT ... FOR UPDATE`), so
       // this returns almost immediately. On a PRE-FIX tree nothing blocks —
-      // the second call races straight through — so this returns once the
-      // bounded timeout elapses and the test proceeds regardless; the poll
-      // only removes an arbitrary fixed delay, it does not require blocking
-      // to occur for the test to be meaningful on that tree too.
-      await waitForAgentsRowLockContention()
+      // the second call races straight through, and there is no captured
+      // pid to scope to — so this returns once the bounded timeout elapses
+      // and the test proceeds regardless; the poll only removes an
+      // arbitrary fixed delay, it does not require blocking to occur for
+      // the test to be meaningful on that tree too.
+      await waitUntilBlockedByWinner(winnerBackendPid)
       resumeWinner()
 
       const [firstRes, secondRes] = await Promise.all([firstCall, secondCall])

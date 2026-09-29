@@ -241,13 +241,13 @@ export async function insertRekeyDelegation(
     // of THIS re-key serializes against this transaction rather than racing
     // it.
     //
-    // Closed by this change (#3450): this re-check ALONE did not stop two CONCURRENT issue
-    // calls on one re-key from both inserting — the stage stays `metered`
-    // until one of them reaches `markIssued`, so a loser that read its
-    // version after the winner's first insert committed, but before the
-    // winner's `markIssued`, still passed this same `FOR UPDATE` (still
-    // `metered`) and landed its own row. The fix is the caller: the issue
-    // route now runs its whole piece loop plus `markIssued` inside ONE
+    // Closed by this change (#3450): this re-check ALONE did not stop two
+    // CONCURRENT issue calls on one re-key from both inserting — the stage
+    // stays `metered` until one of them reaches `markIssued`, so a loser
+    // that read its version after the winner's first insert committed, but
+    // before the winner's `markIssued`, still passed this same `FOR UPDATE`
+    // (still `metered`) and landed its own row. The fix is the caller: the
+    // issue route now runs its whole piece loop plus `markIssued` inside ONE
     // transaction (`withRekeyIssueTransaction` below), and every call this
     // function makes inside that loop — including this one — runs on that
     // SAME transaction client, not a fresh one. `withTransaction` recognises
@@ -462,16 +462,18 @@ export async function markIssued(
  * route-layer concern — unlike every other transaction in this file, which
  * wraps DB statements only. There is precedent for exactly this shape:
  * `delegation-budgets.ts`'s `withDelegationBuildSlotLock` already hands its
- * caller a query-only view of an open transaction so the caller's own
- * business logic (the reuse read, the version read, the insert) can run
- * inside one lock scope without those calls living in `infra/`. This
- * function is the same move for the issue route's longer, multi-piece loop.
- * The alternative (moving the carry-planning and delegation-building calls
- * into this repository module instead) would cross the module boundary the
- * file header describes the other way, pulling `rails/delegation-policy.ts`
- * and `modules/agents/rekey-carry.ts` into `infra/`; this function is the
- * smallest surface that gives the route the transaction while keeping every
- * actual SQL statement in this file, reachable from the real-DB harness.
+ * caller a query-only view of an open transaction so route-layer logic
+ * (`buildBudgetDelegation`, `delegationIdentity`) runs between the caller's
+ * reads and insert inside one lock scope. This function is the same move
+ * for the issue route's multi-piece loop — and unlike that precedent (whose
+ * version read is inline SQL in the route), it keeps every statement in
+ * this file. The alternative (moving the carry-planning and
+ * delegation-building calls into this repository module instead) would
+ * cross the module boundary the file header describes the other way,
+ * pulling `rails/delegation-policy.ts` and `modules/agents/rekey-carry.ts`
+ * into `infra/`; this function is the smallest surface that gives the route
+ * the transaction while keeping every actual SQL statement in this file,
+ * reachable from the real-DB harness.
  */
 export async function withRekeyIssueTransaction<T>(
   fn: (tx: Executor) => Promise<T>,

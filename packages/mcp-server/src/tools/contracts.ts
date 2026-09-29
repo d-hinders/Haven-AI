@@ -1161,14 +1161,16 @@ const OPEN_TASK_BUDGET_DESCRIPTION = [
   'Pass max_amount_human (whole tokens), ttl_minutes (1-1440), optional recipient (pins',
   'every payment to one address; x402 then only by direct settlement), label, token (default',
   'USDC). Returns { task_budget, sign_data, next_action } — sign, then relay with haven_submit',
-  '(task_budget_id). Over-cap, late or wrong-recipient spend is declined; nothing is queued.',
+  '(task_budget_id); signer_compatibility carries the recovery route if the signer predates',
+  'task budgets. Over-cap, late or wrong-recipient spend is declined; nothing is queued.',
 ].join(' ')
 
 const CLOSE_TASK_BUDGET_DESCRIPTION = [
   'End a task budget early, releasing its unspent cap back to the agent\'s own budget.',
   'Pass task_budget_id. A never-signed or already-expired budget ends immediately with',
   '{ task_budget, status: "closed" }; otherwise returns { task_budget, sign_data, next_action } —',
-  'sign, then relay with haven_submit (task_budget_id).',
+  'sign, then relay with haven_submit (task_budget_id); signer_compatibility carries the',
+  'recovery route if the signer predates task budgets.',
 ].join(' ')
 
 const CHECK_FUNDS_DESCRIPTION = [

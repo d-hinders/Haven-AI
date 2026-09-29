@@ -52,6 +52,7 @@ export {
   createToolHandlers,
   toolDescriptions,
   toolSchemas,
+  UNSUPPORTED_ARGUMENT_MARKER,
   type SignerToolName,
   type ToolFailure,
   type ToolPayload,

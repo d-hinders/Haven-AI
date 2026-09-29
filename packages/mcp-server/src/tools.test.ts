@@ -1562,7 +1562,7 @@ describe('hosted erc7710 (#1456)', () => {
     })
     expect(res.data.next_tool).toBeUndefined()
     expect(res.data.next_tool_omitted_reason).toMatch(/this payment already settled/)
-    expect(res.data.reason).toMatch(/merchant was not called again/)
+    expect(res.data.reason).toMatch(/nothing new was charged/)
     expect(merchant).not.toHaveBeenCalled()
   })
 

@@ -831,6 +831,32 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     expect(recordedCalls().find((c) => c.url.includes('/sign'))).toBeUndefined()
   })
 
+  it('a repeated submit of a payment that already settled answers the same done state as haven_settle_mcp_tool (#3423)', async () => {
+    const TX = '0x' + '7d'.repeat(32)
+    stubFetch({
+      'POST /x402/pay_generic_7710/settle': {
+        status: 409,
+        body: {
+          error: 'Payment pay_generic_7710 already settled on-chain; nothing was signed or charged again.',
+          code: 'payment_already_settled',
+          payment_id: 'pay_generic_7710',
+          tx_hash: TX,
+        },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({ payment_id: 'pay_generic_7710', signature: SIG, settlement_scheme: 'erc7710' }),
+    ) as { data: Record<string, any> }
+    expect(res.data).toMatchObject({
+      payment_id: 'pay_generic_7710',
+      settled: true,
+      settlement_tx_hash: TX,
+      next_action: 'none',
+    })
+    expect(res.data).not.toHaveProperty('payment_header')
+    expect(res.data.next_tool_omitted_reason).toMatch(/this payment already settled/)
+  })
+
   it('POSITIVE CONTROL — omitting settlement_scheme still relays a FUNDING signature, unchanged', async () => {
     stubFetch({
       'POST /payments/pay_x402/sign': {

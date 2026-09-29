@@ -2544,18 +2544,6 @@ reading `null`.
 > none-vs-none and replay exactly as before. No wire field moves and no
 > runtime needs an update for calls that never name a task budget.
 
-> **Re-verified (#3423 slice B, 2026-09-29):** the settle half of the same
-> story. A repeated `POST /x402/:id/settle` on an erc7710 payment that already
-> settled answers a typed 409 `payment_already_settled` with `payment_id` and
-> `tx_hash`. An EIP-3009 funding row and a `submitted` row keep the plain 409.
-> The SDK's `submitX402Erc7710()` turns it into `X402Erc7710AlreadySettledError`,
-> and the hosted `haven_settle_mcp_tool` answers the #3417 done state without
-> calling the merchant again. Version skew: an SDK older than this change
-> surfaces the typed 409 as a plain `HavenApiError` 409, the same class it
-> threw before, and its body now carries the hash. A hosted server older than
-> this change answers `API_ERROR`. No signer or connector version is
-> involved. Nothing else in this document was re-verified.
-
 > **Re-verified (#3417, 2026-09-28):** the `confirmed` arm of the replay
 > recipe above did not reach the agent as described. The backend answers with
 > the `tx_hash` and no `sign_data`, but the SDK's erc7710 path read the
@@ -2580,6 +2568,19 @@ reading `null`.
 > Every SDK published before it (`alpha`/`latest` `0.6.0-alpha.0` and the `dev`
 > snapshots before it) still throws the scheme-mismatch `HavenApiError` for
 > that answer.
+
+> **Re-verified (#3423 slice B, 2026-09-29):** the settle half of the same
+> story. A repeated `POST /x402/:id/settle` on an erc7710 payment that already
+> settled answers a typed 409 `payment_already_settled` with `payment_id` and
+> `tx_hash`. An EIP-3009 funding row and a `submitted` row keep the plain 409.
+> The SDK's `submitX402Erc7710()` turns it into `X402Erc7710AlreadySettledError`,
+> and the hosted `haven_settle_mcp_tool` answers the #3417 done state without
+> calling the merchant again; `haven_submit` with `settlement_scheme: 'erc7710'`
+> answers the same done state (before this change it answered `API_ERROR`).
+> Version skew: an SDK older than this change surfaces the typed 409 as a plain `HavenApiError` 409, the same class it
+> threw before, and its body now carries the hash. A hosted server older than
+> this change answers `API_ERROR`. No signer or connector version is
+> involved. Nothing else in this document was re-verified.
 
 One more skew row since #1307, on the SETTLE leg rather than the sign leg:
 `haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /

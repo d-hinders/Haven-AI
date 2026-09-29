@@ -15,6 +15,9 @@
   (`packages/mcp-server/src/tools/paid-mcp-completion.ts`) returns the #3417
   done state (`settled: true`, `settlement_tx_hash`, no next tool), with a
   reason worded for a repeated settle, and does not call the merchant again.
+  `haven_submit` with `settlement_scheme: 'erc7710'`
+  (`packages/mcp-server/src/tools/state-direct-recovery.ts`) answers the same
+  done state.
   **No custody or authority change:** the new branch returns before any
   signing, merchant or chain step, and nothing is written; the real-DB test
   compares the whole row before and after. No key, signature, delegation,

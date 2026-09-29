@@ -249,10 +249,10 @@ const SETTLED_TEXT = {
   settle: {
     omitted: 'this payment already settled; there is nothing left to sign, settle or pay',
     reason:
-      'This payment already settled on-chain, so this settle was a repeat: nothing was signed, ' +
-      'nothing new was charged, and the merchant was not called again. Haven cannot re-deliver the ' +
-      "merchant's result: if you received it earlier, report that purchase from payment_id and " +
-      'settlement_tx_hash; if you did not, tell the user it was paid but the result was not received.',
+      'This payment already settled on-chain, so this was a repeated settle: nothing was signed and ' +
+      "nothing new was charged. Haven cannot re-deliver the merchant's result: if you received it " +
+      'earlier, report that purchase from payment_id and settlement_tx_hash; if you did not, tell the ' +
+      'user it was paid but the result was not received. Do not call the merchant again with a new payment.',
   },
 } as const
 
@@ -300,8 +300,9 @@ export function catchSettledReplay(err: unknown): { settledReplay: ReturnType<ty
 }
 
 /**
- * #3423: the same done state for a repeated `haven_settle_mcp_tool` on an
- * erc7710 payment that already settled (the SDK's `submitX402Erc7710` throws
+ * #3423: the same done state for a repeated settle of an erc7710 payment that
+ * already settled — `haven_settle_mcp_tool` and `haven_submit` with
+ * `settlement_scheme: 'erc7710'` (the SDK's `submitX402Erc7710` throws
  * `X402Erc7710AlreadySettledError` on the backend's typed 409). Any other
  * failure is rethrown unchanged.
  */

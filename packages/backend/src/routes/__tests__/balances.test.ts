@@ -241,10 +241,11 @@ describe('balance routes', () => {
     expect(good.json().balances[1]).toMatchObject({ balance: '2500000' })
     expect(good.json().balances[1].balanceFreshness).toBeUndefined()
 
-    // Expire the 30 s route cache deterministically; the last-known store
-    // timestamps with `new Date()`, which stays real.
+    // Expire the shared 60 s balance-read cache deterministically (#3460:
+    // this route's 30 s cache is gone — the TTL is the shared one); the
+    // last-known store timestamps with `new Date()`, which stays real.
     const realDateNow = Date.now.bind(Date)
-    const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realDateNow() + 31_000)
+    const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realDateNow() + 61_000)
     mockBalanceOf.mockRejectedValueOnce(new Error('Batch of more than 3 requests are not allowed on free plan'))
 
     const degraded = await request()

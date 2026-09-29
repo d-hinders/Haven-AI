@@ -27,10 +27,10 @@ const TWO_USDC = '0x' + (2_000_000).toString(16).padStart(64, '0')
 // balanceOf returning 5 USDC (6 decimals), ABI-encoded.
 const FIVE_USDC = '0x' + (5_000_000).toString(16).padStart(64, '0')
 
-// The 60 s portfolio cache would otherwise serve the first clean read to the
-// later degraded call; a shifted Date.now expires it deterministically. The
-// last-known store timestamps with `new Date()`, not Date.now(), so its as-of
-// values stay real.
+// Since #3460 the 60 s envelope cache is gone; the Date.now shift below
+// expires the SHARED balance-read cache instead (same 60 s TTL), which is
+// what lets a later call re-read the chain. The last-known store timestamps
+// with `new Date()`, not Date.now(), so its as-of values stay real.
 let clockOffsetMs = 0
 const realDateNow = Date.now.bind(Date)
 

@@ -7,7 +7,8 @@
  * token has no price at all — returns an uncached result (#3292's marker).
  *
  * Every test loads a FRESH portfolio module (`vi.resetModules()` + dynamic
- * import), because last-good prices and the backoff are module state.
+ * import), because last-good prices, the backoff, and — since #3460 — the
+ * shared balance-read cache are module state.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -36,7 +37,14 @@ const T0 = new Date('2026-09-25T10:00:00Z').getTime()
 
 async function freshPortfolio() {
   vi.resetModules()
-  return (await import('../portfolio.js')).fetchPortfolioForAccount
+  const portfolio = await import('../portfolio.js')
+  // The #3296 snapshot guard rides the same module state; the barrel
+  // re-exports it (the dashboard reads it from there). Attached to the
+  // callable so the test reads `fetchPortfolio.isPortfolioUnpriceable(…)`.
+  const { isPortfolioUnpriceable } = await import('../index.js')
+  const fetchPortfolio = (chainId: number, address: string) =>
+    portfolio.fetchPortfolioForAccount(chainId, address)
+  return Object.assign(fetchPortfolio, { isPortfolioUnpriceable })
 }
 
 const account = (n: number) => '0x' + n.toString(16).padStart(40, '0')
@@ -81,7 +89,29 @@ describe('last good prices (#3297)', () => {
     expect(partial.totalUsd).toBe(2002) // fresh ETH + last-good USDC
   })
 
-  it('NO price ever fetched: the result is NOT cached (#3292 marker) and the wire shape is unchanged', async () => {
+  it('NO price ever fetched: the PORTFOLIO result is NOT cached (#3292 marker) and the wire shape is unchanged', async () => {
+    // #3460 REWRITE — the cache split moved what "not cached" means.
+    //
+    // OLD assertion (pre-#3460, counted balance reads to prove it): the
+    // portfolio cache held the whole envelope, so a second request re-read
+    // the chain —
+    //     await fetchPortfolio(84532, account(3))
+    //     // Not cached: the balances were read again on the second request…
+    //     expect(mockGetBalance).toHaveBeenCalledTimes(2)
+    //     // …but CoinGecko was not asked again inside the backoff window.
+    //     expect(mockFetchTokenPrices).toHaveBeenCalledTimes(1)
+    //
+    // NEW assertion (below): the BALANCES are legitimately cached now — they
+    // live in the shared (chainId, address) read cache shared with
+    // /balances (#3460) — while the PORTFOLIO ENVELOPE is not cached (the
+    // old portfolioCache is gone; the envelope is re-derived per call). The
+    // non-caching proof therefore counts CoinGecko calls, not balance reads:
+    // every derivation calls `readDisplayPrices` afresh, but only the FIRST
+    // one reaches CoinGecko — the second and third are answered by the
+    // module's 60 s backoff (`priceFetchBlockedUntil`), which is exactly
+    // what the old test's second line pinned. The #3296 snapshot guard
+    // (`isPortfolioUnpriceable`, dashboard.ts:162) rides these instances and
+    // stays intact — asserted via the predicate below.
     const fetchPortfolio = await freshPortfolio()
     mockFetchTokenPrices.mockImplementation(async () => {
       throw new Error('CoinGecko API error: 429')
@@ -89,11 +119,17 @@ describe('last good prices (#3297)', () => {
     const first = await fetchPortfolio(84532, account(3))
     expect(first.totalUsd).toBe(0)
     expect(Object.keys(first).sort()).toEqual(['breakdown', 'totalEur', 'totalSek', 'totalUsd'])
+    expect(fetchPortfolio.isPortfolioUnpriceable(first)).toBe(true)
 
-    await fetchPortfolio(84532, account(3))
-    // Not cached: the balances were read again on the second request…
-    expect(mockGetBalance).toHaveBeenCalledTimes(2)
-    // …but CoinGecko was not asked again inside the backoff window.
+    const second = await fetchPortfolio(84532, account(3))
+    // The envelope is NOT cached: a new instance, re-derived (unpriceable
+    // again — the prices are still unavailable inside the backoff window).
+    expect(second).not.toBe(first)
+    expect(fetchPortfolio.isPortfolioUnpriceable(second)).toBe(true)
+    // The balances ARE cached (shared read cache — clean reads): still one
+    // native read across both requests.
+    expect(mockGetBalance).toHaveBeenCalledTimes(1)
+    // CoinGecko was asked once — not again inside the backoff window.
     expect(mockFetchTokenPrices).toHaveBeenCalledTimes(1)
   })
 

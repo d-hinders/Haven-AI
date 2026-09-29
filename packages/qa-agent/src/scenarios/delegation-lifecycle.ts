@@ -14,10 +14,9 @@
  * depends on, so this scenario NEVER touches it. Each run provisions a fresh
  * throwaway identity (signup → hybrid account → agent → grant), funds it
  * with a small payment FROM the standing identity, and revokes its agent
- * when the leg ends (#3459) — which also makes QA_MAX_ATTEMPTS retries trivially
- * safe. Owner keys are
- * ephemeral in-scenario wallets; all signing is client-side (non-custody
- * preserved even in QA).
+ * when the leg ends (#3459) — which also makes QA_MAX_ATTEMPTS retries
+ * trivially safe. Owner keys are ephemeral in-scenario wallets; all signing
+ * is client-side (non-custody preserved even in QA).
  */
 
 import { type Scenario, type ScenarioContext, type ScenarioResult, pass, fail, skip } from './types.js'

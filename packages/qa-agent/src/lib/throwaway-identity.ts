@@ -82,6 +82,10 @@ export async function revokeThrowawayAgent(
     const res = await fetch(`${apiUrl}/agents/${agentId}/revoke`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      // A JSON content type with no body is refused by Fastify before the
+      // route runs (400 FST_ERR_CTP_EMPTY_JSON_BODY) — the frontend sends `{}`
+      // for the same reason.
+      body: '{}',
     })
     if (res.ok) return null
     const body = (await res.json().catch(() => ({}))) as { error?: string }

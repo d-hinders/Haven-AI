@@ -44,7 +44,15 @@ function installFake(opts: FakeOpts = {}) {
       return opts.build?.() ?? json({ delegation_hash: '0xhash1', signing_payload: TD }, 201)
     }
     if (path.endsWith('/activate')) return opts.activate?.() ?? json({ activated: true })
-    if (path === '/agents/agent-1/revoke') return opts.revoke?.() ?? json({ success: true })
+    if (path === '/agents/agent-1/revoke') {
+      // Fastify's contract (review of #3459): a JSON content type with an
+      // empty body is refused before the route runs — FST_ERR_CTP_EMPTY_JSON_BODY.
+      const ct = headers['content-type'] ?? ''
+      if (ct.includes('application/json') && (init?.body === undefined || init.body === '')) {
+        return json({ code: 'FST_ERR_CTP_EMPTY_JSON_BODY', error: 'Bad Request' }, 400)
+      }
+      return opts.revoke?.() ?? json({ success: true })
+    }
     throw new Error(`unexpected request: ${init?.method ?? 'GET'} ${path}`)
   }))
   const revokes = () => calls.filter((c) => c.path === '/agents/agent-1/revoke')
@@ -59,6 +67,12 @@ describe('withThrowawayIdentity — the scenario ends three ways', () => {
     const result = await withThrowawayIdentity(API, OPTIONS, async () => pass('green'))
     expect(result).toEqual({ pass: true, detail: 'green' })
     expect(api.revokes()).toEqual([{ method: 'POST', path: '/agents/agent-1/revoke', auth: 'Bearer jwt-throwaway' }])
+  })
+
+  it('the revoke carries a JSON body, so the backend accepts it (Fastify 400s an empty JSON body)', async () => {
+    installFake()
+    const result = await withThrowawayIdentity(API, OPTIONS, async () => pass('ok'))
+    expect(result).toEqual(pass('ok')) // no cleanupWarning: the revoke landed
   })
 
   it('revokes after a FAIL', async () => {

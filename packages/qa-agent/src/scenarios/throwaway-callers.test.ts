@@ -59,6 +59,12 @@ function installFake() {
     if (path === '/payments') return json({ error: 'funding refused' }, 500)
     if (path === '/agents/agent-1/revoke') {
       revokes.push({ auth: headers.authorization ?? null })
+      // Fastify refuses a JSON content type with an empty body before the
+      // route runs (FST_ERR_CTP_EMPTY_JSON_BODY): mirror it, so a revoke the
+      // real backend would 400 cannot pass here.
+      if ((headers['content-type'] ?? '').includes('application/json') && !init?.body) {
+        return json({ code: 'FST_ERR_CTP_EMPTY_JSON_BODY' }, 400)
+      }
       return json({ success: true })
     }
     throw new Error(`unexpected request: ${init?.method ?? 'GET'} ${path}`)
@@ -75,6 +81,8 @@ describe('the real throwaway scenarios revoke their agent', () => {
     expect(result.pass).toBe(false)
     expect(result.detail).toMatch(/funding the throwaway treasury failed/)
     expect(revokes).toEqual([{ auth: 'Bearer jwt-throwaway' }])
+    // …and it LANDED: no cleanup warning means the backend accepted it.
+    expect(result.cleanupWarning).toBeUndefined()
   })
 
   it('x402-erc7710-fresh-agent revokes when it ends in a failure', async () => {
@@ -83,5 +91,7 @@ describe('the real throwaway scenarios revoke their agent', () => {
     expect(result.pass).toBe(false)
     expect(result.detail).toMatch(/funding the throwaway treasury failed/)
     expect(revokes).toEqual([{ auth: 'Bearer jwt-throwaway' }])
+    // …and it LANDED: no cleanup warning means the backend accepted it.
+    expect(result.cleanupWarning).toBeUndefined()
   })
 })

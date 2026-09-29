@@ -50,7 +50,9 @@ vi.mock('../lib/throwaway-identity.js', async (importOriginal) => {
   return {
     ...actual,
     // The leg's provisioning is scripted here; the cleanup wrapper itself is
-    // exercised, unmocked, in throwaway-cleanup.test.ts (#3459).
+    // exercised, unmocked, in throwaway-cleanup.test.ts (#3459). mockProvision
+    // must return an identity: a provisioning `{ error }` would be handed to the
+    // leg as one — those paths are covered in throwaway-cleanup.test.ts.
     withThrowawayIdentity: async (_api: string, _opts: unknown, leg: (i: unknown) => Promise<unknown>) =>
       leg(await mockProvision()),
     payViaDelegation: mockPay,

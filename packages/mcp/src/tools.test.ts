@@ -2062,7 +2062,7 @@ describe('haven_get_payment_status: post-purchase allowance summary (#1310)', ()
         return jsonResponse({
           id: 'agent-1', name: 'A', status: 'active',
           account_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
-          execution_rail: 'legacy',
+          execution_rail: 'delegation',
         })
       }
       if (u.endsWith('/machine-payments/allowances')) return jsonResponse(allowancesFixture('3000000'))
@@ -2071,9 +2071,9 @@ describe('haven_get_payment_status: post-purchase allowance summary (#1310)', ()
 
     const result = await handlers().haven_get_payment_status({ payment_id: 'pay_x402' })
     expect(result.success).toBe(true)
-    const data = (result as { data: { allowance: { rail: string; remaining_atomic: string } | null } }).data
+    const data = (result as { data: { allowance: { rail: string; remaining_atomic: string; remainingAtomic?: string } | null } }).data
     expect(data.allowance).toEqual(
-      expect.objectContaining({ rail: 'legacy', remaining_atomic: '3000000' }),
+      expect.objectContaining({ rail: 'delegation', remaining_atomic: '3000000', remainingAtomic: '3000000' }),
     )
   })
 

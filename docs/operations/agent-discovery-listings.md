@@ -32,6 +32,11 @@ covers:
   - scripts/release-version-order.mjs
   - packages/core/src/client-releases.ts
   - packages/core/src/chains.ts
+  - packages/frontend/src/app/demo/page.tsx
+  - packages/frontend/src/app/demo.md/route.ts
+  - packages/frontend/src/lib/demo-gate.ts
+  - packages/frontend/src/lib/demo-md-content.ts
+  - packages/frontend/src/app/demo/__tests__/not-listed.test.ts
 last-verified: "2026-09-08"
 ---
 
@@ -54,6 +59,7 @@ Operational home of the **Agent Discovery (AEO) GTM track**, Phase 0 (strategy d
 | npm metadata | package.json of sdk / signer / mcp / connect / cli | Keywords + descriptions carry the category phrases (x402, agent-payments, budget, non-custodial). Ships on next `release:bump`; do not hand-edit versions (see `scripts/README.md`). |
 | `robots.txt` | `/robots.txt` | **Generated**, not a static file (`src/app/robots.txt/route.ts`). Names the agent-readable artifacts and `Disallow`s the authenticated prefixes. Update when a public artifact is added or an authenticated prefix appears — both come from `AUTHENTICATED_PREFIXES` in `src/lib/discovery-surfaces.ts`, so edit that list, not the template. |
 | `sitemap.xml` | `/sitemap.xml` | **Generated** (`src/app/sitemap.xml/route.ts`) from `PUBLIC_SURFACES` in `src/lib/discovery-surfaces.ts`. Add a public page → add it there. The guard test fails if an entry resolves to no route or file, or if an authenticated prefix reaches the list. |
+| `demo.md` | `/demo.md` | **Deliberate exception (#3477) — NOT added to `PUBLIC_SURFACES`.** The investor demo (`/demo`, `packages/frontend/src/app/demo/page.tsx`) is semi-private: not advertised — the team hands the link to invited investors — never listed in the sitemap, `robots.txt`, `llms.txt`, `for-agents.md` or the site header/footer — `src/app/demo/__tests__/not-listed.test.ts` pins the absence. `/demo.md` is served from a **gated route handler** (`src/app/demo.md/route.ts`), not a static `public/` file: both it and `/demo` 404 on production (`src/lib/demo-gate.ts`), which no static artifact in this table can do. It links `/for-agents.md` for setup rather than duplicating it, but overrides that runbook's "25 USDC per day" budget example — a budget that large would clear the demo's over-budget refusal step instead of triggering it. |
 | Auth-wall marker | `<meta name="haven:auth" content="required">` | Emitted by `src/app/(authenticated)/layout.tsx` on every authenticated page, plus a `<noscript>` sentence. Lets a non-browser client tell a wall from a page — they all answer 200 with an SSR shell. Never add it to a public route; never remove it from an authenticated one. |
 
 **Own-product links in these artifacts are same-origin paths, never absolute hosts (#2520).**

@@ -314,21 +314,39 @@ export class AccountReads {
         (allowance) => allowance.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
       )
       if (!match) return unavailable('no allowance/budget row matches the settled token', payment)
-      const token = resolveTokenFromAddress(match.tokenAddress)
-      const remainingDisplay = token
-        ? `${formatAtomicAmount(safeBigInt(match.onchain.remaining), token.decimals)} ${match.tokenSymbol}`
-        : undefined
+      // #3464: the ONE shared formatter — `haven_get_agent`'s allowances[]
+      // rows use the same `formatRemainingDisplay` call, so the settle summary
+      // can never omit or disagree with the display figure get_agent emits
+      // for the same fixture (an unknown-decimals token gets the same explicit
+      // atomic label instead of a missing field).
+      const remainingDisplay = formatRemainingDisplay(match.tokenAddress, match.tokenSymbol, match.onchain.remaining)
+      // #1986/#2020 proven by exhaustion: a retired-rail account is refused
+      // (410) by GET /machine-payments/allowances BEFORE this read completes,
+      // so `executionRail` can only be 'delegation' here — narrowed at the
+      // mapping, not at the public HavenAgent.executionRail type (#3464).
       const rail = agentResult.value.executionRail
+      if (rail !== 'delegation') {
+        return unavailable(`the account's rail ('${rail}') cannot have a settled x402 payment`, payment)
+      }
       return {
         payment,
         allowance: {
           rail,
           remaining_atomic: match.onchain.remaining,
-          ...(remainingDisplay ? { remaining_display: remainingDisplay } : {}),
+          // Deprecated spellings (#3464): kept for the deprecation window;
+          // removal condition on the type's JSDoc.
+          remaining_display: remainingDisplay,
           token_symbol: match.tokenSymbol,
           token_address: match.tokenAddress,
           reset_period: match.resetPeriodMin,
-          source: rail === 'delegation' ? 'active_delegations' : 'allowance_module',
+          source: 'active_delegations',
+          // The canonical spellings — the SAME names and values
+          // `haven_get_agent`'s allowances[] rows report.
+          remainingAtomic: match.onchain.remaining,
+          remainingDisplay,
+          resetPeriodMin: match.resetPeriodMin,
+          tokenSymbol: match.tokenSymbol,
+          tokenAddress: match.tokenAddress,
         },
         warnings: [],
       }

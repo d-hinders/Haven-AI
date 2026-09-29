@@ -813,15 +813,20 @@ Sequence:
    refused; an exact atomic `max_amount` still works, since comparing it needs no
    decimals. `max_amount`'s meaning is unchanged for existing callers.
 5. Read a rail-aware allowance/budget report via the EXISTING, already
-   rail-aware `GET /machine-payments/allowances` (#1135) and the account's
-   `execution_rail` (now also carried on `GET /machine-payments/agent`,
-   #1306) — no new derivation logic. The response carries an `allowance`
-   block: `{ rail: 'legacy' | 'delegation', sufficient: boolean | null,
-   remaining_atomic?: string, source: 'allowance_module' | 'active_delegations'
-   }`. The union is the declared TYPE; its `'legacy'` / `'allowance_module'`
-   arm is **unreachable in practice** — since #2020,
-   `GET /machine-payments/allowances` answers HTTP 410 for a retired-rail
-   account, so no caller receives those values from this read (#2265). A failed read degrades to `sufficient: null` plus a warning
+   rail-aware `POST /machine-payments/budget-precheck` (#3054) — no new
+   derivation logic. The response carries an `allowance`
+   block: `{ rail: 'delegation', sufficient: boolean | null,
+   remaining_atomic?: string, remainingAtomic?: string,
+   source: 'active_delegations' }`. #3464: the declared TYPE is the
+   delegation arm only — its former `'legacy'` / `'allowance_module'` arm was
+   **unreachable in practice** — since #2020, every retired-rail read answers
+   HTTP 410 (`GET /machine-payments/allowances` for the summary read,
+   `budget-precheck` for this block; `POST /x402` refuses the account before
+   step 3 could pass), so no caller ever received those values (#2265); the
+   declared type now says so instead of carrying dead arms. The canonical
+   figure spelling is `remainingAtomic` — the SAME name `haven_get_agent`'s
+   `allowances[]` rows report (#3464) — with `remaining_atomic` kept as a
+   deprecated alias for a deprecation window. A failed read degrades to `sufficient: null` plus a warning
    (`ALLOWANCE_CHECK_UNAVAILABLE`) — it never fails the preflight, since the
    on-chain policy remains the actual gate either way; this holds on BOTH
    rails, including the delegation rail's no-approval-queue branch below
@@ -891,19 +896,32 @@ values are the #1090 `deriveDelegationBudgets`-backed enforcer read, never
 the same fixture. Shape:
 
 ```text
-{ rail: 'legacy' | 'delegation', remaining_atomic: string,
-  remaining_display?: string, token_symbol?: string, token_address?: string,
-  reset_period?: number, source: 'allowance_module' | 'active_delegations' }
+{ rail: 'delegation', remaining_atomic: string, remainingAtomic?: string,
+  remaining_display?: string, remainingDisplay?: string,
+  token_symbol?: string, tokenAddress?: string, tokenSymbol?: string,
+  token_address?: string, reset_period?: number, resetPeriodMin?: number,
+  source: 'active_delegations' }
 ```
 
-As in #1306's block above, the `'legacy'` / `'allowance_module'` arm is the
-declared type rather than a reachable value: this summary reads through
+#3464: the declared type is the delegation arm only. The former
+`'legacy'` / `'allowance_module'` arms were the declared type rather than a
+reachable value — this summary reads through
 `GET /machine-payments/allowances`, which 410s for a retired-rail account
 (#2020), and it only fires for a settled x402 payment, which a retired-rail
-account cannot have (#1986). Doubly unreachable (#2265).
+account cannot have (#1986) — doubly unreachable (#2265) — so the type now
+carries the one reachable arm instead of dead ones. The canonical key
+spelling is the camelCase set — `remainingAtomic`, `remainingDisplay`,
+`resetPeriodMin`, `tokenSymbol`, `tokenAddress` — the SAME names
+`haven_get_agent`'s `allowances[]` rows report; the snake_case keys
+(`remaining_atomic`, `remaining_display`, `token_symbol`, `token_address`,
+`reset_period`) are DEPRECATED and kept for a deprecation window, removed
+once `packages/qa-agent` reads the camelCase keys.
 
-Deliberately the SAME rail-labeled spelling as #1306's `allowance` block,
-minus the preflight-only `sufficient` field — post-purchase reporting answers
+Deliberately the SAME spelling as `haven_get_agent`'s `allowances[]` rows —
+which is also the spelling of #1306's `allowance` block above, minus the
+preflight-only `sufficient` field (#3464 restated the invariant from
+"matches #1306" to "matches `haven_get_agent`"; the two blocks still move
+together) — post-purchase reporting answers
 "what is left", not "was this purchase covered". This is read-only reporting,
 never a spend authority claim: the on-chain policy (the active delegation's
 caveat enforcers) remains the actual gate regardless of
@@ -916,7 +934,11 @@ settled token (#1320 review: unknown is reported as unknown, never a
 fabricated zero) —
 folded into the response's existing `warnings[]` (#1308). `ALLOWANCE_CHECK_UNAVAILABLE`
 predates this issue (#1306) and is reused rather than respelled; per #1318 it
-was confirmed SDK-side only, never mirrored on the backend.
+was confirmed SDK-side only, never mirrored on the backend. #3464: the
+summary's `remainingDisplay` is now produced by the ONE shared formatter
+(`formatRemainingDisplay`) `haven_get_agent` uses, so a settled
+unknown-decimals token reports the same explicit atomic label get_agent does
+instead of omitting the field.
 
 Freshness caveat (#1319): the delegation rail's on-chain enforcer read can
 silently fall back to the optimistic full period budget without throwing when
@@ -924,7 +946,8 @@ the RPC read itself fails (the pre-existing #1145 design, deliberately
 unchanged by #1319 — the fallback stays fund-safe). The underlying wire now
 carries the provenance (`onchain.remaining_is_from_chain`, #1319), but this
 summary — unlike the #1306 catalog-purchase preflight above — does not yet
-surface it as a warning; `remaining_atomic` still reflects the last successful
+surface it as a warning; `remaining_atomic` / `remainingAtomic` still reflect
+the last successful
 chain read, not a guaranteed-live one, and phrasing here avoids claiming
 freshness.
 

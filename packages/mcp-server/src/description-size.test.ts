@@ -170,14 +170,35 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * payment is already confirmed; the hash is recorded beside it): −11 UTF-8
  * bytes. Measured total 22,575 across 26 tools; the absolute pin follows it
  * down. The mean pin stays HELD at 875: 22,575 / 26 = 868.27.
+ *
+ * **Re-derived — round 8, #3464 (2026-09-29).** Four descriptions must now
+ * name the canonical allowance-block key set — remainingAtomic /
+ * remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress, the names
+ * `haven_get_agent`'s rows report — AND mark the snake_case spellings
+ * deprecated with the removal window stated: `haven_settle_mcp_tool`,
+ * `haven_complete_mcp_tool`, the shared `getPaymentStatus` behavior the
+ * hosted status tool composes, and the catalog-preflight paragraph inside
+ * `haven_prepare_catalog_purchase`. The issue mandates exactly this copy in
+ * exactly these descriptions; the leanest version that still enumerates the
+ * five canonical keys and the five deprecated ones costs +1,195 UTF-8 bytes
+ * net (22,586 → 23,781 across the same 26 tools; #3475's disjoint −11 above
+ * makes the merged-tree measure 23,770), and the enumeration IS the
+ * mandated content — no duplication or overclaim remains to trim. So the
+ * absolute pin moves to the exact measured value of this surface,
+ * 23,770 UTF-8 bytes across 26 tools, shrink-only from here; and the mean
+ * pin moves too, because 23,770 / 26 = 914.23 sits ABOVE the held 875
+ * ceiling and a pin above the tree it guards is the exact failure rounds
+ * 2-3 named ("the constant cannot stay while the tree the PR must merge
+ * into already exceeds it"). Re-derived at the measured mean, shrink-only
+ * from here.
  */
-const MAX_TOTAL_BYTES = 22_575
-// Mean pin: HELD at the #3329 ceiling (21,000 / 24 = 875.0), not re-derived —
-// the composed surface's actual mean (22,173 / 26 = 852.81) already sits
-// BELOW the ceiling, so the held value is the stricter pin, and re-deriving
-// it to the latest measured mean would turn the ceiling into a running
-// average of whatever landed most recently, which #3329's round rejected.
-const MAX_MEAN_BYTES = 875
+const MAX_TOTAL_BYTES = 23_770
+// Mean pin: re-derived — round 8, #3464 (block above): 23,770 / 26 =
+// 914.2307, pinned at the two-decimal ceiling (914.24). The #3464
+// key-enumeration copy is mandated in four descriptions and cannot fit
+// under the #3329 ceiling; holding 875 would leave the gate redder than the
+// tree it guards. Shrink-only from here.
+const MAX_MEAN_BYTES = 914.24
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

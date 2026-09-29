@@ -600,8 +600,10 @@ export class MerchantCompletion {
    * itself was already confirmed by funding.
    *
    * Reuses `reportEvidence` — same backend seam
-   * (`POST /machine-payments/evidence` → `observeErc7710Settlement`,
-   * fail-closed — see `settlement-observed.ts`), same three-outcome contract.
+   * (`POST /machine-payments/evidence` → `observeErc7710Settlement`, or
+   * `observeEip3009MerchantSettlement` on eip3009, both fail-closed — see
+   * `settlement-observed.ts` / `eip3009-settlement-evidence.ts`), same
+   * three-outcome contract.
    * `resourceUrl` and `merchantStatus` are omitted: this call has no fresh
    * merchant HTTP exchange to read either from, and both are optional at the
    * backend (see the parameter doc on `reportEvidence`).

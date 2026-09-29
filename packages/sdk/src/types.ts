@@ -1146,8 +1146,10 @@ export interface HavenPaymentReceipt {
   /**
    * The delegate → merchant settlement transaction (#2998). Trust level differs
    * by scheme: on erc7710 it is `txHash` itself and Haven VERIFIED it on-chain
-   * before the receipt existed; on eip3009 it is the merchant's claim as relayed
-   * (PAYMENT-RESPONSE), NOT verified on-chain by Haven — cite it as such.
+   * before the receipt existed. On eip3009 it is the settlement the agent
+   * reported through `reportSettlementEvidence()` when there is one, which Haven
+   * also VERIFIED on-chain (#3475); otherwise the merchant's claim as relayed
+   * (PAYMENT-RESPONSE), NOT verified on-chain by Haven — cite that as such.
    */
   settlementTxHash: string | null
   chainId: number

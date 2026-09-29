@@ -434,52 +434,11 @@ export async function confirmObservedSettlement(
 // ── eip3009 merchant settlement evidence (#3475) ─────────────────────────────
 
 /**
- * The look-alike an eip3009 settlement could equally belong to: another
- * funded eip3009 payment of this agent, on this chain, in this token, from the
- * same delegate to the same merchant, for the same amount, with no settlement
- * of its own recorded yet, whose window contains the reported block. Haven
- * never sees the EIP-3009 nonce on the plain-HTTP path, so transfer shape and
- * window are all it has, and two such payments cannot be told apart.
- *
- * Only an EARLIER-funded look-alike blocks (ordered by `confirmed_at`, then
- * `id`): an overlapping pair is attributed oldest first. Blocking in both
- * directions would deadlock such a pair for good, since each would refuse
- * while the other is unreported. Ordering keeps the oldest always reportable,
- * and the price is bounded: the pair is identical in amount, token, payer and
- * merchant, so the only thing an out-of-order report can swap is which of two
- * identical rows carries which hash.
- *
- * A twin's window is `[confirmed_at - skew, expires_at + forward]`: its funding
- * confirmed before its merchant could pull, and its authorization was signed
- * by `expires_at` and lives at most `forward - skew` seconds after that.
- * Built from placeholders because the same predicate runs standalone (to
- * classify a refusal) and inside the guarded UPDATE, with different numbering.
+ * Some OTHER payment already holds this hash, as its own transaction or as its
+ * recorded merchant settlement. Built from placeholders because the same
+ * predicate runs standalone (to classify a refusal) and inside the guarded
+ * UPDATE, with different numbering.
  */
-function eip3009TwinExistsSql(p: { id: string; blockTs: string; skew: string; forward: string }): string {
-  return `SELECT 1
-               FROM payment_intents me
-               JOIN payment_intents twin
-                 ON twin.id <> me.id
-                AND twin.agent_id = me.agent_id
-                AND twin.chain_id = me.chain_id
-                AND twin.status = 'confirmed'
-                AND twin.tx_hash IS NOT NULL
-                AND LOWER(twin.token_address) = LOWER(me.token_address)
-                AND LOWER(twin.to_address) = LOWER(me.to_address)
-                AND LOWER(COALESCE(twin.x402_merchant_address, twin.merchant_address, ''))
-                      = LOWER(COALESCE(me.x402_merchant_address, me.merchant_address, ''))
-                AND twin.amount_raw = me.amount_raw
-                AND COALESCE(twin.payment_rail, twin.source) = 'x402'
-                AND twin.execution_rail = 'delegation'
-                AND twin.machine_metadata->>'settlement_scheme' = 'eip3009'
-                AND twin.machine_metadata->>'merchant_settlement_tx_hash' IS NULL
-                AND (twin.confirmed_at, twin.id) < (me.confirmed_at, me.id)
-                AND to_timestamp(${p.blockTs}) BETWEEN twin.confirmed_at - (${p.skew} * interval '1 second')
-                                                   AND twin.expires_at + (${p.forward} * interval '1 second')
-              WHERE me.id = ${p.id}`
-}
-
-/** Some OTHER payment already holds this hash, as its own transaction or as its recorded settlement. */
 function settlementHashTakenSql(p: { hash: string; id: string }): string {
   return `SELECT 1 FROM payment_intents other
               WHERE other.id <> ${p.id}
@@ -489,7 +448,6 @@ function settlementHashTakenSql(p: { hash: string; id: string }): string {
                 )`
 }
 
-export const EIP3009_TWIN_EXISTS_SQL = eip3009TwinExistsSql({ id: '$1', blockTs: '$2', skew: '$3', forward: '$4' })
 export const SETTLEMENT_HASH_TAKEN_SQL = settlementHashTakenSql({ hash: '$1', id: '$2' })
 
 /**
@@ -501,8 +459,17 @@ export const SETTLEMENT_HASH_TAKEN_SQL = settlementHashTakenSql({ hash: '$1', id
  * receipt read prefers over the merchant's unverified `PAYMENT-RESPONSE` echo.
  * JSONB, so no migration.
  *
- * The two NOT EXISTS repeat the checks {@link recordEip3009MerchantSettlement}
- * classifies with, so the UPDATE stays correct even without the classification.
+ * What it does NOT try to decide is which of two same-shaped payments (same
+ * agent, token, delegate, merchant and amount, overlapping in time) a transfer
+ * settled: Haven never sees the EIP-3009 nonce on this path, so it cannot. A
+ * look-alike guard was tried and dropped in review: every payment it refused
+ * stayed unrecorded and so refused the next one, and an unreportable payment
+ * (merchant-rejected, or reported through the funding hash) blocked every later
+ * same-price payment for good. What remains bounds the damage instead: one
+ * hash backs at most one eip3009 payment (`settlementHashTakenSql`), a payment
+ * takes one hash only (`merchant_settlement_tx_hash IS NULL` makes the UPDATE
+ * a compare-and-set), and a swap between two identical rows changes nothing
+ * about amount, token, payer or merchant.
  */
 export const RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL = `UPDATE payment_intents target
            SET machine_metadata = COALESCE(target.machine_metadata, '{}'::jsonb)
@@ -517,7 +484,6 @@ export const RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL = `UPDATE payment_intents ta
            AND LOWER(target.tx_hash) <> LOWER($1)
            AND target.machine_metadata->>'merchant_settlement_tx_hash' IS NULL
            AND NOT EXISTS (${settlementHashTakenSql({ hash: '$1', id: '$2' })})
-           AND NOT EXISTS (${eip3009TwinExistsSql({ id: '$2', blockTs: '$4', skew: '$5', forward: '$6' })})
          RETURNING target.id`
 
 export const FIND_RECORDED_EIP3009_SETTLEMENT_SQL = `SELECT machine_metadata->>'merchant_settlement_tx_hash' AS recorded
@@ -527,12 +493,6 @@ export interface Eip3009SettlementRecord {
   txHash: string
   intentId: string
   agentId: string
-  /** The verified settlement block's timestamp, in seconds. */
-  blockTimestampSec: number
-  /** Clock-skew allowance on both window edges. */
-  skewSeconds: number
-  /** How long after `expires_at` a settlement can still be mined, skew included. */
-  forwardSeconds: number
 }
 
 export type Eip3009SettlementRecordOutcome =
@@ -542,16 +502,17 @@ export type Eip3009SettlementRecordOutcome =
   | 'conflict'
   /** Another payment already holds this hash. */
   | 'hash_taken'
-  /** A same-shaped payment's window also contains this settlement. */
-  | 'ambiguous'
   /** Not a confirmed eip3009 delegation-rail x402 intent of this agent. */
   | 'not_eligible'
 
 /**
  * {@link RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL}, serialized per settlement
- * hash with the same advisory lock the erc7710 confirm takes, so one real
- * transaction can never be recorded against two payments, whatever their
- * scheme.
+ * hash with the same advisory lock the erc7710 confirm takes. The uniqueness
+ * this enforces is one-directional: an eip3009 record refuses a hash an
+ * erc7710 row already confirmed with, but the erc7710 confirm checks only
+ * `tx_hash`. The reverse collision would need one transaction to be both an
+ * account → merchant settlement and a delegate EOA → merchant one, which the
+ * two payers make unreachable in practice.
  */
 export async function recordEip3009MerchantSettlement(
   input: Eip3009SettlementRecord,
@@ -570,20 +531,10 @@ export async function recordEip3009MerchantSettlement(
     if ((await tx.query(SETTLEMENT_HASH_TAKEN_SQL, [input.txHash, input.intentId])).rows.length > 0) {
       return 'hash_taken'
     }
-    const twin = await tx.query(EIP3009_TWIN_EXISTS_SQL, [
-      input.intentId,
-      input.blockTimestampSec,
-      input.skewSeconds,
-      input.forwardSeconds,
-    ])
-    if (twin.rows.length > 0) return 'ambiguous'
     const written = await tx.query<{ id: string }>(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [
       input.txHash,
       input.intentId,
       input.agentId,
-      input.blockTimestampSec,
-      input.skewSeconds,
-      input.forwardSeconds,
     ])
     return written.rows.length > 0 ? 'recorded' : 'not_eligible'
   })

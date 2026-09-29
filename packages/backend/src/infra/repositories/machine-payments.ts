@@ -198,8 +198,7 @@ export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS
             execution_rail,
             delegation_hash,
             created_at,
-            confirmed_at,
-            expires_at
+            confirmed_at
      FROM payment_intents
      WHERE id = $1
        AND ($2::UUID IS NULL OR agent_id = $2)
@@ -248,12 +247,6 @@ export interface EvidenceSourceRow {
   /** #2092: authorize time — the origin of the erc7710 settlement window. */
   created_at: string | null
   confirmed_at: string | null
-  /**
-   * #3475: the signing deadline. On the eip3009 leg the merchant's
-   * EIP-3009 authorization is signed no later than this, so its settlement
-   * is mined no later than this plus the authorization's bounded lifetime.
-   */
-  expires_at: string | null
 }
 
 /**
@@ -282,8 +275,7 @@ export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS ki
             execution_rail,
             delegation_hash,
             created_at,
-            confirmed_at,
-            expires_at
+            confirmed_at
      FROM payment_intents
      WHERE id = $1 AND agent_id = $2
      LIMIT 1`

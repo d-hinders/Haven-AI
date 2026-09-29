@@ -10956,12 +10956,14 @@ export const openapiSpec = {
             type: ['string', 'null'],
             description:
               'The delegate → merchant settlement transaction (#2998). On erc7710 this is `tx_hash` itself ' +
-              '(the one transaction). On eip3009 this is the merchant-reported ' +
+              '(the one transaction). On eip3009 this is, first, a merchant settlement the agent reported and ' +
+              'Haven verified on-chain (#3475); otherwise the merchant-reported ' +
               '`protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed 32-byte hash, else null ' +
               '— the merchant has not reported a settlement yet, or reported the zero-hash "delivered, not ' +
-              'settled" marker. Trust level differs by scheme: on erc7710 Haven verified this hash on-chain ' +
-              'before the receipt existed; on eip3009 it is the merchant\'s claim as relayed (PAYMENT-RESPONSE), ' +
-              'NOT verified on-chain by Haven. On scheme-less retired mpp-rail rows it is `tx_hash` itself.',
+              'settled" marker. Trust level differs: on erc7710, and for the verified eip3009 report, Haven ' +
+              'verified this hash on-chain; the eip3009 fallback is the merchant\'s claim as relayed ' +
+              '(PAYMENT-RESPONSE), NOT verified on-chain by Haven. On scheme-less retired mpp-rail rows it is ' +
+              '`tx_hash` itself.',
           },
           chain_id: { type: 'integer' },
           resource_url: { type: 'string', format: 'uri' },

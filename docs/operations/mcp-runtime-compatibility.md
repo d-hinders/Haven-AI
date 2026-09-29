@@ -1065,14 +1065,18 @@ last-verified: "2026-09-29"
 > backend seam behind the same `POST /machine-payments/evidence` decides by
 > the payment. A funded eip3009 intent reported with a hash that is not its
 > funding hash goes to `observeEip3009MerchantSettlement`, which verifies a
-> delegate → merchant transfer of exactly the amount, mined between funding
-> confirmation and `expires_at` plus the SDK's authorization lifetime, and
-> records it as `machine_metadata.merchant_settlement_tx_hash`. The funding
-> `tx_hash` and the evidence row's proof status do not move. Receipts
-> (`haven_list_receipts`) then show that hash as `settlementTxHash`, ahead of
-> the merchant's unverified echo. A refused report still classifies as
-> `DELIVERED_UNSETTLED` or `SETTLEMENT_PENDING` (the same three outcomes; an
-> eip3009 refusal leaves an already-confirmed payment as it was). The shared
+> delegate → merchant transfer of exactly the amount, mined after funding
+> confirmed and before the report (so a settlement from a funded retry signed
+> long after `expires_at` still qualifies), and records it as
+> `machine_metadata.merchant_settlement_tx_hash`. The funding `tx_hash` and the
+> evidence row's proof status do not move. Receipts (`haven_list_receipts`)
+> then show that hash as `settlementTxHash`, ahead of the merchant's
+> unverified echo, and `haven_get_payment_status` stops offering
+> `retry_original_x402_request` for that payment: the merchant was provably
+> paid, so a fresh header could only pay it twice. A refused report still
+> classifies as `DELIVERED_UNSETTLED` or `SETTLEMENT_PENDING` (the same three
+> outcomes; an eip3009 refusal leaves an already-confirmed payment as it was,
+> and the backend's 409 body now carries a `reason`). The shared
 > description drops its erc7710-only wording (−11 bytes, the #1591 total pin
 > moves to 22,575), and the skill's plain-HTTP paragraph now tells the agent
 > to report the transaction. Version skew: an older backend treats the report

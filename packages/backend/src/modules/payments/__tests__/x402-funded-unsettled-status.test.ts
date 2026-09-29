@@ -47,6 +47,8 @@ interface SeedOptions {
   evidenceProofStatus?: 'payment_confirmed' | 'merchant_response_observed' | 'protocol_receipt_attached'
   /** Insert an open client-written `merchant_retry_rejected_after_payment` event. */
   merchantRejected?: boolean
+  /** #3475: a verified eip3009 merchant settlement recorded on the intent. */
+  merchantSettlementRecorded?: boolean
 }
 
 /** Seed a CONFIRMED x402 intent in the given evidence state. */
@@ -61,7 +63,10 @@ async function seedConfirmedX402(opts: SeedOptions): Promise<{ agent: AgentConte
     [userId],
   )
   const agentId = agentRow.rows[0].id
-  const metadata = opts.settlementScheme ? { settlement_scheme: opts.settlementScheme } : {}
+  const metadata = {
+    ...(opts.settlementScheme ? { settlement_scheme: opts.settlementScheme } : {}),
+    ...(opts.merchantSettlementRecorded ? { merchant_settlement_tx_hash: `0x${'5e'.repeat(32)}` } : {}),
+  }
   const intent = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
        (agent_id, user_id, account_address, token_symbol, token_address, to_address,
@@ -253,6 +258,7 @@ describeDb('#2290 — the resume predicate agrees with the status remedy', () =>
     { name: 'erc7710 (no funding leg)', seed: { settlementScheme: 'erc7710', confirmedMinutesAgo: 60 } },
     { name: 'no settlement_scheme metadata', seed: { confirmedMinutesAgo: 60 } },
     { name: 'inside the merchant-report grace window', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 1 } },
+    { name: 'a verified merchant settlement recorded (#3475)', seed: { settlementScheme: 'eip3009', confirmedMinutesAgo: 60, merchantSettlementRecorded: true } },
   ]
 
   for (const { name, seed } of CASES) {
@@ -266,6 +272,23 @@ describeDb('#2290 — the resume predicate agrees with the status remedy', () =>
       )
     })
   }
+
+  it('is false once a verified merchant settlement is recorded (#3475): the merchant was already paid', async () => {
+    // Funded, no merchant response reported, past the grace window: without
+    // the recorded settlement this is exactly the resume state. A verified
+    // delegate → merchant pull proves the merchant already took this
+    // payment's funds, so a fresh EIP-3009 header could only pay it twice.
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'eip3009',
+      confirmedMinutesAgo: 60,
+      evidenceProofStatus: 'payment_confirmed',
+      merchantSettlementRecorded: true,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.next_action).not.toBe('retry_original_x402_request')
+    const row = await findIntentStatusRow(paymentId, agent.id)
+    expect(isFundedX402AwaitingMerchantLeg(row!)).toBe(false)
+  })
 
   it('is false for the one state whose remedy is sweep, not resume', async () => {
     // Guards the direction that matters: a merchant that was asked and said

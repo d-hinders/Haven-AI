@@ -1776,16 +1776,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > payment's merchant settlement hash (`haven_report_settlement_evidence`). The
 > backend verifies it on-chain with the existing
 > `verifySettlementTransferTx` (a Transfer of exactly the amount, in the
-> token, from the payment's delegate EOA to its merchant, mined inside the
-> payment's funding-to-authorization-expiry window) and records it on the
-> intent's metadata. Nothing is signed, submitted or moved, the intent's
-> status and funding hash stay, and the one write is serialized per hash with
-> the erc7710 confirm's advisory lock, so a transaction can back at most one
-> payment. Same-shaped overlapping payments are attributed oldest-funded
-> first, because Haven never sees the EIP-3009 nonce on this path. No
-> signature, key role, delegation, caveat or on-chain surface changes. The
-> rest of this document was not re-read for it, and `last-verified` is not
-> bumped.
+> token, from the payment's delegate EOA to its merchant, mined after the
+> payment's funding confirmed) and records it on the intent's metadata.
+> Nothing is signed, submitted or moved, and the intent's status and funding
+> hash stay. The one write is serialized per hash with the erc7710 confirm's
+> advisory lock and refuses a hash another payment already holds. That check
+> runs from the eip3009 side only (the erc7710 confirm reads `tx_hash`
+> alone); the reverse collision would need one transaction to be both an
+> account → merchant and a delegate EOA → merchant settlement. Which of two
+> same-shaped payments a transfer settled is not decided, because Haven never
+> sees the EIP-3009 nonce on this path; such a pair can at worst swap hashes
+> between two otherwise identical rows. A recorded settlement also closes the
+> funded-merchant-retry remedy (`isFundedX402AwaitingMerchantLeg`), so the
+> delegate key is never asked to sign a second authorization for a merchant
+> already paid. No signature, key role, delegation, caveat or on-chain surface
+> changes. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
 
 > **Re-verified (#3423 slice C, 2026-09-29):** the SDK's
 > `listReceiptsPage` (and `haven_list_receipts` on both surfaces) gains an

@@ -38,6 +38,7 @@ vi.mock('../../accounting/index.js', async (importOriginal) => ({
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { attachEvidenceHandler, attachMachinePaymentEvidence, listReceipts } from '../evidence.js'
+import { RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL } from '../../../infra/repositories/x402-authorizations.js'
 
 const TOKEN = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const TREASURY = '0x00000000000000000000000000000000000000b1'
@@ -98,6 +99,8 @@ async function seedFunded(seed: {
   userId: string
   scheme?: string
   confirmedOffsetSec?: number
+  /** Signing deadline, seconds from now (default +600). */
+  expiresOffsetSec?: number
   amountRaw?: string
   merchant?: string
 }): Promise<{ id: string; funding: string }> {
@@ -109,7 +112,7 @@ async function seedFunded(seed: {
         status, tx_hash, confirmed_at, expires_at, source, payment_rail, execution_rail, machine_metadata,
         x402_resource_url, payment_resource_url, merchant_address, x402_merchant_address)
      VALUES ($1, $2, $3, 84532, 'USDC', $4, $5, $6, '0.001', $5, 0, $7,
-             'confirmed', $8, NOW() + ($9 * interval '1 second'), NOW() + interval '10 minutes',
+             'confirmed', $8, NOW() + ($9 * interval '1 second'), NOW() + ($13 * interval '1 second'),
              'x402', 'x402', 'delegation', $10::jsonb,
              $11, $11, $12, $12)
      RETURNING id`,
@@ -126,6 +129,7 @@ async function seedFunded(seed: {
       JSON.stringify({ settlement_scheme: seed.scheme ?? 'eip3009' }),
       RESOURCE,
       seed.merchant ?? MERCHANT,
+      seed.expiresOffsetSec ?? 600,
     ],
   )
   return { id: result.rows[0].id, funding }
@@ -256,11 +260,11 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       expect(await recordedHash(id)).toBeNull()
     })
 
-    it('mined after the authorization could have expired', async () => {
+    it('mined after the report was made', async () => {
       getTransactionReceipt.mockResolvedValue(goodReceipt())
-      // expires_at is now + 600 s; the authorization lives at most 900 s past
-      // signing, plus 120 s skew.
-      getBlock.mockResolvedValue(blockAt(600 + 900 + 120 + 60))
+      // The far edge is the report itself (plus 120 s skew): a block from the
+      // future cannot be a settlement that already happened.
+      getBlock.mockResolvedValue(blockAt(600))
       const { agentId, userId } = await seedAgent()
       const { id } = await seedFunded({ agentId, userId })
 
@@ -311,45 +315,90 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
     })
   })
 
-  describe('same-shaped payments', () => {
-    it('attributes an overlapping pair oldest first, and neither can lock the other out', async () => {
+  describe('late and repeated payments', () => {
+    it('a settlement long after the signing deadline is recorded (a resumed funded-merchant retry)', async () => {
       getTransactionReceipt.mockResolvedValue(goodReceipt())
+      // Funded two hours ago, signing deadline 110 minutes ago; the agent
+      // re-signed through the funded-retry path and the merchant settled ten
+      // minutes ago.
+      getBlock.mockResolvedValue(blockAt(-600))
       const { agentId, userId } = await seedAgent()
-      const first = await seedFunded({ agentId, userId, confirmedOffsetSec: -20 })
-      const second = await seedFunded({ agentId, userId })
-
-      // The block (now + 30 s) lies in both windows. `first` was funded
-      // earlier and has no settlement recorded, so `second` must wait.
-      await expect(report(agentId, second.id, SETTLE_B)).rejects.toThrow('settlement_unverified')
-      expect(await recordedHash(second.id)).toBeNull()
-
-      // `first` is never blocked by the later `second`, even though
-      // `second` is unreported and its window contains the block too.
-      await expect(report(agentId, first.id, SETTLE_A)).resolves.not.toBeNull()
-      await expect(report(agentId, second.id, SETTLE_B)).resolves.not.toBeNull()
-      expect(await recordedHash(first.id)).toBe(SETTLE_A)
-      expect(await recordedHash(second.id)).toBe(SETTLE_B)
-    })
-
-    it('a look-alike whose window cannot contain the block is not a twin', async () => {
-      getTransactionReceipt.mockResolvedValue(goodReceipt())
-      const { agentId, userId } = await seedAgent()
-      // Funded 10 minutes from now: its window opens after the settlement block.
-      await seedFunded({ agentId, userId, confirmedOffsetSec: 600 })
-      const { id } = await seedFunded({ agentId, userId })
+      const { id } = await seedFunded({ agentId, userId, confirmedOffsetSec: -7200, expiresOffsetSec: -6600 })
 
       await expect(report(agentId, id, SETTLE_A)).resolves.not.toBeNull()
       expect(await recordedHash(id)).toBe(SETTLE_A)
     })
 
-    it('a different amount or merchant is not a twin', async () => {
+    it('one payment that is never reported blocks none of the later same-price payments', async () => {
       getTransactionReceipt.mockResolvedValue(goodReceipt())
       const { agentId, userId } = await seedAgent()
-      await seedFunded({ agentId, userId, amountRaw: '2000' })
-      await seedFunded({ agentId, userId, merchant: OTHER })
+      // A: funded first, merchant never answered with a transaction, so it is
+      // never reported. B and C: same price, same merchant, overlapping.
+      const a = await seedFunded({ agentId, userId, confirmedOffsetSec: -40 })
+      const b = await seedFunded({ agentId, userId, confirmedOffsetSec: -20 })
+      const c = await seedFunded({ agentId, userId })
+
+      await expect(report(agentId, c.id, SETTLE_B)).resolves.not.toBeNull()
+      await expect(report(agentId, b.id, SETTLE_A)).resolves.not.toBeNull()
+      expect(await recordedHash(a.id)).toBeNull()
+      expect(await recordedHash(b.id)).toBe(SETTLE_A)
+      expect(await recordedHash(c.id)).toBe(SETTLE_B)
+    })
+
+    it('a mixed-case report of a recorded hash is the same hash', async () => {
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+      const { agentId, userId } = await seedAgent()
+      const first = await seedFunded({ agentId, userId })
+      const second = await seedFunded({ agentId, userId })
+      const upper = `0x${'A'.repeat(64)}`
+
+      await report(agentId, first.id, upper)
+      expect(await recordedHash(first.id)).toBe(SETTLE_A)
+      // Idempotent on the same payment, refused on another, whatever the case.
+      await expect(report(agentId, first.id, SETTLE_A)).resolves.not.toBeNull()
+      await expect(report(agentId, second.id, SETTLE_A)).rejects.toThrow('settlement_unverified')
+    })
+
+    it('two concurrent reports of one hash for two payments record it exactly once', async () => {
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+      const { agentId, userId } = await seedAgent()
+      const first = await seedFunded({ agentId, userId })
+      const second = await seedFunded({ agentId, userId })
+
+      const results = await Promise.allSettled([
+        report(agentId, first.id, SETTLE_A),
+        report(agentId, second.id, SETTLE_A),
+      ])
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+      const holders = [await recordedHash(first.id), await recordedHash(second.id)].filter(Boolean)
+      expect(holders).toEqual([SETTLE_A])
+    })
+
+    it("the UPDATE's own guard refuses a hash another payment holds, without the classification", async () => {
+      const { agentId, userId } = await seedAgent()
+      const holder = await seedFunded({ agentId, userId })
       const { id } = await seedFunded({ agentId, userId })
 
-      await expect(report(agentId, id, SETTLE_A)).resolves.not.toBeNull()
+      const written = await db.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [holder.funding, id, agentId])
+
+      expect(written.rows).toHaveLength(0)
+      expect(await recordedHash(id)).toBeNull()
+    })
+
+    it('a refusal names its reason and does not claim the payment is unconfirmed', async () => {
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+      const { agentId, userId } = await seedAgent()
+      const first = await seedFunded({ agentId, userId })
+      const second = await seedFunded({ agentId, userId })
+      await report(agentId, first.id, SETTLE_A)
+
+      const result = await attachEvidenceHandler(agentId, { paymentId: second.id, rail: 'x402', txHash: SETTLE_A })
+
+      expect(result.statusCode).toBe(409)
+      const body = result.body as { error: string; reason: string }
+      expect(body.reason).toMatch(/already recorded for another payment/)
+      expect(body.error).not.toMatch(/not confirmed/)
     })
   })
 
@@ -395,6 +444,20 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
           agentId, paymentId: id, rail: 'x402', txHash: SETTLE_A, resourceUrl: 'https://elsewhere.example/',
         }),
       ).rejects.toThrow('resource_mismatch')
+      expect(getTransactionReceipt).not.toHaveBeenCalled()
+      expect(await recordedHash(id)).toBeNull()
+    })
+
+    it('a payment that cannot carry an evidence row is refused before the hash is committed', async () => {
+      getTransactionReceipt.mockResolvedValue(goodReceipt())
+      const { agentId, userId } = await seedAgent()
+      const { id } = await seedFunded({ agentId, userId })
+      await db.query(
+        `UPDATE payment_intents SET x402_resource_url = NULL, payment_resource_url = NULL WHERE id = $1`,
+        [id],
+      )
+
+      await expect(report(agentId, id, SETTLE_A)).rejects.toThrow('resource_missing')
       expect(getTransactionReceipt).not.toHaveBeenCalled()
       expect(await recordedHash(id)).toBeNull()
     })

@@ -27,34 +27,20 @@
  * The hash is CLIENT INPUT that ends in the user's receipts, so it is verified
  * against the chain first (`verifySettlementTransferTx`): a successful
  * transaction carrying a Transfer of exactly this payment's amount, in this
- * token, from this payment's delegate to its merchant, mined inside this
- * payment's window. Fail closed: anything short of `verified` writes nothing.
- * Haven still never contacts the merchant.
+ * token, from this payment's delegate to its merchant, mined after this
+ * payment's funding confirmed. Fail closed: anything short of `verified`
+ * writes nothing. Haven still never contacts the merchant.
  *
- * What it cannot prove: WHICH of two same-shaped payments a transfer settled.
- * Haven never sees the EIP-3009 nonce on this path, so overlapping look-alikes
- * are attributed oldest-funded first: the repository refuses a settlement
- * whose block also falls inside the window of an EARLIER-funded look-alike
- * that has none recorded (`recordEip3009MerchantSettlement`, outcome
- * `ambiguous`). See `eip3009TwinExistsSql` for why only earlier ones block.
+ * The window's far edge is the report itself, not `expires_at`: a funded
+ * payment whose merchant leg never completed can be re-signed long after its
+ * signing deadline (the #2290 funded-merchant-retry path), and its genuine
+ * settlement must still be recordable. What the window cannot do is tell two
+ * same-shaped payments apart; see `recordEip3009MerchantSettlement` for why
+ * that is bounded rather than guarded.
  */
-import {
-  X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
-  X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
-} from '@haven_ai/sdk'
 import { verifySettlementTransferTx } from '../../infra/chain/settlement-transfer-verifier.js'
 import { recordEip3009MerchantSettlement } from '../../infra/repositories/x402-authorizations.js'
 import { CLOCK_SKEW_SECONDS } from './settlement-observed.js'
-
-/**
- * How long after `expires_at` a genuine settlement can still be mined: the
- * agent signs its EIP-3009 authorization no later than the payment's signing
- * deadline, and the SDK caps that authorization's lifetime at the clamped
- * merchant timeout plus the forward margin. Both constants are the SDK's own,
- * so the backend window cannot drift from what the signer signs.
- */
-export const EIP3009_AUTHORIZATION_LIFETIME_SECONDS =
-  X402_MAX_AUTHORIZATION_WINDOW_SECONDS + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS
 
 /** The intent fields this seam reads; a structural subset of the evidence source row. */
 export interface Eip3009SettlementIntent {
@@ -73,8 +59,7 @@ export interface Eip3009SettlementIntent {
   payment_rail?: string | null
   execution_rail?: string | null
   machine_metadata?: Record<string, unknown> | string | null
-  confirmed_at?: string | null
-  expires_at?: string | null
+  confirmed_at?: string | Date | null
 }
 
 export type Eip3009SettlementObservation =
@@ -113,40 +98,35 @@ export function isFundedEip3009Payment(intent: Eip3009SettlementIntent, reported
   )
 }
 
-function toSeconds(value: string | null | undefined): number {
-  return Math.floor(new Date(value ?? '').getTime() / 1000)
-}
-
 export async function observeEip3009MerchantSettlement(
   intent: Eip3009SettlementIntent,
   txHash: string,
+  nowMs: number = Date.now(),
 ): Promise<Eip3009SettlementObservation> {
   if (!isFundedEip3009Payment(intent, txHash)) return { outcome: 'not_applicable' }
 
   const merchant = intent.x402_merchant_address ?? intent.merchant_address ?? null
-  const confirmedSec = toSeconds(intent.confirmed_at)
-  const expiresSec = toSeconds(intent.expires_at)
-  if (!merchant || !Number.isFinite(confirmedSec) || !Number.isFinite(expiresSec)) {
-    // No merchant or no window means the only payment-specific checks cannot
-    // run. Refuse rather than widen: a window around the wrong anchor would
-    // pass a transfer that settled some other payment.
+  const confirmedSec = Math.floor(new Date(intent.confirmed_at ?? '').getTime() / 1000)
+  if (!merchant || !Number.isFinite(confirmedSec)) {
+    // No merchant or no funding time means the only payment-specific checks
+    // cannot run. Refuse rather than widen: a window around the wrong anchor
+    // would pass a transfer that settled some other payment.
     return {
       outcome: 'unverified',
       retryable: false,
-      reason: 'The payment has no merchant or no funding window, so its settlement cannot be verified',
+      reason: 'The payment has no merchant or no funding time, so its settlement cannot be verified',
     }
   }
 
-  const forwardSeconds = EIP3009_AUTHORIZATION_LIFETIME_SECONDS + CLOCK_SKEW_SECONDS
   const verification = await verifySettlementTransferTx(txHash, {
     chainId: intent.chain_id,
     tokenAddress: intent.token_address,
     fromAddress: intent.to_address,
     toAddress: merchant,
     amountRaw: intent.amount_raw,
-    // The merchant can only pull what funding already put on the delegate.
+    // The merchant can only pull what this payment's funding put on the delegate.
     notBeforeSec: confirmedSec - CLOCK_SKEW_SECONDS,
-    notAfterSec: expiresSec + forwardSeconds,
+    notAfterSec: Math.floor(nowMs / 1000) + CLOCK_SKEW_SECONDS,
   })
   if (verification.outcome !== 'verified') {
     return {
@@ -160,9 +140,6 @@ export async function observeEip3009MerchantSettlement(
     txHash,
     intentId: intent.id,
     agentId: intent.agent_id,
-    blockTimestampSec: verification.blockTimestampSec,
-    skewSeconds: CLOCK_SKEW_SECONDS,
-    forwardSeconds,
   })
   switch (recorded) {
     case 'recorded':
@@ -178,14 +155,6 @@ export async function observeEip3009MerchantSettlement(
         outcome: 'unverified',
         retryable: false,
         reason: `Transaction ${txHash} is already recorded for another payment`,
-      }
-    case 'ambiguous':
-      return {
-        outcome: 'unverified',
-        retryable: false,
-        reason:
-          `Transaction ${txHash} matches this payment, but also an earlier payment of the same amount ` +
-          'to the same merchant whose settlement is not recorded yet; report that payment\'s settlement first',
       }
     case 'not_eligible':
       return {

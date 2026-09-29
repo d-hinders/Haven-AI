@@ -490,6 +490,15 @@ function delegateAccountAddressOf(machineMetadata: unknown): string | null {
 }
 
 /**
+ * #3475: an eip3009 merchant settlement the agent reported and Haven verified
+ * on-chain (`modules/x402/eip3009-settlement-evidence.ts`). Its presence is
+ * proof the merchant already pulled this payment's funds from the delegate.
+ */
+function hasVerifiedMerchantSettlement(machineMetadata: unknown): boolean {
+  return typeof parsedMachineMetadata(machineMetadata)?.merchant_settlement_tx_hash === 'string'
+}
+
+/**
  * #2290: the funded-but-deliverable state — case 2 of `intentStateFor` below,
  * the one that emits `retry_original_x402_request`.
  *
@@ -505,6 +514,13 @@ function delegateAccountAddressOf(machineMetadata: unknown): string | null {
  * and said no, and case 1 below claims that row first. Its remedy is
  * `sweep_stranded_funds` — reclaiming the money, not re-signing a header for
  * a merchant that already refused it.
+ *
+ * `!hasVerifiedMerchantSettlement` (#3475) is load-bearing the same way: a
+ * recorded, on-chain-verified delegate → merchant pull proves this payment's
+ * merchant was already paid. Re-signing a fresh EIP-3009 authorization for the
+ * same amount from the shared delegate could then pay that merchant twice, out
+ * of another payment's in-flight funding. A pull is not proof of delivery, but
+ * it is proof a retry must not re-pay.
  */
 export function isFundedX402AwaitingMerchantLeg(payment: PaymentIntentStatusRow): boolean {
   return (
@@ -512,6 +528,7 @@ export function isFundedX402AwaitingMerchantLeg(payment: PaymentIntentStatusRow)
     !payment.funded_but_unsettled &&
     railFor(payment) === AgentPaymentRail.X402 &&
     settlementSchemeOf(payment.machine_metadata) === 'eip3009' &&
+    !hasVerifiedMerchantSettlement(payment.machine_metadata) &&
     !payment.merchant_leg_reported &&
     payment.confirmed_at !== null &&
     merchantReportGraceElapsed(payment.confirmed_at)

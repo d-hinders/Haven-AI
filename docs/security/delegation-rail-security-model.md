@@ -1786,10 +1786,11 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > account → merchant and a delegate EOA → merchant settlement. Which of two
 > same-shaped payments a transfer settled is not decided, because Haven never
 > sees the EIP-3009 nonce on this path: a hash can be recorded on any
-> earlier-funded payment with the same agent, amount, token, delegate and
-> merchant, including one whose merchant leg failed, and that payment's
-> receipt and funded-retry remedy then follow the attribution. That takes an
-> agent misreporting a payment id, and moves no money. A recorded settlement
+> payment with the same agent, amount, token, delegate and merchant whose
+> funding confirmed before the transfer was mined (within the 120 s skew),
+> including one whose merchant leg failed, and that payment's receipt and
+> funded-retry remedy then follow the attribution. That takes an agent
+> misreporting a payment id; the record itself moves no money. A recorded settlement
 > closes the funded-merchant-retry remedy (`isFundedX402AwaitingMerchantLeg`),
 > so the delegate key is not asked to sign a second authorization for a
 > payment whose merchant settlement is recorded. No signature, key role, delegation, caveat or on-chain surface

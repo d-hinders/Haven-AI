@@ -165,7 +165,7 @@ describe('capability manifest', () => {
     // every other assertion in this file. A default other than 8453 catches
     // that literal. (84532 also equals FACTS.chains.deployable[0], so this
     // test cannot catch a recompute-from-deployable; the "takes the
-    // environment-dependent values" test above does.)
+    // environment-dependent values" test below does.)
     const facts = { ...FACTS, chains: { ...FACTS.chains, default: 84532 } }
     expect(buildManifestFrom(ORIGIN, facts).chains?.default).toBe(84532)
   })

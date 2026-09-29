@@ -12,7 +12,7 @@ import {
 import { apiBaseUrl } from '../domain/request-origin.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
 import {
-  DEFAULT_CHAIN_ID,
+  effectiveDefaultChainId,
   buildReleaseCompat,
   type PackageReleaseCompat,
   type PublishedClientPackage,
@@ -82,13 +82,24 @@ export function buildDiscoveryDocument(request: FastifyRequest): DiscoveryDocume
     note = 'This deployment has no hosted MCP configured. Connect with --local, or ask its operator to set HAVEN_HOSTED_MCP_URL.'
   }
 
+  const deployable = deployableChainIds()
+
   return {
     hosted_mcp_url: hostedMcp,
     ...(note ? { hosted_mcp_note: note } : {}),
     connector_package: CONNECTOR_PACKAGE,
     cli_package: CLI_PACKAGE,
     openapi_url: `${base}/openapi.json`,
-    chains: { default: DEFAULT_CHAIN_ID, deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS },
+    chains: {
+      // The deployment's EFFECTIVE default (#3431), not the bare product
+      // constant: `DEFAULT_CHAIN_ID` when this deployment deploys on it,
+      // else the first chain it does. Dev deploys Base Sepolia only, so
+      // naming Base mainnet here was a funding-step trap — see
+      // `effectiveDefaultChainId`'s doc in `@haven_ai/core`.
+      default: effectiveDefaultChainId(deployable),
+      deployable,
+      supported: SUPPORTED_CHAIN_IDS,
+    },
     client_releases: {
       release_notes_url: releaseNotesUrl(),
       packages: buildReleaseCompat(config.connectorChannel),

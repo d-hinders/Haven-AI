@@ -29,7 +29,7 @@ Then:
 3. When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.
 4. Once I have approved the budget, verify with the \`haven_get_agent\` tool: \`ready\` means you can pay, \`needs_approval\` means my approval has not landed yet.
 
-Two things only I can do: approving that budget with my passkey, and funding the account with USDC on Base — no ETH, Haven sponsors the gas. Tell me if either is missing rather than working around it.
+Two things only I can do: approving that budget with my passkey, and funding the account with USDC — no ETH, Haven sponsors the gas. Tell me if either is missing rather than working around it.
 
 Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.`
 

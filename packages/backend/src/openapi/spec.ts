@@ -8878,7 +8878,16 @@ export const openapiSpec = {
             type: 'object',
             required: ['default', 'deployable', 'supported'],
             properties: {
-              default: { type: 'integer', description: 'Canonical Haven default chain id.' },
+              default: {
+                type: 'integer',
+                description:
+                  "This deployment's effective default chain id (#3431): the product default " +
+                  "(`DEFAULT_CHAIN_ID`) when this deployment deploys on it, else the first chain " +
+                  "it does deploy on. Not necessarily the product-wide default — a deployment " +
+                  "scoped to one chain (dev: Base Sepolia only) reports that chain here, not " +
+                  "Base mainnet. Confirm the funding chain with `haven wallets funding` or the " +
+                  "dashboard funding card before sending money.",
+              },
               deployable: { type: 'array', items: { type: 'integer' } },
               supported: { type: 'array', items: { type: 'integer' } },
             },

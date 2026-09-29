@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import discoveryRoutes, { buildDiscoveryDocument } from '../routes/discovery.js'
 import { openapiSpec } from '../openapi/spec.js'
 import { CLIENT_COMPAT, CLIENT_RELEASES, DEFAULT_CHAIN_ID, PUBLISHED_CLIENT_PACKAGES } from '@haven_ai/core'
+import * as chainsDomain from '../domain/chains.js'
 
 /**
  * `GET /discovery` (#2531).
@@ -13,9 +14,14 @@ import { CLIENT_COMPAT, CLIENT_RELEASES, DEFAULT_CHAIN_ID, PUBLISHED_CLIENT_PACK
  * rather than something that drifts in.
  */
 
-vi.mock('../domain/chains.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../domain/chains.js')>()),
-}))
+vi.mock('../domain/chains.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../domain/chains.js')>()
+  // `deployableChainIds` becomes a spy DEFAULTING to the real implementation,
+  // so every test not naming this deployment's chain shape unaffected; #3431's
+  // tests override the return value per case to prove the effective-default
+  // derivation against fixtures a bad fix would fail.
+  return { ...actual, deployableChainIds: vi.fn(actual.deployableChainIds) }
+})
 
 function req(headers: Record<string, string> = { host: 'api.test' }) {
   return { headers, url: '/discovery', raw: { url: '/discovery' } } as never
@@ -92,6 +98,39 @@ describe('GET /discovery', () => {
 
   it('reports the canonical default chain alongside the deployment chain lists', () => {
     expect(buildDiscoveryDocument(req()).chains.default).toBe(DEFAULT_CHAIN_ID)
+  })
+
+  describe('chains.default is the deployment EFFECTIVE default (#3431)', () => {
+    // `buildDiscoveryDocument` calls `deployableChainIds()` exactly once per
+    // invocation (it reads it into a local before building the response), so
+    // `mockReturnValueOnce` isolates each case without a restore step —
+    // the next test's call falls through to the real (spied) implementation.
+
+    it('production shape [8453, 84532]: DEFAULT_CHAIN_ID is deployable, value pinned at 8453', () => {
+      vi.mocked(chainsDomain.deployableChainIds).mockReturnValueOnce([8453, 84532])
+      const doc = buildDiscoveryDocument(req())
+      expect(doc.chains.default).toBe(8453)
+      expect(doc.chains.default).toBe(DEFAULT_CHAIN_ID)
+    })
+
+    it('dev shape [84532]: a deployable list that excludes DEFAULT_CHAIN_ID reports a default that IS deployable', () => {
+      // This is the fixture the issue names: on unfixed `dev`, `/discovery`
+      // reported `chains.default: 8453` while `chains.deployable: [84532]` —
+      // a default NOT in the deployable set. Proven against the unfixed file
+      // with a cp backup (see the worker report); this fixture must fail
+      // there and pass here.
+      vi.mocked(chainsDomain.deployableChainIds).mockReturnValueOnce([84532])
+      const doc = buildDiscoveryDocument(req())
+      expect(doc.chains.deployable).toContain(doc.chains.default)
+      expect(doc.chains.default).toBe(84532)
+      expect(doc.chains.default).not.toBe(DEFAULT_CHAIN_ID)
+    })
+
+    it('empty deployable list (misconfigured HAVEN_DEPLOY_CHAIN_IDS): falls back to DEFAULT_CHAIN_ID', () => {
+      vi.mocked(chainsDomain.deployableChainIds).mockReturnValueOnce([])
+      const doc = buildDiscoveryDocument(req())
+      expect(doc.chains.default).toBe(DEFAULT_CHAIN_ID)
+    })
   })
 
   it('answers 200 unauthenticated, and says caches must not share it', async () => {

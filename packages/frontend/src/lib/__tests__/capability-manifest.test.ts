@@ -31,6 +31,15 @@ import {
 
 const ORIGIN = 'https://preview.test'
 
+// `default: DEFAULT_CHAIN_ID` beside `deployable: [84532]` is a shape the
+// backend itself never sends after #3431 (`/discovery` reports the
+// deployment's EFFECTIVE default, which would be 84532 here) — deliberately
+// kept anyway, because this suite tests `buildManifestFrom`'s PASS-THROUGH of
+// whatever `chains.default` the backend sent, not the backend's own
+// derivation (that is `effectiveDefaultChainId` in `@haven_ai/core`,
+// covered by `packages/core/src/chains.test.ts`). Fixing the fixture would
+// make this suite blind to a manifest that silently recomputed the field
+// instead of relaying it.
 const FACTS: DiscoveryFacts = {
   hosted_mcp_url: 'https://mcp.test',
   connector_package: '@haven_ai/connect@dev',

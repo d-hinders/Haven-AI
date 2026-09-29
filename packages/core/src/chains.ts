@@ -189,6 +189,35 @@ export const REGISTRY_CHAIN_IDS = Object.keys(CHAIN_REGISTRY).map(Number)
  */
 export const DEFAULT_CHAIN_ID = 8453
 
+/**
+ * The deployment's EFFECTIVE default chain (#3431): `DEFAULT_CHAIN_ID` when
+ * this deployment actually deploys on it, else the first chain it does
+ * deploy on. Dev serves Base Sepolia only (`HAVEN_DEPLOY_CHAIN_IDS`, #679),
+ * so `DEFAULT_CHAIN_ID` (Base mainnet) named as dev's `chains.default` was a
+ * funding-step trap: an agent reading `/discovery` or
+ * `/.well-known/haven.json` could point its user at a chain the deployment
+ * cannot serve. This is the one place that decides the answer; `discovery.ts`
+ * calls it with `deployableChainIds()` rather than restating the rule.
+ *
+ * `deployable` empty — a misconfigured `HAVEN_DEPLOY_CHAIN_IDS` naming no
+ * registered chain (`deployableChainIds()`'s own doc calls this "backward
+ * compat" for an unset var, but a SET var that resolves to nothing is a
+ * config error, not that case) — falls back to `DEFAULT_CHAIN_ID` itself:
+ * an answer the deployment cannot currently back is still a chain id, never
+ * `undefined`.
+ *
+ * Deliberately takes `deployable` as a parameter rather than importing
+ * `deployableChainIds()`: that function reads backend config (`config.ts`),
+ * which this package must not depend on (`core-stays-pure`, see the module
+ * header). The caller supplies the environment-scoped fact; this function is
+ * the pure rule applied to it.
+ */
+export function effectiveDefaultChainId(deployable: readonly number[]): number {
+  if (deployable.includes(DEFAULT_CHAIN_ID)) return DEFAULT_CHAIN_ID
+  const chainId = deployable[0]
+  return chainId ?? DEFAULT_CHAIN_ID
+}
+
 export function getChainData(chainId: number): CoreChainConfig {
   const chain = CHAIN_REGISTRY[chainId]
   if (!chain) {

@@ -22,6 +22,19 @@ import { havenEnvironment } from './env'
  * Bumped when a key is REMOVED or changes meaning. Adding a key is not a
  * breaking change, which is what lets the omissions below land later without
  * a version bump.
+ *
+ * #3431 did NOT bump this. `chains.default` going from a bare
+ * `DEFAULT_CHAIN_ID` to the deployment's effective default is a bug fix, not
+ * a meaning change: this file's own `chains` doc and
+ * `docs/operations/agent-discovery-listings.md` already documented the field
+ * as "the expected deployment chain" before the fix — the code was wrong
+ * relative to the documented meaning, not the other way round. No consumer
+ * read the value as "the product-wide default"; the OpenAPI description that
+ * said "Canonical Haven default chain id" was corrected to match the
+ * already-documented meaning in the same change. A key's TYPE and PRESENCE
+ * are unchanged, and production's value is unchanged (`8453` is deployable
+ * there) — only a scoped deployment's number moves to one it can actually
+ * back.
  */
 export const MANIFEST_SCHEMA_VERSION = 1
 
@@ -127,6 +140,14 @@ export interface CapabilityManifest {
    * Relative, like every own-origin path here.
    */
   release_notes_url: string
+  /**
+   * `default` is this deployment's EFFECTIVE default chain (#3431), a
+   * pass-through of the backend's `GET /discovery` `chains.default` — not
+   * necessarily the product-wide default: a deployment scoped to one chain
+   * (dev: Base Sepolia only) reports that chain, never a chain it cannot
+   * serve. Confirm the funding chain before sending money; see
+   * `docs/operations/agent-discovery-listings.md`.
+   */
   chains: {
     default: number
     deployable: number[]

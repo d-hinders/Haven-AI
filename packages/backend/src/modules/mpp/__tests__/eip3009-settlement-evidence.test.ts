@@ -4,8 +4,8 @@
  *
  * Real Postgres (the #1220 harness), because what is asserted is database
  * behaviour: which intent carries the verified hash, that the funding hash and
- * the evidence row's proof status never move, the per-hash uniqueness, and the
- * look-alike guard. The CHAIN is a collaborator this test does not own, so it
+ * the evidence row's proof status never move, the per-hash uniqueness, and that
+ * an unreported payment blocks no later one. The CHAIN is a collaborator this test does not own, so it
  * is mocked, per `docs/contributing/testing-strategy.md`.
  *
  * Each negative case is a way of lying about a settlement hash, and each one
@@ -228,7 +228,7 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
     })
   })
 
-  describe('a hash that does not settle this payment is refused and writes nothing', () => {
+  describe('a hash that does not settle this payment is refused and records no hash', () => {
     const cases: Array<[string, () => unknown]> = [
       ['paid from the treasury, not the delegate', () => goodReceipt({ from: TREASURY })],
       ['paid to another address', () => goodReceipt({ to: OTHER })],
@@ -403,7 +403,7 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
   })
 
   describe('what stays unchanged', () => {
-    it('a transaction not mined yet is retryable and writes nothing', async () => {
+    it('a transaction not mined yet is retryable and records no hash', async () => {
       getTransactionReceipt.mockResolvedValue(null)
       const { agentId, userId } = await seedAgent()
       const { id } = await seedFunded({ agentId, userId })
@@ -458,6 +458,8 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       )
 
       await expect(report(agentId, id, SETTLE_A)).rejects.toThrow('resource_missing')
+      const answered = await attachEvidenceHandler(agentId, { paymentId: id, rail: 'x402', txHash: SETTLE_A })
+      expect(answered.statusCode).toBe(409)
       expect(getTransactionReceipt).not.toHaveBeenCalled()
       expect(await recordedHash(id)).toBeNull()
     })

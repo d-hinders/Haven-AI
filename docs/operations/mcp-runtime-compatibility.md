@@ -1081,7 +1081,9 @@ last-verified: "2026-09-29"
 > moves to 22,575), and the skill's plain-HTTP paragraph now tells the agent
 > to report the transaction. Version skew: an older backend treats the report
 > as the funding-hash attach and answers 409 `tx_hash_mismatch`, which the
-> tool reports as `DELIVERED_UNSETTLED`; nothing is written either way. No
+> tool reports as `DELIVERED_UNSETTLED`, and records no hash. (The new
+> backend writes the payment's base evidence row before its chain read, an
+> idempotent upsert that never touches proof status.) No
 > local-runtime twin, so the consent hash and the local signer are unchanged.
 >
 > **Recent re-verification (#2968):** the response vocabulary is completed at

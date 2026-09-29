@@ -517,7 +517,8 @@ export async function attachMachinePaymentEvidence(
     // The base row first: if it cannot exist (no resource URL), refuse before
     // the hash is committed rather than commit it and answer "not found".
     const base = await recordMachinePaymentEvidenceBase(payment)
-    if (base.status !== 'recorded') throw new Error('resource_missing')
+    if (base.status === 'failed' && base.reason === 'missing_resource_url') throw new Error('resource_missing')
+    if (base.status !== 'recorded') throw new Error(`evidence_base_${base.reason}`)
     const settled = await observeEip3009MerchantSettlement(payment, input.txHash)
     if (settled.outcome === 'unverified') {
       throw new SettlementReportRefusal(
@@ -928,6 +929,12 @@ export async function attachEvidenceHandler(
     }
     if (marker === 'rail_mismatch') {
       return { statusCode: 409, body: { error: 'rail does not match payment intent' } }
+    }
+    if (marker === 'resource_missing') {
+      return {
+        statusCode: 409,
+        body: { error: 'This payment has no resource URL, so no evidence can be recorded for it' },
+      }
     }
     if (marker === 'resource_mismatch') {
       return { statusCode: 409, body: { error: 'resourceUrl does not match payment intent' } }

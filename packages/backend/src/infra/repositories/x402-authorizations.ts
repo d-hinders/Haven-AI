@@ -468,8 +468,12 @@ export const SETTLEMENT_HASH_TAKEN_SQL = settlementHashTakenSql({ hash: '$1', id
  * same-price payment for good. What remains bounds the damage instead: one
  * hash backs at most one eip3009 payment (`settlementHashTakenSql`), a payment
  * takes one hash only (`merchant_settlement_tx_hash IS NULL` makes the UPDATE
- * a compare-and-set), and a swap between two identical rows changes nothing
- * about amount, token, payer or merchant.
+ * a compare-and-set). The residual: a hash can be recorded on ANY
+ * earlier-funded payment with the same agent, amount, token, delegate and
+ * merchant, including one whose merchant leg failed, and that payment's
+ * receipt and funded-retry remedy (`isFundedX402AwaitingMerchantLeg`) then
+ * follow the attribution. It takes an agent misreporting a payment id, and no
+ * money moves because of it.
  */
 export const RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL = `UPDATE payment_intents target
            SET machine_metadata = COALESCE(target.machine_metadata, '{}'::jsonb)

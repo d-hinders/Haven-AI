@@ -29,7 +29,9 @@
  * transaction carrying a Transfer of exactly this payment's amount, in this
  * token, from this payment's delegate to its merchant, mined after this
  * payment's funding confirmed. Fail closed: anything short of `verified`
- * writes nothing. Haven still never contacts the merchant.
+ * records no hash. (Its caller has already written the payment's base evidence
+ * row, an idempotent upsert that never touches proof status.) Haven still
+ * never contacts the merchant.
  *
  * The window's far edge is the report itself, not `expires_at`: a funded
  * payment whose merchant leg never completed can be re-signed long after its

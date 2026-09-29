@@ -12,7 +12,7 @@
  * around the constraint. These tests prove the constraint half.
  */
 import { beforeAll, beforeEach, expect, it } from 'vitest'
-import db from '../../../db.js'
+import db, { getPool } from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   activateRekeyDelegation,
@@ -1026,6 +1026,92 @@ describeDb('insertRekeyDelegation refuses a stalled re-key while a successor is 
     })
 
     expect(inserted).toBe(true)
+  })
+})
+
+/**
+ * #3450 — `insertRekeyDelegation` called with a REAL checked-out `PoolClient`
+ * as its executor, not a fake. This is the exact call the issue route's
+ * transactional piece loop makes for every piece after the first: the route
+ * opens ONE transaction (`withRekeyIssueTransaction`) and threads that same
+ * `PoolClient` through every DB call inside the loop, including this one.
+ *
+ * Before #3450, `withTransaction` treated ANY executor with a `connect`
+ * method as poolable and tried to check out a SECOND client from it. A real
+ * `pg` `PoolClient` has `connect` (inherited from `Client.prototype`) as well
+ * as `release`, so this rejected with "Client has already been connected. You
+ * cannot reuse a client." The existing "runs inline on an executor that is
+ * already a transaction client" test in `transaction.test.ts` uses a FAKE
+ * executor with no `connect` method at all, so it could not, and did not,
+ * catch this.
+ */
+describeDb('insertRekeyDelegation on a checked-out PoolClient (#3450)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('MUTATION TARGET — accepts a real PoolClient and runs INLINE on it, not on a second checkout', async () => {
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+
+    const client = await getPool().connect()
+    try {
+      await client.query('BEGIN')
+      const hash = `0x${String(++seq).padStart(64, '0')}`
+      const inserted = await insertRekeyDelegation(
+        {
+          agentId: seeded.agentId,
+          userId: seeded.userId,
+          chainId: 84532,
+          tokenAddress: USDC,
+          recipientAddress: null,
+          delegationHash: hash,
+          delegationJson: '{"signed":"capability"}',
+          version: 2,
+          budgetAtomic: '1000000',
+          periodSeconds: 86_400,
+          startDate: 0,
+          expiresAt: 9_999_999_999,
+          rekeyId: rekey.id,
+          carryRole: 'carry',
+          merchantId: null,
+        },
+        // Before #3450 this line threw "Client has already been connected."
+        client,
+      )
+      expect(inserted).toBe(true)
+
+      // Visible on THIS client's own open transaction...
+      const withinTx = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM agent_delegations WHERE delegation_hash = $1`,
+        [hash],
+      )
+      expect(withinTx.rows[0].n).toBe(1)
+
+      // ...but NOT yet on a fresh connection — proving `withTransaction` ran
+      // INLINE on `client` rather than silently opening (and committing) an
+      // independent second transaction on a different connection, which
+      // would make this row visible here before `client` ever commits.
+      const outsideTx = await db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM agent_delegations WHERE delegation_hash = $1`,
+        [hash],
+      )
+      expect(outsideTx.rows[0].n).toBe(0)
+
+      await client.query('COMMIT')
+      const afterCommit = await db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM agent_delegations WHERE delegation_hash = $1`,
+        [hash],
+      )
+      expect(afterCommit.rows[0].n).toBe(1)
+    } finally {
+      client.release()
+    }
   })
 })
 

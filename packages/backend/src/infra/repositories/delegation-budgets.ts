@@ -167,14 +167,21 @@ export function delegationBuildSlotKey(
  * delegate account address before taking the lock, because holding a database
  * lock across a chain round trip makes a slow node into a stalled slot.
  *
- * `fn` receives a QUERY-ONLY view of the transaction, and that is load-bearing.
- * `withTransaction` decides whether to open a transaction by asking whether its
- * executor has a `connect` method — and the pg client it hands out has one, so
- * passing the raw client to a repository that wraps itself in `withTransaction`
- * (`insertPendingDelegationForOwnedNonRevokedAgent` does) makes that repository
- * try to reconnect an already-connected client and throw. Handing over a plain
- * `{ query }` makes the nested `withTransaction` degrade to a direct call, which
- * is what joining an outer transaction is supposed to mean.
+ * `fn` receives a QUERY-ONLY view of the transaction (`joined`, below). This
+ * predates #3450: at the time this was written, `withTransaction` decided
+ * whether to open a transaction by asking whether its executor has a
+ * `connect` method — and the pg client it hands out has one, so passing the
+ * raw client to a repository that wraps itself in `withTransaction`
+ * (`insertPendingDelegationForOwnedNonRevokedAgent` does) made that
+ * repository try to reconnect an already-connected client and throw. A plain
+ * `{ query }` view has neither `connect` nor `release`, so the nested
+ * `withTransaction` degraded to a direct call — the same effect #3450 later
+ * gave `withTransaction` itself, by checking `release` instead of `connect`
+ * (a real `pg.PoolClient` has both, which is what made `connect` alone the
+ * wrong discriminator; see `infra/transaction.ts`). A checked-out `PoolClient`
+ * now runs inline whether or not it is wrapped in a query-only view first, so
+ * this view is redundant for that purpose today — but harmless, and kept
+ * rather than unwound as a change this function does not need to make.
  */
 export async function withDelegationBuildSlotLock<T>(
   agentId: string,

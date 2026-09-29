@@ -32,6 +32,7 @@ const {
   mockFindDelegationTerms,
   mockMarkIssued,
   mockComputeAddress,
+  FAKE_TX,
 } = vi.hoisted(() => ({
   mockFindOwnedRekeyAgent: vi.fn(),
   mockFindRekey: vi.fn(),
@@ -40,11 +41,20 @@ const {
   mockFindDelegationTerms: vi.fn(),
   mockMarkIssued: vi.fn(),
   mockComputeAddress: vi.fn(),
+  // A fixed marker object (#3450) — not `pool`/`undefined` — so the
+  // assertions below can tell "the route passed its transaction client
+  // through" apart from "the route silently fell back to the default
+  // executor".
+  FAKE_TX: {},
 }))
 
 // The pool is deliberately not stubbed — every query is behind a repository
 // module, mocked by name. Data-layer behaviour is proven on the real-Postgres
 // harness (`infra/repositories/__tests__/agent-rekeys.test.ts`), not here.
+//
+// `withRekeyIssueTransaction` is mocked too (#3450): the real implementation
+// opens a real Postgres transaction (`withTransaction(pool, fn)`), which this
+// file — a pure mocked-repository unit test — must not depend on.
 vi.mock('../../middleware/auth.js', () => ({
   authMiddleware: async (request: { user?: unknown }) => {
     request.user = { sub: 'user-1' }
@@ -60,6 +70,7 @@ vi.mock('../../infra/repositories/agent-rekeys.js', async (importOriginal) => {
     insertRekeyDelegation: (...a: unknown[]) => mockInsertRekeyDelegation(...a),
     findDelegationTerms: (...a: unknown[]) => mockFindDelegationTerms(...a),
     markIssued: (...a: unknown[]) => mockMarkIssued(...a),
+    withRekeyIssueTransaction: (fn: (tx: unknown) => Promise<unknown>) => fn(FAKE_TX),
   }
 })
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
@@ -190,7 +201,9 @@ describe('#3386 re-key issue — the merchant label carries onto every replaceme
     // Read once per entry that produced a piece to insert, scoped by agent
     // and the OLD delegation's hash — not the new replacement's.
     expect(mockFindDelegationTerms).toHaveBeenCalledTimes(1)
-    expect(mockFindDelegationTerms).toHaveBeenCalledWith(AGENT_ID, HASH)
+    // Third argument is the transaction client (#3450) — every DB call the
+    // issue loop makes must run on it, not the default `pool`.
+    expect(mockFindDelegationTerms).toHaveBeenCalledWith(AGENT_ID, HASH, FAKE_TX)
     expect(mockInsertRekeyDelegation).toHaveBeenCalledTimes(2)
     for (const call of mockInsertRekeyDelegation.mock.calls) {
       expect((call[0] as { merchantId: string | null }).merchantId).toBe(MERCHANT_ID)

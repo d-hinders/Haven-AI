@@ -54,12 +54,23 @@ describe('/demo page', () => {
     expect(screen.getAllByRole('link', { name: /Haven/ }).length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: 'Back to Haven' })).toHaveAttribute('href', '/')
 
-    // Testnet banner + laptop note + prerequisites.
-    expect(screen.getByText(/Test funds only/)).toBeInTheDocument()
+    // The hero renders as the page's ONE <h1> (design review round 4) — not
+    // Section's `title` prop, which always emits an <h2>.
+    const h1 = screen.getByRole('heading', { level: 1 })
+    expect(h1).toHaveTextContent('See a Haven agent pay, in about 10 minutes')
+    expect(screen.queryAllByRole('heading', { level: 1 })).toHaveLength(1)
+
+    // Testnet banner + laptop note + prerequisites. The banner is the ONLY
+    // place "Test funds only" appears now — the lede no longer duplicates it
+    // (design review round 4).
+    expect(screen.getAllByText(/Test funds only/)).toHaveLength(1)
     expect(screen.getByText(/works best on a laptop/)).toBeInTheDocument()
     expect(screen.getByText(/passkey-capable device/)).toBeInTheDocument()
+    // "harness" jargon dropped (design review round 4, nit 6).
+    expect(pageText).not.toMatch(/harness/i)
+    expect(screen.getByText(/One AI agent \(Claude Code, Codex, or Hermes\)/)).toBeInTheDocument()
 
-    // All eight steps, in order, each with a "why it matters" line.
+    // All eight steps, in order.
     const stepTitles = [
       'Create your account',
       'Fund it with test USDC',
@@ -73,7 +84,9 @@ describe('/demo page', () => {
     for (const title of stepTitles) {
       expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
     }
-    expect(screen.getAllByText(/Why it matters:/).length).toBe(8)
+    // Six of eight now — steps 3 and 5 dropped a generic reused line rather
+    // than keep a "why it matters" that added nothing (design review round 4).
+    expect(screen.getAllByText(/Why it matters:/).length).toBe(6)
 
     // Step 1: onboarding's live Network selector, kept on Base Sepolia. Text
     // spans multiple inline <strong> elements, so checked against the whole
@@ -81,31 +94,44 @@ describe('/demo page', () => {
     expect(pageText).toMatch(/under Network when onboarding/)
 
     // Step 2: Base Sepolia named explicitly, pointing at the Add funds
-    // modal's own faucet card (#3478) AND a direct fallback link.
+    // modal's own faucet card (#3478) AND a direct fallback link, now with
+    // an external-link affordance (design review round 4, nit 7).
     expect(screen.getByText(/Get test funds/)).toBeInTheDocument()
     expect(screen.getByText(/Open Circle's faucet/)).toBeInTheDocument()
     expect(screen.getAllByText(/Base Sepolia/).length).toBeGreaterThan(0)
-    expect(screen.getByRole('link', { name: 'faucet.circle.com' })).toHaveAttribute(
-      'href',
-      'https://faucet.circle.com',
-    )
+    const faucetLink = screen.getByRole('link', { name: /faucet\.circle\.com/ })
+    expect(faucetLink).toHaveAttribute('href', 'https://faucet.circle.com')
+    expect(faucetLink).toHaveAccessibleName(/opens in a new tab/)
 
     // Step 3: the budget is set IN the connect flow, before the paste — not
     // as a separate step 4 (review round 1 F5; the real flow is
     // details → policy (amount+period) → review → connect/paste).
     expect(screen.getByText(/0\.05 USDC, Daily/)).toBeInTheDocument()
-    expect(screen.getByText(/recipient pin/)).toBeInTheDocument()
+    // "recipient pin" jargon reduced to plain language (design review round
+    // 4, nit 6).
+    expect(pageText).not.toMatch(/recipient pin/)
+    expect(screen.getByText(/Leave the budget as set/)).toBeInTheDocument()
 
-    // Step 7: Haven's own address, the under-1-USDC condition, and the real
-    // refusal signal — not a fabricated two-layer story (review round 1).
-    expect(screen.getByText(/0x0A5B4da361AfBc5109030010c3f1d0b64b60ba6C/)).toBeInTheDocument()
+    // Step 7: Haven's own address rendered through the `Address` primitive
+    // (design review round 4, item 3) — full value, not truncated, with a
+    // copy affordance — and the real refusal signal, not a fabricated
+    // two-layer story (review round 1).
+    expect(screen.getByText('0x0A5B4da361AfBc5109030010c3f1d0b64b60ba6C')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /copy address/i })).toBeInTheDocument()
     expect(screen.getByText(/under 1 USDC/)).toBeInTheDocument()
     expect(screen.getByText(/before any money moves/)).toBeInTheDocument()
     expect(screen.getByText(/checked against the rules in your account/)).toBeInTheDocument()
 
-    // Step 8 / F4: no false "never held custody" claim — EIP-3009 funds the
-    // agent's delegate transiently.
+    // Step 8 is an UNNUMBERED summary surface now, not StepCard 8 (design
+    // review round 4). No false "never held custody" claim either — EIP-3009
+    // funds the agent's delegate transiently (review round 1, F4).
     expect(screen.getByText(/budget you signed and it could not exceed/)).toBeInTheDocument()
+    expect(screen.queryByText('8')).not.toBeInTheDocument()
+    // "Questions? Ask the team" links out (design review round 4, nit 5) —
+    // SiteFooter's own "Contact" nav item is itself an unwired "#" (no real
+    // destination exists in this codebase to point at instead), so this
+    // matches it faithfully rather than inventing one.
+    expect(screen.getByRole('link', { name: 'Ask the team' })).toHaveAttribute('href', '#')
 
     // Signup link carries no ?src=demo tracking param (owner decision).
     const signupLink = screen.getByRole('link', { name: 'Sign up' })

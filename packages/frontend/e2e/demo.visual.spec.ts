@@ -37,8 +37,10 @@ test.describe('/demo visual regression', () => {
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await page.goto('/demo')
 
+      // The hero renders as the page's <h1> (design review round 4) — not
+      // Section's `title` prop, which always emits an <h2>.
       await expect(
-        page.getByRole('heading', { name: 'See a Haven agent pay, in about 10 minutes' }),
+        page.getByRole('heading', { level: 1, name: 'See a Haven agent pay, in about 10 minutes' }),
       ).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
 
       // All eight steps present, in order.

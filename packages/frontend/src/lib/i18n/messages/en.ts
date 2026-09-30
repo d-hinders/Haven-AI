@@ -461,8 +461,17 @@ export const en = {
       // written inside of — reworded
       // to name the one case removal is not self-serve (the flag going off)
       // without describing the reader's own vantage point.
+      //
+      // Owner copy review, 2026-09-30: trimmed to the essentials. What stays is
+      // what the design depends on: that it is optional, the sole-trader
+      // personal-identity-number disclosure (#3332 acceptance point 2, and the
+      // consent basis in docs/product/owner-company-details.md), and that the
+      // owner can remove the details here. Dropped: the SE VAT-number encoding
+      // detail, the VIES explanation (the VAT field and its status name VIES
+      // themselves) and the support sentence (the product doc keeps the
+      // flag-off erasure path).
       purpose:
-        "Optional — saving these never blocks an agent or a payment. For a sole trader, the organisation number is your personal identity number, and Sweden's SE-format VAT number encodes that same number (SE + personal number + 01). Adding a VAT number gets it checked against VIES, the EU's VAT number register. You can remove them here at any time; if this section is ever unavailable, Haven support can remove them.",
+        'Optional. For a sole trader, the organisation number is your personal identity number. You can remove these details here at any time.',
       loadError: 'We could not load your company details. Try again in a moment.',
       retry: 'Try again',
 

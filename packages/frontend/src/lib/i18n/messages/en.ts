@@ -445,24 +445,20 @@ export const en = {
       title: 'Company details',
       description:
         'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants.',
-      // D3/design 9 (#3332 review): "gates" replaced with plain words; VIES
-      // named as the EU's VAT number register, not left unexplained; the
-      // Swedish sole-trader VAT-encodes-the-personal-number fact stated
-      // alongside the org-number one, not only in the field helper. The
-      // erasure sentence is the captain's decision on M3: true whether the
-      // flag is on or off, since this text is only ever shown WHILE the
-      // section itself is shown.
+      // History: #3332's review rounds shaped a longer paragraph (VIES named,
+      // the SE VAT encoding, a support-erasure sentence), and the "receipts"
+      // sentence stays in `description` above.
       //
-      // #3332 review round 2, design 6: trimmed for a 390px viewport while
-      // keeping every required fact. Round 3 dropped the receipts sentence
-      // (WHY Haven asks) again as a duplicate: `description`, which renders
-      // directly above this paragraph, already says it. "while this section
-      // is shown" read like a stage direction from OUTSIDE the section it is
-      // written inside of — reworded
-      // to name the one case removal is not self-serve (the flag going off)
-      // without describing the reader's own vantage point.
+      // Owner copy review, 2026-09-30: trimmed to the essentials. What stays is
+      // what the design depends on: that it is optional, the sole-trader
+      // personal-identity-number disclosure (#3332 acceptance point 2, and the
+      // consent basis in docs/product/owner-company-details.md), and that the
+      // owner can remove the details here. Dropped: the SE VAT-number encoding
+      // detail, the VIES explanation (the VAT field and its status name VIES
+      // themselves) and the support sentence (the product doc keeps the
+      // flag-off erasure path).
       purpose:
-        "Optional — saving these never blocks an agent or a payment. For a sole trader, the organisation number is your personal identity number, and Sweden's SE-format VAT number encodes that same number (SE + personal number + 01). Adding a VAT number gets it checked against VIES, the EU's VAT number register. You can remove them here at any time; if this section is ever unavailable, Haven support can remove them.",
+        'Optional. For a sole trader, the organisation number is your personal identity number. You can remove these details here at any time.',
       loadError: 'We could not load your company details. Try again in a moment.',
       retry: 'Try again',
 

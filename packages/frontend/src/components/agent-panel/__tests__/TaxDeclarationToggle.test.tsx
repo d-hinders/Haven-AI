@@ -138,7 +138,7 @@ describe('TaxDeclarationToggle copy', () => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
   })
 
-  it('does not overclaim: EIP-3009-only scope, pinned merchants excluded, nothing submitted', () => {
+  it('does not overclaim: "can be declared", nothing submitted, never "verified"', () => {
     render(
       <TaxDeclarationToggle
         agentId="agent-1"
@@ -147,9 +147,13 @@ describe('TaxDeclarationToggle copy', () => {
       />,
     )
     const help = screen.getByText(/checked against the EU's VIES register/).textContent ?? ''
-    // The EIP-3009-only sentence the issue requires, stated not implied.
-    expect(help).toContain('settle by EIP-3009')
-    expect(help).toContain('pinned merchant never carry one')
+    // Owner copy review, 2026-09-30: the EIP-3009-only / pinned-merchant
+    // sentence #3426 asked for was dropped from the card. The scope stays
+    // stated in docs/product/agent-passport.md (the EIP-3009-only
+    // declaration); the card keeps "can be declared", never a promise that
+    // every payment carries one (guarded below).
+    expect(help).toContain('can be declared to merchants that ask')
+    expect(help).not.toContain('settle by EIP-3009')
     expect(help).toContain('Nothing is submitted to an authority')
     // The overclaim guard: the strongest word about the VAT number is
     // "checked" — never "verified" (docs/product/owner-company-details.md).

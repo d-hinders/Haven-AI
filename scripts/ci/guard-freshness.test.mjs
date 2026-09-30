@@ -1149,6 +1149,50 @@ test('observe(): a guard with NO provenance (db-concurrency-proof.yml) also retr
   assert.equal(evaluate({ guards: [GUARD], observations: { [GUARD.workflow]: seen }, now: OBS_NOW }).healthy, true)
 })
 
+test('observe(): a guard with NO provenance that stays frozen through every retry still reports its real, stale success (#3321 N — missing case, round 2)', () => {
+  // The 09-29T12:47 incident's literal shape: `schedule` page 1 frozen at
+  // `2026-09-18T07:36:48Z` on EVERY read, never resolving. Unlike the QA
+  // (provenance) stays-stale case, this run is a REAL `success` — just one
+  // the frozen page can never show as anything but 11+ days old — so the
+  // verdict is `stale` (a genuine but too-old last success), not
+  // `unconfirmed`/`never-succeeded`: there is nothing here for a coherence
+  // check to distrust (GUARD has no Deployments index), only an old truth.
+  const frozenAt = new Date(Date.parse('2026-09-18T07:36:48Z')).toISOString()
+  const frozenRun = rest(91500, 'n/a', frozenAt, 'success', shaN(91500))
+  frozenRun.event = 'schedule'
+  let scheduleReads = 0
+  let dispatchReads = 0
+  const gh = (args) => {
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const eventArg = args.find((a) => a.startsWith('event='))
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      if (page !== 1) return JSON.stringify([])
+      if (eventArg === 'event=schedule') {
+        scheduleReads += 1
+        return JSON.stringify([frozenRun]) // never resolves — the frozen-page case
+      }
+      dispatchReads += 1
+      return JSON.stringify([])
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`)
+  }
+  const sleeps = []
+  let seen
+  const errors = captureConsoleError(() => {
+    seen = observe(GUARD, { gh, now: OBS_NOW, sleep: (ms) => sleeps.push(ms) })
+  })
+  assert.equal(scheduleReads, 1 + PAGE1_RETRY_ATTEMPTS, 'every retry was spent on the frozen page')
+  assert.equal(dispatchReads, 1, 'workflow_dispatch is still read once — a (stale) success was found on schedule')
+  assert.deepEqual(sleeps, Array(PAGE1_RETRY_ATTEMPTS).fill(PAGE1_RETRY_DELAY_MS))
+  assert.equal(seen.lastSuccessAt, frozenAt)
+  const result = evaluate({ guards: [GUARD], observations: { [GUARD.workflow]: seen }, now: OBS_NOW })
+  assert.equal(result.findings[0].kind, 'stale')
+  assert.match(
+    errors.join('\n'),
+    new RegExp(`page 1 \\(schedule\\): \\d+ rows.*\\(retried ${PAGE1_RETRY_ATTEMPTS}x — #3321\\)`),
+  )
+})
+
 test('observe(): a guard with NO provenance does NOT retry once a qualifying success is already in hand (#3321 S2)', () => {
   // GUARD counts two events (schedule, workflow_dispatch). A fresh success on
   // `schedule`'s page 1 must stop `workflow_dispatch`'s own page 1 — even a

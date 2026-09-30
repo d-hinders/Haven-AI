@@ -677,23 +677,24 @@ export const RUN_PAGE_CAP = 8
  * cache-served, but a 60 s directive cannot by itself explain an 11-day-old
  * snapshot, so the deeper cause is GitHub's own read path for this listing
  * (cache or search-index replica) occasionally serving a stale snapshot.
- * Measured live (2026-09-30, review round 1): staleness is per-request, not
- * per-workflow-run — in one observed run qa-dev read fresh while
- * db-concurrency-proof read stale in the SAME evaluation — and it clusters:
- * of 55 hand-read attempts across three clustered windows on 09-28
- * (15:02/15:22/15:39), roughly 11 came back stale, each cluster then
- * resolving within roughly 1–2 minutes. A reviewer reproduced it by hand
- * again the same day: 2 of 25 identical reads returned a different frozen
- * page (`newest=2026-09-19T05:36:10Z`). Whether varying the request shape
- * (a different `per_page`, a `created=>` filter) dodges the stale read was
- * tested by hand for this fix (30 alternating `per_page=100` /
- * `per_page=99` / `created=>=2026-09-27` reads, plus an earlier 10+15+28-read
- * pass): a stale cluster (3 of 10 default-shape reads) was caught once, but
- * had already resolved by the time the varied shapes were tried against it —
- * every one of the ~70 varied-shape reads in this session came back fresh,
- * which is consistent with the cluster simply having ended, not with the
- * shape mattering. Inconclusive: the fix below does NOT vary the request
- * shape.
+ *
+ * What the evidence actually shows, from `guard-freshness.yml`'s own CI run
+ * logs (not hand reads): classifying every guard-freshness.yml evaluation
+ * from 09-27 to 09-30, roughly 11 of ~55 came back stale over those three
+ * days. The three 09-28 timestamps named in earlier drafts of this comment
+ * (15:02/15:22/15:39) are ONE cluster, not three separate ones — fresh
+ * evaluations bracket it at 14:58 and 15:41, so it lasted AT LEAST 37
+ * minutes. "1–2 minutes" is not a cluster length: it is the gap between two
+ * consecutive evaluations where a stale read was immediately followed by a
+ * fresh one (16:09:59→16:11:04, 15:39:50→15:41:17) — evidence for how fast
+ * an ISOLATED stale read can resolve, not for how long a cluster lasts. A
+ * hand-run reproduction on 2026-09-30 (2 of 25 identical reads returning a
+ * frozen `newest=2026-09-19T05:36:10Z`) and a separate hand-run attempt to
+ * see whether varying the request shape (`per_page`, a `created=>` filter)
+ * dodges the stale read (inconclusive — a live stale cluster was caught once
+ * but had already resolved by the time the varied shapes were tried against
+ * it) both happened, but neither is recorded anywhere reproducible; they are
+ * not restated here as numbers.
  *
  * A single read of this listing is therefore not ground truth for ANY
  * counted-event guard, which is exactly the shape coherence check 1 already
@@ -712,21 +713,31 @@ export const RUN_PAGE_CAP = 8
  * unaffected. The first retry that opens near "now" replaces the stale read;
  * a genuinely dead trigger cannot self-correct on retry — every attempt
  * stays old — so the guard still exhausts every attempt and still escalates
- * that case exactly as before. The measured 1–2 minute cluster-recovery time
- * is close to, but not proven to always fit inside, the
- * `PAGE1_RETRY_ATTEMPTS × PAGE1_RETRY_DELAY_MS` window below (worst case
- * ~60 s, sized against that measurement — see the constants) — this is a
- * best-effort mitigation, not a guaranteed fix, and the `(retried Nx —
- * #3321)` diagnostic line will show whether a future occurrence outlasts it.
+ * that case exactly as before.
+ *
+ * Staleness is per-request, not per-workflow-run or per-cluster: an isolated
+ * stale read recovers within about a minute (see the gaps above), which the
+ * retry window below is sized for, but the 09-28 cluster ran at least 37
+ * minutes — longer than any in-evaluation retry budget can reasonably cover.
+ * For that case the mitigation is NOT the retry: it is the next evaluation.
+ * `guard-freshness.yml` runs on every push to `dev`/`main` — 144
+ * push-triggered runs in the 7 days to 2026-09-30 (measured) — so a cluster
+ * that outlasts one evaluation's retries is very likely covered by the next
+ * one, minutes later, without a human noticing the first. `3 ×
+ * PAGE1_RETRY_DELAY_MS` is a judgement call sized for the isolated-read case,
+ * not a claim that it covers a multi-minute cluster; the `(retried Nx —
+ * #3321)` diagnostic line is what will show whether a future occurrence
+ * outlasts it.
  */
-// 3 × 20 s ≈ 60 s worst case: the measured cluster-recovery time (~1–2 min on
-// 09-28's three clustered windows) is longer than this, so it is a
-// best-effort budget, not a guarantee — but this workflow evaluates on every
-// push to dev/main (dozens/week) plus a weekly cron, so an evaluation that
-// still exhausts its retries mid-cluster is very likely followed by another,
-// fresh one within minutes; a 60 s worst case per evaluation is acceptable
-// against that backdrop and against the alternative (10 s, proven too short
-// by the 8-of-9 reopen history above).
+// Worst case ~60 s per stale page 1, per counted event, per guard (3 attempts
+// × 20 s between them). One evaluation can sleep on MULTIPLE page-1 retries —
+// qa-dev.yml has one counted event (up to ~60 s) and db-concurrency-proof.yml
+// has two, schedule and workflow_dispatch (up to ~60 s each, ~120 s) — so a
+// single evaluation's worst case is ~180 s (~3 min), inside
+// guard-freshness.yml's own `timeout-minutes: 5`. Sized for an isolated
+// stale read (recovers in under a minute, per the measurements above), not
+// for the longer clusters the next push-triggered evaluation covers instead
+// — see the JSDoc above.
 export const PAGE1_RETRY_ATTEMPTS = 3
 export const PAGE1_RETRY_DELAY_MS = 20000
 

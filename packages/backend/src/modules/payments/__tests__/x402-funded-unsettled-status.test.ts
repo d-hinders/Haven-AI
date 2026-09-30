@@ -359,6 +359,19 @@ describeDb('#3475 follow-up — settlement_scheme / merchant_settlement_recorded
     expect(status).not.toHaveProperty('merchant_settlement_recorded')
   })
 
+  it('an off-enum stored scheme (never written today, not column-enforced): settlement_scheme is null, not the raw string', async () => {
+    // #3475 follow-up review round 2 (nit 5): `narrowSettlementScheme` maps
+    // any stored value outside 'eip3009' | 'erc7710' to null rather than
+    // letting it escape the OpenAPI-declared enum onto the wire.
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'bogus',
+      confirmedMinutesAgo: 1,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.settlement_scheme).toBeNull()
+    expect(status).not.toHaveProperty('merchant_settlement_recorded')
+  })
+
   it('the live response validates against the spec\'s declared AgentPaymentStatus schema', async () => {
     const { responseSchema, matchSpec } = await import('../../../openapi/response-shape.js')
     const { agent, paymentId } = await seedConfirmedX402({

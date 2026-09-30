@@ -1209,7 +1209,8 @@ const agentPaymentStatus = {
       ],
       description:
         'Which settlement branch this x402 payment runs (#946), from machine_metadata. Null on the ' +
-        'legacy rail and on any x402 intent whose scheme metadata predates #946.',
+        'legacy rail, on any x402 intent whose scheme metadata predates #946, or any stored value ' +
+        'outside this enum.',
     },
     merchant_settlement_recorded: {
       type: 'boolean',

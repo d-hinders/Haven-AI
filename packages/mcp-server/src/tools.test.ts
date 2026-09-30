@@ -2181,6 +2181,14 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
   // following next_tool/next_arguments exactly as given must not get an
   // error for doing so.
   it('a call with no settlement_tx_hash is a success no-op — zero backend calls', async () => {
+    // #3475 follow-up review round 2 (SF1): a stub MUST be installed for the
+    // zero-calls assertion below to mean anything. Without one, the prior
+    // test's `afterEach` (`installSharedFixtureLifecycle`) has already run
+    // `vi.unstubAllGlobals()`, so `fetch` here is whatever the environment's
+    // real, UNSTUBBED fetch is — a call through it is never pushed to
+    // `recordedCalls()` (only the stub does that), so `toEqual([])` passed
+    // trivially whether or not the handler actually fetched anything.
+    stubReport({ status: 202, body: {} })
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
 
     const res = ok(
@@ -2194,11 +2202,12 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
     expect(res.data.next_action).toBe('none')
     expect(res.data.next_tool).toBeUndefined()
     expect(res.data.next_tool_omitted_reason).toBe(
-      'no settlement hash was reported; nothing to record — the purchase is complete',
+      'no settlement hash was supplied; nothing was checked or recorded',
     )
     // The load-bearing assertion: NOTHING was fetched. Haven does not read
     // status, does not post evidence — there is nothing to check or record
-    // without a hash.
+    // without a hash. The stub above makes this a REAL assertion: a call
+    // that did fire would be recorded and fail it.
     expect(recordedCalls()).toEqual([])
   })
 })

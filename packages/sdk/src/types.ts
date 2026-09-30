@@ -1851,8 +1851,8 @@ export interface PaymentStatusResult {
   delivered?: boolean
   /**
    * #3475 follow-up: which settlement branch this x402 payment runs (#946).
-   * `null` on the legacy rail and on any x402 intent whose scheme metadata
-   * predates #946.
+   * `null` on the legacy rail, on any x402 intent whose scheme metadata
+   * predates #946, or any stored value outside this enum.
    */
   settlementScheme?: 'eip3009' | 'erc7710' | null
   /**
@@ -2114,8 +2114,9 @@ export interface RawPaymentStatusResult {
   delivered?: boolean
   /**
    * #3475 follow-up: `machine_metadata.settlement_scheme`, additive
-   * alongside `delivered`. `null` on the legacy rail and on any x402 intent
-   * whose scheme metadata predates #946.
+   * alongside `delivered`. `null` on the legacy rail, on any x402 intent
+   * whose scheme metadata predates #946, or any stored value outside this
+   * enum.
    */
   settlement_scheme?: 'eip3009' | 'erc7710' | null
   /**

@@ -1024,28 +1024,31 @@ export function createPaidMcpCompletionHandlers(
     haven_report_settlement_evidence: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_report_settlement_evidence', input)
-        // #3475 follow-up: `settlement_tx_hash` is optional on the SCHEMA so
-        // haven_report_x402_outcome can name this tool with only payment_id
-        // prefilled, before it knows whether the merchant returned a hash at
-        // all. A call that never supplies one refuses cleanly here rather
-        // than reporting anything — this tool still never records evidence
-        // without an actual hash to verify.
+        // #3475 follow-up (review round 1, S3): `settlement_tx_hash` is
+        // optional on the SCHEMA so haven_report_x402_outcome can name this
+        // tool with only payment_id prefilled, before it knows whether the
+        // merchant returned a hash at all. A call that never supplies one is
+        // a SUCCESS no-op, not a refusal — an agent following next_tool /
+        // next_arguments VERBATIM (the contract every hosted tool promises)
+        // must never get an error for doing exactly that. Zero backend
+        // calls: nothing to check or record without a hash.
         if (!args.settlement_tx_hash) {
-          throw new HostedToolError({
-            code: 'SETTLEMENT_TX_HASH_REQUIRED',
-            message:
-              'settlement_tx_hash is required to report merchant settlement evidence. Call again ' +
-              "with the merchant's PAYMENT-RESPONSE.transaction (0x + 64 hex characters). If the " +
-              'merchant returned none, there is nothing to report — the purchase is already complete.',
-            statusCode: 400,
-            nextStep: refusalNextStep({
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
+          return {
+            payment_id: args.payment_id,
+            recorded: false,
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.None,
               nextTool: null,
               nextToolOmittedReason:
-                'no settlement_tx_hash was supplied, so there is nothing to verify or record; re-call with one if the merchant returned it',
+                'no settlement hash was reported; nothing to record — the purchase is complete',
+              safeToContinue: true,
+              reason:
+                'No settlement_tx_hash was supplied, so nothing was checked or recorded — Haven made ' +
+                'no network call. If the merchant later returns its settlement transaction, call ' +
+                'again with settlement_tx_hash to record it.',
+              summary: { payment_id: args.payment_id, status: 'complete' },
             }),
-            paymentId: args.payment_id,
-          })
+          }
         }
         const outcome = await haven.reportSettlementEvidence(
           args.payment_id,

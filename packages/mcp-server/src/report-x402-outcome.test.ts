@@ -327,6 +327,7 @@ describe('haven_report_x402_outcome', () => {
         next_tool?: string
         next_arguments?: Record<string, unknown>
         next_action: string
+        reason?: string
       }>(
         await handlers().haven_report_x402_outcome({
           payment_id: 'pay_x402',
@@ -336,7 +337,19 @@ describe('haven_report_x402_outcome', () => {
       )
       expect(result.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
       expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402' })
-      expect(result.data.next_action).toBe('awaiting_settlement_evidence')
+      // S1 (review round 1): next_action is UNCHANGED by the offer — it stays
+      // the status re-read's own answer ('none' here, statusBody's default),
+      // never AgentPaymentNextAction.AwaitingSettlementEvidence — that value's
+      // published meaning (an erc7710 payment past its settlement window) is
+      // never reused for this, different, fact.
+      expect(result.data.next_action).toBe('none')
+      // S4: the offer's reason states the conditional verbatim.
+      expect(result.data.reason).toBe(
+        "Recorded. If the merchant's response carried a settlement transaction " +
+          '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
+          'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
+          'not, the purchase is already complete and no further Haven tool is needed.',
+      )
     })
 
     it('accepted + eip3009 + settlement ALREADY recorded: no tool follows (unchanged answer)', async () => {

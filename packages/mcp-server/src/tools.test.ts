@@ -2174,6 +2174,33 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
     expect(failure.message).toContain('rail')
     expect(recordedCalls()).toEqual([])
   })
+
+  // #3475 follow-up review round 1 (S2, S3): a call carrying only payment_id
+  // — the exact shape haven_report_x402_outcome now offers verbatim — is a
+  // SUCCESS no-op, never a refusal, and never touches the network: an agent
+  // following next_tool/next_arguments exactly as given must not get an
+  // error for doing so.
+  it('a call with no settlement_tx_hash is a success no-op — zero backend calls', async () => {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const res = ok(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+      } as never),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.payment_id).toBe('pay_7710')
+    expect(res.data.recorded).toBe(false)
+    expect(res.data.next_action).toBe('none')
+    expect(res.data.next_tool).toBeUndefined()
+    expect(res.data.next_tool_omitted_reason).toBe(
+      'no settlement hash was reported; nothing to record — the purchase is complete',
+    )
+    // The load-bearing assertion: NOTHING was fetched. Haven does not read
+    // status, does not post evidence — there is nothing to check or record
+    // without a hash.
+    expect(recordedCalls()).toEqual([])
+  })
 })
 
 describe('runtime-neutral tool naming (#1588)', () => {

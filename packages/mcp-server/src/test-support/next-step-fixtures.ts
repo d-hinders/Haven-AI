@@ -23,15 +23,21 @@ const HOSTED = (name: string) => ({
   next_tool_server_role: 'hosted',
 })
 
-/** `buildAgentGuidance(` call sites in the hosted non-test source — the census `next-step-characterization.test.ts` enforces. */
-export const EMISSION_SITE_COUNT = 20
+/**
+ * `buildAgentGuidance(` call sites in the hosted non-test source — the
+ * census `next-step-characterization.test.ts` enforces. #3475 follow-up
+ * review round 1 (S3) adds one: the missing-settlement-hash success no-op
+ * that used to be a `refusalNextStep(` site.
+ */
+export const EMISSION_SITE_COUNT = 21
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
- * null-id sites share one helper, and (#3475 follow-up) the report-outcome
- * accepted site now has two branches of its own (offer settlement evidence,
- * or not).
+ * null-id sites share one helper, the report-outcome accepted site has two
+ * branches of its own (offer settlement evidence, or not — #3475
+ * follow-up), and the missing-settlement-hash success no-op is its own site
+ * (#3475 follow-up review round 1, S3).
  */
-export const EMISSION_FIXTURE_COUNT = 24
+export const EMISSION_FIXTURE_COUNT = 25
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -46,11 +52,18 @@ export const EMISSION_SITES = [
   { site: 'plain-http-x402.ts report outcome rejected', action: AgentPaymentNextAction.SweepStrandedFunds, tool: 'haven_sweep_delegate', args: {}, expect: { ...HOSTED('haven_sweep_delegate'), next_arguments: {} } },
   { site: 'plain-http-x402.ts report outcome accepted, no settlement offer (no tool)', action: AgentPaymentNextAction.None, tool: null, reason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows', expect: { next_tool_omitted_reason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' } } /* RE-DECIDED: additive reason, no tool before either */,
   // #3475 follow-up: an eip3009 acceptance with no merchant settlement recorded yet names haven_report_settlement_evidence, payment_id only — see the owner decision in plain-http-x402.ts.
-  { site: 'plain-http-x402.ts report outcome accepted, eip3009 unsettled (offer settlement evidence)', action: AgentPaymentNextAction.AwaitingSettlementEvidence, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1' } } },
+  // Review round 1 (S1): next_action stays None here (the same fallback the
+  // "no settlement offer" branch above uses) — the offer rides next_tool /
+  // next_arguments / reason only, so AgentPaymentNextAction.AwaitingSettlementEvidence's
+  // published meaning (an erc7710 payment past its settlement window) is
+  // never reused for a different fact.
+  { site: 'plain-http-x402.ts report outcome accepted, eip3009 unsettled (offer settlement evidence)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts settle held-hash, can report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) } } },
   { site: 'paid-mcp-completion.ts settle held-hash, cannot report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts settle funding pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
+  // #3475 follow-up review round 1 (S3): a call with no settlement_tx_hash is a SUCCESS no-op, not a refusal — moved here from REFUSAL_SITES.
+  { site: 'paid-mcp-completion.ts report settlement evidence: no hash supplied (success no-op)', action: AgentPaymentNextAction.None, tool: null, reason: 'no settlement hash was reported; nothing to record — the purchase is complete', expect: { next_tool_omitted_reason: 'no settlement hash was reported; nothing to record — the purchase is complete' } },
   // The four no-tool sites (no `nextTool:` line before #3101; the required input surfaced them).
   { site: 'paid-mcp-completion.ts complete settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
   { site: 'paid-mcp-completion.ts settle erc7710 settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
@@ -96,10 +109,18 @@ type Site = {
   thrown?: unknown
 }
 
-/** Refusal fixtures: 35 HostedToolError sites (31 + the #3213 symbol-resolution refusal + the #3423 http-catalog-row refusal + the #3475 follow-up's missing-settlement-hash refusal, the eip3009 rejection carrying a live-state branch) + the 4 generic normalizeError branches #3214/#3416 added (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR, and #3416's typed rail-unavailable branch). */
-export const REFUSAL_SITE_COUNT = 39
-/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3475 follow-up's 1 (paid-mcp-completion.ts's missing-settlement-hash refusal). */
-export const REFUSAL_STEP_CALLS = 48
+/**
+ * Refusal fixtures: 34 HostedToolError sites (31 + the #3213
+ * symbol-resolution refusal + the #3423 http-catalog-row refusal, the
+ * eip3009 rejection carrying a live-state branch) + the 4 generic
+ * normalizeError branches #3214/#3416 added (the HavenApiError 4xx/5xx pair,
+ * HavenError, UNKNOWN_ERROR, and #3416's typed rail-unavailable branch).
+ * #3475 follow-up review round 1 (S3): the missing-settlement-hash case is a
+ * SUCCESS no-op, not a refusal — its fixture moved to `EMISSION_SITES`.
+ */
+export const REFUSAL_SITE_COUNT = 38
+/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503). */
+export const REFUSAL_STEP_CALLS = 47
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },
@@ -136,8 +157,6 @@ export const REFUSAL_SITES: Site[] = [
   { site: 'mcp-context.ts merchant not ready', base: { code: 'MERCHANT_NOT_READY', message: 'm', statusCode: 503, retryWithNewQuote: true }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the merchant needs to recover first; re-quote after retry_after_s' }, expect: { next_action: 'stop_and_tell_user', ...OMIT('the merchant needs to recover first; re-quote after retry_after_s') } },
   { site: 'mcp-context.ts insecure merchant url', base: { code: 'INSECURE_RETRY_TARGET', message: 'm', statusCode: 400 }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: "re-call with the merchant's https URL as merchant_url; nothing was funded or signed" }, expect: { next_action: 'retry_with_explicit_context', ...OMIT("re-call with the merchant's https URL as merchant_url; nothing was funded or signed") } },
   { site: 'mcp-context.ts mcp_transport unrecognised', base: { code: 'INVALID_INPUT', message: 'm', statusCode: 400, status: 'invalid_input', phase: 'not_started', rail: 'x402' }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: RETRY }, expect: { next_action: 'retry_with_explicit_context', ...OMIT(RETRY) } },
-  // #3475 follow-up: settlement_tx_hash is now optional on the schema (so haven_report_x402_outcome can prefill payment_id only); a call with no hash refuses cleanly instead of reporting anything.
-  { site: 'paid-mcp-completion.ts report settlement evidence: no hash supplied', base: { code: 'SETTLEMENT_TX_HASH_REQUIRED', message: 'm', statusCode: 400, paymentId: 'pay_1' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'no settlement_tx_hash was supplied, so there is nothing to verify or record; re-call with one if the merchant returned it' }, expect: { next_action: 'stop_and_tell_user', ...OMIT('no settlement_tx_hash was supplied, so there is nothing to verify or record; re-call with one if the merchant returned it') } },
   // #3214: the four GENERIC normalizeError branches — no HostedToolError site; `thrown` is what the test throws.
   { site: 'errors.ts normalizeError: HavenApiError 5xx', base: { code: 'API_ERROR', message: 'Expected an x402 quote response with HTTP 402, got HTTP 500.', statusCode: 500 }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: RETRY_API }, thrown: new HavenApiError('Expected an x402 quote response with HTTP 402, got HTTP 500.', 500), expect: { next_action: 'retry_with_explicit_context', ...OMIT(RETRY_API) } },
   // #3416: the typed chain-unavailable 503 is a stop, not the 5xx retry above.

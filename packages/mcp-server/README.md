@@ -143,6 +143,7 @@ mcp__haven__haven_pay_x402_quote
   -> mcp__haven-signer__haven_sign_x402
   -> (the agent's OWN retry of the merchant)
   -> mcp__haven__haven_report_x402_outcome
+  -> mcp__haven__haven_report_settlement_evidence (eip3009, only if PAYMENT-RESPONSE.transaction was returned)
 ```
 
 `outcome: "rejected"` writes the same open
@@ -151,7 +152,12 @@ retry path writes, so `haven_get_payment_status` answers
 `funded_but_unsettled` / `sweep_stranded_funds` on the **next** call instead
 of after the 15-minute merchant-report grace window. `outcome: "accepted"`
 writes the merchant-response evidence row, so a delivered purchase stops
-reading as undelivered and never enters that window.
+reading as undelivered and never enters that window. On the eip3009 funding
+leg specifically, an accepted outcome with no settlement recorded yet
+(#3475 follow-up) also names `haven_report_settlement_evidence` as the next
+step, `payment_id` prefilled — pass the merchant's `PAYMENT-RESPONSE.transaction`
+as `settlement_tx_hash` if it returned one; calling with no hash is a
+well-formed no-op, since the purchase may already be complete.
 
 The report is **evidence, not authority**. Haven does not verify the claim —
 verifying it would mean calling the merchant. What bounds it instead: the

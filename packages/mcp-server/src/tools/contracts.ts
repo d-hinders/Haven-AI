@@ -462,9 +462,10 @@ export const toolSchemas = {
     // now names this tool as the next step for an eip3009 acceptance before it
     // knows whether the merchant returned a settlement hash at all, prefilling
     // only `payment_id`. Calling with no hash is a well-formed call that
-    // refuses cleanly (`SETTLEMENT_TX_HASH_REQUIRED`) rather than a schema
-    // parse error, so that next-step hint is genuinely callable; it never
-    // reports anything on its own.
+    // SUCCEEDS as a no-op (review round 1, S3) — `recorded: false`, zero
+    // backend calls, `next_action: none` — rather than a refusal: an agent
+    // following next_tool / next_arguments verbatim must never get an error
+    // for doing exactly that. It never reports anything without a real hash.
     payment_id: z.string().min(1),
     settlement_tx_hash: z
       .string()

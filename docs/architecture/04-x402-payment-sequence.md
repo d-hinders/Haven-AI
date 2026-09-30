@@ -1058,6 +1058,17 @@ case 1 fires on the next status call; `accepted` posts `POST
 `merchant_response_observed` and therefore removes the payment from case 2's
 predicate permanently rather than until the window elapses.
 
+> **Re-verified (#3475 follow-up, 2026-09-30, passage only).** An `accepted`
+> outcome on an eip3009 payment with no merchant *settlement* recorded yet
+> (a separate fact from the evidence row above — the delegate → merchant
+> transfer, not the merchant's HTTP response) also names
+> `haven_report_settlement_evidence` as the next tool, `payment_id`
+> prefilled: pass the merchant's `PAYMENT-RESPONSE.transaction` as
+> `settlement_tx_hash` if it returned one. A call carrying only `payment_id`
+> is a well-formed success no-op — nothing checked, nothing recorded — never
+> a refusal, since the merchant may simply have returned no hash.
+> `last-verified` unchanged.
+
 The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
 drew it for a caller-asserted settlement hash:
 

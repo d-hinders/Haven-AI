@@ -887,12 +887,19 @@ export function createPlainHttpX402Handlers(
           tx_hash: report.txHash,
           resource_url: report.resourceUrl,
           ...buildAgentGuidance({
+            // #3475 follow-up review round 1 (S1): next_action is UNCHANGED
+            // by the settlement-evidence offer — it stays the status re-read's
+            // own answer (or the pre-existing per-outcome default), exactly as
+            // before this follow-up. The offer rides next_tool /
+            // next_arguments / reason only, so
+            // AgentPaymentNextAction.AwaitingSettlementEvidence's published
+            // meaning (an erc7710 payment past its settlement window with no
+            // verified evidence) is never reused for a different fact.
             nextAction:
-              report.outcome === 'rejected'
-                ? (status?.nextAction ?? AgentPaymentNextAction.SweepStrandedFunds)
-                : offerSettlementEvidence
-                  ? AgentPaymentNextAction.AwaitingSettlementEvidence
-                  : (status?.nextAction ?? AgentPaymentNextAction.None),
+              status?.nextAction ??
+              (report.outcome === 'rejected'
+                ? AgentPaymentNextAction.SweepStrandedFunds
+                : AgentPaymentNextAction.None),
             ...reportOutcomeHandoff(report.outcome, offerSettlementEvidence, report.paymentId),
             safeToContinue: true,
             reason:

@@ -1854,7 +1854,7 @@ export interface PaymentStatusResult {
    * `null` on the legacy rail and on any x402 intent whose scheme metadata
    * predates #946.
    */
-  settlementScheme?: string | null
+  settlementScheme?: 'eip3009' | 'erc7710' | null
   /**
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified.
@@ -2117,7 +2117,7 @@ export interface RawPaymentStatusResult {
    * alongside `delivered`. `null` on the legacy rail and on any x402 intent
    * whose scheme metadata predates #946.
    */
-  settlement_scheme?: string | null
+  settlement_scheme?: 'eip3009' | 'erc7710' | null
   /**
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified.

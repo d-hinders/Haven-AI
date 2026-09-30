@@ -750,10 +750,15 @@ last-verified: "2026-09-29"
 > `haven_prepare_catalog_purchase`'s step 5b forwards `args.idempotency_key`
 > onto the pre-check call; `haven_pay_mcp_tool` is unaffected — it never had
 > this bug, because its authorize call runs the replay lookup BEFORE its own
-> pre-check (`delegation-authorize.ts`). No tool added, renamed or
-> re-shaped: arguments, schemas, descriptions and the strict/permissive
-> split are untouched, the local stdio runtime is not on this path, and the
-> skew-flatness this document asserts holds in the tool-shape sense — but
+> pre-check (`delegation-authorize.ts`). One input-schema change:
+> `haven_prepare_catalog_purchase`'s `idempotency_key` gains 1–128 bounds,
+> matching `haven_pay` and the backend's `X402AuthorizeRequest`, so an empty
+> or over-long key is now refused at tool input (`INVALID_INPUT`). Before,
+> an over-long key was refused by the backend (400), and an empty key was
+> treated as no key on the erc7710 branch. No tool added or renamed; descriptions
+> and the strict/permissive split are untouched, the local stdio runtime is
+> not on this path, and the skew-flatness this document asserts holds in the
+> tool-shape sense apart from that bound — but
 > the WIRE is not skew-flat here, checked from the code
 > (`routes/machine-payments.ts` is in `index.ts`'s `enforcedModules`, and
 > `BudgetPrecheckRequest` is `additionalProperties: false`): an older

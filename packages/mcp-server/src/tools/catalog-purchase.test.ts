@@ -644,6 +644,21 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(recordedCalls()).toHaveLength(0)
   })
 
+  it('refuses an empty or over-long idempotency_key at tool input, before any Haven call (#3492)', async () => {
+    for (const idempotency_key of ['', 'k'.repeat(129)]) {
+      stubFetch({})
+      const payload = await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount_human: '1',
+        idempotency_key,
+      })
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe('INVALID_INPUT')
+      expect(recordedCalls()).toHaveLength(0)
+    }
+  })
+
   // #2259 re-based this test rather than deleting it. Its OLD framing —
   // "legacy rail: insufficient allowance still proceeds … queues for approval"
   // — asserts something unreachable: the legacy rail answers 410 at every

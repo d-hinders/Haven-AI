@@ -86,6 +86,11 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     // #3420: the delivered half of the settle vocabulary, additive — absent
     // from the raw payload (older backend) stays absent here.
     ...(raw.delivered === true ? { delivered: true as const } : {}),
+    // #3475 follow-up: additive alongside `delivered` — absent from the raw
+    // payload (older backend) stays absent here; `settlementScheme` is
+    // carried through even when `null` (a real, known answer).
+    ...(raw.settlement_scheme !== undefined ? { settlementScheme: raw.settlement_scheme } : {}),
+    ...(raw.merchant_settlement_recorded === true ? { merchantSettlementRecorded: true as const } : {}),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

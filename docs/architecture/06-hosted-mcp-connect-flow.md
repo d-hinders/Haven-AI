@@ -152,6 +152,9 @@ haven_quote_x402 / haven_pay_x402_quote
   → haven_x402_sign_header
   → merchant retry or haven_complete_mcp_tool
   → haven_report_x402_outcome          (only when YOU did the retry)
+  → haven_report_settlement_evidence   (#3475 follow-up: only on an accepted outcome
+                                         with no settlement recorded yet, and only if the
+                                         merchant returned PAYMENT-RESPONSE.transaction)
 
 erc7710 direct settlement (delegation rail + merchant advertises it)
 haven_quote_x402 / haven_pay_x402_quote
@@ -159,6 +162,14 @@ haven_quote_x402 / haven_pay_x402_quote
   → haven_submit { settlement_scheme: "erc7710" }  → payment_header
   → merchant retry
 ```
+
+> **Re-verified (#3475 follow-up, 2026-09-30, passage only).** The added
+> `haven_report_settlement_evidence` step above is the hosted next-step
+> answer, not a new tool: `haven_report_x402_outcome`'s response names it
+> when the fact warrants it (eip3009, accepted, unsettled), and the tool
+> itself now accepts a bare `payment_id` as a well-formed no-op when the
+> merchant returned no hash. `last-verified` unchanged — nothing else in this
+> file's scope was re-checked.
 
 **Why the last EIP-3009 step exists at all
 ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).** The two

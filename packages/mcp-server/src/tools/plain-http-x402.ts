@@ -100,11 +100,27 @@ import {
 // URL existed to compare against. On the pay-from-declaration path nothing was
 // compared, and a literal `false` there read as "the merchant agrees with what
 // you quoted" (haven-reviewer on #3112).
-/** #3101: the handoff after a reported outcome — sweep on a rejection, nothing (with the reason) on acceptance. */
-function reportOutcomeHandoff(outcome: 'accepted' | 'rejected'): HostedHandoff {
-  return outcome === 'rejected'
-    ? { nextTool: 'haven_sweep_delegate', nextArguments: {} }
-    : { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
+/**
+ * #3101: the handoff after a reported outcome — sweep on a rejection; on
+ * acceptance, nothing follows UNLESS `offerSettlementEvidence` is true.
+ *
+ * #3475 follow-up (owner decision, 2026-09-30): an `accepted` eip3009
+ * plain-HTTP payment with no merchant settlement recorded yet names
+ * `haven_report_settlement_evidence` as the next tool, `payment_id` prefilled
+ * — the schema's `settlement_tx_hash` is optional for exactly this reason
+ * (see `contracts.ts`'s `haven_report_settlement_evidence` shape), so this is
+ * a genuinely callable next step even though the agent may have nothing to
+ * add. Rejected outcomes, erc7710 payments, a non-eip3009/unknown scheme, and
+ * a payment whose settlement is already recorded all keep the old answer.
+ */
+function reportOutcomeHandoff(outcome: 'accepted' | 'rejected', offerSettlementEvidence: boolean, paymentId: string): HostedHandoff {
+  if (outcome === 'rejected') {
+    return { nextTool: 'haven_sweep_delegate', nextArguments: {} }
+  }
+  if (offerSettlementEvidence) {
+    return { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId } }
+  }
+  return { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
 }
 
 function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
@@ -849,6 +865,19 @@ export function createPlainHttpX402Handlers(
         } catch {
           status = null
         }
+        // #3475 follow-up (owner decision, 2026-09-30): an `accepted` outcome
+        // on an eip3009 plain-HTTP payment with no merchant settlement
+        // recorded yet offers haven_report_settlement_evidence as the next
+        // step. `settlementScheme`/`merchantSettlementRecorded` are read from
+        // the SAME re-read above — no second call — and default to "do not
+        // offer" when the read failed or the fields are absent (an older
+        // backend, or genuinely unknown), which is the safe side: erc7710,
+        // a non-x402 rail, and an already-recorded settlement all keep the
+        // pre-existing "no tool follows" answer, unchanged.
+        const offerSettlementEvidence =
+          report.outcome === 'accepted' &&
+          status?.settlementScheme === 'eip3009' &&
+          status?.merchantSettlementRecorded !== true
         return {
           payment_id: report.paymentId,
           outcome: report.outcome,
@@ -858,20 +887,33 @@ export function createPlainHttpX402Handlers(
           tx_hash: report.txHash,
           resource_url: report.resourceUrl,
           ...buildAgentGuidance({
+            // #3475 follow-up review round 1 (S1): next_action is UNCHANGED
+            // by the settlement-evidence offer — it stays the status re-read's
+            // own answer (or the pre-existing per-outcome default), exactly as
+            // before this follow-up. The offer rides next_tool /
+            // next_arguments / reason only, so
+            // AgentPaymentNextAction.AwaitingSettlementEvidence's published
+            // meaning (an erc7710 payment past its settlement window with no
+            // verified evidence) is never reused for a different fact.
             nextAction:
               status?.nextAction ??
               (report.outcome === 'rejected'
                 ? AgentPaymentNextAction.SweepStrandedFunds
                 : AgentPaymentNextAction.None),
-            ...reportOutcomeHandoff(report.outcome),
+            ...reportOutcomeHandoff(report.outcome, offerSettlementEvidence, report.paymentId),
             safeToContinue: true,
             reason:
               report.outcome === 'rejected'
                 ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
                   'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
                   'the same purchase.'
-                : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
-                  'Haven tool is needed.',
+                : offerSettlementEvidence
+                  ? "Recorded. If the merchant's response carried a settlement transaction " +
+                    '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
+                    'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
+                    'not, the purchase is already complete and no further Haven tool is needed.'
+                  : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
+                    'Haven tool is needed.',
             summary: {
               payment_id: report.paymentId,
               status: status?.status ?? 'confirmed',

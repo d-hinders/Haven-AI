@@ -328,12 +328,20 @@ EIP-3009 bridge
 haven_pay_x402_quote → haven_sign → haven_submit
   → haven_x402_sign_header → merchant retry
   → haven_report_x402_outcome
+  → haven_report_settlement_evidence   (#3475 follow-up: only on an accepted outcome
+                                         with no settlement recorded yet, and only if the
+                                         merchant returned PAYMENT-RESPONSE.transaction)
 
 erc7710 direct settlement
 haven_pay_x402_quote → haven_sign
   → haven_submit { settlement_scheme: "erc7710" } → payment_header
   → merchant retry
 ```
+
+> **Re-verified (#3475 follow-up, 2026-09-30, passage only).** The added
+> step is `haven_report_x402_outcome`'s own next-step answer, offered only
+> when the fact warrants it (eip3009, accepted, unsettled) — not a new call
+> an agent must always make. `last-verified` unchanged.
 
 The report step exists only on the EIP-3009 branch, and only in hosted mode's
 plain-HTTP shape ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).

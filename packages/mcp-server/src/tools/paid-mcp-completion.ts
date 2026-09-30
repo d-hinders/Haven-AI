@@ -549,11 +549,15 @@ export function classifyErc7710Settlement(
 }
 
 /**
- * #2972: the `haven_report_settlement_evidence` tool's response shape — the
- * SAME three outcomes `classifyErc7710Settlement` classifies for the settle/
- * complete gate, built directly from `MerchantCompletion.reportEvidence`'s
- * `EvidenceReportOutcome` rather than derived from a merchant HTTP call (there
- * is none here — the agent is handing Haven a hash it already holds).
+ * #2972: builds THREE of the `haven_report_settlement_evidence` tool's four
+ * possible response shapes — the SAME three outcomes `classifyErc7710Settlement`
+ * classifies for the settle/complete gate, built directly from
+ * `MerchantCompletion.reportEvidence`'s `EvidenceReportOutcome` rather than
+ * derived from a merchant HTTP call (there is none here — the agent is
+ * handing Haven a hash it already holds). The fourth shape — no
+ * `settlement_tx_hash` supplied at all — is a SUCCESS no-op the handler
+ * returns directly, before this function is ever called (#3475 follow-up,
+ * the `if (!args.settlement_tx_hash)` branch below).
  *
  * `confirmed` -> settled: true. `retryable` -> SETTLEMENT_PENDING (the chain
  * could not be read yet, or the transaction is not mined — worth reporting
@@ -1024,6 +1028,38 @@ export function createPaidMcpCompletionHandlers(
     haven_report_settlement_evidence: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_report_settlement_evidence', input)
+        // #3475 follow-up (review round 1, S3): `settlement_tx_hash` is
+        // optional on the SCHEMA so haven_report_x402_outcome can name this
+        // tool with only payment_id prefilled, before it knows whether the
+        // merchant returned a hash at all. A call that never supplies one is
+        // a SUCCESS no-op, not a refusal — an agent following next_tool /
+        // next_arguments VERBATIM (the contract every hosted tool promises)
+        // must never get an error for doing exactly that. Zero backend
+        // calls: nothing to check or record without a hash.
+        if (!args.settlement_tx_hash) {
+          // #3475 follow-up review round 2 (both reviewers): state only what
+          // is known. This tool is ALSO the named remedy for an erc7710
+          // payment `awaiting_settlement_evidence` / `delivered_unverified`
+          // — a no-hash call there means the agent has not yet received one
+          // from the merchant, not that the purchase is complete. Nothing
+          // was checked or recorded is the only thing every payment_id this
+          // tool accepts can honestly say.
+          return {
+            payment_id: args.payment_id,
+            recorded: false,
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.None,
+              nextTool: null,
+              nextToolOmittedReason: 'no settlement hash was supplied; nothing was checked or recorded',
+              safeToContinue: true,
+              reason:
+                'No settlement_tx_hash was supplied, so nothing was checked or recorded — Haven made ' +
+                'no network call. If you receive the merchant settlement transaction, call again with ' +
+                'settlement_tx_hash to record it.',
+              summary: { payment_id: args.payment_id, status: 'not_recorded' },
+            }),
+          }
+        }
         const outcome = await haven.reportSettlementEvidence(
           args.payment_id,
           args.settlement_tx_hash,

@@ -1849,6 +1849,19 @@ export interface PaymentStatusResult {
    * row records its response); absent = unknown. See the raw field's doc.
    */
   delivered?: boolean
+  /**
+   * #3475 follow-up: which settlement branch this x402 payment runs (#946).
+   * `null` on the legacy rail, on any x402 intent whose scheme metadata
+   * predates #946, or any stored value outside this enum.
+   */
+  settlementScheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #3475 follow-up: `true` only when an eip3009 payment's merchant
+   * settlement transaction is already recorded and on-chain-verified.
+   * Absent — never `false` — when unknown or on erc7710, matching
+   * `delivered`'s own honesty rule.
+   */
+  merchantSettlementRecorded?: boolean
   /** Platform fee surfaced so it's never silently collected (#386). */
   fee?: PaymentFee | null
   amountAtomic?: string | null
@@ -2099,6 +2112,20 @@ export interface RawPaymentStatusResult {
    * DELIVERED_UNSETTLED branches.
    */
   delivered?: boolean
+  /**
+   * #3475 follow-up: `machine_metadata.settlement_scheme`, additive
+   * alongside `delivered`. `null` on the legacy rail, on any x402 intent
+   * whose scheme metadata predates #946, or any stored value outside this
+   * enum.
+   */
+  settlement_scheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #3475 follow-up: `true` only when an eip3009 payment's merchant
+   * settlement transaction is already recorded and on-chain-verified.
+   * Absent — never `false` — when unknown or on erc7710, matching
+   * `delivered`'s own honesty rule.
+   */
+  merchant_settlement_recorded?: boolean
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null

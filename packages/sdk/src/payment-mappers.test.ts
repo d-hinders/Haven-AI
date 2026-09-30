@@ -268,6 +268,38 @@ describe('payment result mappers', () => {
       merchant: '0xMerchant',
     })
   })
+
+  // #3475 follow-up (review round 1, N2)
+  it('mapPaymentStatusResult carries settlementScheme (including explicit null) and drops it when absent', () => {
+    expect(mapPaymentStatusResult(paymentStatusResponse()).settlementScheme).toBeUndefined()
+    expect('settlementScheme' in mapPaymentStatusResult(paymentStatusResponse())).toBe(false)
+
+    // An explicit `null` on the wire (legacy rail / pre-#946 scheme metadata)
+    // is a REAL answer, not an absence — it must pass through as `null`,
+    // never get coerced to `undefined` and never get dropped.
+    expect(
+      mapPaymentStatusResult(paymentStatusResponse({ settlement_scheme: null })).settlementScheme,
+    ).toBeNull()
+
+    expect(
+      mapPaymentStatusResult(paymentStatusResponse({ settlement_scheme: 'eip3009' })).settlementScheme,
+    ).toBe('eip3009')
+    expect(
+      mapPaymentStatusResult(paymentStatusResponse({ settlement_scheme: 'erc7710' })).settlementScheme,
+    ).toBe('erc7710')
+  })
+
+  it('mapPaymentStatusResult carries merchantSettlementRecorded only when true, matching delivered\'s honesty rule', () => {
+    expect(mapPaymentStatusResult(paymentStatusResponse()).merchantSettlementRecorded).toBeUndefined()
+    expect(
+      'merchantSettlementRecorded' in mapPaymentStatusResult(paymentStatusResponse()),
+    ).toBe(false)
+
+    expect(
+      mapPaymentStatusResult(paymentStatusResponse({ merchant_settlement_recorded: true }))
+        .merchantSettlementRecorded,
+    ).toBe(true)
+  })
 })
 
 describe('list scope survives the receipt mapper (#3132)', () => {

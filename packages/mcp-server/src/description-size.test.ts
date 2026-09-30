@@ -205,12 +205,29 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * 922.42 sits above round 8's 914.24, and the same round-8 rule applies (the
  * constant cannot stay while the tree the PR must merge into already
  * exceeds it) — re-derived at the measured mean, shrink-only from here.
+ *
+ * **Re-derived — round 10, #3475 follow-up (2026-09-30, review round 1
+ * wording).** The shared `haven_report_settlement_evidence` description now
+ * says `settlement_tx_hash` is optional and that omitting it SUCCEEDS AS A
+ * NO-OP — nothing checked, nothing recorded, no network call — rather than
+ * refusing, per review round 1's S3 (an agent following next_tool /
+ * next_arguments verbatim must never get an error for doing exactly that).
+ * The same field-naming obligation round 9 states applies:
+ * `haven_report_x402_outcome` can now name this tool as the next step
+ * before it knows whether the merchant returned a hash at all, and an agent
+ * reading tools/list needs to know a bare `payment_id` call is well-formed
+ * and what it does (+140 UTF-8 bytes on that one description). No overclaim
+ * remains to trim. Measured total 24,123 across the same 26 tools; the
+ * absolute pin moves to that exact value, shrink-only from here. The mean
+ * pin moves too: 24,123 / 26 = 927.81 sits above round 9's 922.42, and the
+ * same rule applies — re-derived at the measured mean, shrink-only from
+ * here.
  */
-const MAX_TOTAL_BYTES = 23_983
-// Mean pin: re-derived — round 9, #3476 (block above): 23,983 / 26 =
-// 922.4230, pinned at the two-decimal ceiling (922.43). Round 8's 914.24
+const MAX_TOTAL_BYTES = 24_123
+// Mean pin: re-derived — round 10, #3475 follow-up (block above): 24,123 / 26 =
+// 927.8077, pinned at the two-decimal ceiling (927.81). Round 9's 922.43
 // cannot hold while this tree exceeds it. Shrink-only from here.
-const MAX_MEAN_BYTES = 922.43
+const MAX_MEAN_BYTES = 927.81
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

@@ -304,3 +304,87 @@ describeDb('#2290 — the resume predicate agrees with the status remedy', () =>
     expect(isFundedX402AwaitingMerchantLeg(row!)).toBe(false)
   })
 })
+
+/**
+ * #3475 follow-up (review round 1, B1) — the WIRE fields the status route
+ * adds (`settlement_scheme`, `merchant_settlement_recorded`), proven against
+ * the real DB read `statusFromRow` performs, not a mock. `settlement_scheme`
+ * is asserted per branch; `merchant_settlement_recorded` per the `delivered`
+ * honesty rule (present, `true`, only when a verified hash is recorded —
+ * absent, never `false`, otherwise). The route's actual response also
+ * validates against the spec's declared enum, so a schema and a code path
+ * that silently disagreed would both be caught here.
+ */
+describeDb('#3475 follow-up — settlement_scheme / merchant_settlement_recorded on GET status', () => {
+  beforeAll(initDbHarness)
+  beforeEach(resetDb)
+
+  it('eip3009, no settlement recorded: settlement_scheme is eip3009, merchant_settlement_recorded is absent', async () => {
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'eip3009',
+      confirmedMinutesAgo: 1,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.settlement_scheme).toBe('eip3009')
+    expect(status).not.toHaveProperty('merchant_settlement_recorded')
+  })
+
+  it('eip3009, settlement recorded: merchant_settlement_recorded is true', async () => {
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'eip3009',
+      confirmedMinutesAgo: 60,
+      merchantSettlementRecorded: true,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.settlement_scheme).toBe('eip3009')
+    expect(status?.merchant_settlement_recorded).toBe(true)
+  })
+
+  it('erc7710: settlement_scheme is erc7710, merchant_settlement_recorded is absent (never the right signal there)', async () => {
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'erc7710',
+      confirmedMinutesAgo: 1,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.settlement_scheme).toBe('erc7710')
+    expect(status).not.toHaveProperty('merchant_settlement_recorded')
+  })
+
+  it('no scheme metadata (legacy / predates #946): settlement_scheme is null', async () => {
+    const { agent, paymentId } = await seedConfirmedX402({
+      confirmedMinutesAgo: 1,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.settlement_scheme).toBeNull()
+    expect(status).not.toHaveProperty('merchant_settlement_recorded')
+  })
+
+  it('an off-enum stored scheme (never written today, not column-enforced): settlement_scheme is null, not the raw string', async () => {
+    // #3475 follow-up review round 2 (nit 5): `narrowSettlementScheme` maps
+    // any stored value outside 'eip3009' | 'erc7710' to null rather than
+    // letting it escape the OpenAPI-declared enum onto the wire.
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'bogus',
+      confirmedMinutesAgo: 1,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.settlement_scheme).toBeNull()
+    expect(status).not.toHaveProperty('merchant_settlement_recorded')
+  })
+
+  it('the live response validates against the spec\'s declared AgentPaymentStatus schema', async () => {
+    const { responseSchema, matchSpec } = await import('../../../openapi/response-shape.js')
+    const { agent, paymentId } = await seedConfirmedX402({
+      settlementScheme: 'eip3009',
+      confirmedMinutesAgo: 60,
+      merchantSettlementRecorded: true,
+    })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    const schema = responseSchema('get', '/machine-payments/{id}/status', '200')
+    // JSON round-tripped first: the real HTTP boundary serializes to JSON
+    // (Fastify), which is what turns `expires_at`'s Date into the ISO string
+    // the spec declares — asserting on the raw DB-read object would fail the
+    // date-format check for a reason that has nothing to do with this test.
+    expect(matchSpec(schema, JSON.parse(JSON.stringify(status)))).toEqual([])
+  })
+})

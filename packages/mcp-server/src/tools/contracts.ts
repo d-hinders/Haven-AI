@@ -457,13 +457,23 @@ export const toolSchemas = {
     // it retried itself. Nothing else is taken: the
     // payment's rail, amount, and merchant are read from Haven's own record,
     // scoped to this agent, exactly like haven_report_x402_outcome.
+    //
+    // #3475 follow-up: `settlement_tx_hash` is OPTIONAL — `haven_report_x402_outcome`
+    // now names this tool as the next step for an eip3009 acceptance before it
+    // knows whether the merchant returned a settlement hash at all, prefilling
+    // only `payment_id`. Calling with no hash is a well-formed call that
+    // SUCCEEDS as a no-op (review round 1, S3) — `recorded: false`, zero
+    // backend calls, `next_action: none` — rather than a refusal: an agent
+    // following next_tool / next_arguments verbatim must never get an error
+    // for doing exactly that. It never reports anything without a real hash.
     payment_id: z.string().min(1),
     settlement_tx_hash: z
       .string()
       .regex(
         /^0x[0-9a-fA-F]{64}$/,
         'settlement_tx_hash must be a 0x-prefixed transaction hash: 0x followed by exactly 64 hex characters (case-insensitive).',
-      ),
+      )
+      .optional(),
   },
   haven_get_payment_status: {
     payment_id: z.string().min(1),

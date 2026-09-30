@@ -83,6 +83,27 @@ export interface AgentPaymentStatus {
    * honest "unknown", never a claimed `false`.
    */
   delivered?: boolean
+  /**
+   * #3475 follow-up: `machine_metadata.settlement_scheme`, the same read
+   * `isFundedX402AwaitingMerchantLeg` already uses internally — surfaced so a
+   * caller can tell an eip3009 funding-leg payment from an erc7710
+   * no-funding-leg one without re-deriving it. `null` on the legacy rail, on
+   * any x402 intent whose scheme metadata predates #946, and on any stored
+   * value this enum does not (yet) name — never a third string this type
+   * does not declare.
+   */
+  settlement_scheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #3475 follow-up: `true` only when an eip3009 payment's merchant
+   * settlement transaction is already recorded and on-chain-verified
+   * (`machine_metadata.merchant_settlement_tx_hash`, written by
+   * `haven_report_settlement_evidence`'s eip3009 branch). Always absent on
+   * erc7710 — its one settlement transaction IS the confirmed intent, not a
+   * separately recorded hash, so this flag is not the right signal there.
+   * Absent — never `false` — when unknown, matching `delivered`'s own
+   * honesty rule.
+   */
+  merchant_settlement_recorded?: boolean
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
@@ -477,6 +498,20 @@ function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown
 function settlementSchemeOf(machineMetadata: unknown): string | null {
   const scheme = parsedMachineMetadata(machineMetadata)?.settlement_scheme
   return typeof scheme === 'string' ? scheme : null
+}
+
+/**
+ * #3475 follow-up (review round 1, N1): the WIRE-TYPED narrowing of
+ * `settlementSchemeOf` above for `AgentPaymentStatus.settlement_scheme` —
+ * that helper stays `string | null` because its other two call sites
+ * (`isFundedX402AwaitingMerchantLeg`, `isPastSettlementEvidenceWindowErc7710`)
+ * only ever compare it against a literal and never surface it on the wire.
+ * A stored value outside the declared enum (never written today, but not
+ * schema-enforced at the column) maps to `null` here rather than escaping
+ * the OpenAPI-declared type.
+ */
+function narrowSettlementScheme(scheme: string | null): 'eip3009' | 'erc7710' | null {
+  return scheme === 'eip3009' || scheme === 'erc7710' ? scheme : null
 }
 
 /**
@@ -985,6 +1020,13 @@ function statusFromRow(
       // response is recorded server-side; the key is OMITTED otherwise so the
       // payload never claims a `false` it cannot know.
       ...(payment.merchant_leg_reported ? { delivered: true as const } : {}),
+      // #3475 follow-up: additive alongside `delivered` — same read
+      // `isFundedX402AwaitingMerchantLeg` already performs, surfaced so a
+      // caller does not have to re-derive it from `machine_metadata`.
+      settlement_scheme: narrowSettlementScheme(settlementSchemeOf(payment.machine_metadata)),
+      ...(hasVerifiedMerchantSettlement(payment.machine_metadata)
+        ? { merchant_settlement_recorded: true as const }
+        : {}),
       fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
       ...railContext({
         rail,

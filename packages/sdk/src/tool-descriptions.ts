@@ -239,7 +239,7 @@ export const toolDescriptions = {
     summary:
       'Report a payment\'s real merchant settlement transaction hash so Haven can verify it on-chain and record it.',
     behavior:
-      'Pass payment_id and settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Haven verifies on-chain before recording; a zero, mismatched, or reverted hash is refused. Your own payments only.',
+      'Pass payment_id and, when you hold one, settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Omitting settlement_tx_hash succeeds as a no-op — nothing is checked or recorded, and no network call is made. Haven verifies on-chain before recording a hash; a zero, mismatched, or reverted hash is refused. Your own payments only.',
     nextActionGuidance:
       'code DELIVERED_UNSETTLED: did not verify, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.',
   },

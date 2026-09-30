@@ -110,9 +110,9 @@ function settlementSchemeOf(machineMetadata: unknown): string | null {
  * This is STRICTER than `delegationReplay`'s own confirmed+tx_hash branch
  * (`modules/x402/replay.ts:89-110`), which answers its stored 200 for ANY
  * `confirmed` row with a `tx_hash` regardless of settlement scheme, payee or
- * resource — those fields are pinned to the request only in the earlier
- * `pending_signature` mismatch check (`existingX402IntentMismatch`), which
- * the confirmed branch runs BEFORE. This endpoint instead checks:
+ * resource — those fields are compared only by `existingX402IntentMismatch`,
+ * which runs AFTER the confirmed branch and on `pending_signature` rows only.
+ * This endpoint instead checks:
  *
  *  - `confirmed` + a `tx_hash` — the payment already moved money; refusing
  *    it as over-budget now would be a false ledger row for a spend that is
@@ -228,8 +228,9 @@ export async function handleBudgetPrecheck(
   // budget that was live at the time, so re-running today's remaining-budget
   // compare (now lower, post-settlement) must never REFUSE it: that would
   // book a false `delegation_budget_exceeded` row for a spend that is done,
-  // not pending. The same lookup `delegationReplay`'s own confirmed+tx_hash
-  // branch runs (`findX402IntentByIdempotencyKey`), scoped to THIS agent;
+  // not pending. The same lookup the authorize path runs before
+  // `delegationReplay` (`findX402IntentByIdempotencyKey`,
+  // `delegation-authorize.ts`), scoped to THIS agent;
   // any other shape (no row, a pending child, a key collision on a
   // different payee/resource/token/amount, a task/sub-budget-scoped row, or
   // a settled EIP-3009 row — deliberately out of scope here, see

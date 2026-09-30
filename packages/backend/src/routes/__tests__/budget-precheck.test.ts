@@ -716,6 +716,27 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     })
   })
 
+  it('a SUBMITTED row that already carries a tx_hash is still refused — only confirmed is settled', async () => {
+    const { userId, agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    await seedX402Intent({ userId, agentId }, 'catalog-submitted-txhash-1', {
+      status: 'submitted',
+      txHash: '0x' + 'ab'.repeat(32),
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-submitted-txhash-1' }),
+    })
+    expect(res.statusCode).toBe(403)
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
   // ── #3492 review round 1: N1 — resourceUrl/merchantTo are REQUIRED ───────
 
   it('a key that would otherwise replay is still refused when the request omits resourceUrl', async () => {

@@ -107,7 +107,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the README re-verified in this pass.
     // #3173: § Install gained the two-entry paragraph (`@haven_ai/sdk/edge`),
     // verified against package.json exports, tsup.config.ts and edge.ts.
-    'last-verified': '2026-09-20',
+    // #3503: the decline paragraph re-read against `routes/payments.ts` —
+    // over-budget is now a 403 delegation_budget_exceeded on POST /payments too.
+    // Scope: that paragraph.
+    'last-verified': '2026-09-30',
   },
   {
     doc: 'packages/signer/README.md',

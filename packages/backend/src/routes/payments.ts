@@ -672,14 +672,16 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // #3503: the PERIOD budget pre-check the x402 legs have had since
     // #2082/#2706. Without it the direct route's only over-budget answer was
     // the simulation revert — an untyped 502 whose hosted step said
-    // "transient, retry once". Reads the SAME delegation
-    // `prepareDelegationPayment` redeems (a sub-budget's or task budget's
-    // parent by hash, #3329 finding E; otherwise the (token, to) selection).
-    // FAIL OPEN on an unreadable read or a delegation without a readable
+    // "transient, retry once". Reads the SAME delegations
+    // `prepareDelegationPayment` redeems: a task budget's parent by hash
+    // (#3329 finding E), otherwise the (token, to) selection — made ONCE,
+    // here, and handed to `prepareDelegationPayment`, so the row read is the
+    // row redeemed. A sub-budget redeems three links and each carries its own
+    // period caveat (`sub-budget-delegation.ts`), so all three are read and
+    // the SMALLEST remaining decides — B's own slice is usually the tighter.
+    // FAIL OPEN per link on an unreadable read or a link without a readable
     // period caveat (`fromChain: false`), exactly like the x402 legs: the
     // enforcer stays the gate.
-    // The (token, to) selection is made ONCE, here, and handed to
-    // `prepareDelegationPayment` — the row read is the row redeemed.
     const budgetOptions =
       subBudgetGrant && subBudgetParentDelegation && subBudgetParentChildDelegation
         ? {
@@ -692,21 +694,33 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         : taskBudgetChild && taskBudgetParentDelegation
           ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
           : { delegation: await selectDelegation(agent.id, tokenAddress, to.toLowerCase()) }
-    const periodBudgetDelegation =
-      budgetOptions.subBudget?.parentDelegation ??
-      budgetOptions.taskBudget?.parentDelegation ??
-      budgetOptions.delegation
-    const periodBudgetRefusal = async (): Promise<Record<string, unknown> | null> => {
-      if (!periodBudgetDelegation) return null
-      let remainingAtomic: bigint | null = null
+    const periodBudgetLinks: string[] = budgetOptions.subBudget
+      ? [
+          JSON.stringify(budgetOptions.subBudget.grantDelegation),
+          JSON.stringify(budgetOptions.subBudget.parentChildDelegation),
+          budgetOptions.subBudget.parentDelegation.delegation_json,
+        ]
+      : budgetOptions.taskBudget
+        ? [budgetOptions.taskBudget.parentDelegation.delegation_json]
+        : budgetOptions.delegation
+          ? [budgetOptions.delegation.delegation_json]
+          : []
+    const readLinkRemaining = async (delegationJson: string): Promise<bigint | null> => {
       try {
-        const read = await readRemainingBudget(agent.chain_id, periodBudgetDelegation.delegation_json, amountRaw.toString())
-        remainingAtomic = read.fromChain ? BigInt(read.remainingAtomic) : null
+        const read = await readRemainingBudget(agent.chain_id, delegationJson, amountRaw.toString())
+        return read.fromChain ? BigInt(read.remainingAtomic) : null
       } catch {
-        remainingAtomic = null
+        return null
       }
+    }
+    const periodBudgetRefusal = async (): Promise<Record<string, unknown> | null> => {
+      const reads = (await Promise.all(periodBudgetLinks.map(readLinkRemaining))).filter(
+        (r): r is bigint => r !== null,
+      )
+      if (reads.length === 0) return null
+      const remainingAtomic = reads.reduce((min, r) => (r < min ? r : min))
       // `<`, never `<=`: spending the exact remainder is what the chain allows.
-      if (remainingAtomic === null || remainingAtomic >= amountRaw) return null
+      if (remainingAtomic >= amountRaw) return null
       const shortfallAtomic = amountRaw - remainingAtomic
       const remainingHuman = formatTokenAmount(remainingAtomic, tokenConfig.decimals)
       const shortfallHuman = formatTokenAmount(shortfallAtomic, tokenConfig.decimals)

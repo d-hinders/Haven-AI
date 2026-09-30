@@ -142,8 +142,15 @@ const INSERT_INTENT: DbRoute = [
   /INSERT INTO payment_intents/,
   () => ({ rows: [{ id: 'intent-1', status: 'pending_signature', expires_at: '2026-09-30T00:10:00.000Z' }] }),
 ]
+// The verbatim shape a bundler relays (dev, 2026-08-25): the enforcer's reason
+// as an ABI-encoded Error(string), hex — never the plain enforcer name, which
+// is what the first draft of this fixture carried (review finding).
 const PERIOD_REVERT = new Error(
-  'UserOperation reverted during simulation with reason: ERC20PeriodTransferEnforcer:transfer-amount-exceeded',
+  'UserOperation reverted during simulation with reason: 0x08c379a0' +
+    '0000000000000000000000000000000000000000000000000000000000000020' +
+    '0000000000000000000000000000000000000000000000000000000000000034' +
+    '4552433230506572696f645472616e73666572456e666f726365723a7472616e736665722d616d6f756e742d65786365656465' +
+    '6400000000000000000000000000',
 )
 
 describe('POST /payments: the period budget cannot cover the payment (#3503)', () => {
@@ -250,6 +257,9 @@ describe('POST /payments: the period budget cannot cover the payment (#3503)', (
     expect(res.json().error_code).toBe('delegation_budget_exceeded')
     expect(mockReadRemaining).toHaveBeenCalledWith(AGENT.chain_id, PARENT_JSON, '5000')
     expect(mockQuery.mock.calls.some((c) => SELECTED_GRANT_SQL.test(String(c[0])))).toBe(false)
+    // Drain the fire-and-forget ledger write, or it lands in the NEXT test's
+    // mockQuery and doubles its row count (doc-review finding: 3/7 flaky).
+    await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
   })
 
   it('revert fallback: a period revert a fresh budget read confirms is the same typed 403, not a "transient" 502', async () => {
@@ -261,7 +271,11 @@ describe('POST /payments: the period budget cannot cover the payment (#3503)', (
     prepareRedemption.mockRejectedValue(PERIOD_REVERT)
     const res = await pay()
     expect(res.statusCode).toBe(403)
-    expect(res.json()).toMatchObject({ error_code: 'delegation_budget_exceeded', remaining_atomic: '0' })
+    expect(res.json()).toMatchObject({
+      error_code: 'delegation_budget_exceeded',
+      remaining_atomic: '0',
+      shortfall_atomic: '5000',
+    })
     await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
   })
 
@@ -281,5 +295,6 @@ describe('POST /payments: the period budget cannot cover the payment (#3503)', (
     expect(res.json().error_code).not.toBe('delegation_budget_exceeded')
     expect(mockReadRemaining).not.toHaveBeenCalled()
     expect(prepareRedemption).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(refusalRows()).toHaveLength(1)) // drain the no-delegation row
   })
 })

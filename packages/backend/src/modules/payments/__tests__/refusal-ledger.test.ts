@@ -45,6 +45,9 @@ import {
   recordRefusalFireAndForget,
   pickRefusalDetail,
   classifyRevertForLedger,
+  decodeErrorStrings,
+  isPeriodBudgetRevert,
+  isTransferCapRevert,
 } from '../refusal-ledger.js'
 import { EstimateGasExecutionError } from 'viem'
 
@@ -312,5 +315,46 @@ describe('refusal ledger unit contracts', () => {
     expect(classifyRevertForLedger(new Error('DELEGATION_RAIL_BUNDLER_URL is not configured'))).toBeNull()
     expect(classifyRevertForLedger(new Error('fetch failed'))).toBeNull()
     expect(classifyRevertForLedger(null)).toBeNull()
+  })
+
+  // #3503 review finding: a bundler relays the enforcer's reason as an
+  // ABI-encoded Error(string), hex — the verbatim dev shape (2026-08-25, also
+  // the qa-agent's ENFORCER_502 fixture). Every pattern above only ever saw
+  // decoded test strings.
+  const hexRevert = (reason: string) =>
+    'UserOperation reverted during simulation with reason: 0x08c379a0' +
+    (32).toString(16).padStart(64, '0') +
+    reason.length.toString(16).padStart(64, '0') +
+    Buffer.from(reason, 'utf8').toString('hex').padEnd(Math.ceil(reason.length / 32) * 64, '0')
+  const VERBATIM_DEV_PERIOD_REVERT =
+    'UserOperation reverted during simulation with reason: 0x08c379a0' +
+    '0000000000000000000000000000000000000000000000000000000000000020' +
+    '0000000000000000000000000000000000000000000000000000000000000034' +
+    '4552433230506572696f645472616e73666572456e666f726365723a7472616e736665722d616d6f756e742d65786365656465' +
+    '6400000000000000000000000000'
+
+  it('decodeErrorStrings: reads the reason out of an ABI-encoded Error(string), skips malformed payloads', () => {
+    expect(decodeErrorStrings(VERBATIM_DEV_PERIOD_REVERT)).toEqual([
+      'ERC20PeriodTransferEnforcer:transfer-amount-exceeded',
+    ])
+    expect(decodeErrorStrings('reason: 0x08c379a0deadbeef')).toEqual([])
+    expect(decodeErrorStrings('no payload here')).toEqual([])
+  })
+
+  it('the hex-encoded enforcer reverts classify exactly like their decoded text', () => {
+    const period = new Error(VERBATIM_DEV_PERIOD_REVERT)
+    expect(isPeriodBudgetRevert(period)).toBe(true)
+    expect(classifyRevertForLedger(period)).toBe('delegation_budget_exceeded')
+    // Wrapped as viem does — the hex sits in the cause.
+    expect(isPeriodBudgetRevert(new Error('estimate failed', { cause: period }))).toBe(true)
+
+    const cap = new Error(hexRevert('ERC20TransferAmountEnforcer:allowance-exceeded'))
+    expect(isTransferCapRevert(cap)).toBe(true)
+    expect(isPeriodBudgetRevert(cap)).toBe(false)
+    expect(classifyRevertForLedger(cap)).toBe('delegation_budget_exceeded')
+
+    const expired = new Error(hexRevert('TimestampEnforcer:expired-delegation'))
+    expect(classifyRevertForLedger(expired)).toBe('delegation_expired')
+    expect(isPeriodBudgetRevert(expired)).toBe(false)
   })
 })

@@ -188,18 +188,20 @@ path above:
    parent is selected by hash instead, and the selected row is the one
    redeemed.
 2. **Period-budget pre-check (#3503).** Haven reads that delegation's live
-   remaining period budget. When it cannot cover the amount, the payment is
-   refused with a typed `403 delegation_budget_exceeded` (remaining, shortfall,
-   `next_action: fund_account_or_raise_allowance`) before any UserOp is built
-   — the same body the x402 legs answer. An unreadable read fails open: this
-   is a fail-fast convenience, and the enforcer below stays the gate.
+   remaining period budget — for a sub-budget, every link of its three-link
+   chain, the smallest deciding. When it cannot cover the amount, the payment
+   is refused with a typed `403 delegation_budget_exceeded` (remaining,
+   shortfall, `next_action: fund_account_or_raise_allowance`) before any UserOp
+   is built — the error code and budget fields the x402 legs answer. An
+   unreadable read fails open: this is a fail-fast convenience, and the
+   enforcer below stays the gate.
 3. Haven prepares a redeeming sponsored UserOp; **budget (with native period
    refill), recipient, and expiry are enforced on-chain during gas estimation**,
    so an over-budget or wrong-recipient intent reverts here rather than being
    queued. A period revert that a fresh budget read confirms is answered with
-   the same 403 (as is a task-budget cap revert, #3500); any other revert is a
-   `502`. The response is `201` with
-   `status`, `expires_at`, and
+   the same 403, and a task-budget cap revert its own confirmed
+   `403 task_budget_exceeded` (#3500); any other revert is a `502`. The
+   response is `201` with `status`, `expires_at`, and
    `sign_data: { signature_scheme: 'eip712_userop', typed_data }`.
 4. The agent signs the account's **exact EIP-712 `typed_data` VERBATIM** with its
    delegate key — never a bare 4337 UserOp hash (the #829 lesson; the account

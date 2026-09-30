@@ -142,7 +142,8 @@ HTTP 410 fail-closed, nothing written, distinct in the body returned.
    and pre-checks its live remaining period budget (a typed 403 when it cannot cover
    the amount; fails open on an unreadable read — #3503)
 3. Haven prepares a redeeming UserOp; budget, recipient and expiry are enforced
-   ON-CHAIN during gas estimation — over-budget or wrong-recipient reverts here
+   ON-CHAIN during gas estimation — wrong-recipient (or over-budget, when the
+   pre-check failed open) reverts here
 4. The agent signs the account's exact EIP-712 typed data VERBATIM (never a bare
    hash); Haven submits the sponsored UserOp, funds move account→recipient
 5. Response → { status: "executed", tx }

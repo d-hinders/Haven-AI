@@ -38,7 +38,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-30"
 ---
 
 # Haven — Edge Signer
@@ -317,11 +317,13 @@ their allowlist.
 here said the result carries `payload_hash: null` and told the agent to "wait
 for the user to approve and execute the Safe payment" — an approval that cannot
 arrive on any rail, and which this file already contradicts two sections below.
-What actually happens on `POST /payments`: `prepareDelegationPayment` estimates
-the redemption, the caveat enforcer rejects budget/recipient/expiry there, and
-the caller gets a **502 with the database untouched** (`routes/payments.ts`);
-an agent with no budget delegation for that token/recipient at all gets a
-**403**. Either way there is no intent row, no `payload_hash` to sign, and
+What actually happens on `POST /payments`: a period-budget pre-check refuses an
+amount the remaining budget cannot cover with a typed **403
+`delegation_budget_exceeded`** (#3503); otherwise `prepareDelegationPayment`
+estimates the redemption, the caveat enforcer rejects recipient/expiry (or a
+budget the pre-check could not read) there, and the caller gets a **502 with
+the database untouched** (`routes/payments.ts`); an agent with no budget
+delegation for that token/recipient at all gets a **403**. Either way there is no intent row, no `payload_hash` to sign, and
 nothing to poll — tell the user to raise the budget in Haven.
 
 **Recommended paid-MCP x402 flow** — two delegate signatures in one local tool
@@ -367,10 +369,10 @@ expires, re-run `haven_pay_mcp_tool` with the same idempotency key. Hosted x402
 approval resume is not completable through the edge-signer tools — and since
 #2055 there is no approval path on any rail to fall back to: the legacy queue
 is deleted, and the delegation rail refuses over-budget instead of queueing.
-The mechanism differs by path. On a healthy budget read, BOTH x402 schemes
-refuse at a remaining-budget pre-check — erc7710 since #2082, the EIP-3009 funding leg
-since #2706 — and only `POST /payments` still reaches the enforcer
-unconditionally, as a gas-estimation revert. The pre-check is itself an
+On a healthy budget read every path refuses at a remaining-budget pre-check —
+erc7710 since #2082, the EIP-3009 funding leg since #2706, `POST /payments`
+since #3503 — and the enforcer's gas-estimation revert is what a failed-open
+pre-check reaches. The pre-check is itself an
 `eth_call` against the enforcer's storage, so what it precedes is the
 REDEMPTION, not every chain call.
 

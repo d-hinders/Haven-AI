@@ -134,8 +134,8 @@ test.describe('Hosted MCP — in-budget path', () => {
 // ⚠️ This IS a coverage loss, and naming it honestly matters more than the
 // tests did. Over-budget is still a real product behaviour — it just has a
 // different shape on the delegation rail, where the budget is enforced
-// on-chain during gas estimation and an over-budget payment REVERTS rather
-// than queueing. Nothing in this file exercises that path today. Repointing
+// on-chain and an over-budget payment is REFUSED (a typed 403 pre-check since
+// #3503, the enforcer's gas-estimation revert behind it) rather than queueing. Nothing in this file exercises that path today. Repointing
 // these two at it would have meant inventing assertions about a flow they
 // were never written for, so the gap is recorded for the epic's residue
 // sweep (#1993) instead of being papered over with a green test.

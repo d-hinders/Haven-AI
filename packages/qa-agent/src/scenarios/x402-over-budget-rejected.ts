@@ -41,7 +41,7 @@
  *     request comes back signable — and a deployed enforcer that stops
  *     refusing is caught by the backend's CI contract suite
  *     `non-custody-onchain-enforcer.contract.test.ts`, which `eth_call`s each
- *     deployed enforcer over budget.
+ *     deployed period enforcer over budget.
  *
  * What this does NOT restore: no leg observes the on-chain refusal of an
  * over-budget redemption on any entrypoint any more — gone, not relocated.

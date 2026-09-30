@@ -66,9 +66,10 @@ against the enforcer's storage, so "before any chain call" would be wrong — an
 there is therefore no revert reason to decode; each requires the typed
 `error_code: delegation_budget_exceeded` and a `remaining_atomic` equal to the
 live on-chain read — a pre-check answering from a different delegation refuses
-correctly by accident. (`lib/revert-reason.ts` still decodes the enforcer's
-revert, which only a failed-open pre-check lets through.) Asserting only the status is the defect #2016
-was filed about.
+correctly by accident. A 502 — the enforcer's revert, which only a failed-open
+pre-check lets through — fails the direct and 3009 legs on its status, so the
+hex revert decoder the direct leg used until #3503 (`lib/revert-reason.ts`) is
+deleted. Asserting only the status is the defect #2016 was filed about.
 
 **The erc7710 gap is closed at authorize, and only at authorize (#2082).**
 Until then, `POST /x402/authorize` returned 201 with a signable child

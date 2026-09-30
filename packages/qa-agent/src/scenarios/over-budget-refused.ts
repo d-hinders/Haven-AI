@@ -1,6 +1,6 @@
 /**
  * #420 invariant, re-based (#2016): an over-budget payment is **refused before
- * it becomes signable**, by the on-chain policy — never auto-executed.
+ * it becomes signable**, against the on-chain budget — never auto-executed.
  *
  * REPLACES `over-budget-queue`, and the rename is the finding. That leg
  * asserted HTTP 202 `pending_approval`: the legacy AllowanceModule rail queued
@@ -43,7 +43,7 @@
  *     remaining is not from the chain);
  *   * a deployed enforcer that stops refusing → the CI contract suite
  *     `packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts`,
- *     which `eth_call`s each deployed enforcer's `beforeHook` over budget.
+ *     which `eth_call`s the deployed period enforcer's `beforeHook` over budget.
  *
  * The pre-check FAILS OPEN by design, so a degraded budget read still reaches
  * the enforcer and this leg then goes red on the 502 — a flapping RPC before it

@@ -6574,8 +6574,9 @@ export const openapiSpec = {
           'refused with 403 error_code "delegation_budget_exceeded" (phase "insufficient_funds", ' +
           'next_action "fund_account_or_raise_allowance", remaining/remaining_atomic, ' +
           'shortfall/shortfall_atomic, amount/amount_atomic) before any UserOp is built — the same ' +
-          'body the x402 legs refuse with. It reads the delegation the payment redeems (a task ' +
-          'budget\'s or sub-budget\'s parent, else the (token, recipient) grant). It is a fail-fast ' +
+          'error_code and budget fields the x402 legs refuse with. It reads the delegation the payment redeems (a task ' +
+          'budget\'s parent, else the (token, recipient) grant); for a sub-budget, every link of ' +
+          'its three-link chain, the smallest remaining deciding. It is a fail-fast ' +
           'convenience, not the gate: an unreadable read fails OPEN and the ERC20PeriodTransferEnforcer ' +
           'still reverts on-chain; a period revert that a fresh read confirms gets the same 403. ' +
           '#3500: with task_budget_id, a payment the task budget\'s own cap cannot cover is refused ' +
@@ -10277,7 +10278,8 @@ export const openapiSpec = {
       // which invited a builder to extend an approval taxonomy that epic #1440
       // retired. The delegation rail has no approval queue at all: budget is
       // enforced on-chain by the caveat enforcers, and an over-budget payment
-      // reverts during gas estimation rather than queuing.
+      // is refused (a typed 403 pre-check since #3503, the enforcer's revert
+      // behind it) rather than queuing.
       //
       // Note what is NOT removed for symmetry: `AgentPaymentStatus.kind` keeps
       // `approval_request` in its enum. That one is a live wire enum on a route

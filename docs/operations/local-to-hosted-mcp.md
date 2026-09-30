@@ -235,22 +235,35 @@ at all since #1986, so there is no second answer here any more.)
 
 Then test a tiny in-budget payment. The expected direct payment sequence is:
 
+> **Re-verified #3495 (2026-09-30):** steps 2 and 3, for the compact-by-default
+> result and its opt-in relay. Nothing else in this file was re-verified in
+> this pass.
+
 1. Agent calls hosted `haven_pay`.
-2. Hosted MCP returns `{ payment_id, payload_hash, expires_at }` — and on a
-   **delegation-rail** account (the only rail that can pay) also
-   `signature_scheme`, `typed_data` and `typed_data_b64`: the Hybrid account
+2. Hosted MCP returns a COMPACT result (#3495, mirroring the x402 quote
+   tools' #1272 contract): `{ payment_id, status, idempotency_key,
+   payload_hash, expires_at }` — and on a **delegation-rail** account (the
+   only rail that can pay) also `signature_scheme` (the Hybrid account
    validates the EIP-712 typed data, and a bare-hash signature is rejected
-   on-chain (AA24, #1254). Since #3277 it also names the signing handoff:
+   on-chain, AA24, #1254) — but NOT `typed_data` / `typed_data_b64` by
+   default. `idempotency_key` is generated fresh when the caller passed none,
+   and always echoed. Since #3277 it also names the signing handoff:
    `next_tool: haven_sign`, `next_arguments: { payment_id }`, plus a
    `signer_compatibility` notice.
 3. Agent calls local `haven_sign` — pass just `payment_id` and let the signer
    fetch the payload (#1263 for x402; for a direct payment since #3271, via
-   `GET /payments/:id/sign-context`). On a pre-#3271 signer that call refuses
-   with `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` and signs nothing:
-   follow the result's notice and re-sign with `{ payload_hash, typed_data_b64 }`
-   from the hosted result, passed through UNCHANGED, then update the connector.
-   The legacy rail's bare-payload-hash variant is unreachable: that rail is
-   retired (#1440) and never returns a signable intent.
+   `GET /payments/:id/sign-context`). On a refusal carrying `fallback:
+   'typed_data_b64'` (any code — a currently-published signer's transport
+   failure, malformed body, or a 404 on an older backend) or
+   `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` (a signer predating
+   #3271, which has no fallback of its own to try), having signed nothing:
+   follow the result's notice — re-run `haven_pay` with the SAME
+   `idempotency_key` plus `include_signing_payload: true` (the backend
+   replays the stored payment rather than creating a second one), then
+   re-sign with `{ payload_hash, typed_data_b64 }` from THAT re-run's result,
+   passed through UNCHANGED, then update the connector. The legacy rail's
+   bare-payload-hash variant is unreachable: that rail is retired (#1440) and
+   never returns a signable intent.
 4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.
 5. Haven relays the independently valid signed transaction.
 

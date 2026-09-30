@@ -26,18 +26,26 @@ const HOSTED = (name: string) => ({
 /**
  * `buildAgentGuidance(` call sites in the hosted non-test source — the
  * census `next-step-characterization.test.ts` enforces. #3475 follow-up
- * review round 1 (S3) adds one: the missing-settlement-hash success no-op
- * that used to be a `refusalNextStep(` site.
+ * review round 1 (S3) added one: the missing-settlement-hash success no-op
+ * that used to be a `refusalNextStep(` site. #3495 review round 1 (S5) adds
+ * TWO more: `respondToNoSignDataReplay` in `state-direct-recovery.ts`
+ * (shared by `haven_send`/`haven_pay`'s no-sign-data replay guard) is
+ * written as two full call sites — confirmed and still-resolving — rather
+ * than one call with a conditional spread, because `lint:next-steps`
+ * requires a handoff to be named at the emission's OWN top level; a handoff
+ * hidden behind a ternary spread reads as unnamed.
  */
-export const EMISSION_SITE_COUNT = 21
+export const EMISSION_SITE_COUNT = 23
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
  * null-id sites share one helper, the report-outcome accepted site has two
  * branches of its own (offer settlement evidence, or not — #3475
- * follow-up), and the missing-settlement-hash success no-op is its own site
- * (#3475 follow-up review round 1, S3).
+ * follow-up), the missing-settlement-hash success no-op is its own site
+ * (#3475 follow-up review round 1, S3), and the no-sign-data replay guard
+ * (#3495 review round 1, S5) is two full sites of its own (confirmed / still
+ * resolving) — one fixture each, matching the two call sites.
  */
-export const EMISSION_FIXTURE_COUNT = 25
+export const EMISSION_FIXTURE_COUNT = 27
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -76,6 +84,12 @@ export const EMISSION_SITES = [
   // #3277: haven_send / haven_pay success — the direct-payment byte-free handoff, always named (refusal recovery, the #1547 pattern; signer_compatibility rides the result alongside these fields and stays off this next-step census).
   { site: 'state-direct-recovery.ts haven_send success', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'state-direct-recovery.ts haven_pay success', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
+  // #3495 review S5: a same-key replay of an already-progressed payment
+  // (no sign_data at all) — respondToNoSignDataReplay, shared by both
+  // haven_send and haven_pay, so it is ONE source call site with two
+  // branches: confirmed (no tool follows) and still-resolving (poll status).
+  { site: 'state-direct-recovery.ts no-sign-data replay: confirmed (no tool)', action: AgentPaymentNextAction.None, tool: null, reason: 'this idempotency_key already settled; there is nothing left to sign', expect: { next_tool_omitted_reason: 'this idempotency_key already settled; there is nothing left to sign' } },
+  { site: 'state-direct-recovery.ts no-sign-data replay: still resolving', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
 ] as const
 
 

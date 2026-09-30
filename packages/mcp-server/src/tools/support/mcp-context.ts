@@ -14,6 +14,7 @@
  * connector channel, and sibling support modules only. Never imports a
  * capability module.
  */
+import { randomUUID } from 'node:crypto'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -58,10 +59,15 @@ export function delegationSignFields(signData: {
         // reproduction). The b64 form is copied as a single string; the
         // signer decodes it into the SAME check, so transport gets safer
         // while the trust model is unchanged. Since #3277 these relay fields
-        // are the RECOVERY route a pre-#3271 signer follows after its
+        // are the RECOVERY route a signer follows after its
         // `haven_sign({ payment_id })` refusal (see
-        // `directSignerCompatibilityNotice`) — they stay on every result,
-        // never demoted to a fallback the result omits.
+        // `directSignerCompatibilityNotice`). Since #3495 they are no longer
+        // unconditional on the direct-payment tools: `haven_send` / `haven_pay`
+        // are compact by default (this function returns only
+        // `signature_scheme` there), and these bulky fields ride the result
+        // only on a same-`idempotency_key` re-run with
+        // `include_signing_payload: true` — mirroring the x402 quote tools'
+        // #1272 contract, which this same function has always implemented.
         ...(signData.typed_data
           ? {
               typed_data_b64: Buffer.from(JSON.stringify(signData.typed_data)).toString('base64'),
@@ -69,6 +75,33 @@ export function delegationSignFields(signData: {
           : {}),
       }
     : {}
+}
+
+/**
+ * #3495 (review correction, 2026-09-30): a fresh per-call `idempotency_key`
+ * for a direct payment (`haven_send` / `haven_pay`) when the caller passed
+ * none — generated in the HOSTED TOOL, not the SDK, because only the hosted
+ * server needs to hand the caller a key to echo back on the opt-in re-run
+ * (the SDK's own callers already choose their own keys or accept none).
+ *
+ * DELIBERATELY RANDOM, not derived from the payment's parameters. A first
+ * design bucketed a hash of token/amount/recipient/budget ids into a 5-minute
+ * window, mirroring the x402 tools' `buildX402IdempotencyKey`
+ * (`@haven_ai/sdk`'s `x402.ts`) — but x402's key identifies a QUOTE for one
+ * paid resource, where two calls with the same parameters inside the bucket
+ * really are the same purchase. A direct send has no such identity: "send 5
+ * USDC to 0xabc" said twice in five minutes is routinely two DIFFERENT
+ * payments (two tips, two payouts), and bucketing them onto the same key
+ * would make the backend's replay (`findPaymentReplay`, `payments.ts`) return
+ * the FIRST payment for the second call — an agent told the second send
+ * succeeded while no second transfer ever happened. Randomness makes every
+ * no-key call its own payment by default, exactly like omitting the key
+ * always has; the ONLY way two calls share a payment is the caller
+ * deliberately echoing the same key back (the `include_signing_payload: true`
+ * opt-in re-run this key exists for).
+ */
+export function generateDirectIdempotencyKey(): string {
+  return `direct:${randomUUID()}`
 }
 
 /** The probe failure shape that means "this URL is not the MCP endpoint". */
@@ -328,8 +361,11 @@ export function buildX402SigningContext(
   // failure. True restores today's full shape for diagnostics and pre-#1263
   // signers; the recovery loop is re-running the quote tool with the SAME
   // idempotency_key, which replays the ORIGINAL sign_data (#1207 semantics).
-  // Direct payments (haven_pay/haven_send) are untouched: they have no
-  // payment_id fetch path, so the bulk stays mandatory there.
+  // Stale since #3271, fixed by #3495: direct payments (haven_pay/haven_send)
+  // gained the identical payment_id fetch path in #3271, and #3495 gave them
+  // this exact compact-by-default / include_signing_payload=true contract too
+  // (state-direct-recovery.ts) — they are no longer the exception this
+  // comment once carved out.
   includeSigningPayload = false,
 ) {
   return {

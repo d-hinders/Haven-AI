@@ -3091,6 +3091,144 @@ production runs the signer at `@haven_ai/connect@alpha`'s exact pin
 the compatibility story. Merging to `dev` waits for the promotion carrying
 #3271 to publish a connect/signer pair that includes the direct sign-context.
 
+> **Superseded by #3495 (2026-09-30), see the section immediately below.**
+> The paragraph above ("the relay fields stay on every delegation-rail result
+> unchanged") was the #3277 owner decision of 2026-09-24; the #3495 owner
+> decision of 2026-09-30 reverses it. The handoff fields named in the first
+> paragraph (`next_action`, `next_tool`, `next_arguments`, `signer_compatibility`)
+> are UNCHANGED by #3495 — only whether `payload_hash`/`typed_data`/
+> `typed_data_b64` ride the result unconditionally.
+
+## Direct-payment results compact by default, and the opt-in relay (#3495, 2026-09-30)
+
+Owner decision (2026-09-30), superseding #3277 AC2 ("the relay fields stay"):
+the hosted `haven_send` / `haven_pay` results are now **compact by default**,
+mirroring the x402 quote tools' own #1272 contract on the same helper
+(`delegationSignFields`, `tools/support/mcp-context.ts`) — `payment_id`,
+`status`, `idempotency_key`, `payload_hash`, `expires_at`, the byte-free
+signing handoff, `signer_compatibility`, and (send) `asset`/`amount`/
+`recipient` or (pay) `meta`; `signature_scheme` rides every delegation-rail
+result, but `typed_data` / `typed_data_b64` do not.
+
+**Idempotency key, generated fresh and echoed.** When the caller passes no
+`idempotency_key`, the hosted tool generates one and echoes it on every
+result (`idempotency_key` field, present on success AND on
+`pending_approval`) — echoing the same way the x402 tools echo theirs
+(`buildX402SigningContext`, `mcp-context.ts`), but the direct-payment
+generator (`generateDirectIdempotencyKey`, `tools/support/mcp-context.ts`) is
+DELIBERATELY NOT a derivation of `buildX402IdempotencyKey` (`@haven_ai/sdk`'s
+`x402.ts`). An earlier design hashed token/amount/recipient/task_budget_id/
+sub_budget_id into a 5-minute bucket, mirroring the x402 key's shape — review
+caught that this is wrong for a direct send: x402's key identifies a QUOTE
+for one paid resource, where two calls with the same parameters inside the
+bucket really are the same purchase, but "send 5 USDC to 0xabc" said twice in
+five minutes is routinely two DIFFERENT payments (two tips, two payouts), and
+bucketing them onto one key would make the backend's `findPaymentReplay`
+function return the FIRST payment for the second call — the agent told the
+second send succeeded while no second transfer happened. The generator is instead `direct:` + `crypto.randomUUID()`:
+every no-key call gets its own payment by construction, and a same-key
+re-run — in particular the `include_signing_payload: true` opt-in below — is
+a true replay ONLY because the caller deliberately echoes the key back, never
+because two calls happened to share parameters. The backend still requires
+the re-run to repeat the exact token, amount, recipient, `task_budget_id` and
+`sub_budget_id` the first call used — a mismatch answers 409 rather than
+silently rerouting to a different payment.
+
+**Replay semantics, precisely** (`findSendIntentByIdempotencyKey`'s
+`FIND_SEND_INTENT_BY_KEY_SQL`, `findPaymentReplay`): the outcome depends on
+the stored row's own state, and on whether the lookup finds a row at all —
+the SQL excludes `status IN ('failed', 'expired')` from its `WHERE` clause
+outright. A matching key against a row still `pending_signature` AND within
+its `expires_at` window is a TRUE replay — the same `payment_id`, the same
+stored `sign_data`, no new chain read. A matching key against a row
+`pending_signature` but PAST `expires_at` is lazily expired IN PLACE and a
+FRESH intent is created under the SAME key (pre-existing #961 behaviour,
+untouched here). A key that already belongs to a `failed` or `expired` row
+matches NOTHING in the query — the lookup returns as if no row exists, and a
+FRESH intent is created immediately, no lazy-expire step. A matching key
+against a row already `confirmed` (or any other terminal, non-`failed`/
+`expired` status the query does return) answers a STATUS replay with no
+`sign_data` at all. At any moment a given `idempotency_key` names AT MOST ONE
+live (non-terminal) intent.
+
+**The opt-in.** `include_signing_payload: true` on `haven_send` / `haven_pay`
+is new schema surface (`contracts.ts`) — a same-`idempotency_key` re-run
+returns the stored payment's full `delegationSignFields` (signature_scheme +
+typed_data + typed_data_b64), never a second intent.
+
+Two review-round-1 corrections, both fixed in the same PR that introduced
+this whole section:
+- **S5 — a same-key re-run of a CONFIRMED payment used to crash.**
+  `HavenClient.createIntent`'s return type hardcodes `status:
+  'pending_signature'`, so the status-replay body above (no `sign_data`)
+  reached `intent.signData.hash` and threw (`UNKNOWN_ERROR`) instead of
+  surfacing the real state. `haven_send`/`haven_pay` now detect a missing
+  `sign_data.hash` and answer with the REAL status (`haven.getPaymentStatus`),
+  the tx hash when recorded, no signing fields, and `next_action: none`
+  (confirmed) or `check_status_later` (a defensive branch for any other
+  status `agentPaymentStatusHttpCode` answers 200 for through its default
+  arm; no current payment-intent status reaches it). A
+  status mapped to a non-2xx code there (`pending_signature`/`submitted` →
+  409, `expired` → 410, `failed` → 502) never reaches this branch: the SDK
+  transport throws before `createIntent` returns, surfacing as an ordinary
+  API error instead.
+- **N3 — the opt-in re-run's own reason now tells the agent to relay
+  directly**, rather than looping back through `haven_sign { payment_id }` —
+  a compact result's reason (`DIRECT_SIGN_REASON`) still points at
+  `payment_id` first; the `include_signing_payload: true` re-run's own result
+  carries `DIRECT_SIGN_REASON_WITH_RELAY` instead.
+
+This is the recovery route `directSignerCompatibilityNotice`
+(`support/signer-compat.ts`) and `DIRECT_SIGN_REASON` (`state-direct-recovery.ts`)
+now name — on TWO DISTINCT trigger shapes, named separately (review round 1
+caught the PR's first pass conflating them into one wrong trigger): (1) any
+`haven_sign` refusal carrying `fallback: 'typed_data_b64'`, whatever its
+code — a currently-published `@haven_ai/signer` (0.5.0-alpha.1 through
+current) sets that field only on `SIGN_CONTEXT_TIMEOUT` /
+`SIGN_CONTEXT_UNREACHABLE` / `SIGN_CONTEXT_MALFORMED`, or
+`SIGN_CONTEXT_REFUSED` with `http_status: 404` against an older backend; (2)
+`SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
+and NO `fallback` field, which only a signer predating #3271 produces (no
+direct-fetch fallback of its own to try). Guidance never suggests a
+`payload_hash`-only call — a signer predating #3169's bare-hash refusal
+signs it raw and the account rejects it on-chain (AA24). The signer's own
+messages (`sign-context.ts`'s timeout/unreachable/malformed/404 throws,
+`tools.ts`'s `USEROP_BINDING_MISMATCH` remedy) and the backend's own 409 text
+(`modules/x402/sign-context.ts`) are updated to match; the 404 case names
+BOTH routes since the signer cannot tell whether the backend also predates
+#3495 (original result already carries the pair) or is merely refusing this
+`payment_id` for some other reason (a same-key opt-in re-run).
+
+**Skew, both directions.** Against a Haven deployment that has shipped #3495:
+an old signer (`<= 0.4.0-alpha.0`, predating #3271's direct sign-context
+fetch) or a CURRENT published signer hitting either trigger shape above both
+now need ONE EXTRA hosted call — the `include_signing_payload: true` re-run —
+before they can relay, where #3277 let them relay straight from the original
+result. Neither signer needs a code change to keep working: both already
+read `fallback`/`next_tool_omitted_reason` as data, and the hosted notice's
+prose now names the extra call. Against an OLD Haven deployment (pre-#3495)
+the result still carries the relay fields unconditionally, so the extra call
+is simply unused guidance the old backend never asked for. The OTHER
+direction: a caller running #3495-aware guidance against a PRE-#3495 hosted
+server — `include_signing_payload` is new schema surface the old server's
+strict input validation (`STRICT_INPUT_TOOLS`) does not declare, so it
+refuses the argument outright rather than silently ignoring it — no loss:
+one refused call (the old server's strict input schema refuses
+`include_signing_payload`), and the pair is already on that server's
+original result.
+
+Compatibility: additive/removed result fields only (the compact default drops
+`typed_data`/`typed_data_b64` from the unconditional shape; `idempotency_key`
+is newly always present); one new optional input (`include_signing_payload`)
+on two existing tool schemas; no tool renamed, no failure code changed, no
+expected-context version changed, no signing wire format changed (the
+relayed bytes on the opt-in re-run are byte-identical to what the original
+result used to carry unconditionally). `@haven_ai/signer`'s
+`DIRECT_RELAY_FALLBACK` text ships in the same PR (`sign-context.ts`) and its
+own release, with the hosted `signer_compatibility.check`/`fallback` prose
+covering every currently-published signer in the meantime — no gate upgrades
+an existing install.
+
 ## Task-budget signing handoff and old-signer recovery (#3419, 2026-09-28)
 
 The hosted `haven_open_task_budget` / `haven_close_task_budget` results that

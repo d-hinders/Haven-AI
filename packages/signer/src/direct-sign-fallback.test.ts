@@ -269,7 +269,9 @@ describe('the #3271 binding check on a caller-relayed direct payload', () => {
 })
 
 // Review round 1: a direct-fetch refusal must name DIRECT remedies — there is
-// no quote tool to re-run, and the payment result carries the relay fields.
+// no quote tool to re-run. Since #3495 the payment result is compact by
+// default, so the remedy is a same-idempotency_key include_signing_payload=true
+// re-run of the original tool, which then carries the relay fields.
 describe('direct sign-context refusals name direct-payment remedies (#3271)', () => {
   function handlersWith(direct: () => Response, x402: () => Response = x402Unavailable) {
     const signer = createEdgeSigner(TEST_KEY)
@@ -288,6 +290,23 @@ describe('direct sign-context refusals name direct-payment remedies (#3271)', ()
     expect((result as { fallback?: string }).fallback).toBe('typed_data_b64')
     expect(result.message).toMatch(/typed_data_b64/)
     expect(JSON.stringify(result)).not.toMatch(/quote/)
+  })
+
+  // #3495 review round 2, item 6: the 404 is ambiguous (not this agent's
+  // payment, OR a backend old enough to predate #3271 — and so #3495 too,
+  // meaning its result already carries the pair unconditionally). The
+  // next_tool_omitted_reason names BOTH routes rather than only the
+  // same-key re-run DIRECT_RELAY_FALLBACK names for every other trigger.
+  it('a 404 from the direct route names BOTH the original-result route and the opt-in re-run, distinct from the generic relay text', async () => {
+    const result = await handlersWith(
+      () => new Response(JSON.stringify({ message: 'Route GET:/payments/x/sign-context not found' }), { status: 404 }),
+    ).haven_sign({ payment_id: 'pay_old_backend' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    const reason = (result as { next_tool_omitted_reason?: string }).next_tool_omitted_reason ?? ''
+    expect(reason).toMatch(/ORIGINAL haven_send \/ haven_pay/)
+    expect(reason).toMatch(/include_signing_payload: true/)
+    expect(reason).toMatch(/predates #3271/)
   })
 
   it('a 410 from the direct route says to re-send the payment, never to re-run a quote', async () => {
@@ -330,7 +349,9 @@ describe('direct sign-context refusals name direct-payment remedies (#3271)', ()
     expect(result.success).toBe(false)
     if (result.success) throw new Error('expected failure')
     expect(result.code).toBe('SIGN_CONTEXT_UNREACHABLE')
-    expect((result as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toMatch(/typed_data_b64 from the haven_send \/ haven_pay result/)
+    expect((result as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toMatch(
+      /re-run whichever of haven_send \/ haven_pay.*include_signing_payload: true.*typed_data_b64/s,
+    )
     expect(JSON.stringify(result)).not.toMatch(/quote/)
   })
 

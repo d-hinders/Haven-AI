@@ -41,38 +41,83 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { runTool, HostedToolError } from './support/errors.js'
-import { buildAgentGuidance, catchSettledResettle, refusalNextStep } from './support/guidance.js'
+import { buildAgentGuidance, catchSettledResettle, paymentStatusHandoff, refusalNextStep } from './support/guidance.js'
 import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
   delegationSignFields,
+  generateDirectIdempotencyKey,
   submitErc7710WithExpiryMapping,
   submitSignatureWithExpiryMapping,
 } from './support/mcp-context.js'
 import { isPendingApproval } from './support/quote-response.js'
 
 /**
- * #3277: the next-step reason every direct-payment (`haven_send` /
+ * #3277 / #3495: the next-step reason every direct-payment (`haven_send` /
  * `haven_pay`) SUCCESS result carries, via its own inline `buildAgentGuidance`
  * call (one per tool, matching the rest of this file's convention — see
  * `next-step-characterization.test.ts`'s call-site census). The hosted result
  * ALWAYS names the byte-free `payment_id` handoff (owner decision on #3277,
  * 2026-09-24: refusal recovery, the #1547 pattern — never an `initialize`
  * version comparison), and the accompanying `directSignerCompatibilityNotice`
- * tells the agent how to recover when a pre-#3271 signer refuses that call:
- * it answers `SIGN_CONTEXT_REFUSED` with
- * `backend_error_code: 'sign_context_unavailable'`, having signed nothing, so
- * re-signing with the relay fields (`delegationSignFields`, kept unchanged)
- * from THIS result is safe. `next_arguments` stays the exact
- * `{ payment_id }` shape `SIGNER_HANDOFF_SHAPES` declares for `haven_sign` —
- * never widened.
+ * tells the agent how to recover when a signer refuses that call: it answers
+ * `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`,
+ * having signed nothing.
+ *
+ * Owner decision on #3495 (2026-09-30, superseding #3277 AC2 "the relay
+ * fields stay"): the result is compact by default — no `typed_data` /
+ * `typed_data_b64` — so "re-sign from THIS result" is no longer true. The
+ * recovery route is now a same-`idempotency_key` re-run of the SAME tool with
+ * `include_signing_payload: true` (mirroring the x402 tools' #1272 opt-in):
+ * the backend replays the stored payment on that key
+ * (`findPaymentReplay`/`payments.ts`) rather than creating a second intent,
+ * so the re-run is always a true replay, never a new charge — PROVIDED the
+ * re-run repeats the same token/amount/recipient/task_budget_id/sub_budget_id
+ * the first call used, or the backend answers 409 (a pin mismatch, never a
+ * silent reroute). That re-run's result then carries the relay fields, and
+ * THOSE are what gets passed to `haven_sign`. Never suggest a
+ * `payload_hash`-only call — a pre-#3169 signer signs it raw and the account
+ * rejects it on-chain (AA24).
+ *
+ * Review correction (round 1, 2026-09-30): the trigger is two DISTINCT
+ * refusal shapes, not one conflated code — see the matching note on
+ * `directSignerCompatibilityNotice` (`support/signer-compat.ts`) for the
+ * exact signer-side mapping this text now names separately: `fallback:
+ * 'typed_data_b64'` (any code — a currently-published signer's transport
+ * failure, malformed body, or a 404 on an older backend) versus
+ * `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` with NO `fallback`
+ * field (a signer predating #3271, which has no direct-fetch fallback of its
+ * own to try).
  */
 const DIRECT_SIGN_REASON =
   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer fetches the ' +
-  'exact bytes by payment_id. If the signer refuses with code SIGN_CONTEXT_REFUSED and ' +
-  "backend_error_code 'sign_context_unavailable' (an older signer: nothing was signed), re-sign " +
-  'with { payload_hash, typed_data_b64 } from this result, passed through unchanged, then update ' +
-  'the connector. Then call haven_submit with the returned signature.'
+  "exact bytes by payment_id. If haven_sign refuses that call — carrying fallback: 'typed_data_b64' " +
+  '(any code: a transport failure, a malformed body, or a 404 on an older backend), or code ' +
+  "SIGN_CONTEXT_REFUSED with backend_error_code 'sign_context_unavailable' from a signer predating " +
+  '#3271 — nothing was signed either way: re-run this same tool with the SAME idempotency_key ' +
+  '(echoed on this result as idempotency_key) plus include_signing_payload: true — repeating the ' +
+  'same token/amount/recipient/task_budget_id/sub_budget_id, or it answers 409 — then sign with ' +
+  '{ payload_hash, typed_data_b64 } from THAT re-run result, passed through unchanged, then update ' +
+  'the connector. Never send a payload_hash-only call. Then call haven_submit with the returned ' +
+  'signature.'
+
+/**
+ * #3495 review N3 (round 1, 2026-09-30): the TWIN of `DIRECT_SIGN_REASON`
+ * for the call that is ITSELF the opt-in re-run (`include_signing_payload:
+ * true`). That result already carries the relay pair
+ * (`delegationSignFields`) — looping the agent back through `next_tool:
+ * haven_sign` / `next_arguments: { payment_id }` (the ONLY shape
+ * `SIGNER_HANDOFF_SHAPES` allows, so the structured handoff cannot itself
+ * point at `{ payload_hash, typed_data_b64 }`) would have it re-fetch by
+ * payment_id — fine for a current signer, but pointless when the agent is
+ * already holding the bytes because an earlier attempt needed them. This
+ * reason tells the agent to relay the pair directly instead.
+ */
+const DIRECT_SIGN_REASON_WITH_RELAY =
+  'This result already includes { payload_hash, typed_data_b64 } — the relay pair, returned ' +
+  'because you passed include_signing_payload: true. Call haven_sign with THOSE two fields ' +
+  'directly, passed through unchanged (do not loop back through payment_id), then call ' +
+  'haven_submit with the returned signature.'
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a
@@ -151,6 +196,80 @@ async function resolveTokenAddressFromAllowances(haven: HavenClient, symbol: str
       nextArguments: {},
     }),
   })
+}
+
+/**
+ * #3495 review S5 (round 1, 2026-09-30): a same-key replay of a CONFIRMED
+ * payment carries no `sign_data` in the backend's replay body (`submitted`
+ * answers 409 and `failed`/`expired` rows are not matched by the key lookup,
+ * so those never reach here: the SDK throws first, or a fresh intent is
+ * minted) —
+ * `payments.ts`'s `statusReplay` returns the payment's STATUS, not a
+ * signable payload, once `pi.status !== 'pending_signature'`. But
+ * `HavenClient.createIntent`'s return TYPE hardcodes `status:
+ * 'pending_signature'` regardless (`PaymentIntent.status` in `@haven_ai/sdk`
+ * is the literal type `'pending_signature'`, assuming the happy path), so
+ * `intent.signData.hash` crashed here (`Cannot read properties of undefined`,
+ * a generic `UNKNOWN_ERROR`) instead of surfacing the real state — found in
+ * review, not caught by any existing test, because every stub before this
+ * always carried `sign_data`.
+ *
+ * Detected as `!intent.signData?.hash`: the one signal available at this
+ * layer without a type this PR does not own. Rather than trust
+ * `intent.status`'s hardcoded lie, this re-reads the REAL status
+ * (`haven.getPaymentStatus`, the same call `haven_get_payment_status`
+ * makes) and answers with it — no signing fields (there is nothing to
+ * sign), the real status, the tx hash when Haven has recorded one, and a
+ * `next_action` that tells the truth: `none` once confirmed (nothing
+ * follows), `check_status_later` otherwise — a defensive branch for any other
+ * status `agentPaymentStatusHttpCode` answers 200 for through its default
+ * arm; no current payment-intent status reaches it.
+ */
+async function respondToNoSignDataReplay(
+  haven: HavenClient,
+  paymentId: string,
+  idempotencyKey: string,
+): Promise<Record<string, unknown>> {
+  const real = await haven.getPaymentStatus(paymentId)
+  const base = {
+    payment_id: paymentId,
+    status: real.status,
+    idempotency_key: idempotencyKey,
+    payload_hash: null,
+    ...(real.txHash ? { tx_hash: real.txHash } : {}),
+  }
+  // #3495 review S5: two full branches, each naming its handoff at the
+  // emission's own top level (`lint:next-steps` requires that — a handoff
+  // hidden behind a conditional spread reads as unnamed).
+  if (real.status === 'confirmed') {
+    return {
+      ...base,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.None,
+        nextTool: null,
+        nextToolOmittedReason: 'this idempotency_key already settled; there is nothing left to sign',
+        safeToContinue: true,
+        reason:
+          `This idempotency_key already belongs to a payment that is ${real.status}, not ` +
+          'pending_signature — there is nothing to sign. It already completed; the tx_hash above ' +
+          '(when present) is the settlement transaction.',
+        summary: { payment_id: paymentId, status: real.status },
+      }),
+    }
+  }
+  return {
+    ...base,
+    ...buildAgentGuidance({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      ...paymentStatusHandoff(paymentId),
+      safeToContinue: true,
+      reason:
+        `This idempotency_key already belongs to a payment that is ${real.status}, not ` +
+        'pending_signature — there is nothing to sign. Check its status, or use a different ' +
+        'idempotency_key to start an unrelated payment.',
+      summary: { payment_id: paymentId, status: real.status },
+    }),
+  }
 }
 
 export function createStateDirectRecoveryHandlers(
@@ -354,6 +473,18 @@ export function createStateDirectRecoveryHandlers(
     haven_send: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_send', input)
+        // #3495: generate a FRESH, random key when the caller passed none —
+        // never derived from the payment's own parameters (two separate
+        // sends of the same amount to the same recipient minutes apart are
+        // routinely different payments, not a retry) — and echo it on every
+        // direct result below, so a caller who deliberately wants a same-key
+        // re-run (the include_signing_payload=true opt-in) always can, by
+        // passing the echoed key back.
+        const idempotencyKey = args.idempotency_key ?? generateDirectIdempotencyKey()
+        // #1272 / #3495: compact by default — the signer fetches the exact
+        // bytes by payment_id (#3271); the bulky typed_data/typed_data_b64
+        // only ride a same-key re-run naming include_signing_payload: true.
+        const includeSigningPayload = args.include_signing_payload === true
         try {
           const intent = await haven.createIntent({
             token: args.asset,
@@ -361,7 +492,7 @@ export function createStateDirectRecoveryHandlers(
             to: args.recipient,
             // #1207: was accepted by this tool's schema but silently dropped —
             // now carried to the backend's replay contract.
-            idempotencyKey: args.idempotency_key,
+            idempotencyKey,
             // #3378: the schema has accepted task_budget_id since #3329; this
             // handler dropped it, so the payment was charged to the whole budget.
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
@@ -369,25 +500,38 @@ export function createStateDirectRecoveryHandlers(
             // the sub-budget A granted it); carried like task_budget_id.
             ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
           })
+          // #3495 review S5: a same-key replay of an already-progressed
+          // payment has no sign_data — see respondToNoSignDataReplay.
+          if (!intent.signData?.hash) {
+            return respondToNoSignDataReplay(haven, intent.paymentId, idempotencyKey)
+          }
           return {
             payment_id: intent.paymentId,
             status: intent.status,
+            idempotency_key: idempotencyKey,
             payload_hash: intent.signData.hash,
             expires_at: intent.expiresAt,
-            // #1254: same forwarding as haven_pay — see the note there.
-            ...delegationSignFields(intent.signData),
+            // #1254 / #1272 / #3495: same contract as the x402 quote tools —
+            // the full relay pair only on the opt-in re-run; otherwise just
+            // signature_scheme, so an agent still learns which rail this is.
+            ...(includeSigningPayload
+              ? delegationSignFields(intent.signData)
+              : intent.signData.signature_scheme
+                ? { signature_scheme: intent.signData.signature_scheme }
+                : {}),
             asset: args.asset,
             amount: args.amount,
             recipient: args.recipient,
             // #3277: the byte-free signing handoff, always named (owner
             // decision: refusal recovery, the #1547 pattern — see
-            // DIRECT_SIGN_REASON). The relay fields above stay unchanged.
+            // DIRECT_SIGN_REASON). Since #3495 the relay fields above are an
+            // opt-in re-run, not unconditional.
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
               nextTool: 'haven_sign',
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
-              reason: DIRECT_SIGN_REASON,
+              reason: includeSigningPayload ? DIRECT_SIGN_REASON_WITH_RELAY : DIRECT_SIGN_REASON,
               summary: {
                 payment_id: intent.paymentId,
                 status: intent.status,
@@ -402,6 +546,7 @@ export function createStateDirectRecoveryHandlers(
             return {
               payment_id: err.paymentId,
               status: 'pending_approval',
+              idempotency_key: idempotencyKey,
               payload_hash: null,
               asset: args.asset,
               amount: args.amount,
@@ -415,12 +560,15 @@ export function createStateDirectRecoveryHandlers(
     haven_pay: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_pay', input)
+        // #3495: see the matching note in haven_send above.
+        const idempotencyKey = args.idempotency_key ?? generateDirectIdempotencyKey()
+        const includeSigningPayload = args.include_signing_payload === true
         try {
           const intent = await haven.createIntent({
             token: args.token,
             amount: args.amount,
             to: args.to,
-            idempotencyKey: args.idempotency_key,
+            idempotencyKey,
             // #3378: the schema has accepted task_budget_id since #3329; this
             // handler dropped it, so the payment was charged to the whole budget.
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
@@ -428,27 +576,40 @@ export function createStateDirectRecoveryHandlers(
             // the sub-budget A granted it); carried like task_budget_id.
             ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
           })
+          // #3495 review S5: a same-key replay of an already-progressed
+          // payment has no sign_data — see respondToNoSignDataReplay.
+          if (!intent.signData?.hash) {
+            return respondToNoSignDataReplay(haven, intent.paymentId, idempotencyKey)
+          }
           return {
             payment_id: intent.paymentId,
             status: intent.status,
+            idempotency_key: idempotencyKey,
             payload_hash: intent.signData.hash,
             expires_at: intent.expiresAt,
-            // #1254: on the delegation rail the account validates TYPED DATA,
-            // not payload_hash. The x402 quote path always forwarded these;
-            // this direct path dropped them, so the local signer raw-signed
-            // the hash and the account rejected it on-chain (AA24). Found
-            // live during the #908 mainnet canary.
-            ...delegationSignFields(intent.signData),
+            // #1254 / #1272 / #3495: on the delegation rail the account
+            // validates TYPED DATA, not payload_hash — the x402 quote path
+            // always forwarded these; this direct path dropped them once,
+            // so the local signer raw-signed the hash and the account
+            // rejected it on-chain (AA24, found live during the #908
+            // mainnet canary). Since #3495 the pair is compact by default,
+            // like the x402 tools (#1272) — only the opt-in re-run restores it.
+            ...(includeSigningPayload
+              ? delegationSignFields(intent.signData)
+              : intent.signData.signature_scheme
+                ? { signature_scheme: intent.signData.signature_scheme }
+                : {}),
             meta: { token: args.token, amount: args.amount, to: args.to },
             // #3277: the byte-free signing handoff, always named (owner
             // decision: refusal recovery, the #1547 pattern — see
-            // DIRECT_SIGN_REASON). The relay fields above stay unchanged.
+            // DIRECT_SIGN_REASON). Since #3495 the relay fields above are an
+            // opt-in re-run, not unconditional.
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
               nextTool: 'haven_sign',
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
-              reason: DIRECT_SIGN_REASON,
+              reason: includeSigningPayload ? DIRECT_SIGN_REASON_WITH_RELAY : DIRECT_SIGN_REASON,
               summary: {
                 payment_id: intent.paymentId,
                 status: intent.status,
@@ -460,7 +621,12 @@ export function createStateDirectRecoveryHandlers(
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
-            return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }
+            return {
+              payment_id: err.paymentId,
+              status: 'pending_approval',
+              idempotency_key: idempotencyKey,
+              payload_hash: null,
+            }
           }
           throw err
         }

@@ -3820,6 +3820,24 @@ to call next in structured fields, and those fields are typed end to end
 > refusal fixture (the census moves to 37 fixtures and 46 `refusalNextStep`
 > calls). Nothing else in this document was re-verified.
 
+> **Re-verification (#3500, 2026-09-30):** `normalizeError` gains a second
+> typed branch next to #3416's. A `HavenApiError` whose body carries
+> `error_code: 'task_budget_exceeded'` becomes `code: TASK_BUDGET_EXCEEDED`
+> with `next_action: stop_and_tell_user`, the body's `task_budget_id` and
+> `remaining_atomic`, and a `next_tool_omitted_reason` naming the remedy
+> (close the task budget and open a new one, or pay without it). The backend
+> answers that 403 on every path that takes a task budget (`POST /payments`,
+> both x402 authorize legs) when the task child's
+> `ERC20TransferAmountEnforcer.spentMap` shows the cap cannot cover the
+> payment. Before, the same condition reached the agent as the 5xx
+> "transient, retry once" step, with a raw simulation dump; on the erc7710
+> leg it only failed at the merchant's redemption. Hosted-only mapping: no
+> signer, connector or SDK version is involved, and every other branch is
+> unchanged. A backend older than this change keeps the old 502, and a hosted
+> server older than it shows the 403 as the generic 4xx `API_ERROR` stop.
+> Pinned by one new refusal fixture (the census moves to 39 fixtures and 48
+> `refusalNextStep` calls). Nothing else in this document was re-verified.
+
 > **Re-verification (#3230, the next-step ratchet refuses an empty scan,
 > 2026-09-23):** this diff touches `scripts/lint-next-steps.mjs` (listed in
 > `covers:` above). The gate's NUMERATOR is untouched — what counts as an

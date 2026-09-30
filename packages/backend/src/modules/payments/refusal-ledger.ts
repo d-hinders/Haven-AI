@@ -31,16 +31,18 @@
  * ## The revert classification
  *
  * `prepareRedemption`'s gas estimation throws the caveat enforcers' revert
- * text as a raw viem error string — there is no typed error to switch on.
+ * inside a viem/bundler error string — as plain text or, the shape a bundler
+ * actually relays, an ABI-encoded `Error(string)` in hex that
+ * `flattenErrorText` decodes (#3503) — there is no typed error to switch on.
  * `classifyRevertForLedger` is deliberately four-way: the timestamp
  * enforcer's revert text (`beforeThreshold` / `Enforcer:expired-delegation`
  * in the flattened error chain) is `delegation_expired`; the period-budget
  * enforcer's custom error (`Enforcer:transfer-amount-exceeded`) and the
  * cumulative-cap enforcer's (`ERC20TransferAmountEnforcer:allowance-exceeded`,
  * a task budget's cap or a budget's lifetime cap, #3500) are
- * `delegation_budget_exceeded` — the DIRECT `POST /payments` route has no
- * period-budget pre-check, so that revert IS its over-budget answer and the
- * classification is what gives the value its named writer there; any OTHER
+ * `delegation_budget_exceeded` — since #3503 the DIRECT `POST /payments`
+ * route pre-checks the period budget too, so that revert reaches it only when
+ * the pre-check failed open or a concurrent payment landed first; any OTHER
  * estimation revert (viem's `EstimateGasExecutionError`, or a bundled revert
  * reason) is `onchain_revert` — rare since #2706, the pre-checks catch
  * over-budget on both x402 legs first; and anything that is not a revert
@@ -120,10 +122,10 @@ const DELEGATION_EXPIRED_REVERT_PATTERNS = [
 /**
  * The period-budget enforcer's revert text. `ERC20PeriodTransferEnforcer`
  * refuses an over-redemption with `Enforcer:transfer-amount-exceeded` — the
- * on-chain answer to the same question the fail-fast pre-check asks, and the
- * only answer the DIRECT `POST /payments` route ever gets (it has no
- * pre-check in front of it). Without this pattern the common case — the
- * direct over-budget payment — would classify as `onchain_revert`, which
+ * on-chain answer to the same question the fail-fast pre-checks ask (on the
+ * DIRECT `POST /payments` route too since #3503), reaching the chain when a
+ * pre-check failed open or lost a race. Without this pattern that revert
+ * would classify as `onchain_revert`, which
  * contradicts the enum's named-writer rule (the pre-check on both x402 legs
  * already owns `delegation_budget_exceeded`) and would make
  * `onchain_revert` anything but rare.
@@ -140,6 +142,16 @@ const BUDGET_ENFORCER_REVERT_PATTERNS = [
   /Enforcer:transfer-amount-exceeded/i,
   ...TRANSFER_CAP_REVERT_PATTERNS,
 ]
+
+/**
+ * #3503: true when a caught error is the PERIOD budget's revert
+ * (`ERC20PeriodTransferEnforcer:transfer-amount-exceeded`). Like the
+ * transfer-cap one, a caller attributes it to the budget it redeemed only
+ * after reading that budget's remaining figure.
+ */
+export function isPeriodBudgetRevert(err: unknown): boolean {
+  return /Enforcer:transfer-amount-exceeded/i.test(flattenErrorText(err))
+}
 
 /**
  * #3500: true when a caught error is a cumulative transfer-cap revert. The
@@ -159,13 +171,46 @@ export function isTransferCapRevert(err: unknown): boolean {
  * contract error as `cause`, and a bundler relays the revert reason inside
  * its own RPC error — the enforcer text can sit at any depth.
  */
-function flattenErrorText(err: unknown, depth = 0): string {
+function flattenErrorText(err: unknown): string {
+  const text = flattenRaw(err, 0)
+  const decoded = decodeErrorStrings(text)
+  return decoded.length ? `${text}\n${decoded.join('\n')}` : text
+}
+
+function flattenRaw(err: unknown, depth: number): string {
   if (err == null || depth > 5) return ''
   if (typeof err === 'string') return err
   if (typeof err !== 'object') return String(err)
   const withMessage = err as { message?: unknown; cause?: unknown }
   const own = typeof withMessage.message === 'string' ? withMessage.message : ''
-  return `${own}\n${flattenErrorText(withMessage.cause, depth + 1)}`
+  return `${own}\n${flattenRaw(withMessage.cause, depth + 1)}`
+}
+
+/**
+ * #3503: the reason strings inside every ABI-encoded `Error(string)` payload
+ * (selector `0x08c379a0`) in `text`. A bundler relays a caveat revert that
+ * way — `...with reason: 0x08c379a0…` — so the enforcer's name is hex, never
+ * plain text, and a pattern searching for it matched only decoded test
+ * fixtures (review finding on #3503). Malformed payloads are skipped.
+ */
+export function decodeErrorStrings(text: string): string[] {
+  const out: string[] = []
+  // A lookahead, not a greedy capture: every selector occurrence is a
+  // candidate, so a stray `08c379a0` earlier in the same hex run cannot
+  // swallow the real payload behind it (round-2 review nit).
+  for (const m of text.matchAll(/08c379a0(?=([0-9a-f]+))/gi)) {
+    const body = m[1]!
+    const word = (i: number) => body.slice(i * 64, (i + 1) * 64)
+    if (word(1).length < 64) continue
+    const offsetWords = Number.parseInt(word(0), 16) / 32
+    const length = Number.parseInt(word(offsetWords), 16)
+    if (!Number.isSafeInteger(offsetWords) || !Number.isSafeInteger(length) || length <= 0) continue
+    const start = (offsetWords + 1) * 64
+    const hex = body.slice(start, start + length * 2)
+    if (hex.length !== length * 2) continue
+    out.push(Buffer.from(hex, 'hex').toString('utf8'))
+  }
+  return out
 }
 
 /**
@@ -178,14 +223,14 @@ function flattenErrorText(err: unknown, depth = 0): string {
  *   `Enforcer:expired-delegation` custom-error name, or any `beforeThreshold`
  *   occurrence) is `delegation_expired`.
  * - The period-budget enforcer's custom error (`Enforcer:transfer-amount-
- *   exceeded`, the on-chain answer the DIRECT `POST /payments` route gets
- *   with no period-budget pre-check in front of it) and the cumulative-cap
+ *   exceeded`, reaching the chain on any route only when a pre-check failed
+ *   open or lost a race — #3503 gave `POST /payments` one too) and the cumulative-cap
  *   enforcer's (`ERC20TransferAmountEnforcer:allowance-exceeded`, #3500) are
  *   `delegation_budget_exceeded`.
  * - Any OTHER estimation revert — viem's `EstimateGasExecutionError`, or an
- *   error whose flattened text says the execution reverted (bundlers echo
- *   the enforcer revert reason inside the RPC error) — is `onchain_revert`.
- *   Rare since #2706: the pre-checks catch over-budget on both legs first.
+ *   error whose flattened text (hex reasons decoded) says the execution
+ *   reverted without naming one of the enforcers above — is `onchain_revert`.
+ *   Rare: the pre-checks catch over-budget on every route first.
  * - Everything else — a transport failure, an RPC auth/config error, an
  *   unknown shape — is NOT a refusal: the guardrails did not refuse
  *   anything, the infrastructure broke. Recording it would pollute the

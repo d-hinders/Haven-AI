@@ -6568,9 +6568,17 @@ export const openapiSpec = {
           'Creates a signable payment intent on the delegation rail. The agent must sign the ' +
           'returned sign_data with its delegate key before Haven can relay execution; the budget ' +
           'delegation\'s caveat enforcers authorize it on-chain at redemption. ' +
-          '#2105: there is no over-budget approval branch — an over-budget payment REVERTS during ' +
-          'gas estimation rather than queuing, and the approval queue died with the Safe rail ' +
-          '(#2055). Both retired rails are refused with 410 before anything is written. ' +
+          '#2105: there is no over-budget approval branch — the approval queue died with the Safe ' +
+          'rail (#2055). Both retired rails are refused with 410 before anything is written. ' +
+          '#3503: a payment the budget delegation\'s live remaining PERIOD budget cannot cover is ' +
+          'refused with 403 error_code "delegation_budget_exceeded" (phase "insufficient_funds", ' +
+          'next_action "fund_account_or_raise_allowance", remaining/remaining_atomic, ' +
+          'shortfall/shortfall_atomic, amount/amount_atomic) before any UserOp is built — the same ' +
+          'error_code and budget fields the x402 legs refuse with. It reads the delegation the payment redeems (a task ' +
+          'budget\'s parent, else the (token, recipient) grant); for a sub-budget, every link of ' +
+          'its three-link chain, the smallest remaining deciding. It is a fail-fast ' +
+          'convenience, not the gate: an unreadable read fails OPEN and the ERC20PeriodTransferEnforcer ' +
+          'still reverts on-chain; a period revert that a fresh read confirms gets the same 403. ' +
           '#3500: with task_budget_id, a payment the task budget\'s own cap cannot cover is refused ' +
           'with 403 error_code "task_budget_exceeded" (task_budget_id, remaining_atomic, max_atomic, ' +
           'amount_atomic) before anything is built, read from the task child\'s ' +
@@ -6615,7 +6623,15 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
-          '403': errorResponse,
+          '403': {
+            ...errorResponse,
+            description:
+              'EITHER the agent-auth refusal (`agent_pending_approval` / `agent_paused`, #1130) OR ' +
+              'spend authority the agent does not have: no active budget delegation for this token ' +
+              'and recipient, or (#3503) error_code "delegation_budget_exceeded" — the period budget ' +
+              'cannot cover the amount — or (#3500) error_code "task_budget_exceeded" — the task ' +
+              'budget\'s cap cannot. Both budget refusals are decided before any UserOp is built.',
+          },
           '409': {
             ...errorResponse,
             description:
@@ -10262,7 +10278,8 @@ export const openapiSpec = {
       // which invited a builder to extend an approval taxonomy that epic #1440
       // retired. The delegation rail has no approval queue at all: budget is
       // enforced on-chain by the caveat enforcers, and an over-budget payment
-      // reverts during gas estimation rather than queuing.
+      // is refused (a typed 403 pre-check since #3503, the enforcer's revert
+      // behind it) rather than queuing.
       //
       // Note what is NOT removed for symmetry: `AgentPaymentStatus.kind` keeps
       // `approval_request` in its enum. That one is a live wire enum on a route

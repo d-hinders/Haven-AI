@@ -177,6 +177,18 @@ describe('buildHostedMcpServer', () => {
     await server.close()
   })
 
+  it('names the routable fallback trigger for a direct-payment refusal, never the round-1 conflated text (#3495 review round 2, S1 pin)', () => {
+    // The trigger is two distinct shapes: any refusal carrying fallback:
+    // 'typed_data_b64' (a current signer's own transport failure, malformed
+    // body, or a 404 on an older backend), or SIGN_CONTEXT_REFUSED with
+    // sign_context_unavailable from a signer predating #3271. Round 1's text
+    // conflated these into one wrong trigger ("a current signer's own
+    // transport-failure fallback" attached to the sign_context_unavailable
+    // case, which a current signer never actually answers with).
+    expect(HOSTED_INSTRUCTIONS).toContain("fallback: 'typed_data_b64'")
+    expect(HOSTED_INSTRUCTIONS).not.toMatch(/current signer.{0,2}s own transport-failure/)
+  })
+
   it('keeps x402 next-tool guidance runtime-neutral (bare names in descriptions, naming note on instructions)', async () => {
     // The slim-descriptions pass (#1591) finished what the runtime-neutral
     // naming work (#1588) started: descriptions name next tools by their BARE

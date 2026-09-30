@@ -330,7 +330,11 @@ table below with direct-payment remedies: no quote to re-run, and the
 `typed_data_b64` relay — reached by re-running whichever of `haven_send` /
 `haven_pay` was called, with the SAME `idempotency_key` (echoed on its
 result) plus `include_signing_payload: true` (#3495; superseding #3277's
-"the relay fields stay") — is the fallback. A 409 `sign_context_unavailable` from the direct route too (an
+"the relay fields stay") — is the fallback, EXCEPT the direct fetch's 404
+(the table row below): that message names BOTH routes, since a 404 there is
+ambiguous with a backend old enough to predate #3495 too, whose result
+already carries the pair unconditionally with no opt-in to re-run.
+A 409 `sign_context_unavailable` from the direct route too (an
 x402 row the x402 route could not serve, or a direct row with no stored
 signing payload) surfaces the x402 route's own refusal instead. `haven_sign_x402` never takes this branch: a direct payment
 carries no x402 context to fund a merchant retry with, so it surfaces the

@@ -275,6 +275,16 @@ describe('haven_pay', () => {
     expect(notice.fallback).toContain('typed_data_b64')
     expect(notice.check).not.toMatch(/initialize/i)
     expect(notice.fallback).not.toMatch(/initialize/i)
+    // #3495 review round 2 (S1 pin): the trigger is the routable
+    // fallback: 'typed_data_b64' string, on EITHER a current signer's own
+    // transport-failure/malformed/404 case OR the older-signer
+    // sign_context_unavailable case — never the round-1 text that
+    // conflated a current signer's transport failure INTO the
+    // sign_context_unavailable trigger.
+    expect(notice.check).toContain("fallback: 'typed_data_b64'")
+    expect(notice.fallback).toContain("fallback: 'typed_data_b64'")
+    expect(notice.check).not.toMatch(/current signer.{0,2}s own transport-failure/)
+    expect(notice.fallback).not.toMatch(/current signer.{0,2}s own transport-failure/)
 
     // #3495: the relay fields are NOT on this (default) result — the notice
     // routes through a same-key opt-in re-run instead.
@@ -289,6 +299,9 @@ describe('haven_pay', () => {
     expect(String(result.data.reason)).not.toMatch(/initialize/i)
     // Never a payload_hash-only call — a pre-#3169 signer signs it raw (AA24).
     expect(String(result.data.reason)).toMatch(/payload_hash-only/i)
+    // #3495 review round 2 (S1 pin): see the matching note above.
+    expect(String(result.data.reason)).toContain("fallback: 'typed_data_b64'")
+    expect(String(result.data.reason)).not.toMatch(/current signer.{0,2}s own transport-failure/)
   })
 
   it('a same-key include_signing_payload=true re-run replays the ORIGINAL payment — never a second intent (#3495)', async () => {
@@ -911,10 +924,19 @@ describe('haven_send', () => {
     expect(notice.check).toContain('include_signing_payload: true')
     expect(notice.check).toContain('{ payload_hash, typed_data_b64 }')
     expect(notice.check).not.toMatch(/initialize/i)
+    // #3495 review round 2 (S1 pin): see the matching note on the haven_pay
+    // twin above.
+    expect(notice.check).toContain("fallback: 'typed_data_b64'")
+    expect(notice.check).not.toMatch(/current signer.{0,2}s own transport-failure/)
 
     // #3495: the relay fields are NOT on this (default) result.
     expect('typed_data' in result.data).toBe(false)
     expect('typed_data_b64' in result.data).toBe(false)
+
+    // #3495 review round 2 (S1 pin): the reason carries the same routable
+    // trigger string as the notice, never the round-1 conflated text.
+    expect(String(result.data.reason)).toContain("fallback: 'typed_data_b64'")
+    expect(String(result.data.reason)).not.toMatch(/current signer.{0,2}s own transport-failure/)
   })
 
   it('a same-key include_signing_payload=true re-run replays the ORIGINAL payment — never a second intent (#3495)', async () => {
@@ -1041,7 +1063,7 @@ describe('a same-key replay of an already-progressed payment (#3495 review S5)',
   it('haven_pay: a CONFIRMED replay returns status + tx_hash, no signing fields, and does not crash', async () => {
     stubFetch({
       'POST /payments': {
-        status: 201,
+        status: 200, // agentPaymentStatusHttpCode('confirmed') === 200
         body: {
           // No sign_data: the real shape payments.ts's statusReplay returns
           // once the stored payment is no longer pending_signature.
@@ -1077,7 +1099,7 @@ describe('a same-key replay of an already-progressed payment (#3495 review S5)',
   it('haven_send: a CONFIRMED replay returns status + tx_hash, no signing fields, and does not crash', async () => {
     stubFetch({
       'POST /payments': {
-        status: 201,
+        status: 200, // agentPaymentStatusHttpCode('confirmed') === 200
         body: { payment_id: 'pay_send_confirmed_replay', status: 'confirmed', idempotent_replay: true },
       },
       'GET /machine-payments/pay_send_confirmed_replay/status': {
@@ -1103,34 +1125,44 @@ describe('a same-key replay of an already-progressed payment (#3495 review S5)',
     expect('typed_data_b64' in result.data).toBe(false)
   })
 
-  it('haven_pay: a still-in-flight (submitted) replay points at haven_get_payment_status, not "none"', async () => {
+  it('haven_pay: a non-confirmed but still-200 replay (rejected) points at haven_get_payment_status, not "none" (#3495 review round 2, nit R2-4)', async () => {
+    // #3495 review round 2 caught that a REAL `submitted`-status replay
+    // cannot reach this branch: `agentPaymentStatusHttpCode` (backend) maps
+    // pending_signature/submitted to HTTP 409, and the SDK's transport
+    // throws HavenApiError on a non-ok response — `createIntent` never
+    // returns for that status, so `respondToNoSignDataReplay` is never
+    // reached; the round-1 test stubbed an unreachable 201 for it. The
+    // still-resolving branch IS reached for the statuses
+    // `agentPaymentStatusHttpCode` maps to 200 alongside `confirmed` — its
+    // own default arm, e.g. `rejected` — so this test uses one of those
+    // real 200-mapped statuses instead.
     stubFetch({
       'POST /payments': {
-        status: 201,
-        body: { payment_id: 'pay_submitted_replay', status: 'submitted', idempotent_replay: true },
-      },
-      'GET /machine-payments/pay_submitted_replay/status': {
         status: 200,
-        body: confirmedStatusFixture('pay_submitted_replay', {
-          status: 'submitted',
-          phase: 'payment_submitted',
+        body: { payment_id: 'pay_rejected_replay', status: 'rejected', idempotent_replay: true },
+      },
+      'GET /machine-payments/pay_rejected_replay/status': {
+        status: 200,
+        body: confirmedStatusFixture('pay_rejected_replay', {
+          status: 'rejected',
+          phase: 'payment_rejected',
           next_action: 'check_status_later',
           tx_hash: null,
-          message: 'The payment was submitted and is awaiting confirmation.',
+          message: 'The payment was rejected.',
         }),
       },
     })
 
     const result = ok<Record<string, unknown>>(
-      await handlers().haven_pay({ token: 'USDC', amount: '5', to: '0xabc', idempotency_key: 'k-submitted' }),
+      await handlers().haven_pay({ token: 'USDC', amount: '5', to: '0xabc', idempotency_key: 'k-rejected' }),
     )
 
-    expect(result.data.status).toBe('submitted')
+    expect(result.data.status).toBe('rejected')
     expect('tx_hash' in result.data).toBe(false)
     expect(result.data.payload_hash).toBeNull()
     expect(result.data.next_action).toBe('check_status_later')
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
-    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_submitted_replay' })
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_rejected_replay' })
   })
 })
 

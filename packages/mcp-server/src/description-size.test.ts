@@ -235,12 +235,27 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * mean pin moves too: 24,452 / 26 = 940.4615… sits above round 10's 927.81,
  * and the same rule applies — re-derived at the measured mean, shrink-only
  * from here.
+ *
+ * **Re-derived — round 12, #3495 review round 2 (2026-09-30).**
+ * `PAY_DESCRIPTION` (`haven_pay`) named only `SIGN_CONTEXT_REFUSED` /
+ * `sign_context_unavailable` as the opt-in trigger — review round 2 caught
+ * that a currently-published signer's OWN transport-failure/malformed/404
+ * fallback (`fallback: 'typed_data_b64'`, any code) never sets that backend
+ * code, so an agent whose signer refused that way had no route named in this
+ * description at all. The sentence now names both trigger shapes (+95 UTF-8
+ * bytes on that one description: was 24,452 total / 940.4615 mean, now
+ * 24,547 / 944.1153…). Same tool count (26) — a reword, not a new tool.
+ * Measured total 24,547; the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin moves too: 24,547 / 26 = 944.1153… sits
+ * above round 11's 940.47, and the same rule applies — re-derived at the
+ * measured mean, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 24_452
-// Mean pin: re-derived — round 11, #3495 (block above): 24,452 / 26 =
-// 940.4615, pinned at the two-decimal ceiling (940.47). Round 10's 927.81
-// cannot hold while this tree exceeds it. Shrink-only from here.
-const MAX_MEAN_BYTES = 940.47
+const MAX_TOTAL_BYTES = 24_547
+// Mean pin: re-derived — round 12, #3495 review round 2 (block above):
+// 24,547 / 26 = 944.1153, pinned at the two-decimal ceiling (944.12).
+// Round 11's 940.47 cannot hold while this tree exceeds it. Shrink-only
+// from here.
+const MAX_MEAN_BYTES = 944.12
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

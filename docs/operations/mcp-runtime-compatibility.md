@@ -3117,16 +3117,22 @@ the re-run to repeat the exact token, amount, recipient, `task_budget_id` and
 `sub_budget_id` the first call used — a mismatch answers 409 rather than
 silently rerouting to a different payment.
 
-**Replay semantics, precisely** (`findPaymentReplay`): the outcome depends on
-the stored row's own state. A matching key against a row still
-`pending_signature` AND within its `expires_at` window is a TRUE replay — the
-same `payment_id`, the same stored `sign_data`, no new chain read. A matching
-key against a row `pending_signature` but PAST `expires_at` is lazily expired
-and a FRESH intent is created under the SAME key (pre-existing #961
-behaviour, untouched here). A matching key against a row already `confirmed`
-(or any other terminal status) returns a STATUS replay with no `sign_data` at
-all. At any moment a given `idempotency_key` names AT MOST ONE live
-(non-terminal) intent.
+**Replay semantics, precisely** (`findSendIntentByIdempotencyKey`'s
+`FIND_SEND_INTENT_BY_KEY_SQL`, `findPaymentReplay`): the outcome depends on
+the stored row's own state, and on whether the lookup finds a row at all —
+the SQL excludes `status IN ('failed', 'expired')` from its `WHERE` clause
+outright. A matching key against a row still `pending_signature` AND within
+its `expires_at` window is a TRUE replay — the same `payment_id`, the same
+stored `sign_data`, no new chain read. A matching key against a row
+`pending_signature` but PAST `expires_at` is lazily expired IN PLACE and a
+FRESH intent is created under the SAME key (pre-existing #961 behaviour,
+untouched here). A key that already belongs to a `failed` or `expired` row
+matches NOTHING in the query — the lookup returns as if no row exists, and a
+FRESH intent is created immediately, no lazy-expire step. A matching key
+against a row already `confirmed` (or any other terminal, non-`failed`/
+`expired` status the query does return) answers a STATUS replay with no
+`sign_data` at all. At any moment a given `idempotency_key` names AT MOST ONE
+live (non-terminal) intent.
 
 **The opt-in.** `include_signing_payload: true` on `haven_send` / `haven_pay`
 is new schema surface (`contracts.ts`) — a same-`idempotency_key` re-run
@@ -3142,7 +3148,12 @@ this whole section:
   surfacing the real state. `haven_send`/`haven_pay` now detect a missing
   `sign_data.hash` and answer with the REAL status (`haven.getPaymentStatus`),
   the tx hash when recorded, no signing fields, and `next_action: none`
-  (confirmed) or `check_status_later` (otherwise).
+  (confirmed) or `check_status_later` (any other status the backend's
+  `agentPaymentStatusHttpCode` still answers 200 for, e.g. `rejected`). A
+  status mapped to a non-2xx code there (`pending_signature`/`submitted` →
+  409, `expired` → 410, `failed` → 502) never reaches this branch: the SDK
+  transport throws before `createIntent` returns, surfacing as an ordinary
+  API error instead.
 - **N3 — the opt-in re-run's own reason now tells the agent to relay
   directly**, rather than looping back through `haven_sign { payment_id }` —
   a compact result's reason (`DIRECT_SIGN_REASON`) still points at
@@ -3183,9 +3194,10 @@ is simply unused guidance the old backend never asked for. The OTHER
 direction: a caller running #3495-aware guidance against a PRE-#3495 hosted
 server — `include_signing_payload` is new schema surface the old server's
 strict input validation (`STRICT_INPUT_TOOLS`) does not declare, so it
-refuses the argument outright rather than silently ignoring it; harmless,
-because on that old server the pair was already on the original result and
-the re-run was never needed.
+refuses the argument outright rather than silently ignoring it — no loss:
+one refused call (the old server's strict input schema refuses
+`include_signing_payload`), and the pair is already on that server's
+original result.
 
 Compatibility: additive/removed result fields only (the compact default drops
 `typed_data`/`typed_data_b64` from the unconditional shape; `idempotency_key`

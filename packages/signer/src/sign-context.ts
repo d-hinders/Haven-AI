@@ -85,6 +85,24 @@ const DIRECT_RELAY_FALLBACK =
   'its result) plus include_signing_payload: true, then call haven_sign with payload_hash and ' +
   "typed_data_b64 from THAT re-run's result, passed through unchanged"
 
+/**
+ * #3271 / #3495 review round 2: the direct fetch's 404 is ambiguous between
+ * two causes the signer cannot tell apart — the `payment_id` is not this
+ * agent's own, or this Haven backend predates #3271 (and so also predates
+ * #3495, meaning its `haven_send` / `haven_pay` result already carries
+ * `typed_data`/`typed_data_b64` unconditionally, with no
+ * `include_signing_payload` opt-in to re-run). `DIRECT_RELAY_FALLBACK`
+ * above only names the newer route — wrong advice on the older-backend
+ * branch of this ambiguity — so the 404 case gets its own text naming BOTH.
+ */
+const DIRECT_404_FALLBACK =
+  'either the payment_id is not from this agent’s own POST /payments call, or this Haven backend ' +
+  'predates #3271 (which also predates #3495, so its result already carries payload_hash and ' +
+  'typed_data_b64 unconditionally): pass those fields from the ORIGINAL haven_send / haven_pay ' +
+  'result, unchanged, if it already carries them — or, on a newer server, re-run haven_send / ' +
+  'haven_pay with the SAME idempotency_key plus include_signing_payload: true and pass them from ' +
+  'THAT result instead'
+
 export class HavenSignContextError extends HavenSigningError {
   declare readonly code: SignContextErrorCode
   /**
@@ -149,8 +167,14 @@ export class HavenSignContextError extends HavenSigningError {
     /** #3103: the payment the context was fetched for, so a refusal can name the status read. */
     paymentId: string,
     /**
-     * #3271: which fetch failed. A DIRECT payment has no quote tool to re-run
-     * and its result always carries `typed_data_b64`, so its remedies differ.
+     * #3271: which fetch failed. A DIRECT payment has no quote tool to
+     * re-run, so its remedies differ. Since #3495 (review round 2) its
+     * result no longer always carries `typed_data_b64` — it is compact by
+     * default like the x402 quote results, and the relay pair is reached
+     * only via a same-key `include_signing_payload: true` re-run (the 404
+     * branch below is the one exception: it names BOTH the original result
+     * and the re-run, because a 404 there is ambiguous with a backend old
+     * enough to predate #3495 too).
      * #3329: `'task'` is the task-budget sign-context fetch — it has no
      * `typed_data_b64` relay at all (there is no quote tool to re-run and no
      * caller-supplied fallback payload), so every refusal on this flow is
@@ -184,15 +208,16 @@ export class HavenSignContextError extends HavenSigningError {
         })
       } else if (flow === 'direct' && refusal?.httpStatus === 404) {
         // Either the payment is not this agent's, or the backend predates
-        // #3271 and has no direct sign-context route at all (deploy skew).
-        // Since #3495 the relay pair is not on the original result — DIRECT_RELAY_FALLBACK
-        // names the same-key include_signing_payload=true re-run that fetches it.
+        // #3271 and has no direct sign-context route at all (deploy skew) —
+        // and, since that also means it predates #3495, its result already
+        // carries the pair unconditionally. DIRECT_404_FALLBACK names BOTH
+        // routes because the signer cannot tell which cause this is.
         this.fallback = 'typed_data_b64'
         this.next_action = AgentPaymentNextAction.StopAndTellUser
         step = signerRefusalStep({
           nextAction: AgentPaymentNextAction.StopAndTellUser,
           nextTool: null,
-          nextToolOmittedReason: DIRECT_RELAY_FALLBACK,
+          nextToolOmittedReason: DIRECT_404_FALLBACK,
         })
       } else if (flow === 'direct' && refusal?.errorCode === 'expired') {
         // Keyed on the backend's `expired` code, never a bare 410: the direct

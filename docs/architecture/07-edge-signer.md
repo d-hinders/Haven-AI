@@ -203,12 +203,16 @@ giving the hosted service payment-signing authority.
 
 ## Orchestration
 
-> **Re-verified #3495 (2026-09-30):** the "Regular payment" sequence and the
-> paragraphs through the compact-by-default note below were updated for the
-> #3495 owner decision (direct-payment results compact by default, relay
-> behind an `include_signing_payload: true` opt-in) and its review-round-1
-> corrections (the two-trigger-shape fix, the S5 no-sign-data-replay guard).
-> Nothing else in this document was re-verified in this pass.
+> **Re-verified #3495 (2026-09-30):** the "Regular payment" sequence, the
+> paragraphs through the compact-by-default note below, and the "Preferred
+> x402 form" paragraph's direct-payment sentence further down (which used to
+> say direct payments "always carry the full pair as well, for older
+> signers" — no longer true since #3495) were updated for the #3495 owner
+> decision (direct-payment results compact by default, relay behind an
+> `include_signing_payload: true` opt-in) and its review-round-1 and
+> round-2 corrections (the two-trigger-shape fix, the S5 no-sign-data-replay
+> guard, the direct fetch's 404 naming both routes). Nothing else in this
+> document was re-verified in this pass.
 
 The hosted server (brain) and the local signer (key) are two MCP servers; the
 agent runtime drives the sequence.
@@ -306,8 +310,10 @@ re-run the quote tool with the SAME `idempotency_key` plus
 `include_signing_payload=true`: the replay returns the ORIGINAL sign_data
 (#1207 semantics), and `typed_data_b64` / `typed_data` remain the fallback
 transport for older backends and for the fully offline core. Direct payments
-(`haven_pay`/`haven_send`) always carry the full pair as well, for older
-signers; since #3271 they also have a fetch path (`GET /payments/:id/sign-context`).
+(`haven_pay`/`haven_send`) have a fetch path since #3271
+(`GET /payments/:id/sign-context`); since #3495 they are compact by default
+too, and the same-key `include_signing_payload: true` re-run described above
+is how the pair is restored for older signers and diagnostics.
 
 Note the trust-model asymmetry: the **x402** typed-data leg
 (`signX402FundingTypedData`) verifies a Haven-authenticated expected context

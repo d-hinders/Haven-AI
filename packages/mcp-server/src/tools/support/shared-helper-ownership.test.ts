@@ -142,7 +142,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   catchSettledResettle: { module: 'guidance', slices: ['s2809', 's2812'] },
   // #3101: the status handoff for a refusal that may not know its payment id —
   // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
-  paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
+  // #3495 review S5: s2809 joined it too — haven_send/haven_pay's
+  // no-sign-data replay guard names haven_get_payment_status the same way.
+  paymentStatusHandoff: { module: 'guidance', slices: ['s2809', 's2810', 's2811'] },
   // #3102: the refusal-side builder — every HostedToolError that names an action.
   refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
   // #3329: the success-side counterpart — a task budget's signer hand-off,

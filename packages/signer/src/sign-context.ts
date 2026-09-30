@@ -71,12 +71,14 @@ export type SignContextErrorCode =
 /**
  * #3271 / #3495: the relay remedy for a direct payment whose sign-context
  * fetch failed. Since #3495 the hosted `haven_send` / `haven_pay` results are
- * compact by default (no `payload_hash`/`typed_data_b64` pair inline) —
- * superseding #3277 AC2 — so the remedy is a re-run of whichever tool was
+ * compact by default — `payment_id`, `status`, `idempotency_key`,
+ * `payload_hash` and the signing handoff still ride the result
+ * unconditionally; only `typed_data`/`typed_data_b64` are withheld —
+ * superseding #3277 AC2. The remedy is a re-run of whichever tool was
  * called, naming the SAME `idempotency_key` (echoed on its result) plus
  * `include_signing_payload: true`; the backend replays the stored payment on
  * that key rather than creating a second one. That re-run's own result then
- * carries the pair to relay.
+ * carries `typed_data`/`typed_data_b64` to relay.
  */
 const DIRECT_RELAY_FALLBACK =
   're-run whichever of haven_send / haven_pay you called, with the SAME idempotency_key (echoed on ' +
@@ -487,10 +489,12 @@ export async function fetchDirectSignContext(
     throw new HavenSignContextError(
       timedOut
         ? `Haven did not answer the direct-payment signing-context fetch for ${paymentId} within ${timeoutMs} ms. ` +
-          'Retry, or pass typed_data_b64 from the payment result instead.'
+          'Retry, or re-run haven_send / haven_pay with the same idempotency_key plus ' +
+          'include_signing_payload: true and pass typed_data_b64 from that result instead.'
         : `Could not reach Haven to fetch the direct-payment signing context for ${paymentId}: ` +
           `${err instanceof Error ? err.message : String(err)}. ` +
-          'Retry, or pass typed_data_b64 from the payment result instead.',
+          'Retry, or re-run haven_send / haven_pay with the same idempotency_key plus ' +
+          'include_signing_payload: true and pass typed_data_b64 from that result instead.',
       timedOut ? 'SIGN_CONTEXT_TIMEOUT' : 'SIGN_CONTEXT_UNREACHABLE',
       undefined,
       paymentId,
@@ -504,7 +508,8 @@ export async function fetchDirectSignContext(
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       throw new HavenSignContextError(
         `Haven did not finish sending the direct-payment signing context for ${paymentId} within ${timeoutMs} ms. ` +
-          'Retry, or pass typed_data_b64 from the payment result instead.',
+          'Retry, or re-run haven_send / haven_pay with the same idempotency_key plus ' +
+          'include_signing_payload: true and pass typed_data_b64 from that result instead.',
         'SIGN_CONTEXT_TIMEOUT',
         undefined,
         paymentId,
@@ -520,8 +525,10 @@ export async function fetchDirectSignContext(
       `Haven refused the direct-payment signing-context fetch for ${paymentId}: ${detail}` +
         (response.status === 404
           ? ' — either the payment_id is not from this agent’s own POST /payments call, or this ' +
-            'Haven backend predates #3271. Pass payload_hash and typed_data_b64 from the ' +
-            'haven_send / haven_pay result, unchanged, instead.'
+            'Haven backend predates #3271 (which also predates #3495, so its haven_send / ' +
+            'haven_pay result already carries payload_hash and typed_data_b64 unconditionally). ' +
+            'Pass payload_hash and typed_data_b64, unchanged, from the original result — or, on a ' +
+            'newer server, from a same-key re-run with include_signing_payload: true.'
           : body.error_code === 'expired'
             ? ' The payment window has expired; call haven_send / haven_pay again with the same idempotency_key.'
             : ''),
@@ -548,8 +555,9 @@ export async function fetchDirectSignContext(
           `does not support (supported: ${SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS.join(', ')}). ` +
           'Update @haven_ai/signer.'
         : 'The Haven direct-payment sign-context response is missing sign_data.typed_data, or its ' +
-          "signature_scheme is not 'eip712_userop' — the backend may predate #3271. Pass typed_data_b64 " +
-          'from the payment result instead.',
+          "signature_scheme is not 'eip712_userop' — the backend may predate #3271. Re-run " +
+          'haven_send / haven_pay with the same idempotency_key plus include_signing_payload: ' +
+          'true and pass typed_data_b64 from that result instead.',
       'SIGN_CONTEXT_MALFORMED',
       undefined,
       paymentId,

@@ -137,14 +137,22 @@ export function signerCompatibilityNotice(emittedVersion: number) {
  * payment on that key, never creating a second intent, PROVIDED the re-run
  * repeats the original token/amount/recipient/task_budget_id/sub_budget_id
  * or it answers 409. That re-run's own result then carries the relay pair to
- * sign. This covers every signer that can emit `fallback: 'typed_data_b64'`
- * on a direct-payment sign-context fetch — not only one predating #3271:
- * every published `@haven_ai/signer` (0.5.0-alpha.1 through the current
- * release) still falls back to it on a transport failure, a malformed body,
- * or a 404 from an older backend, so the route is named unconditionally
- * rather than as "an old signer" special case. Never `{ payload_hash }`
- * alone — a signer predating #3169's bare-hash refusal signs it raw and the
- * account rejects it on-chain (AA24).
+ * sign. Never `{ payload_hash }` alone — a signer predating #3169's
+ * bare-hash refusal signs it raw and the account rejects it on-chain (AA24).
+ *
+ * Review correction (round 1, 2026-09-30): the TRIGGER is two DISTINCT
+ * shapes, not one conflated refusal. A currently-published `@haven_ai/signer`
+ * (0.5.0-alpha.1 through the current release, `sign-context.ts`) sets
+ * `fallback: 'typed_data_b64'` ONLY on `SIGN_CONTEXT_TIMEOUT`,
+ * `SIGN_CONTEXT_UNREACHABLE`, `SIGN_CONTEXT_MALFORMED`, or
+ * `SIGN_CONTEXT_REFUSED` with `http_status: 404` (an older BACKEND with no
+ * direct route) — it NEVER sets `fallback` on `SIGN_CONTEXT_REFUSED` +
+ * `backend_error_code: 'sign_context_unavailable'`; that combination, with NO
+ * `fallback` field, is what a signer PREDATING #3271 produces instead (it has
+ * no direct-fetch fallback of its own to try, so its x402-only fetch's 409
+ * is the terminal state). Both cases signed nothing and both recover through
+ * the same opt-in re-run, so the check/fallback text below routes on either,
+ * named separately rather than merged into one (wrong) trigger.
  *
  * `direct_sign_context_version` is `DIRECT_SIGN_CONTEXT_VERSION` from
  * `@haven_ai/sdk` (`userop-binding.ts`) — the same constant the backend's
@@ -157,20 +165,22 @@ export function directSignerCompatibilityNotice() {
     signer_capability: SIGNER_CAPABILITY_KEY,
     check:
       'Call next_tool with next_arguments EXACTLY as given — the signer fetches the exact bytes ' +
-      'by payment_id. If haven_sign refuses with code SIGN_CONTEXT_REFUSED and backend_error_code ' +
-      "'sign_context_unavailable' (an older signer, or a current signer's own transport-failure " +
-      'fallback: it signed nothing), re-run the SAME haven_send / haven_pay call with the SAME ' +
-      'idempotency_key (echoed on its result) plus include_signing_payload: true — repeating the ' +
-      'same token/amount/recipient/task_budget_id/sub_budget_id, or it answers 409 — then sign ' +
-      'through the relay: call haven_sign with { payload_hash, typed_data_b64 } from THAT re-run ' +
-      `result, passed through unchanged, then update the connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair line it prints.`,
+      "by payment_id. If haven_sign refuses that call — carrying fallback: 'typed_data_b64' (any " +
+      'code: a transport failure, a malformed body, or a 404 on an older backend), or code ' +
+      "SIGN_CONTEXT_REFUSED with backend_error_code 'sign_context_unavailable' from a signer " +
+      'predating #3271 — nothing was signed either way: re-run the SAME haven_send / haven_pay ' +
+      'call with the SAME idempotency_key (echoed on its result) plus include_signing_payload: ' +
+      'true — repeating the same token/amount/recipient/task_budget_id/sub_budget_id, or it ' +
+      'answers 409 — then sign through the relay: call haven_sign with { payload_hash, ' +
+      `typed_data_b64 } from THAT re-run result, passed through unchanged, then update the connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair line it prints.`,
     // The same recovery sentence as structured data, mirroring the #1309
     // pattern on the x402 notice above: prose to read, data to route on.
     fallback:
-      'haven_sign refused SIGN_CONTEXT_REFUSED / sign_context_unavailable and signed nothing: ' +
-      're-run the SAME haven_send / haven_pay call with the SAME idempotency_key plus ' +
-      'include_signing_payload: true, then call haven_sign again with { payload_hash, ' +
-      'typed_data_b64 } from that re-run result, unchanged, ' +
+      "haven_sign refused this call — fallback: 'typed_data_b64' (any code), or " +
+      "SIGN_CONTEXT_REFUSED / sign_context_unavailable from a signer predating #3271 — and signed " +
+      'nothing either way: re-run the SAME haven_send / haven_pay call with the SAME ' +
+      'idempotency_key plus include_signing_payload: true, then call haven_sign again with ' +
+      '{ payload_hash, typed_data_b64 } from that re-run result, unchanged, ' +
       `then update the connector by running \`${hostedConnectorUpgradeCommand()}\` and the repair line it prints.`,
   }
 }

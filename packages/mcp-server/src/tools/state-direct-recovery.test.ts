@@ -205,7 +205,7 @@ describe('haven_pay', () => {
       },
     })
 
-    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string }>(
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string; reason?: string }>(
       await handlers().haven_pay({
         token: 'USDC',
         amount: '0.10',
@@ -223,6 +223,11 @@ describe('haven_pay', () => {
       JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
     ).toEqual(typedData)
     expect(result.data.payload_hash).toBe('0xdeadbeef')
+    // #3495 review N3: the reason tailors to this being the opt-in re-run —
+    // relay the pair directly, don't loop back through payment_id.
+    expect(String(result.data.reason)).toContain('payload_hash, typed_data_b64')
+    expect(String(result.data.reason)).toContain('already includes')
+    expect(String(result.data.reason)).not.toMatch(/EXACTLY as given/)
   })
 
   it('names the byte-free haven_sign handoff and the opt-in relay route (#3277, #3495)', async () => {
@@ -846,7 +851,7 @@ describe('haven_send', () => {
       },
     })
 
-    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string }>(
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string; reason?: string }>(
       await handlers().haven_send({
         asset: 'USDC',
         recipient: '0xRecipient',
@@ -863,6 +868,10 @@ describe('haven_send', () => {
       JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
     ).toEqual(typedData)
     expect(result.data.payload_hash).toBe('0xsendhash')
+    // #3495 review N3: same tailored reason as the haven_pay twin above.
+    expect(String(result.data.reason)).toContain('payload_hash, typed_data_b64')
+    expect(String(result.data.reason)).toContain('already includes')
+    expect(String(result.data.reason)).not.toMatch(/EXACTLY as given/)
   })
 
   it('names the byte-free haven_sign handoff and the opt-in relay route (#3277, #3495)', async () => {
@@ -994,6 +1003,134 @@ describe('haven_send', () => {
     const result = await handlers().haven_send({ asset: 'DAI', recipient: '0xRecipient', amount: '1' })
     expect(result.success).toBe(false)
     expect(recordedCalls()).toHaveLength(0)
+  })
+})
+
+
+// ── a same-key replay of an already-progressed payment (#3495 review S5) ──────
+//
+// The backend's idempotency replay for a payment that has moved PAST
+// pending_signature (confirmed, submitted, failed, expired…) returns a
+// STATUS body with no sign_data at all — but HavenClient.createIntent's
+// return type hardcodes status: 'pending_signature' regardless, so
+// intent.signData.hash used to crash (UNKNOWN_ERROR) instead of surfacing
+// the real state. Found in review: no stub before this ever omitted
+// sign_data.
+
+function confirmedStatusFixture(paymentId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    payment_id: paymentId,
+    kind: 'payment_intent',
+    rail: 'direct',
+    status: 'confirmed',
+    phase: 'payment_confirmed',
+    next_action: 'none',
+    amount: '5',
+    token: 'USDC',
+    resource_url: null,
+    merchant_address: null,
+    tx_hash: '0xsettled',
+    expires_at: '2099-01-01T00:00:00.000Z',
+    chain_id: 8453,
+    message: 'The payment is confirmed.',
+    ...overrides,
+  }
+}
+
+describe('a same-key replay of an already-progressed payment (#3495 review S5)', () => {
+  it('haven_pay: a CONFIRMED replay returns status + tx_hash, no signing fields, and does not crash', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          // No sign_data: the real shape payments.ts's statusReplay returns
+          // once the stored payment is no longer pending_signature.
+          payment_id: 'pay_confirmed_replay',
+          status: 'confirmed',
+          idempotent_replay: true,
+        },
+      },
+      'GET /machine-payments/pay_confirmed_replay/status': {
+        status: 200,
+        body: confirmedStatusFixture('pay_confirmed_replay'),
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay({ token: 'USDC', amount: '5', to: '0xabc', idempotency_key: 'k-confirmed' }),
+    )
+
+    expect(result.data.payment_id).toBe('pay_confirmed_replay')
+    expect(result.data.status).toBe('confirmed')
+    expect(result.data.idempotency_key).toBe('k-confirmed')
+    expect(result.data.tx_hash).toBe('0xsettled')
+    expect(result.data.payload_hash).toBeNull()
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+    expect('signature_scheme' in result.data).toBe(false)
+    expect(result.data.next_action).toBe('none')
+    expect(result.data.next_tool).toBeUndefined()
+    expect(result.data.next_tool_omitted_reason).toMatch(/already settled/)
+    expect(String(result.data.reason)).toMatch(/confirmed/)
+  })
+
+  it('haven_send: a CONFIRMED replay returns status + tx_hash, no signing fields, and does not crash', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: { payment_id: 'pay_send_confirmed_replay', status: 'confirmed', idempotent_replay: true },
+      },
+      'GET /machine-payments/pay_send_confirmed_replay/status': {
+        status: 200,
+        body: confirmedStatusFixture('pay_send_confirmed_replay'),
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_send({
+        asset: 'USDC',
+        recipient: '0xabc',
+        amount: '5',
+        idempotency_key: 'k-send-confirmed',
+      }),
+    )
+
+    expect(result.data.payment_id).toBe('pay_send_confirmed_replay')
+    expect(result.data.status).toBe('confirmed')
+    expect(result.data.tx_hash).toBe('0xsettled')
+    expect(result.data.payload_hash).toBeNull()
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+  })
+
+  it('haven_pay: a still-in-flight (submitted) replay points at haven_get_payment_status, not "none"', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: { payment_id: 'pay_submitted_replay', status: 'submitted', idempotent_replay: true },
+      },
+      'GET /machine-payments/pay_submitted_replay/status': {
+        status: 200,
+        body: confirmedStatusFixture('pay_submitted_replay', {
+          status: 'submitted',
+          phase: 'payment_submitted',
+          next_action: 'check_status_later',
+          tx_hash: null,
+          message: 'The payment was submitted and is awaiting confirmation.',
+        }),
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay({ token: 'USDC', amount: '5', to: '0xabc', idempotency_key: 'k-submitted' }),
+    )
+
+    expect(result.data.status).toBe('submitted')
+    expect('tx_hash' in result.data).toBe(false)
+    expect(result.data.payload_hash).toBeNull()
+    expect(result.data.next_action).toBe('check_status_later')
+    expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_submitted_replay' })
   })
 })
 

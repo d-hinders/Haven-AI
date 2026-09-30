@@ -753,7 +753,8 @@ describe('Hosted MCP + Edge Signer integration', () => {
           JSON.stringify({
             error:
               'Not an x402 intent — sign-context serves the x402 signing handoff only. ' +
-              'For a direct payment, sign the typed_data_b64 from the haven_pay/haven_send result instead; ' +
+              'For a direct payment, re-run haven_pay/haven_send with the same idempotency_key plus ' +
+              'include_signing_payload: true and sign the typed_data_b64 from that result instead; ' +
               'a current @haven_ai/signer fetches GET /payments/:id/sign-context itself.',
             error_code: 'sign_context_unavailable',
           }),
@@ -1077,6 +1078,109 @@ describe('Hosted MCP + Edge Signer integration', () => {
     // ── Step 4: the relay re-sign, fed from the RE-RUN's own fields ──────────
     // The relay re-sign needs NO context fetch, so the same install
     // completes it — the relay fields from the opt-in re-run, unchanged.
+    const recovered = ok<{ signature: string }>(
+      await install.haven_sign({
+        payload_hash: reRun.payload_hash as string,
+        typed_data_b64: reRun.typed_data_b64 as string,
+      }),
+    )
+    expect(recovered.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    const recoveredAddress = await recoverTypedDataAddress({
+      ...(REALISTIC_TYPED_DATA as Parameters<typeof hashTypedData>[0]),
+      signature: recovered.signature as `0x${string}`,
+    })
+    expect(recoveredAddress.toLowerCase()).toBe(DELEGATE_ADDR.toLowerCase())
+  })
+
+  // #3495 review round 1, item 1: a CURRENT signer's own fallback trigger —
+  // SIGN_CONTEXT_UNREACHABLE (a transport failure, not sign_context_unavailable)
+  // — routed through the SAME opt-in re-run as the pre-#3271-signer case
+  // above. Review round 1 caught that the hosted guidance had conflated the
+  // two distinct trigger shapes into one (wrong) refusal; this test proves
+  // the OTHER shape independently, end to end, on the real signer package.
+  it('the hosted haven_pay result: a CURRENT signer transport failure (SIGN_CONTEXT_UNREACHABLE), then the opt-in re-run, then the relay completes (#3495 review round 1)', async () => {
+    const directPaymentId = 'pay_pay_unreachable'
+    const realisticHash = packedUserOperationHash(REALISTIC_TYPED_DATA)
+    const postedIdempotencyKeys: unknown[] = []
+    const hostedApi = (async (url: string, init: RequestInit = {}) => {
+      const method = (init.method ?? 'GET').toUpperCase()
+      const path = new URL(url).pathname
+      if (method === 'POST' && path === '/payments') {
+        const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
+        postedIdempotencyKeys.push(body.idempotency_key)
+        return new Response(
+          JSON.stringify({
+            payment_id: directPaymentId,
+            status: 'pending_signature',
+            expires_at: '2099-01-01T00:00:00.000Z',
+            sign_data: { hash: realisticHash, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
+          }),
+          { status: 201 },
+        )
+      }
+      return new Response(JSON.stringify({ error: `No stub for ${method} ${path}` }), { status: 404 })
+    }) as typeof fetch
+    vi.stubGlobal('fetch', hostedApi)
+    // A CURRENT signer's network layer failing — DISTINCT from the 409
+    // sign_context_unavailable a pre-#3271 signer produces. haven_sign always
+    // tries the x402 route first (tools.ts): that 409s sign_context_unavailable
+    // (a direct payment_id), which is the ONE condition that triggers the
+    // direct-fetch fallback — and THAT fetch is what fails outright here, so
+    // the resulting SIGN_CONTEXT_UNREACHABLE carries flow: 'direct' (this is
+    // the shape a currently-published @haven_ai/signer actually sets
+    // fallback: 'typed_data_b64' on).
+    const unreachableFetch = (async (url: string) => {
+      if (url.includes('/x402/')) {
+        return new Response(
+          JSON.stringify({ error: 'Not an x402 intent.', error_code: 'sign_context_unavailable' }),
+          { status: 409 },
+        )
+      }
+      throw new TypeError('fetch failed')
+    }) as typeof fetch
+
+    const hostedHandlers = createHostedHandlers(
+      new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' }),
+    )
+
+    const hosted = ok<Record<string, unknown>>(
+      await hostedHandlers.haven_pay({ token: 'USDC', amount: '0.01', to: DELEGATE_ADDR }),
+    )
+    expect(hosted.next_tool_name).toBe('haven_sign')
+    expect(hosted.next_arguments).toEqual({ payment_id: directPaymentId })
+    expect('typed_data' in hosted).toBe(false)
+    const idempotencyKey = hosted.idempotency_key as string
+    expect(typeof idempotencyKey).toBe('string')
+
+    const identity = { apiUrl: 'http://haven.test', apiKey: 'sk_agent_test' as const }
+    const install = createSignerHandlers(createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER }), {
+      signContext: { loadIdentity: async () => identity, fetchImpl: unreachableFetch },
+    })
+    const refused = await install.haven_sign(hosted.next_arguments as { payment_id: string })
+    expect(refused.success).toBe(false)
+    if (refused.success) throw new Error('expected the refusal')
+    expect(refused.code).toBe('SIGN_CONTEXT_UNREACHABLE')
+    expect((refused as { fallback?: string }).fallback).toBe('typed_data_b64')
+    // Never sign_context_unavailable here — this IS the other trigger shape.
+    expect(refused.backend_error_code).toBeUndefined()
+    const notice = hosted.signer_compatibility as Record<string, string>
+    expect(notice.check).toContain('fallback')
+    expect(notice.check).toContain('include_signing_payload: true')
+
+    const reRun = ok<Record<string, unknown>>(
+      await hostedHandlers.haven_pay({
+        token: 'USDC',
+        amount: '0.01',
+        to: DELEGATE_ADDR,
+        idempotency_key: idempotencyKey,
+        include_signing_payload: true,
+      }),
+    )
+    expect(reRun.payment_id).toBe(directPaymentId)
+    expect(postedIdempotencyKeys).toEqual([idempotencyKey, idempotencyKey])
+    expect(reRun.payload_hash).toBe(realisticHash)
+    expect(reRun.typed_data).toEqual(REALISTIC_TYPED_DATA)
+
     const recovered = ok<{ signature: string }>(
       await install.haven_sign({
         payload_hash: reRun.payload_hash as string,

@@ -356,9 +356,11 @@ since #1272: obtain it by re-running the SAME quote tool with the SAME
 `idempotency_key` plus `include_signing_payload: true`, then pass
 `typed_data_b64` (plus `payload_hash` / `x402_expected`) instead of
 `payment_id`. A direct payment's `haven_send` / `haven_pay` result is compact
-by default (#3495) — the same `include_signing_payload: true` re-run on the
-SAME `idempotency_key` is how its `payload_hash` + `typed_data_b64` are
-reached. Any other backend REFUSAL
+by default too (#3495) — `payload_hash` is on that result unconditionally (as
+is `idempotency_key`, generated fresh when the caller passed none and always
+echoed); only `typed_data` / `typed_data_b64` are withheld, reached the same
+way — a `include_signing_payload: true` re-run on the SAME `idempotency_key`.
+Any other backend REFUSAL
 carries no fallback: an expired, executed or unsignable intent cannot be
 rescued by re-signing its bytes — an expired x402 one is re-quoted (the same
 `payment_window_expired` + `retry_with_new_quote` the signer emits for

@@ -72,7 +72,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-30"
+last-verified: "2026-09-29"
 ---
 
 # MCP Runtime Compatibility
@@ -3038,44 +3038,85 @@ for one paid resource, where two calls with the same parameters inside the
 bucket really are the same purchase, but "send 5 USDC to 0xabc" said twice in
 five minutes is routinely two DIFFERENT payments (two tips, two payouts), and
 bucketing them onto one key would make the backend's `findPaymentReplay`
-(`payments.ts`) return the FIRST payment for the second call — the agent told
-the second send succeeded while no second transfer happened. The generator is
-instead `direct:` + `crypto.randomUUID()`: every no-key call gets its own
-payment by construction, and a same-key re-run — in particular the
-`include_signing_payload: true` opt-in below — is a true replay ONLY because
-the caller deliberately echoes the key back, never because two calls
-happened to share parameters. The backend still requires the re-run to
-repeat the exact token, amount, recipient, `task_budget_id` and
-`sub_budget_id` the first call used — a mismatch answers 409
-(`payments.ts:255-271`) rather than silently rerouting to a different
-payment.
+function return the FIRST payment for the second call — the agent told the
+second send succeeded while no second transfer happened. The generator is instead `direct:` + `crypto.randomUUID()`:
+every no-key call gets its own payment by construction, and a same-key
+re-run — in particular the `include_signing_payload: true` opt-in below — is
+a true replay ONLY because the caller deliberately echoes the key back, never
+because two calls happened to share parameters. The backend still requires
+the re-run to repeat the exact token, amount, recipient, `task_budget_id` and
+`sub_budget_id` the first call used — a mismatch answers 409 rather than
+silently rerouting to a different payment.
+
+**Replay semantics, precisely** (`findPaymentReplay`): the outcome depends on
+the stored row's own state. A matching key against a row still
+`pending_signature` AND within its `expires_at` window is a TRUE replay — the
+same `payment_id`, the same stored `sign_data`, no new chain read. A matching
+key against a row `pending_signature` but PAST `expires_at` is lazily expired
+and a FRESH intent is created under the SAME key (pre-existing #961
+behaviour, untouched here). A matching key against a row already `confirmed`
+(or any other terminal status) returns a STATUS replay with no `sign_data` at
+all. At any moment a given `idempotency_key` names AT MOST ONE live
+(non-terminal) intent.
 
 **The opt-in.** `include_signing_payload: true` on `haven_send` / `haven_pay`
 is new schema surface (`contracts.ts`) — a same-`idempotency_key` re-run
 returns the stored payment's full `delegationSignFields` (signature_scheme +
-typed_data + typed_data_b64), never a second intent. This is the recovery
-route `directSignerCompatibilityNotice` (`support/signer-compat.ts`) and
-`DIRECT_SIGN_REASON` (`state-direct-recovery.ts`) now name on a signer's
-`SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` refusal — worded for
-EVERY signer that can answer that refusal with `fallback: 'typed_data_b64'`
-(every published `@haven_ai/signer`, 0.5.0-alpha.1 through current, on a
-transport failure, a malformed body, or a 404 from an older backend), not
-only a pre-#3271 install as the #3277-era text said. Guidance never suggests
-a `payload_hash`-only call — a signer predating #3169's bare-hash refusal
-signs it raw and the account rejects it on-chain (AA24).
+typed_data + typed_data_b64), never a second intent.
 
-**Skew row.** Against a Haven deployment that has shipped #3495: an old
-signer (`<= 0.4.0-alpha.0`, predating #3271's direct sign-context fetch) or a
-CURRENT published signer's own `fallback: 'typed_data_b64'` (a transport
-failure on its `payment_id` fetch) both now need ONE EXTRA hosted call — the
-`include_signing_payload: true` re-run — before they can relay, where #3277
-let them relay straight from the original result. Neither signer needs a
-code change to keep working: both already read `fallback`/
-`next_tool_omitted_reason` as data, and the hosted notice's prose now names
-the extra call. Against an OLD Haven deployment (pre-#3495) the result still
-carries the relay fields unconditionally, so the extra call is simply unused
-guidance the old backend never asked for — no behaviour changes on that side
-of the skew.
+Two review-round-1 corrections, both fixed in the same PR that introduced
+this whole section:
+- **S5 — a same-key re-run of a CONFIRMED payment used to crash.**
+  `HavenClient.createIntent`'s return type hardcodes `status:
+  'pending_signature'`, so the status-replay body above (no `sign_data`)
+  reached `intent.signData.hash` and threw (`UNKNOWN_ERROR`) instead of
+  surfacing the real state. `haven_send`/`haven_pay` now detect a missing
+  `sign_data.hash` and answer with the REAL status (`haven.getPaymentStatus`),
+  the tx hash when recorded, no signing fields, and `next_action: none`
+  (confirmed) or `check_status_later` (otherwise).
+- **N3 — the opt-in re-run's own reason now tells the agent to relay
+  directly**, rather than looping back through `haven_sign { payment_id }` —
+  a compact result's reason (`DIRECT_SIGN_REASON`) still points at
+  `payment_id` first; the `include_signing_payload: true` re-run's own result
+  carries `DIRECT_SIGN_REASON_WITH_RELAY` instead.
+
+This is the recovery route `directSignerCompatibilityNotice`
+(`support/signer-compat.ts`) and `DIRECT_SIGN_REASON` (`state-direct-recovery.ts`)
+now name — on TWO DISTINCT trigger shapes, named separately (review round 1
+caught the PR's first pass conflating them into one wrong trigger): (1) any
+`haven_sign` refusal carrying `fallback: 'typed_data_b64'`, whatever its
+code — a currently-published `@haven_ai/signer` (0.5.0-alpha.1 through
+current) sets that field only on `SIGN_CONTEXT_TIMEOUT` /
+`SIGN_CONTEXT_UNREACHABLE` / `SIGN_CONTEXT_MALFORMED`, or
+`SIGN_CONTEXT_REFUSED` with `http_status: 404` against an older backend; (2)
+`SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
+and NO `fallback` field, which only a signer predating #3271 produces (no
+direct-fetch fallback of its own to try). Guidance never suggests a
+`payload_hash`-only call — a signer predating #3169's bare-hash refusal
+signs it raw and the account rejects it on-chain (AA24). The signer's own
+messages (`sign-context.ts`'s timeout/unreachable/malformed/404 throws,
+`tools.ts`'s `USEROP_BINDING_MISMATCH` remedy) and the backend's own 409 text
+(`modules/x402/sign-context.ts`) are updated to match; the 404 case names
+BOTH routes since the signer cannot tell whether the backend also predates
+#3495 (original result already carries the pair) or is merely refusing this
+`payment_id` for some other reason (a same-key opt-in re-run).
+
+**Skew, both directions.** Against a Haven deployment that has shipped #3495:
+an old signer (`<= 0.4.0-alpha.0`, predating #3271's direct sign-context
+fetch) or a CURRENT published signer hitting either trigger shape above both
+now need ONE EXTRA hosted call — the `include_signing_payload: true` re-run —
+before they can relay, where #3277 let them relay straight from the original
+result. Neither signer needs a code change to keep working: both already
+read `fallback`/`next_tool_omitted_reason` as data, and the hosted notice's
+prose now names the extra call. Against an OLD Haven deployment (pre-#3495)
+the result still carries the relay fields unconditionally, so the extra call
+is simply unused guidance the old backend never asked for. The OTHER
+direction: a caller running #3495-aware guidance against a PRE-#3495 hosted
+server — `include_signing_payload` is new schema surface the old server's
+strict input validation (`STRICT_INPUT_TOOLS`) does not declare, so it
+refuses the argument outright rather than silently ignoring it; harmless,
+because on that old server the pair was already on the original result and
+the re-run was never needed.
 
 Compatibility: additive/removed result fields only (the compact default drops
 `typed_data`/`typed_data_b64` from the unconditional shape; `idempotency_key`

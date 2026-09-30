@@ -126,6 +126,96 @@ describe('AccountReads', () => {
     await expect(service.getAgentSummary()).resolves.toMatchObject({ taskBudgets: [] })
   })
 
+  // #3501: the summary rows carry the budget-visibility figures — what the
+  // chain will still allow through each open task budget — so an agent
+  // reading getAgentSummary can tell BEFORE its next payment whether the
+  // task budget will refuse it.
+  it('maps task-budget spent/remaining with the honesty flag and a matching display (#3501)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent('delegation'))
+      if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') {
+        return json({ task_budgets: [{
+          id: 'tb-1', agent_id: 'agent_1', chain_id: 8453, token_address: USDC,
+          recipient_address: null, parent_delegation_hash: `0x${'ab'.repeat(32)}`,
+          delegation_hash: `0x${'cd'.repeat(32)}`, label: 'Research', max_atomic: '1500',
+          // The issue's reproduction: 1000 + 500 spent under a 1500 cap.
+          spent_atomic: '1500', remaining_atomic: '0', remaining_is_from_chain: true,
+          status: 'open', expires_at: 9999999999, is_expired: false,
+          created_at: '2026-09-30T00:00:00.000Z', opened_at: '2026-09-30T00:00:00.000Z',
+          closed_at: null, close_tx_hash: null,
+        }] })
+      }
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    const summary = await service.getAgentSummary()
+    expect(summary.taskBudgets).toHaveLength(1)
+    const row = summary.taskBudgets[0]
+    expect(row.spentAtomic).toBe('1500')
+    expect(row.remainingAtomic).toBe('0')
+    expect(row.remainingIsFromChain).toBe(true)
+    // formatAtomicAmount keeps one decimal place — the shared SDK formatter,
+    // same shape maxDisplay uses.
+    expect(row.remainingDisplay).toBe('0.0 USDC')
+    expect(row.maxDisplay).toBe('0.0015 USDC')
+  })
+
+  it('#3501: a failed on-chain read (null figures, false flag) maps to null remaining — never the full cap', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent('delegation'))
+      if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') {
+        return json({ task_budgets: [{
+          id: 'tb-1', agent_id: 'agent_1', chain_id: 8453, token_address: USDC,
+          recipient_address: null, parent_delegation_hash: `0x${'ab'.repeat(32)}`,
+          delegation_hash: `0x${'cd'.repeat(32)}`, label: 'Research', max_atomic: '1500',
+          spent_atomic: null, remaining_atomic: null, remaining_is_from_chain: false,
+          status: 'open', expires_at: 9999999999, is_expired: false,
+          created_at: '2026-09-30T00:00:00.000Z', opened_at: '2026-09-30T00:00:00.000Z',
+          closed_at: null, close_tx_hash: null,
+        }] })
+      }
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    const summary = await service.getAgentSummary()
+    const row = summary.taskBudgets[0]
+    expect(row.spentAtomic).toBeNull()
+    expect(row.remainingAtomic).toBeNull()
+    expect(row.remainingDisplay).toBeNull()
+    expect(row.remainingIsFromChain).toBe(false)
+    expect(row.remainingAtomic).not.toBe('1500')
+  })
+
+  it('#3501: a backend without the new keys maps to the honest degraded shape (nulls, false flag)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent('delegation'))
+      if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') {
+        return json({ task_budgets: [{
+          id: 'tb-1', agent_id: 'agent_1', chain_id: 8453, token_address: USDC,
+          recipient_address: null, parent_delegation_hash: `0x${'ab'.repeat(32)}`,
+          delegation_hash: `0x${'cd'.repeat(32)}`, label: 'Research', max_atomic: '1500',
+          status: 'open', expires_at: 9999999999, is_expired: false,
+          created_at: '2026-09-30T00:00:00.000Z', opened_at: '2026-09-30T00:00:00.000Z',
+          closed_at: null, close_tx_hash: null,
+        }] })
+      }
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    const summary = await service.getAgentSummary()
+    const row = summary.taskBudgets[0]
+    expect(row.spentAtomic).toBeNull()
+    expect(row.remainingAtomic).toBeNull()
+    expect(row.remainingIsFromChain).toBe(false)
+    expect(row.remainingDisplay).toBeNull()
+  })
+
   it('keeps a settled status when the best-effort allowance read fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname

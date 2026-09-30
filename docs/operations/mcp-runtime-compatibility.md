@@ -81,6 +81,32 @@ last-verified: "2026-09-29"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified #3501 (2026-09-30, task budgets report spent/remaining):**
+> this diff touches four files this document covers —
+> `packages/sdk/src/types.ts` (`RawTaskBudget` gains optional
+> `spent_atomic` / `remaining_atomic` / `remaining_is_from_chain`;
+> `HavenTaskBudget` and `HavenTaskBudgetSummary` the camelCase forms plus
+> `remainingDisplay`), `packages/sdk/src/account-reads.ts` (`mapTaskBudget`
+> preserves key presence exactly — absent stays absent, so a caller can
+> distinguish "this response did not read the chain" from "the read failed"
+> (null), and `summarizeTaskBudget` derives `remainingDisplay` by the SAME
+> formatter as `maxDisplay`, mapping an older backend's absent keys to the
+> honest degraded shape — null figures, `remainingIsFromChain: false`, never
+> the full cap as remaining), `packages/sdk/src/tool-descriptions.ts`
+> (`getAgent`'s and `getAllowances`'s behavior text names the new fields and
+> where task budgets live), and
+> `packages/mcp-server/src/description-size.test.ts` (the #1591 total/mean
+> pins re-derived to the measured 24,474 / 941.31 — the test, not this
+> sentence, is the instrument). Additive, optional keys on the wire; no tool
+> is added, renamed or re-shaped on either runtime, no argument or input
+> schema changes, and the version-skew and consent-hash contracts do not
+> move: descriptions are not a skew axis (#2330 precedent), and the local
+> consent hash covers tool names, not their inputs or responses
+> (`packages/mcp/src/consent.ts`). An older SDK against a newer backend
+> ignores the new keys; a newer SDK against an older backend sees none and
+> reports the degraded shape. `last-verified` is not re-stamped: this block
+> is the scope. Nothing else in this document was re-verified.
+>
 > **Re-verified #3427 (2026-09-29, the paid x402 retry carries the buyer tax
 > declaration):** this diff touches files under covered trees —
 > `packages/sdk/src/client.ts`, `merchant-completion.ts`, `edge.ts`,

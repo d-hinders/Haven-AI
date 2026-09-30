@@ -23,9 +23,13 @@
  * concurrent payments can each pass and the second still fail on-chain.
  */
 import type { Hex } from 'viem'
-import { readTaskBudgetSpent, type TaskBudgetSpentReader } from '../../infra/chain/task-budget-spent-reader.js'
+import {
+  readTaskBudgetSpent,
+  readTaskBudgetSpentBounded,
+  type TaskBudgetSpentReader,
+} from '../../infra/chain/task-budget-spent-reader.js'
 
-export { readTaskBudgetSpent, type TaskBudgetSpentReader }
+export { readTaskBudgetSpent, readTaskBudgetSpentBounded, type TaskBudgetSpentReader }
 
 export type TaskBudgetCapCheck =
   | { outcome: 'fits' }
@@ -74,5 +78,42 @@ export function taskBudgetExceededBody(input: {
     amount_atomic: input.amountAtomic,
     remaining_atomic: input.remainingAtomic,
     max_atomic: input.maxAtomic,
+  }
+}
+
+/**
+ * #3501: the READ-side twin of {@link checkTaskBudgetCap} — spent/remaining
+ * for a task-budget REPORT, decided on the same authority (the enforcer's
+ * own `spentMap` for the child's delegation hash).
+ *
+ * A report must never lie by omission: a failed chain read answers
+ * `spentAtomic: null, remainingAtomic: null` with a console warning, and the
+ * caller labels the figures unavailable. It must NEVER fall back to "remaining
+ * = the full cap" the way the parent budget's read does (#1145 kept its
+ * fallback because that number had a prior behaviour to preserve): for a task
+ * budget the full cap as "remaining" is exactly the wrong answer the issue
+ * reports — the agent would read `1500/1500 left`, attempt the payment, and
+ * revert on-chain again. Unavailable is honest; optimistic is not.
+ */
+export async function readTaskBudgetSpentForReport(
+  input: { chainId: number; delegationHash: string; maxAtomic: string },
+  // The BOUNDED variant: a report is a polled, advisory read and the GET
+  // endpoints carrying it must answer promptly even when every RPC endpoint
+  // hangs (#1145's lesson). Inject `readTaskBudgetSpent` (unbounded) to
+  // reproduce the pre-check's contract in tests.
+  readSpent: TaskBudgetSpentReader = readTaskBudgetSpentBounded,
+): Promise<{ spentAtomic: string | null; remainingAtomic: string | null }> {
+  try {
+    const spent = await readSpent(input.chainId, input.delegationHash as Hex)
+    const max = BigInt(input.maxAtomic)
+    const remaining = spent >= max ? 0n : max - spent
+    return { spentAtomic: spent.toString(), remainingAtomic: remaining.toString() }
+  } catch (err) {
+    console.warn(
+      `task-budget: on-chain spent read unavailable for delegation ${input.delegationHash} ` +
+        `(chain ${input.chainId}) — reporting spent/remaining as null rather than an optimistic figure: ` +
+        (err instanceof Error ? err.message : String(err)),
+    )
+    return { spentAtomic: null, remainingAtomic: null }
   }
 }

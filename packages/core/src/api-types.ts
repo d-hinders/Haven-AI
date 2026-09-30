@@ -605,7 +605,7 @@ export type paths = {
         };
         /**
          * List an agent's task budgets.
-         * @description Every task budget on this agent, newest first — the owner-facing twin of the agent-auth list at GET /task-budgets. Scoped by BOTH agent id and the caller's ownership of it.
+         * @description Every task budget on this agent, newest first — the owner-facing twin of the agent-auth list at GET /task-budgets. Scoped by BOTH agent id and the caller's ownership of it. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash; a failed on-chain read reports null with remaining_is_from_chain: false — never the full cap as remaining.
          */
         get: operations["listAgentTaskBudgets"];
         put?: never;
@@ -2320,7 +2320,7 @@ export type paths = {
         };
         /**
          * List task budgets for the authenticated agent.
-         * @description Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry.
+         * @description Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.
          */
         get: operations["listTaskBudgets"];
         put?: never;
@@ -2342,7 +2342,10 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Fetch one task budget. */
+        /**
+         * Fetch one task budget.
+         * @description #3501: an OPEN task budget carries spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.
+         */
         get: operations["getTaskBudget"];
         put?: never;
         post?: never;
@@ -3461,6 +3464,16 @@ export type components = {
             delegation_hash: string;
             label: string | null;
             max_atomic: string;
+            /** @description What has been transferred through this child so far, read live from the ERC20TransferAmountEnforcer's spentMap for this delegation hash — the same authority the chain applies at redemption. Present on GET reads of an open task budget only; null when the on-chain read failed (a warning is logged server-side). Absent on responses that did not read the chain. */
+            spent_atomic?: string | null;
+            /** @description max_atomic minus spent_atomic, clamped at zero — what the chain will still allow through this child. Never fabricated: a failed read reports null, never the full cap. */
+            remaining_atomic?: string | null;
+            /** @description Human form of spent_atomic ("0.001 USDC"), derived server-side from the chain registry. Null exactly when spent_atomic is null; an unknown token renders the atomic figure explicitly labelled. */
+            spent_display?: string | null;
+            /** @description Human form of remaining_atomic. Null exactly when remaining_atomic is null. */
+            remaining_display?: string | null;
+            /** @description Provenance of remaining_atomic (#1319-style honesty flag): true when it came from the live enforcer read, false when that read failed (spent_atomic and remaining_atomic are then null). Present only where the read was attempted. */
+            remaining_is_from_chain?: boolean;
             /** @enum {string} */
             status: "pending" | "open" | "closing" | "closed";
             /** @description Unix seconds. */

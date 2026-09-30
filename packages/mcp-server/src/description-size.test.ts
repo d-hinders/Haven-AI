@@ -223,11 +223,28 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * same rule applies — re-derived at the measured mean, shrink-only from
  * here.
  */
-const MAX_TOTAL_BYTES = 24_123
-// Mean pin: re-derived — round 10, #3475 follow-up (block above): 24,123 / 26 =
-// 927.8077, pinned at the two-decimal ceiling (927.81). Round 9's 922.43
+/**
+ * **Re-derived — round 11, #3501 (2026-09-30).** `haven_get_agent`'s
+ * `taskBudgets[]` rows gain the budget-visibility figures the issue asks for
+ * — `spentAtomic`, `remainingAtomic`, `remainingDisplay` (what the chain will
+ * still allow through an open task budget) and the `remainingIsFromChain`
+ * honesty flag — and `haven_get_allowances` names where task budgets live
+ * instead of leaving an agent guessing (+351 UTF-8 bytes across those two
+ * descriptions, compressed once: the clauses state the fields, the degraded
+ * read, and nothing else — an agent reading tools/list learns the fields
+ * exist before it attempts a payment a spent-out task budget will refuse,
+ * the same field-naming obligation rounds 9/10 recorded for additive
+ * response fields). No overclaim remains to trim. Measured total 24,474
+ * across the same 26 tools; the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin moves too: 24,474 / 26 = 941.31 sits
+ * above round 10's 927.81, and the same rule applies — re-derived at the
+ * measured mean, shrink-only from here.
+ */
+const MAX_TOTAL_BYTES = 24_474
+// Mean pin: re-derived — round 11, #3501 (block above): 24,474 / 26 =
+// 941.3077, pinned at the two-decimal ceiling (941.31). Round 10's 927.81
 // cannot hold while this tree exceeds it. Shrink-only from here.
-const MAX_MEAN_BYTES = 927.81
+const MAX_MEAN_BYTES = 941.31
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

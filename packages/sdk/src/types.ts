@@ -939,6 +939,27 @@ export interface RawTaskBudget {
   delegation_hash: string
   label: string | null
   max_atomic: string
+  /**
+   * #3501: what the child has spent so far, read live from the enforcer's
+   * `spentMap` for the delegation hash. Present on GET reads of an OPEN task
+   * budget only; null when the on-chain read failed; absent on responses
+   * that did not read the chain.
+   */
+  spent_atomic?: string | null
+  /**
+   * #3501: `max_atomic` minus `spent_atomic`, clamped at zero — what the
+   * chain will still allow. Never fabricated: a failed read is null, never
+   * the full cap.
+   */
+  remaining_atomic?: string | null
+  /**
+   * #3501: provenance of `remaining_atomic`, the same honesty flag the
+   * parent allowance carries (`onchain.remaining_is_from_chain`, #1319):
+   * true when it came from the live enforcer read, false when that read
+   * failed (spent/remaining are then null). Present only where the read was
+   * attempted.
+   */
+  remaining_is_from_chain?: boolean
   status: HavenTaskBudgetStatus
   expires_at: number
   is_expired: boolean
@@ -959,6 +980,22 @@ export interface HavenTaskBudget {
   delegationHash: string
   label: string | null
   maxAtomic: string
+  /**
+   * #3501: camelCase form of `spent_atomic` — the live enforcer figure.
+   * Present on GET reads of an open task budget; null when the read failed;
+   * absent when the response did not read the chain.
+   */
+  spentAtomic?: string | null
+  /**
+   * #3501: what the chain will still allow through this child (cap minus
+   * spent, clamped at zero). A failed read is null — never the full cap.
+   */
+  remainingAtomic?: string | null
+  /**
+   * #3501: provenance of `remainingAtomic`, the parent allowance's honesty
+   * flag (`onchain.remainingIsFromChain`, #1319) on the task-budget surface.
+   */
+  remainingIsFromChain?: boolean
   status: HavenTaskBudgetStatus
   expiresAt: number
   isExpired: boolean
@@ -972,6 +1009,15 @@ export interface HavenTaskBudget {
  * #3329: the condensed row `getAgentSummary()` carries per open, unexpired
  * task budget — enough to render a "reserved by open task budgets" line and
  * a task-budget list without a second read.
+ *
+ * #3501: each row also carries the budget-visibility figure the issue asks
+ * for — what the chain will still allow through this child — so an agent
+ * reading `haven_get_agent` can tell BEFORE its next payment whether the
+ * task budget will refuse it. `remainingAtomic` is null when the on-chain
+ * read failed (never the full cap as remaining), and
+ * `remainingIsFromChain` is the same honesty flag the parent allowance's
+ * `onchain.remainingIsFromChain` carries (#1319): true = live enforcer
+ * read, false = the read failed and the figures are null.
  */
 export interface HavenTaskBudgetSummary {
   id: string
@@ -979,6 +1025,28 @@ export interface HavenTaskBudgetSummary {
   tokenAddress: string
   maxAtomic: string
   maxDisplay: string
+  /**
+   * #3501: spent so far through this child, from the enforcer's `spentMap`.
+   * Null when the on-chain read failed; also null for a budget whose
+   * delegation the read could not speak for.
+   */
+  spentAtomic: string | null
+  /**
+   * #3501: `maxAtomic` minus spent, clamped at zero. Null — never the full
+   * cap — when the on-chain read failed.
+   */
+  remainingAtomic: string | null
+  /**
+   * #3501: true when `remainingAtomic` came from the live enforcer read,
+   * false when that read failed (spent/remaining are then null).
+   */
+  remainingIsFromChain: boolean
+  /**
+   * #3501: human form of `remainingAtomic` ("0.001 USDC"), derived by the
+   * same formatter as `maxDisplay`. Null exactly when `remainingAtomic` is
+   * null — a failed read never renders as an amount.
+   */
+  remainingDisplay: string | null
   recipientAddress: string | null
   expiresAt: number
 }

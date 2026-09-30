@@ -99,6 +99,13 @@ export function mapTaskBudget(raw: RawTaskBudget): HavenTaskBudget {
     delegationHash: raw.delegation_hash,
     label: raw.label,
     maxAtomic: raw.max_atomic,
+    // #3501: the wire keys are optional/present-when-read; the mapping
+    // preserves presence exactly — absent stays absent, so a caller can
+    // distinguish "this response did not read the chain" from "the read
+    // failed" (null) and from a live figure.
+    ...(raw.spent_atomic === undefined ? {} : { spentAtomic: raw.spent_atomic }),
+    ...(raw.remaining_atomic === undefined ? {} : { remainingAtomic: raw.remaining_atomic }),
+    ...(raw.remaining_is_from_chain === undefined ? {} : { remainingIsFromChain: raw.remaining_is_from_chain }),
     status: raw.status,
     expiresAt: raw.expires_at,
     isExpired: raw.is_expired,
@@ -115,12 +122,32 @@ function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummar
   const maxDisplay = token
     ? `${formatAtomicAmount(safeBigInt(taskBudget.maxAtomic), token.decimals)} ${token.symbol}`
     : `${taskBudget.maxAtomic} (atomic; unknown decimals)`
+  // #3501: the display form rides beside the atomic one, derived by the SAME
+  // formatter as `maxDisplay` — one arithmetic, no drift between max and
+  // remaining. Null atomic (failed read) maps to null display, never "0" or
+  // the cap; an unknown token spells the atomic figure out explicitly
+  // instead of guessing decimals.
+  const spendDisplay = (atomic: string | null): string | null => {
+    if (atomic === null) return null
+    return token
+      ? `${formatAtomicAmount(safeBigInt(atomic), token.decimals)} ${token.symbol}`
+      : `${atomic} (atomic; unknown decimals)`
+  }
   return {
     id: taskBudget.id,
     label: taskBudget.label,
     tokenAddress: taskBudget.tokenAddress,
     maxAtomic: taskBudget.maxAtomic,
     maxDisplay,
+    // The GET route only enriches OPEN rows, and this summary reads
+    // `?status=open` — so the keys are present whenever the backend
+    // deployed this far. An older backend without them maps to the honest
+    // degraded shape (null figures, false flag), which is also exactly what
+    // a backend whose live read failed reports: "unknown", never optimistic.
+    spentAtomic: taskBudget.spentAtomic ?? null,
+    remainingAtomic: taskBudget.remainingAtomic ?? null,
+    remainingIsFromChain: taskBudget.remainingIsFromChain ?? false,
+    remainingDisplay: spendDisplay(taskBudget.remainingAtomic ?? null),
     recipientAddress: taskBudget.recipientAddress,
     expiresAt: taskBudget.expiresAt,
   }

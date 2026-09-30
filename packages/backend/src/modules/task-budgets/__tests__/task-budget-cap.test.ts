@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { EstimateGasExecutionError } from 'viem'
-import { checkTaskBudgetCap, taskBudgetExceededBody } from '../task-budget-cap.js'
+import { checkTaskBudgetCap, readTaskBudgetSpentForReport, taskBudgetExceededBody } from '../task-budget-cap.js'
 import { classifyRevertForLedger, isTransferCapRevert } from '../../payments/refusal-ledger.js'
 
 const HASH = `0x${'cd'.repeat(32)}`
@@ -71,6 +71,36 @@ describe('taskBudgetExceededBody (#3500)', () => {
     })
     expect(String(body.error)).toMatch(/retrying cannot succeed/)
     expect(String(body.error)).toMatch(/Close this task budget and open a new one/)
+  })
+})
+
+describe('readTaskBudgetSpentForReport (#3501)', () => {
+  it('reports the enforcer figures with the same clamp the cap check uses', async () => {
+    await expect(
+      readTaskBudgetSpentForReport({ chainId: 84532, delegationHash: HASH, maxAtomic: '1500' }, reads(1000n)),
+    ).resolves.toEqual({ spentAtomic: '1000', remainingAtomic: '500' })
+    // A spent-past-cap budget (the issue's reproduction: 1000 + 500 under a
+    // 1500 cap) clamps at zero — never a negative, never the full cap.
+    await expect(
+      readTaskBudgetSpentForReport({ chainId: 84532, delegationHash: HASH, maxAtomic: '1500' }, reads(1600n)),
+    ).resolves.toEqual({ spentAtomic: '1600', remainingAtomic: '0' })
+  })
+
+  it('a failed chain read degrades to null/null with a warning — never the full cap as remaining', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await expect(
+        readTaskBudgetSpentForReport(
+          { chainId: 84532, delegationHash: HASH, maxAtomic: '1500' },
+          vi.fn().mockRejectedValue(new Error('rpc down')),
+        ),
+      ).resolves.toEqual({ spentAtomic: null, remainingAtomic: null })
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0][0])).toMatch(/spent read unavailable/)
+      expect(String(warn.mock.calls[0][0])).toMatch(/never a fabricated remaining|reporting spent\/remaining as null/)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 

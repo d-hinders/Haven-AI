@@ -17,7 +17,7 @@ import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
-import { formatFiat, timeAgo } from '@/lib/format'
+import { formatFiat, currencyLocale, timeAgo } from '@/lib/format'
 import {
   transactionMovement,
   transactionStatus,
@@ -52,11 +52,20 @@ import type { AggregatedTransaction } from '@/types/transactions'
 // `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
 // These two wrappers keep only what is dashboard-specific: the compact
 // notation for the metric tiles, and the signed change line.
+//
+// #3195 (round-2 finding a): the SEK compact tier renders in the UI's voice
+// (en-US), not the currency's — a big SEK tile read sv-SE's Swedish scale
+// words (`5,19 tn kr`, "tn" = tusen) in an otherwise English UI. Scoped to
+// the compact tier: the standard tier keeps `133,00 kr` (the #3127 voice,
+// byte-pinned by the SEK baseline), and EUR keeps its deliberate de-DE voice
+// at every tier (#3127's "the rule that puts EUR in de-DE" — untouched).
 function formatCompactCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
+  const compact = Math.abs(value) >= 1000
+  const locale = compact && currency === 'SEK' ? 'en-US' : currencyLocale(currency)
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
-    notation: Math.abs(value) >= 1000 ? 'compact' : 'standard',
+    notation: compact ? 'compact' : 'standard',
     maximumFractionDigits: 2,
   }).format(value)
 }
@@ -66,8 +75,21 @@ function formatSignedCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): s
   return `${sign}${formatFiat(Math.abs(value), currency)}`
 }
 
-function formatPercent(value: number): string {
-  return `${value > 0 ? '+' : value < 0 ? '-' : ''}${Math.abs(value).toFixed(2)}%`
+// #3195 (round-2 finding b): the percent half of the change line renders in
+// the currency's locale through `Intl` — `signDisplay: 'exceptZero'` keeps
+// the explicit sign the old `toFixed` branch built by hand. The USD render is
+// byte-identical (`+1.00%`); EUR now takes de-DE's voice (`+1,00 %`, its old
+// render was the same hand-rolled English scaffold) and a SEK change line
+// stops mixing voices: `+20,00 %` now, where the decimal comma came from
+// sv-SE and the `+`/`%` scaffold from that pattern.
+function formatPercent(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
+  return new Intl.NumberFormat(currencyLocale(currency), {
+    style: 'percent',
+    signDisplay: 'exceptZero',
+    useGrouping: false,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value / 100)
 }
 
 function formatResetLabel(resetPeriodMin: number): string {
@@ -319,7 +341,7 @@ function DashboardHero({
               </p>
             ) : changeAvailable && !sekChangeUnavailable && !changeUnavailable && changeAmount !== null ? (
             <p className={`mt-3 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
-              {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
+              {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent, currency)}) today
             </p>
           ) : (
             <p className="mt-3 text-sm text-[var(--v2-ink-3)]">

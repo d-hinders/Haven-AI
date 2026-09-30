@@ -310,12 +310,14 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(2, 10)
       expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(1.8, 10)
       // A zero `fallback_amount_sek` prices NO SEK fallback even though the
-      // same fiat read returned one — SEK is booked or NULL, never re-priced
-      // from the USD/EUR bucket (#3127 round-3 review).
+      // same fiat read returned one — the SEK bucket prices only what its
+      // OWN aggregate collected (#3127 round-2 review), never the USD/EUR
+      // read. `fallback_amount_sek` is 0 on this row because the row booked
+      // a real SEK figure — priced rows are collected into neither bucket.
       expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(0, 10)
     })
 
-    it('does NOT double-count a row migration 090 backfilled — the probe fixture, result 21 vs truth 10.5 pre-fix (#3127 round-3 review)', async () => {
+    it('does NOT double-count a row migration 090 backfilled — the probe fixture, result 21 vs truth 10.5 pre-fix (#3127 round-2 review)', async () => {
       // The reviewer's probe: one confirmed row with a backfilled
       // `sek_value` of 10.5 and no booked USD/EUR. The pre-fix accumulator
       // collected the row's token amount through `fallback_amount` (whose
@@ -340,29 +342,47 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(0.09, 10)
     })
 
-    it('prices SEK from its own NULL-sek_value bucket, once, alongside an independent USD/EUR bucket', async () => {
-      // One row booked SEK (backfilled) needing the USD/EUR re-price, plus
-      // one row with `sek_value` still NULL needing the SEK re-price: each
-      // bucket prices its own rows exactly once. One shared fiat answer
-      // serves both reads (the ratchet forbids positional mocks here): the
+    it('prices SEK from its own bucket under the mirrored predicate — the A/B/C probe rows (#3195)', async () => {
+      // The probe rows #3195 measured on a real DB, now as aggregate output
+      // (what the mirrored SQL returns for them):
+      //   A: booked sek 10.5, usd/eur NULL, amount 1  → fallback 1, sek 0
+      //   B: sek NULL, booked usd 2 / eur 1.8, amt 2  → fallback 0, sek 2
+      //   C: 0/0/0 booked, amount 4 (the zeroPrice() shape)
+      //       → fallback 4, sek 4 under the MIRRORED predicate;
+      //         sek 0 under the pre-#3195 NULL-only predicate.
+      // Each bucket prices its own rows exactly once. One shared fiat answer
+      // serves every read (the ratchet forbids positional mocks here): the
       // SEK figure each row contributes comes from the read its OWN bucket
       // triggered, which the call-count assertions below pin.
       fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.1, eur: 0.09, sek: 1 })
       installQueryMock({
         paymentSpend: [
           { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '10.5', fallback_amount: '1', fallback_amount_sek: '0' },
-          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '0', fallback_amount: '0', fallback_amount_sek: '1' },
+          { token_symbol: 'USDC', usd_sum: '2', eur_sum: '1.8', sek_sum: '0', fallback_amount: '0', fallback_amount_sek: '2' },
+          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '0', fallback_amount: '4', fallback_amount_sek: '4' },
         ],
       })
 
       const body = (await getOverview()).json()
 
-      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenCalledTimes(2)
+      // A: the USD/EUR re-price; B: the SEK re-price; C: BOTH (the mirror).
+      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenCalledTimes(4)
       expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(1, 'USDC', '1')
-      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(2, 'USDC', '1')
-      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(11.5, 10)
-      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(0.1, 10)
-      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(0.09, 10)
+      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(2, 'USDC', '2')
+      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(3, 'USDC', '4')
+      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(4, 'USDC', '4')
+      // C is what the asymmetry hid: under a NULL-only SEK predicate the
+      // zero-booked row contributes 0 SEK (total 11.5) while USD/EUR still
+      // re-price it — the SEK tile reads LOWER than USD for the same rows.
+      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(12.5, 10)
+      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(2.2, 10)
+      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(1.98, 10)
+      // This file mocks db.query, so it pins what the CALLER does with the
+      // aggregate's columns; the row-C values here are only reachable if the
+      // SQL produced them. The SQL-side mutation proof — reverting the
+      // mirrored zero prong turns the db suite red — lives in
+      // infra/repositories/__tests__/dashboard-monthly-spend.db.test.ts,
+      // which executes the statement itself.
     })
 
     it('scopes the month-to-date aggregate to the authenticated user', async () => {

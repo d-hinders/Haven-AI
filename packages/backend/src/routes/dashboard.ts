@@ -59,12 +59,11 @@ async function accumulateMonthlySpend(
     // the token amount into all three currencies, but each bucket may only
     // land its own currency: `sek_sum` already holds every row's booked
     // `sek_value`, and pricing SEK from the USD/EUR bucket's read is the
-    // double-count the round-3 review measured (21 vs 10.5) — migration 090
+    // double-count the round-2 review measured (21 vs 10.5) — migration 090
     // backfills rows whose usd/eur are NULL, so the USD/EUR predicate
-    // collects rows SEK has already priced. The row shapes are disjoint
-    // neither way: a row can carry a booked SEK figure and still need the
-    // USD/EUR re-price, or the reverse, so neither bucket may `continue` the
-    // other.
+    // collects rows SEK has already priced. The buckets' predicates agree
+    // per row shape (#3195): NULL, or zero-booked beside a real amount,
+    // collects into BOTH buckets; a priced row into neither.
     const fallbackAmount = Number(row.fallback_amount ?? '0')
     if (fallbackAmount > 0) {
       const fallback = await getFiatValuesForTokenAmount(
@@ -240,7 +239,7 @@ export default async function dashboardRoutes(
     const enrichedTransactions = await enrichTransactionsWithAgents(
       sub,
       dedupedTransactions,
-      // The preview names its currency like the feed does (#3127 round-3
+      // The preview names its currency like the feed does (#3127 round-2
       // review): without the preference, the same payment is SEK here and
       // USD on /transactions for a USD user.
       await resolveTransactionCurrency(sub),

@@ -143,3 +143,33 @@ describe('the typed rail-unavailable 503 is a stop with its own code (#3416)', (
     expect(out.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
   })
 })
+
+describe('the typed task-budget 403 is a stop with its own code (#3500)', () => {
+  const taskBudgetExceeded = () =>
+    new HavenApiError('This payment of 0.0005 USDC exceeds what is left of task budget tb_1 (0 USDC left).', 403, {
+      error: 'This payment of 0.0005 USDC exceeds what is left of task budget tb_1 (0 USDC left).',
+      error_code: 'task_budget_exceeded',
+      task_budget_id: 'tb_1',
+      remaining_atomic: '0',
+    })
+
+  it('carries TASK_BUDGET_EXCEEDED with the task budget id and remainder, not the generic API_ERROR', () => {
+    const out = normalizeError(taskBudgetExceeded()) as unknown as Record<string, unknown>
+    expect(out.code).toBe('TASK_BUDGET_EXCEEDED')
+    expect(out.statusCode).toBe(403)
+    expect(out.task_budget_id).toBe('tb_1')
+    expect(out.remaining_atomic).toBe('0')
+  })
+
+  it('says stop and names the close-and-reopen remedy, never a retry', () => {
+    const out = normalizeError(taskBudgetExceeded()) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/close it and open a new one/)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/retrying cannot succeed/)
+  })
+
+  it('any other 403 keeps the generic API_ERROR stop', () => {
+    const out = normalizeError(new HavenApiError('forbidden', 403, { error: 'forbidden', error_code: 'delegation_budget_exceeded' }))
+    expect(out.code).toBe('API_ERROR')
+  })
+})

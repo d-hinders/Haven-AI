@@ -27,7 +27,7 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { classifyRevertForLedger, refuse } from '../modules/payments/index.js'
+import { classifyRevertForLedger, isTransferCapRevert, refuse } from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
@@ -67,7 +67,9 @@ import {
   type SubBudgetPaymentRefusal,
 } from '../modules/sub-budgets/index.js'
 import {
+  checkTaskBudgetCap,
   resolveTaskBudgetChildForPayment,
+  taskBudgetExceededBody,
   type TaskBudgetPaymentRefusal,
 } from '../modules/task-budgets/index.js'
 
@@ -521,6 +523,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // `to`, would otherwise get a spurious task_budget_parent_mismatch).
     let taskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
     let taskBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
+    // #3500: the task budget's cap inputs, kept for the pre-check below and
+    // for attributing an on-chain transfer-cap revert to THIS task budget.
+    let taskBudgetCap: { id: string; delegationHash: string; maxAtomic: string } | null = null
     if (task_budget_id) {
       const taskBudgetRow = await findTaskBudgetForAgent(task_budget_id, agent.id)
       if (!taskBudgetRow) {
@@ -552,6 +557,52 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       }
       taskBudgetChild = resolved.childDelegation
       taskBudgetParentDelegation = parentDelegation
+      taskBudgetCap = {
+        id: taskBudgetRow.id,
+        delegationHash: taskBudgetRow.delegation_hash,
+        maxAtomic: taskBudgetRow.max_atomic,
+      }
+    }
+
+    // #3500: refuse a payment the task budget's cap cannot cover BEFORE the
+    // UserOp is built, from the enforcer's own spent figure — a typed,
+    // non-retryable 403 instead of the simulation revert's untyped 502. An
+    // unreadable chain skips the check; the enforcer remains the gate and the
+    // revert fallback in the catch below answers the same refusal.
+    const taskBudgetRefusal = async (): Promise<Record<string, unknown> | null> => {
+      if (!taskBudgetCap) return null
+      const check = await checkTaskBudgetCap({
+        chainId: agent.chain_id,
+        delegationHash: taskBudgetCap.delegationHash,
+        maxAtomic: taskBudgetCap.maxAtomic,
+        amountAtomic: amountRaw,
+      })
+      if (check.outcome !== 'exceeded') return null
+      return taskBudgetExceededBody({
+        taskBudgetId: taskBudgetCap.id,
+        tokenSymbol: tokenConfig.symbol,
+        amountHuman: amount,
+        amountAtomic: amountRaw.toString(),
+        remainingAtomic: check.remainingAtomic.toString(),
+        remainingHuman: formatTokenAmount(check.remainingAtomic, tokenConfig.decimals),
+        maxAtomic: check.maxAtomic.toString(),
+      })
+    }
+    const taskBudgetLedger = (body: Record<string, unknown>) => ({
+      userId: agent.user_id,
+      agentId: agent.id,
+      chainId: agent.chain_id,
+      tokenSymbol: tokenConfig.symbol,
+      amountAtomic: amountRaw.toString(),
+      accountAddress: agent.account_address,
+      merchantTo: to.toLowerCase(),
+      reason: 'delegation_budget_exceeded' as const,
+      source: 'payment' as const,
+      detail: { error_code: 'task_budget_exceeded', task_budget_id: body.task_budget_id, remaining_atomic: body.remaining_atomic },
+    })
+    const preRefusal = await taskBudgetRefusal()
+    if (preRefusal) {
+      return refuse(reply.code(403).send(preRefusal), taskBudgetLedger(preRefusal))
     }
 
     // ── Sub-budget (#3330, optional) ──────────────────────────────────────
@@ -646,6 +697,16 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // typed, non-retryable 503, and nothing booked (nothing was refused).
       if (err instanceof DelegationRailChainUnavailableError) {
         return refuse(reply.code(503).send(railUnavailableRefusalBody(err)), null)
+      }
+      // #3500: a transfer-cap revert on a task-budget payment is that task
+      // budget's cap — but only once its own spent figure confirms it (the
+      // same enforcer also carries a budget's lifetime cap). Then it is the
+      // same typed 403 the pre-check answers, never a "transient" 502.
+      if (taskBudgetCap && isTransferCapRevert(err)) {
+        const revertRefusal = await taskBudgetRefusal()
+        if (revertRefusal) {
+          return refuse(reply.code(403).send(revertRefusal), taskBudgetLedger(revertRefusal))
+        }
       }
       const refusalReason = classifyRevertForLedger(err)
       // #3053: through the shared choke point; the ledger input is null when

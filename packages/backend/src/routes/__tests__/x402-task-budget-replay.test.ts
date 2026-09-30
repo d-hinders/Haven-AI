@@ -20,6 +20,8 @@
  * live in the sibling lost-race file, which stubs the repository lookup.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+// #3500: the task-budget cap pre-check reads the enforcer's spentMap — never a live chain here.
+vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({ readTaskBudgetSpent: async () => 0n }))
 import { privateKeyToAccount } from 'viem/accounts'
 
 const {

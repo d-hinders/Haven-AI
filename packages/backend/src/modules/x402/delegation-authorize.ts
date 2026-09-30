@@ -34,7 +34,7 @@ import {
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
-import { classifyRevertForLedger } from '../payments/refusal-ledger.js'
+import { classifyRevertForLedger, isTransferCapRevert } from '../payments/refusal-ledger.js'
 import { refuse } from '../payments/refuse.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
@@ -45,7 +45,9 @@ import {
   findOpenParentChildByHash,
 } from '../../infra/repositories/sub-budgets.js'
 import {
+  checkTaskBudgetCap,
   resolveTaskBudgetChildForPayment,
+  taskBudgetExceededBody,
   type TaskBudgetPaymentRefusal,
 } from '../task-budgets/index.js'
 import {
@@ -169,7 +171,62 @@ async function resolveTaskBudgetOrRefusal(
       } as X402HandlerResult,
     }
   }
-  return { ok: true as const, childDelegation: resolved.childDelegation, parentDelegation }
+  return { ok: true as const, childDelegation: resolved.childDelegation, parentDelegation, row }
+}
+
+/**
+ * #3500: the typed refusal for a payment an open task budget's cap cannot
+ * cover, read from the enforcer's own spent figure (`checkTaskBudgetCap`).
+ * `null` when the cap covers it or the chain could not be read — the
+ * enforcer then remains the gate. Shared by both legs' pre-checks and the
+ * funding leg's revert fallback, so every path answers one refusal.
+ */
+async function taskBudgetCapRefusal(input: {
+  agent: { id: string; user_id: string; chain_id: number; account_address: string }
+  row: { id: string; delegation_hash: string; max_atomic: string }
+  amountRaw: bigint
+  amountHuman: string
+  tokenSymbol: string
+  tokenDecimals: number
+  merchantTo: string
+  resourceUrl: string
+}): Promise<X402HandlerResult | null> {
+  const check = await checkTaskBudgetCap({
+    chainId: input.agent.chain_id,
+    delegationHash: input.row.delegation_hash,
+    maxAtomic: input.row.max_atomic,
+    amountAtomic: input.amountRaw,
+  })
+  if (check.outcome !== 'exceeded') return null
+  const body = taskBudgetExceededBody({
+    taskBudgetId: input.row.id,
+    tokenSymbol: input.tokenSymbol,
+    amountHuman: input.amountHuman,
+    amountAtomic: input.amountRaw.toString(),
+    remainingAtomic: check.remainingAtomic.toString(),
+    remainingHuman: formatTokenValue(check.remainingAtomic.toString(), input.tokenDecimals),
+    maxAtomic: check.maxAtomic.toString(),
+  })
+  return refuse(
+    { code: 403, body },
+    {
+      userId: input.agent.user_id,
+      agentId: input.agent.id,
+      chainId: input.agent.chain_id,
+      tokenSymbol: input.tokenSymbol,
+      amountAtomic: input.amountRaw.toString(),
+      accountAddress: input.agent.account_address,
+      merchantTo: input.merchantTo,
+      resourceUrl: input.resourceUrl,
+      reason: 'delegation_budget_exceeded',
+      source: 'x402_authorize',
+      detail: {
+        error_code: 'task_budget_exceeded',
+        task_budget_id: input.row.id,
+        remaining_atomic: check.remainingAtomic.toString(),
+      },
+    },
+  )
 }
 
 /**
@@ -370,11 +427,26 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // further down uses the task budget's own resolved parent.
     let fundingTaskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
     let fundingTaskBudgetParent: Awaited<ReturnType<typeof selectDelegationByHash>> = null
+    // #3500: kept for the cap pre-check and the revert fallback below.
+    let fundingTaskBudgetCapInput: Parameters<typeof taskBudgetCapRefusal>[0] | null = null
     if (taskBudgetId) {
       const resolved = await resolveTaskBudgetOrRefusal(agent.id, taskBudgetId, tokenAddress, payTo.toLowerCase())
       if (!resolved.ok) return resolved.result
       fundingTaskBudgetChild = resolved.childDelegation
       fundingTaskBudgetParent = resolved.parentDelegation
+      fundingTaskBudgetCapInput = {
+        agent,
+        row: resolved.row,
+        amountRaw,
+        amountHuman,
+        tokenSymbol: tokenConfig.symbol,
+        tokenDecimals: tokenConfig.decimals,
+        // NOT `payTo`: on this leg that is the agent's own funding EOA.
+        merchantTo: merchantPayTo.toLowerCase(),
+        resourceUrl: url,
+      }
+      const capRefusal = await taskBudgetCapRefusal(fundingTaskBudgetCapInput)
+      if (capRefusal) return capRefusal
     }
 
     // ── Sub-budget (#3330, optional), funding leg ─────────────────────────
@@ -501,6 +573,13 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // refused), so nothing is booked, exactly like the outage case below.
       if (err instanceof DelegationRailChainUnavailableError) {
         return refuse({ code: 503, body: railUnavailableRefusalBody(err) }, null)
+      }
+      // #3500: a transfer-cap revert through a task budget is that task
+      // budget's cap once its own spent figure confirms it — the same typed
+      // 403 the pre-check answers, never a "transient" 502.
+      if (fundingTaskBudgetCapInput && isTransferCapRevert(err)) {
+        const capRefusal = await taskBudgetCapRefusal(fundingTaskBudgetCapInput)
+        if (capRefusal) return capRefusal
       }
       const fundingRefusalReason = classifyRevertForLedger(err)
       // #3053: through the shared choke point. The ledger input is null when
@@ -731,6 +810,19 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     if (!resolved.ok) return resolved.result
     erc7710TaskBudgetChild = resolved.childDelegation
     budget = resolved.parentDelegation
+    // #3500: this leg builds no UserOp, so without this an over-cap payment
+    // would only fail when the MERCHANT tried to redeem the settlement child.
+    const capRefusal = await taskBudgetCapRefusal({
+      agent,
+      row: resolved.row,
+      amountRaw,
+      amountHuman,
+      tokenSymbol: tokenConfig.symbol,
+      tokenDecimals: tokenConfig.decimals,
+      merchantTo: payTo.toLowerCase(),
+      resourceUrl: url,
+    })
+    if (capRefusal) return capRefusal
   }
 
   // ── Sub-budget (#3330, optional), erc7710 leg ───────────────────────────

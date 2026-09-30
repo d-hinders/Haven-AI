@@ -3,6 +3,8 @@
  * settlement compiler runs REAL so the child delegation and header are genuine.
  */
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+// #3500: the task-budget cap pre-check reads the enforcer's spentMap — never a live chain here.
+vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({ readTaskBudgetSpent: async () => 0n }))
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 

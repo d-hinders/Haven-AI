@@ -125,8 +125,31 @@ const DELEGATION_EXPIRED_REVERT_PATTERNS = [
  * contradicts the enum's named-writer rule (the pre-check on both x402 legs
  * already owns `delegation_budget_exceeded`) and would make
  * `onchain_revert` anything but rare.
+ *
+ * #3500: the cumulative-cap enforcer too. `ERC20TransferAmountEnforcer`
+ * refuses with `ERC20TransferAmountEnforcer:allowance-exceeded`; it carries a
+ * task budget's cap and a budget delegation's optional lifetime cap. Both are
+ * budgets the guardrails set, so the refusal is `delegation_budget_exceeded`,
+ * not the generic `onchain_revert` it fell into before.
  */
-const BUDGET_ENFORCER_REVERT_PATTERNS = [/Enforcer:transfer-amount-exceeded/i]
+const TRANSFER_CAP_REVERT_PATTERNS: readonly RegExp[] = [/ERC20TransferAmountEnforcer:allowance-exceeded/i]
+
+const BUDGET_ENFORCER_REVERT_PATTERNS = [
+  /Enforcer:transfer-amount-exceeded/i,
+  ...TRANSFER_CAP_REVERT_PATTERNS,
+]
+
+/**
+ * #3500: true when a caught error is a cumulative transfer-cap revert. The
+ * enforcer carries both a task budget's cap and a budget delegation's
+ * optional lifetime cap, so this names "a transfer cap was exhausted", not
+ * which one: a caller attributes it to a task budget only after reading that
+ * task budget's own spent figure.
+ */
+export function isTransferCapRevert(err: unknown): boolean {
+  const text = flattenErrorText(err)
+  return TRANSFER_CAP_REVERT_PATTERNS.some((re) => re.test(text))
+}
 
 /**
  * Flatten an error and its `cause` chain into one searchable string. Caveat

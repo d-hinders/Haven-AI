@@ -10,10 +10,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const { mockQuery, mockCompute, mockCreateRail } = vi.hoisted(() => ({
+const { mockQuery, mockCompute, mockCreateRail, mockReadSpent } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockCompute: vi.fn(),
   mockCreateRail: vi.fn(),
+  mockReadSpent: vi.fn(),
+}))
+// #3500: the task-budget cap pre-check reads the enforcer's spentMap; no chain here.
+vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({
+  readTaskBudgetSpent: (...a: unknown[]) => mockReadSpent(...a),
 }))
 vi.mock('../../db.js', () => ({
   default: { query: (...a: unknown[]) => mockQuery(...a) },
@@ -174,6 +179,8 @@ describe('POST /payments with task_budget_id (#3329)', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
+    mockReadSpent.mockReset()
+    mockReadSpent.mockResolvedValue(0n)
     mockCompute.mockReset()
     mockCompute.mockResolvedValue(DELEGATE_ACCOUNT)
     mockCreateRail.mockReset()
@@ -309,5 +316,111 @@ describe('POST /payments with task_budget_id (#3329)', () => {
     // grant), never the pinned grant's distinct delegator.
     expect(chainArg[1].delegator.toLowerCase()).toBe(AGENT.account_address.toLowerCase())
     expect(chainArg[1].delegator.toLowerCase()).not.toBe(PINNED_DELEGATOR.toLowerCase())
+  })
+})
+
+describe('POST /payments: a task budget whose cap cannot cover the payment (#3500)', () => {
+  let app: FastifyInstance
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(paymentRoutes, { prefix: '/payments' })
+  })
+  afterAll(async () => app.close())
+
+  const prepareRedemption = vi.fn()
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockReadSpent.mockReset()
+    mockCompute.mockReset()
+    mockCompute.mockResolvedValue(DELEGATE_ACCOUNT)
+    prepareRedemption.mockReset()
+    prepareRedemption.mockResolvedValue({
+      userOperation: { sender: DELEGATE_ACCOUNT },
+      userOpHash: `0x${'11'.repeat(32)}`,
+      signingTypedData: { primaryType: 'PackedUserOperation' },
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+    })
+    mockCreateRail.mockReset()
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareRedemption,
+      prepareAccountCall: vi.fn(),
+      submitRedemption: vi.fn(),
+    })
+    primeDb(
+      AUTH, RAIL_STATE, NO_IDEMPOTENCY_REPLAY, BUDGET_DELEGATION,
+      // cap 1.0 USDC (1_000_000 atomic); the payment below is 0.5 USDC.
+      taskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' })), INSERT_INTENT,
+    )
+  })
+
+  const pay = () =>
+    app.inject({
+      method: 'POST', url: '/payments', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.5', to: RECIPIENT, task_budget_id: 'tb-1' },
+    })
+  const refusalRows = () =>
+    mockQuery.mock.calls.filter((c) => /INSERT INTO payment_refusals/.test(String(c[0])))
+
+  it('pre-check: refuses with a typed 403 before any UserOp is built, and books a budget refusal', async () => {
+    mockReadSpent.mockResolvedValue(700_000n) // 0.3 left, 0.5 asked
+    const res = await pay()
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({
+      error_code: 'task_budget_exceeded',
+      task_budget_id: 'tb-1',
+      remaining_atomic: '300000',
+      max_atomic: '1000000',
+      amount_atomic: '500000',
+    })
+    expect(prepareRedemption).not.toHaveBeenCalled()
+    expect(mockReadSpent).toHaveBeenCalledWith(AGENT.chain_id, `0x${'cd'.repeat(32)}`)
+    await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
+    expect(refusalRows()[0]![1]).toContain('delegation_budget_exceeded')
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+  })
+
+  it('the exact remainder is allowed', async () => {
+    mockReadSpent.mockResolvedValue(500_000n)
+    const res = await pay()
+    expect(res.statusCode).toBe(201)
+    expect(prepareRedemption).toHaveBeenCalled()
+  })
+
+  it('an unreadable chain skips the pre-check — the enforcer stays the gate', async () => {
+    mockReadSpent.mockRejectedValue(new Error('rpc down'))
+    const res = await pay()
+    expect(res.statusCode).toBe(201)
+  })
+
+  it('revert fallback: a transfer-cap revert the task budget\'s own spent figure confirms is the same typed 403, not a "transient" 502', async () => {
+    // The pre-check read fits (a concurrent payment landed in between); the
+    // simulation then reverts; the fallback's fresh read confirms the cap.
+    mockReadSpent.mockResolvedValueOnce(0n).mockResolvedValueOnce(1_000_000n)
+    prepareRedemption.mockRejectedValue(new Error('UserOperation reverted during simulation with reason: ERC20TransferAmountEnforcer:allowance-exceeded'))
+    const res = await pay()
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error_code: 'task_budget_exceeded', remaining_atomic: '0' })
+    await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
+  })
+
+  it('a transfer-cap revert the task budget does NOT explain (a budget lifetime cap) keeps the 502, booked as a budget refusal', async () => {
+    mockReadSpent.mockResolvedValue(0n)
+    prepareRedemption.mockRejectedValue(new Error('UserOperation reverted during simulation with reason: ERC20TransferAmountEnforcer:allowance-exceeded'))
+    const res = await pay()
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBeUndefined()
+    await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
+    expect(refusalRows()[0]![1]).toContain('delegation_budget_exceeded')
+  })
+
+  it('a payment without a task budget never reads the task cap', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/payments', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.5', to: RECIPIENT },
+    })
+    // (No ordinary grant is mocked, so it is refused for that reason — never for a task cap.)
+    expect(res.json().error_code).not.toBe('task_budget_exceeded')
+    expect(mockReadSpent).not.toHaveBeenCalled()
   })
 })

@@ -44,6 +44,7 @@ covers:
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
+  - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/cli/src/commands.ts
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/setup-copy.ts
@@ -735,22 +736,37 @@ last-verified: "2026-09-29"
 > faking the remaining figure (`remaining_atomic` still reports the true,
 > now-lower number). Any other row shape — no row, a `pending_signature`
 > child, a key collision on a different payee/resource/token/amount, a
-> task/sub-budget-scoped row, or an EIP-3009 row (`settlement_scheme:
-> 'eip3009'`, deliberately OUT of scope here: its funding leg is a separate
-> budget-metered hop the remaining figure must still reflect, so a settled
-> 3009 replay keeps today's compare and CAN still refuse) — falls through to
-> today's compare unchanged, including its refusal branch.
+> task/sub-budget-scoped row, or a settled EIP-3009 row
+> (`settlement_scheme: 'eip3009'`) — falls through to today's compare
+> unchanged, including its refusal branch. EIP-3009 is deliberately OUT of
+> scope for this fix, not because `delegationReplay`'s own authorize-side
+> replay would refuse it — it would not: its confirmed+tx_hash branch
+> (`replay.ts:89-110`) answers its stored 200 for ANY settlement scheme, so
+> a settled 3009 replay never reaches a second authorize either. A settled
+> 3009 replay hitting this pre-check still gets the SAME false over-budget
+> refusal and ledger row this issue fixes for erc7710 — known, left as a
+> follow-up, because its funding leg is a separate budget-metered hop (the
+> bridge, #946) this endpoint cannot yet tell has already settled.
 > `haven_prepare_catalog_purchase`'s step 5b forwards `args.idempotency_key`
 > onto the pre-check call; `haven_pay_mcp_tool` is unaffected — it never had
 > this bug, because its authorize call runs the replay lookup BEFORE its own
 > pre-check (`delegation-authorize.ts`). No tool added, renamed or
 > re-shaped: arguments, schemas, descriptions and the strict/permissive
 > split are untouched, the local stdio runtime is not on this path, and the
-> skew-flatness this document asserts holds — an older MCP simply never
-> sends the new optional field and gets today's (occasionally over-refusing)
-> behavior; an older backend ignores the field if sent. Deploy order is
-> backend → hosted MCP. Nothing else in this document was re-verified in
-> this pass.
+> skew-flatness this document asserts holds in the tool-shape sense — but
+> the WIRE is not skew-flat here, checked from the code
+> (`routes/machine-payments.ts` is in `index.ts`'s `enforcedModules`, and
+> `BudgetPrecheckRequest` is `additionalProperties: false`): an older
+> backend's spec does not declare `idempotencyKey`, so request validation
+> REFUSES the field with a 400 ("body must NOT have additional properties"),
+> not silently ignores it. The hosted tool's catch block only recognizes a
+> decided 403 `delegation_budget_exceeded` as a refusal; a 400 falls to the
+> generic branch and degrades to `sufficient: null` with
+> `ALLOWANCE_CHECK_UNAVAILABLE` — the SAME safe degrade as a transport
+> failure, just for a different reason. An older MCP against the new
+> backend never sends the field and gets today's (occasionally
+> over-refusing) behavior. Deploy order is backend → hosted MCP either way.
+> Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3000):** the hosted server's
 > `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of

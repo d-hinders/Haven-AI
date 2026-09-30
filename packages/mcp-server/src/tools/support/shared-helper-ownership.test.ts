@@ -142,7 +142,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   catchSettledResettle: { module: 'guidance', slices: ['s2809', 's2812'] },
   // #3101: the status handoff for a refusal that may not know its payment id —
   // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
-  paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
+  // #3495 review S5: s2809 joined it too — haven_send/haven_pay's
+  // no-sign-data replay guard names haven_get_payment_status the same way.
+  paymentStatusHandoff: { module: 'guidance', slices: ['s2809', 's2810', 's2811'] },
   // #3102: the refusal-side builder — every HostedToolError that names an action.
   refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
   // #3329: the success-side counterpart — a task budget's signer hand-off,
@@ -189,6 +191,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   submitSignatureWithExpiryMapping: { module: 'mcp-context', slices: ['s2809', 's2812'] },
   submitErc7710WithExpiryMapping: { module: 'mcp-context', slices: ['s2809'] },
   coerceJsonField: { module: 'mcp-context', slices: ['s2811'] },
+  // #3495: the direct-payment idempotency-key generator, called only by the
+  // s2809 handlers (haven_send/haven_pay) — see SINGLE_SLICE_RETAINED for why
+  // it still lives in shared support beside delegationSignFields.
+  generateDirectIdempotencyKey: { module: 'mcp-context', slices: ['s2809'] },
   // tools/paid-mcp-completion.ts — the #2812 capability module itself now owns
   // its single-slice merchant helpers (the carve-out the #2808 map retained
   // them for has landed, so "until #2812 moves them" is satisfied).
@@ -283,6 +289,18 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     '(s2809+s2812) and stays beside it in support until #2812 settles where the shared pattern lives. ' +
     'Moving it into the capability would fork the pattern across a module boundary on the signing path, ' +
     'which is the failure this epic exists to make impossible.',
+  // #3495: only the #2809 handlers (haven_send/haven_pay) call it, but it is
+  // DELIBERATE: it stays beside delegationSignFields/buildX402SigningContext
+  // in tools/support/mcp-context.ts, the helpers whose compact-by-default /
+  // include_signing_payload=true contract it extends to haven_send/haven_pay
+  // (review correction, 2026-09-30: this generator is a fresh random key per
+  // call, NOT a derivation of the x402 tools' buildX402IdempotencyKey —
+  // bucketing a hash of a direct payment's own parameters would collide two
+  // genuinely separate sends of the same amount to the same recipient).
+  generateDirectIdempotencyKey:
+    'Only the #2809 handlers (haven_send/haven_pay) call it (#3495), but it is DELIBERATE: it stays in ' +
+    'tools/support/mcp-context.ts beside delegationSignFields/buildX402SigningContext, the helpers ' +
+    'whose compact-by-default / include_signing_payload=true contract it extends to haven_send/haven_pay.',
   // #3277: the direct-payment twin of signerCompatibilityNotice, called only by
   // s2809's two success sites — recorded here because SINGLE_SLICE_RETAINED is
   // where a support helper with one calling slice states why it still lives in
@@ -419,6 +437,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'coerceJsonField',
     'submitSignatureWithExpiryMapping',
     'submitErc7710WithExpiryMapping',
+    'generateDirectIdempotencyKey',
   ],
   // The #2812 capability module — a single-slice owner, not shared support,
   // but the four helpers it owns are mapped in HELPER_OWNERSHIP like any

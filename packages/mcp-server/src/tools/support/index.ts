@@ -33,6 +33,7 @@ export {
   buildX402SigningContext,
   coerceJsonField,
   delegationSignFields,
+  generateDirectIdempotencyKey,
   isMerchantEndpointMiss,
   parseMcpTransport,
   quoteMcpToolCall,

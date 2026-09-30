@@ -683,13 +683,12 @@ describe('custody invariant', () => {
 // The x402 quote surfaces omit the multi-KB typed_data/typed_data_b64 by
 // default — the signer fetches the exact bytes from Haven by payment_id
 // (#1263) — and restore them byte-identically on include_signing_payload=true
-// (the recovery path for diagnostics and pre-#1263 signers). Direct payments
-// (haven_pay/haven_send) keep the bulk unconditionally: since #3271 they also
-// have a fetch path (GET /payments/:id/sign-context), and since #3277 the
-// hosted result NAMES it (next_tool: haven_sign + { payment_id }) with the
-// refusal-recovery route for a pre-#3271 signer — which still needs the relay
-// fields, and the haven_pay/haven_send tests above prove those are always
-// present.
+// (the recovery path for diagnostics and pre-#1263 signers). Since #3495
+// (superseding #3277 AC2 "the relay fields stay") direct payments
+// (haven_pay/haven_send) carry the SAME compact-by-default /
+// include_signing_payload=true contract on the exact same helper
+// (delegationSignFields) — see 'compact direct-payment signing payload
+// (#3495)' below, in state-direct-recovery.test.ts.
 
 describe('compact x402 signing payload (#1272)', () => {
   const TYPED_DATA = {

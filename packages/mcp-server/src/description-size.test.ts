@@ -222,29 +222,59 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * pin moves too: 24,123 / 26 = 927.81 sits above round 9's 922.42, and the
  * same rule applies — re-derived at the measured mean, shrink-only from
  * here.
- */
-/**
- * **Re-derived — round 11, #3501 (2026-09-30).** `haven_get_agent`'s
- * `taskBudgets[]` rows gain the budget-visibility figures the issue asks for
- * — `spentAtomic`, `remainingAtomic`, `remainingDisplay` (what the chain will
- * still allow through an open task budget) and the `remainingIsFromChain`
- * honesty flag — and `haven_get_allowances` names where task budgets live
- * instead of leaving an agent guessing (+351 UTF-8 bytes across those two
- * descriptions, compressed once: the clauses state the fields, the degraded
- * read, and nothing else — an agent reading tools/list learns the fields
- * exist before it attempts a payment a spent-out task budget will refuse,
- * the same field-naming obligation rounds 9/10 recorded for additive
- * response fields). No overclaim remains to trim. Measured total 24,474
- * across the same 26 tools; the absolute pin moves to that exact value,
- * shrink-only from here. The mean pin moves too: 24,474 / 26 = 941.31 sits
- * above round 10's 927.81, and the same rule applies — re-derived at the
+ *
+ * **Re-derived — round 11, #3495 (2026-09-30).** The direct-payment
+ * description (`PAY_DESCRIPTION`, shared by `haven_pay`) now documents the
+ * compact-by-default contract this issue built: `idempotency_key` in the
+ * returned shape, that it is generated when omitted, and the
+ * `include_signing_payload=true` same-key re-run that restores the relay
+ * pair — replacing the old unconditional "re-sign with { payload_hash,
+ * typed_data_b64 } from the result" sentence, which was no longer true. Same
+ * tool count (26) — this is a reword, not a new tool. Measured total 24,452;
+ * the absolute pin moves to that exact value, shrink-only from here. The
+ * mean pin moves too: 24,452 / 26 = 940.4615… sits above round 10's 927.81,
+ * and the same rule applies — re-derived at the measured mean, shrink-only
+ * from here.
+ *
+ * **Re-derived — round 12, #3495 review round 2 (2026-09-30).**
+ * `PAY_DESCRIPTION` (`haven_pay`) named only `SIGN_CONTEXT_REFUSED` /
+ * `sign_context_unavailable` as the opt-in trigger — review round 2 caught
+ * that a currently-published signer's OWN transport-failure/malformed/404
+ * fallback (`fallback: 'typed_data_b64'`, any code) never sets that backend
+ * code, so an agent whose signer refused that way had no route named in this
+ * description at all. The sentence now names both trigger shapes (+95 UTF-8
+ * bytes on that one description: was 24,452 total / 940.4615 mean, now
+ * 24,547 / 944.1153…). Same tool count (26) — a reword, not a new tool.
+ * Measured total 24,547; the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin moves too: 24,547 / 26 = 944.1153… sits
+ * above round 11's 940.47, and the same rule applies — re-derived at the
  * measured mean, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 24_474
-// Mean pin: re-derived — round 11, #3501 (block above): 24,474 / 26 =
-// 941.3077, pinned at the two-decimal ceiling (941.31). Round 10's 927.81
-// cannot hold while this tree exceeds it. Shrink-only from here.
-const MAX_MEAN_BYTES = 941.31
+/**
+ * **Re-derived — round 13, #3501 union with #3495 (2026-10-01 merge).** Both
+ * changes grew from the same round-10 base: this branch (#3501) adds
+ * `haven_get_agent`'s budget-visibility figures — `taskBudgets[]` rows gain
+ * `spentAtomic`, `remainingAtomic`, `remainingDisplay` (what the chain will
+ * still allow through an open task budget) and the `remainingIsFromChain`
+ * honesty flag — and `haven_get_allowances` names where task budgets live
+ * (+351 UTF-8 bytes across those two descriptions, compressed once: the
+ * clauses state the fields, the degraded read, and nothing else — an agent
+ * reading tools/list learns the fields exist before it attempts a payment a
+ * spent-out task budget will refuse, the same field-naming obligation rounds
+ * 9/10 recorded for additive response fields. No overclaim remains to trim),
+ * while dev's #3495 rewords the direct-payment description (rounds 11/12
+ * above). The union tree re-measures at 24,898 across the same 26 tools —
+ * 24,547 + the 351 bytes this branch adds, exactly — so the absolute pin
+ * moves to that exact value, shrink-only from here. The mean pin moves too:
+ * 24,898 / 26 = 957.6154 sits above round 12's 944.12, and the same rule
+ * applies — re-derived at the measured mean, shrink-only from here.
+ */
+const MAX_TOTAL_BYTES = 24_898
+// Mean pin: re-derived — round 13, #3501 union with #3495 (block above):
+// 24,898 / 26 = 957.6154, pinned at the two-decimal ceiling (957.62).
+// Round 12's 944.12 cannot hold while this tree exceeds it. Shrink-only
+// from here.
+const MAX_MEAN_BYTES = 957.62
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

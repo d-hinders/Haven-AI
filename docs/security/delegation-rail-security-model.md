@@ -2059,6 +2059,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > column, its migration registration, and the two new repository functions.
 > Nothing else in this document was re-verified.
 
+> **Re-verified unchanged (#3495 review round 1, 2026-09-30):** this diff
+> touches one file in this document's coverage list,
+> `packages/signer/src/tools.ts` — the `USEROP_BINDING_MISMATCH` refusal's
+> `nextToolOmittedReason` prose now also names the `include_signing_payload:
+> true` same-key re-run as a source for relayed `typed_data`, alongside the
+> existing "copied unchanged from the payment result" route. No check, guard
+> or allowlist moves: `assertUserOpTypedDataBinding`'s recomputation against
+> `payload_hash` still runs identically on either source of bytes, the
+> refusal still signs nothing, and the on-chain redemption path is untouched.
+> Scope of this note: that one string. Nothing else in this document was
+> re-verified.
+
 > **Re-verified unchanged (#3492, 2026-09-30):** `client.ts`'s
 > `precheckBudget` now forwards an optional `idempotencyKey` to
 > `POST /machine-payments/budget-precheck`, and the backend handler

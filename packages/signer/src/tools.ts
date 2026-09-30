@@ -102,7 +102,9 @@ export class HavenUserOpBindingRefusedError extends HavenSigningError {
       nextAction: AgentPaymentNextAction.StopAndTellUser,
       nextTool: null,
       nextToolOmittedReason:
-        'call haven_sign again with payment_id alone (preferred), or with typed_data copied unchanged from the payment result',
+        'call haven_sign again with payment_id alone (preferred), or with typed_data copied unchanged from ' +
+        'the payment result (or, on a compact direct-payment result, from a same-key re-run with ' +
+        'include_signing_payload: true)',
     })
   }
 }

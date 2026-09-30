@@ -3024,22 +3024,30 @@ signing handoff, `signer_compatibility`, and (send) `asset`/`amount`/
 `recipient` or (pay) `meta`; `signature_scheme` rides every delegation-rail
 result, but `typed_data` / `typed_data_b64` do not.
 
-**Idempotency key, generated and echoed.** When the caller passes no
+**Idempotency key, generated fresh and echoed.** When the caller passes no
 `idempotency_key`, the hosted tool generates one and echoes it on every
 result (`idempotency_key` field, present on success AND on
-`pending_approval`) — mirroring how the x402 tools derive and echo theirs
-(`buildX402IdempotencyKey`, `@haven_ai/sdk`'s `x402.ts`; echoed at
-`buildX402SigningContext`, `mcp-context.ts`). The direct-payment twin
-(`buildDirectIdempotencyKey`, `tools/support/mcp-context.ts`) lives in the
-hosted tool, not the SDK: hashes token/amount/recipient/task_budget_id/
-sub_budget_id into a 5-minute bucket, same bucket width and shape as the
-x402 key, `direct:` prefixed instead of `x402:`. This makes a same-key re-run
-— in particular the `include_signing_payload: true` opt-in below — always a
-true replay: the backend's `findPaymentReplay` (`payments.ts`) returns the
-ORIGINAL payment on a matching key rather than creating a second intent,
-PROVIDED the re-run repeats the exact token, amount, recipient,
-`task_budget_id` and `sub_budget_id` the first call used — a mismatch answers
-409 (`payments.ts:255-271`) rather than silently rerouting to a different
+`pending_approval`) — echoing the same way the x402 tools echo theirs
+(`buildX402SigningContext`, `mcp-context.ts`), but the direct-payment
+generator (`generateDirectIdempotencyKey`, `tools/support/mcp-context.ts`) is
+DELIBERATELY NOT a derivation of `buildX402IdempotencyKey` (`@haven_ai/sdk`'s
+`x402.ts`). An earlier design hashed token/amount/recipient/task_budget_id/
+sub_budget_id into a 5-minute bucket, mirroring the x402 key's shape — review
+caught that this is wrong for a direct send: x402's key identifies a QUOTE
+for one paid resource, where two calls with the same parameters inside the
+bucket really are the same purchase, but "send 5 USDC to 0xabc" said twice in
+five minutes is routinely two DIFFERENT payments (two tips, two payouts), and
+bucketing them onto one key would make the backend's `findPaymentReplay`
+(`payments.ts`) return the FIRST payment for the second call — the agent told
+the second send succeeded while no second transfer happened. The generator is
+instead `direct:` + `crypto.randomUUID()`: every no-key call gets its own
+payment by construction, and a same-key re-run — in particular the
+`include_signing_payload: true` opt-in below — is a true replay ONLY because
+the caller deliberately echoes the key back, never because two calls
+happened to share parameters. The backend still requires the re-run to
+repeat the exact token, amount, recipient, `task_budget_id` and
+`sub_budget_id` the first call used — a mismatch answers 409
+(`payments.ts:255-271`) rather than silently rerouting to a different
 payment.
 
 **The opt-in.** `include_signing_payload: true` on `haven_send` / `haven_pay`

@@ -73,7 +73,52 @@ describe('haven_pay', () => {
     expect(result.data.status).toBe('pending_signature')
     // #3495: generated when the caller passes none, and echoed.
     expect(typeof result.data.idempotency_key).toBe('string')
-    expect(result.data.idempotency_key).toMatch(/^direct:[0-9a-f]{16}$/)
+    expect(result.data.idempotency_key).toMatch(/^direct:[0-9a-f-]{36}$/)
+  })
+
+  it('two no-key calls with IDENTICAL arguments get two DIFFERENT generated keys and hit the backend twice (#3495 review correction)', async () => {
+    // Two genuinely separate payments (two tips, two payouts) of the same
+    // amount to the same recipient must never collapse into one: a
+    // deterministic/bucketed key would make the backend's idempotency replay
+    // return the FIRST payment for the second call, and the agent would be
+    // told the second send succeeded while no second transfer ever happened.
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_first',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+        },
+      },
+    })
+    const first = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '1', to: '0xabc' }),
+    )
+
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_second',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+        },
+      },
+    })
+    const second = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '1', to: '0xabc' }),
+    )
+
+    expect(first.data.idempotency_key).not.toBe(second.data.idempotency_key)
+    expect(first.data.payment_id).not.toBe(second.data.payment_id)
+
+    const payCalls = recordedCalls().filter((c) => c.url.endsWith('/payments'))
+    expect(payCalls).toHaveLength(2)
+    const keys = payCalls.map((c) => (c.body as Record<string, unknown>).idempotency_key)
+    expect(keys[0]).not.toBe(keys[1])
   })
 
   it('echoes the caller-supplied idempotency_key verbatim instead of generating one (#3495)', async () => {
@@ -685,7 +730,7 @@ describe('haven_send', () => {
     expect(result.data.asset).toBe('USDC')
     expect(result.data.amount).toBe('5.00')
     expect(typeof result.data.idempotency_key).toBe('string')
-    expect(result.data.idempotency_key).toMatch(/^direct:[0-9a-f]{16}$/)
+    expect(result.data.idempotency_key).toMatch(/^direct:[0-9a-f-]{36}$/)
 
     const postCall = recordedCalls().find((c) => c.url.endsWith('/payments'))
     const body = postCall?.body as Record<string, unknown>
@@ -695,6 +740,49 @@ describe('haven_send', () => {
     expect(body.idempotency_key).toBe(result.data.idempotency_key)
     // Custody invariant
     expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
+  })
+
+  it('two no-key calls with IDENTICAL arguments get two DIFFERENT generated keys and hit the backend twice (#3495 review correction)', async () => {
+    // Same property as the haven_pay twin above: two separate tips/payouts of
+    // the same amount to the same recipient must never collapse into one
+    // silently-replayed payment.
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_first',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+    const first = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_second',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+    const second = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    expect(first.data.idempotency_key).not.toBe(second.data.idempotency_key)
+    expect(first.data.payment_id).not.toBe(second.data.payment_id)
+
+    const payCalls = recordedCalls().filter((c) => c.url.endsWith('/payments'))
+    expect(payCalls).toHaveLength(2)
+    const keys = payCalls.map((c) => (c.body as Record<string, unknown>).idempotency_key)
+    expect(keys[0]).not.toBe(keys[1])
   })
 
   it('omits typed_data / typed_data_b64 by DEFAULT on a delegation-rail intent, keeping only signature_scheme (#3495)', async () => {

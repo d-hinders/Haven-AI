@@ -45,8 +45,8 @@ import { buildAgentGuidance, catchSettledResettle, refusalNextStep } from './sup
 import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
-  buildDirectIdempotencyKey,
   delegationSignFields,
+  generateDirectIdempotencyKey,
   submitErc7710WithExpiryMapping,
   submitSignatureWithExpiryMapping,
 } from './support/mcp-context.js'
@@ -370,20 +370,14 @@ export function createStateDirectRecoveryHandlers(
     haven_send: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_send', input)
-        // #3495: generate a replayable key when the caller passed none —
-        // mirroring the x402 tools' `buildX402IdempotencyKey` approach — and
-        // echo it on every direct result below, so a same-key re-run
-        // (including the include_signing_payload=true opt-in) always replays
-        // this exact payment rather than minting a second one.
-        const idempotencyKey =
-          args.idempotency_key ??
-          buildDirectIdempotencyKey({
-            token: args.asset,
-            amount: args.amount,
-            recipient: args.recipient,
-            taskBudgetId: args.task_budget_id,
-            subBudgetId: args.sub_budget_id,
-          })
+        // #3495: generate a FRESH, random key when the caller passed none —
+        // never derived from the payment's own parameters (two separate
+        // sends of the same amount to the same recipient minutes apart are
+        // routinely different payments, not a retry) — and echo it on every
+        // direct result below, so a caller who deliberately wants a same-key
+        // re-run (the include_signing_payload=true opt-in) always can, by
+        // passing the echoed key back.
+        const idempotencyKey = args.idempotency_key ?? generateDirectIdempotencyKey()
         // #1272 / #3495: compact by default — the signer fetches the exact
         // bytes by payment_id (#3271); the bulky typed_data/typed_data_b64
         // only ride a same-key re-run naming include_signing_payload: true.
@@ -459,15 +453,7 @@ export function createStateDirectRecoveryHandlers(
       runTool(async () => {
         const args = parseStrict('haven_pay', input)
         // #3495: see the matching note in haven_send above.
-        const idempotencyKey =
-          args.idempotency_key ??
-          buildDirectIdempotencyKey({
-            token: args.token,
-            amount: args.amount,
-            recipient: args.to,
-            taskBudgetId: args.task_budget_id,
-            subBudgetId: args.sub_budget_id,
-          })
+        const idempotencyKey = args.idempotency_key ?? generateDirectIdempotencyKey()
         const includeSigningPayload = args.include_signing_payload === true
         try {
           const intent = await haven.createIntent({

@@ -192,7 +192,7 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // #3495: the direct-payment idempotency-key generator, called only by the
   // s2809 handlers (haven_send/haven_pay) — see SINGLE_SLICE_RETAINED for why
   // it still lives in shared support beside delegationSignFields.
-  buildDirectIdempotencyKey: { module: 'mcp-context', slices: ['s2809'] },
+  generateDirectIdempotencyKey: { module: 'mcp-context', slices: ['s2809'] },
   // tools/paid-mcp-completion.ts — the #2812 capability module itself now owns
   // its single-slice merchant helpers (the carve-out the #2808 map retained
   // them for has landed, so "until #2812 moves them" is satisfied).
@@ -288,14 +288,15 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'Moving it into the capability would fork the pattern across a module boundary on the signing path, ' +
     'which is the failure this epic exists to make impossible.',
   // #3495: only the #2809 handlers (haven_send/haven_pay) call it, but it is
-  // DELIBERATE: it mirrors the x402 tools' buildX402IdempotencyKey (@haven_ai/sdk's
-  // x402.ts) exactly — same bucket width, same hash-of-material shape — and
-  // stays beside delegationSignFields/buildX402SigningContext in
-  // tools/support/mcp-context.ts so the direct-payment compact/opt-in contract
-  // those two already implement for x402 does not fork into a second copy.
-  buildDirectIdempotencyKey:
-    'Only the #2809 handlers (haven_send/haven_pay) call it (#3495), but it is DELIBERATE: it is the ' +
-    'direct-payment twin of the x402 tools\' buildX402IdempotencyKey (@haven_ai/sdk) and stays in ' +
+  // DELIBERATE: it stays beside delegationSignFields/buildX402SigningContext
+  // in tools/support/mcp-context.ts, the helpers whose compact-by-default /
+  // include_signing_payload=true contract it extends to haven_send/haven_pay
+  // (review correction, 2026-09-30: this generator is a fresh random key per
+  // call, NOT a derivation of the x402 tools' buildX402IdempotencyKey —
+  // bucketing a hash of a direct payment's own parameters would collide two
+  // genuinely separate sends of the same amount to the same recipient).
+  generateDirectIdempotencyKey:
+    'Only the #2809 handlers (haven_send/haven_pay) call it (#3495), but it is DELIBERATE: it stays in ' +
     'tools/support/mcp-context.ts beside delegationSignFields/buildX402SigningContext, the helpers ' +
     'whose compact-by-default / include_signing_payload=true contract it extends to haven_send/haven_pay.',
   // #3277: the direct-payment twin of signerCompatibilityNotice, called only by
@@ -434,7 +435,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'coerceJsonField',
     'submitSignatureWithExpiryMapping',
     'submitErc7710WithExpiryMapping',
-    'buildDirectIdempotencyKey',
+    'generateDirectIdempotencyKey',
   ],
   // The #2812 capability module — a single-slice owner, not shared support,
   // but the four helpers it owns are mapped in HELPER_OWNERSHIP like any

@@ -14,7 +14,7 @@
  * connector channel, and sibling support modules only. Never imports a
  * capability module.
  */
-import { createHash } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -78,51 +78,31 @@ export function delegationSignFields(signData: {
 }
 
 /**
- * #3495: the direct-payment (`haven_send` / `haven_pay`) twin of
- * `buildX402IdempotencyKey` (`@haven_ai/sdk`'s `x402.ts`) — generated in the
- * HOSTED TOOL, not the SDK, because only the hosted server needs a direct
- * payment to be replayable when the caller passed no key at all (the SDK's
- * own callers already choose their own keys or accept none). Deterministic
- * and bucketed the same way: a caller that omits idempotency_key and retries
- * within the bucket (a dropped response, a runtime restart, an
- * include_signing_payload=true re-run to reach the opt-in relay) reaches the
- * SAME key, so the backend's idempotency replay (`payments.ts`, keyed on
- * `idempotency_key` + token/amount/recipient/task_budget_id/sub_budget_id,
- * `findPaymentReplay`) returns the ORIGINAL payment rather than minting a
- * second one — never a second intent for one logical send. Bucketed, not
- * request-scoped: two DIFFERENT calls with the same parameters inside one
- * bucket collapse into one payment, matching the x402 tools' existing
- * behaviour (`buildX402IdempotencyKey`) exactly, and is the reason a
- * deliberate re-send of the exact same payment needs a bucket boundary or an
- * explicit idempotency_key of its own.
+ * #3495 (review correction, 2026-09-30): a fresh per-call `idempotency_key`
+ * for a direct payment (`haven_send` / `haven_pay`) when the caller passed
+ * none — generated in the HOSTED TOOL, not the SDK, because only the hosted
+ * server needs to hand the caller a key to echo back on the opt-in re-run
+ * (the SDK's own callers already choose their own keys or accept none).
+ *
+ * DELIBERATELY RANDOM, not derived from the payment's parameters. A first
+ * design bucketed a hash of token/amount/recipient/budget ids into a 5-minute
+ * window, mirroring the x402 tools' `buildX402IdempotencyKey`
+ * (`@haven_ai/sdk`'s `x402.ts`) — but x402's key identifies a QUOTE for one
+ * paid resource, where two calls with the same parameters inside the bucket
+ * really are the same purchase. A direct send has no such identity: "send 5
+ * USDC to 0xabc" said twice in five minutes is routinely two DIFFERENT
+ * payments (two tips, two payouts), and bucketing them onto the same key
+ * would make the backend's replay (`findPaymentReplay`, `payments.ts`) return
+ * the FIRST payment for the second call — an agent told the second send
+ * succeeded while no second transfer ever happened. Randomness makes every
+ * no-key call its own payment by default, exactly like omitting the key
+ * always has; the ONLY way two calls share a payment is the caller
+ * deliberately echoing the same key back (the `include_signing_payload: true`
+ * opt-in re-run this key exists for).
  */
-export function buildDirectIdempotencyKey(
-  params: {
-    token: string
-    amount: string
-    recipient: string
-    taskBudgetId?: string
-    subBudgetId?: string
-  },
-  now = Date.now(),
-): string {
-  const bucket = Math.floor(now / DIRECT_IDEMPOTENCY_BUCKET_MS)
-  const material = [
-    params.token.toLowerCase(),
-    params.amount,
-    params.recipient.toLowerCase(),
-    params.taskBudgetId ?? '',
-    params.subBudgetId ?? '',
-    bucket,
-  ].join('|')
-  return `direct:${createHash('sha256').update(material).digest('hex').slice(0, 16)}`
+export function generateDirectIdempotencyKey(): string {
+  return `direct:${randomUUID()}`
 }
-
-// #3495: same bucket width as the x402 tools' `X402_IDEMPOTENCY_BUCKET_MS`
-// (`@haven_ai/sdk`'s `x402.ts`) — not re-derived from it, since this is the
-// direct-payment path's own deterministic key, mirroring that approach
-// rather than sharing its constant.
-const DIRECT_IDEMPOTENCY_BUCKET_MS = 300_000
 
 /** The probe failure shape that means "this URL is not the MCP endpoint". */
 export function isMerchantEndpointMiss(err: unknown): boolean {

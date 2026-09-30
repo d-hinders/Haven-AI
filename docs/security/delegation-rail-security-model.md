@@ -2046,3 +2046,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > refusal still signs nothing, and the on-chain redemption path is untouched.
 > Scope of this note: that one string. Nothing else in this document was
 > re-verified.
+
+> **Re-verified unchanged (#3492, 2026-09-30):** `client.ts`'s
+> `precheckBudget` now forwards an optional `idempotencyKey` to
+> `POST /machine-payments/budget-precheck`, and the backend handler
+> (`modules/mpp/budget-precheck.ts`) uses it to answer sufficient — without
+> its usual `refuse()` ledger write — when the key resolves to an
+> already-SETTLED erc7710 payment matching the exact quote being
+> pre-checked. No signature, key, delegation graph, caveat enforcer or
+> on-chain redemption path changes: the endpoint remains read/decide-only,
+> the bypass activates only after re-deriving the same settled-row lookup
+> `delegationReplay`'s confirmed+tx_hash branch already trusts
+> (`findX402IntentByIdempotencyKey`, scoped to the caller's own agent id),
+> and the on-chain ERC20PeriodTransferEnforcer stays the real gate the
+> pre-check only mirrors. The rest of this document was not re-read for it,
+> and `last-verified` is not bumped.

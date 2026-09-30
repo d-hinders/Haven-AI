@@ -331,7 +331,7 @@ export const toolSchemas = {
         'max_amount_human must be a plain decimal amount in whole tokens, e.g. "1" or "0.25"',
       )
       .optional(),
-    idempotency_key: z.string().optional(),
+    idempotency_key: z.string().min(1).max(128).optional(),
     // #1272: same contract as haven_pay_mcp_tool — see there.
     include_signing_payload: z.boolean().optional(),
   },

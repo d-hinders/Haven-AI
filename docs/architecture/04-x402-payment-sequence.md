@@ -849,7 +849,12 @@ Sequence:
    created (`DELEGATION_BUDGET_EXCEEDED`,
    `next_action: fund_account_or_raise_allowance`), rather than letting a later
    on-chain redemption revert. There is no approval queue to fall back to
-   (#1090).
+   (#1090). **#3492:** when this tool also names the quote's
+   `idempotency_key` and the #3054 read resolves it to an already-SETTLED
+   erc7710 payment for this exact quote, the budget-precheck answers
+   sufficient (`replay: true`) instead — this bullet's refusal never fires —
+   and the authorize step that follows falls through to the #3417 done
+   state for the same settled replay, rather than a fresh purchase.
 
    > **This bullet described a two-rail split until #2265, and the legacy half
    > was false on every clause.** It read: "on the **legacy** rail, an

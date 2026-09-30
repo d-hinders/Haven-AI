@@ -49,9 +49,11 @@ import { formatRunReport, type ScenarioOutcome } from './lib/run-report.js'
 //   over-budget-refused     renamed from `over-budget-queue`. The approval
 //                           QUEUE it asserted does not exist on this rail and
 //                           no longer exists anywhere (#1986/#1989); the
-//                           circuit breaker is the caveat enforcer reverting
-//                           during gas estimation. Same invariant, different
-//                           shape — so a different name.
+//                           circuit breaker is the caveat enforcer. Since
+//                           #3503 POST /payments refuses at a typed 403
+//                           period-budget pre-check before prepare, so this
+//                           leg — like both x402 legs — no longer watches the
+//                           enforcer revert on a healthy read.
 //   x402-over-budget-rejected  driven on the EIP-3009 funding shape. Since
 //                           #2706 the refusal is a typed 403 pre-check BEFORE
 //                           prepare, not the enforcer reverting in gas

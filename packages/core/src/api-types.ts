@@ -2521,7 +2521,7 @@ export type paths = {
         put?: never;
         /**
          * Create a direct Haven payment intent.
-         * @description Creates a signable payment intent on the delegation rail. The agent must sign the returned sign_data with its delegate key before Haven can relay execution; the budget delegation's caveat enforcers authorize it on-chain at redemption. #2105: there is no over-budget approval branch — an over-budget payment REVERTS during gas estimation rather than queuing, and the approval queue died with the Safe rail (#2055). Both retired rails are refused with 410 before anything is written. #3500: with task_budget_id, a payment the task budget's own cap cannot cover is refused with 403 error_code "task_budget_exceeded" (task_budget_id, remaining_atomic, max_atomic, amount_atomic) before anything is built, read from the task child's ERC20TransferAmountEnforcer; the enforcer still reverts on-chain when that read is unavailable.
+         * @description Creates a signable payment intent on the delegation rail. The agent must sign the returned sign_data with its delegate key before Haven can relay execution; the budget delegation's caveat enforcers authorize it on-chain at redemption. #2105: there is no over-budget approval branch — the approval queue died with the Safe rail (#2055). Both retired rails are refused with 410 before anything is written. #3503: a payment the budget delegation's live remaining PERIOD budget cannot cover is refused with 403 error_code "delegation_budget_exceeded" (phase "insufficient_funds", next_action "fund_account_or_raise_allowance", remaining/remaining_atomic, shortfall/shortfall_atomic, amount/amount_atomic) before any UserOp is built — the same error_code and budget fields the x402 legs refuse with. It reads the delegation the payment redeems (a task budget's parent, else the (token, recipient) grant); for a sub-budget, every link of its three-link chain, the smallest remaining deciding. It is a fail-fast convenience, not the gate: an unreadable read fails OPEN and the ERC20PeriodTransferEnforcer still reverts on-chain; a period revert that a fresh read confirms gets the same 403. #3500: with task_budget_id, a payment the task budget's own cap cannot cover is refused with 403 error_code "task_budget_exceeded" (task_budget_id, remaining_atomic, max_atomic, amount_atomic) before anything is built, read from the task child's ERC20TransferAmountEnforcer; the enforcer still reverts on-chain when that read is unavailable.
          */
         post: operations["createPaymentIntent"];
         delete?: never;
@@ -2755,7 +2755,7 @@ export type paths = {
         put?: never;
         /**
          * Decide server-side whether a quote amount fits the agent’s remaining budget.
-         * @description #3054: the guided prepare's budget compare moved server-side so an over-budget refusal is DECIDED by Haven — and reaches the payment_refusals ledger with source "hosted_prepare" through the refuse() choke point — instead of being computed in the agent's runtime where the ledger never saw it. The body carries the merchant quote facts (chainId/token/amountAtomic plus advisory merchantTo and the bought resourceUrl — the refusal dedupe window's discriminating column, never this endpoint's own URL); nothing about the caller's claim is trusted beyond which quote it asks about. Sufficiency answers { sufficient: true, remaining_atomic }. Insufficiency refuses 403 delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption.
+         * @description #3054: the guided prepare's budget compare moved server-side so an over-budget refusal is DECIDED by Haven — and reaches the payment_refusals ledger with source "hosted_prepare" through the refuse() choke point — instead of being computed in the agent's runtime where the ledger never saw it. The body carries the merchant quote facts (chainId/token/amountAtomic plus advisory merchantTo and the bought resourceUrl — the refusal dedupe window's discriminating column, never this endpoint's own URL); nothing about the caller's claim is trusted beyond which quote it asks about. Sufficiency answers { sufficient: true, remaining_atomic }. Insufficiency refuses 403 delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption. #3492: when the body also carries idempotencyKey and it resolves to an already-SETTLED erc7710 payment for this exact quote, the answer is { sufficient: true, remaining_atomic, replay: true } instead — no refusal, no ledger write, because the money already moved. See BudgetPrecheckRequest.idempotencyKey for the exact match rule and scope.
          */
         post: operations["precheckMachinePaymentBudget"];
         delete?: never;
@@ -4825,10 +4825,12 @@ export type components = {
             token: string;
             /** @description The amount that would be authorized, in ATOMIC units, as a non-negative integer string. */
             amountAtomic: string;
-            /** @description Advisory: the merchant payTo address from the selected option. Carried onto the refusal row; it does not scope the compare — the budget is per-token and the enforcer is the gate on recipients. */
+            /** @description Advisory for the ordinary compare: the merchant payTo address from the selected option, carried onto the refusal row; it does not scope THAT compare — the budget is per-token and the enforcer is the gate on recipients. #3492: when `idempotencyKey` is also present, this field additionally scopes the settled-replay match below — a replay answer requires it to equal the stored row's payee. */
             merchantTo?: string;
-            /** @description The merchant resource being bought. Lands on the refusal row's dedupe key when the pre-check refuses. */
+            /** @description The merchant resource being bought. Lands on the refusal row's dedupe key when the pre-check refuses. #3492: when `idempotencyKey` is also present, this field additionally scopes the settled-replay match below — required, and must equal the stored row's resource. */
             resourceUrl?: string;
+            /** @description #3492: the x402 idempotency key of the quote this pre-check describes. When it resolves to an already-SETTLED erc7710 payment matching this same quote (confirmed, a tx_hash, settlement_scheme erc7710, and the SAME token/amountAtomic/merchantTo/resourceUrl this request names — both of the latter two are REQUIRED for a replay match, no task- or sub-budget pin), the pre-check answers sufficient — with `replay: true` — WITHOUT comparing against the now-lower remaining budget and WITHOUT recording a payment_refusals row: the money already moved, so re-refusing it as over-budget would be a false ledger row. Any other shape (no row, a pending child, a key collision on a different quote, a task/sub-budget-scoped row, or a settled EIP-3009 row — deliberately out of scope; it still gets today's false over-budget refusal and ledger row, a known follow-up) leaves today's compare unchanged. Omitted: unchanged behavior. */
+            idempotencyKey?: string;
         };
         /** @description The sufficient branch of the server-side budget pre-check (#3054). The insufficient answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which also lands a payment_refusals row with source "hosted_prepare". */
         BudgetPrecheckResponse: {
@@ -4838,6 +4840,8 @@ export type components = {
             remaining_atomic: string;
             /** @description #1319 provenance, same semantics as the allowances read's flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
             remaining_is_from_chain?: boolean;
+            /** @description #3492: present and true only when sufficiency was decided because `idempotencyKey` resolved to an already-settled erc7710 replay of this exact quote — NOT because `remaining_atomic` covers `amountAtomic` (it may not, on this branch: the settlement already spent it). Absent on every other sufficient answer. */
+            replay?: boolean;
         };
         /** @description The #3126 sufficiency answer — whether HELD funds cover the checked amount. Deliberately NOT a balance: no field carries the account's balance, and nothing is named like the authority figures (remaining/available). `covered` speaks only of holdings; `budget_remaining_atomic` is the PERMITTED figure the allowances read reports. */
         BalanceCoverageResponse: {
@@ -16940,7 +16944,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description EITHER the agent-auth refusal (`agent_pending_approval` / `agent_paused`, #1130) OR spend authority the agent does not have: no active budget delegation for this token and recipient, or (#3503) error_code "delegation_budget_exceeded" — the period budget cannot cover the amount — or (#3500) error_code "task_budget_exceeded" — the task budget's cap cannot. Both budget refusals are decided before any UserOp is built. */
             403: {
                 headers: {
                     [name: string]: unknown;

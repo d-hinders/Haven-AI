@@ -9,7 +9,8 @@
  * retired_allowance`) — enforces budget, recipient and expiry ON-CHAIN during
  * prepare, so an out-of-policy payment is DECLINED before any money moves and
  * before anything is written (`routes/payments.ts`: no active delegation → 403,
- * caveat rejection → 502; `modules/x402/delegation-authorize.ts`: over-budget →
+ * over-budget → 403 `delegation_budget_exceeded` since #3503, other caveat
+ * rejection → 502; `modules/x402/delegation-authorize.ts`: over-budget →
  * 403 `delegation_budget_exceeded`). Both retired rails answer HTTP 410 at every
  * agent-payment entry point (#1986), #2020 retired the `agent_allowances`
  * surface, and #2055 dropped `approval_requests` outright — the table the

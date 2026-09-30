@@ -24,10 +24,10 @@ import {
 } from '../modules/payments/index.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
-import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payment-taxonomy.js'
+import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../domain/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { classifyRevertForLedger, isTransferCapRevert, refuse } from '../modules/payments/index.js'
+import { classifyRevertForLedger, isPeriodBudgetRevert, isTransferCapRevert, refuse } from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
@@ -48,8 +48,10 @@ import {
 import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../rails/delegation-rail.js'
 import {
   prepareDelegationPayment,
+  selectDelegation,
   submitDelegationPayment,
 } from '../rails/delegation-authorization.js'
+import { readRemainingBudget } from '../infra/chain/delegation-budget-reader.js'
 import { getAgentPaymentResumeState } from '../modules/payments/index.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/index.js'
 import { quoteFee } from '../modules/fee/index.js'
@@ -667,6 +669,107 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       subBudgetParentChildDelegation = JSON.parse(parentChildRow.delegation_json) as Delegation
     }
 
+    // #3503: the PERIOD budget pre-check the x402 legs have had since
+    // #2082/#2706. Without it the direct route's only over-budget answer was
+    // the simulation revert — an untyped 502 whose hosted step said
+    // "transient, retry once". Reads the SAME delegations
+    // `prepareDelegationPayment` redeems: a task budget's parent by hash
+    // (#3329 finding E), otherwise the (token, to) selection — made ONCE,
+    // here, and handed to `prepareDelegationPayment`, so the row read is the
+    // row redeemed. A sub-budget redeems three links and each carries its own
+    // period caveat (`sub-budget-delegation.ts`), so all three are read and
+    // the SMALLEST remaining decides — B's own slice is usually the tighter.
+    // FAIL OPEN per link on an unreadable read or a link without a readable
+    // period caveat (`fromChain: false`), exactly like the x402 legs: the
+    // enforcer stays the gate.
+    const budgetOptions =
+      subBudgetGrant && subBudgetParentDelegation && subBudgetParentChildDelegation
+        ? {
+            subBudget: {
+              grantDelegation: subBudgetGrant,
+              parentChildDelegation: subBudgetParentChildDelegation,
+              parentDelegation: subBudgetParentDelegation,
+            },
+          }
+        : taskBudgetChild && taskBudgetParentDelegation
+          ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
+          : { delegation: await selectDelegation(agent.id, tokenAddress, to.toLowerCase()) }
+    const periodBudgetLinks: string[] = budgetOptions.subBudget
+      ? [
+          JSON.stringify(budgetOptions.subBudget.grantDelegation),
+          JSON.stringify(budgetOptions.subBudget.parentChildDelegation),
+          budgetOptions.subBudget.parentDelegation.delegation_json,
+        ]
+      : budgetOptions.taskBudget
+        ? [budgetOptions.taskBudget.parentDelegation.delegation_json]
+        : budgetOptions.delegation
+          ? [budgetOptions.delegation.delegation_json]
+          : []
+    const readLinkRemaining = async (delegationJson: string): Promise<bigint | null> => {
+      try {
+        const read = await readRemainingBudget(agent.chain_id, delegationJson, amountRaw.toString())
+        return read.fromChain ? BigInt(read.remainingAtomic) : null
+      } catch {
+        return null
+      }
+    }
+    const periodBudgetRefusal = async (): Promise<Record<string, unknown> | null> => {
+      const reads = (await Promise.all(periodBudgetLinks.map(readLinkRemaining))).filter(
+        (r): r is bigint => r !== null,
+      )
+      if (reads.length === 0) return null
+      const remainingAtomic = reads.reduce((min, r) => (r < min ? r : min))
+      // `<`, never `<=`: spending the exact remainder is what the chain allows.
+      if (remainingAtomic >= amountRaw) return null
+      const shortfallAtomic = amountRaw - remainingAtomic
+      const remainingHuman = formatTokenAmount(remainingAtomic, tokenConfig.decimals)
+      const shortfallHuman = formatTokenAmount(shortfallAtomic, tokenConfig.decimals)
+      // The same body the x402 legs answer (delegation-authorize.ts), with
+      // this route's rail and recipient in place of the x402 fields.
+      return {
+        error:
+          `This payment of ${amount} ${tokenConfig.symbol} exceeds the agent's remaining budget for this ` +
+          `period (${remainingHuman} ${tokenConfig.symbol}, short by ${shortfallHuman}). There is no approval ` +
+          'queue on the delegation rail — an over-budget redemption reverts on-chain. Ask the wallet owner ' +
+          'to grant or raise the budget in Haven, or wait for the period to reset.',
+        error_code: 'delegation_budget_exceeded',
+        phase: AgentPaymentPhase.InsufficientFunds,
+        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+        rail: AgentPaymentRail.Direct,
+        chain_id: agent.chain_id,
+        token: tokenConfig.symbol,
+        asset: tokenAddress,
+        amount,
+        amount_atomic: amountRaw.toString(),
+        remaining: remainingHuman,
+        remaining_atomic: remainingAtomic.toString(),
+        shortfall: shortfallHuman,
+        shortfall_atomic: shortfallAtomic.toString(),
+        recipient: to.toLowerCase(),
+      }
+    }
+    const periodBudgetLedger = (body: Record<string, unknown>) => ({
+      userId: agent.user_id,
+      agentId: agent.id,
+      chainId: agent.chain_id,
+      tokenSymbol: tokenConfig.symbol,
+      amountAtomic: amountRaw.toString(),
+      accountAddress: agent.account_address,
+      merchantTo: to.toLowerCase(),
+      reason: 'delegation_budget_exceeded' as const,
+      source: 'payment' as const,
+      detail: {
+        error_code: 'delegation_budget_exceeded',
+        phase: AgentPaymentPhase.InsufficientFunds,
+        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+        remaining_atomic: body.remaining_atomic,
+      },
+    })
+    const prePeriodRefusal = await periodBudgetRefusal()
+    if (prePeriodRefusal) {
+      return refuse(reply.code(403).send(prePeriodRefusal), periodBudgetLedger(prePeriodRefusal))
+    }
+
     let authorization
     try {
       authorization = await prepareDelegationPayment(
@@ -674,17 +777,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         tokenAddress,
         to.toLowerCase(),
         amountRaw,
-        subBudgetGrant && subBudgetParentDelegation && subBudgetParentChildDelegation
-          ? {
-              subBudget: {
-                grantDelegation: subBudgetGrant,
-                parentChildDelegation: subBudgetParentChildDelegation,
-                parentDelegation: subBudgetParentDelegation,
-              },
-            }
-          : taskBudgetChild && taskBudgetParentDelegation
-            ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
-            : undefined,
+        budgetOptions,
       )
     } catch (err) {
       // Caveat rejection (budget/recipient/expiry) or bundler failure —
@@ -707,6 +800,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         const revertRefusal = await taskBudgetRefusal()
         if (revertRefusal) {
           return refuse(reply.code(403).send(revertRefusal), taskBudgetLedger(revertRefusal))
+        }
+      }
+      // #3503: the period budget's own revert (a payment that raced past the
+      // pre-check, or a read that failed open) is the same typed 403 once a
+      // fresh read confirms it — never the "transient" 502.
+      if (isPeriodBudgetRevert(err)) {
+        const revertRefusal = await periodBudgetRefusal()
+        if (revertRefusal) {
+          return refuse(reply.code(403).send(revertRefusal), periodBudgetLedger(revertRefusal))
         }
       }
       const refusalReason = classifyRevertForLedger(err)

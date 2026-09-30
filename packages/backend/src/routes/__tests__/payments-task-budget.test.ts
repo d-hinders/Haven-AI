@@ -8,6 +8,10 @@
  * decisions, same convention as `payments.test.ts`.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+// #3503: POST /payments now pre-checks the period budget on-chain — never a live chain here.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: async () => ({ remainingAtomic: '1000000000000', fromChain: true }),
+}))
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const { mockQuery, mockCompute, mockCreateRail, mockReadSpent } = vi.hoisted(() => ({

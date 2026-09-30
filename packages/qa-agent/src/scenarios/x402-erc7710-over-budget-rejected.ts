@@ -20,8 +20,9 @@
  * this sentence used to carry is the phrase family that has misled four review
  * rounds on this branch.)
  *
- * The on-chain proof for the rail lives in `over-budget-refused`, on
- * `POST /payments` (#2738). That leg was deliberately pinned to 3009 by #2016 because on
+ * The deployed enforcer's own refusal is proven by the backend's
+ * `non-custody-onchain-enforcer.contract.test.ts`; since #3503 no live leg
+ * watches it revert (see `over-budget-refused`). This leg was deliberately pinned to 3009 by #2016 because on
  * **erc7710** — the scheme #1450 made preferred — an over-budget authorize
  * returned 201 `pending_signature` WITH `sign_data` for any amount. The
  * invariant's own words were false on the path most payments take, and #2016

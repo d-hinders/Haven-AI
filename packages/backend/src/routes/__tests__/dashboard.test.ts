@@ -183,6 +183,29 @@ describe('dashboard routes', () => {
     expect(agentQuery).toContain("a.status IN ('active', 'paused')")
   })
 
+  // #3195: the overview must honour the caller's preference when it names
+  // the preview's currency. `resolveTransactionCurrency` is mocked here, so
+  // dropping the route's third argument to `enrichTransactionsWithAgents`
+  // used to keep this suite green — the mock answered 'SEK' through its
+  // default implementation, but NOTHING failed when the route stopped
+  // forwarding it. The call assertion below is the guard: dropping the
+  // argument turns this red ('SEK' never reaches the mock's call log).
+  it('#3195: the preview enrichment receives the resolved preference, not just the rows', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(transactionMocks.resolveTransactionCurrency).toHaveBeenCalledWith('user-1')
+    expect(transactionMocks.enrichTransactionsWithAgents).toHaveBeenCalledWith(
+      'user-1',
+      expect.anything(),
+      'SEK',
+    )
+  })
+
   // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
   // dual-emitted is gone. DashboardAgentPreview and the preview transaction
   // carry the account_* names ONLY, ON THE WIRE — a request-level check, not

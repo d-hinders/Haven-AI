@@ -26,6 +26,10 @@ export interface CreatePaymentResult {
   error?: string
   /** Present on a delegation-rail 502: the bundler/simulation failure (#2016). */
   details?: string
+  /** #3503: the typed period-budget refusal (`delegation_budget_exceeded`). */
+  error_code?: string
+  remaining_atomic?: string
+  shortfall_atomic?: string
 }
 
 export interface PaymentStatus {

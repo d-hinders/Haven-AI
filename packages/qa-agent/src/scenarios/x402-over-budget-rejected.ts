@@ -33,17 +33,18 @@
  *
  *   * delete the pre-check → this leg's 403 becomes the enforcer's 502 and
  *     THIS scenario fails;
- *   * delete the enforcer → `over-budget-refused` (POST /payments, which
- *     still reaches the chain and still asserts
- *     `ERC20PeriodTransferEnforcer:transfer-amount-exceeded`) fails.
+ *   * delete the enforcer → until #3503, `over-budget-refused` (POST
+ *     /payments) failed, since it still reached the chain. #3503 gave that
+ *     route the same pre-check, so no live leg watches the enforcer revert
+ *     any more. A budget compiled WITHOUT its period caveat still goes red —
+ *     the pre-check has nothing to read, fails open, and the over-budget
+ *     request comes back signable — and a deployed enforcer that stops
+ *     refusing is caught by the backend's CI contract suite
+ *     `non-custody-onchain-enforcer.contract.test.ts`, which `eth_call`s each
+ *     deployed period enforcer over budget.
  *
- * Neither half alone proves the invariant. Read them together, and do not
- * retire `over-budget-refused` without moving its enforcer assertion first.
- *
- * What the pair does NOT restore: no leg observes the on-chain refusal of an
- * x402 3009 FUNDING redemption any more. `over-budget-refused` covers a
- * different entrypoint on the same delegation, so that observation is gone
- * rather than relocated.
+ * What this does NOT restore: no leg observes the on-chain refusal of an
+ * over-budget redemption on any entrypoint any more — gone, not relocated.
  *
  * Gone from the SUITE, not from the system, and the difference is load-bearing:
  * the pre-check FAILS OPEN by design (#2706, inherited from #2082). A degraded
@@ -210,8 +211,8 @@ export const x402OverBudgetRejected: Scenario = {
     return pass(
       `3009 funding leg: ${over} atomic refused 403 delegation_budget_exceeded before any prepare ` +
         `(remaining ${res.data.remaining_atomic}, shortfall ${res.data.shortfall_atomic}), ` +
-        'against a control that WAS offered. The on-chain enforcer proof for this rail lives in ' +
-        '`over-budget-refused`',
+        'against a control that WAS offered. The deployed enforcer\'s own refusal is proven by ' +
+        'the backend\'s non-custody-onchain-enforcer contract suite',
     )
   },
 }

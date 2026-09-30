@@ -19,7 +19,7 @@ covers:
   - packages/backend/src/infra/repositories/analytics.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/backend/src/routes/machine-payments.ts
-last-verified: "2026-09-21"
+last-verified: "2026-09-30"
 ---
 
 # Analytics
@@ -58,7 +58,12 @@ sees — are one line under the tile grid, not in the tile (#3204: joined into
 the tile they ran five to seven lines and made it twice its neighbours'
 height). The change chips on every tile write their percentage in the
 display currency's locale, so a `kr` figure sits beside `+15,9 %`, not
-`+15.9%`.
+`+15.9%`. (#3195: the dashboard's change line now renders through the same
+rule — the one shared locale helper in `lib/format.ts`, `currencyLocale` —
+where it had carried its own hand-rolled English percent scaffold beside the
+sv-SE `kr` figure. This doc's `formatAnalytics*` helpers delegate to the same
+helper instead of a byte-identical ternary copy; every rendered voice is
+unchanged.)
 
 **Budget used.** What each agent's own budget allows and how much of it is
 gone. The used amount is read from the chain per delegation, in token units,
@@ -251,3 +256,17 @@ merchants and balance sections (#2949) have both landed, so all three
 scenarios capture against the real page:
 `npm run screenshot -- --scenario=analytics-populated,analytics-empty,analytics-error`
 produces the desktop and 390px captures, both themes.
+
+Re-verified 2026-09-30 for #3195 (PR #3176's round-3 items), scope = the
+*Currency basis* paragraph above and the front-matter stamp: #3195 moved the
+ONE per-currency locale rule into `lib/format.ts`'s `currencyLocale`, and this
+doc's covered `lib/analytics-format.ts` (`analyticsCurrencyLocale`) now
+delegates to it rather than carrying a byte-identical copy of the ternary —
+no rendered voice changed, which the `lib/__tests__/analytics-format.test.ts`
+byte-level pins prove. In the same scope pass: the *Currency basis* paragraph
+(whose SEK sums wording came from the 2026-09-20 #3127 round-3 edits) was
+re-read against the analytics endpoint and is still accurate — the page
+requests `currency=sek` and renders the endpoint's booked figures, no client
+derivation. The stamp this bump replaces was set by #3205 (2026-09-21), which
+did not touch the SEK passages; they were never explicitly re-verified since
+they landed until this pass. Nothing else in this file was re-read.

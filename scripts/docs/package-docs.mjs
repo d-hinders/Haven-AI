@@ -107,7 +107,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the README re-verified in this pass.
     // #3173: § Install gained the two-entry paragraph (`@haven_ai/sdk/edge`),
     // verified against package.json exports, tsup.config.ts and edge.ts.
-    'last-verified': '2026-09-20',
+    // #3503: the decline paragraph re-read against `routes/payments.ts` —
+    // over-budget is now a 403 delegation_budget_exceeded on POST /payments too.
+    // Scope: that paragraph.
+    'last-verified': '2026-09-30',
   },
   {
     doc: 'packages/signer/README.md',
@@ -380,7 +383,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // 2026-08-27; a manifest entry is this file's equivalent of a chain, so it
     // drifts the same way a `last-verified` does. Scope: that paragraph and
     // the scenario-table rows it names. Nothing else in that README re-read.
-    'last-verified': '2026-09-08',
+    // #3503: the over-budget rows and discriminator paragraph re-read against
+    // `routes/payments.ts` — `over-budget-refused` is now refused at the period
+    // pre-check (typed 403), so no live leg watches the enforcer revert. Scope:
+    // those rows, that paragraph and the "Still uncovered" note.
+    'last-verified': '2026-09-30',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',

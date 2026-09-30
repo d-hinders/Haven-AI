@@ -103,7 +103,7 @@ const boundary: ClientBoundary = {
     "async openTaskBudget(request: { tokenAddress?: string; maxAmountAtomic: string; ttlSeconds: number; recipientAddress?: string; label?: string; }): Promise<OpenTaskBudgetResult>",
     "async pay(request: PaymentRequest): Promise<PaymentResult>",
     "async payX402Quote(quote: X402Quote, options: X402AuthorizationOptions = {}): Promise<Response>",
-    "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; }>",
+    "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; idempotencyKey?: string; }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; replay?: boolean; }>", // #3492
     "async prepareSweep(): Promise<SweepPrepareResponse>",
     // #3329: taskBudgetId added — build the settlement child under an open task budget's own
     // child delegation ([settlement, task, budget]) instead of the agent's budget delegation

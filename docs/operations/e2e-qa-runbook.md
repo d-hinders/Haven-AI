@@ -21,7 +21,7 @@ covers:
   - packages/backend/src/modules/transactions/__tests__/csv-export.test.ts
   - packages/backend/src/routes/__tests__/transactions-export-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-09-19"
+last-verified: "2026-09-30"
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -112,10 +112,10 @@ deliberately, not an unreachable one.
 6. **Confirm a basic action** — approve the delegation budget in the modal, then
    have the agent do a small allowed action (e.g. a direct `haven_pay` within budget
    or an x402 call). Expect it to settle. An over-budget payment is **refused before
-   it becomes signable**, by a different mechanism per path — see the #420 edge-case
-   note below; on BOTH x402 schemes it is an off-chain `403` before the redemption
-   (erc7710 since #2082, the EIP-3009 leg since #2706), so do not expect an
-   on-chain revert reason on either. Either way the delegation rail has no
+   it becomes signable** by an off-chain `403 delegation_budget_exceeded` before
+   the redemption on every path — direct `haven_pay` since #3503, erc7710 since
+   #2082, the EIP-3009 leg since #2706 — so do not expect an on-chain revert
+   reason on a healthy budget read (see the #420 edge-case note below). Either way the delegation rail has no
    approval queue (#1440), so a queued approval is a FAILURE here, not an expected
    outcome.
 
@@ -141,16 +141,16 @@ merchants** found.
    merchant, token, amount, chain, x402 resource, tx hash).
 
 Note edge cases worth forcing: over-budget (**refused before it becomes
-signable** — the approval queue died with the Safe rail, #1440 — though by
-different mechanisms per path: an on-chain gas-estimation revert on direct
-payments only, and an off-chain remaining-budget pre-check returning HTTP 403
-`delegation_budget_exceeded` before the REDEMPTION on **both** x402 schemes —
-erc7710 since #2082, the EIP-3009 leg since #2706 (PR #2719), so on a healthy
-budget read neither x402 path produces a revert reason to record. The pre-check
+signable** — the approval queue died with the Safe rail, #1440 — by an
+off-chain remaining-budget pre-check returning HTTP 403
+`delegation_budget_exceeded` before the REDEMPTION on every path: direct
+payments since #3503, erc7710 since #2082, the EIP-3009 leg since #2706 (PR
+#2719), so on a healthy budget read no path produces a revert reason to
+record. The pre-check
 is itself an `eth_call` against the enforcer's storage, so what it precedes is
-the redemption, not every chain call. Both pre-checks FAIL OPEN on a degraded read,
-and there the schemes differ: on the 3009 leg you get the enforcer's 502 after
-all, so a 502 there is a flapping RPC before it is a regression (see
+the redemption, not every chain call. Every pre-check FAILS OPEN on a degraded
+read, and there the paths differ: on direct payments and the 3009 leg you get the
+enforcer's 502 after all, so a 502 there is a flapping RPC before it is a regression (see
 agent-qa.md's #2511 entry); on erc7710, which prepares nothing, you get
 `201 pending_signature` WITH `sign_data` — a signable over-budget intent, the
 #1993 shape, and the one outcome here worth escalating rather than

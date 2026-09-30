@@ -281,6 +281,17 @@ export function createCatalogPurchaseHandlers(
               {
                 resourceUrl: merchantUrl,
                 delegationRail: true,
+                // Persisted so haven_settle_mcp_tool can rehydrate the
+                // merchant call by payment_id instead of the agent
+                // re-threading merchant_url/tool_name/arguments/mcp_transport —
+                // same contract as this tool's EIP-3009 branch below and the
+                // catalog tool's erc7710 branch.
+                mcpCallContext: {
+                  merchantUrl,
+                  toolName: args.tool_name as string,
+                  arguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
+                  ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
+                },
                 // #3042 (scan B2, measured live on dev): this branch never
                 // passed the key, so a retried call minted a SECOND
                 // independently-signable settlement child — on this scheme
@@ -334,8 +345,9 @@ export function createCatalogPurchaseHandlers(
                 reason:
                   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
                   "fetches the settlement child itself and verifies its caveats against Haven's " +
-                  'signed context (#1455) before signing. Then call haven_settle_mcp_tool with the ' +
-                  'returned signature and the merchant_url/tool_name/arguments from this response. ' +
+                  'signed context before signing. Then call haven_settle_mcp_tool with ' +
+                  'payment_id and the returned signature — merchant_url/tool_name/arguments/' +
+                  'mcp_transport are OPTIONAL there: Haven rehydrates them by payment_id. ' +
                   'Do NOT pass payment_header: on this scheme Haven assembles it at settle, so ' +
                   'there is nothing to build locally and no funding transaction to wait for.',
                 summary: {
@@ -649,6 +661,13 @@ export function createCatalogPurchaseHandlers(
               // The merchant resource being bought — the ledger dedupe
               // window's discriminating column — never this request's URL.
               resourceUrl: merchantUrl,
+              // #3492: a replayed idempotency key whose erc7710 authorize
+              // already settled must not refuse here as over-budget against
+              // the now-spent remaining figure — the backend answers
+              // sufficient (replay: true) for that exact shape and runs
+              // today's compare unchanged for every other one, including a
+              // fresh key with no prior payment.
+              ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key as string } : {}),
             })
             allowanceBlock = {
               rail,

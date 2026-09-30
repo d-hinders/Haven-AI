@@ -1,4 +1,4 @@
-import { timeAgo, truncate, isValidAddress } from '@/lib/format'
+import { timeAgo, truncate, isValidAddress, currencyLocale } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import type { AnalyticsDelegationBudget } from '@/types/analytics'
 
@@ -25,9 +25,13 @@ export type AnalyticsCurrency = 'USD' | 'EUR' | 'SEK'
  * The wire voice for each display currency. SEK renders in sv-SE — the
  * currency's own locale, the same rule that puts EUR in de-DE — so a krona
  * figure reads "1 234,56 kr", not a USD figure wearing a SEK symbol (#3127).
+ *
+ * #3195: this is the ONE shared rule (`lib/format.ts`'s `currencyLocale`)
+ * re-exported under the analytics name — the copy here was byte-identical to
+ * `formatFiat`'s inline ternary and could drift independently of it.
  */
 export function analyticsCurrencyLocale(currency: AnalyticsCurrency): string {
-  return currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US'
+  return currencyLocale(currency)
 }
 
 /**

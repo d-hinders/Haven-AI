@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-09-19"
+last-verified: "2026-09-30"
 ---
 
 # Haven
@@ -417,7 +417,7 @@ POST /payments
 
 **Sign `sign_data.typed_data` verbatim, never the bare `hash`.** The account validates the typed data, not the 4337 hash; `@haven_ai/sdk` and the MCP signer do this for you.
 
-There is **no over-budget approval queue** on the delegation rail. A request outside the budget, recipient pin or expiry **reverts during on-chain gas estimation** — it does not become a pending approval. There is **no `202` on this route**: #2055 dropped the `approval_requests` table, so no row is left to replay, and #2105 removed the response from the published contract. Do not keep a `pending_approval` branch alive.
+There is **no over-budget approval queue** on the delegation rail. A request the remaining period budget cannot cover is refused **`403 delegation_budget_exceeded`** at a pre-check before anything is built (#3503); one to a recipient outside the grant's pin, or outside its validity window, finds no active delegation and is refused `403`; anything that still reaches the chain out of policy **reverts during on-chain gas estimation** — none becomes a pending approval. There is **no `202` on this route**: #2055 dropped the `approval_requests` table, so no row is left to replay, and #2105 removed the response from the published contract. Do not keep a `pending_approval` branch alive.
 
 ### Payment intent response
 

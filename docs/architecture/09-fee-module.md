@@ -11,7 +11,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-fee.test.ts
-last-verified: "2026-09-15"
+last-verified: "2026-09-30"
 ---
 
 # Haven — Platform fee scaffold and target design
@@ -60,3 +60,17 @@ bar, and explicit human review.
 See [x402 payment sequence](04-x402-payment-sequence.md) for the current funding
 mechanics and [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
 for authority constraints.
+
+Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
+needed rewriting; `modules/fee/` and migration 029 have no commits since the
+last verification. Re-read at this head: `quoteFee` still returns the zero
+quote unconditionally — including when `HAVEN_FEE_ENABLED` is set
+(`fee-module.ts` zero-quote branch at both flag states); the ledger write
+stays the best-effort zero-fee row, idempotent per payment via
+`ON CONFLICT DO NOTHING` in `infra/repositories/payment-fees.ts`; the SDK
+still maps the same public `fee` shape (`payment-mappers.ts`). The covered
+commits that did move (`routes/payments.ts`, `modules/mpp/`,
+`modules/payments/agent-payment-status.ts` — #3423 settle semantics, #3420
+terminal delivered-unsettled status, #3479 settlement recording) changed
+payment status and settlement handling around the scaffold, not the fee
+shape or the zero-fee path.

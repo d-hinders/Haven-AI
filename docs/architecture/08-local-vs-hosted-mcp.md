@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/routes/transactions.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/modules/transactions/x402.ts
-last-verified: "2026-09-20"
+last-verified: "2026-09-30"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -160,8 +160,12 @@ rather than from arguments (`haven_report_x402_outcome`, `haven_submit`,
 `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
 `haven_pay_x402_quote` — each with a refusal that NAMES the local spelling, so
 a caller holding `idempotencyKey` is told what to send instead. #2349 closed
-the list: **21 of the 23 hosted tools refuse**, and the two that do not are
-on a second, equally explicit list — `PERMISSIVE_INPUT_TOOLS`, beside
+the list: **the split now stands at 24 strict of the 26 hosted tools, with the
+two permissive tools on a second, equally explicit list** (re-measured
+2026-09-30: #3354 added `haven_open_task_budget`, `haven_close_task_budget`
+and `haven_check_funds` strict, and the vocabulary-map follow-ups grew
+`haven_report_settlement_evidence`; `PERMISSIVE_INPUT_TOOLS` remains exactly
+`haven_get_agent` + `haven_get_allowances`) — `PERMISSIVE_INPUT_TOOLS`, beside
 `STRICT_INPUT_TOOLS` in `packages/mcp-server/src/tools/contracts.ts` (both
 have lived there since #2807 split the contracts out of `tools.ts`, which
 re-exports them). Both lists carry the per-tool reason and neither is
@@ -527,3 +531,30 @@ since #1984 — are unaffected, hosted and local alike.
 > change). The hosted server's suite pins the signer's declared shapes to the
 > hosted schemas. Scope of this note: those fields. Nothing else in this
 > document was re-verified.
+
+Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). One claim
+needed updating: the strict/permissive census said "21 of the 23 hosted tools
+refuse"; the registered surface is now 26 tools (the #3354 task-budget slice
+added `haven_open_task_budget`, `haven_close_task_budget`,
+`haven_check_funds`, and later slices added
+`haven_report_settlement_evidence`), with 24 on `STRICT_INPUT_TOOLS` and
+`PERMISSIVE_INPUT_TOOLS` still exactly `haven_get_agent` +
+`haven_get_allowances` — every tool on exactly one list, checked mechanically
+against `tools/contracts.ts` at this head. Everything else re-checked:
+the custody-boundary lines (hosted stays keyless; the sign-context fetch is
+still the signer's whole network surface), the #2561 three-state report, the
+receipt-vs-wallet scope declaration (#3132) and the vocabulary pairs (#3134,
+open count still 0 — `scripts/ci/vocabulary-map.json` unchanged), the #3411
+`idempotencyKey` refusal (`IDEMPOTENCY_KEY_RENAMED`, still declared-but-refused
+in the schemas), the #2366 body convergence, the standing
+`quote`/`payment_required` owner decision, the deleted `#314` aliases
+(`server.ts` still iterates `toolSchemas` only), the four edge-signer tool
+names, the two-flow x402 comparison (EIP-3009 bridge / erc7710 direct, the
+settle-column split, `POST /x402/:id/settle` selection, the #1986 410 rail
+scope — still present in `routes/x402.ts`), `assertExpectedBinding` /
+`verifySettlementChild` in the signer, and the qa-dev env pins
+(`QA_HOSTED_MCP_URL` / `QA_DEMO_MERCHANT_URL` in `.github/workflows/qa-dev.yml`).
+The week's tool-surface drift (#3423 slices, #3444, #3465 catalog handoff,
+#3467 compact receipts, #3476 allowance block, #3485 allowance spelling)
+extended schemas and refusal text inside the documented decision structure;
+none of it moved the local/hosted split this document is about.

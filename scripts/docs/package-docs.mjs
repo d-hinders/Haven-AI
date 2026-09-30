@@ -343,7 +343,21 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the tool table already listed. Tool names checked against the registered
     // set in src/tools/**; Run env names and endpoints checked against
     // src/cli.ts and src/http.ts. Rest of the README re-read, unchanged.
-    'last-verified': '2026-09-15',
+    // #3413 (weekly staleness audit, 2026-09-30, at dev `5b5bd059`):
+    // re-verified, no edit. The tool table's 18 rows match the registered set
+    // composed in src/tools.ts (state-direct-recovery, catalog-purchase,
+    // plain-http-x402, paid-mcp-completion, task-budgets); the six tools the
+    // table omits (`haven_send`, `haven_quote_mcp_tool`,
+    // `haven_quote_catalog_purchase`, `haven_prepare_catalog_purchase`,
+    // `haven_resume_x402_payment`, `haven_verify_receipt`) all predate the
+    // last verification — an editorial selection, not staleness. The #3423
+    // compact-receipts row, the #3475 eip3009 settlement row and the settle
+    // semantics (`DELIVERED_UNSETTLED` / `SETTLEMENT_PENDING` /
+    // `next_action: check_status_later`, paid-mcp-completion.ts) match HEAD;
+    // `createHostedHavenClient` still throws on a delegate key; the Run
+    // endpoints are as written (`POST /v1` Bearer-authenticated, `GET
+    // /healthz` unauthenticated per http.ts).
+    'last-verified': '2026-09-30',
   },
   {
     // The #1992 file. Its prose is mostly about BACKEND behaviour — which

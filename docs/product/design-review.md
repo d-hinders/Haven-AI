@@ -18,7 +18,7 @@ covers:
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-09-15"
+last-verified: "2026-09-30"
 ---
 
 # Haven AI UX Review
@@ -162,3 +162,20 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   entry with the Safe rail.)
 - For animation/style changes, verify the class remains stable across state
   transitions and reduced-motion behavior is covered.
+
+Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
+needed rewriting; every covered file still exists (all six named modals/cards,
+`TransactionActivityRow` in `components/haven/`, `TransactionsTable` in
+`components/transactions/`). Re-checked against the code: `RetiredRailNotice`
+is still absent from the frontend; `.v2-tabular` and the
+`prefers-reduced-motion: no-preference` gate are in `globals.css`; the `Card`
+primitive implements exactly the three elevations the checklist describes
+(`flat`/`raised`/`anchor`, with `anchor` still absent from the static
+design-system table as noted); `Tooltip` still carries the #2038 hover-only
+nesting rule; the shared `Table` emits `aria-sort` and the transactions table
+sorts amount on the raw `value` field, not the display string; the
+`delegator_hybrid` filtering lives in `useAgentPanelState` and the account/agent
+hooks as described. The intervening UI drift (#3442 token-label wrap, #3437
+releases wrap, #3482 faucet/onramp, #3408 receive side, #3198 agent labels,
+#3205 chart callouts, #3087 marketplace) changed screens the checklist reviews
+without changing any review criterion, primitive name, or process step here.

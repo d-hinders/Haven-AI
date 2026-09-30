@@ -38,8 +38,12 @@ export { isAddress as isValidAddress } from '@haven_ai/core'
  *  - SEK → sv-SE, symbol suffix: `13 000,50 kr` (sv-SE styles `currency`
  *    without `currencyDisplay: 'name'` as a suffix `kr`, NBSP-separated)
  */
+export function currencyLocale(currency: 'USD' | 'EUR' | 'SEK'): string {
+  return currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US'
+}
+
 export function formatFiat(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
+  return new Intl.NumberFormat(currencyLocale(currency), {
     style: 'currency',
     currency,
     minimumFractionDigits: 2,

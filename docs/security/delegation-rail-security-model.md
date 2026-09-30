@@ -62,7 +62,7 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/issuance.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
-last-verified: "2026-09-27"
+last-verified: "2026-09-30"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -538,15 +538,39 @@ chain.
 > machine-payment SQL statements gained `mpe.fx_rates` in their SELECT list —
 > one more column from the same row, same WHERE, same bind shape); the new
 > per-request read is the same scoped preference read the preferences route
-> already served, keyed by the JWT subject; `routes/auth.ts`'s change is the
-> signup INSERT gaining a `currency_preference` value (the user's own row,
-> from a constant — nothing about session issuance, device flow or credential
-> verification moves); and `dashboard.ts` gained one WRITE beside its reads —
-> the portfolio-snapshot INSERT carries the snapshot's `total_sek` as one more
-> bind on the same row, same user scope, no authority surface. No file here
+> already served, keyed by the JWT subject; the signup's new column rides the
+> shared signup INSERT — `INSERT_USER_SQL` in
+> `infra/repositories/users.ts` gained the `currency_preference` column with
+> `DEFAULT_TRANSACTION_CURRENCY` bound (the caller's own row, from a
+> constant), while `routes/auth.ts` changed two response literals only: the
+> signup response's `currency_preference` and the `/me` fallback (nothing
+> about session issuance, device flow or credential verification moves); and
+> `dashboard.ts` gained one WRITE beside its reads — the portfolio-snapshot
+> INSERT carries the snapshot's `total_sek` as one more bind on the same row,
+> same user scope, no authority surface — and widened two READ statements in
+> the same pass: `FIND_PORTFOLIO_SNAPSHOTS_SQL` gained the `total_sek` column
+> and the monthly-spend aggregate gained `sek_sum` plus `fallback_amount_sek`
+> (more columns from the same rows, same WHERE, same bind shape). No file here
 > that signs, delegates, relays or gates is touched. Scope of this note: those
-> four files and the two SQL statements' SELECT lists. Nothing else in this
+> four files, the two SQL statements' SELECT lists, and the signup INSERT's
+> column list. Nothing else in this
 > document was re-verified.
+>
+> **Re-verified unchanged (#3195, 2026-09-30, the monthly-spend SEK fallback
+> predicate):** `infra/repositories/dashboard.ts`'s `fallback_amount_sek`
+> predicate in `SUM_MONTHLY_PAYMENT_SPEND_SQL` widened from "rows whose
+> `sek_value` IS NULL" to the same two-pronged shape `fallback_amount` (the
+> USD/EUR twin) already had — NULL, or a booked zero beside a real token
+> amount — so a `zeroPrice()` 0/0/0 row is re-priced into SEK at serve time
+> exactly as it already was into USD/EUR (#3195: under the narrower predicate
+> the same rows read LOWER under SEK than under USD). It is a display
+> re-price of already-confirmed rows at read time: no confirm path, booking
+> figure, handler, query scope, signing path or refusal moves, and the
+> aggregate decides no spend — budget, recipient and expiry remain enforced
+> on-chain by the caveat enforcers. The row shapes stay per-row independent:
+> a priced row is collected into neither bucket. Nothing this document claims
+> about authority, custody or signing changes. Scope of this note: that one
+> CASE predicate. Nothing else in this document was re-verified.
 
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,

@@ -33,9 +33,12 @@ export type TransactionCurrency = (typeof TRANSACTION_CURRENCIES)[number]
  * The currency a converted amount is struck in when the user has no
  * preference (or an unreadable one) — SEK, deliberately (#3127), not
  * inherited: it is the currency every row was already being served in, the
- * currency the CSV export reports fixed, and the accounting feed's own
- * default ledger currency. A user who never touched settings keeps the
- * figures they were getting; now the figure names its currency.
+ *   currency the CSV export reports fixed, and the accounting feed's own
+ *   default ledger currency. What "keeps the figures they were getting"
+ *   covers — and what it does not (#3195): TRUE for the transaction feed,
+ *   where `amountSek` was already served and only gains its name; NOT for
+ *   the dashboard and analytics totals, which moved USD → SEK under 091
+ *   (the migration paragraph below states that consequence).
  *
  * Migration 091 (owner decision, Antonio, 2026-09-20 (proposed by Philip
  * 2026-09-19)) makes the stored data

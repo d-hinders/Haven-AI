@@ -4,9 +4,10 @@
  * `user.test.ts` covers profile / wallet / safe / owner-alias, but nothing
  * exercised the currency-preference read or write — the two `users` statements
  * about to move into `infra/repositories/users.ts`. These pin the behaviour
- * that the move must preserve, in particular the read's `?? 'USD'` fallback on
- * an empty result, which is exactly the shape a repository returning `null`
- * could silently change.
+ * that the move must preserve, in particular the read's fallback on an empty
+ * result — served `SEK` since #3127 round 3 (migration 091; it was the
+ * inherited `'USD'` literal before) — which is exactly the shape a repository
+ * returning `null` could silently change.
  *
  * Written against the UNCHANGED route and passing before the extraction.
  */

@@ -5201,7 +5201,7 @@ export const SCENARIOS = {
   // default puts on them, for the design-reviewer pass.
   'currency-preference-sek': {
     description:
-      '#3127 finding 8: the SEK no-preference default (migration 091) rendering on the three fiat surfaces — the /dashboard hero with its SEK total and change line, the Settings → Preferences card with the kr SEK radio active, and the account detail page priced in SEK',
+      '#3127 finding 8: the SEK no-preference default (migration 091) rendering on the fiat surfaces — the /dashboard hero with its SEK total and change line, the Settings → Preferences card with the kr SEK radio active, the accounts overview and the account detail page priced in SEK (#3195 adds the overview)',
     async run({ page, vp, shoot }) {
       // ── /dashboard: the hero is a SEK hero ────────────────────────────────
       // `sv-SE` renders `136\u00a0050,75\u00a0kr` (NBSP group + decimal
@@ -5213,12 +5213,11 @@ export const SCENARIOS = {
       await page.getByText('Total balance').waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       // The change line renders the SEK swing, not the quiet caption. The
-      // percent keeps `formatPercent`'s plain `toFixed` decimal point — the
-      // same mixed voice the unit test and the visual spec pin. `\s` rather
-      // than literal spaces: sv-SE's separators are NBSPs and a regex is
-      // tested against the node's raw text (string needles normalize, this
-      // does not).
-      await page.getByText(/2\s*285,40\s*kr\s*\(\+1\.70%\)\s*today/).first().waitFor({ timeout: 20_000 })
+      // percent renders in sv-SE through Intl (#3195 round-2 finding b):
+      // decimal comma, NBSP before `%` — `\s` rather than literal spaces,
+      // sv-SE's separators are NBSPs and a regex is tested against the
+      // node's raw text (string needles normalize, this does not).
+      await page.getByText(/2\s*285,40\s*kr\s*\(\+1,70\s*%\)\s*today/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'dashboard')
 
       // ── Settings → Preferences: the kr SEK radio active ──────────────────
@@ -5233,6 +5232,18 @@ export const SCENARIOS = {
         throw new Error(`currency-preference-sek: the Settings radio reads aria-checked=${checked} — the session is not the SEK user`)
       }
       await shoot(preferences, 'settings-preferences')
+
+      // ── /accounts: the accounts overview priced in SEK ───────────────────
+      // #3195: the accounts OVERVIEW joins the photographed set — the card
+      // prices its fiat total and token rows from the portfolio fixture's SEK
+      // figures through the shared formatter, and until now the surface was
+      // pinned by a unit test only. Same SEK needles as the detail page: the
+      // fixture's `totalSek` IS the row's `sekValue`.
+      await page.goto(`${BASE_URL}/accounts`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('heading', { name: 'Accounts', exact: true }).waitFor({ timeout: 20_000 })
+      await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'accounts-overview')
 
       // ── /accounts/<id>: the account priced in SEK ────────────────────────
       await page.goto(`${BASE_URL}/accounts/safe-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })

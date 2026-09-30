@@ -91,7 +91,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-09-21"
+last-verified: "2026-09-30"
 ---
 
 # Haven Design System
@@ -715,8 +715,8 @@ revoke/remove, delete contact):
   and would work there too. The mixed spelling in one class string is the tell — where the
   two forms sit side by side, the one with a modifier is the one that has to be semantic.
 
-**Distribution, with the command that produced it.** Ghost dominates: 112 ghost, 11 tertiary,
-5 danger, 1 primary — 129 literal occurrences, from `packages/frontend`:
+**Distribution, with the command that produced it.** Ghost dominates: 155 ghost, 31 tertiary,
+7 danger, 0 primary — 193 literal occurrences, from `packages/frontend`:
 
 ```bash
 grep -rhoE 'variant="(primary|ghost|tertiary|danger)"' src --include='*.tsx' | sort | uniq -c
@@ -725,10 +725,15 @@ grep -rhoE 'variant="(primary|ghost|tertiary|danger)"' src --include='*.tsx' | s
 The command is published because it has to be: during review of #1830 two reasonable
 counting methods disagreed by roughly a factor of two, and a call-site number without its
 command is not reproducible. It misses two things by construction. **`variant` is optional**,
-so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 1 and is
+so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 0 and is
 nonetheless the most common button in the product. And it cannot see the four dynamic call
-sites (`DashboardClient.tsx:334`, `ConfirmDialog.tsx:60`, `ReplaceSigningKeyModal.tsx:933`,
-`CopyBlock.tsx:39`). The shape of the distribution is the point, not the integer.
+sites (`DashboardClient.tsx:361`, `ConfirmDialog.tsx:60`, `agent-panel/ReplaceSigningKeyModal.tsx:904`,
+`connect-agent/CopyBlock.tsx:54`). The shape of the distribution is the point, not the integer.
+Re-derived 2026-09-30 for #3195 by running the published command: the previous figure
+(112/11/5/1 — 129, derived by #2203 at `ba4e045b`) had drifted through merged work to
+155/31/7/0 — 193, the same shape (ghost dominates, primary lives in the unadorned call
+sites); the `DashboardClient.tsx` citation moved :334→:361 with that file's formatter edits,
+and the two modal citations gain their subdirectory, which they had always needed to resolve.
 
 **Ring tone lives with the fill ([#1817](https://github.com/d-hinders/Haven-AI/issues/1817)).**
 The ring's *geometry* (`ring-2`, `ring-offset-2`, the offset colour) is uniform and lives in
@@ -1878,3 +1883,17 @@ primitives and `Row.tsx`) changed components inside the documented system; the
 doc's token, typography, and gate claims needed no rewrite. `StatTile` and the
 `/analytics` work it shipped remain consistent with the § Statistics tile
 guidance.
+
+Re-verified 2026-09-30 for #3195 (the round-2 design nits from PR #3176's
+review), scope = § Statistics tile's formatting guidance and § Buttons'
+distribution paragraph: the dashboard's metric tiles now render their compact
+SEK tier in the UI's voice (en-US: `SEK 5.19K`) instead of sv-SE's scale
+words (`5,19 tn kr` — "tn" is tusen), scoped so the standard tier keeps the
+#3127 currency-locale voice byte-for-byte; the hero's change line writes its
+percent half through `Intl` in the currency's locale (`+1,00 %` under
+sv-SE/de-DE, byte-identical `+1.00%` under en-US), so the line stops mixing
+a decimal comma with a hand-rolled English percent scaffold; and the
+per-currency locale rule lives once in `lib/format.ts` (`currencyLocale`),
+with the dashboard wrappers and `lib/analytics-format.ts` delegating to it
+instead of carrying a third copy of the ternary. The three items are fixes
+the round-2 review had pinned; the rest of this document was NOT re-read.

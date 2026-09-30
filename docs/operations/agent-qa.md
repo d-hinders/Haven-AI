@@ -1055,8 +1055,8 @@ them is a string a caller supplies:
   firing again (#2268) — the listing alone cannot tell them apart, so
   `unconfirmed` no longer claims "a success may exist further back" unless
   the page cap, the lookup budget, or the index's reach also stopped the
-  search (those causes still leave it possible); #3321 still reopens either
-  way. Every observation without an in-budget success (`never-run`,
+  search (those causes still leave it possible). Every observation without an
+  in-budget success (`never-run`,
   `never-succeeded`, `unconfirmed`, `stale`) also logs
   per-page row counts and newest/oldest `createdAt`, the deployment index's
   size (every creator's shas, not only Railway's), its actual oldest entry,
@@ -1064,6 +1064,93 @@ them is a string a caller supplies:
   reach further back), plus the lookup accounting (attempted/failed/cached) —
   the diagnostics that would have told the leading hypothesis apart from a
   failed lookup at the time, rather than only after the fact.
+  > **Re-verified #3321 (2026-09-30):** the guard-freshness listing-coherence
+  > / page-1 retry passage only; nothing else in this document was
+  > re-verified.
+
+  **A transient stale read is now retried, for both guard kinds (#3321).**
+  #3409's leading hypothesis — an anomalous listing page — went from a guess
+  to a proven, recurring incident: a re-read of the reopen history (review
+  round 1, 2026-09-30) found 8 of the 9 guard-freshness reopens were
+  `qa-dev.yml` reading the IDENTICAL frozen page — 100 `deployment_status`
+  rows, newest `2026-09-19T16:20:14Z`, oldest `2026-09-18T21:18:20Z`, printed
+  verbatim by runs `36542205451`, `36548966124`, `36565011143` and
+  `36692820874`. Before the #3409 diagnostics existed to print the page
+  itself, the four 09-28 runs (e.g. `gh run view 36393133139 --log`) show the
+  same frozen page a different way — the summary line reads
+  `✗ qa-dev.yml — last success none since 2026-09-18T21:18:20Z (budget 4d)`
+  with a separate `never-run: Actions has no record of it ever running.`
+  line, the same `2026-09-18T21:18:20Z` this whole passage is about. The 9th
+  (`36570505601`, 09-29 12:47) was a DIFFERENT guard reading a DIFFERENT
+  frozen page:
+  `db-concurrency-proof.yml`'s `schedule` page 1 frozen at
+  `2026-09-18T07:36:48Z` ("11.2d ago"), while that job in fact succeeds
+  nightly — so the defect is not specific to `deployment_status`, the
+  Deployments index, or a guard with `provenance`. The endpoint sets
+  `Cache-Control: private, max-age=60, s-maxage=60` (measured live) — proof
+  the response is *allowed* to be cache-served, but a 60 s directive cannot
+  by itself explain an 11-day-old snapshot, so the deeper cause is GitHub's
+  own read path for this listing (cache or search-index replica)
+  occasionally serving a stale snapshot.
+
+  What the evidence shows, read from `guard-freshness.yml`'s own CI run
+  logs (each run's summary line, `❌ A scheduled guard has gone stale.` or
+  `✅ Every scheduled guard is fresh.`): of the 57 evaluations from 09-27 to
+  09-30, 12 came back stale. On 09-28, three consecutive evaluations were
+  stale (15:02:50, 15:22:17, 15:39:50), spanning 37 minutes and bracketed by
+  fresh ones at 14:58:20 and 15:41:17; nothing was sampled between them, so
+  whether the staleness was continuous is inferred, not observed. The other
+  stale evaluations were single, apart from two in a row on 09-29 that hit
+  different guards (12:47:37 `db-concurrency-proof.yml`, 13:09:04
+  `qa-dev.yml`); each was followed by a fresh evaluation, the shortest gap
+  being about a minute (16:09:59 stale, 16:11:04 fresh). The gaps are only
+  upper bounds, set by when the next push arrived. The actual recovery time of a stale read is unmeasured.
+  Whether varying the request shape (`per_page`, a `created=>` filter)
+  dodges the stale read was tried by hand during this fix and was
+  inconclusive; it is not recorded anywhere reproducible.
+
+  Staleness is per-request, not per-workflow-run or per-cluster — one
+  evaluation read `qa-dev.yml` fresh while reading `db-concurrency-proof.yml`
+  stale in the same run. `observe()` now retries page 1 of a counted event —
+  up to `PAGE1_RETRY_ATTEMPTS` times, `PAGE1_RETRY_DELAY_MS` apart — whenever
+  the retry could still change the answer: no qualifying success found yet,
+  AND either the guard has provenance and its Deployments index shows an
+  in-window deploy (the original, narrower condition), or the guard has no
+  provenance at all, in which case page 1 being stale is retried
+  unconditionally, since it is indistinguishable from the guard being about
+  to fail either way. A page with no rows (a workflow that has genuinely
+  never run) is "stale" by the same test and is retried too, up to the same
+  bound — wasted reads, capped, and a truly-empty history stays empty on
+  every retry. The first retry that opens near "now" replaces the stale read;
+  a genuinely dead trigger cannot self-correct on retry — every attempt stays
+  old — so it still exhausts the retries and still escalates exactly as
+  before; only a transient stale read is cleared, silently, before it ever
+  becomes a finding.
+
+  **This is a best-effort mitigation for the isolated case, not a fix for a
+  cluster.** Every isolated stale read observed was cleared by a later
+  evaluation, and `3 × PAGE1_RETRY_DELAY_MS` (worst case ~60 s per
+  stale page 1, per counted event, per guard — a single evaluation can sleep
+  on multiple: up to ~60 s for `qa-dev.yml`'s one counted event plus up to
+  ~120 s for `db-concurrency-proof.yml`'s two, `schedule` and
+  `workflow_dispatch`, so ~180 s (~3 min) worst case for one evaluation,
+  inside `guard-freshness.yml`'s own `timeout-minutes: 5`) is a judgement
+  call sized for that case, not a claim that it covers it. The 09-28 run of
+  stale evaluations spanned 37 minutes, longer than any in-evaluation retry
+  budget can reasonably cover, so for that case the mitigation is the *next*
+  evaluation, not the retry: `guard-freshness.yml` runs on every push to
+  `dev`/`main` (124 push-triggered runs 2026-09-24..30, measured with
+  `gh run list --workflow guard-freshness.yml --created 2026-09-24..2026-09-30`),
+  but the next push can be minutes or hours away — the 2026-09-30T08:56Z
+  reopen waited 6 h 20 min for the next evaluation. The
+  `(retried Nx — #3321)` diagnostic line is what will
+  show whether a future occurrence outlasts even that. Mutation-proven in
+  `guard-freshness.test.mjs` for both guard kinds: the self-correcting and
+  stays-stale-through-every-retry cases (qa-dev.yml, with provenance, and
+  db-concurrency-proof.yml, without), a guard that skips the retry once a
+  qualifying success is already found on an earlier counted event, a page 1
+  with no in-window deploy that is never retried, and page 2+ never being
+  retried (only page 1 is).
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

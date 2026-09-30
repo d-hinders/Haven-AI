@@ -472,8 +472,9 @@ any money moves** — during prepare, before anything is written and before the
 agent is asked to sign. `POST /payments` answers `403` when no active delegation
 authorizes that token and recipient, `403 delegation_budget_exceeded` when the
 remaining period budget cannot cover the amount (#3503; the x402 authorize path
-answers the same), and `502` when the on-chain caveat check rejects the
-recipient or expiry. In every case the SDK raises `HavenApiError` and no
+answers the same), and `502` when the on-chain caveat check rejects a
+redemption anyway (a recipient outside a pin or an expired grant already gets
+the first `403`, since no active delegation matches). In every case the SDK raises `HavenApiError` and no
 `payment_id` exists to poll.
 
 Surface that to the user as a decline, not a wait: **nothing will arrive later.**

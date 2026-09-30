@@ -31,7 +31,9 @@
  * ## The revert classification
  *
  * `prepareRedemption`'s gas estimation throws the caveat enforcers' revert
- * text as a raw viem error string — there is no typed error to switch on.
+ * inside a viem/bundler error string — as plain text or, the shape a bundler
+ * actually relays, an ABI-encoded `Error(string)` in hex that
+ * `flattenErrorText` decodes (#3503) — there is no typed error to switch on.
  * `classifyRevertForLedger` is deliberately four-way: the timestamp
  * enforcer's revert text (`beforeThreshold` / `Enforcer:expired-delegation`
  * in the flattened error chain) is `delegation_expired`; the period-budget
@@ -221,14 +223,14 @@ export function decodeErrorStrings(text: string): string[] {
  *   `Enforcer:expired-delegation` custom-error name, or any `beforeThreshold`
  *   occurrence) is `delegation_expired`.
  * - The period-budget enforcer's custom error (`Enforcer:transfer-amount-
- *   exceeded`, the on-chain answer the DIRECT `POST /payments` route gets
- *   with no period-budget pre-check in front of it) and the cumulative-cap
+ *   exceeded`, reaching the chain on any route only when a pre-check failed
+ *   open or lost a race — #3503 gave `POST /payments` one too) and the cumulative-cap
  *   enforcer's (`ERC20TransferAmountEnforcer:allowance-exceeded`, #3500) are
  *   `delegation_budget_exceeded`.
  * - Any OTHER estimation revert — viem's `EstimateGasExecutionError`, or an
- *   error whose flattened text says the execution reverted (bundlers echo
- *   the enforcer revert reason inside the RPC error) — is `onchain_revert`.
- *   Rare since #2706: the pre-checks catch over-budget on both legs first.
+ *   error whose flattened text (hex reasons decoded) says the execution
+ *   reverted without naming one of the enforcers above — is `onchain_revert`.
+ *   Rare: the pre-checks catch over-budget on every route first.
  * - Everything else — a transport failure, an RPC auth/config error, an
  *   unknown shape — is NOT a refusal: the guardrails did not refuse
  *   anything, the infrastructure broke. Recording it would pollute the

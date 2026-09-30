@@ -317,13 +317,15 @@ their allowlist.
 here said the result carries `payload_hash: null` and told the agent to "wait
 for the user to approve and execute the Safe payment" — an approval that cannot
 arrive on any rail, and which this file already contradicts two sections below.
-What actually happens on `POST /payments`: a period-budget pre-check refuses an
-amount the remaining budget cannot cover with a typed **403
-`delegation_budget_exceeded`** (#3503); otherwise `prepareDelegationPayment`
-estimates the redemption, the caveat enforcer rejects recipient/expiry (or a
-budget the pre-check could not read) there, and the caller gets a **502 with
-the database untouched** (`routes/payments.ts`); an agent with no budget
-delegation for that token/recipient at all gets a **403**. Either way there is no intent row, no `payload_hash` to sign, and
+What actually happens on `POST /payments`: an agent with no active budget
+delegation for that token/recipient (a recipient outside a pin, or a grant
+outside its validity window) gets a **403**; a period-budget pre-check refuses
+an amount the remaining budget cannot cover with a typed **403
+`delegation_budget_exceeded`** (#3503); anything out of policy that still
+reaches `prepareDelegationPayment`'s gas estimation (a budget the pre-check
+could not read, for one) is rejected by the caveat enforcer there, and the
+caller gets a **502 with the database untouched** (`routes/payments.ts`).
+In every case there is no intent row, no `payload_hash` to sign, and
 nothing to poll — tell the user to raise the budget in Haven.
 
 **Recommended paid-MCP x402 flow** — two delegate signatures in one local tool
@@ -371,8 +373,8 @@ approval resume is not completable through the edge-signer tools — and since
 is deleted, and the delegation rail refuses over-budget instead of queueing.
 On a healthy budget read every path refuses at a remaining-budget pre-check —
 erc7710 since #2082, the EIP-3009 funding leg since #2706, `POST /payments`
-since #3503 — and the enforcer's gas-estimation revert is what a failed-open
-pre-check reaches. The pre-check is itself an
+since #3503 — and on direct payments and the 3009 leg the enforcer's
+gas-estimation revert is what a failed-open pre-check reaches. The pre-check is itself an
 `eth_call` against the enforcer's storage, so what it precedes is the
 REDEMPTION, not every chain call.
 

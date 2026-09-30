@@ -88,10 +88,9 @@ export function TaxDeclarationToggle({
           <>
             When this is on, your saved VAT number, checked against the
             EU&apos;s VIES register, can be declared to merchants that ask
-            for it, with payments your agent signs under a budget. Only
-            payments that settle by EIP-3009 carry a declaration; payments to
-            a pinned merchant never carry one. Nothing is submitted to an
-            authority, and you can switch it off here at any time.
+            for it, with payments your agent signs under a budget. Nothing is
+            submitted to an authority, and you can switch it off here at any
+            time.
           </>
         }
         disabled={saving}

@@ -2485,15 +2485,119 @@ describe('multi-agent repair targeting (#3412)', () => {
     expect(check?.repair).toContain(`--credentials-dir ${dir}`)
   })
 
-  it('a retired directory counts toward the refusal but is never offered as a repair target', async () => {
-    const { homeDir, wiredDir } = await wiredPlusNewerUnwired()
+  it('a retired directory that kept its identity.json is out of the refusal entirely (#3496)', async () => {
+    // Pre-#3496 the tombstone tell sat inside the missing-identity catch, so
+    // a retired directory that KEPT identity.json counted toward the
+    // multi-directory refusal ("retired — not a repair target") while a
+    // keyless one never did. The tombstone check now runs FIRST in
+    // discovery, so both shapes leave the candidate set together: repair
+    // sees one live candidate and proceeds, consistent with how keyless
+    // retired directories always behaved. The doctor still reports the
+    // directory as retired (see the #3496 block).
+    const { homeDir } = await wiredPlusNewerUnwired()
     const retiredDir = join(homeDir, '.haven', 'agents', 'agent-newer')
     await writeFile(join(retiredDir, 'TOMBSTONE.json'), JSON.stringify({ retired_at: '2026-09-28T00:00:00Z' }))
     const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir, runCommand: vi.fn() })
-    expect(repair.ok).toBe(false)
+    expect(repair.ok).toBe(true)
     const text = repair.messages.join('\n')
-    expect(text).toContain(`--credentials-dir ${wiredDir}`)
-    expect(text).not.toContain(`--credentials-dir ${retiredDir}`)
-    expect(text).toContain(`${retiredDir}): retired — not a repair target`)
+    expect(text).not.toContain(retiredDir)
+    expect(text).not.toContain('retired — not a repair target')
+  })
+})
+
+// ── #3496: a tombstoned directory is never a primary candidate ────────────
+// The TOMBSTONE.json tell used to live inside the missing-identity.json
+// catch, so a retired directory that KEPT its identity.json beside its
+// tombstone stayed a primary candidate — and if that identity was the newest
+// on disk, the doctor selected it, failed its checks, called the live agent
+// superseded, and prescribed a full re-setup (the owner-machine repro). The
+// tombstone check now runs BEFORE the identity stat: still reportable as
+// retired (#1681), never selectable — whether or not identity.json survives.
+describe('tombstoned directory is never the primary (#3496)', () => {
+  async function homeWithTombstonedNewer() {
+    const { homeDir, dir, wrapperPath } = await healthyHome()
+    await seedCodexConfig(homeDir, wrapperPath)
+    // The retired directory: identity.json present (a retirement does not
+    // always delete it — the #1911 wording for the pending file fits here
+    // too), key stripped, no signer.json, TOMBSTONE.json beside it. Seeded
+    // with a NEWER identity mtime than the live agent, the exact ordering
+    // the repro hit.
+    const retiredDir = join(homeDir, '.haven', 'agents', 'agent-retired')
+    await mkdir(retiredDir, { recursive: true })
+    await writeFile(join(retiredDir, 'identity.json'), JSON.stringify({
+      agent_id: 'agent-retired',
+      api_url: 'https://api.haven.example',
+      hosted_mcp_url: HOSTED,
+    }))
+    await writeFile(join(retiredDir, 'TOMBSTONE.json'), JSON.stringify({
+      version: 1,
+      agent_id: 'agent-retired',
+      retired_at: '2026-09-20T16:59:00.000Z',
+      reason: 'reset',
+    }))
+    // Deterministic ordering (#3241): live dir OLDEST, retired NEWEST.
+    await stampAgentMtimes(homeDir, ['agent-1', 'agent-retired'])
+    return { homeDir, dir, retiredDir }
+  }
+
+  it('FAILING-FIRST: a tombstoned dir whose identity.json is newer than the live one is NOT selected', async () => {
+    const { homeDir, dir, retiredDir } = await homeWithTombstonedNewer()
+    // claude-code owns no config file, so agentIsWired falls back to the
+    // isPrimary heuristic: the directory discovery selected is the one the
+    // flat check list describes, and the selected directory reads `wired`.
+    // Selecting the tombstoned directory is the bug; selecting agent-1 is
+    // the fix.
+    const report = await runDoctor({ runtime: 'claude-code' }, { homeDir, ...healthyDeps() })
+    const credentials = report.checks.find((c) => c.id === 'credentials')
+    // Pre-fix this exact line read the tombstoned dir's failure —
+    // "identity.json or signer.json is missing or unparseable" — and
+    // prescribed a full re-setup.
+    expect(credentials?.detail).not.toContain('missing or unparseable')
+    expect(credentials?.detail).toContain('agent agent-1')
+    // The live agent reads as wired — not superseded.
+    expect(report.agents.find((a) => a.directory === dir)?.classification).toBe('wired')
+    // The retired directory stays reportable — from evidence, classified
+    // retired, in the inventory and the superseded scan.
+    expect(report.agents.find((a) => a.directory === retiredDir)?.classification).toBe('retired')
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.ok).toBe(true)
+  })
+
+  it('repair never touches the tombstoned directory — not a target, not a refusal line', async () => {
+    // Pre-fix the tombstoned directory counted as an identity directory, so
+    // the multi-directory refusal listed it ("retired — not a repair
+    // target"). Post-fix it never enters the candidate set, so repair output
+    // does not name it at all: the pin is the ABSENCE of the retired path.
+    const { homeDir, retiredDir } = await homeWithTombstonedNewer()
+    const repair = await runRepair({ runtime: 'claude-code' }, { homeDir, runCommand: vi.fn() })
+    const text = repair.messages.join('\n')
+    expect(text).not.toContain(retiredDir)
+    expect(text).not.toContain('retired — not a repair target')
+  })
+
+  it('a candidate without signer.json still ranks as a candidate — selected, inventoried, its failures described', async () => {
+    // Decision on the third acceptance criterion: absence of signer.json
+    // does NOT demote a directory below one that has it, and it is not
+    // parked. `parked` is a #1915 term of art — rekey-pending key material
+    // with no agent behind it; an identity-bearing directory holds an
+    // agent's credentials and must keep its own name, inventory entry and
+    // failure lines. The real-world guard is elsewhere: with a readable
+    // config, agentIsWired demotes the unwired primary in favor of the
+    // wired one (#1697); only the no-config fallback can ever select it,
+    // and #3496 closes the tombstone-shaped hole in that fallback.
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-doctor-3496-nosigner-'))
+    const bare = await seedCredentials(homeDir, 'agent-bare')
+    await rm(join(bare, 'signer.json'))
+    await stampAgentMtimes(homeDir, ['agent-bare'])
+    const report = await runDoctor({ runtime: 'claude-code' }, { homeDir, ...healthyDeps() })
+    // The configless isPrimary heuristic calls the selected directory wired
+    // (#1697 honest degradation) — the decision point is that it is a full
+    // candidate, not parked and not dropped.
+    const entry = report.agents.find((a) => a.directory === bare)
+    expect(entry?.classification).toBe('wired')
+    expect(report.agents).toHaveLength(1)
+    expect(entry?.checks.find((c) => c.id === 'credentials')?.ok).toBe(false)
+    const credentials = report.checks.find((c) => c.id === 'credentials')
+    expect(credentials?.ok).toBe(false)
+    expect(credentials?.detail).toContain('missing or unparseable')
   })
 })

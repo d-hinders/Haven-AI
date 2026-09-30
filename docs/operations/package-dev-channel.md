@@ -29,6 +29,24 @@ covers:
 last-verified: "2026-09-25"
 ---
 
+> **Re-verification (#3496, tombstone-before-identity doctor selection,
+> 2026-09-30):** this doc is coupled through `packages/connect/src/doctor.ts`.
+> The change is `discoverCredentialDirectory`'s candidate selection: the
+> `TOMBSTONE.json` tell is now checked BEFORE the `identity.json` stat, so a
+> retired directory that kept `identity.json` is never selected as the primary
+> candidate — before, it could be picked whenever its identity file was the
+> newest on disk — while staying reportable as retired (#1681 semantics
+> unchanged); the missing-identity catch narrows to the rekey-pending tell. No
+> channel, dist-tag, snapshot, build-order or runtime-spec-override behaviour
+> moves, and the credential-path rules this loop relies on are unchanged
+> (#3412's `--credentials-dir` requirement, the `identity.json` /
+> `TOMBSTONE.json` layout) — the only movement is which directories may be
+> selected as primary. `last-verified` deliberately NOT bumped, per the
+> precedent notes in `docs/contributing/branch-and-release-flow.md`: nothing
+> this document claims was made false or stale, and #1366 rates a
+> rubber-stamped date worse than a stale one. Scope of this note: that
+> selection change — nothing else in this document was re-verified.
+
 > **Re-verification (#3332, 2026-09-28):** coupled through
 > `packages/backend/src/config.ts`, which is in this doc's `covers:` — the
 > edit is a comment-only re-wording of `ownerCompanyDetailsEnabled`'s own

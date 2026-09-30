@@ -73,8 +73,25 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-29"
+last-verified: "2026-09-30"
 ---
+
+> **Re-verified #3496 (2026-09-30, the tombstone tell moves ahead of the
+> identity stat):** this diff touches `packages/connect/src/doctor.ts` (and its
+> test), a covered tree. In `discoverCredentialDirectory` the `TOMBSTONE.json`
+> check moved out of the missing-identity catch into a pre-check before the
+> `identity.json` stat: a retired directory that kept its `identity.json` (the
+> `--replace`-era shape) used to enter the candidate set whenever that identity
+> was the newest on disk and could be selected as the primary — the doctor then
+> reported the live agent as superseded and prescribed a full re-setup. It is
+> now never a primary candidate and stays reportable as retired (#1681
+> semantics unchanged); the missing-identity catch narrows to the
+> rekey-pending tell. No runtime-compatibility behavior moved: the
+> supported-runtime manifest table, channel, dist-tag, snapshot publishing,
+> runtime-spec-override and package resolution are untouched. `last-verified`
+> is bumped to 2026-09-30 for this note: the candidate selection that decides
+> which directory `--doctor` reports on is part of this document's subject, and
+> that behavior moved.
 
 # MCP Runtime Compatibility
 

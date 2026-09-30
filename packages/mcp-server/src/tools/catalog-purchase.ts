@@ -284,8 +284,8 @@ export function createCatalogPurchaseHandlers(
                 // Persisted so haven_settle_mcp_tool can rehydrate the
                 // merchant call by payment_id instead of the agent
                 // re-threading merchant_url/tool_name/arguments/mcp_transport —
-                // same contract as the EIP-3009 branch above and the catalog
-                // erc7710 branch below.
+                // same contract as this tool's EIP-3009 branch below and the
+                // catalog tool's erc7710 branch.
                 mcpCallContext: {
                   merchantUrl,
                   toolName: args.tool_name as string,

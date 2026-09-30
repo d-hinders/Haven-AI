@@ -2792,6 +2792,20 @@ values `haven_pay_mcp_tool` returned at quote time). Same shape as the
 `include_signing_payload=true` fallback above: no signature verification
 changes, only which call carries the bulk bytes.
 
+> **Re-verified #3493 (2026-09-30):** `haven_pay_mcp_tool`'s erc7710 branch
+> now passes `mcpCallContext` to `prepareX402Erc7710`, like its EIP-3009
+> branch and both `haven_prepare_catalog_purchase` branches, so the
+> rehydration above holds for every `haven_pay_mcp_tool` intent on either
+> scheme. Hosted-only change: the backend has accepted and persisted
+> `mcpCallContext` on the erc7710 authorize since #1547
+> (`delegation-authorize.ts`), and no signer, connector or SDK version is
+> involved. One more case with no stored context: an erc7710
+> `haven_pay_mcp_tool` intent authorized by a hosted server older than this
+> change. Settling it with `payment_id` alone gets the same
+> `MERCHANT_CALL_CONTEXT_UNAVAILABLE` refusal and the same explicit-fields
+> fallback, within the child's short window. Nothing else in this document
+> was re-verified.
+
 On a successful hosted settle (#1349), agents report from the compact
 `agent_summary.purchase_summary` rather than parsing the merchant's raw
 `result`. This is a backward-compatible reporting extension only: Haven state

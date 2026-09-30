@@ -1982,6 +1982,7 @@ describe('#2051 — cap binds the authorized option', () => {
         merchantUrl: 'http://merchant.test/mcp',
         toolName: 'create_text',
         arguments: { prompt: 'Hello' },
+        mcpTransport: { handshakeRequired: true, source: 'path' },
       })
     })
 

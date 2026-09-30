@@ -186,6 +186,11 @@ const TASK_BUDGET_EXCEEDED_ERROR_CODE = 'task_budget_exceeded'
 const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
   "the task budget's cap is spent and is enforced on-chain, so retrying cannot succeed; close it and open a new one, or pay without it, after telling the user"
 
+/** #3504: the backend's `error_code` for a payment the delegation's period budget cannot cover. */
+const DELEGATION_BUDGET_EXCEEDED_ERROR_CODE = 'delegation_budget_exceeded'
+const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
+  "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -280,6 +285,45 @@ export function normalizeError(err: unknown): ToolFailure {
       paymentId: err.paymentId,
       ...(body.task_budget_id ? { task_budget_id: body.task_budget_id } : {}),
       ...(body.remaining_atomic !== undefined ? { remaining_atomic: body.remaining_atomic } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #3504: a payment the delegation's period budget cannot cover. The same
+  // condition already reached the agent as the catalog path's typed
+  // DELEGATION_BUDGET_EXCEEDED refusal (catalog-purchase.ts step 6); every
+  // other tool relayed the backend's typed 403 as the generic 4xx API_ERROR
+  // below, dropping the backend's own next_action and the remaining/shortfall
+  // figures. The backend's body carries the taxonomy field for field on every
+  // path that answers it (delegation-authorize.ts both schemes, mpp
+  // budget-precheck, the direct POST /payments pre-check), so this branch
+  // relays the decision: the body's fund_account_or_raise_allowance step with
+  // a reason naming the remedy, and the atomic figures the agent reports.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === DELEGATION_BUDGET_EXCEEDED_ERROR_CODE
+  ) {
+    const body = err.body as {
+      remaining_atomic?: string | null
+      shortfall_atomic?: string | null
+      phase?: string
+      rail?: string
+    }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+      nextTool: null,
+      nextToolOmittedReason: DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'DELEGATION_BUDGET_EXCEEDED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      ...(body.remaining_atomic !== undefined ? { remaining_atomic: body.remaining_atomic } : {}),
+      ...(body.shortfall_atomic !== undefined ? { shortfall_atomic: body.shortfall_atomic } : {}),
+      ...(body.phase !== undefined ? { phase: body.phase } : {}),
+      ...(body.rail !== undefined ? { rail: body.rail } : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

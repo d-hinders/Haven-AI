@@ -169,7 +169,45 @@ describe('the typed task-budget 403 is a stop with its own code (#3500)', () => 
   })
 
   it('any other 403 keeps the generic API_ERROR stop', () => {
-    const out = normalizeError(new HavenApiError('forbidden', 403, { error: 'forbidden', error_code: 'delegation_budget_exceeded' }))
+    const out = normalizeError(new HavenApiError('forbidden', 403, { error: 'forbidden', error_code: 'unknown_rule' }))
     expect(out.code).toBe('API_ERROR')
+  })
+})
+
+describe('the typed delegation-budget 403 is fund_account_or_raise_allowance with the figures (#3504)', () => {
+  const delegationBudgetExceeded = () =>
+    new HavenApiError(
+      "This x402 payment of 0.001 USDC exceeds the agent's remaining budget for this period (0.0005 USDC, short by 0.0005 USDC).",
+      403,
+      {
+        error:
+          "This x402 payment of 0.001 USDC exceeds the agent's remaining budget for this period (0.0005 USDC, short by 0.0005 USDC). There is no approval queue on the delegation rail — an over-budget redemption reverts on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.",
+        error_code: 'delegation_budget_exceeded',
+        phase: 'insufficient_funds',
+        next_action: 'fund_account_or_raise_allowance',
+        rail: 'x402',
+        remaining: '0.0005',
+        remaining_atomic: '500',
+        shortfall: '0.0005',
+        shortfall_atomic: '500',
+      },
+    )
+
+  it('carries DELEGATION_BUDGET_EXCEEDED — the code the catalog path already emits — with the atomic figures', () => {
+    const out = normalizeError(delegationBudgetExceeded()) as unknown as Record<string, unknown>
+    expect(out.code).toBe('DELEGATION_BUDGET_EXCEEDED')
+    expect(out.statusCode).toBe(403)
+    expect(out.remaining_atomic).toBe('500')
+    expect(out.shortfall_atomic).toBe('500')
+    expect(out.phase).toBe('insufficient_funds')
+    expect(out.rail).toBe('x402')
+  })
+
+  it('uses the backend next_action and names the remedy (owner raises the budget, or the period resets)', () => {
+    const out = normalizeError(delegationBudgetExceeded()) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe(AgentPaymentNextAction.FundAccountOrRaiseAllowance)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/raise the budget in Haven/)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/period to reset/)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/retrying cannot succeed/)
   })
 })

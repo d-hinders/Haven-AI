@@ -28,7 +28,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-30"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -1064,26 +1064,63 @@ them is a string a caller supplies:
   reach further back), plus the lookup accounting (attempted/failed/cached) —
   the diagnostics that would have told the leading hypothesis apart from a
   failed lookup at the time, rather than only after the fact.
-  **A transient stale read now self-corrects (#3321).** #3409's leading
-  hypothesis — an anomalous listing page — went from a guess to a proven
-  incident on 2026-09-30T08:56Z: page 1 of `qa-dev.yml`'s `deployment_status`
-  listing opened at `2026-09-19T16:20:14Z`, 100 rows deep, while `gh run list`
-  and a byte-for-byte repeat of the same `gh api` call, run by hand minutes
-  later, both returned runs from the same hour — the endpoint (measured live)
-  sets `Cache-Control: private, max-age=60, s-maxage=60`, so the response is
-  allowed to be cache- or index-served and is not guaranteed to be the current
-  head of the listing on every read. Nine reopen/close cycles on #3321 were
-  this same transient shape closing itself on the *next* push before anyone
-  looked, not a fixed defect. `observe()` now retries page 1 of a counted
-  event — up to `PAGE1_RETRY_ATTEMPTS` times, `PAGE1_RETRY_DELAY_MS` apart —
-  but *only* under the exact condition check 1 already uses (page 1 not near
-  "now" while the index shows an in-window deploy), and only accepts a retried
-  read that now opens near "now". A genuinely dead trigger cannot self-correct
-  on retry — every attempt stays old — so it still exhausts the retries and
-  still escalates exactly as before; only a transient stale read is cleared,
-  silently, before it ever becomes a finding. Mutation-proven in
-  `guard-freshness.test.mjs` (both the self-correcting and the
-  stays-stale-through-every-retry cases).
+  **A transient stale read is now retried, for both guard kinds (#3321).**
+  #3409's leading hypothesis — an anomalous listing page — went from a guess
+  to a proven, recurring incident: a re-read of the reopen history (review
+  round 1, 2026-09-30) found 8 of the 9 guard-freshness reopens were
+  `qa-dev.yml` reading the IDENTICAL frozen page — 100 `deployment_status`
+  rows, newest `2026-09-19T16:20:14Z`, oldest `2026-09-18T21:18:20Z`, printed
+  verbatim by runs `36542205451`, `36548966124`, `36565011143` and
+  `36692820874`, and matched by the `never-run … since
+  2026-09-18T21:18:20Z` text of the four 09-28 runs that predate the #3409
+  diagnostics. The 9th (`36570505601`, 09-29 12:47) was a DIFFERENT guard
+  reading a DIFFERENT frozen page: `db-concurrency-proof.yml`'s `schedule`
+  page 1 frozen at `2026-09-18T07:36:48Z` ("11.2d ago"), while that job in
+  fact succeeds nightly — so the defect is not specific to
+  `deployment_status`, the Deployments index, or a guard with `provenance`.
+  The endpoint sets `Cache-Control: private, max-age=60, s-maxage=60`
+  (measured live) — proof the response is *allowed* to be cache-served, but a
+  60 s directive cannot by itself explain an 11-day-old snapshot, so the
+  deeper cause is GitHub's own read path for this listing (cache or
+  search-index replica) occasionally serving a stale snapshot. Measured live
+  (review round 1): staleness is per-request, not per-workflow-run — one
+  evaluation read `qa-dev.yml` fresh while reading
+  `db-concurrency-proof.yml` stale in the same run — and it clusters: of 55
+  hand-read attempts across three clustered windows on 09-28
+  (15:02/15:22/15:39), roughly 11 came back stale, each cluster resolving
+  within roughly 1–2 minutes; a reviewer reproduced it again the same day (2
+  of 25 identical reads returned a different frozen page). Whether varying
+  the request shape (`per_page`, a `created=>` filter) dodges the stale read
+  was tested by hand for this fix and was **inconclusive** — a live stale
+  cluster was caught once but had resolved before the varied shapes could be
+  compared against it — so the fix does not vary the request shape.
+  `observe()` now retries page 1 of a counted event — up to
+  `PAGE1_RETRY_ATTEMPTS` times, `PAGE1_RETRY_DELAY_MS` apart — whenever the
+  retry could still change the answer: no qualifying success found yet, AND
+  either the guard has provenance and its Deployments index shows an
+  in-window deploy (the original, narrower condition), or the guard has no
+  provenance at all, in which case page 1 being stale is retried
+  unconditionally, since it is indistinguishable from the guard being about
+  to fail either way. A page with no rows (a workflow that has genuinely
+  never run) is "stale" by the same test and is retried too, up to the same
+  bound — wasted reads, capped, and a truly-empty history stays empty on
+  every retry. The first retry that opens near "now" replaces the stale read;
+  a genuinely dead trigger cannot self-correct on retry — every attempt stays
+  old — so it still exhausts the retries and still escalates exactly as
+  before; only a transient stale read is cleared, silently, before it ever
+  becomes a finding. **This is a best-effort mitigation, not a proven fix:**
+  the measured 1–2 minute cluster-recovery time is close to, but not proven
+  to always fit inside, the retry window (worst case ~60 s, `3 ×
+  20 s`, sized against that measurement, up from an initial 10 s this fix
+  shipped with and then revised once the recovery-time measurement came in);
+  the `(retried Nx — #3321)` diagnostic line is what will show whether a
+  future occurrence outlasts it. Mutation-proven in `guard-freshness.test.mjs`
+  for both guard kinds: the self-correcting and
+  stays-stale-through-every-retry cases (qa-dev.yml, with provenance, and
+  db-concurrency-proof.yml, without), a guard that skips the retry once a
+  qualifying success is already found on an earlier counted event, a page 1
+  with no in-window deploy that is never retried, and page 2+ never being
+  retried (only page 1 is).
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

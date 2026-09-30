@@ -658,31 +658,77 @@ export const JOB_LOOKUP_BUDGET = 24
 export const RUN_PAGE_CAP = 8
 
 /**
- * #3321. The 2026-09-30T08:56Z reopen proved what #3409 could only guess at:
- * `GET .../actions/workflows/qa-dev.yml/runs?event=deployment_status&page=1`
- * is not always the true head of the listing. The measured page held 100 rows
- * spanning 2026-09-18T21:18Z → 2026-09-19T16:20Z — eleven days stale — while
- * `gh run list` and a repeat of the identical `gh api` call, run by hand
- * within the hour, both returned runs from the same minute. The endpoint sets
- * `Cache-Control: private, max-age=60, s-maxage=60` (measured live,
- * 2026-09-30), which only proves the response is allowed to be cache-served —
- * a 60 s cache cannot by itself explain an 11-day-old page — so the deeper
- * cause is GitHub's own read path for this listing (cache or search-index
- * replica) occasionally serving a stale snapshot under the sustained write
- * load a busy `dev` produces (deployment_status fires several times per
- * push). A single read of that listing is therefore not ground truth, which
- * is exactly the shape coherence check 1 already detects (page 1 does not
- * open near "now" while the Deployments index shows an in-window deploy) —
- * this reporter just used to accept that one read as final. Now, only when
- * check 1's own condition is met, page 1 is re-read up to
- * `PAGE1_RETRY_ATTEMPTS` times with `PAGE1_RETRY_DELAY_MS` between attempts,
- * and the first attempt that opens near "now" replaces the stale one. A
- * genuinely dead `deployment_status` trigger cannot self-correct on retry —
- * every attempt stays old — so the guard still escalates that case exactly
- * as before; retrying only clears a transient stale read.
+ * #3321. Re-read of the incident history (2026-09-30, review round 1): 8 of 9
+ * guard-freshness reopens were qa-dev.yml reading the IDENTICAL frozen page —
+ * 100 `deployment_status` rows, newest `2026-09-19T16:20:14Z`, oldest
+ * `2026-09-18T21:18:20Z` — printed verbatim by runs 36542205451, 36548966124,
+ * 36565011143 and 36692820874, and matched by the `never-run … since
+ * 2026-09-18T21:18:20Z` text of the four 09-28 runs that predate the #3409
+ * diagnostics (36393133139, 36426594058, 36440588919, 36449044291). The 9th
+ * (36570505601, 09-29 12:47) was a DIFFERENT guard reading a DIFFERENT frozen
+ * page: `db-concurrency-proof.yml`'s `schedule` page 1 frozen at
+ * `2026-09-18T07:36:48Z` ("11.2d ago"), while that job in fact succeeds
+ * nightly (verified success 2026-09-30T09:00:02Z) — so the defect is not
+ * specific to `deployment_status`, the Deployments index, or a guard with
+ * `provenance`; both counted guards in `SCHEDULED_GUARDS` hit it.
+ *
+ * The endpoint sets `Cache-Control: private, max-age=60, s-maxage=60`
+ * (measured live, 2026-09-30) — proof the response is ALLOWED to be
+ * cache-served, but a 60 s directive cannot by itself explain an 11-day-old
+ * snapshot, so the deeper cause is GitHub's own read path for this listing
+ * (cache or search-index replica) occasionally serving a stale snapshot.
+ * Measured live (2026-09-30, review round 1): staleness is per-request, not
+ * per-workflow-run — in one observed run qa-dev read fresh while
+ * db-concurrency-proof read stale in the SAME evaluation — and it clusters:
+ * of 55 hand-read attempts across three clustered windows on 09-28
+ * (15:02/15:22/15:39), roughly 11 came back stale, each cluster then
+ * resolving within roughly 1–2 minutes. A reviewer reproduced it by hand
+ * again the same day: 2 of 25 identical reads returned a different frozen
+ * page (`newest=2026-09-19T05:36:10Z`). Whether varying the request shape
+ * (a different `per_page`, a `created=>` filter) dodges the stale read was
+ * tested by hand for this fix (30 alternating `per_page=100` /
+ * `per_page=99` / `created=>=2026-09-27` reads, plus an earlier 10+15+28-read
+ * pass): a stale cluster (3 of 10 default-shape reads) was caught once, but
+ * had already resolved by the time the varied shapes were tried against it —
+ * every one of the ~70 varied-shape reads in this session came back fresh,
+ * which is consistent with the cluster simply having ended, not with the
+ * shape mattering. Inconclusive: the fix below does NOT vary the request
+ * shape.
+ *
+ * A single read of this listing is therefore not ground truth for ANY
+ * counted-event guard, which is exactly the shape coherence check 1 already
+ * detects for a provenance guard (page 1 does not open near "now"). The fix:
+ * page 1 of every counted event is now retried up to `PAGE1_RETRY_ATTEMPTS`
+ * times, `PAGE1_RETRY_DELAY_MS` apart, whenever it could change the answer —
+ * no qualifying success found yet, AND (for a provenance guard) the
+ * Deployments index shows an in-window deploy, or (for a guard with no
+ * provenance, e.g. `db-concurrency-proof.yml`) unconditionally, since page 1
+ * being stale there is indistinguishable from the guard being about to fail
+ * either way and the retry only costs time on that already-losing path. A
+ * page with no rows at all (a workflow that has genuinely never run) is
+ * "stale" by the same test (no `newest` to compare) and is retried too, up to
+ * the same bound — the extra reads are wasted but cost is capped, and a
+ * truly-empty history stays empty on every retry, so the verdict is
+ * unaffected. The first retry that opens near "now" replaces the stale read;
+ * a genuinely dead trigger cannot self-correct on retry — every attempt
+ * stays old — so the guard still exhausts every attempt and still escalates
+ * that case exactly as before. The measured 1–2 minute cluster-recovery time
+ * is close to, but not proven to always fit inside, the
+ * `PAGE1_RETRY_ATTEMPTS × PAGE1_RETRY_DELAY_MS` window below (worst case
+ * ~60 s, sized against that measurement — see the constants) — this is a
+ * best-effort mitigation, not a guaranteed fix, and the `(retried Nx —
+ * #3321)` diagnostic line will show whether a future occurrence outlasts it.
  */
-export const PAGE1_RETRY_ATTEMPTS = 2
-export const PAGE1_RETRY_DELAY_MS = 5000
+// 3 × 20 s ≈ 60 s worst case: the measured cluster-recovery time (~1–2 min on
+// 09-28's three clustered windows) is longer than this, so it is a
+// best-effort budget, not a guarantee — but this workflow evaluates on every
+// push to dev/main (dozens/week) plus a weekly cron, so an evaluation that
+// still exhausts its retries mid-cluster is very likely followed by another,
+// fresh one within minutes; a 60 s worst case per evaluation is acceptable
+// against that backdrop and against the alternative (10 s, proven too short
+// by the 8-of-9 reopen history above).
+export const PAGE1_RETRY_ATTEMPTS = 3
+export const PAGE1_RETRY_DELAY_MS = 20000
 
 /** Synchronous sleep (Node allows `Atomics.wait` on the main thread). */
 function sleepSync(ms) {
@@ -846,15 +892,23 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT, 
           break
         }
         let batch = readRunPage(guard, event, page, gh)
-        // #3321: page 1 is the one page every evaluation always reads, and the
-        // one the 2026-09-30T08:56Z reopen proved GitHub can hand back stale —
-        // 100 rows eleven days old while deploys were landing minutes apart.
-        // Retried ONLY under the same condition coherence check 1 already uses
-        // (page 1 not near "now" while the index shows an in-window deploy):
-        // a transient stale read self-corrects within a couple of retries; a
-        // genuinely dead trigger does not, so the retry cannot mask that case.
+        // #3321: page 1 is the one page every evaluation always reads, and
+        // measurably the one GitHub hands back stale — both a provenance
+        // guard (qa-dev.yml) and a guard with none (db-concurrency-proof.yml)
+        // hit it. Retried when it could still change the answer: no
+        // qualifying success found yet (a success already in hand needs no
+        // rescue — S2), AND either the guard has no provenance (page 1 being
+        // stale is itself the only signal available, so any staleness here is
+        // worth a retry — B1) or it does and the Deployments index shows an
+        // in-window deploy (the narrower, already-proven condition). A
+        // genuinely dead trigger cannot self-correct on retry — every attempt
+        // stays old — so the guard still exhausts every attempt and still
+        // escalates exactly as before; only a transient stale read is
+        // cleared.
+        const foundSuccessSoFar = qualifying.some((r) => r.conclusion === 'success')
+        const page1RetryEligible = page === 1 && !foundSuccessSoFar && (guard.provenance ? earlyHasInWindowDeploy : true)
         let page1RetryCount = 0
-        if (page === 1 && earlyHasInWindowDeploy) {
+        if (page1RetryEligible) {
           while (page1RetryCount < PAGE1_RETRY_ATTEMPTS) {
             const batchDates = batch.map((r) => r.createdAt).filter(Boolean).sort()
             const batchNewest = batchDates.at(-1)

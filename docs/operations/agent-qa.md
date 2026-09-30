@@ -1055,8 +1055,8 @@ them is a string a caller supplies:
   firing again (#2268) — the listing alone cannot tell them apart, so
   `unconfirmed` no longer claims "a success may exist further back" unless
   the page cap, the lookup budget, or the index's reach also stopped the
-  search (those causes still leave it possible); #3321 still reopens either
-  way. Every observation without an in-budget success (`never-run`,
+  search (those causes still leave it possible). Every observation without an
+  in-budget success (`never-run`,
   `never-succeeded`, `unconfirmed`, `stale`) also logs
   per-page row counts and newest/oldest `createdAt`, the deployment index's
   size (every creator's shas, not only Railway's), its actual oldest entry,
@@ -1064,6 +1064,26 @@ them is a string a caller supplies:
   reach further back), plus the lookup accounting (attempted/failed/cached) —
   the diagnostics that would have told the leading hypothesis apart from a
   failed lookup at the time, rather than only after the fact.
+  **A transient stale read now self-corrects (#3321).** #3409's leading
+  hypothesis — an anomalous listing page — went from a guess to a proven
+  incident on 2026-09-30T08:56Z: page 1 of `qa-dev.yml`'s `deployment_status`
+  listing opened at `2026-09-19T16:20:14Z`, 100 rows deep, while `gh run list`
+  and a byte-for-byte repeat of the same `gh api` call, run by hand minutes
+  later, both returned runs from the same hour — the endpoint (measured live)
+  sets `Cache-Control: private, max-age=60, s-maxage=60`, so the response is
+  allowed to be cache- or index-served and is not guaranteed to be the current
+  head of the listing on every read. Nine reopen/close cycles on #3321 were
+  this same transient shape closing itself on the *next* push before anyone
+  looked, not a fixed defect. `observe()` now retries page 1 of a counted
+  event — up to `PAGE1_RETRY_ATTEMPTS` times, `PAGE1_RETRY_DELAY_MS` apart —
+  but *only* under the exact condition check 1 already uses (page 1 not near
+  "now" while the index shows an in-window deploy), and only accepts a retried
+  read that now opens near "now". A genuinely dead trigger cannot self-correct
+  on retry — every attempt stays old — so it still exhausts the retries and
+  still escalates exactly as before; only a transient stale read is cleared,
+  silently, before it ever becomes a finding. Mutation-proven in
+  `guard-freshness.test.mjs` (both the self-correcting and the
+  stays-stale-through-every-retry cases).
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

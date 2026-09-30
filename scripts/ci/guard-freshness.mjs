@@ -657,6 +657,38 @@ export const JOB_LOOKUP_BUDGET = 24
 /** At most this many 100-run pages per counted event per evaluation (#3340). */
 export const RUN_PAGE_CAP = 8
 
+/**
+ * #3321. The 2026-09-30T08:56Z reopen proved what #3409 could only guess at:
+ * `GET .../actions/workflows/qa-dev.yml/runs?event=deployment_status&page=1`
+ * is not always the true head of the listing. The measured page held 100 rows
+ * spanning 2026-09-18T21:18Z → 2026-09-19T16:20Z — eleven days stale — while
+ * `gh run list` and a repeat of the identical `gh api` call, run by hand
+ * within the hour, both returned runs from the same minute. The endpoint sets
+ * `Cache-Control: private, max-age=60, s-maxage=60` (measured live,
+ * 2026-09-30), which only proves the response is allowed to be cache-served —
+ * a 60 s cache cannot by itself explain an 11-day-old page — so the deeper
+ * cause is GitHub's own read path for this listing (cache or search-index
+ * replica) occasionally serving a stale snapshot under the sustained write
+ * load a busy `dev` produces (deployment_status fires several times per
+ * push). A single read of that listing is therefore not ground truth, which
+ * is exactly the shape coherence check 1 already detects (page 1 does not
+ * open near "now" while the Deployments index shows an in-window deploy) —
+ * this reporter just used to accept that one read as final. Now, only when
+ * check 1's own condition is met, page 1 is re-read up to
+ * `PAGE1_RETRY_ATTEMPTS` times with `PAGE1_RETRY_DELAY_MS` between attempts,
+ * and the first attempt that opens near "now" replaces the stale one. A
+ * genuinely dead `deployment_status` trigger cannot self-correct on retry —
+ * every attempt stays old — so the guard still escalates that case exactly
+ * as before; retrying only clears a transient stale read.
+ */
+export const PAGE1_RETRY_ATTEMPTS = 2
+export const PAGE1_RETRY_DELAY_MS = 5000
+
+/** Synchronous sleep (Node allows `Atomics.wait` on the main thread). */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
 function boundedCheckRunReader(budget, jobName, shaOfRun, gh = defaultGh) {
   const repo = process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
   const bySha = new Map() // sha → Map(runId → [{ name, conclusion }])
@@ -755,7 +787,7 @@ function readRunPage(guard, event, page, gh) {
  * success): the `::warning::` line and the diagnostics still print, but the
  * verdict is `fresh`, not `unconfirmed`.
  */
-export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT } = {}) {
+export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT, sleep = sleepSync } = {}) {
   const workflowPath = path.join(root, '.github', 'workflows', guard.workflow)
   const fileExists = existsSync(workflowPath)
   if (!fileExists) return { fileExists: false, triggerPresent: false, lastSuccessAt: null, lastRunAt: null }
@@ -776,6 +808,10 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     // N2 (#3340 review): a Deployments index that does not reach the horizon
     // silently drops older runs at the provenance check; say so.
     const indexShort = Boolean(index?.__oldest && index.__oldest > horizon)
+    // #3321: computed BEFORE paging, from the index alone, so page 1's retry
+    // decision (below) does not depend on the very listing read it is
+    // deciding whether to trust.
+    const earlyHasInWindowDeploy = Boolean(index?.__deployments?.some((d) => d.created_at >= horizon))
     const shaOfRun = new Map()
     const jobsFor = guard.requiredJob
       ? boundedCheckRunReader(JOB_LOOKUP_BUDGET, guard.requiredJob, shaOfRun, gh)
@@ -809,13 +845,34 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
           markIncomplete('page-cap')
           break
         }
-        const batch = readRunPage(guard, event, page, gh)
+        let batch = readRunPage(guard, event, page, gh)
+        // #3321: page 1 is the one page every evaluation always reads, and the
+        // one the 2026-09-30T08:56Z reopen proved GitHub can hand back stale —
+        // 100 rows eleven days old while deploys were landing minutes apart.
+        // Retried ONLY under the same condition coherence check 1 already uses
+        // (page 1 not near "now" while the index shows an in-window deploy):
+        // a transient stale read self-corrects within a couple of retries; a
+        // genuinely dead trigger does not, so the retry cannot mask that case.
+        let page1RetryCount = 0
+        if (page === 1 && earlyHasInWindowDeploy) {
+          while (page1RetryCount < PAGE1_RETRY_ATTEMPTS) {
+            const batchDates = batch.map((r) => r.createdAt).filter(Boolean).sort()
+            const batchNewest = batchDates.at(-1)
+            if (batchNewest && batchNewest >= horizon) break
+            sleep(PAGE1_RETRY_DELAY_MS)
+            batch = readRunPage(guard, event, page, gh)
+            page1RetryCount += 1
+          }
+        }
         for (const r of batch) shaOfRun.set(r.databaseId, r.headSha)
         runs.push(...batch)
         const dates = batch.map((r) => r.createdAt).filter(Boolean).sort()
         const oldest = dates[0]
         const newest = dates.at(-1)
-        pageStats.push({ event, page, count: batch.length, newest: newest ?? null, oldest: oldest ?? null })
+        pageStats.push({
+          event, page, count: batch.length, newest: newest ?? null, oldest: oldest ?? null,
+          ...(page1RetryCount > 0 ? { retried: page1RetryCount } : {}),
+        })
         if (page === 1 && newest && page1Newest === null) page1Newest = newest
 
         // Coherence check 2: contiguous and newest-first. Page N's newest row
@@ -936,7 +993,10 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     if (nonFresh) {
       console.error(`guard-freshness diagnostics for ${guard.workflow}:`)
       for (const p of pageStats) {
-        console.error(`  page ${p.page} (${p.event}): ${p.count} rows, newest=${p.newest}, oldest=${p.oldest}`)
+        console.error(
+          `  page ${p.page} (${p.event}): ${p.count} rows, newest=${p.newest}, oldest=${p.oldest}` +
+            (p.retried ? ` (retried ${p.retried}x — #3321)` : ''),
+        )
       }
       // The size counts SHAs from every creator (the index is not filtered to
       // Railway's), so it is comparable across guards; the oldest entry and

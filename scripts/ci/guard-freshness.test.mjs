@@ -23,6 +23,8 @@ import {
   RUN_PAGE_CAP,
   MIN_HARNESS_RUN_SECONDS,
   tooShortForHarness,
+  PAGE1_RETRY_ATTEMPTS,
+  PAGE1_RETRY_DELAY_MS,
 } from './guard-freshness.mjs'
 import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -676,6 +678,11 @@ const rest = (id, title, createdAt, conclusion = 'success', sha = DEPLOYED_SHA, 
   run_started_at: new Date(Date.parse(createdAt) - seconds * 1000).toISOString(),
 })
 const OBS_NOW = Date.parse('2026-09-25T20:45:00Z')
+// #3321: observe()'s default retry sleep is a real wait (see PAGE1_RETRY_DELAY_MS);
+// every test below injects this no-op instead so the suite stays fast, and the
+// dedicated #3321 tests further down assert the retry COUNT via the fake gh's
+// call log rather than via wall-clock time.
+const NO_SLEEP = () => {}
 const at = (hoursAgo) => new Date(OBS_NOW - hoursAgo * 3600e3).toISOString()
 const checkRunCalls = (calls) => calls.filter((c) => c.includes('/check-runs')).length
 
@@ -685,7 +692,7 @@ test('observe(): a green harness run behind a page of Preview and in_progress ro
   for (let i = 0; i < 40; i++) page1.push(rest(2000 + i, DEV_TITLE(shaN(2000 + i), 'in_progress'), at(3.1 + i * 0.05), 'success', shaN(2000 + i)))
   const page2 = [rest(3000, DEV_TITLE(shaN(3000)), at(9.2), 'success', shaN(3000))]
   const { gh, calls } = fakeGh({ pages: [page1, page2], jobs: () => JOBS_HARNESS_RAN[1] })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(seen.lastSuccessAt, at(9.2))
   assert.equal(seen.searchComplete, true)
   assert.equal(checkRunCalls(calls), 1, 'only the one candidate SHA is looked up')
@@ -697,7 +704,7 @@ test('observe(): a long red stretch does not exhaust the lookup budget before an
   for (let i = 0; i < 40; i++) page1.push(rest(4000 + i, DEV_TITLE(shaN(4000 + i)), at(0.2 + i * 0.1), 'failure', shaN(4000 + i)))
   page1.push(rest(5000, DEV_TITLE(shaN(5000)), at(9.2), 'success', shaN(5000)))
   const { gh, calls } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_RAN[1] })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(seen.lastSuccessAt, at(9.2))
   assert.equal(checkRunCalls(calls), 1)
 })
@@ -708,7 +715,7 @@ test('observe(): superseded re-stated runs at one SHA cost ONE lookup, not one e
   const page1 = []
   for (let i = 0; i < 30; i++) page1.push(rest(9000 + i, DEV_TITLE(DEPLOYED_SHA), at(0.2 + i * 0.1)))
   const { gh, calls } = fakeGh({ pages: [page1], jobs: (id) => (id === 9029 ? JOBS_HARNESS_RAN[1] : JOBS_GATE_REFUSED[1]) })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(seen.lastSuccessAt, at(0.2 + 29 * 0.1))
   assert.equal(checkRunCalls(calls), 1)
 })
@@ -719,7 +726,7 @@ test('observe(): when the lookup budget runs out first, the finding says unconfi
   for (let i = 0; i < JOB_LOOKUP_BUDGET + 5; i++) page1.push(rest(6000 + i, DEV_TITLE(shaN(6000 + i)), at(0.2 + i * 0.1), 'success', shaN(6000 + i)))
   page1.push(rest(7000, DEV_TITLE(shaN(7000)), at(20), 'success', shaN(7000)))
   const { gh } = fakeGh({ pages: [page1], jobs: (id) => (id === 7000 ? JOBS_HARNESS_RAN[1] : JOBS_GATE_REFUSED[1]) })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(seen.lastSuccessAt, null)
   assert.equal(seen.searchComplete, false)
   assert.deepEqual(seen.incompleteReasons, ['lookup-budget'])
@@ -731,7 +738,7 @@ test('observe(): when the lookup budget runs out first, the finding says unconfi
 test('observe(): a complete search with no green still reads never-succeeded (the alarm is not weakened)', () => {
   const page1 = [rest(8000, DEV_TITLE(DEPLOYED_SHA), at(1), 'failure'), rest(8001, DEV_TITLE(DEPLOYED_SHA), at(2), 'failure')]
   const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1] })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(seen.searchComplete, true)
   assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0].kind, 'never-succeeded')
 })
@@ -797,7 +804,7 @@ test('observe(): more gate-only deploy SHAs than the lookup budget, then a green
   }
   page1.push(rest(11000, DEV_TITLE(shaN(11000)), at(40), 'success', shaN(11000), 210))
   const { gh, calls } = fakeGh({ pages: [page1], jobs: (id) => (id === 11000 ? JOBS_HARNESS_RAN[1] : JOBS_GATE_REFUSED[1]) })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(seen.lastSuccessAt, at(40))
   assert.equal(checkRunCalls(calls), 1, 'the gate-only greens cost no lookup')
   assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).healthy, true)
@@ -812,7 +819,7 @@ test('observe(): the page cap stops the search and the result reads unconfirmed,
     pages.push(pg)
   }
   const { gh, calls } = fakeGh({ pages, jobs: () => JOBS_HARNESS_RAN[1] })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(calls.filter((c) => c.includes('/runs') && c.includes('page=')).length, RUN_PAGE_CAP)
   assert.equal(seen.searchComplete, false)
   assert.deepEqual(seen.incompleteReasons, ['page-cap'])
@@ -826,7 +833,7 @@ test('observe(): paging stops at the horizon — one page when it already reache
   for (let i = 0; i < 99; i++) page1.push(rest(30000 + i, DEV_TITLE(shaN(30000 + i)), at(1 + i), 'failure', shaN(30000 + i)))
   page1.push(rest(30099, DEV_TITLE(shaN(30099)), at(24 * 5), 'failure', shaN(30099)))
   const { gh, calls } = fakeGh({ pages: [page1, [rest(40000, DEV_TITLE(shaN(40000)), at(24 * 6))]], jobs: () => JOBS_HARNESS_RAN[1] })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(calls.filter((c) => c.includes('/runs') && c.includes('page=')).length, 1)
   assert.equal(seen.searchComplete, true)
   const f = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0]
@@ -849,7 +856,7 @@ test('observe(): a full Deployments index that does not reach the horizon makes 
   const deployments = []
   for (let i = 0; i < 100; i++) deployments.push({ sha: i === 0 ? shaN(50000) : shaN(60000 + i), created_at: at(0.1 + i * 0.4), creator: { login: RAILWAY_DEPLOY_CREATOR } })
   const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(seen.searchComplete, false)
   assert.deepEqual(seen.incompleteReasons, ['index-reach', 'listing-missing-run'])
   assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0].kind, 'unconfirmed')
@@ -872,7 +879,7 @@ test('observe(): a full Deployments index that does not reach the horizon makes 
     ...shortDeployments.slice(1).map((d, j) => rest(51000 + j, DEV_TITLE(d.sha, 'in_progress'), d.created_at, 'success', d.sha)),
   ]
   const { gh: gh2 } = fakeGh({ pages: [shortPage1], jobs: () => JOBS_HARNESS_FAILED[1], deployments: shortDeployments })
-  assert.equal(observe(QA, { gh: gh2, now: OBS_NOW }).searchComplete, true)
+  assert.equal(observe(QA, { gh: gh2, now: OBS_NOW, sleep: NO_SLEEP }).searchComplete, true)
 })
 
 test('observe(): once the lookup budget is spent, it stops paging (API cost, #3340 review)', () => {
@@ -886,7 +893,7 @@ test('observe(): once the lookup budget is spent, it stops paging (API cost, #33
     pages.push(pg)
   }
   const { gh, calls } = fakeGh({ pages, jobs: () => JOBS_GATE_REFUSED[1] })
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   assert.equal(checkRunCalls(calls), JOB_LOOKUP_BUDGET)
   assert.equal(calls.filter((c) => c.includes('/runs') && c.includes('page=')).length, 1)
   assert.equal(seen.searchComplete, false)
@@ -944,7 +951,7 @@ test('observe(): a page of old rows like the 07:42 incident reads unconfirmed, w
     throw new Error(`unexpected gh call in the 07:42 replica: ${args.join(' ')}`)
   }
   let seen
-  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW }) })
+  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP }) })
   assert.equal(seen.lastSuccessAt, null)
   assert.equal(seen.searchComplete, false)
   const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
@@ -957,6 +964,106 @@ test('observe(): a page of old rows like the 07:42 incident reads unconfirmed, w
   // evaluate() must render the detail from those reasons, not a static text.
   assert.match(result.findings[0].detail, /#2268/)
   assert.doesNotMatch(result.findings[0].detail, /further back/)
+})
+
+// ---------------------------------------------------------------------------
+// #3321 — the 2026-09-30T08:56Z reopen. Proof, not hypothesis this time: the
+// run's own diagnostics (#3409's logging) show page 1 of qa-dev.yml's
+// `deployment_status` listing opened at `2026-09-19T16:20:14Z`, 100 rows deep,
+// while `gh run list` and a repeat of the identical `gh api` call — run by
+// hand minutes later — both returned runs from the same hour. A single read
+// of that listing is not ground truth; these tests cover the retry that
+// distinguishes a transient stale read (self-corrects) from a genuinely dead
+// trigger (does not).
+// ---------------------------------------------------------------------------
+
+test('observe(): a transiently stale page 1 self-corrects on retry and reads fresh (#3321)', () => {
+  // First read of page 1: the 08:56Z shape (nine rows, ~9 days old, in-window
+  // deploy missing). Second read: the true head of the list, holding the
+  // deployed SHA. A guard WITHOUT the #3321 retry cannot tell this apart from
+  // the truly-dead-trigger case below — this is the failing case the old code
+  // gets wrong.
+  const OLD_SHAS = Array.from({ length: 9 }, (_, i) => shaN(95000 + i))
+  const stalePage1 = OLD_SHAS.map((sha, i) => rest(95000 + i, DEV_TITLE(sha), at(24 * 9 + i), 'success', sha))
+  const freshPage1 = [rest(96000, DEV_TITLE(DEPLOYED_SHA), at(0.2), 'success', DEPLOYED_SHA)]
+  let page1Reads = 0
+  const gh = (args) => {
+    if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) {
+      return JSON.stringify([{ sha: DEPLOYED_SHA, created_at: at(0.2), creator: { login: RAILWAY_DEPLOY_CREATOR } }])
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/check-runs'))) {
+      return JSON.stringify([{
+        name: MONEY_FLOW_JOB, conclusion: 'success',
+        details_url: `https://github.com/o/r/actions/runs/96000/job/960000`,
+      }])
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      if (page !== 1) return JSON.stringify([])
+      page1Reads += 1
+      return JSON.stringify(page1Reads === 1 ? stalePage1 : freshPage1)
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`)
+  }
+  const sleeps = []
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: (ms) => sleeps.push(ms) })
+  assert.equal(page1Reads, 2, 'the stale first read was retried exactly once before the fresh one landed')
+  assert.deepEqual(sleeps, [PAGE1_RETRY_DELAY_MS], 'slept once, between the stale read and the retry')
+  assert.equal(seen.lastSuccessAt, at(0.2))
+  assert.equal(seen.searchComplete, true)
+  assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).healthy, true)
+})
+
+test('observe(): a page 1 that stays stale through every retry still escalates — the guard is not weakened (#3321)', () => {
+  // Same shape as the transient case, but the stale read never resolves —
+  // the trigger really has stopped firing. All PAGE1_RETRY_ATTEMPTS retries
+  // must be spent, and the verdict must stay `unconfirmed`, exactly as #3409
+  // already proved for a single stale read.
+  const OLD_SHAS = Array.from({ length: 9 }, (_, i) => shaN(97000 + i))
+  const stalePage1 = OLD_SHAS.map((sha, i) => rest(97000 + i, DEV_TITLE(sha), at(24 * 9 + i), 'success', sha))
+  let page1Reads = 0
+  const gh = (args) => {
+    if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) {
+      return JSON.stringify([{ sha: DEPLOYED_SHA, created_at: at(20), creator: { login: RAILWAY_DEPLOY_CREATOR } }])
+    }
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      if (page !== 1) return JSON.stringify([])
+      page1Reads += 1
+      return JSON.stringify(stalePage1) // never resolves — the dead-trigger case
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`)
+  }
+  const sleeps = []
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: (ms) => sleeps.push(ms) })
+  assert.equal(page1Reads, 1 + PAGE1_RETRY_ATTEMPTS, 'every retry was spent — the escalation is not skipped')
+  assert.deepEqual(sleeps, Array(PAGE1_RETRY_ATTEMPTS).fill(PAGE1_RETRY_DELAY_MS))
+  assert.equal(seen.searchComplete, false)
+  assert.deepEqual(seen.incompleteReasons, ['listing-missing-run', 'listing-not-near-now'])
+  const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
+  assert.equal(result.findings[0].kind, 'unconfirmed')
+})
+
+test('observe(): the #3321 retry never fires without an in-window Railway deploy — a quiet week is not retried (#3321)', () => {
+  // Mirrors the #3409 quiet-week control: no deploy landed inside the window,
+  // so a stale-looking page 1 is not evidence of anything, and must cost no
+  // extra `gh` calls.
+  const shaA = shaN(99000)
+  const page1 = [rest(99100, DEV_TITLE(shaA), at(24 * 6), 'failure', shaA)]
+  let page1Reads = 0
+  const gh = (args) => {
+    if (args[0] === 'api' && args.some((a) => a.includes('/deployments'))) return JSON.stringify([])
+    if (args[0] === 'api' && args.some((a) => a.includes('/runs'))) {
+      const page = Number(args.find((a) => a.startsWith('page=')).slice(5))
+      if (page !== 1) return JSON.stringify([])
+      page1Reads += 1
+      return JSON.stringify(page1)
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`)
+  }
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: () => { throw new Error('must not sleep') } })
+  assert.equal(page1Reads, 1, 'no provenance for a retry to be worth trying, so page 1 is read exactly once')
+  assert.equal(seen.searchComplete, true)
 })
 
 test('observe(): a stale page 1 with NO in-window deploy reads as a quiet week, not distrust (#3409)', () => {
@@ -977,7 +1084,7 @@ test('observe(): a stale page 1 with NO in-window deploy reads as a quiet week, 
   ]
   const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments })
   let seen
-  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW }) })
+  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP }) })
   assert.equal(seen.searchComplete, true)
   const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
   assert.equal(result.findings[0].kind, 'never-succeeded')
@@ -999,7 +1106,7 @@ test('observe(): a page whose newest row is newer than the previous page\'s olde
   const { gh } = fakeGh({ pages: [page1, page2], jobs: () => JOBS_HARNESS_FAILED[1] })
   let seen
   const errors = captureConsoleError(() => {
-    seen = observe(QA, { gh, now: OBS_NOW })
+    seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
     assert.equal(seen.searchComplete, false)
   })
   assert.ok(
@@ -1025,7 +1132,7 @@ test('observe(): a thrown check-runs lookup for the only candidate SHA reads unc
     throw new Error(`unexpected gh call: ${args.join(' ')}`)
   }
   let seen
-  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW }) })
+  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP }) })
   assert.equal(seen.lastSuccessAt, null)
   assert.equal(seen.searchComplete, false)
   const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
@@ -1070,7 +1177,7 @@ test('observe(): a thrown lookup is NOT cached — the same sha is re-attempted 
     }
     throw new Error(`unexpected gh call: ${args.join(' ')}`)
   }
-  const seen = observe(QA, { gh, now: OBS_NOW })
+  const seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP })
   // The retry on the page-2 pass finds the success, proving the sha was not
   // stuck refused by the page-1 failure.
   assert.equal(seen.lastSuccessAt, at(0.5))
@@ -1090,7 +1197,7 @@ test('observe(): a non-array deployment index body warns and marks the search in
     throw new Error(`unexpected gh call: ${args.join(' ')}`)
   }
   let seen
-  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW }) })
+  const errors = captureConsoleError(() => { seen = observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP }) })
   assert.equal(seen.searchComplete, false)
   assert.ok(
     errors.some((l) => l.startsWith('::warning::') && l.includes('listing-coherence') && l.includes('not a list')),
@@ -1109,7 +1216,7 @@ test('observe(): diagnostics (per-page counts, index size, lookup accounting) ar
   const page1 = [rest(95000, DEV_TITLE(DEPLOYED_SHA), at(1), 'failure')]
   const deployments = [{ sha: DEPLOYED_SHA, created_at: at(1), creator: { login: RAILWAY_DEPLOY_CREATOR } }]
   const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments })
-  const errors = captureConsoleError(() => observe(QA, { gh, now: OBS_NOW }))
+  const errors = captureConsoleError(() => observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP }))
   const text = errors.join('\n')
   assert.match(text, /diagnostics for qa-dev\.yml/)
   assert.match(text, /page 1 \(deployment_status\): 1 rows, newest=.+, oldest=.+/)
@@ -1125,13 +1232,13 @@ test('observe(): a FULL deployment index (>=100) is noted as possibly not reachi
     sha: i === 0 ? DEPLOYED_SHA : shaN(99000 + i), created_at: at(0.1 + i * 0.2), creator: { login: RAILWAY_DEPLOY_CREATOR },
   }))
   const { gh } = fakeGh({ pages: [page1], jobs: () => JOBS_HARNESS_FAILED[1], deployments })
-  const errors = captureConsoleError(() => observe(QA, { gh, now: OBS_NOW }))
+  const errors = captureConsoleError(() => observe(QA, { gh, now: OBS_NOW, sleep: NO_SLEEP }))
   const text = errors.join('\n')
   assert.match(text, /deployment index: 100 shas \(all creators\), oldest=.+ \(full page — may not reach further back\)/)
 })
 
 test('observe(): a healthy fresh push prints no diagnostics and no warnings (quiet on the common case)', () => {
-  const errors = captureConsoleError(() => observe(QA, { gh: fakeGh({ pages: [[qaRunLike(DEPLOYED_SHA)]], jobs: () => JOBS_HARNESS_RAN[1] }).gh, now: OBS_NOW }))
+  const errors = captureConsoleError(() => observe(QA, { gh: fakeGh({ pages: [[qaRunLike(DEPLOYED_SHA)]], jobs: () => JOBS_HARNESS_RAN[1] }).gh, now: OBS_NOW, sleep: NO_SLEEP }))
   assert.deepEqual(errors, [])
 })
 function qaRunLike(sha) {

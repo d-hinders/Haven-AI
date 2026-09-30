@@ -718,6 +718,40 @@ last-verified: "2026-09-29"
 > rail-aware surface. Nothing else in this document was re-verified in this
 > pass.
 >
+> **Recent re-verification (#3492):** the #3054 pre-check's over-budget
+> compare had a replay bug — a retried `idempotency_key` whose erc7710
+> payment had already SETTLED (via `haven_prepare_catalog_purchase`'s
+> authorize step) could still hit step 5b's pre-check with the now-spent
+> remaining budget and be refused as over-budget: a false
+> `delegation_budget_exceeded` `payment_refusals` row (`source:
+> 'hosted_prepare'`) for a payment that had already moved. `POST
+> /machine-payments/budget-precheck` gains an optional `idempotencyKey`
+> (`BudgetPrecheckRequest`); when it resolves to the SAME lookup authorize's
+> replay already uses (`findX402IntentByIdempotencyKey`) and that row is a
+> SETTLED erc7710 payment for the exact same quote (confirmed, a `tx_hash`,
+> `settlement_scheme: 'erc7710'`, same token/amount/payee/resource, no
+> task- or sub-budget pin), the pre-check answers `{ sufficient: true,
+> replay: true }` WITHOUT calling `refuse()` — skipping the write, not
+> faking the remaining figure (`remaining_atomic` still reports the true,
+> now-lower number). Any other row shape — no row, a `pending_signature`
+> child, a key collision on a different payee/resource/token/amount, a
+> task/sub-budget-scoped row, or an EIP-3009 row (`settlement_scheme:
+> 'eip3009'`, deliberately OUT of scope here: its funding leg is a separate
+> budget-metered hop the remaining figure must still reflect, so a settled
+> 3009 replay keeps today's compare and CAN still refuse) — falls through to
+> today's compare unchanged, including its refusal branch.
+> `haven_prepare_catalog_purchase`'s step 5b forwards `args.idempotency_key`
+> onto the pre-check call; `haven_pay_mcp_tool` is unaffected — it never had
+> this bug, because its authorize call runs the replay lookup BEFORE its own
+> pre-check (`delegation-authorize.ts`). No tool added, renamed or
+> re-shaped: arguments, schemas, descriptions and the strict/permissive
+> split are untouched, the local stdio runtime is not on this path, and the
+> skew-flatness this document asserts holds — an older MCP simply never
+> sends the new optional field and gets today's (occasionally over-refusing)
+> behavior; an older backend ignores the field if sent. Deploy order is
+> backend → hosted MCP. Nothing else in this document was re-verified in
+> this pass.
+>
 > **Recent re-verification (#3000):** the hosted server's
 > `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of
 > `deliverMerchantPayment` in `src/tools/paid-mcp-completion.ts`) now branches

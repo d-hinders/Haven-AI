@@ -4829,6 +4829,8 @@ export type components = {
             merchantTo?: string;
             /** @description The merchant resource being bought. Lands on the refusal row's dedupe key when the pre-check refuses. */
             resourceUrl?: string;
+            /** @description #3492: the x402 idempotency key of the quote this pre-check describes. When it resolves to an already-SETTLED erc7710 payment matching this same quote (confirmed, a tx_hash, same token/amount/payee/resource, no task- or sub-budget pin), the pre-check answers sufficient — with `replay: true` — WITHOUT comparing against the now-lower remaining budget and WITHOUT recording a payment_refusals row: the money already moved, so re-refusing it as over-budget would be a false ledger row. Any other shape (no row, a pending child, a key collision on a different quote, an eip3009 row) leaves today's compare unchanged. Omitted: unchanged behavior. */
+            idempotencyKey?: string;
         };
         /** @description The sufficient branch of the server-side budget pre-check (#3054). The insufficient answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which also lands a payment_refusals row with source "hosted_prepare". */
         BudgetPrecheckResponse: {
@@ -4838,6 +4840,8 @@ export type components = {
             remaining_atomic: string;
             /** @description #1319 provenance, same semantics as the allowances read's flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
             remaining_is_from_chain?: boolean;
+            /** @description #3492: present and true only when sufficiency was decided because `idempotencyKey` resolved to an already-settled erc7710 replay of this exact quote — NOT because `remaining_atomic` covers `amountAtomic` (it may not, on this branch: the settlement already spent it). Absent on every other sufficient answer. */
+            replay?: boolean;
         };
         /** @description The #3126 sufficiency answer — whether HELD funds cover the checked amount. Deliberately NOT a balance: no field carries the account's balance, and nothing is named like the authority figures (remaining/available). `covered` speaks only of holdings; `budget_remaining_atomic` is the PERMITTED figure the allowances read reports. */
         BalanceCoverageResponse: {

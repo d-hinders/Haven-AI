@@ -64,8 +64,84 @@ import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.
 import { formatTokenValue } from '../../domain/tokens.js'
 import { AgentPaymentPhase, AgentPaymentNextAction } from '../../domain/agent-payment-taxonomy.js'
 import { refuse, type DecidedResponse } from '../payments/refuse.js'
+import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { BudgetPrecheckBody, MppHandlerResult } from './types.js'
+
+/** `machine_metadata` is stored as text or already-parsed jsonb depending on the reader — same tolerant parse `settlement-observed.ts` and `agent-payment-status.ts` use. */
+function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
+  if (!machineMetadata) return null
+  if (typeof machineMetadata === 'string') {
+    try {
+      return JSON.parse(machineMetadata) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  return machineMetadata as Record<string, unknown>
+}
+
+/** `machine_metadata.settlement_scheme`, parsed the way every other reader of it does. */
+function settlementSchemeOf(machineMetadata: unknown): string | null {
+  const scheme = parsedMachineMetadata(machineMetadata)?.settlement_scheme
+  return typeof scheme === 'string' ? scheme : null
+}
+
+/**
+ * #3492: is `row` a SETTLED erc7710 replay of exactly the quote `body`
+ * describes? The same predicate `delegationReplay` uses to answer its own
+ * confirmed+tx_hash branch (`modules/x402/replay.ts:55-89`), narrowed to
+ * erc7710 (the captain's scope decision — a settled EIP-3009 replay keeps
+ * today's compare, since its funding leg is a SEPARATE budget-metered hop
+ * the remaining figure must still reflect) and to the fields this
+ * lighter-weight endpoint can compare:
+ *
+ *  - `confirmed` + a `tx_hash` — the payment already moved money; refusing
+ *    it as over-budget now would be a false ledger row for a spend that is
+ *    done, not pending.
+ *  - `settlement_scheme === 'erc7710'` — the scope line above.
+ *  - no task-budget or sub-budget pin on the stored row — the catalog-purchase
+ *    preflight this endpoint serves never authorizes against either, so a
+ *    row that carries one belongs to a different flow this compare should
+ *    not short-circuit.
+ *  - the SAME payee (`merchantTo`) and resource (`resourceUrl`) the request
+ *    asks about — a key collision against a different payee or resource
+ *    must still run (and can still fail) today's compare.
+ */
+function isSettledErc7710Replay(
+  row: Record<string, unknown>,
+  body: BudgetPrecheckBody,
+): boolean {
+  if (row.status !== 'confirmed' || !row.tx_hash) return false
+  if (settlementSchemeOf(row.machine_metadata) !== 'erc7710') return false
+  if (row.task_budget_id != null || row.sub_budget_id != null) return false
+
+  const rowResource = (row.x402_resource_url ?? row.payment_resource_url) as string | null | undefined
+  if (typeof rowResource === 'string' && body.resourceUrl !== undefined && rowResource !== body.resourceUrl) {
+    return false
+  }
+
+  const rowMerchant = (row.x402_merchant_address as string | null | undefined) ?? null
+  if (
+    typeof rowMerchant === 'string' &&
+    body.merchantTo !== undefined &&
+    rowMerchant.toLowerCase() !== body.merchantTo.toLowerCase()
+  ) {
+    return false
+  }
+
+  const rowToken = row.token_address as string | null | undefined
+  if (typeof rowToken === 'string' && body.token !== undefined && rowToken.toLowerCase() !== body.token.toLowerCase()) {
+    return false
+  }
+
+  const rowAmount = row.amount_raw != null ? String(row.amount_raw) : null
+  if (rowAmount !== null && body.amountAtomic !== undefined && rowAmount !== body.amountAtomic) {
+    return false
+  }
+
+  return true
+}
 
 /**
  * Registry-derived token metadata for the address the caller asked about —
@@ -106,6 +182,38 @@ export async function handleBudgetPrecheck(
     return { statusCode: retired.statusCode, body: retired.body }
   }
 
+  // The route layer validates presence/types before calling; this guard is
+  // the module's own fail-closed floor (the EvidenceBody handlers keep the
+  // same shape of check) and gives the compare the narrowed strings it needs.
+  // Moved ahead of the derived-budget read (#3492) so a malformed body still
+  // 400s before either the replay lookup or the chain read runs.
+  if (typeof body.token !== 'string' || typeof body.amountAtomic !== 'string') {
+    return { statusCode: 400, body: { error: 'token and amountAtomic are required' } }
+  }
+  const tokenAddress = body.token
+  const amountAtomicString = body.amountAtomic
+
+  // #3492: a replayed idempotency key whose erc7710 payment already SETTLED
+  // is sufficient by construction — the money already moved under the
+  // budget that was live at the time, so re-running today's remaining-budget
+  // compare (now lower, post-settlement) must never REFUSE it: that would
+  // book a false `delegation_budget_exceeded` row for a spend that is done,
+  // not pending. The same lookup `delegationAuthorize`'s replay runs
+  // (`findX402IntentByIdempotencyKey`), scoped to THIS agent; any other
+  // shape (no row, a pending child, a key collision on a different
+  // payee/resource/token/amount, an eip3009 row, a task/sub-budget-scoped
+  // row) leaves this false and today's compare runs unchanged below —
+  // including its refusal branch.
+  const settledReplay = body.idempotencyKey
+    ? isSettledErc7710Replay(
+        ((await findX402IntentByIdempotencyKey(agent.id, body.idempotencyKey)) ?? {}) as unknown as Record<
+          string,
+          unknown
+        >,
+        body,
+      )
+    : false
+
   // The SAME derivation the allowances read runs (comment there for the
   // #1090/#1145 provenance): active, owner-signed delegations, scoped to the
   // agent's chain, remaining from the ERC20PeriodTransferEnforcer's storage.
@@ -122,15 +230,6 @@ export async function handleBudgetPrecheck(
   )
   const remainingById = new Map(remainingByIdEntries)
 
-  // The route layer validates presence/types before calling; this guard is
-  // the module's own fail-closed floor (the EvidenceBody handlers keep the
-  // same shape of check) and gives the compare the narrowed strings it needs.
-  if (typeof body.token !== 'string' || typeof body.amountAtomic !== 'string') {
-    return { statusCode: 400, body: { error: 'token and amountAtomic are required' } }
-  }
-  const tokenAddress = body.token
-  const amountAtomicString = body.amountAtomic
-
   // The hosted tool's compare, verbatim in semantics: match on the SELECTED
   // option's token, no match means the budget for this token is zero.
   const amountAtomic = BigInt(amountAtomicString)
@@ -142,7 +241,7 @@ export async function handleBudgetPrecheck(
   // token — the allowances view reports the budget under THAT symbol.
   const symbol = match ? match.token_symbol : token.symbol
 
-  if (BigInt(remainingAtomic) >= amountAtomic) {
+  if (BigInt(remainingAtomic) >= amountAtomic || settledReplay) {
     // #1319 provenance, carried so the hosted tool's
     // ALLOWANCE_READ_OPTIMISTIC warning survives the move verbatim: an
     // optimistic remaining (the #1145 fallback, or a budget whose delegation
@@ -157,6 +256,12 @@ export async function handleBudgetPrecheck(
         sufficient: true,
         remaining_atomic: remainingAtomic,
         ...(fromChain !== null ? { remaining_is_from_chain: fromChain } : {}),
+        // #3492: distinguishes "sufficient because it fit" from "sufficient
+        // because this exact payment already settled" — the remaining
+        // figure above can be BELOW amountAtomic on this branch (the
+        // settlement already spent it) and callers should not read
+        // `sufficient: true` here as "there is still headroom".
+        ...(settledReplay ? { replay: true } : {}),
       },
     }
   }

@@ -92,6 +92,19 @@ export interface BudgetPrecheckBody {
   amountAtomic?: string
   merchantTo?: string
   resourceUrl?: string
+  /**
+   * #3492: the x402 idempotency key of the quote this pre-check describes.
+   * When present and it resolves to a SETTLED erc7710 replay (the same
+   * predicate `delegationReplay` uses — `confirmed` + `tx_hash`, equal
+   * task-budget/sub-budget pins, same payee and resource), the pre-check
+   * answers sufficient without comparing against the (now-spent) remaining
+   * budget and without a `refuse()` write — the payment already settled, so
+   * re-refusing it as over-budget would be a false ledger row for money that
+   * already moved. Absent, or any other row shape (no row, a pending child,
+   * a key collision on a different payee/resource, an eip3009 row): today's
+   * compare, unchanged.
+   */
+  idempotencyKey?: string
 }
 
 /** A generic handler result shape, mirroring `X402HandlerResult`. */

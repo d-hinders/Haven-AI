@@ -41,5 +41,9 @@ export function budgetPrecheckBodyError(
   if (body.chainId !== undefined && typeof body.chainId !== 'number') {
     return { error: 'chainId must be a number' }
   }
+  // #3492: optional, so no change to callers that never send it.
+  if (body.idempotencyKey !== undefined && typeof body.idempotencyKey !== 'string') {
+    return { error: 'idempotencyKey must be a string' }
+  }
   return null
 }

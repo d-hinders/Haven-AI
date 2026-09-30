@@ -649,6 +649,13 @@ export function createCatalogPurchaseHandlers(
               // The merchant resource being bought — the ledger dedupe
               // window's discriminating column — never this request's URL.
               resourceUrl: merchantUrl,
+              // #3492: a replayed idempotency key whose erc7710 authorize
+              // already settled must not refuse here as over-budget against
+              // the now-spent remaining figure — the backend answers
+              // sufficient (replay: true) for that exact shape and runs
+              // today's compare unchanged for every other one, including a
+              // fresh key with no prior payment.
+              ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key as string } : {}),
             })
             allowanceBlock = {
               rail,

@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **`PaymentStatusResult.settlementScheme` / `.merchantSettlementRecorded` (#3475 follow-up).** `getPaymentStatus()` now additionally reports which x402 settlement branch a payment runs (`'eip3009' | 'erc7710' | null`) and, on eip3009, whether a merchant settlement is already recorded and on-chain-verified (`true`, omitted otherwise). Both are read-only projections of `machine_metadata` the backend already held; an older backend simply omits them. Additive; no update needed.
+
 ### Changed
 
 - **`reportSettlementEvidence()` also takes an eip3009 merchant settlement (#3475).** After a plain-HTTP x402 purchase on the EIP-3009 funding leg, pass the merchant's `PAYMENT-RESPONSE.transaction`: the backend verifies the delegate → merchant transfer on-chain and records it, and receipts then show it as `settlementTxHash` beside the unchanged funding hash. The method's signature and outcomes are unchanged; an older backend refuses the report (`refused`, 409) and writes nothing. The shared `haven_report_settlement_evidence` description is now scheme-neutral, and the bundled skill's plain-HTTP paragraph tells the agent to make this report. No update needed.

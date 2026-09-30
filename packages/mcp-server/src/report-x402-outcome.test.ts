@@ -311,4 +311,104 @@ describe('haven_report_x402_outcome', () => {
     expect(toolDescriptions.haven_pay_x402_quote).toContain('haven_report_x402_outcome')
     expect(toolDescriptions.haven_resume_x402_payment).toContain('haven_report_x402_outcome')
   })
+
+  // #3475 follow-up (owner decision, 2026-09-30): an `accepted` outcome on an
+  // eip3009 plain-HTTP payment with no merchant settlement recorded yet names
+  // haven_report_settlement_evidence as the next tool, payment_id prefilled.
+  describe('offering haven_report_settlement_evidence (#3475 follow-up)', () => {
+    it('accepted + eip3009 + no recorded settlement: names haven_report_settlement_evidence, payment_id only', async () => {
+      stubFetch({
+        ...HAPPY_ROUTES,
+        'GET /machine-payments/pay_x402/status': {
+          body: statusBody({ settlement_scheme: 'eip3009' }),
+        },
+      })
+      const result = ok<{
+        next_tool?: string
+        next_arguments?: Record<string, unknown>
+        next_action: string
+      }>(
+        await handlers().haven_report_x402_outcome({
+          payment_id: 'pay_x402',
+          outcome: 'accepted',
+          merchant_status: 200,
+        }),
+      )
+      expect(result.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+      expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402' })
+      expect(result.data.next_action).toBe('awaiting_settlement_evidence')
+    })
+
+    it('accepted + eip3009 + settlement ALREADY recorded: no tool follows (unchanged answer)', async () => {
+      stubFetch({
+        ...HAPPY_ROUTES,
+        'GET /machine-payments/pay_x402/status': {
+          body: statusBody({ settlement_scheme: 'eip3009', merchant_settlement_recorded: true }),
+        },
+      })
+      const result = ok<{ next_tool?: string; next_tool_omitted_reason?: string }>(
+        await handlers().haven_report_x402_outcome({
+          payment_id: 'pay_x402',
+          outcome: 'accepted',
+          merchant_status: 200,
+        }),
+      )
+      expect(result.data.next_tool).toBeUndefined()
+      expect(result.data.next_tool_omitted_reason).toBe(
+        'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows',
+      )
+    })
+
+    it('accepted + erc7710: no tool follows (unchanged answer)', async () => {
+      stubFetch({
+        ...HAPPY_ROUTES,
+        'GET /machine-payments/pay_x402/status': {
+          body: statusBody({ settlement_scheme: 'erc7710' }),
+        },
+      })
+      const result = ok<{ next_tool?: string; next_tool_omitted_reason?: string }>(
+        await handlers().haven_report_x402_outcome({
+          payment_id: 'pay_x402',
+          outcome: 'accepted',
+          merchant_status: 200,
+        }),
+      )
+      expect(result.data.next_tool).toBeUndefined()
+      expect(result.data.next_tool_omitted_reason).toBe(
+        'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows',
+      )
+    })
+
+    it('accepted + no settlement_scheme reported (older backend / unknown): no tool follows', async () => {
+      stubFetch(HAPPY_ROUTES)
+      const result = ok<{ next_tool?: string; next_tool_omitted_reason?: string }>(
+        await handlers().haven_report_x402_outcome({
+          payment_id: 'pay_x402',
+          outcome: 'accepted',
+          merchant_status: 200,
+        }),
+      )
+      expect(result.data.next_tool).toBeUndefined()
+      expect(result.data.next_tool_omitted_reason).toBe(
+        'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows',
+      )
+    })
+
+    it('rejected + eip3009 unsettled: still sweeps, never offers settlement evidence', async () => {
+      stubFetch({
+        ...HAPPY_ROUTES,
+        'GET /machine-payments/pay_x402/status': {
+          body: statusBody({ settlement_scheme: 'eip3009' }),
+        },
+      })
+      const result = ok<{ next_tool?: string }>(
+        await handlers().haven_report_x402_outcome({
+          payment_id: 'pay_x402',
+          outcome: 'rejected',
+          merchant_status: 402,
+        }),
+      )
+      expect(result.data.next_tool).toBe('mcp__haven__haven_sweep_delegate')
+    })
+  })
 })

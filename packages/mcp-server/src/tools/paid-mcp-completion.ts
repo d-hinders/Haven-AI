@@ -1024,6 +1024,29 @@ export function createPaidMcpCompletionHandlers(
     haven_report_settlement_evidence: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_report_settlement_evidence', input)
+        // #3475 follow-up: `settlement_tx_hash` is optional on the SCHEMA so
+        // haven_report_x402_outcome can name this tool with only payment_id
+        // prefilled, before it knows whether the merchant returned a hash at
+        // all. A call that never supplies one refuses cleanly here rather
+        // than reporting anything — this tool still never records evidence
+        // without an actual hash to verify.
+        if (!args.settlement_tx_hash) {
+          throw new HostedToolError({
+            code: 'SETTLEMENT_TX_HASH_REQUIRED',
+            message:
+              'settlement_tx_hash is required to report merchant settlement evidence. Call again ' +
+              "with the merchant's PAYMENT-RESPONSE.transaction (0x + 64 hex characters). If the " +
+              'merchant returned none, there is nothing to report — the purchase is already complete.',
+            statusCode: 400,
+            nextStep: refusalNextStep({
+              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextTool: null,
+              nextToolOmittedReason:
+                'no settlement_tx_hash was supplied, so there is nothing to verify or record; re-call with one if the merchant returned it',
+            }),
+            paymentId: args.payment_id,
+          })
+        }
         const outcome = await haven.reportSettlementEvidence(
           args.payment_id,
           args.settlement_tx_hash,

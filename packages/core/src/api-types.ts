@@ -4468,6 +4468,10 @@ export type components = {
             message: string;
             /** @description True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown. */
             delivered?: boolean;
+            /** @description Which settlement branch this x402 payment runs (#946), from machine_metadata. Null on the legacy rail and on any x402 intent whose scheme metadata predates #946. */
+            settlement_scheme?: ("eip3009" | "erc7710") | null;
+            /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
+            merchant_settlement_recorded?: boolean;
             fee?: {
                 amount: string;
                 token: string;

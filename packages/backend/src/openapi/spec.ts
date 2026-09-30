@@ -1201,6 +1201,23 @@ const agentPaymentStatus = {
     // only when a machine_payment_evidence row records the merchant's
     // response; omitted — never false — when the backend does not know.
     delivered: { type: 'boolean', description: 'True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown.' },
+    // #3475 follow-up
+    settlement_scheme: {
+      anyOf: [
+        { type: 'string', enum: ['eip3009', 'erc7710'] },
+        { type: 'null' },
+      ],
+      description:
+        'Which settlement branch this x402 payment runs (#946), from machine_metadata. Null on the ' +
+        'legacy rail and on any x402 intent whose scheme metadata predates #946.',
+    },
+    merchant_settlement_recorded: {
+      type: 'boolean',
+      description:
+        'True only when an eip3009 payment\'s merchant settlement transaction is already recorded and ' +
+        'on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the ' +
+        'confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown.',
+    },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
     fee: {

@@ -56,6 +56,7 @@ covers:
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/domain/agent-payment-taxonomy.ts
+  - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-mappers.ts
@@ -1145,6 +1146,28 @@ last-verified: "2026-09-29"
 > backend writes the payment's base evidence row before its chain read, an
 > idempotent upsert that never touches proof status.) No
 > local-runtime twin, so the consent hash and the local signer are unchanged.
+>
+> **Re-verified (#3475 follow-up, 2026-09-30):** `haven_report_x402_outcome`
+> keeps its no-hash contract (still `payment_id`/`outcome`/`merchant_status`/
+> `merchant_body`, no `tx_hash` input, per the owner decision), but an
+> `accepted` outcome on an eip3009 plain-HTTP payment with no merchant
+> settlement recorded yet now names `haven_report_settlement_evidence` as
+> `next_tool`, `payment_id` prefilled — where it used to answer "no tool
+> follows" unconditionally on acceptance. Rejected outcomes, erc7710
+> payments, and a payment whose settlement is already recorded keep the old
+> answer. The signal comes from `GET /machine-payments/:id/status`'s two new
+> additive fields, `settlement_scheme` and `merchant_settlement_recorded`
+> (absent unless `true`) — read from the SAME status re-read the tool already
+> performed, no second call. Because the offered `next_arguments` carries
+> only `payment_id` and Haven does not yet hold a hash to prefill,
+> `haven_report_settlement_evidence`'s own `settlement_tx_hash` argument is
+> now OPTIONAL on the schema; a call that omits it refuses cleanly
+> (`SETTLEMENT_TX_HASH_REQUIRED`) rather than reporting anything — it never
+> records evidence without a real hash to verify. Version skew: an older
+> backend never sets the two new status fields, so an older-backend response
+> reads as absent/unknown and the tool falls back to its pre-existing "no
+> tool follows" answer — the safe side, since erc7710 and unrecorded-scheme
+> payments already default there.
 >
 > **Recent re-verification (#2968):** the response vocabulary is completed at
 > the agent-facing surface, additively. `deliverMerchantPayment` now collapses

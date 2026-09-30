@@ -250,12 +250,31 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * above round 11's 940.47, and the same rule applies — re-derived at the
  * measured mean, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 24_547
-// Mean pin: re-derived — round 12, #3495 review round 2 (block above):
-// 24,547 / 26 = 944.1153, pinned at the two-decimal ceiling (944.12).
-// Round 11's 940.47 cannot hold while this tree exceeds it. Shrink-only
+/**
+ * **Re-derived — round 13, #3501 union with #3495 (2026-10-01 merge).** Both
+ * changes grew from the same round-10 base: this branch (#3501) adds
+ * `haven_get_agent`'s budget-visibility figures — `taskBudgets[]` rows gain
+ * `spentAtomic`, `remainingAtomic`, `remainingDisplay` (what the chain will
+ * still allow through an open task budget) and the `remainingIsFromChain`
+ * honesty flag — and `haven_get_allowances` names where task budgets live
+ * (+351 UTF-8 bytes across those two descriptions, compressed once: the
+ * clauses state the fields, the degraded read, and nothing else — an agent
+ * reading tools/list learns the fields exist before it attempts a payment a
+ * spent-out task budget will refuse, the same field-naming obligation rounds
+ * 9/10 recorded for additive response fields. No overclaim remains to trim),
+ * while dev's #3495 rewords the direct-payment description (rounds 11/12
+ * above). The union tree re-measures at 24,898 across the same 26 tools —
+ * 24,547 + the 351 bytes this branch adds, exactly — so the absolute pin
+ * moves to that exact value, shrink-only from here. The mean pin moves too:
+ * 24,898 / 26 = 957.6154 sits above round 12's 944.12, and the same rule
+ * applies — re-derived at the measured mean, shrink-only from here.
+ */
+const MAX_TOTAL_BYTES = 24_898
+// Mean pin: re-derived — round 13, #3501 union with #3495 (block above):
+// 24,898 / 26 = 957.6154, pinned at the two-decimal ceiling (957.62).
+// Round 12's 944.12 cannot hold while this tree exceeds it. Shrink-only
 // from here.
-const MAX_MEAN_BYTES = 944.12
+const MAX_MEAN_BYTES = 957.62
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

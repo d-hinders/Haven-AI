@@ -16,6 +16,7 @@ import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { getChain } from '../domain/chains.js'
+import { formatTokenValue } from '../domain/tokens.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { selectDelegationForPayment } from '../infra/repositories/delegation-budgets.js'
 import {
@@ -35,6 +36,7 @@ import {
   checkRemainderForNewTaskBudget,
   isTaskBudgetChildDisabledOnChain,
   prepareTaskBudgetClose,
+  readTaskBudgetSpentForReport,
   recoverTaskBudgetChildSigner,
   serializeClosePreparedUserOp,
   submitTaskBudgetClose,
@@ -54,7 +56,25 @@ function safeDetails(err: unknown): string {
   return redactVendorSecrets(err instanceof Error ? err.message : String(err))
 }
 
-/** Wire shape (#3329 §3 TaskBudget object) — snake_case, `is_expired` derived. */
+/**
+ * Wire shape (#3329 §3 TaskBudget object) — snake_case, `is_expired` derived.
+ *
+ * #3501: `spent_atomic` / `remaining_atomic` / `remaining_is_from_chain` are
+ * the ON-CHAIN figures for this child's delegation hash, read live per
+ * request — they sit OUTSIDE `toWire` (which stays a pure row projection)
+ * and are attached only where the route enriches rows with the chain read.
+ * They are absent (`undefined`) on every response that never read the chain:
+ * the POST build/open and submit/close responses report the row they just
+ * wrote, and a chain read there would answer about a child the chain has
+ * known for milliseconds. The GET reads (list + one) are the budget-
+ * visibility surface an agent polls before its next payment, and they ALWAYS
+ * carry the keys — `null` on a failed read (never the full cap as
+ * "remaining"), matching the parent allowance's honesty-flag contract
+ * (`remaining_is_from_chain`, #1319) with one deliberate difference: the
+ * parent's failed read FALLS BACK to the full budget, while a task budget's
+ * failed read reports null — reporting the full cap as "remaining" is the
+ * optimistic lie this surface exists to stop.
+ */
 function toWire(row: TaskBudgetRow, nowSec: number) {
   return {
     id: row.id,
@@ -73,6 +93,44 @@ function toWire(row: TaskBudgetRow, nowSec: number) {
     opened_at: row.opened_at,
     closed_at: row.closed_at,
     close_tx_hash: row.close_tx_hash,
+  }
+}
+
+/**
+ * #3501: the wire row plus the live on-chain spent/remaining for the child.
+ * A non-open row (pending: never signed, nothing on-chain yet; closed:
+ * nothing left to read) carries no figures — `remaining_is_from_chain` is
+ * absent rather than false, so the keys' presence says "read attempted".
+ *
+ * Display forms ride beside the atomic ones (the issue asks for both). The
+ * display is null exactly when its atomic figure is null — a failed read
+ * never renders as "0" or as the cap; an unknown token renders the atomic
+ * figure explicitly labelled instead of guessing decimals.
+ */
+async function toWireWithSpend(row: TaskBudgetRow, nowSec: number) {
+  const base = toWire(row, nowSec)
+  if (row.status !== 'open') return base
+  const { spentAtomic, remainingAtomic } = await readTaskBudgetSpentForReport({
+    chainId: row.chain_id,
+    delegationHash: row.delegation_hash,
+    maxAtomic: row.max_atomic,
+  })
+  const token = getChain(row.chain_id).tokenByAddress[row.token_address.toLowerCase()]
+  const display = (atomic: string | null): string | null => {
+    if (atomic === null) return null
+    return token ? `${formatTokenValue(atomic, token.decimals)} ${token.symbol}` : `${atomic} atomic (token not in the chain registry)`
+  }
+  return {
+    ...base,
+    spent_atomic: spentAtomic,
+    remaining_atomic: remainingAtomic,
+    spent_display: display(spentAtomic),
+    remaining_display: display(remainingAtomic),
+    // The enforcer's own storage is the source. False (not absent) on the
+    // degraded path: the read RAN, and the figures are null rather than
+    // fallback numbers — the flag says the live read failed, the same
+    // provenance statement the parent allowance's flag makes.
+    remaining_is_from_chain: remainingAtomic !== null,
   }
 }
 
@@ -227,7 +285,11 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
     const status = request.query?.status === 'all' ? 'all' : 'open'
     const nowSec = Math.floor(Date.now() / 1000)
     const rows = await listForAgent(agent.id, { status, nowSec })
-    return reply.send({ task_budgets: rows.map((r) => toWire(r, nowSec)) })
+    // #3501: every open row is enriched with the live on-chain spent/remaining
+    // (in PARALLEL — the endpoint is gated by the slowest read, so a serial
+    // loop would multiply the chain bound by the row count). Fails soft per
+    // row: one unreadable child reports null figures, never a failed list.
+    return reply.send({ task_budgets: await Promise.all(rows.map((r) => toWireWithSpend(r, nowSec))) })
   })
 
   // ── GET /task-budgets/:id ──────────────────────────────────────────────
@@ -235,7 +297,7 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
     const agent = request.agent as AgentContext
     const row = await findForAgent(request.params.id, agent.id)
     if (!row) return reply.code(404).send({ error: 'Task budget not found' })
-    return reply.send({ task_budget: toWire(row, Math.floor(Date.now() / 1000)) })
+    return reply.send({ task_budget: await toWireWithSpend(row, Math.floor(Date.now() / 1000)) })
   })
 
   // ── GET /task-budgets/:id/sign-context — re-servable, byte-free ──────────

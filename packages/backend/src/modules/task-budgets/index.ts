@@ -17,6 +17,7 @@ export type { BuiltTaskBudgetDelegation, TaskBudgetDelegationRequest } from './t
 
 export { checkTaskBudgetCap, readTaskBudgetSpent, taskBudgetExceededBody } from './task-budget-cap.js'
 export type { TaskBudgetCapCheck, TaskBudgetSpentReader } from './task-budget-cap.js'
+export { readTaskBudgetSpentBounded, readTaskBudgetSpentForReport } from './task-budget-cap.js'
 
 export {
   buildTaskBudgetChild,

@@ -1,0 +1,9 @@
+- **Task- and sub-budget close sign contexts serialize to JSON (2026-09-30). This is a reporting-shape fix: no funds move differently, no signing check changes, and there is no authority, custody or perimeter change.**
+  - **The defect.** In epic #3328's dev verification, `GET /task-budgets/:id/sign-context` answered **500** ("Do not know how to serialize a BigInt") on every close. The builder returned the deserialized `prepared_user_op`, which holds real bigints, as `user_operation`, and Fastify's `JSON.stringify` throws on those.
+    - The signer therefore could not fetch the close context, so a task budget could not be closed early. It stayed `closing` until its own on-chain expiry caveat ended it. No funds were at risk.
+    - `buildSubBudgetSignContext` is a copy of the same shape and carried the same defect.
+  - **The fix.** A new `userOperationToWire` in `rails/execution-rail.ts` renders bigints as `"123n"` strings. That is the wire shape the treasury prepare routes already emit (`agent-delegations.ts`, `agent-rekey.ts`). Both close builders now pass `user_operation` through it.
+    - `typed_data` was already string-safe (`userOpTypedData` stringifies its bigints), and `user_op_hash` is unchanged.
+    - The signer does not read `user_operation`. It signs `typed_data` and checks it against `user_op_hash`. So signer behaviour and the signed bytes are unchanged.
+  - **Test.** `modules/task-budgets/__tests__/close-sign-context-wire.test.ts` builds a closing row for each builder and asserts that `JSON.stringify` accepts it. Reverting the task-budget call site turns that case red with the production error.
+  - **Perimeter.** No route, credential scope, key handling or spend path is added or widened. Custody unchanged. Perimeter unchanged.

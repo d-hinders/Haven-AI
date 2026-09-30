@@ -445,22 +445,9 @@ export const en = {
       title: 'Company details',
       description:
         'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants.',
-      // D3/design 9 (#3332 review): "gates" replaced with plain words; VIES
-      // named as the EU's VAT number register, not left unexplained; the
-      // Swedish sole-trader VAT-encodes-the-personal-number fact stated
-      // alongside the org-number one, not only in the field helper. The
-      // erasure sentence is the captain's decision on M3: true whether the
-      // flag is on or off, since this text is only ever shown WHILE the
-      // section itself is shown.
-      //
-      // #3332 review round 2, design 6: trimmed for a 390px viewport while
-      // keeping every required fact. Round 3 dropped the receipts sentence
-      // (WHY Haven asks) again as a duplicate: `description`, which renders
-      // directly above this paragraph, already says it. "while this section
-      // is shown" read like a stage direction from OUTSIDE the section it is
-      // written inside of — reworded
-      // to name the one case removal is not self-serve (the flag going off)
-      // without describing the reader's own vantage point.
+      // History: #3332's review rounds shaped a longer paragraph (VIES named,
+      // the SE VAT encoding, a support-erasure sentence), and the "receipts"
+      // sentence stays in `description` above.
       //
       // Owner copy review, 2026-09-30: trimmed to the essentials. What stays is
       // what the design depends on: that it is optional, the sole-trader

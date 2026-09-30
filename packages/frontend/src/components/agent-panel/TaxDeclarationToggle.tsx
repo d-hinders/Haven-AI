@@ -15,11 +15,11 @@
  *
  * ── Copy discipline ──────────────────────────────────────────────────────
  * The help text must not overclaim: the declaration is sent ONLY on
- * EIP-3009 payments, and the copy states that rail by name (the same
- * convention `marketplace/PayWithHavenBlock.tsx` uses). Agents whose
- * recipient is pinned to a merchant are ERC-7710-only, and so are merchants
- * that accept ERC-7710 — so a pinned agent never sends one, and the copy
- * says so rather than implying every payment carries the declaration.
+ * EIP-3009 payments. A pinned agent, and a merchant that accepts ERC-7710,
+ * never gets one. The card used to name that rail; the owner's copy review
+ * (2026-09-30) dropped the sentence. The card now relies on "can be
+ * declared", never a promise that every payment carries one, and the
+ * EIP-3009 scope is stated in docs/product/agent-passport.md.
  * "checked" is the strongest word used: VIES `valid` says the VAT number
  * was checked against the EU's register on a date, never that anything
  * about the agent or owner is "verified" (see

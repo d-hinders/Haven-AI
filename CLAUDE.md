@@ -25,7 +25,7 @@ covers:
   - .claude/agents/**
   - .claude/commands/**
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-15"
+last-verified: "2026-09-30"
 ---
 
 # Haven — CLAUDE.md
@@ -138,7 +138,9 @@ HTTP 410 fail-closed, nothing written, distinct in the body returned.
 
 ```
 1. Agent intent → { action: "payment", asset: "USDC", amount: "100", recipient: "0xabc" }
-2. Haven authenticates the agent, selects its budget delegation for that token/recipient
+2. Haven authenticates the agent, selects its budget delegation for that token/recipient,
+   and pre-checks its live remaining period budget (a typed 403 when it cannot cover
+   the amount; fails open on an unreadable read — #3503)
 3. Haven prepares a redeeming UserOp; budget, recipient and expiry are enforced
    ON-CHAIN during gas estimation — over-budget or wrong-recipient reverts here
 4. The agent signs the account's exact EIP-712 typed data VERBATIM (never a bare

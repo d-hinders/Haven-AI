@@ -38,9 +38,10 @@ const DELEGATE = '0x' + 'a3'.repeat(20)
 const MERCHANT = '0x' + 'cc'.repeat(20)
 
 /**
- * The verbatim shape dev returns for an over-budget refusal on the DIRECT
- * payment path (2026-08-25). Still current: `over-budget-refused` reaches the
- * chain, so the enforcer still answers it.
+ * The verbatim shape dev returned for an over-budget refusal on the DIRECT
+ * payment path (2026-08-25), before #3503 added the period-budget pre-check.
+ * Since then it is what a REMOVED pre-check, or one that failed open on a
+ * degraded read, looks like — on both legs a red, never a pass.
  */
 const ENFORCER_502 = {
   ok: false,
@@ -92,6 +93,37 @@ const PRECHECK_403 = {
     shortfall_atomic: '1000000',
     resource_url: 'https://example.test/resource',
     merchant_address: MERCHANT.toLowerCase(),
+  },
+}
+
+/**
+ * The typed 403 `POST /payments` answers since #3503 — the x402 body with the
+ * direct route's `rail` and `recipient` in place of the x402 fields
+ * (`routes/payments.ts`).
+ */
+const DIRECT_PRECHECK_403 = {
+  ok: false,
+  status: 403,
+  data: {
+    error:
+      "This payment of 2 USDC exceeds the agent's remaining budget for this period " +
+      '(1 USDC, short by 1). There is no approval queue on the delegation rail — an ' +
+      'over-budget redemption reverts on-chain. Ask the wallet owner to grant or raise the ' +
+      'budget in Haven, or wait for the period to reset.',
+    error_code: 'delegation_budget_exceeded',
+    phase: 'insufficient_funds',
+    next_action: 'fund_account_or_raise_allowance',
+    rail: 'direct',
+    chain_id: 84532,
+    token: 'USDC',
+    asset: USDC,
+    amount: '2',
+    amount_atomic: '2000000',
+    remaining: '1',
+    remaining_atomic: '1000000',
+    shortfall: '1',
+    shortfall_atomic: '1000000',
+    recipient: MERCHANT.toLowerCase(),
   },
 }
 
@@ -165,17 +197,18 @@ beforeEach(() => {
 })
 
 describe('over-budget-refused (POST /payments)', () => {
-  it('PASSES on the live enforcer refusal, naming the enforcer', async () => {
+  it('PASSES on the typed 403 pre-check (#3503), naming the error_code', async () => {
     // The positive control for the whole file: without this, every red below
     // is also consistent with a leg that can never pass at all.
-    mockCreatePayment.mockResolvedValueOnce(SIGNABLE).mockResolvedValueOnce(ENFORCER_502)
+    mockCreatePayment.mockResolvedValueOnce(SIGNABLE).mockResolvedValueOnce(DIRECT_PRECHECK_403)
     const r = await overBudgetRefused.run(ctx)
     expect(r.pass).toBe(true)
-    expect(r.detail).toContain('ERC20PeriodTransferEnforcer:transfer-amount-exceeded')
+    expect(r.detail).toContain('delegation_budget_exceeded')
+    expect(r.detail).toContain('control that WAS offered')
   })
 
   it('asks for an amount ACTUALLY above the live remaining budget', async () => {
-    mockCreatePayment.mockResolvedValueOnce(SIGNABLE).mockResolvedValueOnce(ENFORCER_502)
+    mockCreatePayment.mockResolvedValueOnce(SIGNABLE).mockResolvedValueOnce(DIRECT_PRECHECK_403)
     await overBudgetRefused.run(ctx)
     // remaining 1000000 atomic (1 USDC) → the over-budget ask must exceed it.
     const [, overAmount] = mockCreatePayment.mock.calls[1]
@@ -186,16 +219,39 @@ describe('over-budget-refused (POST /payments)', () => {
     mockCreatePayment.mockResolvedValueOnce(SIGNABLE).mockResolvedValueOnce(RETIREMENT_410)
     const r = await overBudgetRefused.run(ctx)
     expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/expected HTTP 502/)
+    expect(r.detail).toMatch(/expected HTTP 403/)
   })
 
-  it('FAILS on a 502 that is a bundler failure, not a policy refusal', async () => {
-    mockCreatePayment
-      .mockResolvedValueOnce(SIGNABLE)
-      .mockResolvedValueOnce({ ok: false, status: 502, data: { error: 'x', details: 'fetch failed: ECONNREFUSED bundler' } })
+  it('FAILS on the pre-#3503 enforcer 502 — the pre-check did not answer', async () => {
+    // Removed, or failed open on a degraded read: both reach gas estimation,
+    // and only the first is a regression — so the text names both causes.
+    mockCreatePayment.mockResolvedValueOnce(SIGNABLE).mockResolvedValueOnce(ENFORCER_502)
     const r = await overBudgetRefused.run(ctx)
     expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/did not come from a caveat enforcer/)
+    expect(r.detail).toMatch(/expected HTTP 403/)
+    expect(r.detail).toMatch(/failed OPEN to prepare/)
+  })
+
+  it('FAILS on a 403 that is a MISSING delegation, not the budget check', async () => {
+    mockCreatePayment
+      .mockResolvedValueOnce(SIGNABLE)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        data: { error: 'Agent has no active budget delegation for USDC to this recipient' },
+      })
+    const r = await overBudgetRefused.run(ctx)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/did not come from the budget pre-check/)
+  })
+
+  it('FAILS when the refusal reports a budget other than the live one', async () => {
+    mockCreatePayment
+      .mockResolvedValueOnce(SIGNABLE)
+      .mockResolvedValueOnce({ ...DIRECT_PRECHECK_403, data: { ...DIRECT_PRECHECK_403.data, remaining_atomic: '999' } })
+    const r = await overBudgetRefused.run(ctx)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/consulted a different delegation/)
   })
 
   it('FAILS when the over-budget request IS offered as a signable intent', async () => {
@@ -209,7 +265,7 @@ describe('over-budget-refused (POST /payments)', () => {
   it('FAILS when the within-budget control is NOT offered', async () => {
     // An account that can pay nothing would refuse the over-budget request
     // too — and the leg must refuse to read that as budget enforcement.
-    mockCreatePayment.mockResolvedValueOnce(RETIREMENT_410).mockResolvedValueOnce(ENFORCER_502)
+    mockCreatePayment.mockResolvedValueOnce(RETIREMENT_410).mockResolvedValueOnce(DIRECT_PRECHECK_403)
     const r = await overBudgetRefused.run(ctx)
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/control: a within-budget payment was NOT offered/)
@@ -347,9 +403,10 @@ describe('x402-over-budget-rejected (POST /x402/authorize)', () => {
     // 502 carrying the enforcer's revert reason means the pre-check was
     // bypassed, deleted, OR failed open on a degraded budget read — all three
     // reach gas estimation, and only the first two are regressions. The leg's
-    // own failure text names both causes for exactly that reason. The
-    // enforcer's own guarantee is not lost either way: `over-budget-refused`
-    // still drives the chain path and still asserts the revert reason.
+    // own failure text names both causes for exactly that reason. Since #3503
+    // `over-budget-refused` is refused at the same kind of pre-check; the
+    // deployed enforcer's own refusal is proven by the backend's
+    // `non-custody-onchain-enforcer.contract.test.ts`.
     then(ENFORCER_502)
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(false)

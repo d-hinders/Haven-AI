@@ -10,27 +10,47 @@
  * assertion would have meant inventing a flow nobody built.
  *
  * The circuit breaker it was protecting is still there; it has a different
- * shape. The budget lives in the delegation's ERC20PeriodTransferEnforcer, so
- * an over-budget redemption REVERTS during the bundler's gas estimation —
- * before any intent row is written and before the agent is offered anything to
- * sign. `POST /payments` turns that into HTTP 502 with the simulation error.
+ * shape. The budget lives in the delegation's ERC20PeriodTransferEnforcer.
+ * Until #3503 an over-budget redemption REVERTED during the bundler's gas
+ * estimation and `POST /payments` turned that into an untyped HTTP 502. Since
+ * #3503 the route pre-checks the live remaining period budget — the same
+ * fail-fast check the x402 legs gained in #2082/#2706 — and refuses with a
+ * typed 403 `delegation_budget_exceeded` before any UserOp is built.
  *
- * ⚠️ The whole difficulty of this leg is that 502 is NOT proof. A bundler
- * outage, an RPC failure and an exhausted paymaster all land on the same
- * status, so asserting the status alone would pass with over-budget
- * enforcement deleted outright — which is precisely the defect #2016 was filed
- * about, in the leg next door. Three things therefore have to hold together:
+ * ⚠️ A bare 403 is NOT proof: a missing or revoked delegation refuses with 403
+ * too, and a retired rail's 410 is the false green #2016 was filed about.
+ * Three things therefore have to hold together:
  *
  *  1. the amount is derived from a LIVE enforcer read, so the leg knows it
  *     asked an over-budget question (`readOnchainBudget` refuses a fallback
  *     number and refuses an already-exhausted budget);
  *  2. a within-budget request against the SAME account in the SAME run is
  *     still offered as a signable intent — the instrument can say yes;
- *  3. the refusal decodes to a CAVEAT ENFORCER rejection, named in the result.
+ *  3. the refusal carries `error_code: delegation_budget_exceeded` AND a
+ *     `remaining_atomic` equal to the live read — a pre-check answering from a
+ *     different delegation refuses correctly by accident.
+ *
+ * ── What #3503 moved, stated rather than dropped ──────────────────────
+ *
+ * On a healthy budget read this leg no longer watches the enforcer revert: no
+ * live leg does any more. Each deletion is still red somewhere:
+ *
+ *   * delete the pre-check → the enforcer's 502 returns and THIS leg fails on
+ *     the status;
+ *   * compile a budget without its period caveat → the pre-check has nothing
+ *     to read, fails open, and the over-budget request comes back signable —
+ *     THIS leg fails (and `readOnchainBudget` already refuses a budget whose
+ *     remaining is not from the chain);
+ *   * a deployed enforcer that stops refusing → the CI contract suite
+ *     `packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts`,
+ *     which `eth_call`s each deployed enforcer's `beforeHook` over budget.
+ *
+ * The pre-check FAILS OPEN by design, so a degraded budget read still reaches
+ * the enforcer and this leg then goes red on the 502 — a flapping RPC before it
+ * is a regression; the failure text names both causes.
  */
 
 import { HavenApi } from '../lib/haven-api.js'
-import { caveatEnforcerRejection } from '../lib/revert-reason.js'
 import { overBudgetAmount, readOnchainBudget } from '../lib/delegation-budget.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
@@ -40,8 +60,9 @@ const CONTROL_AMOUNT = '0.001'
 export const overBudgetRefused: Scenario = {
   name: 'over-budget-refused',
   invariant:
-    'A payment exceeding the budget is refused by the on-chain caveat enforcer before it ' +
-    'becomes signable, never auto-executed — while a within-budget payment is still offered.',
+    'A payment exceeding the live on-chain budget is refused before it becomes signable ' +
+    '(403 delegation_budget_exceeded, #3503), never auto-executed — while a within-budget ' +
+    'payment is still offered.',
   async run(ctx: ScenarioContext) {
     if (!ctx.cfg.delegationAgentApiKey) {
       return skip('QA_DELEGATION_AGENT_API_KEY not set — over-budget lives on the delegation rail since #2016')
@@ -74,24 +95,34 @@ export const overBudgetRefused: Scenario = {
           `HTTP ${res.status}) — it must be refused before it is offered`,
       )
     }
-    if (res.status !== 502) {
+    if (res.status !== 403) {
       return fail(
-        `expected HTTP 502 (chain-side policy refusal), got ${res.status}: ` +
-          `${res.data.error ?? JSON.stringify(res.data).slice(0, 160)}`,
+        `expected HTTP 403 (period budget pre-check, #3503), got ${res.status}: ` +
+          `${res.data.error ?? JSON.stringify(res.data).slice(0, 160)}` +
+          (res.status === 502
+            ? ' — a 502 means the pre-check did not answer: either it was removed, or its ' +
+              'on-chain budget read degraded and it failed OPEN to prepare (by design)'
+            : ''),
       )
     }
-    const enforcer = caveatEnforcerRejection(res.data.details)
-    if (!enforcer) {
+    if (res.data.error_code !== 'delegation_budget_exceeded') {
       return fail(
-        'the refusal did not come from a caveat enforcer — a 502 alone is also what a bundler ' +
-          `or RPC failure looks like, and would prove nothing: ${(res.data.details ?? res.data.error ?? '').slice(0, 200)}`,
+        'the 403 did not come from the budget pre-check — a missing delegation also refuses ' +
+          `with 403, and does not prove the budget was consulted: ` +
+          `error_code=${res.data.error_code ?? '(absent)'} ${(res.data.error ?? '').slice(0, 160)}`,
+      )
+    }
+    if (res.data.remaining_atomic !== budget.remaining.toString()) {
+      return fail(
+        `the refusal reported remaining=${res.data.remaining_atomic} atomic, but the live budget ` +
+          `read said ${budget.remaining} — the pre-check consulted a different delegation`,
       )
     }
 
     return pass(
-      `${overHuman} USDC refused on-chain by ${enforcer} with no signable intent, ` +
-        `against a live remaining budget of ${budget.remaining} atomic ` +
-        `(control: ${CONTROL_AMOUNT} USDC WAS offered, intent ${control.data.payment_id})`,
+      `${overHuman} USDC refused 403 delegation_budget_exceeded with no signable intent ` +
+        `(remaining ${res.data.remaining_atomic}, shortfall ${res.data.shortfall_atomic}) ` +
+        `against a control that WAS offered (${CONTROL_AMOUNT} USDC, intent ${control.data.payment_id})`,
     )
   },
 }

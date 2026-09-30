@@ -10,6 +10,10 @@
  * EIP-191 signature, so a scheme regression fails these tests.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+// #3503: POST /payments now pre-checks the period budget on-chain — never a live chain here.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: async () => ({ remainingAtomic: '1000000000000', fromChain: true }),
+}))
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet, getBytes } from 'ethers'
 
@@ -24,6 +28,7 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks, mockRecordRefusal
     getBookTimeCapture: vi.fn().mockResolvedValue(null),
   },
   delegationMocks: {
+    selectDelegation: vi.fn(),
     prepareDelegationPayment: vi.fn(),
     submitDelegationPayment: vi.fn(),
   },

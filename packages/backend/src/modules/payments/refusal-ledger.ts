@@ -142,6 +142,16 @@ const BUDGET_ENFORCER_REVERT_PATTERNS = [
 ]
 
 /**
+ * #3503: true when a caught error is the PERIOD budget's revert
+ * (`ERC20PeriodTransferEnforcer:transfer-amount-exceeded`). Like the
+ * transfer-cap one, a caller attributes it to the budget it redeemed only
+ * after reading that budget's remaining figure.
+ */
+export function isPeriodBudgetRevert(err: unknown): boolean {
+  return /Enforcer:transfer-amount-exceeded/i.test(flattenErrorText(err))
+}
+
+/**
  * #3500: true when a caught error is a cumulative transfer-cap revert. The
  * enforcer carries both a task budget's cap and a budget delegation's
  * optional lifetime cap, so this names "a transfer cap was exhausted", not

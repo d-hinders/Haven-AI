@@ -16,6 +16,10 @@
  */
 import { createHash } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
+// #3503: POST /payments now pre-checks the period budget on-chain — never a live chain here.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: async () => ({ remainingAtomic: '1000000000000', fromChain: true }),
+}))
 import Fastify, { type FastifyInstance } from 'fastify'
 import { PUBLISHED_CLIENT_PACKAGES, type ClientCompatEntry, type PublishedClientPackage } from '@haven_ai/core'
 import db from '../../db.js'

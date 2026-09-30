@@ -9,7 +9,7 @@
  * `createDelegationRail`/`delegationRailBundlerUrl` and the budget read at
  * `readRemainingBudget`, so no bundler or chain call happens.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const { mockQuery, mockCompute, mockCreateRail, mockReadRemaining, mockReadSpent } = vi.hoisted(() => ({
@@ -184,6 +184,17 @@ describe('POST /payments: the period budget cannot cover the payment (#3503)', (
       submitRedemption: vi.fn(),
     })
     primeDb(AUTH, RAIL_STATE, NO_IDEMPOTENCY_REPLAY, SELECTED_GRANT, PARENT_BY_HASH, TASK_BUDGET, INSERT_INTENT)
+  })
+
+  // A refusal's ledger write is fire-and-forget. Wait for the DB mock to go
+  // quiet so a write a failing test never awaited cannot land in the NEXT
+  // test's rows (it made one mutation look like four failures).
+  afterEach(async () => {
+    let seen = -1
+    while (seen !== mockQuery.mock.calls.length) {
+      seen = mockQuery.mock.calls.length
+      await new Promise((r) => setTimeout(r, 25))
+    }
   })
 
   // 0.005 USDC = 5000 atomic.

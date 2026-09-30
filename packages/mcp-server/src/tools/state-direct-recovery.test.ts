@@ -1125,17 +1125,17 @@ describe('a same-key replay of an already-progressed payment (#3495 review S5)',
     expect('typed_data_b64' in result.data).toBe(false)
   })
 
-  it('haven_pay: a non-confirmed but still-200 replay (rejected) points at haven_get_payment_status, not "none" (#3495 review round 2, nit R2-4)', async () => {
+  it('haven_pay: the defensive non-confirmed 200 branch points at haven_get_payment_status, not "none" (#3495 review round 2, nit R2-4)', async () => {
     // #3495 review round 2 caught that a REAL `submitted`-status replay
     // cannot reach this branch: `agentPaymentStatusHttpCode` (backend) maps
     // pending_signature/submitted to HTTP 409, and the SDK's transport
     // throws HavenApiError on a non-ok response — `createIntent` never
     // returns for that status, so `respondToNoSignDataReplay` is never
     // reached; the round-1 test stubbed an unreachable 201 for it. The
-    // still-resolving branch IS reached for the statuses
-    // `agentPaymentStatusHttpCode` maps to 200 alongside `confirmed` — its
-    // own default arm, e.g. `rejected` — so this test uses one of those
-    // real 200-mapped statuses instead.
+    // remaining branch is defensive: `agentPaymentStatusHttpCode` answers 200
+    // only for `confirmed` and, through its default arm, for statuses no
+    // current payment intent carries. This test drives it with a synthetic
+    // non-confirmed 200 status (`rejected`, not a real payment-intent status).
     stubFetch({
       'POST /payments': {
         status: 200,

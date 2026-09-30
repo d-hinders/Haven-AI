@@ -189,6 +189,12 @@ describe('buildHostedMcpServer', () => {
     expect(HOSTED_INSTRUCTIONS).not.toMatch(/current signer.{0,2}s own transport-failure/)
   })
 
+  it('the served haven_pay description names both direct-payment refusal triggers (#3495 review round 3)', async () => {
+    const { toolDescriptions } = await import('./tools.js')
+    expect(toolDescriptions.haven_pay).toContain("fallback: 'typed_data_b64'")
+    expect(toolDescriptions.haven_pay).toContain('sign_context_unavailable')
+  })
+
   it('keeps x402 next-tool guidance runtime-neutral (bare names in descriptions, naming note on instructions)', async () => {
     // The slim-descriptions pass (#1591) finished what the runtime-neutral
     // naming work (#1588) started: descriptions name next tools by their BARE

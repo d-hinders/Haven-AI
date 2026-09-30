@@ -199,9 +199,11 @@ async function resolveTokenAddressFromAllowances(haven: HavenClient, symbol: str
 }
 
 /**
- * #3495 review S5 (round 1, 2026-09-30): a same-key replay of a payment that
- * has already moved PAST `pending_signature` (confirmed, submitted, failed,
- * expired…) carries no `sign_data` at all in the backend's replay body —
+ * #3495 review S5 (round 1, 2026-09-30): a same-key replay of a CONFIRMED
+ * payment carries no `sign_data` in the backend's replay body (`submitted`
+ * answers 409 and `failed`/`expired` rows are not matched by the key lookup,
+ * so those never reach here: the SDK throws first, or a fresh intent is
+ * minted) —
  * `payments.ts`'s `statusReplay` returns the payment's STATUS, not a
  * signable payload, once `pi.status !== 'pending_signature'`. But
  * `HavenClient.createIntent`'s return TYPE hardcodes `status:
@@ -219,9 +221,9 @@ async function resolveTokenAddressFromAllowances(haven: HavenClient, symbol: str
  * makes) and answers with it — no signing fields (there is nothing to
  * sign), the real status, the tx hash when Haven has recorded one, and a
  * `next_action` that tells the truth: `none` once confirmed (nothing
- * follows), `check_status_later` otherwise (still resolving, or a dead end
- * like `failed`/`expired` the agent should hear about from the user, not
- * retry into).
+ * follows), `check_status_later` otherwise — a defensive branch for any other
+ * status `agentPaymentStatusHttpCode` answers 200 for through its default
+ * arm; no current payment-intent status reaches it.
  */
 async function respondToNoSignDataReplay(
   haven: HavenClient,

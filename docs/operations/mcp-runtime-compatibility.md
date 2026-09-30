@@ -3148,8 +3148,9 @@ this whole section:
   surfacing the real state. `haven_send`/`haven_pay` now detect a missing
   `sign_data.hash` and answer with the REAL status (`haven.getPaymentStatus`),
   the tx hash when recorded, no signing fields, and `next_action: none`
-  (confirmed) or `check_status_later` (any other status the backend's
-  `agentPaymentStatusHttpCode` still answers 200 for, e.g. `rejected`). A
+  (confirmed) or `check_status_later` (a defensive branch for any other
+  status `agentPaymentStatusHttpCode` answers 200 for through its default
+  arm; no current payment-intent status reaches it). A
   status mapped to a non-2xx code there (`pending_signature`/`submitted` →
   409, `expired` → 410, `failed` → 502) never reaches this branch: the SDK
   transport throws before `createIntent` returns, surfacing as an ordinary

@@ -35,9 +35,11 @@
  * `classifyRevertForLedger` is deliberately four-way: the timestamp
  * enforcer's revert text (`beforeThreshold` / `Enforcer:expired-delegation`
  * in the flattened error chain) is `delegation_expired`; the period-budget
- * enforcer's custom error (`Enforcer:transfer-amount-exceeded`) is
+ * enforcer's custom error (`Enforcer:transfer-amount-exceeded`) and the
+ * cumulative-cap enforcer's (`ERC20TransferAmountEnforcer:allowance-exceeded`,
+ * a task budget's cap or a budget's lifetime cap, #3500) are
  * `delegation_budget_exceeded` — the DIRECT `POST /payments` route has no
- * fail-fast pre-check, so that revert IS its over-budget answer and the
+ * period-budget pre-check, so that revert IS its over-budget answer and the
  * classification is what gives the value its named writer there; any OTHER
  * estimation revert (viem's `EstimateGasExecutionError`, or a bundled revert
  * reason) is `onchain_revert` — rare since #2706, the pre-checks catch
@@ -177,7 +179,9 @@ function flattenErrorText(err: unknown, depth = 0): string {
  *   occurrence) is `delegation_expired`.
  * - The period-budget enforcer's custom error (`Enforcer:transfer-amount-
  *   exceeded`, the on-chain answer the DIRECT `POST /payments` route gets
- *   when it has no pre-check in front of it) is `delegation_budget_exceeded`.
+ *   with no period-budget pre-check in front of it) and the cumulative-cap
+ *   enforcer's (`ERC20TransferAmountEnforcer:allowance-exceeded`, #3500) are
+ *   `delegation_budget_exceeded`.
  * - Any OTHER estimation revert — viem's `EstimateGasExecutionError`, or an
  *   error whose flattened text says the execution reverted (bundlers echo
  *   the enforcer revert reason inside the RPC error) — is `onchain_revert`.

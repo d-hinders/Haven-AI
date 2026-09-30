@@ -222,7 +222,6 @@ async function taskBudgetCapRefusal(input: {
       source: 'x402_authorize',
       detail: {
         error_code: 'task_budget_exceeded',
-        task_budget_id: input.row.id,
         remaining_atomic: check.remainingAtomic.toString(),
       },
     },
@@ -812,6 +811,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     budget = resolved.parentDelegation
     // #3500: this leg builds no UserOp, so without this an over-cap payment
     // would only fail when the MERCHANT tried to redeem the settlement child.
+    // It sees REDEEMED spend only: a settlement child still in flight is not
+    // counted, so it narrows the redemption-time failure, it cannot close it.
     const capRefusal = await taskBudgetCapRefusal({
       agent,
       row: resolved.row,

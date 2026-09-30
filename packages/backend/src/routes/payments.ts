@@ -598,7 +598,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       merchantTo: to.toLowerCase(),
       reason: 'delegation_budget_exceeded' as const,
       source: 'payment' as const,
-      detail: { error_code: 'task_budget_exceeded', task_budget_id: body.task_budget_id, remaining_atomic: body.remaining_atomic },
+      // The 086 detail allowlist keeps error_code and remaining_atomic only.
+      detail: { error_code: 'task_budget_exceeded', remaining_atomic: body.remaining_atomic },
     })
     const preRefusal = await taskBudgetRefusal()
     if (preRefusal) {

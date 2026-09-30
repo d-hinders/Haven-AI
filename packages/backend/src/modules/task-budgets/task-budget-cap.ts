@@ -13,8 +13,14 @@
  * This reads the enforcer's own storage, the same authority the chain applies,
  * so the refusal is decided on the figure that would have reverted. It is a
  * guide, never the gate: an unreadable chain degrades to "not checked" and the
- * enforcer still refuses on-chain, where the revert fallback in each caller
- * answers the same typed refusal.
+ * enforcer still refuses on-chain. Where Haven builds a UserOp (`POST
+ * /payments`, the x402 funding leg) a transfer-cap revert re-reads this figure
+ * and answers the same typed refusal only if the read confirms it; otherwise
+ * the old 502 stands. The erc7710 leg builds nothing, so it has no fallback.
+ *
+ * `spentMap` counts only REDEEMED spend: authorizations issued but not yet
+ * redeemed (erc7710 settlement children in flight) are invisible here, so two
+ * concurrent payments can each pass and the second still fail on-chain.
  */
 import type { Hex } from 'viem'
 import { readTaskBudgetSpent, type TaskBudgetSpentReader } from '../../infra/chain/task-budget-spent-reader.js'
@@ -53,12 +59,11 @@ export function taskBudgetExceededBody(input: {
   tokenSymbol: string
   amountHuman: string
   amountAtomic: string
-  /** Null when the refusal came from the on-chain revert and the read failed. */
-  remainingAtomic: string | null
-  remainingHuman: string | null
+  remainingAtomic: string
+  remainingHuman: string
   maxAtomic: string
 }): Record<string, unknown> {
-  const remaining = input.remainingHuman === null ? '' : ` (${input.remainingHuman} ${input.tokenSymbol} left)`
+  const remaining = ` (${input.remainingHuman} ${input.tokenSymbol} left)`
   return {
     error:
       `This payment of ${input.amountHuman} ${input.tokenSymbol} exceeds what is left of task budget ` +

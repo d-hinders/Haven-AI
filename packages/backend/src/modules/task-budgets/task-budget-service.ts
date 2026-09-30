@@ -23,7 +23,7 @@ import {
   type PreparedRedemption,
   type RedemptionSubmitResult,
 } from '../../rails/delegation-rail.js'
-import { deserializeUserOp, serializeUserOp } from '../../rails/execution-rail.js'
+import { deserializeUserOp, serializeUserOp, userOperationToWire } from '../../rails/execution-rail.js'
 import { buildTaskBudgetDelegation, type BuiltTaskBudgetDelegation } from './task-budget-delegation.js'
 
 export interface RemainderCheck {
@@ -280,7 +280,7 @@ export async function buildTaskBudgetSignContext(
       purpose: 'close',
       task_sign_context_version: 1,
       typed_data: typedData,
-      user_operation: userOperation,
+      user_operation: userOperationToWire(userOperation),
       user_op_hash: userOpHash,
       expected: {
         delegate_account: delegateAccountAddress,

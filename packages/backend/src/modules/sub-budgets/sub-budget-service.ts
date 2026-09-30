@@ -24,7 +24,7 @@ import {
   type PreparedRedemption,
   type RedemptionSubmitResult,
 } from '../../rails/delegation-rail.js'
-import { deserializeUserOp, serializeUserOp } from '../../rails/execution-rail.js'
+import { deserializeUserOp, serializeUserOp, userOperationToWire } from '../../rails/execution-rail.js'
 import {
   buildSubBudgetGrant,
   buildSubBudgetParentChild,
@@ -372,7 +372,7 @@ export async function buildSubBudgetSignContext(
       purpose: 'close',
       sub_budget_sign_context_version: 1,
       typed_data: typedData,
-      user_operation: userOperation,
+      user_operation: userOperationToWire(userOperation),
       user_op_hash: userOpHash,
       expected: {
         delegate_account: delegateAccountAddress,

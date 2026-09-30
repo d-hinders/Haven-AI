@@ -257,6 +257,23 @@ export function serializeUserOp(userOp: unknown): string {
 }
 
 /**
+ * A prepared UserOperation as WIRE JSON for a response body: bigint →
+ * `"123n"`, the same shape the prepare routes emit (`agent-delegations.ts`,
+ * `agent-rekey.ts`) and their `nSuffixStringToBigintReplacer` revives. A
+ * deserialized `prepared_user_op` carries real bigints, and Fastify's
+ * `JSON.stringify` throws on them — the task- and sub-budget CLOSE sign
+ * contexts returned the object raw and answered 500 on every close (found in
+ * epic #3328's dev verification, 2026-09-30).
+ */
+export function userOperationToWire(userOp: unknown): unknown {
+  return JSON.parse(
+    JSON.stringify(userOp, (_key, value: unknown) =>
+      typeof value === 'bigint' ? `${value.toString()}n` : value,
+    ),
+  )
+}
+
+/**
  * Accepts either the serialized string or the object pg hands back from a
  * JSONB column (node-postgres parses JSONB on read).
  */

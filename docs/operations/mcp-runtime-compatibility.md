@@ -44,6 +44,7 @@ covers:
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
+  - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/cli/src/commands.ts
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/setup-copy.ts
@@ -717,6 +718,60 @@ last-verified: "2026-09-29"
 > warning path. The new route answers 410 on both retired rails like every
 > rail-aware surface. Nothing else in this document was re-verified in this
 > pass.
+>
+> **Recent re-verification (#3492):** the #3054 pre-check's over-budget
+> compare had a replay bug — a retried `idempotency_key` whose erc7710
+> payment had already SETTLED (via `haven_prepare_catalog_purchase`'s
+> authorize step) could still hit step 5b's pre-check with the now-spent
+> remaining budget and be refused as over-budget: a false
+> `delegation_budget_exceeded` `payment_refusals` row (`source:
+> 'hosted_prepare'`) for a payment that had already moved. `POST
+> /machine-payments/budget-precheck` gains an optional `idempotencyKey`
+> (`BudgetPrecheckRequest`); when it resolves to the SAME lookup authorize's
+> replay already uses (`findX402IntentByIdempotencyKey`) and that row is a
+> SETTLED erc7710 payment for the exact same quote (confirmed, a `tx_hash`,
+> `settlement_scheme: 'erc7710'`, same token/amount/payee/resource, no
+> task- or sub-budget pin), the pre-check answers `{ sufficient: true,
+> replay: true }` WITHOUT calling `refuse()` — skipping the write, not
+> faking the remaining figure (`remaining_atomic` still reports the true,
+> now-lower number). Any other row shape — no row, a `pending_signature`
+> child, a key collision on a different payee/resource/token/amount, a
+> task/sub-budget-scoped row, or a settled EIP-3009 row
+> (`settlement_scheme: 'eip3009'`) — falls through to today's compare
+> unchanged, including its refusal branch. EIP-3009 is deliberately OUT of
+> scope for this fix, not because `delegationReplay`'s own authorize-side
+> replay would refuse it — it would not: its confirmed+tx_hash branch
+> (`replay.ts:89-110`) answers its stored 200 for ANY settlement scheme, so
+> a settled 3009 replay never reaches a second authorize either. A settled
+> 3009 replay hitting this pre-check still gets the SAME false over-budget
+> refusal and ledger row this issue fixes for erc7710 — known, left as a
+> follow-up, because its funding leg is a separate budget-metered hop (the
+> bridge, #946) this endpoint cannot yet tell has already settled.
+> `haven_prepare_catalog_purchase`'s step 5b forwards `args.idempotency_key`
+> onto the pre-check call; `haven_pay_mcp_tool` is unaffected — it never had
+> this bug, because its authorize call runs the replay lookup BEFORE its own
+> pre-check (`delegation-authorize.ts`). One input-schema change:
+> `haven_prepare_catalog_purchase`'s `idempotency_key` gains 1–128 bounds,
+> matching `haven_pay` and the backend's `X402AuthorizeRequest`, so an empty
+> or over-long key is now refused at tool input (`INVALID_INPUT`). Before,
+> an over-long key was refused by the backend (400), and an empty key was
+> treated as no key on the erc7710 branch. No tool added or renamed; descriptions
+> and the strict/permissive split are untouched, the local stdio runtime is
+> not on this path, and the skew-flatness this document asserts holds in the
+> tool-shape sense apart from that bound — but
+> the WIRE is not skew-flat here, checked from the code
+> (`routes/machine-payments.ts` is in `index.ts`'s `enforcedModules`, and
+> `BudgetPrecheckRequest` is `additionalProperties: false`): an older
+> backend's spec does not declare `idempotencyKey`, so request validation
+> REFUSES the field with a 400 ("body must NOT have additional properties"),
+> not silently ignores it. The hosted tool's catch block only recognizes a
+> decided 403 `delegation_budget_exceeded` as a refusal; a 400 falls to the
+> generic branch and degrades to `sufficient: null` with
+> `ALLOWANCE_CHECK_UNAVAILABLE` — the SAME safe degrade as a transport
+> failure, just for a different reason. An older MCP against the new
+> backend never sends the field and gets today's (occasionally
+> over-refusing) behavior. Deploy order is backend → hosted MCP either way.
+> Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3000):** the hosted server's
 > `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of

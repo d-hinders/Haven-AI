@@ -644,6 +644,21 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(recordedCalls()).toHaveLength(0)
   })
 
+  it('refuses an empty or over-long idempotency_key at tool input, before any Haven call (#3492)', async () => {
+    for (const idempotency_key of ['', 'k'.repeat(129)]) {
+      stubFetch({})
+      const payload = await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount_human: '1',
+        idempotency_key,
+      })
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe('INVALID_INPUT')
+      expect(recordedCalls()).toHaveLength(0)
+    }
+  })
+
   // #2259 re-based this test rather than deleting it. Its OLD framing —
   // "legacy rail: insufficient allowance still proceeds … queues for approval"
   // — asserts something unreachable: the legacy rail answers 410 at every
@@ -723,6 +738,43 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.suggested_tool).toBe('haven_get_allowances')
   })
 
+  // #3492: a keyed twin of the test above. A FRESH idempotency key that has
+  // never settled anything must still be refused exactly as before — the
+  // key is forwarded, but the backend answers 403 for this shape (no prior
+  // settled row to replay), so the refusal is unchanged and no /x402 call
+  // is ever made.
+  it('a fresh idempotency_key over budget is still refused, with no POST /x402 (#3492 keyed twin)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': {
+        status: 403,
+        body: {
+          error: 'This payment of 1.5 USDC exceeds the agent\'s remaining budget for this period (0.0001 USDC, short by 1.4999 USDC). There is no approval queue on the delegation rail — an over-budget redemption reverts on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
+          error_code: 'delegation_budget_exceeded',
+          phase: 'insufficient_funds',
+          next_action: 'fund_safe_or_raise_allowance',
+          remaining_atomic: '100',
+          amount_atomic: '1500000',
+        },
+      },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+      idempotency_key: 'catalog-7710-fresh-over-budget',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('DELEGATION_BUDGET_EXCEEDED')
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+
+    const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+    expect(precheck?.body).toMatchObject({ idempotencyKey: 'catalog-7710-fresh-over-budget' })
+  })
+
   it('sends the server the quote facts it needs: the SELECTED option asset/amount, the merchant payTo, and the bought resource URL (#3054)', async () => {
     stubFetch({
       ...baseRoutes,
@@ -747,6 +799,38 @@ describe('haven_prepare_catalog_purchase', () => {
     })
     // The allowances GET is GONE — one budget read, now this POST (#1348).
     expect(recordedCalls().find((c) => c.method === 'GET' && new URL(c.url).pathname.endsWith('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  it('forwards args.idempotency_key onto the pre-check body (#3492)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+    })
+
+    ok(
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount: '2000000',
+        idempotency_key: 'catalog-7710-precheck-key',
+      }),
+    )
+
+    const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+    expect(precheck?.body).toMatchObject({ idempotencyKey: 'catalog-7710-precheck-key' })
+  })
+
+  it('sends NO idempotencyKey on the pre-check when the caller gave none (#3492)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+    })
+
+    ok(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+    expect(precheck?.body).not.toHaveProperty('idempotencyKey')
   })
 
   it('a non-budget 403 from the pre-check is NOT a refusal — it degrades to sufficient: null with a warning (#3054)', async () => {
@@ -1233,6 +1317,13 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(res.data).not.toHaveProperty('delivered')
       expect(res.data.reason).toMatch(/cannot re-deliver/)
       expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
+      // #3492: the key that resolved the authorize replay above was ALSO
+      // forwarded onto step 5b's pre-check — the fix this test's stub
+      // cannot itself exercise (the precheck stub answers sufficient
+      // either way here), but the forward is what lets a REAL backend
+      // answer sufficient instead of refusing over the now-spent budget.
+      const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+      expect(precheck?.body).toMatchObject({ idempotencyKey: 'catalog-7710-settled' })
     })
 
     it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {

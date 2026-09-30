@@ -7104,7 +7104,11 @@ export const openapiSpec = {
           'delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, ' +
           'next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like ' +
           'every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the ' +
-          'budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption.',
+          'budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption. ' +
+          '#3492: when the body also carries idempotencyKey and it resolves to an already-SETTLED ' +
+          'erc7710 payment for this exact quote, the answer is { sufficient: true, remaining_atomic, ' +
+          'replay: true } instead — no refusal, no ledger write, because the money already moved. ' +
+          'See BudgetPrecheckRequest.idempotencyKey for the exact match rule and scope.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,
@@ -10873,11 +10877,38 @@ export const openapiSpec = {
           },
           merchantTo: {
             type: 'string',
-            description: 'Advisory: the merchant payTo address from the selected option. Carried onto the refusal row; it does not scope the compare — the budget is per-token and the enforcer is the gate on recipients.',
+            description:
+              'Advisory for the ordinary compare: the merchant payTo address from the selected ' +
+              'option, carried onto the refusal row; it does not scope THAT compare — the budget ' +
+              'is per-token and the enforcer is the gate on recipients. #3492: when `idempotencyKey` ' +
+              'is also present, this field additionally scopes the settled-replay match below — a ' +
+              'replay answer requires it to equal the stored row\'s payee.',
           },
           resourceUrl: {
             type: 'string',
-            description: 'The merchant resource being bought. Lands on the refusal row\'s dedupe key when the pre-check refuses.',
+            description:
+              'The merchant resource being bought. Lands on the refusal row\'s dedupe key when the ' +
+              'pre-check refuses. #3492: when `idempotencyKey` is also present, this field ' +
+              'additionally scopes the settled-replay match below — required, and must equal the ' +
+              'stored row\'s resource.',
+          },
+          idempotencyKey: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+            description:
+              '#3492: the x402 idempotency key of the quote this pre-check describes. When it ' +
+              'resolves to an already-SETTLED erc7710 payment matching this same quote (confirmed, ' +
+              'a tx_hash, settlement_scheme erc7710, and the SAME token/amountAtomic/merchantTo/' +
+              'resourceUrl this request names — both of the latter two are REQUIRED for a replay ' +
+              'match, no task- or sub-budget pin), the pre-check answers sufficient — with ' +
+              '`replay: true` — WITHOUT comparing against the now-lower remaining budget and ' +
+              'WITHOUT recording a payment_refusals row: the money already moved, so re-refusing ' +
+              'it as over-budget would be a false ledger row. Any other shape (no row, a pending ' +
+              'child, a key collision on a different quote, a task/sub-budget-scoped row, or a ' +
+              'settled EIP-3009 row — deliberately out of scope; it still gets today\'s false ' +
+              'over-budget refusal and ledger row, a known follow-up) leaves today\'s compare ' +
+              'unchanged. Omitted: unchanged behavior.',
           },
         },
         additionalProperties: false,
@@ -10899,6 +10930,14 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          replay: {
+            type: 'boolean',
+            description:
+              '#3492: present and true only when sufficiency was decided because `idempotencyKey` ' +
+              'resolved to an already-settled erc7710 replay of this exact quote — NOT because ' +
+              '`remaining_atomic` covers `amountAtomic` (it may not, on this branch: the ' +
+              'settlement already spent it). Absent on every other sufficient answer.',
           },
         },
         additionalProperties: false,

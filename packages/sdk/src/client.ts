@@ -817,17 +817,28 @@ export class HavenClient {
     amountAtomic: string
     merchantTo?: string
     resourceUrl?: string
-  }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean }> {
+    /**
+     * #3492: the x402 idempotency key of the quote this pre-check describes.
+     * When it resolves to an already-settled erc7710 replay of the SAME
+     * quote, the response answers sufficient (with `replay: true`) instead
+     * of comparing against the now-lower remaining budget — see
+     * `BudgetPrecheckRequest.idempotencyKey` in the OpenAPI spec. Omitted:
+     * unchanged behavior.
+     */
+    idempotencyKey?: string
+  }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; replay?: boolean }> {
     return this.post<{
       sufficient: boolean
       remaining_atomic: string
       remaining_is_from_chain?: boolean
+      replay?: boolean
     }>('/machine-payments/budget-precheck', {
       chainId: input.chainId,
       token: input.token,
       amountAtomic: input.amountAtomic,
       ...(input.merchantTo !== undefined ? { merchantTo: input.merchantTo } : {}),
       ...(input.resourceUrl !== undefined ? { resourceUrl: input.resourceUrl } : {}),
+      ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
     })
   }
 

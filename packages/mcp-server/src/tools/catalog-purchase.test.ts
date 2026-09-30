@@ -1969,6 +1969,33 @@ describe('#2051 — cap binds the authorized option', () => {
       expect(x402Body()).not.toHaveProperty('idempotencyKey')
     })
 
+    // #3493: this branch never persisted the merchant call context on the
+    // erc7710 authorize — haven_settle_mcp_tool with only payment_id +
+    // signature had nothing to rehydrate. Mirrors the sibling assertion on
+    // haven_prepare_catalog_purchase's erc7710 branch above.
+    it('persists the merchant call context on the erc7710 authorize, so settle rehydrates by payment_id', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.mcpCallContext).toMatchObject({
+        merchantUrl: 'http://merchant.test/mcp',
+        toolName: 'create_text',
+        arguments: { prompt: 'Hello' },
+        mcpTransport: { handshakeRequired: true, source: 'path' },
+      })
+    })
+
+    it('the erc7710 pay reason states merchant/tool/mcp_transport fields are optional at settle', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.reason).toMatch(
+        /merchant_url\/tool_name\/arguments\/mcp_transport are OPTIONAL there/,
+      )
+    })
+
     it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {
       const res = ok<Record<string, any>>(
         await pay(merchant('1000000', '2500000'), DELEGATION_AGENT, { max_amount_human: '5' }, true),

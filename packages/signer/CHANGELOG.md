@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **`DIRECT_RELAY_FALLBACK` now names the opt-in re-run, not "the haven_send / haven_pay result" (#3495).** Hosted `haven_send` / `haven_pay` results are compact by default as of this Haven backend release (no `payload_hash`/`typed_data_b64` inline) — superseding the #3277 "the relay fields stay" note. A sign-context refusal that used to say "call haven_sign with payload_hash and typed_data_b64 from the haven_send / haven_pay result" now says to re-run whichever of those tools was called, with the same `idempotency_key` (echoed on its result) plus `include_signing_payload: true`, then relay that re-run's own `payload_hash` / `typed_data_b64`. No code, field or refusal shape changes — `fallback: 'typed_data_b64'`, `SIGN_CONTEXT_REFUSED` and `sign_context_unavailable` are unchanged — only the recovery sentence's wording. No update needed for an agent runtime that reads the structured fields rather than the prose.
+
 ## 0.7.0-alpha.0 — 2026-09-29
 
 ### Added

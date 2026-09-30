@@ -883,9 +883,13 @@ describe('Hosted MCP + Edge Signer integration', () => {
   // same `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` either way.)
   // The codes come from `@haven_ai/signer`'s own sign-context.ts — the test
   // then asserts the hosted notice names EXACTLY them — and following the
-  // notice (re-sign with { payload_hash, typed_data_b64 } from the hosted
-  // result, unchanged) completes the payment.
-  it('a pre-#3271 signer following the hosted handoff refuses, then recovers through the relay (#3277)', async () => {
+  // notice (re-sign with { payload_hash, typed_data_b64 } — since #3495
+  // reached via a same-idempotency_key include_signing_payload=true
+  // re-run's OWN result, simulated here by re-signing the same bytes step 1
+  // already fetched directly, unchanged) completes the payment. The
+  // composed test below drives this through the actual hosted result and
+  // the actual opt-in re-run.
+  it('a signer following the hosted handoff refuses, then recovers through the relay (#3277, #3495)', async () => {
     const realisticHash = packedUserOperationHash(REALISTIC_TYPED_DATA)
     const directPaymentId = 'pay_direct_3277'
 
@@ -965,27 +969,39 @@ describe('Hosted MCP + Edge Signer integration', () => {
     expect(recoveredAddress.toLowerCase()).toBe(DELEGATE_ADDR.toLowerCase())
   })
 
-  // #3277 criterion 3, COMPOSED: the hosted haven_send RESULT (the real
-  // handler, its fetch stubbed here) drives the signer package end to end —
-  // follow next_tool/next_arguments, draw the refusal, then re-sign with the
-  // result's OWN relay fields taken from the result object (never rebuilt by
-  // this test). The refusal is STUBBED as the issue allows: the signer's
-  // context fetches draw the pre-#3271 backend's 409 `sign_context_unavailable`
-  // on EVERY route it can try — the x402 route (the only one a pre-#3271
-  // package fetches, and where its refusal terminates) and the direct route
-  // this package falls back to — so the REAL package reaches the exact
-  // terminal refusal the old install reaches, having signed nothing. The
-  // unit suites pin the hosted fields and the emission separately; this pins
-  // that the two halves line up ON THE WIRE.
-  it('the hosted haven_send result drives an old install: refusal, then recovery through its own relay fields (#3277)', async () => {
+  // #3277 criterion 3 / #3495, COMPOSED: the hosted haven_send RESULT (the
+  // real handler, its fetch stubbed here) drives the signer package end to
+  // end — follow next_tool/next_arguments, draw the refusal, then re-run
+  // haven_send itself on the SAME idempotency_key with
+  // include_signing_payload: true (the #3495 opt-in, superseding #3277 AC2
+  // "the relay fields stay"), and sign from THAT re-run's own relay fields
+  // (never rebuilt by this test). The refusal is STUBBED as the issue
+  // allows: the signer's context fetches draw the backend's 409
+  // `sign_context_unavailable` on EVERY route it can try — the x402 route
+  // (the only one this shape of install fetches, and where its refusal
+  // terminates) and the direct route this package falls back to — so the
+  // REAL package reaches the exact terminal refusal an install can reach,
+  // having signed nothing. The unit suites pin the hosted fields and the
+  // emission separately; this pins that the two halves line up ON THE WIRE,
+  // and that the re-run never creates a second payment (same payment_id
+  // both times, same idempotency_key on both requests).
+  it('the hosted haven_send result: refusal, then a same-key opt-in re-run, then the relay completes (#3277, #3495)', async () => {
     const directPaymentId = 'pay_send_recovered'
     const realisticHash = packedUserOperationHash(REALISTIC_TYPED_DATA)
+    const postedIdempotencyKeys: unknown[] = []
     // The hosted client's view: POST /payments prepares a delegation-rail
-    // intent carrying typed data.
+    // intent carrying typed data. A real backend would only return
+    // typed_data/typed_data_b64 on this shape when asked (#3495) or replayed
+    // on a matching key — this stub always carries them, and it is the
+    // mcp-server layer (not this stub) that strips them by default and
+    // restores them on the opt-in, which is exactly what the assertions
+    // below check.
     const hostedApi = (async (url: string, init: RequestInit = {}) => {
       const method = (init.method ?? 'GET').toUpperCase()
       const path = new URL(url).pathname
       if (method === 'POST' && path === '/payments') {
+        const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
+        postedIdempotencyKeys.push(body.idempotency_key)
         return new Response(
           JSON.stringify({
             payment_id: directPaymentId,
@@ -1000,48 +1016,71 @@ describe('Hosted MCP + Edge Signer integration', () => {
     }) as typeof fetch
     vi.stubGlobal('fetch', hostedApi)
     // The signer's view (stubbed refusal): every sign-context fetch draws the
-    // backend's 409 sign_context_unavailable — the pre-#3271 world.
+    // backend's 409 sign_context_unavailable.
     const refusedFetch = (async () =>
       new Response(
         JSON.stringify({ error: 'Not an x402 intent.', error_code: 'sign_context_unavailable' }),
         { status: 409 },
       )) as typeof fetch
 
-    // ── Step 1: the hosted result, named handoff and relay fields alike ──────
+    const hostedHandlers = createHostedHandlers(
+      new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' }),
+    )
+
+    // ── Step 1: the compact hosted result (#3495) — handoff named, no relay
+    // fields, an idempotency_key generated and echoed ───────────────────────
     const hosted = ok<Record<string, unknown>>(
-      await createHostedHandlers(
-        new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' }),
-      ).haven_send({ asset: 'USDC', recipient: DELEGATE_ADDR, amount: '0.01' }),
+      await hostedHandlers.haven_send({ asset: 'USDC', recipient: DELEGATE_ADDR, amount: '0.01' }),
     )
     expect(hosted.next_tool_name).toBe('haven_sign')
     expect(hosted.next_arguments).toEqual({ payment_id: directPaymentId })
+    expect('typed_data' in hosted).toBe(false)
+    expect('typed_data_b64' in hosted).toBe(false)
+    const idempotencyKey = hosted.idempotency_key as string
+    expect(typeof idempotencyKey).toBe('string')
 
-    // ── Step 2: the old install follows next_tool and is refused ─────────────
-    // The REAL signer package's handler, its context fetches answered with the
-    // stubbed pre-#3271 refusal — nothing signed.
+    // ── Step 2: following next_tool draws the refusal — signed nothing ──────
     const identity = { apiUrl: 'http://haven.test', apiKey: 'sk_agent_test' as const }
-    const oldInstall = createSignerHandlers(createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER }), {
+    const install = createSignerHandlers(createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER }), {
       signContext: { loadIdentity: async () => identity, fetchImpl: refusedFetch },
     })
-    const refused = await oldInstall.haven_sign(
+    const refused = await install.haven_sign(
       hosted.next_arguments as { payment_id: string },
     )
     expect(refused.success).toBe(false)
-    if (refused.success) throw new Error('expected the old-install refusal')
+    if (refused.success) throw new Error('expected the refusal')
     expect(refused.code).toBe('SIGN_CONTEXT_REFUSED')
     expect(refused.backend_error_code).toBe('sign_context_unavailable')
     // The refusal is exactly what the result's notice told the agent to expect.
     const notice = hosted.signer_compatibility as Record<string, string>
     expect(notice.check).toContain(refused.code)
     expect(notice.check).toContain(refused.backend_error_code as string)
+    expect(notice.check).toContain('include_signing_payload: true')
 
-    // ── Step 3: the notice's route, fed from the RESULT's own fields ─────────
-    // The relay re-sign needs NO context fetch, so the same old install
-    // completes it — the relay fields from the result, unchanged.
+    // ── Step 3: the opt-in re-run, same tool, same idempotency_key ──────────
+    const reRun = ok<Record<string, unknown>>(
+      await hostedHandlers.haven_send({
+        asset: 'USDC',
+        recipient: DELEGATE_ADDR,
+        amount: '0.01',
+        idempotency_key: idempotencyKey,
+        include_signing_payload: true,
+      }),
+    )
+    // Same logical payment — never a second intent — and both hosted
+    // requests carried the identical key.
+    expect(reRun.payment_id).toBe(directPaymentId)
+    expect(postedIdempotencyKeys).toEqual([idempotencyKey, idempotencyKey])
+    expect(reRun.payload_hash).toBe(realisticHash)
+    expect(reRun.typed_data).toEqual(REALISTIC_TYPED_DATA)
+
+    // ── Step 4: the relay re-sign, fed from the RE-RUN's own fields ──────────
+    // The relay re-sign needs NO context fetch, so the same install
+    // completes it — the relay fields from the opt-in re-run, unchanged.
     const recovered = ok<{ signature: string }>(
-      await oldInstall.haven_sign({
-        payload_hash: hosted.payload_hash as string,
-        typed_data_b64: hosted.typed_data_b64 as string,
+      await install.haven_sign({
+        payload_hash: reRun.payload_hash as string,
+        typed_data_b64: reRun.typed_data_b64 as string,
       }),
     )
     expect(recovered.signature).toMatch(/^0x[0-9a-fA-F]+$/)

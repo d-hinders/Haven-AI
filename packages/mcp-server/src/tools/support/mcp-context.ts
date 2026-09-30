@@ -14,6 +14,7 @@
  * connector channel, and sibling support modules only. Never imports a
  * capability module.
  */
+import { createHash } from 'node:crypto'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -58,10 +59,15 @@ export function delegationSignFields(signData: {
         // reproduction). The b64 form is copied as a single string; the
         // signer decodes it into the SAME check, so transport gets safer
         // while the trust model is unchanged. Since #3277 these relay fields
-        // are the RECOVERY route a pre-#3271 signer follows after its
+        // are the RECOVERY route a signer follows after its
         // `haven_sign({ payment_id })` refusal (see
-        // `directSignerCompatibilityNotice`) — they stay on every result,
-        // never demoted to a fallback the result omits.
+        // `directSignerCompatibilityNotice`). Since #3495 they are no longer
+        // unconditional on the direct-payment tools: `haven_send` / `haven_pay`
+        // are compact by default (this function returns only
+        // `signature_scheme` there), and these bulky fields ride the result
+        // only on a same-`idempotency_key` re-run with
+        // `include_signing_payload: true` — mirroring the x402 quote tools'
+        // #1272 contract, which this same function has always implemented.
         ...(signData.typed_data
           ? {
               typed_data_b64: Buffer.from(JSON.stringify(signData.typed_data)).toString('base64'),
@@ -70,6 +76,53 @@ export function delegationSignFields(signData: {
       }
     : {}
 }
+
+/**
+ * #3495: the direct-payment (`haven_send` / `haven_pay`) twin of
+ * `buildX402IdempotencyKey` (`@haven_ai/sdk`'s `x402.ts`) — generated in the
+ * HOSTED TOOL, not the SDK, because only the hosted server needs a direct
+ * payment to be replayable when the caller passed no key at all (the SDK's
+ * own callers already choose their own keys or accept none). Deterministic
+ * and bucketed the same way: a caller that omits idempotency_key and retries
+ * within the bucket (a dropped response, a runtime restart, an
+ * include_signing_payload=true re-run to reach the opt-in relay) reaches the
+ * SAME key, so the backend's idempotency replay (`payments.ts`, keyed on
+ * `idempotency_key` + token/amount/recipient/task_budget_id/sub_budget_id,
+ * `findPaymentReplay`) returns the ORIGINAL payment rather than minting a
+ * second one — never a second intent for one logical send. Bucketed, not
+ * request-scoped: two DIFFERENT calls with the same parameters inside one
+ * bucket collapse into one payment, matching the x402 tools' existing
+ * behaviour (`buildX402IdempotencyKey`) exactly, and is the reason a
+ * deliberate re-send of the exact same payment needs a bucket boundary or an
+ * explicit idempotency_key of its own.
+ */
+export function buildDirectIdempotencyKey(
+  params: {
+    token: string
+    amount: string
+    recipient: string
+    taskBudgetId?: string
+    subBudgetId?: string
+  },
+  now = Date.now(),
+): string {
+  const bucket = Math.floor(now / DIRECT_IDEMPOTENCY_BUCKET_MS)
+  const material = [
+    params.token.toLowerCase(),
+    params.amount,
+    params.recipient.toLowerCase(),
+    params.taskBudgetId ?? '',
+    params.subBudgetId ?? '',
+    bucket,
+  ].join('|')
+  return `direct:${createHash('sha256').update(material).digest('hex').slice(0, 16)}`
+}
+
+// #3495: same bucket width as the x402 tools' `X402_IDEMPOTENCY_BUCKET_MS`
+// (`@haven_ai/sdk`'s `x402.ts`) — not re-derived from it, since this is the
+// direct-payment path's own deterministic key, mirroring that approach
+// rather than sharing its constant.
+const DIRECT_IDEMPOTENCY_BUCKET_MS = 300_000
 
 /** The probe failure shape that means "this URL is not the MCP endpoint". */
 export function isMerchantEndpointMiss(err: unknown): boolean {
@@ -328,8 +381,11 @@ export function buildX402SigningContext(
   // failure. True restores today's full shape for diagnostics and pre-#1263
   // signers; the recovery loop is re-running the quote tool with the SAME
   // idempotency_key, which replays the ORIGINAL sign_data (#1207 semantics).
-  // Direct payments (haven_pay/haven_send) are untouched: they have no
-  // payment_id fetch path, so the bulk stays mandatory there.
+  // Stale since #3271, fixed by #3495: direct payments (haven_pay/haven_send)
+  // gained the identical payment_id fetch path in #3271, and #3495 gave them
+  // this exact compact-by-default / include_signing_payload=true contract too
+  // (state-direct-recovery.ts) — they are no longer the exception this
+  // comment once carved out.
   includeSigningPayload = false,
 ) {
   return {

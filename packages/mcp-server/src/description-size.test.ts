@@ -222,12 +222,25 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * pin moves too: 24,123 / 26 = 927.81 sits above round 9's 922.42, and the
  * same rule applies — re-derived at the measured mean, shrink-only from
  * here.
+ *
+ * **Re-derived — round 11, #3495 (2026-09-30).** The direct-payment
+ * description (`PAY_DESCRIPTION`, shared by `haven_pay`) now documents the
+ * compact-by-default contract this issue built: `idempotency_key` in the
+ * returned shape, that it is generated when omitted, and the
+ * `include_signing_payload=true` same-key re-run that restores the relay
+ * pair — replacing the old unconditional "re-sign with { payload_hash,
+ * typed_data_b64 } from the result" sentence, which was no longer true. Same
+ * tool count (26) — this is a reword, not a new tool. Measured total 24,452;
+ * the absolute pin moves to that exact value, shrink-only from here. The
+ * mean pin moves too: 24,452 / 26 = 940.4615… sits above round 10's 927.81,
+ * and the same rule applies — re-derived at the measured mean, shrink-only
+ * from here.
  */
-const MAX_TOTAL_BYTES = 24_123
-// Mean pin: re-derived — round 10, #3475 follow-up (block above): 24,123 / 26 =
-// 927.8077, pinned at the two-decimal ceiling (927.81). Round 9's 922.43
+const MAX_TOTAL_BYTES = 24_452
+// Mean pin: re-derived — round 11, #3495 (block above): 24,452 / 26 =
+// 940.4615, pinned at the two-decimal ceiling (940.47). Round 10's 927.81
 // cannot hold while this tree exceeds it. Shrink-only from here.
-const MAX_MEAN_BYTES = 927.81
+const MAX_MEAN_BYTES = 940.47
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

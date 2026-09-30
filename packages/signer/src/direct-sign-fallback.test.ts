@@ -269,7 +269,9 @@ describe('the #3271 binding check on a caller-relayed direct payload', () => {
 })
 
 // Review round 1: a direct-fetch refusal must name DIRECT remedies — there is
-// no quote tool to re-run, and the payment result carries the relay fields.
+// no quote tool to re-run. Since #3495 the payment result is compact by
+// default, so the remedy is a same-idempotency_key include_signing_payload=true
+// re-run of the original tool, which then carries the relay fields.
 describe('direct sign-context refusals name direct-payment remedies (#3271)', () => {
   function handlersWith(direct: () => Response, x402: () => Response = x402Unavailable) {
     const signer = createEdgeSigner(TEST_KEY)
@@ -330,7 +332,9 @@ describe('direct sign-context refusals name direct-payment remedies (#3271)', ()
     expect(result.success).toBe(false)
     if (result.success) throw new Error('expected failure')
     expect(result.code).toBe('SIGN_CONTEXT_UNREACHABLE')
-    expect((result as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toMatch(/typed_data_b64 from the haven_send \/ haven_pay result/)
+    expect((result as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toMatch(
+      /re-run whichever of haven_send \/ haven_pay.*include_signing_payload: true.*typed_data_b64/s,
+    )
     expect(JSON.stringify(result)).not.toMatch(/quote/)
   })
 

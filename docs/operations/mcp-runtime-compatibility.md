@@ -72,7 +72,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-29"
+last-verified: "2026-09-30"
 ---
 
 # MCP Runtime Compatibility
@@ -3004,6 +3004,82 @@ production runs the signer at `@haven_ai/connect@alpha`'s exact pin
 (`0.4.0-alpha.0`) — which is why the recovery route, not an update prompt, is
 the compatibility story. Merging to `dev` waits for the promotion carrying
 #3271 to publish a connect/signer pair that includes the direct sign-context.
+
+> **Superseded by #3495 (2026-09-30), see the section immediately below.**
+> The paragraph above ("the relay fields stay on every delegation-rail result
+> unchanged") was the #3277 owner decision of 2026-09-24; the #3495 owner
+> decision of 2026-09-30 reverses it. The handoff fields named in the first
+> paragraph (`next_action`, `next_tool`, `next_arguments`, `signer_compatibility`)
+> are UNCHANGED by #3495 — only whether `payload_hash`/`typed_data`/
+> `typed_data_b64` ride the result unconditionally.
+
+## Direct-payment results compact by default, and the opt-in relay (#3495, 2026-09-30)
+
+Owner decision (2026-09-30), superseding #3277 AC2 ("the relay fields stay"):
+the hosted `haven_send` / `haven_pay` results are now **compact by default**,
+mirroring the x402 quote tools' own #1272 contract on the same helper
+(`delegationSignFields`, `tools/support/mcp-context.ts`) — `payment_id`,
+`status`, `idempotency_key`, `payload_hash`, `expires_at`, the byte-free
+signing handoff, `signer_compatibility`, and (send) `asset`/`amount`/
+`recipient` or (pay) `meta`; `signature_scheme` rides every delegation-rail
+result, but `typed_data` / `typed_data_b64` do not.
+
+**Idempotency key, generated and echoed.** When the caller passes no
+`idempotency_key`, the hosted tool generates one and echoes it on every
+result (`idempotency_key` field, present on success AND on
+`pending_approval`) — mirroring how the x402 tools derive and echo theirs
+(`buildX402IdempotencyKey`, `@haven_ai/sdk`'s `x402.ts`; echoed at
+`buildX402SigningContext`, `mcp-context.ts`). The direct-payment twin
+(`buildDirectIdempotencyKey`, `tools/support/mcp-context.ts`) lives in the
+hosted tool, not the SDK: hashes token/amount/recipient/task_budget_id/
+sub_budget_id into a 5-minute bucket, same bucket width and shape as the
+x402 key, `direct:` prefixed instead of `x402:`. This makes a same-key re-run
+— in particular the `include_signing_payload: true` opt-in below — always a
+true replay: the backend's `findPaymentReplay` (`payments.ts`) returns the
+ORIGINAL payment on a matching key rather than creating a second intent,
+PROVIDED the re-run repeats the exact token, amount, recipient,
+`task_budget_id` and `sub_budget_id` the first call used — a mismatch answers
+409 (`payments.ts:255-271`) rather than silently rerouting to a different
+payment.
+
+**The opt-in.** `include_signing_payload: true` on `haven_send` / `haven_pay`
+is new schema surface (`contracts.ts`) — a same-`idempotency_key` re-run
+returns the stored payment's full `delegationSignFields` (signature_scheme +
+typed_data + typed_data_b64), never a second intent. This is the recovery
+route `directSignerCompatibilityNotice` (`support/signer-compat.ts`) and
+`DIRECT_SIGN_REASON` (`state-direct-recovery.ts`) now name on a signer's
+`SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` refusal — worded for
+EVERY signer that can answer that refusal with `fallback: 'typed_data_b64'`
+(every published `@haven_ai/signer`, 0.5.0-alpha.1 through current, on a
+transport failure, a malformed body, or a 404 from an older backend), not
+only a pre-#3271 install as the #3277-era text said. Guidance never suggests
+a `payload_hash`-only call — a signer predating #3169's bare-hash refusal
+signs it raw and the account rejects it on-chain (AA24).
+
+**Skew row.** Against a Haven deployment that has shipped #3495: an old
+signer (`<= 0.4.0-alpha.0`, predating #3271's direct sign-context fetch) or a
+CURRENT published signer's own `fallback: 'typed_data_b64'` (a transport
+failure on its `payment_id` fetch) both now need ONE EXTRA hosted call — the
+`include_signing_payload: true` re-run — before they can relay, where #3277
+let them relay straight from the original result. Neither signer needs a
+code change to keep working: both already read `fallback`/
+`next_tool_omitted_reason` as data, and the hosted notice's prose now names
+the extra call. Against an OLD Haven deployment (pre-#3495) the result still
+carries the relay fields unconditionally, so the extra call is simply unused
+guidance the old backend never asked for — no behaviour changes on that side
+of the skew.
+
+Compatibility: additive/removed result fields only (the compact default drops
+`typed_data`/`typed_data_b64` from the unconditional shape; `idempotency_key`
+is newly always present); one new optional input (`include_signing_payload`)
+on two existing tool schemas; no tool renamed, no failure code changed, no
+expected-context version changed, no signing wire format changed (the
+relayed bytes on the opt-in re-run are byte-identical to what the original
+result used to carry unconditionally). `@haven_ai/signer`'s
+`DIRECT_RELAY_FALLBACK` text ships in the same PR (`sign-context.ts`) and its
+own release, with the hosted `signer_compatibility.check`/`fallback` prose
+covering every currently-published signer in the meantime — no gate upgrades
+an existing install.
 
 ## Task-budget signing handoff and old-signer recovery (#3419, 2026-09-28)
 

@@ -212,6 +212,11 @@ export const toolSchemas = {
     // sub-agent B). Mutually exclusive with task_budget_id — the backend
     // refuses a body naming both.
     sub_budget_id: z.string().min(1).optional(),
+    // #3495: the result is compact by default (no typed_data / typed_data_b64
+    // — #1272's contract). Set true on a re-run naming the SAME idempotency_key
+    // (generated and echoed when omitted) to get the relay pair back: the
+    // backend replays the stored payment, it never creates a second one.
+    include_signing_payload: z.boolean().optional(),
   },
   haven_pay: {
     token: z.string().min(1),
@@ -224,6 +229,8 @@ export const toolSchemas = {
     // #3330: spend against an open sub-budget this agent holds (it is
     // sub-agent B). Mutually exclusive with task_budget_id.
     sub_budget_id: z.string().min(1).optional(),
+    // #3495: same contract as haven_send — see there.
+    include_signing_payload: z.boolean().optional(),
   },
   haven_submit: {
     // #3329: exactly one of payment_id / task_budget_id — never both, never
@@ -980,9 +987,12 @@ const _noHostedToolIsDecidedTwice: [DoublyDecidedInputTool] extends [never]
 const PAY_DESCRIPTION = [
   'Construct a direct wallet payment inside the agent budget and return the unsigned payload for the local signer.',
   'For read-only allowance/budget questions use haven_get_allowances instead.',
-  'Returns { payment_id, payload_hash, expires_at, next_tool, next_arguments, signer_compatibility }.',
+  'Returns { payment_id, status, idempotency_key, payload_hash, expires_at, next_tool, next_arguments, signer_compatibility } —',
+  'compact by default, no typed_data / typed_data_b64; idempotency_key is generated when you pass none, and echoed here.',
   'Sign by payment_id; if the signer refuses with SIGN_CONTEXT_REFUSED / sign_context_unavailable (it signed',
-  'nothing), re-sign with { payload_hash, typed_data_b64 } from the result, UNCHANGED, then haven_submit.',
+  'nothing), re-run this tool with the SAME idempotency_key plus include_signing_payload=true — repeating token,',
+  'amount, recipient, task_budget_id and sub_budget_id, or it answers 409 — then re-sign with',
+  '{ payload_hash, typed_data_b64 } from that result, UNCHANGED, then haven_submit.',
   'A payment outside the budget, recipient or expiry is declined at prepare — nothing to sign, nothing queued:',
   'ask the user to raise the budget in Haven. Haven never receives the signing key.',
 ].join(' ')

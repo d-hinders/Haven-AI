@@ -30,6 +30,7 @@ export {
 } from './errors.js'
 export { buildAgentGuidance, buildPurchaseSummary, catchSettledReplay } from './guidance.js'
 export {
+  buildDirectIdempotencyKey,
   buildX402SigningContext,
   coerceJsonField,
   delegationSignFields,

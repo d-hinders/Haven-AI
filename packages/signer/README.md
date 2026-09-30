@@ -327,8 +327,10 @@ table.** When the x402 fetch answers `SIGN_CONTEXT_REFUSED` with
 `GET /payments/:id/sign-context` instead, same auth header, timeout and
 refusal structuring. That second fetch's own refusals reuse the codes in the
 table below with direct-payment remedies: no quote to re-run, and the
-`typed_data_b64` relay from the `haven_send` / `haven_pay` result is the
-fallback. A 409 `sign_context_unavailable` from the direct route too (an
+`typed_data_b64` relay — reached by re-running whichever of `haven_send` /
+`haven_pay` was called, with the SAME `idempotency_key` (echoed on its
+result) plus `include_signing_payload: true` (#3495; superseding #3277's
+"the relay fields stay") — is the fallback. A 409 `sign_context_unavailable` from the direct route too (an
 x402 row the x402 route could not serve, or a direct row with no stored
 signing payload) surfaces the x402 route's own refusal instead. `haven_sign_x402` never takes this branch: a direct payment
 carries no x402 context to fund a merchant retry with, so it surfaces the
@@ -353,8 +355,10 @@ no direct route, #3271). For x402 it is **not** in the default quote result
 since #1272: obtain it by re-running the SAME quote tool with the SAME
 `idempotency_key` plus `include_signing_payload: true`, then pass
 `typed_data_b64` (plus `payload_hash` / `x402_expected`) instead of
-`payment_id`. A direct payment's `haven_send` / `haven_pay` result always
-carries `payload_hash` + `typed_data_b64`. Any other backend REFUSAL
+`payment_id`. A direct payment's `haven_send` / `haven_pay` result is compact
+by default (#3495) — the same `include_signing_payload: true` re-run on the
+SAME `idempotency_key` is how its `payload_hash` + `typed_data_b64` are
+reached. Any other backend REFUSAL
 carries no fallback: an expired, executed or unsignable intent cannot be
 rescued by re-signing its bytes — an expired x402 one is re-quoted (the same
 `payment_window_expired` + `retry_with_new_quote` the signer emits for

@@ -68,9 +68,20 @@ export type SignContextErrorCode =
  * signer-local, not part of the shared `@haven_ai/sdk` error taxonomy, so that
  * type does not belong there).
  */
-/** #3271: the relay remedy for a direct payment whose sign-context fetch failed. */
+/**
+ * #3271 / #3495: the relay remedy for a direct payment whose sign-context
+ * fetch failed. Since #3495 the hosted `haven_send` / `haven_pay` results are
+ * compact by default (no `payload_hash`/`typed_data_b64` pair inline) —
+ * superseding #3277 AC2 — so the remedy is a re-run of whichever tool was
+ * called, naming the SAME `idempotency_key` (echoed on its result) plus
+ * `include_signing_payload: true`; the backend replays the stored payment on
+ * that key rather than creating a second one. That re-run's own result then
+ * carries the pair to relay.
+ */
 const DIRECT_RELAY_FALLBACK =
-  'call haven_sign with payload_hash and typed_data_b64 from the haven_send / haven_pay result, passed through unchanged'
+  're-run whichever of haven_send / haven_pay you called, with the SAME idempotency_key (echoed on ' +
+  'its result) plus include_signing_payload: true, then call haven_sign with payload_hash and ' +
+  "typed_data_b64 from THAT re-run's result, passed through unchanged"
 
 export class HavenSignContextError extends HavenSigningError {
   declare readonly code: SignContextErrorCode
@@ -171,8 +182,9 @@ export class HavenSignContextError extends HavenSigningError {
         })
       } else if (flow === 'direct' && refusal?.httpStatus === 404) {
         // Either the payment is not this agent's, or the backend predates
-        // #3271 and has no direct sign-context route at all (deploy skew). The
-        // payment result's relay fields still work whenever the payment is real.
+        // #3271 and has no direct sign-context route at all (deploy skew).
+        // Since #3495 the relay pair is not on the original result — DIRECT_RELAY_FALLBACK
+        // names the same-key include_signing_payload=true re-run that fetches it.
         this.fallback = 'typed_data_b64'
         this.next_action = AgentPaymentNextAction.StopAndTellUser
         step = signerRefusalStep({

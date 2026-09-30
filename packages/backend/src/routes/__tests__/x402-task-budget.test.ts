@@ -10,7 +10,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 
 const {
   mockQuery, mockSelect, mockSelectByHash, mockCompute, mockCreateIntent,
-  mockPrepareFunding, mockEnsureDeployed, mockReadRemaining,
+  mockPrepareFunding, mockEnsureDeployed, mockReadRemaining, mockReadSpent,
 } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockSelect: vi.fn(),
@@ -20,6 +20,11 @@ const {
   mockPrepareFunding: vi.fn(),
   mockEnsureDeployed: vi.fn(),
   mockReadRemaining: vi.fn(),
+  mockReadSpent: vi.fn(),
+}))
+// #3500: the task-budget cap pre-check reads the enforcer's spentMap; no chain here.
+vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({
+  readTaskBudgetSpent: (...a: unknown[]) => mockReadSpent(...a),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
@@ -161,6 +166,8 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
     mockEnsureDeployed.mockReset()
     mockReadRemaining.mockReset()
     mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+    mockReadSpent.mockReset()
+    mockReadSpent.mockResolvedValue(0n)
     mockCompute.mockResolvedValue(DELEGATE_ACCT)
     mockEnsureDeployed.mockResolvedValue({ address: DELEGATE_ACCT, alreadyDeployed: true })
     // #3329 review finding E2: the (token, to) selection and the by-hash
@@ -284,5 +291,93 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
     })
     expect(res.statusCode).toBe(400)
     expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  // ── #3500: the task budget's cap, before anything is built or signed ──
+  const refusalRows = () =>
+    mockQuery.mock.calls.filter((c) => /INSERT INTO payment_refusals/.test(String(c[0])))
+  const fundingPrepared = async () => ({
+    delegationHash: BUDGET_HASH,
+    prepared: {
+      userOpHash: `0x${'aa'.repeat(32)}`,
+      userOperation: { sender: DELEGATE_ACCT },
+      signingTypedData: {
+        domain: { chainId: 84532, name: 'HybridDeleGator', version: '1', verifyingContract: DELEGATE_ACCT },
+        types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+        primaryType: 'PackedUserOperation',
+        message: { sender: DELEGATE_ACCT },
+      },
+      delegateAccountAddress: DELEGATE_ACCT,
+    },
+  })
+
+  it('#3500 erc7710: refuses task_budget_exceeded before a settlement child exists (the merchant would otherwise find out at redemption)', async () => {
+    primeTaskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' }))
+    mockReadSpent.mockResolvedValue(950_000n) // 50_000 left, 100_000 asked
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody(),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error_code: 'task_budget_exceeded', task_budget_id: 'tb-1', remaining_atomic: '50000' })
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
+    expect(refusalRows()[0]![1]).toContain('delegation_budget_exceeded')
+  })
+
+  it('#3500 3009 funding leg: refuses task_budget_exceeded before the funding UserOp is prepared', async () => {
+    primeTaskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' }))
+    mockReadSpent.mockResolvedValue(1_000_000n)
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error_code: 'task_budget_exceeded', remaining_atomic: '0' })
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
+    // The refusal names the MERCHANT, never the agent's own funding EOA.
+    expect(refusalRows()[0]![1]).toContain(MERCHANT.toLowerCase())
+    expect(refusalRows()[0]![1]).not.toContain(DELEGATE_SIGNER.address.toLowerCase())
+  })
+
+  it('#3500 3009 funding leg: a transfer-cap revert the task budget confirms is the typed 403, not the "transient" 502', async () => {
+    primeTaskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' }))
+    mockReadSpent.mockResolvedValueOnce(0n).mockResolvedValueOnce(1_000_000n)
+    mockPrepareFunding.mockRejectedValue(new Error('UserOperation reverted during simulation with reason: ERC20TransferAmountEnforcer:allowance-exceeded'))
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().error_code).toBe('task_budget_exceeded')
+  })
+
+  it('#3500 3009 funding leg: an unexplained transfer-cap revert keeps the 502', async () => {
+    primeTaskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' }))
+    mockReadSpent.mockResolvedValue(0n)
+    mockPrepareFunding.mockRejectedValue(new Error('UserOperation reverted during simulation with reason: ERC20TransferAmountEnforcer:allowance-exceeded'))
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(502)
+  })
+
+  it('#3500: an unreadable chain skips the pre-check on both legs', async () => {
+    primeTaskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' }))
+    mockReadSpent.mockRejectedValue(new Error('rpc down'))
+    mockCreateIntent.mockImplementation(async () => ({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' }))
+    const erc7710 = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody(),
+    })
+    expect(erc7710.statusCode).toBe(201)
+    mockPrepareFunding.mockImplementation(fundingPrepared)
+    const funding = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
+    })
+    expect(funding.statusCode).toBe(201)
   })
 })

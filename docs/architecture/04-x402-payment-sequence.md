@@ -2087,8 +2087,10 @@ child's delegator and its delegate (owner decision 2026-09-25, recorded on
 #3329) — so the chain a payment redeems is `[task child, budget]`, the
 `ERC20TransferAmountEnforcer` on the child caps the run and the
 `ERC20PeriodTransferEnforcer` on the budget still meters the period. Over the
-child's amount or past its expiry the redemption reverts during gas
-estimation; nothing queues. Key separation for a *different* delegate is
+child's amount, Haven refuses first with a typed 403 `task_budget_exceeded`
+(#3500), read from the child's own `spentMap` on every path that takes a task
+budget; if that read is unavailable, the enforcer still reverts at gas
+estimation. Past its expiry the redemption reverts; nothing queues. Key separation for a *different* delegate is
 #3330's job, not this one.
 
 **Lifecycle** (`packages/backend/src/modules/task-budgets/`,

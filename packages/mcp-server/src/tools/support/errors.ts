@@ -181,6 +181,11 @@ const RAIL_UNAVAILABLE_ERROR_CODE = 'rail_unavailable_for_chain'
 const RAIL_UNAVAILABLE_OMITTED_REASON =
   "this Haven deployment cannot serve this chain's payments until its operator provisions it; retrying gets the same answer, so tell the user"
 
+/** #3500: the backend's `error_code` for a payment an open task budget's cap cannot cover. */
+const TASK_BUDGET_EXCEEDED_ERROR_CODE = 'task_budget_exceeded'
+const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
+  "the task budget's cap is spent and is enforced on-chain, so retrying cannot succeed; close it and open a new one, or pay without it, after telling the user"
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -249,6 +254,32 @@ export function normalizeError(err: unknown): ToolFailure {
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #3500: a payment the task budget's cap cannot cover. A 403 would already
+  // say stop, but under the generic API_ERROR code; the agent needs to know
+  // it is the TASK BUDGET that is spent (so it can close it and open a new
+  // one), not the agent's budget, and never to retry.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === TASK_BUDGET_EXCEEDED_ERROR_CODE
+  ) {
+    const body = err.body as { task_budget_id?: string; remaining_atomic?: string | null }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: TASK_BUDGET_EXCEEDED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'TASK_BUDGET_EXCEEDED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      ...(body.task_budget_id ? { task_budget_id: body.task_budget_id } : {}),
+      ...(body.remaining_atomic !== undefined ? { remaining_atomic: body.remaining_atomic } : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

@@ -35,9 +35,11 @@
  * `classifyRevertForLedger` is deliberately four-way: the timestamp
  * enforcer's revert text (`beforeThreshold` / `Enforcer:expired-delegation`
  * in the flattened error chain) is `delegation_expired`; the period-budget
- * enforcer's custom error (`Enforcer:transfer-amount-exceeded`) is
+ * enforcer's custom error (`Enforcer:transfer-amount-exceeded`) and the
+ * cumulative-cap enforcer's (`ERC20TransferAmountEnforcer:allowance-exceeded`,
+ * a task budget's cap or a budget's lifetime cap, #3500) are
  * `delegation_budget_exceeded` — the DIRECT `POST /payments` route has no
- * fail-fast pre-check, so that revert IS its over-budget answer and the
+ * period-budget pre-check, so that revert IS its over-budget answer and the
  * classification is what gives the value its named writer there; any OTHER
  * estimation revert (viem's `EstimateGasExecutionError`, or a bundled revert
  * reason) is `onchain_revert` — rare since #2706, the pre-checks catch
@@ -125,8 +127,31 @@ const DELEGATION_EXPIRED_REVERT_PATTERNS = [
  * contradicts the enum's named-writer rule (the pre-check on both x402 legs
  * already owns `delegation_budget_exceeded`) and would make
  * `onchain_revert` anything but rare.
+ *
+ * #3500: the cumulative-cap enforcer too. `ERC20TransferAmountEnforcer`
+ * refuses with `ERC20TransferAmountEnforcer:allowance-exceeded`; it carries a
+ * task budget's cap and a budget delegation's optional lifetime cap. Both are
+ * budgets the guardrails set, so the refusal is `delegation_budget_exceeded`,
+ * not the generic `onchain_revert` it fell into before.
  */
-const BUDGET_ENFORCER_REVERT_PATTERNS = [/Enforcer:transfer-amount-exceeded/i]
+const TRANSFER_CAP_REVERT_PATTERNS: readonly RegExp[] = [/ERC20TransferAmountEnforcer:allowance-exceeded/i]
+
+const BUDGET_ENFORCER_REVERT_PATTERNS = [
+  /Enforcer:transfer-amount-exceeded/i,
+  ...TRANSFER_CAP_REVERT_PATTERNS,
+]
+
+/**
+ * #3500: true when a caught error is a cumulative transfer-cap revert. The
+ * enforcer carries both a task budget's cap and a budget delegation's
+ * optional lifetime cap, so this names "a transfer cap was exhausted", not
+ * which one: a caller attributes it to a task budget only after reading that
+ * task budget's own spent figure.
+ */
+export function isTransferCapRevert(err: unknown): boolean {
+  const text = flattenErrorText(err)
+  return TRANSFER_CAP_REVERT_PATTERNS.some((re) => re.test(text))
+}
 
 /**
  * Flatten an error and its `cause` chain into one searchable string. Caveat
@@ -154,7 +179,9 @@ function flattenErrorText(err: unknown, depth = 0): string {
  *   occurrence) is `delegation_expired`.
  * - The period-budget enforcer's custom error (`Enforcer:transfer-amount-
  *   exceeded`, the on-chain answer the DIRECT `POST /payments` route gets
- *   when it has no pre-check in front of it) is `delegation_budget_exceeded`.
+ *   with no period-budget pre-check in front of it) and the cumulative-cap
+ *   enforcer's (`ERC20TransferAmountEnforcer:allowance-exceeded`, #3500) are
+ *   `delegation_budget_exceeded`.
  * - Any OTHER estimation revert — viem's `EstimateGasExecutionError`, or an
  *   error whose flattened text says the execution reverted (bundlers echo
  *   the enforcer revert reason inside the RPC error) — is `onchain_revert`.

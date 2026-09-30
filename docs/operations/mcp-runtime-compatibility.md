@@ -2796,10 +2796,10 @@ changes, only which call carries the bulk bytes.
 > now passes `mcpCallContext` to `prepareX402Erc7710`, like its EIP-3009
 > branch and both `haven_prepare_catalog_purchase` branches, so the
 > rehydration above holds for every `haven_pay_mcp_tool` intent on either
-> scheme. Hosted-only change: the backend has accepted and persisted
-> `mcpCallContext` on the erc7710 authorize since #1547
-> (`delegation-authorize.ts`), and no signer, connector or SDK version is
-> involved. One more case with no stored context: an erc7710
+> scheme. Hosted-only change: the backend has persisted `mcpCallContext` on
+> the erc7710 authorize since #1307 (`delegation-authorize.ts`), and the
+> SDK's `prepareX402Erc7710` has forwarded it since #1547; no signer,
+> connector or SDK version is involved. One more case with no stored context: an erc7710
 > `haven_pay_mcp_tool` intent authorized by a hosted server older than this
 > change. Settling it with `payment_id` alone gets the same
 > `MERCHANT_CALL_CONTEXT_UNAVAILABLE` refusal and the same explicit-fields

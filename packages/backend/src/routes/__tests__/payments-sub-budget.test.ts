@@ -405,6 +405,18 @@ describe('POST /payments with sub_budget_id (#3330)', () => {
     })
   }
 
+  it('#3503: an unreadable link does not disable the others — a readable short link still refuses', async () => {
+    mockReadRemaining.mockImplementation(async (_chain: number, json: string) => {
+      const d = JSON.parse(json) as { delegate: string; delegator: string }
+      if (d.delegate.toLowerCase() === B_DELEGATE_ACCOUNT.toLowerCase()) throw new Error('rpc down')
+      if (d.delegator.toLowerCase() === A_DELEGATE_ACCOUNT.toLowerCase()) return { remainingAtomic: '500', fromChain: true }
+      return { remainingAtomic: '9000000', fromChain: true }
+    })
+    const res = await payThroughGrant()
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error_code: 'delegation_budget_exceeded', remaining_atomic: '500' })
+  })
+
   it('#3503: pays when every link covers it, and an unreadable link is skipped (fail open per link)', async () => {
     mockReadRemaining.mockImplementation(async (_chain: number, json: string) => {
       const d = JSON.parse(json) as { delegate: string }

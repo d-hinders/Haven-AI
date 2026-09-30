@@ -193,7 +193,10 @@ function flattenRaw(err: unknown, depth: number): string {
  */
 export function decodeErrorStrings(text: string): string[] {
   const out: string[] = []
-  for (const m of text.matchAll(/08c379a0([0-9a-fA-F]+)/g)) {
+  // A lookahead, not a greedy capture: every selector occurrence is a
+  // candidate, so a stray `08c379a0` earlier in the same hex run cannot
+  // swallow the real payload behind it (round-2 review nit).
+  for (const m of text.matchAll(/08c379a0(?=([0-9a-f]+))/gi)) {
     const body = m[1]!
     const word = (i: number) => body.slice(i * 64, (i + 1) * 64)
     if (word(1).length < 64) continue

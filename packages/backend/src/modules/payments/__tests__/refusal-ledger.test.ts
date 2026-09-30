@@ -339,6 +339,21 @@ describe('refusal ledger unit contracts', () => {
     ])
     expect(decodeErrorStrings('reason: 0x08c379a0deadbeef')).toEqual([])
     expect(decodeErrorStrings('no payload here')).toEqual([])
+    // Truncated: the declared length runs past the hex.
+    expect(decodeErrorStrings(VERBATIM_DEV_PERIOD_REVERT.slice(0, -40))).toEqual([])
+    // A non-0x20 offset is honoured, not assumed.
+    const reason = 'ERC20PeriodTransferEnforcer:transfer-amount-exceeded'
+    const offset40 =
+      '08c379a0' +
+      (64).toString(16).padStart(64, '0') +
+      '0'.repeat(64) +
+      reason.length.toString(16).padStart(64, '0') +
+      Buffer.from(reason, 'utf8').toString('hex').padEnd(128, '0')
+    expect(decodeErrorStrings(offset40)).toEqual([reason])
+    // A stray selector earlier in the SAME hex run does not hide the payload.
+    expect(decodeErrorStrings(`0x08c379a0ff${VERBATIM_DEV_PERIOD_REVERT.split('0x')[1]}`)).toEqual([reason])
+    // Uppercase hex.
+    expect(decodeErrorStrings(VERBATIM_DEV_PERIOD_REVERT.toUpperCase().replace('0X', '0x'))).toEqual([reason])
   })
 
   it('the hex-encoded enforcer reverts classify exactly like their decoded text', () => {

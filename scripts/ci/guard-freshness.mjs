@@ -662,8 +662,9 @@ export const RUN_PAGE_CAP = 8
  * guard-freshness reopens were qa-dev.yml reading the IDENTICAL frozen page —
  * 100 `deployment_status` rows, newest `2026-09-19T16:20:14Z`, oldest
  * `2026-09-18T21:18:20Z` — printed verbatim by runs 36542205451, 36548966124,
- * 36565011143 and 36692820874, and matched by the `never-run … since
- * 2026-09-18T21:18:20Z` text of the four 09-28 runs that predate the #3409
+ * 36565011143 and 36692820874, and matched by the `✗ qa-dev.yml — last
+ * success none since 2026-09-18T21:18:20Z (budget 4d)` line (followed by a
+ * separate `never-run:` line) of the four 09-28 runs that predate the #3409
  * diagnostics (36393133139, 36426594058, 36440588919, 36449044291). The 9th
  * (36570505601, 09-29 12:47) was a DIFFERENT guard reading a DIFFERENT frozen
  * page: `db-concurrency-proof.yml`'s `schedule` page 1 frozen at
@@ -678,23 +679,21 @@ export const RUN_PAGE_CAP = 8
  * snapshot, so the deeper cause is GitHub's own read path for this listing
  * (cache or search-index replica) occasionally serving a stale snapshot.
  *
- * What the evidence actually shows, from `guard-freshness.yml`'s own CI run
- * logs (not hand reads): classifying every guard-freshness.yml evaluation
- * from 09-27 to 09-30, roughly 11 of ~55 came back stale over those three
- * days. The three 09-28 timestamps named in earlier drafts of this comment
- * (15:02/15:22/15:39) are ONE cluster, not three separate ones — fresh
- * evaluations bracket it at 14:58 and 15:41, so it lasted AT LEAST 37
- * minutes. "1–2 minutes" is not a cluster length: it is the gap between two
- * consecutive evaluations where a stale read was immediately followed by a
- * fresh one (16:09:59→16:11:04, 15:39:50→15:41:17) — evidence for how fast
- * an ISOLATED stale read can resolve, not for how long a cluster lasts. A
- * hand-run reproduction on 2026-09-30 (2 of 25 identical reads returning a
- * frozen `newest=2026-09-19T05:36:10Z`) and a separate hand-run attempt to
- * see whether varying the request shape (`per_page`, a `created=>` filter)
- * dodges the stale read (inconclusive — a live stale cluster was caught once
- * but had already resolved by the time the varied shapes were tried against
- * it) both happened, but neither is recorded anywhere reproducible; they are
- * not restated here as numbers.
+ * What the evidence shows, from `guard-freshness.yml`'s own CI run logs
+ * (each run's `❌ A scheduled guard has gone stale.` / `✅ Every scheduled
+ * guard is fresh.` summary line): of the 57 evaluations from 09-27 to 09-30,
+ * 12 came back stale. On 09-28 three consecutive evaluations were stale
+ * (15:02:50, 15:22:17, 15:39:50), spanning 37 minutes and bracketed by fresh
+ * ones at 14:58:20 and 15:41:17; nothing was sampled between them, so
+ * continuity is inferred, not observed. The other stale evaluations were
+ * single, apart from two in a row on 09-29 that hit different guards
+ * (12:47:37 db-concurrency-proof.yml, 13:09:04 qa-dev.yml); each was followed
+ * by a fresh evaluation, the shortest gap about a minute (16:09:59 →
+ * 16:11:04). Those gaps are upper bounds set by
+ * when the next push arrived — the actual recovery time is unmeasured.
+ * Whether varying the request shape (`per_page`, a `created=>` filter) dodges
+ * the stale read was tried by hand and was inconclusive; it is not recorded
+ * anywhere reproducible.
  *
  * A single read of this listing is therefore not ground truth for ANY
  * counted-event guard, which is exactly the shape coherence check 1 already
@@ -715,19 +714,18 @@ export const RUN_PAGE_CAP = 8
  * stays old — so the guard still exhausts every attempt and still escalates
  * that case exactly as before.
  *
- * Staleness is per-request, not per-workflow-run or per-cluster: an isolated
- * stale read recovers within about a minute (see the gaps above), which the
- * retry window below is sized for, but the 09-28 cluster ran at least 37
- * minutes — longer than any in-evaluation retry budget can reasonably cover.
- * For that case the mitigation is NOT the retry: it is the next evaluation.
- * `guard-freshness.yml` runs on every push to `dev`/`main` — 144
- * push-triggered runs in the 7 days to 2026-09-30 (measured) — so a cluster
- * that outlasts one evaluation's retries is very likely covered by the next
- * one, minutes later, without a human noticing the first. `3 ×
- * PAGE1_RETRY_DELAY_MS` is a judgement call sized for the isolated-read case,
- * not a claim that it covers a multi-minute cluster; the `(retried Nx —
- * #3321)` diagnostic line is what will show whether a future occurrence
- * outlasts it.
+ * Staleness is per-request, not per-workflow-run or per-cluster. Every
+ * isolated stale read observed was cleared by a later evaluation, and the
+ * retry window below is sized for that case; the 09-28 run of stale
+ * evaluations spanned 37 minutes, longer than any in-evaluation retry budget
+ * can reasonably cover. For that case the mitigation is NOT the retry: it is
+ * the next evaluation. `guard-freshness.yml` runs on every push to
+ * `dev`/`main` (124 push-triggered runs 2026-09-24..30, measured), but the
+ * next push can be minutes or hours away — the 2026-09-30T08:56Z reopen
+ * waited 6 h 20 min for it. `3 × PAGE1_RETRY_DELAY_MS` is a judgement call
+ * sized for the isolated-read case, not a claim that it covers a cluster;
+ * the `(retried Nx — #3321)` diagnostic line is what will show whether a
+ * future occurrence outlasts it.
  */
 // Worst case ~60 s per stale page 1, per counted event, per guard (3 attempts
 // × 20 s between them). One evaluation can sleep on MULTIPLE page-1 retries —
@@ -735,8 +733,8 @@ export const RUN_PAGE_CAP = 8
 // has two, schedule and workflow_dispatch (up to ~60 s each, ~120 s) — so a
 // single evaluation's worst case is ~180 s (~3 min), inside
 // guard-freshness.yml's own `timeout-minutes: 5`. Sized for an isolated
-// stale read (recovers in under a minute, per the measurements above), not
-// for the longer clusters the next push-triggered evaluation covers instead
+// stale read (a later evaluation cleared every one observed), not for the
+// longer clusters the next push-triggered evaluation covers instead
 // — see the JSDoc above.
 export const PAGE1_RETRY_ATTEMPTS = 3
 export const PAGE1_RETRY_DELAY_MS = 20000

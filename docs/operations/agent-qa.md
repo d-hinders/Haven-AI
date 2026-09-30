@@ -1093,23 +1093,21 @@ them is a string a caller supplies:
   own read path for this listing (cache or search-index replica)
   occasionally serving a stale snapshot.
 
-  What the evidence actually shows, read from `guard-freshness.yml`'s own CI
-  run logs — not hand reads: classifying every evaluation from 09-27 to
-  09-30, roughly 11 of ~55 came back stale over those three days. The three
-  09-28 timestamps named in an earlier draft of this passage
-  (15:02/15:22/15:39) are ONE cluster, not three — fresh evaluations bracket
-  it at 14:58 and 15:41, so it lasted **at least 37 minutes**. "1–2 minutes"
-  is not a cluster length: it is the gap between two consecutive evaluations
-  where a stale read was immediately followed by a fresh one
-  (16:09:59→16:11:04, 15:39:50→15:41:17) — evidence for how fast an
-  *isolated* stale read resolves, not for how long a cluster lasts. A
-  hand-run reproduction (2 of 25 identical reads returning a frozen
-  `newest=2026-09-19T05:36:10Z`) and a separate attempt to see whether
-  varying the request shape (`per_page`, a `created=>` filter) dodges the
-  stale read (inconclusive — a live stale cluster was caught once but had
-  already resolved before the varied shapes could be compared against it)
-  both happened during this fix, but neither is recorded anywhere
-  reproducible, so their numbers are not restated here.
+  What the evidence shows, read from `guard-freshness.yml`'s own CI run
+  logs (each run's summary line, `❌ A scheduled guard has gone stale.` or
+  `✅ Every scheduled guard is fresh.`): of the 57 evaluations from 09-27 to
+  09-30, 12 came back stale. On 09-28, three consecutive evaluations were
+  stale (15:02:50, 15:22:17, 15:39:50), spanning 37 minutes and bracketed by
+  fresh ones at 14:58:20 and 15:41:17; nothing was sampled between them, so
+  whether the staleness was continuous is inferred, not observed. The other
+  stale evaluations were single, apart from two in a row on 09-29 that hit
+  different guards (12:47:37 `db-concurrency-proof.yml`, 13:09:04
+  `qa-dev.yml`); each was followed by a fresh evaluation, the shortest gap
+  being about a minute (16:09:59 stale, 16:11:04 fresh). The gaps are only
+  upper bounds, set by when the next push arrived. The actual recovery time of a stale read is unmeasured.
+  Whether varying the request shape (`per_page`, a `created=>` filter)
+  dodges the stale read was tried by hand during this fix and was
+  inconclusive; it is not recorded anywhere reproducible.
 
   Staleness is per-request, not per-workflow-run or per-cluster — one
   evaluation read `qa-dev.yml` fresh while reading `db-concurrency-proof.yml`
@@ -1130,20 +1128,22 @@ them is a string a caller supplies:
   becomes a finding.
 
   **This is a best-effort mitigation for the isolated case, not a fix for a
-  cluster.** An isolated stale read recovers within about a minute (the gaps
-  above), which `3 × PAGE1_RETRY_DELAY_MS` (worst case ~60 s per stale page
-  1, per counted event, per guard — a single evaluation can sleep on
-  multiple: up to ~60 s for `qa-dev.yml`'s one counted event plus up to
+  cluster.** Every isolated stale read observed was cleared by a later
+  evaluation, and `3 × PAGE1_RETRY_DELAY_MS` (worst case ~60 s per
+  stale page 1, per counted event, per guard — a single evaluation can sleep
+  on multiple: up to ~60 s for `qa-dev.yml`'s one counted event plus up to
   ~120 s for `db-concurrency-proof.yml`'s two, `schedule` and
   `workflow_dispatch`, so ~180 s (~3 min) worst case for one evaluation,
   inside `guard-freshness.yml`'s own `timeout-minutes: 5`) is a judgement
-  call sized for, not a claim that it covers. The 09-28 cluster ran at least
-  37 minutes — longer than any in-evaluation retry budget can reasonably
-  cover — so for that case the mitigation is the *next* evaluation, not the
-  retry: `guard-freshness.yml` runs on every push to `dev`/`main` (144
-  push-triggered runs in the 7 days to 2026-09-30, measured), so a cluster
-  that outlasts one evaluation's retries is very likely covered by the next
-  one, minutes later. The `(retried Nx — #3321)` diagnostic line is what will
+  call sized for that case, not a claim that it covers it. The 09-28 run of
+  stale evaluations spanned 37 minutes, longer than any in-evaluation retry
+  budget can reasonably cover, so for that case the mitigation is the *next*
+  evaluation, not the retry: `guard-freshness.yml` runs on every push to
+  `dev`/`main` (124 push-triggered runs 2026-09-24..30, measured with
+  `gh run list --workflow guard-freshness.yml --created 2026-09-24..2026-09-30`),
+  but the next push can be minutes or hours away — the 2026-09-30T08:56Z
+  reopen waited 6 h 20 min for the next evaluation. The
+  `(retried Nx — #3321)` diagnostic line is what will
   show whether a future occurrence outlasts even that. Mutation-proven in
   `guard-freshness.test.mjs` for both guard kinds: the self-correcting and
   stays-stale-through-every-retry cases (qa-dev.yml, with provenance, and

@@ -984,8 +984,9 @@ test('observe(): a page of old rows like the 07:42 incident reads unconfirmed, w
 // guard-freshness reopens were qa-dev.yml reading the IDENTICAL frozen page —
 // 100 `deployment_status` rows, newest `2026-09-19T16:20:14Z`, oldest
 // `2026-09-18T21:18:20Z` (runs 36542205451, 36548966124, 36565011143,
-// 36692820874, plus the four pre-diagnostics 09-28 runs whose `never-run …
-// since 2026-09-18T21:18:20Z` text matches the same snapshot). The 9th
+// 36692820874, plus the four pre-diagnostics 09-28 runs whose `✗ qa-dev.yml
+// — last success none since 2026-09-18T21:18:20Z (budget 4d)` line matches the
+// same snapshot). The 9th
 // (36570505601, 09-29 12:47) was db-concurrency-proof.yml — a DIFFERENT
 // guard, no `provenance`, a DIFFERENT frozen `schedule` page (newest
 // `2026-09-18T07:36:48Z`) — while that job in fact succeeds nightly. The
@@ -1149,7 +1150,7 @@ test('observe(): a guard with NO provenance (db-concurrency-proof.yml) also retr
   assert.equal(evaluate({ guards: [GUARD], observations: { [GUARD.workflow]: seen }, now: OBS_NOW }).healthy, true)
 })
 
-test('observe(): a guard with NO provenance that stays frozen through every retry still reports its real, stale success (#3321 N — missing case, round 2)', () => {
+test('observe(): a guard with NO provenance that stays frozen through every retry still reports its real, stale success (#3321 B1)', () => {
   // The 09-29T12:47 incident's literal shape: `schedule` page 1 frozen at
   // `2026-09-18T07:36:48Z` on EVERY read, never resolving. Unlike the QA
   // (provenance) stays-stale case, this run is a REAL `success` — just one

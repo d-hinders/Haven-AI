@@ -241,6 +241,12 @@ so this is a rule to point at rather than a question to ask the release runner.
       Use a key distinct from the dev/QA ones, so usage is attributable and
       either can be rotated alone.
 
+      **One accepted exception (owner, 2026-09-29, #3456):** prod's
+      `RPC_URL_BASE_FALLBACK` and dev's `RPC_URL_BASE_SEPOLIA_FALLBACK` share
+      one Infura free Core key, because the free plan allows one key. Both are
+      fallbacks, so the shared per-second budget is reached only when a
+      primary is already failing. Revisit when a paid RPC plan is considered.
+
       **Before any of these variables — or `RPC_URL_BASE_FALLBACK` /
       `RPC_URL_BASE_SEPOLIA_FALLBACK` (#3255) — points at a new endpoint, run
       the RPC conformance probe against it (#3336).** It is a required step, run

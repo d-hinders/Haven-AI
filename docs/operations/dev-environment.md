@@ -256,8 +256,11 @@ Isolation rules that are non-negotiable for a payments product:
   [`delegation-rail-vendor-ops.md` §2](delegation-rail-vendor-ops.md). Every
   secret here still MUST differ from production.
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
-  chain 100 is dead per above), `RPC_URL_BASE` → **Base Sepolia**. Swap to
-  mainnet RPCs only if a test genuinely needs mainnet state.
+  chain 100 is dead per above), `RPC_URL_BASE_SEPOLIA` → **Base Sepolia**
+  (chain 84532, the chain dev's accounts and the money-flow harness use).
+  `RPC_URL_BASE` is Base **mainnet** (8453): dev reads it only for the mainnet
+  merchants the marketplace grid lists, so point it at mainnet only if a test
+  genuinely needs mainnet state.
 - **Two Base Sepolia RPCs, and they must stay two** (#2511). The backend
   WRITES through `RPC_URL_BASE_SEPOLIA`; the QA harness OBSERVES through
   `QA_RPC_URL_BASE_SEPOLIA` (a GitHub Actions **secret**, since a provider URL
@@ -276,22 +279,22 @@ Isolation rules that are non-negotiable for a payments product:
   refused for funds, never mined) and a burst of 20 without a 429. dRPC's free
   plan (the dev primary 2026-09-24 → 2026-09-28) failed the batch and the
   `pending` tag; the shared public node can fail the burst — it is what a
-  dedicated endpoint replaces.
+  dedicated endpoint replaces. The probe measures per-second behaviour, never
+  monthly quota: a 5/5 endpoint can still run out of compute units mid-month.
 
-  > Corrected 2026-09-30 (#3413 audit): the bullet's provider example called
-  > dRPC's free plan "the September 2026 dev primary", stale since 2026-09-28
-  > (#3262) — dRPC left both environments, and dev's primary is Infura's free
-  > Core plan with Alchemy as the fallback. Infura failed the #3336 burst
-  > check twice on 2026-09-29 (20/20, then 14/20 rate-limited; the fallback
-  > passed all five), and the owner decided (#3456) to keep the arrangement
-  > and cut Haven's own RPC usage first (epic #3457) before re-probing — so
-  > the primary in place today is known to miss this bar. The paragraph's
-  > post-change rewrite with the dated probe result is #3456's acceptance
-  > criterion, which owns the fuller rewrite; the two stale code comments it
-  > also lists (`relayer.ts`, `outbound-queue.test.ts`) are code files and
-  > stay out of a docs audit. Only the provider example above was edited;
-  > nothing else in this file's covered claims was re-read, so
-  > `last-verified` is deliberately not bumped.
+  **The dev arrangement since 2026-10-01 (#3489, #3456):**
+
+  | Variable (`@haven/backend` / dev) | Provider | Burst of 20 |
+  |---|---|---|
+  | `RPC_URL_BASE_SEPOLIA` (primary) | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap) |
+  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | Infura, free Core plan | 20/20 rate-limited (2026-09-29 and 2026-09-30) — a fallback only, never admitted as a primary |
+  | `QA_RPC_URL_BASE_SEPOLIA` (GitHub secret, the QA observer) | Alchemy, a separate QA-observer app | not probed; first run after the swap passed 14/14 on attempt 1 |
+
+  Infura was the primary from 2026-09-28 and failed the burst even after
+  epic #3457 cut Haven's own usage, so the limit is the free plan's per-second
+  cap. Every Alchemy app draws on one account-wide monthly compute-unit
+  allowance, prod's app included: a burn alert from Alchemy reopens #3489.
+
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over
   in order: `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA`, then the optional

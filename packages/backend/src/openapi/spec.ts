@@ -2567,7 +2567,7 @@ export const openapiSpec = {
         operationId: 'issueAgentSubBudget',
         summary: 'Issue a sub-budget: agent A re-delegates a narrower budget to agent B.',
         description:
-          "Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (409 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side (sign-context, then relay each signature via POST /agents/{id}/sub-budgets/{sub}/sign). A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329).",
+          "Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (409 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side: the agent lists its rows (GET /sub-budgets?status=awaiting_signature), fetches each sign-context, and submits each signature itself (POST /sub-budgets/{id}/submit; next_action 'agent_signs_then_submits'). The owner relay via POST /agents/{id}/sub-budgets/{sub}/sign still works but is optional. A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329).",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -2704,7 +2704,7 @@ export const openapiSpec = {
         operationId: 'signAgentSubBudget',
         summary: "Relay the delegating agent's signature over one pending sub-budget child.",
         description:
-          "Owner relays step (#3330): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch.",
+          "OPTIONAL owner relay (#3330; since #3506 the agent submits its own signature via POST /sub-budgets/{id}/submit and this relay is not required): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { $ref: '#/components/parameters/AgentId' },
@@ -6352,21 +6352,21 @@ export const openapiSpec = {
       get: {
         tags: ['SubBudgets'],
         operationId: 'listSubBudgets',
-        summary: 'List sub-budgets this agent holds (it is the sub-agent).',
+        summary: 'List sub-budgets this agent holds (it is the sub-agent), or owes a signature on (it is the delegating agent).',
         description:
-          "Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.",
+          "Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. status=awaiting_signature (#3506): the DELEGATING side — the rows this agent must still sign, i.e. its own parent-child row and every grant it issued, while pending (an open signature is owed; a pending row past its expiry is omitted) or closing (a close signature is owed), parent-child row first. Each row's id is the sub_budget_id to pass to haven_sign, then haven_submit. The agent's own parent-child narrowings are otherwise read through the delegating side (sign-context/close below) — the default list is what a sub-agent spends through.",
         security: [{ AgentApiKey: [] }],
         parameters: [
           {
             name: 'status',
             in: 'query',
             required: false,
-            schema: { type: 'string', enum: ['open', 'all'] },
+            schema: { type: 'string', enum: ['open', 'all', 'awaiting_signature'] },
           },
         ],
         responses: {
           '200': {
-            description: 'Sub-budgets held by this agent.',
+            description: 'Sub-budgets held by this agent, or owed a signature by it.',
             content: {
               'application/json': {
                 schema: {

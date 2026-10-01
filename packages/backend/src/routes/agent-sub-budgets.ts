@@ -12,10 +12,15 @@
  *      recipient — a child wider than the parent is refused BEFORE signing,
  *      400 `sub_budget_wider_than_parent`), both children are built and
  *      stored `pending` (two rows: A's parent-child + B's grant).
- *   2. POST   /agents/:id/sub-budgets/:id/sign — the owner relays A's
- *      signature over the pending children (both sign_contexts were served
- *      to the agent); each row flips `pending`→`open` as its signature
- *      lands. B's grant stays unusable until BOTH rows are open.
+ *   2. The delegating agent (A) signs each pending row and each row flips
+ *      `pending`→`open` as its signature lands (#3506: the agent completes
+ *      this itself — `GET /sub-budgets?status=awaiting_signature` lists its
+ *      rows, `GET /sub-budgets/:id/sign-context` serves the typed data, and
+ *      `POST /sub-budgets/:id/submit` applies the signature). B's grant
+ *      stays unusable until BOTH rows are open.
+ *      POST   /agents/:id/sub-budgets/:id/sign — an OPTIONAL owner relay of
+ *      that same signature, kept for callers that route it through the
+ *      owner session; it applies exactly what the agent's own submit would.
  *   3. GET    /agents/:id/sub-budgets          — flat list (both rows).
  *   4. GET    /agents/:id/sub-budgets/tree     — the parent→child tree.
  *   5. DELETE /agents/:id/sub-budgets/:id      — owner revoke: mirrors
@@ -270,9 +275,12 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
       parent_child_sub_budget: toWire(parentChildRow, nowSec),
       // Both children are signed by A's delegate key (agent-side); the
       // route that serves each typed data to the agent is the agent's own
-      // sign-context endpoint. The owner relays both signatures via
-      // POST /agents/:id/sub-budgets/:id/sign (row id, one call per row).
-      next_action: 'agent_signs_then_owner_relays',
+      // sign-context endpoint, and the agent submits each signature itself
+      // (POST /sub-budgets/:id/submit, #3506 — haven_sign then haven_submit
+      // with sub_budget_id). The owner may OPTIONALLY relay a signature via
+      // POST /agents/:id/sub-budgets/:id/sign (row id, one call per row);
+      // that route is unchanged and no longer required.
+      next_action: 'agent_signs_then_submits',
       sign_targets: [
         { sub_budget_id: parentChildRow.id, who: 'delegating_agent', what: 'parent-child' },
         { sub_budget_id: grantRow.id, who: 'delegating_agent', what: 'grant' },
@@ -280,7 +288,9 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     })
   })
 
-  // ── POST /agents/:id/sub-budgets/:id/sign — the owner relays A's signature ─
+  // ── POST /agents/:id/sub-budgets/:id/sign — OPTIONAL owner relay of A's signature ─
+  // (#3506: the agent submits its own signature via POST /sub-budgets/:id/submit;
+  // this relay stays working for callers that go through the owner session.)
   app.post<{
     Params: { id: string; sub: string }
     Body: { signature?: string }
@@ -388,7 +398,9 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
       if (!closing) return reply.code(409).send({ error: 'Sub-budget is no longer open' })
       return reply.send({
         sub_budget: toWire(closing, nowSec),
-        next_action: 'agent_signs_close_then_owner_relays',
+        // #3506: the agent signs the close and submits it itself (haven_sign then
+        // haven_submit with sub_budget_id); an owner relay is not required.
+        next_action: 'agent_signs_close_then_submits',
       })
     } catch (err) {
       return reply.code(502).send({ error: 'Could not prepare the sub-budget close', details: String(err) })

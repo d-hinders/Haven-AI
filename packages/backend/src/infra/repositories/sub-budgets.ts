@@ -194,6 +194,34 @@ export async function listForAgent(
   return result.rows
 }
 
+/**
+ * #3506 — the rows the DELEGATING agent (A) still has to SIGN: its own
+ * parent-child row and every grant it issued, while `pending` (an open
+ * signature is owed) or `closing` (a close signature is owed). Discovery for
+ * the agent-completes flow: the owner's issuance response lists these ids, but
+ * nothing else hands them to A. Scoped by `parent_agent_id` (the delegator —
+ * the same scope `findForDelegatingAgent` and the sign-context/submit routes
+ * use), so a sub-agent B never sees the rows A has to sign. A `pending` row
+ * past its expiry is left out: it could only open an already-expired child
+ * (closing it is `/close`'s trivial path); a `closing` row stays regardless,
+ * because its stored disable op is still the thing to sign. Parent-child row
+ * first, then its grants, so the agent signs in the order the tree was built.
+ */
+export async function listAwaitingSignatureForDelegatingAgent(
+  parentAgentId: string,
+  nowSec: number = Math.floor(Date.now() / 1000),
+  executor: Executor = pool,
+): Promise<SubBudgetRow[]> {
+  const result = await executor.query<SubBudgetRow>(
+    `SELECT ${SELECT_COLUMNS} FROM agent_sub_budgets
+     WHERE parent_agent_id = $1
+       AND (status = 'closing' OR (status = 'pending' AND expires_at > $2))
+     ORDER BY (parent_sub_budget_id IS NOT NULL), created_at ASC, id ASC`,
+    [parentAgentId, nowSec],
+  )
+  return result.rows
+}
+
 export interface AgentParentSubBudget {
   sub_budget_id: string
   parent_agent_id: string

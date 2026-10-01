@@ -458,6 +458,9 @@ export const SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL =
 export async function isGrantReceiverRetired(row: SubBudgetRow): Promise<boolean> {
   if (row.parent_sub_budget_id == null) return false
   const receiver = await findAgentLifecycleById(row.agent_id)
-  if (!receiver) return false
-  return receiver.status === 'revoked' || receiver.status === 'pending_approval' || receiver.archived_at != null
+  // Unreachable (agent_sub_budgets.agent_id cascades on delete); fail closed anyway.
+  if (!receiver) return true
+  // Same rule as issuance: only an active or paused, non-archived agent may
+  // receive — so a status added later is refused, not let through.
+  return !(receiver.status === 'active' || receiver.status === 'paused') || receiver.archived_at != null
 }

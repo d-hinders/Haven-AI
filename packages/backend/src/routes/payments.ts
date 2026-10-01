@@ -1193,8 +1193,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         // own doc comment), but it now covers TWO different certainties and
         // this route must not conflate them (N3):
         // - `reverted: true` — the receipt arrived and says the op executed
-        //   and reverted. That is a KNOWN outcome (an EVM revert rolls back
-        //   every state change, so no funds moved) — it falls through to the
+        //   and reverted. That is a KNOWN outcome (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed) — it falls through to the
         //   generic `onchain_execution_failed` below like any other on-chain
         //   failure, never `submission_outcome_unknown`.
         // - `reverted: false` (the default) — the receipt wait itself

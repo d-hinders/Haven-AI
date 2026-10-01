@@ -235,7 +235,7 @@ export interface RedemptionSubmitResult {
  * #3494 review round 2 (N3): `reverted` further splits the post-send phase a
  * caller must not conflate. `reverted: true` means the receipt arrived and
  * says the op executed and reverted — that is a KNOWN, confirmed outcome
- * (an EVM revert rolls back every state change, so no funds moved) and a
+ * (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed) and a
  * caller may safely answer "this failed, try again". `reverted: false`
  * (the default) means the receipt wait itself errored or timed out — Haven
  * never learned whether the op landed, so a caller must NOT say "this

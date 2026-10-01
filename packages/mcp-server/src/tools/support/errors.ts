@@ -219,8 +219,7 @@ const ACCOUNT_VALIDATION_FAILED_OMITTED_REASON =
  * on-chain/bundler failure — the one case this route cannot classify as a
  * signature, account-validation or budget cause, INCLUDING a
  * `SubmittedUserOpFailedError` whose `reverted` flag is `true` (round 2,
- * N3): the op executed and reverted is a KNOWN, confirmed outcome (an EVM
- * revert rolls back every state change, so no funds moved), unlike
+ * N3): the op executed and reverted is a KNOWN, confirmed outcome (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed), unlike
  * `SUBMISSION_OUTCOME_UNKNOWN` below. Still a failed intent, so still
  * stop-and-tell, never the generic 5xx "retry once" below (there is no live
  * state left on this payment_id for a retry to find).
@@ -393,8 +392,9 @@ export function normalizeError(err: unknown): ToolFailure {
   }
   // #3494: `POST /payments/:id/sign` (every rail it relays, including the
   // EIP-3009 funding leg) now carries a typed `error_code` on its failure
-  // 502, which this generic-5xx-means-retry-once branch predates. Every one
-  // of the six typed codes below means the intent is ALREADY FAILED —
+  // 502, which this generic-5xx-means-retry-once branch predates. Each of the
+  // four typed codes below (and the two budget codes above) means the intent
+  // is ALREADY FAILED —
   // `failSubmittedIntent` booked it on the row before the response was sent
   // — so "retry once" is never the right next step whatever caused it.
   // #3494 review round 1 (B1, double-pay risk), round 2 (B1'): checked

@@ -4567,7 +4567,7 @@ to call next in structured fields, and those fields are typed end to end
 > time; neither carries a `message` field); and `onchain_execution_failed`
 > for everything else, INCLUDING (round 2, N3) a `SubmittedUserOpFailedError`
 > with `reverted: true` — the op executed and reverted, a KNOWN, confirmed
-> outcome (an EVM revert rolls back every state change, so no funds moved),
+> outcome (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed),
 > strictly distinct from the "truly unknown" case above. `normalizeError`
 > gains four new typed branches next to #3416's/#3500's/#3504's: all four map
 > to `stop_and_tell_user` (the budget two needed no new branch — #3500's and
@@ -4601,12 +4601,15 @@ to call next in structured fields, and those fields are typed end to end
 > and `GET /payments/:id`'s `error_message` is now truncated past 300
 > characters — every other field and branch is additive. A backend older
 > than this change keeps the old untyped 502 and the un-bounded
-> `error_message`. A hosted server older than this shows all six new codes
-> as the generic 5xx branch — "re-call the same tool once with the same
-> arguments" (round 2, R2-2/N4: NOT "create a new payment", which only an
-> agent's own independent decision after abandoning that retry could reach —
-> the retry itself just re-posts the same already-consumed signature to the
-> same `payment_id` and fails the same way again) — which is stale advice on
+> `error_message`. A hosted server older than this shows the four new codes
+> (`submission_outcome_unknown`, `signature_rejected`,
+> `account_validation_failed`, `onchain_execution_failed`) as the generic 5xx
+> branch — "re-call the same tool once with the same arguments" (NOT "create
+> a new payment"); the two budget codes already map through the #3500/#3504
+> branches on any hosted server that has them. The retry gets a 409
+> "Payment intent is failed, expected pending_signature", which an old hosted
+> server shows as the generic 4xx stop: it reads as a plain failure, which is
+> exactly the misreading `submission_outcome_unknown` exists to prevent — stale advice on
 > an already-failed intent but not a new failure mode (the pre-#3494
 > behaviour for every sign failure); the real risk of an old hosted server is
 > an agent giving up on the stale retry advice and deciding, on its own, to

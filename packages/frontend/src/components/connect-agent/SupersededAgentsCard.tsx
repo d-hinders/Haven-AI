@@ -69,17 +69,20 @@ function RevokeAndEndBudgetDialog({
           <RevokeConfirmBody linked />
           {!ready && !signersLoading && (
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
-              This device cannot sign for the account. The key is still revoked, and the budget
-              stays active until you finish on a device that can.
+              This device cannot sign for the account. Its key will still be revoked, but the
+              budget stays active until you finish on a device that can.
             </p>
           )}
         </>
       }
       confirmLabel="Revoke agent"
       cancelLabel="Keep it"
+      loading={loading || busy}
       // While the signer set loads, `ready` is not yet an answer: a click now
-      // would revoke the credential and skip the signature for no reason.
-      loading={loading || busy || signersLoading}
+      // would revoke the credential and skip the signature for no reason. Only
+      // the confirm waits — cancel stays usable, so a hung read never traps
+      // the owner in the dialog.
+      confirmDisabled={signersLoading}
       onConfirm={() => onConfirm({ revokeAll, ready })}
       onCancel={onCancel}
     />

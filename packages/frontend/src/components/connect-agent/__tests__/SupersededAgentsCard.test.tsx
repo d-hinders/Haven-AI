@@ -428,10 +428,9 @@ describe('SupersededAgentsCard', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
       expect(screen.queryByText(/cannot sign for the account/i)).not.toBeInTheDocument()
-      // The confirm shows its working state and cannot be clicked.
-      const confirm = screen.getByRole('button', { name: /working/i })
-      expect(confirm).toBeDisabled()
-      expect(screen.queryByRole('button', { name: /^revoke agent$/i })).not.toBeInTheDocument()
+      // Only the confirm waits; cancel stays usable so the owner is never trapped.
+      expect(screen.getByRole('button', { name: /^revoke agent$/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /keep it/i })).not.toBeDisabled()
       expect(mockRevoke).not.toHaveBeenCalled()
     })
 

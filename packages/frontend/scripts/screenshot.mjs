@@ -3781,9 +3781,10 @@ export const SCENARIOS = {
         await confirm.waitFor({ state: 'detached', timeout: 20_000 })
       }
 
-      // Signer set still loading: the confirm is busy, and says nothing about signing.
+      // Signer set still loading: only the confirm waits (cancel stays usable),
+      // and it says nothing about signing.
       await openConfirm('loading')
-      await confirm.getByRole('button', { name: 'Working...' }).waitFor({ timeout: 20_000 })
+      await confirm.locator('button:disabled', { hasText: 'Revoke agent' }).waitFor({ timeout: 20_000 })
       await shoot(confirm, 'superseded-confirm-loading')
       await closeConfirm()
 

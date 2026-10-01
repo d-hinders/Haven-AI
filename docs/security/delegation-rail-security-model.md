@@ -633,6 +633,34 @@ and removal of authority already issued. This is deliberately not a replacement
 for the owner signature or the on-chain caveats, which remain the authority and
 enforcement.
 
+**The credential revoke accepts `pending_approval` (#3544).** The owner's
+`POST /agents/:id/revoke` also retires a connect-modal agent still awaiting its
+first budget: `REVOKE_AGENT_SQL` matches `status IN ('active', 'paused',
+'pending_approval')`. The widen is safe because nothing re-activates a revoked
+agent — an audit of every `UPDATE agents` writing `status = 'active'` found
+exactly three writers (`RESUME_AGENT_SQL`, requiring `paused`;
+`ACTIVATE_AGENT_SQL`, requiring `pending_approval`/`active`; the first-budget
+activation, requiring `pending_approval` behind the locked read
+`lockOwnedNonRevokedDelegationAgent`), and none matches `revoked`. The revoke
+is also where the agent's open connection setup retires: the same transaction
+cancels a setup still in `awaiting_connection`, `connected_local` or
+`awaiting_wallet_approval`, so a connect flow that has not finished cannot
+approve a budget for an agent that no longer exists; a setup that already
+carries an approval transaction hash is left for its existing refusal paths —
+the cancel does not reclassify evidence the setup state machine wrote. The
+setup-side half-apply is closed with it: `applyApprovalState` abandons its
+whole transaction when an intended `ACTIVATE_AGENT_SQL` matched zero rows, so
+an approval can never commit a setup `active` next to a revoked agent. The
+credential's `api_key_hash` is kept, so sweep recovery for a stranded delegate
+balance keeps working (the setup-cancel abort path's own
+`REVOKE_PENDING_AGENT_SQL` still nulls the key inside that flow; the dashboard
+revoke deliberately does not fork toward it, and a regression pin holds the
+difference). Authority only narrows: a `pending_approval` agent has no spend
+authority to begin with, the widened revoke ends the one thing it could become,
+and the refusal contract is typed — 404 for an agent the owner does not have,
+409 `error_code: already_revoked` for "already done", 409 `not_revocable` for
+any other owned-but-unrevocable status.
+
 ## 4. Exit story — design + acceptance test (#832's contract)
 
 **Claim to keep true for the live delegation rail:** *a user can enumerate and

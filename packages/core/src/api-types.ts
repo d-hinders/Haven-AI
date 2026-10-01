@@ -242,6 +242,66 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Platform-wide counts for the ops console.
+         * @description Counts only: users, smart accounts per chain split by account_type (retired legacy_safe rows stay visible apart), agents by status, active agent delegations, and payment intents and payment refusals in the last 24 h. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. Returns 404 while the deployment has no read-only ops database configured.
+         */
+        get: operations["getOpsOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find customer records by a pasted id, address, tx hash or email prefix.
+         * @description Detects the key type: a UUID matches users, agents and payment intents; an address (0x + 40 hex) matches smart accounts and agent delegate addresses; a tx hash (0x + 64 hex) matches payment intents and, as a typed system_tx hit with no user link, outbound system transactions; anything else is a case-insensitive email prefix of at least 3 characters. At most 20 hits per lookup. The lookups run one after another inside a 5 s total budget; lookups that did not complete are listed in timed_out and the hits found so far are returned. Emails are masked. The audit row stores the key type and the masked term, never the raw query. Returns 404 while the deployment has no read-only ops database configured.
+         */
+        get: operations["searchOps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One customer's record, masked, for support.
+         * @description The user (email and name masked), their smart accounts per chain with account_type, their agents with status, their agents' active delegations (budget shape, recipient pin, window), and their last 50 payment intents and last 50 payment refusals. Payment-intent error messages are stored redacted of vendor secrets. Company details, machine metadata, hashes, signatures and delegation bodies are never returned. Reads through the read-only ops database role and writes one audit row before answering. Returns 404 for an unknown user, or while the deployment has no read-only ops database configured.
+         */
+        get: operations["getOpsUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/reveal": {
         parameters: {
             query?: never;
@@ -499,7 +559,7 @@ export type paths = {
         put?: never;
         /**
          * Mark an agent as revoked in Haven.
-         * @description Blocks Haven API access for the agent. Users can also revoke or change Safe module permissions outside Haven; on-chain revocation remains the authority boundary.
+         * @description Blocks Haven API access for the agent. Revoking is permitted from `active`, `paused` and `pending_approval` — nothing re-activates a revoked agent, so the credential cannot return to life (on-chain revocation remains the authority boundary). Revoking also cancels the agent's open connection setup in the same transaction, so a connect flow that has not finished cannot approve a budget for an agent that no longer exists. The agent's `api_key_hash` is kept: sweep recovery for a stranded delegate balance stays available. Users can also revoke or change Safe module permissions outside Haven.
          */
         post: operations["revokeAgent"];
         delete?: never;
@@ -3867,6 +3927,137 @@ export type components = {
             /** Format: date-time */
             expires_at: string;
         };
+        OpsOverview: {
+            users: number;
+            smart_accounts: {
+                chain_id: number;
+                account_type: string;
+                count: number;
+            }[];
+            agents_by_status: {
+                status: string;
+                count: number;
+            }[];
+            active_delegations: number;
+            payment_intents_24h: {
+                status: string;
+                count: number;
+            }[];
+            payment_refusals_24h: {
+                reason: string;
+                count: number;
+            }[];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        OpsSearchResponse: {
+            /** @enum {string} */
+            key_type: "uuid" | "address" | "tx_hash" | "email";
+            /** @description Typed by kind: user (email masked), agent, payment_intent, smart_account, or system_tx (no user link). */
+            hits: {
+                /** @enum {string} */
+                kind: "user" | "agent" | "payment_intent" | "smart_account" | "system_tx";
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                user_id?: string;
+                /** Format: uuid */
+                agent_id?: string;
+                /** @description Masked. */
+                email?: string;
+                status?: string;
+                chain_id?: number;
+                delegate_address?: string | null;
+                account_address?: string;
+                account_type?: string;
+                submitter?: string;
+                /** Format: date-time */
+                created_at?: string | null;
+            }[];
+            timed_out: ("users" | "agents" | "payment_intents" | "smart_accounts" | "system_txs")[];
+        };
+        OpsUserDetail: {
+            user: {
+                /** Format: uuid */
+                id: string;
+                /** @description Masked; reveal through POST /ops/reveal. */
+                email: string;
+                /** @description Masked; reveal through POST /ops/reveal. */
+                name: string | null;
+                /** Format: date-time */
+                created_at: string | null;
+            };
+            smart_accounts: {
+                /** Format: uuid */
+                id: string;
+                chain_id: number;
+                account_address: string;
+                account_type: string;
+                execution_rail: string;
+                name: string;
+                /** Format: date-time */
+                created_at: string | null;
+            }[];
+            agents: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                account_id: string | null;
+                name: string;
+                status: string;
+                delegate_address: string | null;
+                /** Format: date-time */
+                created_at: string | null;
+                /** Format: date-time */
+                archived_at: string | null;
+            }[];
+            active_delegations: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_address: string;
+                /** @description The recipient pin; null for an open budget. */
+                recipient_address: string | null;
+                /** Format: uuid */
+                merchant_id: string | null;
+                budget_atomic: string;
+                period_seconds: number;
+                /** @description Unix seconds. */
+                start_date: number;
+                /** @description Unix seconds. */
+                expires_at: number;
+            }[];
+            payment_intents: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                status: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_human: string;
+                to_address: string;
+                /** @description Stored redacted of vendor secrets. */
+                error_message: string | null;
+                /** Format: date-time */
+                created_at: string | null;
+            }[];
+            payment_refusals: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_atomic: string;
+                reason: string;
+                source: string;
+                /** Format: date-time */
+                created_at: string | null;
+            }[];
+        };
         OpsRevealRequest: {
             /** @enum {string} */
             target_type: "user";
@@ -6286,6 +6477,251 @@ export interface operations {
             };
         };
     };
+    getOpsOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsOverview"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    searchOps: {
+        parameters: {
+            query: {
+                /** @description What to look up: a UUID, an address, a tx hash, or an email prefix. */
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The hits, and any lookups that ran out of time. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsSearchResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The search could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The masked record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsUserDetail"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such user, or the ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     revealOpsField: {
         parameters: {
             query?: never;
@@ -7667,6 +8103,19 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The agent exists and is owned by the caller but cannot be revoked: `error_code` `already_revoked` (nothing to do) or `not_revocable` (the status is outside the revocable set). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "already_revoked" | "not_revocable";
                     };
                 };
             };

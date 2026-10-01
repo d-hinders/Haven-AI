@@ -478,7 +478,9 @@ Isolation rules that are non-negotiable for a payments product:
   from the OpenAPI spec, so a body that is not exactly
   `{ tax_declaration_enabled: boolean }` is refused before the handler. #3509's
   `routes/ops.ts` did the same; its plugin answers 404 before validation
-  when the ops console is unconfigured. The
+  when the ops console is unconfigured. #3512's data routes
+  (`GET /ops/overview`, `/ops/search`, `/ops/users/{id}`) joined that module,
+  so they were enforced from their first commit too. The
   `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are

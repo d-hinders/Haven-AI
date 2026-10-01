@@ -6,6 +6,9 @@ import { useDelegationBudget } from '@/hooks/useDelegationBudget'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isHalfRevoked } from '@/lib/half-revoked'
+// #3544: the credential revoke's refusal is read from the wire shape —
+// status + `error_code` — never from the error's message text.
+import { ApiRequestError } from '@/lib/api'
 import Link from 'next/link'
 import ConfirmDialog from '../ConfirmDialog'
 import { ApprovalRequiredBanner } from '../haven/ApprovalRequiredBanner'
@@ -84,6 +87,24 @@ export function RemoveAgentDialog({
   const needsSignature = hasLiveBudget && !cannotEndBudgetHere
   const budgetAlreadyEnded = budgets !== null && !hasLiveBudget
 
+  // #3544: what the backend's credential-revoke refusal means for this flow.
+  // The refusal is typed on the wire (404, or 409 with an `error_code`), so
+  // the classification reads status and body — never the message text. The
+  // old `/not found|already revoked/i` message match swallowed the real
+  // refusal ("Agent not found or cannot be revoked" matched on "not found").
+  // 404 stays step-already-done for the #1437 stale-tab race, but ONLY under
+  // that race: status is not `revoked` here, so a 404 means another tab
+  // revoked it between list load and now.
+  function isCredentialStepAlreadyDone(err: unknown): boolean {
+    if (!(err instanceof ApiRequestError)) return false
+    if (err.status === 404) return true
+    const code =
+      typeof err.body === 'object' && err.body !== null && 'error_code' in err.body
+        ? (err.body as { error_code?: unknown }).error_code
+        : undefined
+    return err.status === 409 && code === 'already_revoked'
+  }
+
   async function handleRemove() {
     setError(null)
     setPhase('working')
@@ -128,7 +149,7 @@ export function RemoveAgentDialog({
         try {
           await onRevokeCredential()
         } catch (err) {
-          if (!/not found|already revoked/i.test(err instanceof Error ? err.message : '')) {
+          if (!isCredentialStepAlreadyDone(err)) {
             throw err
           }
         }

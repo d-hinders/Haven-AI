@@ -11,8 +11,14 @@
  * 2. The routes the plugin actually registers (recorded with an `onRoute`
  *    hook, not read from source) are all GET, except `POST /ops/reveal`.
  *
- * A failure here means a change gave the ops console write or spend reach —
- * get the review the epic's threat model requires rather than "fixing" this.
+ * A failure of either means a change gave the ops console write or spend
+ * reach — get the review the epic's threat model requires rather than
+ * "fixing" this.
+ *
+ * One more check rides here because it needs the same route recorder, and is
+ * NOT invariant 1: `/ops/search` and `/ops/reveal` carry their own rate-limit
+ * configs (#3512), so searching never spends the reveal budget. A failure of
+ * that one is a limiter-wiring regression, not write reach.
  */
 import Fastify from 'fastify'
 import { existsSync, readFileSync } from 'node:fs'
@@ -20,6 +26,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import opsRoutes from '../routes/ops.js'
+import { opsRevealRateLimit, opsSearchRateLimit } from '../middleware/rate-limit.js'
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..')
 const ENTRY = join(SRC, 'routes', 'ops.ts')
@@ -99,6 +106,34 @@ describe('ops console invariants (#3509)', () => {
     expect(routes).toEqual(expect.arrayContaining(['GET /ops/me', 'POST /ops/reveal']))
     const writes = routes.filter((r) => !/^(GET|HEAD) /.test(r) && r !== 'POST /ops/reveal')
     expect(writes, 'an ops route other than reveal accepts a write method').toEqual([])
+    await app.close()
+  })
+
+  it('search and reveal are rate-limited in separate buckets (#3512)', async () => {
+    const app = Fastify({ logger: false })
+    const limits = new Map<string, unknown>()
+    app.addHook('onRoute', (route) => {
+      const methods = Array.isArray(route.method) ? route.method : [route.method]
+      for (const method of methods) limits.set(`${method} ${route.url}`, (route.config as { rateLimit?: unknown } | undefined)?.rateLimit)
+    })
+    await app.register(opsRoutes, {
+      prefix: '/ops',
+      ops: {
+        githubClientId: '',
+        githubClientSecret: '',
+        jwtSecret: '',
+        allowedGithubIds: [],
+        redirectOrigins: [],
+        publicOrigin: '',
+      },
+      trustProxyHops: 0,
+    })
+    await app.ready()
+    // The bucket separation itself is proven against real Postgres in
+    // middleware/__tests__/rate-limit-plugin-integration.test.ts; this pins
+    // the wiring, so /search cannot drift back onto reveal's limiter.
+    expect(limits.get('GET /ops/search')).toBe(opsSearchRateLimit.rateLimit)
+    expect(limits.get('POST /ops/reveal')).toBe(opsRevealRateLimit.rateLimit)
     await app.close()
   })
 })

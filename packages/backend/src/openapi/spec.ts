@@ -1788,6 +1788,82 @@ export const openapiSpec = {
         },
       },
     },
+    '/ops/overview': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsOverview',
+        summary: 'Platform-wide counts for the ops console.',
+        description:
+          'Counts only: users, smart accounts per chain split by account_type (retired legacy_safe rows stay visible apart), agents by status, active agent delegations, and payment intents and payment refusals in the last 24 h. ' +
+          'Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. ' +
+          'Returns 404 while the deployment has no read-only ops database configured.',
+        security: [{ OpsJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The counts.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsOverview' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console (or its read-only database) is not configured.' },
+          '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
+        },
+      },
+    },
+    '/ops/search': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'searchOps',
+        summary: 'Find customer records by a pasted id, address, tx hash or email prefix.',
+        description:
+          'Detects the key type: a UUID matches users, agents and payment intents; an address (0x + 40 hex) matches smart accounts and agent delegate addresses; a tx hash (0x + 64 hex) matches payment intents and, as a typed system_tx hit with no user link, outbound system transactions; anything else is a case-insensitive email prefix of at least 3 characters. ' +
+          'At most 20 hits per lookup. The lookups run one after another inside a 5 s total budget; lookups that did not complete are listed in timed_out and the hits found so far are returned. ' +
+          'Emails are masked. The audit row stores the key type and the masked term, never the raw query. Returns 404 while the deployment has no read-only ops database configured.',
+        security: [{ OpsJwt: [] }],
+        parameters: [
+          {
+            name: 'q',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 320 },
+            description: 'What to look up: a UUID, an address, a tx hash, or an email prefix.',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The hits, and any lookups that ran out of time.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsSearchResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console (or its read-only database) is not configured.' },
+          '429': errorResponse,
+          '503': { ...errorResponse, description: 'The search could not be audited, so nothing was returned.' },
+        },
+      },
+    },
+    '/ops/users/{id}': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsUser',
+        summary: "One customer's record, masked, for support.",
+        description:
+          "The user (email and name masked), their smart accounts per chain with account_type, their agents with status, their agents' active delegations (budget shape, recipient pin, window), and their last 50 payment intents and last 50 payment refusals. " +
+          'Payment-intent error messages are stored redacted of vendor secrets. Company details, machine metadata, hashes, signatures and delegation bodies are never returned. ' +
+          'Reads through the read-only ops database role and writes one audit row before answering. Returns 404 for an unknown user, or while the deployment has no read-only ops database configured.',
+        security: [{ OpsJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The masked record.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsUserDetail' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such user, or the ops console (or its read-only database) is not configured.' },
+          '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
+        },
+      },
+    },
     '/ops/reveal': {
       post: {
         tags: ['Ops'],
@@ -2299,7 +2375,7 @@ export const openapiSpec = {
         operationId: 'revokeAgent',
         summary: 'Mark an agent as revoked in Haven.',
         description:
-          'Blocks Haven API access for the agent. Users can also revoke or change Safe module permissions outside Haven; on-chain revocation remains the authority boundary.',
+          'Blocks Haven API access for the agent. Revoking is permitted from `active`, `paused` and `pending_approval` — nothing re-activates a revoked agent, so the credential cannot return to life (on-chain revocation remains the authority boundary). Revoking also cancels the agent\'s open connection setup in the same transaction, so a connect flow that has not finished cannot approve a budget for an agent that no longer exists. The agent\'s `api_key_hash` is kept: sweep recovery for a stranded delegate balance stays available. Users can also revoke or change Safe module permissions outside Haven.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -2316,6 +2392,26 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
+          // #3544: an owned agent this route will not revoke is a distinct,
+          // typed refusal — `already_revoked` is "done", anything else is a
+          // real failure a caller must surface.
+          '409': {
+            description:
+              'The agent exists and is owned by the caller but cannot be revoked: `error_code` `already_revoked` (nothing to do) or `not_revocable` (the status is outside the revocable set).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code'],
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', enum: ['already_revoked', 'not_revocable'] },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -9367,6 +9463,196 @@ export const openapiSpec = {
           github_id: { type: 'string', description: 'Numeric GitHub user id (the allowlist key).' },
           login: { type: 'string', description: 'GitHub login at sign-in time; display only.' },
           expires_at: { type: 'string', format: 'date-time' },
+        },
+        additionalProperties: false,
+      },
+      OpsOverview: {
+        type: 'object',
+        required: ['users', 'smart_accounts', 'agents_by_status', 'active_delegations', 'payment_intents_24h', 'payment_refusals_24h', 'generated_at'],
+        properties: {
+          users: { type: 'integer' },
+          smart_accounts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['chain_id', 'account_type', 'count'],
+              properties: { chain_id: { type: 'integer' }, account_type: { type: 'string' }, count: { type: 'integer' } },
+              additionalProperties: false,
+            },
+          },
+          agents_by_status: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['status', 'count'],
+              properties: { status: { type: 'string' }, count: { type: 'integer' } },
+              additionalProperties: false,
+            },
+          },
+          active_delegations: { type: 'integer' },
+          payment_intents_24h: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['status', 'count'],
+              properties: { status: { type: 'string' }, count: { type: 'integer' } },
+              additionalProperties: false,
+            },
+          },
+          payment_refusals_24h: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['reason', 'count'],
+              properties: { reason: { type: 'string' }, count: { type: 'integer' } },
+              additionalProperties: false,
+            },
+          },
+          generated_at: { type: 'string', format: 'date-time' },
+        },
+        additionalProperties: false,
+      },
+      OpsSearchResponse: {
+        type: 'object',
+        required: ['key_type', 'hits', 'timed_out'],
+        properties: {
+          key_type: { type: 'string', enum: ['uuid', 'address', 'tx_hash', 'email'] },
+          hits: {
+            type: 'array',
+            description: 'Typed by kind: user (email masked), agent, payment_intent, smart_account, or system_tx (no user link).',
+            items: {
+              type: 'object',
+              required: ['kind', 'id'],
+              properties: {
+                kind: { type: 'string', enum: ['user', 'agent', 'payment_intent', 'smart_account', 'system_tx'] },
+                id: { type: 'string', format: 'uuid' },
+                user_id: { type: 'string', format: 'uuid' },
+                agent_id: { type: 'string', format: 'uuid' },
+                email: { type: 'string', description: 'Masked.' },
+                status: { type: 'string' },
+                chain_id: { type: 'integer' },
+                delegate_address: { type: ['string', 'null'] },
+                account_address: { type: 'string' },
+                account_type: { type: 'string' },
+                submitter: { type: 'string' },
+                created_at: { type: ['string', 'null'], format: 'date-time' },
+              },
+              additionalProperties: false,
+            },
+          },
+          timed_out: {
+            type: 'array',
+            items: { type: 'string', enum: ['users', 'agents', 'payment_intents', 'smart_accounts', 'system_txs'] },
+          },
+        },
+        additionalProperties: false,
+      },
+      OpsUserDetail: {
+        type: 'object',
+        required: ['user', 'smart_accounts', 'agents', 'active_delegations', 'payment_intents', 'payment_refusals'],
+        properties: {
+          user: {
+            type: 'object',
+            required: ['id', 'email', 'name', 'created_at'],
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              email: { type: 'string', description: 'Masked; reveal through POST /ops/reveal.' },
+              name: { type: ['string', 'null'], description: 'Masked; reveal through POST /ops/reveal.' },
+              created_at: { type: ['string', 'null'], format: 'date-time' },
+            },
+            additionalProperties: false,
+          },
+          smart_accounts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'chain_id', 'account_address', 'account_type', 'execution_rail', 'name', 'created_at'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                account_address: { type: 'string' },
+                account_type: { type: 'string' },
+                execution_rail: { type: 'string' },
+                name: { type: 'string' },
+                created_at: { type: ['string', 'null'], format: 'date-time' },
+              },
+              additionalProperties: false,
+            },
+          },
+          agents: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'account_id', 'name', 'status', 'delegate_address', 'created_at', 'archived_at'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                account_id: { type: ['string', 'null'], format: 'uuid' },
+                name: { type: 'string' },
+                status: { type: 'string' },
+                delegate_address: { type: ['string', 'null'] },
+                created_at: { type: ['string', 'null'], format: 'date-time' },
+                archived_at: { type: ['string', 'null'], format: 'date-time' },
+              },
+              additionalProperties: false,
+            },
+          },
+          active_delegations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'agent_id', 'chain_id', 'token_address', 'recipient_address', 'merchant_id', 'budget_atomic', 'period_seconds', 'start_date', 'expires_at'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                agent_id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                token_address: { type: 'string' },
+                recipient_address: { type: ['string', 'null'], description: 'The recipient pin; null for an open budget.' },
+                merchant_id: { type: ['string', 'null'], format: 'uuid' },
+                budget_atomic: { type: 'string' },
+                period_seconds: { type: 'integer' },
+                start_date: { type: 'integer', description: 'Unix seconds.' },
+                expires_at: { type: 'integer', description: 'Unix seconds.' },
+              },
+              additionalProperties: false,
+            },
+          },
+          payment_intents: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'agent_id', 'status', 'chain_id', 'token_symbol', 'amount_human', 'to_address', 'error_message', 'created_at'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                agent_id: { type: 'string', format: 'uuid' },
+                status: { type: 'string' },
+                chain_id: { type: 'integer' },
+                token_symbol: { type: 'string' },
+                amount_human: { type: 'string' },
+                to_address: { type: 'string' },
+                error_message: { type: ['string', 'null'], description: 'Stored redacted of vendor secrets.' },
+                created_at: { type: ['string', 'null'], format: 'date-time' },
+              },
+              additionalProperties: false,
+            },
+          },
+          payment_refusals: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'agent_id', 'chain_id', 'token_symbol', 'amount_atomic', 'reason', 'source', 'created_at'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                agent_id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                token_symbol: { type: 'string' },
+                amount_atomic: { type: 'string' },
+                reason: { type: 'string' },
+                source: { type: 'string' },
+                created_at: { type: ['string', 'null'], format: 'date-time' },
+              },
+              additionalProperties: false,
+            },
+          },
         },
         additionalProperties: false,
       },

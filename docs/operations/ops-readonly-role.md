@@ -8,6 +8,7 @@ covers:
   - packages/backend/src/db/ops-read-pool.ts
   - packages/backend/src/config/ops.ts
   - packages/backend/src/routes/ops.ts
+  - packages/backend/src/infra/repositories/ops-reads.ts
   - packages/backend/src/domain/redact-vendor-secrets.ts
 last-verified: "2026-10-01"
 ---
@@ -74,7 +75,8 @@ user in Railway → Postgres → Query.
    no user or the same user as `DATABASE_URL`.
 
    Before its first read, the pool also asks the database what the login can
-   do. If the login can do any of the following, the ops data routes (today
+   do. If the login can do any of the following, the ops data routes
+   (`GET /ops/overview`, `/ops/search`, `/ops/users/{id}` and
    `POST /ops/reveal`) answer 404 and the log says `Ops console data reads are OFF: …`:
    - read any column on the never-grant list (`OPS_NEVER_GRANT`: the
      password, API-key, signature and idempotency-key columns);
@@ -128,5 +130,5 @@ regex covers:
 
 A merchant URL can embed a customer's own key in its query string. These
 columns are granted because the console needs them (#3510 sanctions
-`machine_metadata`). They are customer data: the pages that show them
-(#3512, #3516) have to treat them that way.
+`machine_metadata`). They are customer data: whatever shows them has to treat
+them that way. The #3512 data routes return none of them.

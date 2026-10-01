@@ -24,6 +24,8 @@
  *   login denial-of-service, not a protection. Also the ops console's
  *   unauthenticated GitHub sign-in pair (`ops_auth`, #3509).
  * - opsRevealRateLimit — `POST /ops/reveal` (#3509), per ops token.
+ * - opsSearchRateLimit — `GET /ops/search` (#3512), per ops token, in its own
+ *   bucket (`groupId`) so searching never spends the reveal budget.
  *
  * Constants, not env: tuning is a code change with review, and the values are
  * deliberately generous — the goal is a ceiling, not throttling real use.
@@ -76,6 +78,21 @@ export const opsRevealRateLimit = {
   rateLimit: {
     max: 20,
     timeWindow: '1 minute',
+  },
+} as const
+
+/**
+ * `GET /ops/search` (#3512): keyed per ops token like reveal, but a separate
+ * bucket — `groupId` is appended to the key, so a console that searches as the
+ * founder types cannot 429 their next reveal. Looser than reveal because a
+ * search returns masked rows only; still a ceiling on a script enumerating
+ * email prefixes.
+ */
+export const opsSearchRateLimit = {
+  rateLimit: {
+    max: 60,
+    timeWindow: '1 minute',
+    groupId: 'ops_search',
   },
 } as const
 

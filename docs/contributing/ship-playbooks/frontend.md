@@ -14,6 +14,7 @@ covers:
   - packages/frontend/e2e/fixtures/api-mock.ts
   - packages/frontend/src/__tests__/api-mock-builder.test.ts
   - packages/frontend/src/__tests__/fixture-shape-parity.test.ts
+  - packages/ui/**
 last-verified: "2026-09-20"
 ---
 

@@ -4475,3 +4475,14 @@ to call next in structured fields, and those fields are typed end to end
 > `last-verified` is re-stamped to 2026-10-01: the failure envelope this
 > document's own re-verification trail pins is what changed. Nothing else in
 > this document was re-verified.
+>
+> **Re-verified unchanged (#3508, 2026-10-01):** the change touches
+> `.github/workflows/ci.yml`, a covered file, but only inside the required
+> package-check aggregator and the surface-job wiring: one new `ui_checks` job
+> (typecheck + the moved primitive suites from `packages/ui`), its entry in the
+> umbrella `needs:` list, and one summary clause pairing
+> `needs.changes.outputs.ui` with `needs.ui_checks.result`. Frontend-adjacent
+> CI plumbing for the shared design-system package: no tool is added, renamed
+> or re-shaped, no description text changes, no schema or argument changes, and
+> the runtime-skew and consent-hash contracts are untouched. `last-verified` is
+> not re-stamped: this note is the scope.

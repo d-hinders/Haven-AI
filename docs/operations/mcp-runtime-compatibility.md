@@ -73,7 +73,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-01"
 ---
 
 > **Re-verified #3496 (2026-09-30, the tombstone tell moves ahead of the
@@ -4369,3 +4369,29 @@ to call next in structured fields, and those fields are typed end to end
 > which fails when a constant the bump owns is no longer declared in the file
 > the table names. No tool, capability, version-skew rule or manifest value
 > moved.
+
+> **Re-verification (#3504, 2026-10-01):** `normalizeError`
+> (`packages/mcp-server/src/tools/support/errors.ts`) gains a third typed
+> branch next to #3416's and #3500's. A `HavenApiError` whose body carries
+> `error_code: 'delegation_budget_exceeded'` becomes
+> `code: DELEGATION_BUDGET_EXCEEDED` with the backend's own
+> `next_action: fund_account_or_raise_allowance` step and a
+> `next_tool_omitted_reason` naming the remedy (the wallet owner raises the
+> budget in Haven, or the period resets), plus the body's `remaining_atomic` /
+> `shortfall_atomic` and, when the body carries them, `phase` and `rail`.
+> Before this, the same condition reached the agent as the generic 4xx
+> `API_ERROR` stop with `next_action: stop_and_tell_user` and no figures on
+> every tool except the catalog prepare, whose own step-6 refusal already
+> emits this code (it catches the same 403 upstream, so `normalizeError` never
+> sees it there). The backend answers this 403 on every path that reads the
+> delegation's period budget (`delegation-authorize.ts` on both x402 schemes,
+> `mpp/budget-precheck.ts`, and since #3503 the direct `POST /payments`
+> pre-check), so `haven_send` / `haven_pay` now surface the same typed refusal
+> the catalog path does. Hosted-only mapping: no signer, connector or SDK
+> version is involved, and every other branch is unchanged. A backend older
+> than the pre-checks keeps its own shape, and a hosted server older than this
+> shows the 403 as the generic 4xx `API_ERROR` stop. Pinned by one new refusal
+> fixture (the census moves to 40 fixtures and 49 `refusalNextStep` calls).
+> `last-verified` is re-stamped to 2026-10-01: the failure envelope this
+> document's own re-verification trail pins is what changed. Nothing else in
+> this document was re-verified.

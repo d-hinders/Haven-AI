@@ -101,6 +101,9 @@ const RAIL_UNAVAILABLE_OMITTED_REASON =
 /** #3500: pinned verbatim, not imported, so a reworded reason reddens the fixture. */
 const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
   "the task budget's cap is spent and is enforced on-chain, so retrying cannot succeed; close it and open a new one, or pay without it, after telling the user"
+/** #3504: pinned verbatim, not imported, so a reworded reason reddens the fixture. */
+const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
+  "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
 const RETRY = 're-call the same tool with the explicit context this message names; no tool can be named until you supply it'
 const STOP = 'the user has to decide before anything is called again'
 const STOP_SUG = 'the user has to decide before anything is called again; suggested_tool names the tool for after that'
@@ -127,18 +130,19 @@ type Site = {
 }
 
 /**
- * Refusal fixtures: 34 HostedToolError sites (31 + the #3213
- * symbol-resolution refusal + the #3423 http-catalog-row refusal, the
- * eip3009 rejection carrying a live-state branch) + the 4 generic
- * normalizeError branches #3214/#3416/#3500 added (the HavenApiError 4xx/5xx
- * pair, HavenError, UNKNOWN_ERROR, #3416's typed rail-unavailable branch and
- * #3500's typed task-budget-exceeded branch).
+ * Refusal fixtures: 33 site-thrown `HostedToolError` rows (the eip3009
+ * rejection carrying a live-state branch) + the 7 generic `normalizeError`
+ * branches (the HavenApiError 4xx/5xx pair, `HavenError` and UNKNOWN_ERROR
+ * from #3214, #3416's typed rail-unavailable branch, #3500's typed
+ * task-budget-exceeded branch and #3504's typed delegation-budget-exceeded
+ * branch — the last three no site throws; the test throws the typed
+ * `HavenApiError` the branch reads).
  * #3475 follow-up review round 1 (S3): the missing-settlement-hash case is a
  * SUCCESS no-op, not a refusal — its fixture moved to `EMISSION_SITES`.
  */
-export const REFUSAL_SITE_COUNT = 39
-/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3500's 1 in normalizeError (the typed task_budget_exceeded 403). */
-export const REFUSAL_STEP_CALLS = 48
+export const REFUSAL_SITE_COUNT = 40
+/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3500's 1 in normalizeError (the typed task_budget_exceeded 403) + #3504's 1 in normalizeError (the typed delegation_budget_exceeded 403). */
+export const REFUSAL_STEP_CALLS = 49
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },
@@ -181,6 +185,8 @@ export const REFUSAL_SITES: Site[] = [
   { site: 'errors.ts normalizeError: rail unavailable for chain (typed 503)', base: { code: 'RAIL_UNAVAILABLE_FOR_CHAIN', message: 'cannot serve chain 84532', statusCode: 503 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: RAIL_UNAVAILABLE_OMITTED_REASON }, thrown: new HavenApiError('cannot serve chain 84532', 503, { error_code: 'rail_unavailable_for_chain', chain_id: 84532 }), expect: { next_action: 'stop_and_tell_user', ...OMIT(RAIL_UNAVAILABLE_OMITTED_REASON) } },
   // #3500: the typed task-budget 403 names its own code and reason, not the generic 4xx API_ERROR below.
   { site: 'errors.ts normalizeError: task budget exceeded (typed 403)', base: { code: 'TASK_BUDGET_EXCEEDED', message: 'task budget spent', statusCode: 403 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: TASK_BUDGET_EXCEEDED_OMITTED_REASON }, thrown: new HavenApiError('task budget spent', 403, { error_code: 'task_budget_exceeded', task_budget_id: 'tb_1', remaining_atomic: '0' }), expect: { next_action: 'stop_and_tell_user', ...OMIT(TASK_BUDGET_EXCEEDED_OMITTED_REASON) } },
+  // #3504: the typed delegation-budget 403 keeps the backend's own fund_account_or_raise_allowance step and figures, not the generic 4xx API_ERROR below.
+  { site: 'errors.ts normalizeError: delegation budget exceeded (typed 403)', base: { code: 'DELEGATION_BUDGET_EXCEEDED', message: 'period budget exceeded', statusCode: 403 }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON }, thrown: new HavenApiError('period budget exceeded', 403, { error_code: 'delegation_budget_exceeded', phase: 'insufficient_funds', next_action: 'fund_account_or_raise_allowance', rail: 'x402', remaining_atomic: '500', shortfall_atomic: '500' }), expect: { next_action: 'fund_account_or_raise_allowance', ...OMIT(DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON) } },
   { site: 'errors.ts normalizeError: HavenApiError 4xx', base: { code: 'API_ERROR', message: 'refused as made', statusCode: 404 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_API }, thrown: new HavenApiError('refused as made', 404), expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_API) } },
   { site: 'errors.ts normalizeError: HavenError', base: { code: 'CONFIG_ERROR', message: 'cfg broke', statusCode: 500 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_HAVEN }, thrown: new HavenError('cfg broke', 'CONFIG_ERROR', 500), expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_HAVEN) } },
   { site: 'errors.ts normalizeError: UNKNOWN_ERROR (thrown non-Error)', base: { code: 'UNKNOWN_ERROR', message: 'a string failure' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_UNKNOWN }, thrown: 'a string failure', expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_UNKNOWN) } },

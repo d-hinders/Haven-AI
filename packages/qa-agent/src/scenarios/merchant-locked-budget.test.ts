@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScenarioContext } from './types.js'
 
-const { mockSign, mockProve, mockRead, mockProvider } = vi.hoisted(() => ({
+const { mockSign, mockProve, mockRead, mockProvider, mockGetCode } = vi.hoisted(() => ({
+  mockGetCode: vi.fn(),
   mockSign: vi.fn(),
   mockProve: vi.fn(),
   mockRead: vi.fn(),
@@ -18,7 +19,9 @@ vi.mock('../lib/delegation-budget.js', async (original) => ({
   readOnchainDelegationBudget: mockRead,
 }))
 
-const { merchantLockedBudget } = await import('./merchant-locked-budget.js')
+const { merchantLockedBudget, TIMING } = await import('./merchant-locked-budget.js')
+TIMING.pollIntervalMs = 1
+TIMING.deployVisibleWaitMs = 100
 const API = 'https://api.example'
 const MERCHANT_URL = 'https://demo-merchant.example'
 const TREASURY = '0x' + '11'.repeat(20)
@@ -70,8 +73,8 @@ function install(options: Options = {}) {
     if (path === '/agents') return out(201, { id: 'agent-1', api_key: 'sk-1' })
     if (path === '/agents/agent-1/delegations/build') {
       return out(201, body?.merchant_slug
-        ? { delegation_hash: '0xpinned', signing_payload: TD }
-        : { delegation_hash: '0xopen', signing_payload: TD })
+        ? { delegation_hash: '0xpinned', signing_payload: TD, delegate_account_address: '0x' + '44'.repeat(20) }
+        : { delegation_hash: '0xopen', signing_payload: TD, delegate_account_address: '0x' + '44'.repeat(20) })
     }
     if (/\/delegations\/0x(open|pinned)\/activate$/.test(path)) return out(200, { activated: true })
     if (path === '/agents/agent-1/revoke') return out(200, {})
@@ -103,7 +106,9 @@ function scriptReads(after: { pinned: bigint; open: bigint }) {
 
 beforeEach(() => {
   mockSign.mockReset().mockResolvedValue('0x' + 'aa'.repeat(65))
-  mockProvider.mockReset().mockReturnValue({ getBlockNumber: async () => 100 })
+  let block = 100
+  mockGetCode.mockReset().mockResolvedValue('0x6080')
+  mockProvider.mockReset().mockReturnValue({ getBlockNumber: async () => block++, getCode: mockGetCode })
   mockProve.mockReset().mockResolvedValue({ ok: true, txHash: '0xsettle' })
   scriptReads({ pinned: 9_000n, open: 10_000n })
 })
@@ -167,5 +172,26 @@ describe('merchant-locked budget', () => {
     install()
     mockProve.mockResolvedValue({ ok: false, error: 'none seen' })
     expect((await merchantLockedBudget.run(ctx)).detail).toMatch(/no exact treasury→merchant Transfer: none seen/)
+  })
+
+  it('waits for the observer to see the deployed delegate account before the paid retry', async () => {
+    const calls = install()
+    mockGetCode.mockReset()
+      .mockResolvedValueOnce('0x')
+      .mockResolvedValueOnce('0x')
+      .mockResolvedValue('0x6080')
+    const result = await merchantLockedBudget.run(ctx)
+    expect(result.pass).toBe(true)
+    expect(mockGetCode.mock.calls.length).toBeGreaterThanOrEqual(4)
+    expect(calls.some((c) => c.path === '/x402/x-1/settle')).toBe(true)
+  })
+
+  it('fails naming the observer lag, and never settles, when the code never appears', async () => {
+    const calls = install()
+    mockGetCode.mockResolvedValue('0x')
+    const result = await merchantLockedBudget.run(ctx)
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/observer node has not caught up with the deploy/)
+    expect(calls.some((c) => c.path === '/x402/x-1/settle')).toBe(false)
   })
 })

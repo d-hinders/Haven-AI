@@ -41,6 +41,7 @@ type Options = {
   refusalBody?: Record<string, unknown>
   missingTransferAt?: number
   signContext500?: boolean
+  postShapeContext?: boolean
 }
 
 function installApi(options: Options = {}) {
@@ -48,6 +49,10 @@ function installApi(options: Options = {}) {
   let payments = 0
   let grantContexts = 0
   const calls: Array<{ method: string; path: string; body?: Record<string, unknown> }> = []
+  // The live GET /sub-budgets/:id/sign-context is FLAT (typed_data at the top level).
+  const ctxBody = (typedData: unknown) => options.postShapeContext
+    ? { sub_budget_id: 'x', sign_data: { typed_data: typedData } }
+    : { sub_budget_id: 'x', purpose: 'open', sub_budget_sign_context_version: 1, typed_data: typedData }
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
     const path = String(input).replace(API, '')
     const method = init?.method ?? 'GET'
@@ -90,11 +95,11 @@ function installApi(options: Options = {}) {
         parent_child_sub_budget: { id: 'parent-id', delegation_hash: '0xparent' },
       })
     }
-    if (path === '/sub-budgets/parent-id/sign-context') return out(200, { sign_data: { typed_data: TD('parent') } })
+    if (path === '/sub-budgets/parent-id/sign-context') return out(200, ctxBody(TD('parent')))
     if (path === '/sub-budgets/grant-id/sign-context') {
       grantContexts += 1
       if (grantContexts === 1 && options.signContext500) return out(500, { error: 'sign context exploded' })
-      return out(200, { sign_data: { typed_data: TD(grantContexts === 1 ? 'grant' : 'close') } })
+      return out(200, ctxBody(TD(grantContexts === 1 ? 'grant' : 'close')))
     }
     if (/^\/agents\/agent-a\/sub-budgets\/(parent-id|grant-id)\/sign$/.test(path)) {
       return out(200, { status: 'open' })
@@ -179,5 +184,12 @@ describe('sub-budget redemption', () => {
     const stale = await subBudgetRedemption.run(ctx)
     expect(stale.pass).toBe(false)
     expect(stale.detail).toMatch(/never saw B's 0.001 USDC reflected/)
+  })
+
+  it('does NOT accept the POST shape (sign_data wrapper) from sign-context', async () => {
+    installApi({ postShapeContext: true })
+    const result = await subBudgetRedemption.run(ctx)
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/sign-context failed \(200\)/)
   })
 })

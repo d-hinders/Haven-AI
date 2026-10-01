@@ -2232,7 +2232,10 @@ says there is nothing to preserve; `--replace` does not probe — only once the
 runtime install actually completed — a failed install skips it and the outcome
 says so), and the owner still revokes on the Haven
 agent page. The revoke route is owner-authenticated; the connector holds agent
-keys only.
+keys only. Since #3542 the dashboard's revoke of a superseded agent also ends
+its budget with one owner signature (`revoke-all`); a revoke that stops at the
+credential leaves the agent marked "budget still active" with a Finish revoking
+action. Nothing the connector sends or does changes.
 
 `runtime_config_unreadable` is the exception, and the only one of the six that
 reaches the dashboard (`runtimeStatusHelper`; the routing is pinned by

@@ -130,6 +130,16 @@ export function useAgents() {
     )
   }, [])
 
+  // #3542: after the owner's `revoke-all` lands, the agent has no live budget
+  // delegation left. Patch it locally so the half-revoked markers clear without
+  // waiting for the next poll — `revokeAgent`/`archiveAgent` deliberately do
+  // NOT touch this count, because ending the credential does not end the budget.
+  const markBudgetEnded = useCallback((id: string): void => {
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, live_delegation_count: 0 } : a)),
+    )
+  }, [])
+
   const pauseAgent = useCallback(async (id: string): Promise<void> => {
     await api.post(`/agents/${id}/pause`, {})
     setAgents((prev) =>
@@ -153,6 +163,7 @@ export function useAgents() {
     archiveAgent,
     unarchiveAgent,
     revokeAgent,
+    markBudgetEnded,
     pauseAgent,
     resumeAgent,
     refetch: fetchAgents,

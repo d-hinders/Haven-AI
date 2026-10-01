@@ -24,6 +24,7 @@
 import pool from '../../db.js'
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { withTransaction, type Executor } from '../transaction.js'
+import { LIVE_DELEGATION_STATUSES_SQL } from './delegation-budgets.js'
 
 export type { Executor }
 
@@ -65,6 +66,12 @@ export interface AgentRow {
    */
   tax_declaration_enabled: boolean
   has_stranded_funds: boolean
+  /**
+   * #3542: how many of this agent's delegations are live (pending, active or
+   * replaced — `LIVE_DELEGATION_STATUSES_SQL`, the revoke-all target set).
+   * Read-only display/guard signal; derived in the list/detail SQL.
+   */
+  live_delegation_count: number
 }
 
 export interface AgentAllowanceRow {
@@ -287,7 +294,9 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
                 WHERE pi.agent_id = a.id
                   AND mpre.event_type = 'merchant_retry_rejected_after_payment'
                   AND mpre.status = 'open'
-              ) AS has_stranded_funds
+              ) AS has_stranded_funds,
+              (SELECT COUNT(*)::int FROM agent_delegations ald
+               WHERE ald.agent_id = a.id AND ald.status IN ${LIVE_DELEGATION_STATUSES_SQL}) AS live_delegation_count
        FROM agents a
        LEFT JOIN smart_accounts us ON a.account_id = us.id
        -- #2413: only agents on a live delegation account are listed, so every
@@ -321,7 +330,9 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
                 WHERE pi.agent_id = a.id
                   AND mpre.event_type = 'merchant_retry_rejected_after_payment'
                   AND mpre.status = 'open'
-              ) AS has_stranded_funds
+              ) AS has_stranded_funds,
+              (SELECT COUNT(*)::int FROM agent_delegations ald
+               WHERE ald.agent_id = a.id AND ald.status IN ${LIVE_DELEGATION_STATUSES_SQL}) AS live_delegation_count
        FROM agents a
        LEFT JOIN smart_accounts us ON a.account_id = us.id
        -- #2413: matches the list filter, so an agent dropped from the list
@@ -678,6 +689,10 @@ export async function updateAgentProfile(
  * Crash-window orphans (#1423: disabled on-chain, still `active` here) DO
  * block archiving, correctly: revoke-all heals them, and that is the same
  * remedy this refusal names.
+ *
+ * "Live" is `LIVE_DELEGATION_STATUSES_SQL` — pending, active AND replaced
+ * (#3542), the same set revoke-all targets. A `replaced` row is still enabled
+ * on-chain until the owner's Stop userop lands (#3343), so it blocks too.
  */
 export const ARCHIVE_AGENT_SQL = `UPDATE agents
        SET archived_at = COALESCE(archived_at, NOW()), updated_at = NOW()
@@ -694,20 +709,20 @@ export const ARCHIVE_AGENT_SQL = `UPDATE agents
              AND NOT EXISTS (
                SELECT 1 FROM agent_delegations ad_unlinked
                WHERE ad_unlinked.agent_id = agents.id
-                 AND ad_unlinked.status IN ('pending', 'active')
+                 AND ad_unlinked.status IN ${LIVE_DELEGATION_STATUSES_SQL}
              )
            )
          )
          AND NOT EXISTS (
            SELECT 1 FROM agent_delegations ad
-           WHERE ad.agent_id = agents.id AND ad.status IN ('pending', 'active')
+           WHERE ad.agent_id = agents.id AND ad.status IN ${LIVE_DELEGATION_STATUSES_SQL}
          )
        RETURNING id, archived_at`
 
 /** True when the agent still holds budget authority that archiving must not hide. */
 export const AGENT_HAS_LIVE_DELEGATIONS_SQL = `SELECT EXISTS (
          SELECT 1 FROM agent_delegations
-         WHERE agent_id = $1 AND status IN ('pending', 'active')
+         WHERE agent_id = $1 AND status IN ${LIVE_DELEGATION_STATUSES_SQL}
        ) AS live`
 
 export async function agentHasLiveDelegations(

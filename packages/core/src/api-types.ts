@@ -382,7 +382,7 @@ export type paths = {
         put?: never;
         /**
          * Archive an agent (soft removal — history is kept).
-         * @description Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
+         * @description Replaces agent deletion (#1401). Delegation agents require status=revoked and no live budget delegations (pending, active or replaced — anything revoke-all would still target) because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
          */
         post: operations["archiveAgent"];
         delete?: never;
@@ -1177,7 +1177,7 @@ export type paths = {
         post?: never;
         /**
          * Unlink an account from the Haven account.
-         * @description Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.
+         * @description Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key.
          */
         delete: operations["unlinkUserAccount"];
         options?: never;
@@ -4249,6 +4249,7 @@ export type components = {
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
+            live_delegation_count?: number;
         } & {
             [key: string]: unknown;
         };

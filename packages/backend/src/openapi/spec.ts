@@ -2031,7 +2031,7 @@ export const openapiSpec = {
         operationId: 'archiveAgent',
         summary: 'Archive an agent (soft removal — history is kept).',
         description:
-          'Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
+          'Replaces agent deletion (#1401). Delegation agents require status=revoked and no live budget delegations (pending, active or replaced — anything revoke-all would still target) because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -3771,7 +3771,7 @@ export const openapiSpec = {
         operationId: 'unlinkUserAccount',
         summary: 'Unlink an account from the Haven account.',
         description:
-          'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.',
+          'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         responses: {
@@ -10127,6 +10127,17 @@ export const openapiSpec = {
            * row and omits it — a brand-new agent cannot have stranded funds.
            */
           has_stranded_funds: { type: 'boolean' },
+          /**
+           * #3542: how many of this agent's delegations are LIVE — status
+           * `pending`, `active` or `replaced`, the same set revoke-all targets
+           * and the archive / account-delete guards refuse on. `replaced` rows
+           * count because they stay enabled on-chain until their Stop userop
+           * lands. Derived by the list and detail reads, so it is NOT
+           * required: the creation response omits it (a brand-new agent holds
+           * none). Zero means archive and account removal are not blocked by
+           * delegations.
+           */
+          live_delegation_count: { type: 'integer', minimum: 0 },
         },
         additionalProperties: true,
       },

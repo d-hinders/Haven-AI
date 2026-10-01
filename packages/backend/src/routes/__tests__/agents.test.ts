@@ -95,6 +95,7 @@ describe('agent routes', () => {
             organization_id: null,
             tax_declaration_enabled: false,
             mcp_last_seen_at: null,
+            live_delegation_count: 2,
           }],
         }
       }
@@ -115,6 +116,7 @@ describe('agent routes', () => {
       name: 'Research Agent',
       allowances: [],
       mcp_last_seen_at: null,
+      live_delegation_count: 2,
     })
     // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
     // setup used to leave the user with "Agents 0" and no route back to an
@@ -657,6 +659,7 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
     account_id: 'safe-1', account_address: '0x' + '22'.repeat(20), account_name: 'Main',
     account_chain_id: 84532, api_key_prefix: 'sk_a', status: 'active',
     created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null, has_stranded_funds: false,
+    live_delegation_count: 2,
   }
   beforeEach(() => {
     mockQuery.mockReset()
@@ -696,6 +699,8 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
       id: 'd-1', agent_id: 'agent-1', token_address: SEPOLIA_USDC,
       token_symbol: 'USDC', allowance_amount: '1.00', reset_period_min: 1440,
     }])
+    // #3542: the repository's live_delegation_count flows through untouched.
+    expect(agent.live_delegation_count).toBe(2)
   })
 
   it('by-id: same derivation, and a revoked-only agent reports NO budget', async () => {
@@ -703,6 +708,7 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
     const res = await getAgents('/agents/agent-1')
     expect(res.statusCode).toBe(200)
     expect(res.json().allowances).toEqual([])
+    expect(res.json().live_delegation_count).toBe(2)
   })
 
   // #2020, reversing the byte-identical mirror pin this replaces: the Safe
@@ -714,7 +720,11 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
     const res = await getAgents('/agents')
     expect(res.json().agents[0].allowances).toEqual([])
     // Neither table is consulted for a legacy-only listing:
-    expect(mockQuery.mock.calls.some((c) => /FROM agent_delegations/.test(String(c[0])))).toBe(false)
+    // (The agents read itself carries a live_delegation_count subquery over
+    // agent_delegations — #3542 — so exclude that statement.)
+    expect(
+      mockQuery.mock.calls.some((c) => !/FROM agents a/.test(String(c[0])) && /FROM agent_delegations/.test(String(c[0]))),
+    ).toBe(false)
     expect(mockQuery.mock.calls.some((c) => /FROM agent_allowances/.test(String(c[0])))).toBe(false)
   })
 

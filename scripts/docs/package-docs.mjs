@@ -232,6 +232,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
+    // #3542: EDITED, scope = the "dashboard offers the revoke" paragraph (the
+    // dashboard revoke now also ends the budget with one owner signature).
+    // Nothing else re-verified. Prior:
     // #3210: EDITED, scope = the `--doctor` / `--repair` section's runtime-flag
     // paragraph and the added flagless `--doctor` example (`--runtime` optional
     // for `--doctor`, required for `--repair`). Nothing else re-verified. Prior:

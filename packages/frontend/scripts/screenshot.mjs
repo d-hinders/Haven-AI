@@ -965,6 +965,68 @@ export const FIXTURE_ORGANIZATIONS = [
   },
 ]
 
+/**
+ * #3542: the two HALF-REVOKED agents — credential ended in Haven (revoked) or
+ * filed under Removed (archived), while the budget delegation is still
+ * redeemable on-chain, so `live_delegation_count` is 1 on each.
+ *
+ * Deliberately NOT part of `FIXTURE_AGENTS`: that list feeds the dashboard
+ * overview, the account page, the connected-agents counts and a dozen other
+ * captures, and appending two revoked agents would change every one of them.
+ * Only the `half-revoked-agents` scenario serves them (merged into `/agents`
+ * there); the matching `/agents/:id/delegations` and `/delegate-balance` reads
+ * are keyed below, in `fixtureFor` and `FIXTURE_DELEGATE_BALANCES`, so the
+ * detail pages of these two agents render their real budget card and no
+ * false "recoverable funds" banner.
+ *
+ * Shape: spread from the showcase agent so every key a hook reads is present
+ * (the fixture-shape parity suite compares against the typed e2e fixture).
+ * `allowances` keeps its active-row projection — revoking the credential does
+ * not touch the delegation, which is the whole defect.
+ */
+const FIXTURE_HALF_REVOKED_BASE = {
+  ...FIXTURE_AGENTS[0],
+  // No delegate address: the same pre-column legacy shape `agent-retired`
+  // carries, so `/delegate-balance` answers its real 422 and no stranded-funds
+  // banner is invented for an agent that never paid.
+  delegate_address: null,
+  has_stranded_funds: false,
+  mcp_server_name: null,
+  mcp_last_seen_at: '2026-07-01T09:00:00.000Z',
+  status: 'revoked',
+  organization_id: null,
+  labels: [],
+  live_delegation_count: 1,
+}
+export const FIXTURE_HALF_REVOKED_AGENTS = [
+  {
+    ...FIXTURE_HALF_REVOKED_BASE,
+    id: 'agent-half-revoked', name: 'Legacy research agent',
+    description: 'Revoked in Haven; its weekly budget was never ended',
+    api_key_prefix: 'hvn_d4e5f6',
+    created_at: '2026-05-20T10:00:00.000Z',
+    allowances: [{
+      id: 'alw-half-revoked', agent_id: 'agent-half-revoked',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '150.000000', reset_period_min: 10080,
+    }],
+    archived_at: null,
+  },
+  {
+    ...FIXTURE_HALF_REVOKED_BASE,
+    id: 'agent-half-removed', name: 'Old data-feed agent',
+    description: 'Removed from the list; its daily budget was never ended',
+    api_key_prefix: 'hvn_a7b8c9',
+    created_at: '2026-04-12T10:00:00.000Z',
+    allowances: [{
+      id: 'alw-half-removed', agent_id: 'agent-half-removed',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '75.000000', reset_period_min: 1440,
+    }],
+    archived_at: '2026-08-02T10:00:00.000Z',
+  },
+]
+
 const FIXTURE_PORTFOLIO = {
   // #3127 (finding 8): SEK joins the priced totals — ~10.76 SEK/USD — with
   // the token rows' `sekValue` summing to it.
@@ -1251,6 +1313,9 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // balance reads — it answers 422 at `routes/agents.ts:140-142`. Served as a
   // real 422 by `fixtureFor` below.
   'agent-retired': null,
+  // #3542: the half-revoked scenario's agents carry no delegate address either.
+  'agent-half-revoked': null,
+  'agent-half-removed': null,
 }
 
 export const FIXTURE_AGENT_STATS = {
@@ -1874,6 +1939,39 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-05-18T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 4, 18) / 1000),
           created_at: '2026-05-18T10:00:00.000Z',
+        }],
+      }
+    }
+    // #3542: the budget delegations the two half-revoked agents still hold.
+    // `status: 'active'` on a REVOKED agent is the defect itself — the route
+    // has no status filter, so it serves the row, and revoke-all targets it.
+    if (pathname === `/agents/agent-half-revoked/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-half-1', chain_id: FIXTURE_ACCOUNT.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: null,
+          delegation_hash: '0x' + '6f'.repeat(32),
+          version: 1, status: 'active',
+          budget_atomic: '150000000', period_seconds: 604_800,
+          start_date: '2026-05-20T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 4, 20) / 1000),
+          created_at: '2026-05-20T10:00:00.000Z',
+        }],
+      }
+    }
+    if (pathname === `/agents/agent-half-removed/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-half-2', chain_id: FIXTURE_ACCOUNT.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: null,
+          delegation_hash: '0x' + '7a'.repeat(32),
+          version: 1, status: 'active',
+          budget_atomic: '75000000', period_seconds: 86_400,
+          start_date: '2026-04-12T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 3, 12) / 1000),
+          created_at: '2026-04-12T10:00:00.000Z',
         }],
       }
     }
@@ -3081,6 +3179,10 @@ async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
   await shoot(page.locator('main').first(), 'page')
 }
 
+// Staged by the `half-revoked-agents` run: how the superseded card's signer set
+// answers (`ready` | `not-ready` | `loading`). Reset at the top of each run.
+let halfRevokedSignerStage = 'ready'
+
 export const SCENARIOS = {
   'settings-accounting': {
     description:
@@ -3512,6 +3614,196 @@ export const SCENARIOS = {
       await page.getByText('haven-data-feed', { exact: true }).first().waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'list')
+    },
+  },
+
+  'half-revoked-agents': {
+    description:
+      'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the collapsed Removed toggle carrying its warning, the expanded Removed group, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
+    api(apiPath, method) {
+      if (apiPath === '/agents' && method === 'GET') {
+        return {
+          agents: [...FIXTURE_AGENTS, ...FIXTURE_HALF_REVOKED_AGENTS],
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      // The Finish revoking dialog mounts the budget hook for the half-revoked
+      // agents, whose signer set must resolve (one enrolled passkey: ready).
+      if (apiPath.startsWith('/agents/agent-half-') && apiPath.endsWith('/account-signers')) {
+        return {
+          account_address: FIXTURE_ACCOUNT.account_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
+          owner_address: null,
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        }
+      }
+      // ── The superseded-agent revoke confirm (#3542 B), reached through the
+      // connect modal's completed setup exactly as `connect-agent-superseded-*`
+      // do. Its signer set is staged by the run: loading (delayed answer),
+      // cannot-sign (no signer at all) and ready (one enrolled passkey).
+      if (apiPath === '/agents/agent-research/account-signers') {
+        if (halfRevokedSignerStage === 'loading') {
+          return delayedHttp(30_000, {
+            account_address: FIXTURE_ACCOUNT.account_address, chain_id: FIXTURE_ACCOUNT.chain_id,
+            owner_address: null, passkeys: [],
+          })
+        }
+        return {
+          account_address: FIXTURE_ACCOUNT.account_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
+          owner_address: null,
+          passkeys: halfRevokedSignerStage === 'not-ready'
+            ? []
+            : [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        }
+      }
+      if (apiPath === '/agents/agent-research/revoke' && method === 'POST') return {}
+      if (apiPath === '/agents/agent-research/delegations/revoke-all' && method === 'POST') {
+        // A prepare the headless browser cannot sign: no WebAuthn here, so the
+        // ceremony fails and the card shows its "key revoked, budget still
+        // active" result — the same screen a cancelled signature produces.
+        return {
+          signature_scheme: 'webauthn_userop',
+          user_operation: {},
+          user_op_hash: '0x' + '9c'.repeat(32),
+          delegation_hashes: ['0x' + '4d'.repeat(32)],
+        }
+      }
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'active',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          setup_prompt: 'Please connect this workspace to Haven.',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-fixture-new',
+          status: 'active',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'New agent', description: null },
+          haven_wallet: {
+            id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.account_address, chain_id: FIXTURE_ACCOUNT.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [{
+            id: 'budget-1', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440,
+          }],
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          install_status: {
+            runtime_mcp_mode: 'local_stdio', local_mcp_configured: true,
+            local_mcp_acknowledged: true, credential_files_written: true,
+            skill_installed: false, restart_required: true,
+            superseded_agent_ids: ['agent-research'],
+          },
+          approval: { status: 'confirmed', safe_tx_hash: null, tx_hash: null },
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      halfRevokedSignerStage = 'ready'
+      // ── /agents: list card, collapsed toggle, expanded Removed group ──────
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const revokedCard = page.getByTestId('agent-card').filter({ hasText: 'Legacy research agent' })
+      await revokedCard.getByRole('button', { name: 'Finish revoking Legacy research agent' }).waitFor({ timeout: 20_000 })
+      await revokedCard.scrollIntoViewIfNeeded()
+      await shoot(revokedCard, 'list-card-revoked')
+
+      // Finish mode of the Remove dialog, opened from Finish revoking.
+      await revokedCard.getByRole('button', { name: 'Finish revoking Legacy research agent' }).click()
+      const finishDialog = page.getByRole('dialog', { name: 'Finish revoking Legacy research agent?' })
+      await finishDialog.waitFor({ timeout: 20_000 })
+      await finishDialog.getByText(/You sign once and every budget it still holds ends/).waitFor({ timeout: 20_000 })
+      await shoot(finishDialog, 'finish-dialog')
+      await finishDialog.getByRole('button', { name: 'Cancel' }).click()
+      await finishDialog.waitFor({ state: 'detached', timeout: 20_000 })
+
+      // The toggle carries the warning while the group is COLLAPSED — that is
+      // the state the owner sees by default, and the whole reason for it.
+      const toggle = page.getByRole('button', { name: /Removed/ })
+      await toggle.getByText(/still has an active budget/).waitFor({ timeout: 20_000 })
+      await toggle.scrollIntoViewIfNeeded()
+      await shoot(toggle.locator('xpath=..'), 'removed-toggle-collapsed')
+
+      await toggle.click()
+      const removedGroup = page.getByRole('group', { name: 'Removed agents' })
+      await removedGroup.getByRole('button', { name: 'Finish revoking Old data-feed agent' }).waitFor({ timeout: 20_000 })
+      await removedGroup.scrollIntoViewIfNeeded()
+      await shoot(removedGroup, 'removed-expanded')
+
+      // ── Agent detail: the callout above the budget card ───────────────────
+      for (const [id, label] of [
+        ['agent-half-revoked', 'detail-revoked'],
+        ['agent-half-removed', 'detail-archived'],
+      ]) {
+        await page.goto(`${BASE_URL}/agents/${id}`, { waitUntil: 'networkidle', timeout: 60_000 })
+        await dismissMobileSidebar(page, vp)
+        await page.getByTestId('half-revoked-callout').waitFor({ timeout: 20_000 })
+        await page.getByRole('button', { name: 'Finish revoking', exact: true }).waitFor({ timeout: 20_000 })
+        await shoot(page.locator('main').first(), label)
+      }
+
+      // ── Account page: the agent summary says the budget is still active ───
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText(/Budget still active/).first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'account-summary')
+
+      // ── Superseded-agent revoke confirm: loading, cannot sign, ready, result ──
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const connect = page.getByRole('dialog').first()
+      await connect.getByLabel('Agent name').fill('New agent')
+      await connect.getByRole('button', { name: 'Set agent budget' }).click()
+      await connect.getByPlaceholder('Amount').fill('25')
+      await connect.getByRole('button', { name: 'Review agent budget' }).click()
+      await connect.getByRole('button', { name: 'Create setup prompt' }).click()
+      await connect.getByText(/This setup replaced /).waitFor({ timeout: 30_000 })
+
+      const confirm = page.getByRole('dialog', { name: 'Revoke Research agent?' })
+      const openConfirm = async (stage) => {
+        halfRevokedSignerStage = stage
+        await connect.getByRole('button', { name: 'Revoke Research agent' }).click()
+        await confirm.waitFor({ timeout: 20_000 })
+      }
+      const closeConfirm = async () => {
+        await confirm.getByRole('button', { name: 'Keep it' }).click()
+        await confirm.waitFor({ state: 'detached', timeout: 20_000 })
+      }
+
+      // Signer set still loading: only the confirm waits (cancel stays usable),
+      // and it says nothing about signing.
+      await openConfirm('loading')
+      await confirm.locator('button:disabled', { hasText: 'Revoke agent' }).waitFor({ timeout: 20_000 })
+      await shoot(confirm, 'superseded-confirm-loading')
+      await closeConfirm()
+
+      // No signer reachable from this device: confirm still available, hint shown.
+      await openConfirm('not-ready')
+      await confirm.getByText(/cannot sign for the account/).waitFor({ timeout: 20_000 })
+      await shoot(confirm, 'superseded-confirm-cannot-sign')
+      await closeConfirm()
+
+      // Normal state: one enrolled passkey.
+      await openConfirm('ready')
+      await confirm.getByRole('button', { name: 'Revoke agent' }).waitFor({ timeout: 20_000 })
+      await shoot(confirm, 'superseded-confirm')
+
+      // Confirm: the credential is revoked, the signature cannot complete, and
+      // the card says which half happened.
+      await confirm.getByRole('button', { name: 'Revoke agent' }).click()
+      await connect.getByText(/Its key is revoked, but its budget is still active/).waitFor({ timeout: 30_000 })
+      await shoot(connect, 'superseded-result-budget-active')
     },
   },
 

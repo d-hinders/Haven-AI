@@ -379,7 +379,11 @@ Two limits are deliberate:
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:
 `ARCHIVE_AGENT_SQL` requires `status='revoked'` **and** `NOT EXISTS` any
-`pending`/`active` row in `agent_delegations`, in one statement. Revoking flips
+live row in `agent_delegations`, in one statement. Since #3542 "live" is
+`pending`, `active` **and** `replaced` — one shared set
+(`LIVE_DELEGATION_STATUSES_SQL`) with the `revoke-all` target list, the
+account-delete guard and the `live_delegation_count` on agent reads — because a
+`replaced` row stays redeemable until its own disable lands. Revoking flips
 only the agent's status — it never touches delegations — so revoke+archive
 through the API (bypassing the dashboard's revoke-all-first ordering) cannot
 file a delegation agent under Removed while its budget stays redeemable
@@ -2106,4 +2110,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > No signature, key role, delegation shape, caveat, allowlist or redemption
 > guard in this document moves. The three-link allowlist and the narrowing
 > gate run unchanged. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
+> **#3542 (2026-10-01).** Re-verified unchanged except the archive guard
+> above. The archive guard and the account-delete guard
+> (`HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`) now count `replaced` rows as live,
+> so an agent holding only a still-enabled `replaced` delegation can neither be
+> filed under Removed nor orphaned by deleting its account from Haven. Agent
+> reads carry `live_delegation_count`, and the dashboard uses it: the
+> replaced-agents card revokes the credential and then asks for the owner's
+> `revoke-all` signature, the Remove dialog decides the signature from the
+> loaded delegation list rather than `agents.status`, and an agent that is
+> revoked or archived with live delegations is marked with a Finish revoking
+> action. Haven still signs nothing; ending a budget is still only the owner's
+> `revoke-all`. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.

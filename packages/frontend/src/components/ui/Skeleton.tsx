@@ -1,18 +1,9 @@
-type SkeletonProps = {
-  className?: string
-  variant?: 'text' | 'rect' | 'circle'
-}
-
-export function Skeleton({ className = '', variant = 'rect' }: SkeletonProps) {
-  // Default background applies only when the caller hasn't supplied one.
-  const hasCustomBg = /(^|\s)bg-/.test(className)
-  const bgClass = hasCustomBg ? '' : 'bg-[var(--v2-surface-2)]'
-  // Height/width are caller-controlled via `className`. Variant only sets the corner radius.
-  const variantClass =
-    variant === 'circle' ? 'rounded-full' :
-    variant === 'text' ? 'rounded' :
-    'rounded-md'
-  return <div className={`${bgClass} animate-pulse ${variantClass} ${className}`} aria-hidden="true" />
-}
-
-export default Skeleton
+/**
+ * Re-export shim (#3508). `Skeleton` moved to `@haven_ai/ui`
+ * (`packages/ui/src/Skeleton.tsx`) as part of the shared ops-console design
+ * system; the primitives the ops console consumes moved to the shared package. This shim keeps every existing
+ * `@/components/ui/Skeleton` import working. New code imports the package
+ * directly.
+ */
+export * from '@haven_ai/ui/Skeleton'
+export { default } from '@haven_ai/ui/Skeleton'

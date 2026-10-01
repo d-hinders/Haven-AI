@@ -57,9 +57,16 @@ import { describe, expect, it } from 'vitest'
  */
 
 const FRONTEND = resolve(__dirname, '../..')
-const css = readFileSync(join(FRONTEND, 'src/app/globals.css'), 'utf8')
+// The palette moved to @haven_ai/ui (#3508): tokens.css and the Tailwind
+// preset now live in packages/ui, imported by the app layout before
+// globals.css. globals.css itself keeps the classes that CONSUME tokens
+// (.v2-modal-backdrop, .v2-scroll-edge-cue), so the reader control below
+// spans both files.
+const UI = resolve(FRONTEND, '..')
+const css = readFileSync(join(UI, 'ui/src/tokens.css'), 'utf8')
+const appCss = readFileSync(join(FRONTEND, 'src/app/globals.css'), 'utf8')
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const tailwindConfig = require(join(FRONTEND, 'tailwind.config.js'))
+const tailwindConfig = require(join(UI, 'ui', 'tailwind.preset.js'))
 
 /** Booting real Tailwind is a real compile; vitest's 5s default would flake. */
 const COMPILE_TIMEOUT = 60_000
@@ -141,7 +148,7 @@ describe('the reader works before any "emits nothing" is believed (#1945)', () =
     // The named-class idiom that RESOLVED in the browser probe while every
     // `shadow-[var(…)]` sibling read `none`. If this ever returns null, the
     // stylesheet reader is broken and every token assertion below is vacuous.
-    expect(css, 'globals.css does not contain .v2-modal-backdrop').toMatch(/\.v2-modal-backdrop\s*\{/)
+    expect(appCss, 'globals.css does not contain .v2-modal-backdrop').toMatch(/\.v2-modal-backdrop\s*\{/)
     expect(tokenValue('modal-backdrop'), 'the token reader returned nothing for a live token').toMatch(
       /^rgba\(/,
     )
@@ -184,10 +191,16 @@ interface ShadowUse {
 function shadowUses(): ShadowUse[] {
   const re = /\b([a-z-]+:)?shadow-(?:\[var\(--v2-shadow-[a-z-]+\)\]|(?:card-raised|card|button|modal|popover)\b)/g
   const out: ShadowUse[] = []
-  for (const file of sourceFiles(join(FRONTEND, 'src'))) {
-    if (/__tests__|\.test\.tsx?$/.test(file)) continue
-    for (const m of readFileSync(file, 'utf8').matchAll(re)) {
-      out.push({ file: relative(FRONTEND, file), utility: m[0] })
+  // The primitives moved to packages/ui (#3508), so the sweep follows them:
+  // a dead spelling in the shared package must fail this guard exactly like
+  // one in the app.
+  const roots = [join(FRONTEND, 'src'), join(UI, 'ui', 'src')]
+  for (const root of roots) {
+    for (const file of sourceFiles(root)) {
+      if (/__tests__|\.test\.tsx?$/.test(file)) continue
+      for (const m of readFileSync(file, 'utf8').matchAll(re)) {
+        out.push({ file: relative(FRONTEND, file), utility: m[0] })
+      }
     }
   }
   return out
@@ -293,7 +306,7 @@ describe('the dead spelling cannot come back (#1945)', () => {
     // Same mechanism #1792/#1809 used for `TONE_EXEMPT`: an exemption that
     // stops being true must fail rather than linger as stale data dressed as a
     // decision. `scroll-edge` is exempt because it is applied through a class.
-    expect(css, '.v2-scroll-edge-cue no longer applies --v2-shadow-scroll-edge').toMatch(
+    expect(appCss, '.v2-scroll-edge-cue no longer applies --v2-shadow-scroll-edge').toMatch(
       /\.v2-scroll-edge-cue\s*\{[\s\S]*box-shadow:\s*var\(--v2-shadow-scroll-edge\)/,
     )
   })

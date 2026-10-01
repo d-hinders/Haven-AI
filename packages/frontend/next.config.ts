@@ -38,7 +38,7 @@ const nextConfig: NextConfig = {
   // dashboard keeps building if core ever exposes untranspiled source, and so
   // core's output goes through Next's own browser-target pipeline rather than
   // being trusted verbatim.
-  transpilePackages: ['@haven_ai/core'],
+  transpilePackages: ['@haven_ai/core', '@haven_ai/ui'],
   async rewrites() {
     return [
       {

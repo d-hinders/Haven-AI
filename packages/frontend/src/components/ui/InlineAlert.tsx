@@ -1,13 +1,8 @@
-import type { ReactNode } from 'react'
-
 /**
- * A short, field- or dialog-level failure message. Keep larger failed-state
- * panels and toasts in their dedicated components.
+ * Re-export shim (#3508). `InlineAlert` moved to `@haven_ai/ui`
+ * (`packages/ui/src/InlineAlert.tsx`) as part of the shared ops-console design
+ * system; the primitives the ops console consumes moved to the shared package. This shim keeps every existing
+ * `@/components/ui/InlineAlert` import working. New code imports the package
+ * directly.
  */
-export function InlineAlert({ children, id }: { children: ReactNode; id?: string }) {
-  return (
-    <p id={id} role="alert" className="text-xs text-[var(--v2-danger)]">
-      {children}
-    </p>
-  )
-}
+export * from '@haven_ai/ui/InlineAlert'

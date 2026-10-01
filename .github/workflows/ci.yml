@@ -23,6 +23,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      ui: ${{ steps.filter.outputs.ui }}
       backend: ${{ steps.filter.outputs.backend }}
       sdk: ${{ steps.filter.outputs.sdk }}
       connect: ${{ steps.filter.outputs.connect }}
@@ -291,6 +292,33 @@ jobs:
 
       - name: Build core
         run: npm run build -w packages/core
+
+  ui_checks:
+    name: UI checks
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check ui
+        run: npm run typecheck -w packages/ui
+
+      - name: Run ui unit tests
+        # The moved primitives' suites (#3508). Until this job existed they ran
+        # only inside the frontend's job; the package has its own now because a
+        # ui-only change routes here, not to the frontend job.
+        run: npm run test -w packages/ui
 
   qa_agent_checks:
     name: QA agent checks
@@ -981,7 +1009,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -1072,6 +1100,11 @@ jobs:
 
           if [ "${{ needs.changes.outputs.frontend }}" = "true" ] && [ "${{ needs.frontend_checks.result }}" != "success" ]; then
             echo "Frontend checks result: ${{ needs.frontend_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.ui }}" = "true" ] && [ "${{ needs.ui_checks.result }}" != "success" ]; then
+            echo "UI checks result: ${{ needs.ui_checks.result }}"
             exit 1
           fi
 

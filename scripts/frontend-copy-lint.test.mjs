@@ -304,12 +304,13 @@ const PAGE = 'packages/frontend/src/app/page.tsx'
 const BASE = 'packages/frontend/copy-lint-baseline.json'
 const copy = (text) => `export default function P() {\n  return <p>${text}</p>\n}\n`
 
-// Both SCAN_DIRS must contain something: the guard REFUSES a scan directory
-// that matches no files ("repoint it, do not leave it matching nothing"), which
-// is its own positive control against a lint quietly reporting on an empty set.
-// A fixture supplying only `app/` trips that refusal and would have looked like
-// the copy rule firing.
+// Every SCAN_DIRS entry must contain something: the guard REFUSES a scan
+// directory that matches no files ("repoint it, do not leave it matching
+// nothing"), which is its own positive control against a lint quietly
+// reporting on an empty set. A fixture supplying only `app/` trips that
+// refusal and would have looked like the copy rule firing.
 const OTHER = 'packages/frontend/src/components/Thing.tsx'
+const UI_FILE = 'packages/ui/src/Thing.tsx'
 
 // The guard carries THREE self-checks that fire before any copy rule, and each
 // one caught a draft of this fixture: a SCAN_DIRS entry matching no files, a
@@ -324,6 +325,7 @@ const allowlisted = Object.fromEntries(
 const scaffold = (files) => ({
   ...allowlisted,
   [OTHER]: copy('Nothing to see.'),
+  [UI_FILE]: 'export const x = 1\n',
   ...files,
 })
 

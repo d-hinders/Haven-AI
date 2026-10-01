@@ -14,6 +14,7 @@ covers:
   - packages/frontend/e2e/fixtures/api-mock.ts
   - packages/frontend/src/__tests__/api-mock-builder.test.ts
   - packages/frontend/src/__tests__/fixture-shape-parity.test.ts
+  - packages/ui/**
 last-verified: "2026-09-20"
 ---
 
@@ -35,7 +36,7 @@ If a `/design-system` route exists, inspect it before editing UX.
 
 ## 2. Reuse first
 
-Inspect `packages/frontend/src/components/ui` (primitives) and `packages/frontend/src/components/haven` (domain components) before adding UI. Prefer composition; do **not** invent new card styles, spacing, shadows, radius, or typography unless the existing system genuinely can't express the need. Use the v2 tokens in `globals.css` and the Tailwind aliases.
+Inspect `packages/frontend/src/components/ui` (primitives) and `packages/frontend/src/components/haven` (domain components) before adding UI. Prefer composition; do **not** invent new card styles, spacing, shadows, radius, or typography unless the existing system genuinely can't express the need. Use the v2 tokens in `packages/ui/src/tokens.css` (imported into the app before `globals.css`; shared `@haven_ai/ui` package since #3508) and the Tailwind aliases from the frontend config, which consumes the `@haven_ai/ui` preset.
 
 **Absorb a pattern on its 2nd occurrence, not its 12th ([#901](https://github.com/d-hinders/Haven-AI/issues/901)).** If this diff writes the same markup shape a second time — a header band, badge, row, empty-state, inline `<svg>`, address slice — or re-creates something a primitive already covers, extract it into a `ui/`/`haven/` primitive **and** document it on `/design-system`, in this same PR. This is the Captain Self-Check Preflight's **Pattern Absorption** item; it's the mechanism that prevents the debt clusters epic #859 had to clean retroactively. Only skip it if the two uses will genuinely diverge — and say so.
 

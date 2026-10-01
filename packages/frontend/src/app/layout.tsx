@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
+import '@haven_ai/ui/tokens.css'
 import './globals.css'
 import Providers from './providers'
 import DiscoverySourceCapture from '@/components/DiscoverySourceCapture'

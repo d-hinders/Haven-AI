@@ -44,12 +44,20 @@ import { execFileSync } from 'node:child_process'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PAGE = 'src/app/(authenticated)/design-system/page.tsx'
-// Only these two directories hold the shared, showcase-worthy primitives.
+// Only these two directories hold the shared, showcase-worthy primitives in
+// the app; the primitives that moved to @haven_ai/ui are reached through
+// UI_GIT_PATHSPEC below (#3508) and matched repo-root-relative in
+// isPrimitiveFile — the gate follows the code, or it stops seeing the
+// implementations the moment a primitive moves.
 const PRIMITIVE_DIRS = ['src/components/ui/', 'src/components/haven/']
 // `git diff` run from the package cwd still prints repo-root-relative paths
 // (packages/frontend/src/…). Strip that prefix so paths are package-relative
-// and match PRIMITIVE_DIRS / PAGE.
+// and match PRIMITIVE_DIRS / PAGE. The moved primitives live one level up in
+// the workspace (packages/ui/src, #3508): the `:/` magic prefix anchors the
+// pathspec at the repo root, so it is immune to the cwd a relative `../ui/src`
+// would resolve against.
 const PKG_PREFIX = 'packages/frontend/'
+const UI_GIT_PATHSPEC = ':/packages/ui/src'
 const EXEMPT_MARK = 'design-system-exempt'
 
 function pkgRelative(file) {
@@ -62,6 +70,17 @@ function arg(name) {
 }
 
 function isPrimitiveFile(file) {
+  // The moved primitives' home in @haven_ai/ui (#3508), matched
+  // repo-root-relative (git reports it that way; the shims' own paths go
+  // through pkgRelative below and stay package-relative).
+  if (file.startsWith('packages/ui/src/')) {
+    if (!/\.tsx?$/.test(file)) return false
+    if (/\.test\.tsx?$/.test(file)) return false
+    if (/\.stories\.tsx?$/.test(file)) return false // stories showcase, not a primitive
+    if (/\/index\.tsx?$/.test(file)) return false // the barrel re-exports, not the source
+    if (/\/hooks\//.test(file)) return false // a hook is not a showcase primitive
+    return true
+  }
   if (!PRIMITIVE_DIRS.some((d) => file.startsWith(d))) return false
   if (!/\.tsx?$/.test(file)) return false
   if (/\.test\.tsx?$/.test(file)) return false
@@ -230,7 +249,7 @@ function git(args) {
 }
 
 function gitDiff(revs) {
-  return git(['diff', '--unified=0', ...revs, '--', ...PRIMITIVE_DIRS])
+  return git(['diff', '--unified=0', ...revs, '--', ...PRIMITIVE_DIRS, UI_GIT_PATHSPEC])
 }
 
 /**
@@ -295,6 +314,7 @@ function getDiff() {
       '--full-name',
       '--',
       ...PRIMITIVE_DIRS,
+      UI_GIT_PATHSPEC,
     ])
       .split('\n')
       .filter(Boolean)

@@ -698,7 +698,67 @@ export function createStateDirectRecoveryHandlers(
           // #3506: the DELEGATING agent's signature for a sub-budget row — it
           // opens a pending row, or relays a signed close. The owner relay
           // (/agents/:id/sub-budgets/:sub/sign) is no longer required.
-          const result = await haven.submitSubBudget(args.sub_budget_id as string, args.signature)
+          const subBudgetId = args.sub_budget_id as string
+          let result: Awaited<ReturnType<HavenClient['submitSubBudget']>>
+          try {
+            result = await haven.submitSubBudget(subBudgetId, args.signature)
+          } catch (err) {
+            // A close can answer 409 close_needs_reprepare (the stored
+            // disable UserOp is stale) or 502 close_outcome_unconfirmed (it
+            // was sent; the chain has not finalised). There is no close
+            // tool, so this handler does the recovery the backend names:
+            // closeSubBudget (idempotent in effect, authority-reducing)
+            // reports `closed` if the disable finalised, else prepares a
+            // fresh op for haven_sign; the unconfirmed case says to retry
+            // this same call later.
+            const code =
+              err instanceof HavenApiError ? (err.body as { error_code?: string } | undefined)?.error_code : undefined
+            if (code === 'close_needs_reprepare') {
+              const fresh = await haven.closeSubBudget(subBudgetId)
+              if (fresh.status === 'closed') {
+                return {
+                  sub_budget: fresh.subBudget,
+                  status: 'closed',
+                  ...taskBudgetNextStep({
+                    nextAction: AgentPaymentNextAction.None,
+                    nextTool: null,
+                    nextToolOmittedReason:
+                      'the sub-budget is closed on-chain; nothing further to sign or submit for it',
+                    reason: 'The sub-budget is closed.',
+                  }),
+                }
+              }
+              throw new HostedToolError({
+                code: 'CLOSE_NEEDS_REPREPARE',
+                message:
+                  'The stored close operation for this sub-budget was stale, so nothing was relayed. Haven ' +
+                  'prepared a fresh one: sign it with haven_sign, then call haven_submit again with the new signature.',
+                statusCode: 409,
+                nextStep: refusalNextStep({
+                  nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                  nextTool: 'haven_sign',
+                  nextArguments: { sub_budget_id: subBudgetId },
+                }),
+              })
+            }
+            if (code === 'close_outcome_unconfirmed') {
+              throw new HostedToolError({
+                code: 'CLOSE_OUTCOME_UNCONFIRMED',
+                message:
+                  'The close operation was sent but its outcome is not confirmed yet (on Base that can take tens ' +
+                  'of minutes). Wait, then call haven_submit again with the same arguments: it reports closed ' +
+                  'once the chain has finalised the disable, or prepares a fresh operation to sign if the ' +
+                  'earlier one did not land.',
+                statusCode: 502,
+                nextStep: refusalNextStep({
+                  nextAction: AgentPaymentNextAction.CheckStatusLater,
+                  nextTool: 'haven_submit',
+                  nextArguments: { sub_budget_id: subBudgetId, signature: args.signature },
+                }),
+              })
+            }
+            throw err
+          }
           const submitted = {
             sub_budget: result.subBudget,
             status: result.status,

@@ -9,7 +9,7 @@
  * exactly-one-id refusal.
  */
 import { describe, expect, it, vi } from 'vitest'
-import type { HavenClient } from '@haven_ai/sdk'
+import { HavenApiError, type HavenClient } from '@haven_ai/sdk'
 import { createToolHandlers, toolSchemas } from '../tools.js'
 
 const SIG = `0x${'ab'.repeat(65)}`
@@ -222,5 +222,86 @@ describe('haven_get_agent — pending sub-budget signatures (#3506)', () => {
     const data = result.data as Record<string, unknown>
     expect(data.pendingSubBudgetSignatures).toEqual([])
     expect(data.next_tool).toBeUndefined()
+  })
+})
+
+describe('haven_submit — a stale or unconfirmed close recovers without a close tool (#3506 review S2)', () => {
+  const apiError = (status: number, error_code: string) => new HavenApiError(error_code, status, { error_code })
+  const CLOSED_ROW = { id: GRANT, status: 'closed', parentSubBudgetId: PARENT_CHILD }
+
+  function stubClose(opts: { submit: () => Promise<unknown>; close?: () => Promise<unknown> }) {
+    const closeSubBudget = vi.fn(opts.close ?? (async () => ({ subBudget: { id: GRANT, status: 'closing' }, signData: { user_op_hash: '0x1' } })))
+    const submitSubBudget = vi.fn(opts.submit)
+    const haven = {
+      submitSubBudget,
+      closeSubBudget,
+      listPendingSubBudgetSignatures: vi.fn(async () => []),
+      withRequestContext: async (_ctx: unknown, run: () => Promise<unknown>) => run(),
+      clientUpdate: () => undefined,
+    } as unknown as HavenClient
+    return { haven, closeSubBudget, submitSubBudget }
+  }
+
+  it('close_needs_reprepare: re-prepares via closeSubBudget and names haven_sign { sub_budget_id } for the fresh op', async () => {
+    const { haven, closeSubBudget } = stubClose({
+      submit: async () => {
+        throw apiError(409, 'close_needs_reprepare')
+      },
+    })
+    const result = await createToolHandlers(haven).haven_submit({ sub_budget_id: GRANT, signature: SIG })
+    expect(closeSubBudget).toHaveBeenCalledWith(GRANT)
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result).toMatchObject({
+      code: 'CLOSE_NEEDS_REPREPARE',
+      statusCode: 409,
+      next_tool: 'mcp__haven-signer__haven_sign',
+      next_tool_server_role: 'signer',
+      next_arguments: { sub_budget_id: GRANT },
+    })
+  })
+
+  it('close_needs_reprepare where the chain already shows the disable: reports closed, no refusal', async () => {
+    const { haven } = stubClose({
+      submit: async () => {
+        throw apiError(409, 'close_needs_reprepare')
+      },
+      close: async () => ({ subBudget: CLOSED_ROW, status: 'closed' }),
+    })
+    const result = await createToolHandlers(haven).haven_submit({ sub_budget_id: GRANT, signature: SIG })
+    if (!result.success) throw new Error('expected success')
+    const data = result.data as Record<string, unknown>
+    expect(data).toMatchObject({ status: 'closed', next_action: 'none' })
+    expect(data.next_tool).toBeUndefined()
+    expect(typeof data.next_tool_omitted_reason).toBe('string')
+  })
+
+  it('close_outcome_unconfirmed: does NOT re-prepare, and names this same haven_submit to retry later', async () => {
+    const { haven, closeSubBudget } = stubClose({
+      submit: async () => {
+        throw apiError(502, 'close_outcome_unconfirmed')
+      },
+    })
+    const result = await createToolHandlers(haven).haven_submit({ sub_budget_id: GRANT, signature: SIG })
+    expect(closeSubBudget).not.toHaveBeenCalled()
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result).toMatchObject({
+      code: 'CLOSE_OUTCOME_UNCONFIRMED',
+      next_tool: 'mcp__haven__haven_submit',
+      next_tool_server_role: 'hosted',
+      next_arguments: { sub_budget_id: GRANT, signature: SIG },
+    })
+  })
+
+  it('any other submit error passes through unchanged and never calls closeSubBudget', async () => {
+    const { haven, closeSubBudget } = stubClose({
+      submit: async () => {
+        throw apiError(400, 'signature_mismatch')
+      },
+    })
+    const result = await createToolHandlers(haven).haven_submit({ sub_budget_id: GRANT, signature: SIG })
+    expect(result.success).toBe(false)
+    expect(closeSubBudget).not.toHaveBeenCalled()
   })
 })

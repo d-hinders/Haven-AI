@@ -186,6 +186,11 @@ const TASK_BUDGET_EXCEEDED_ERROR_CODE = 'task_budget_exceeded'
 const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
   "the task budget's cap is spent and is enforced on-chain, so retrying cannot succeed; close it and open a new one, or pay without it, after telling the user"
 
+/** #3564 (the #3494 mapping follow-through): the backend's `error_code` for a submit whose receipt was never confirmed. */
+const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
+const SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON =
+  'the payment was submitted but its on-chain outcome is not known yet, and no payment id is available to poll; do not create a new payment for this — tell the user, who can check the account\'s activity or the userOpHash before paying again'
+
 /** #3504: the backend's `error_code` for a payment the delegation's period budget cannot cover. */
 const DELEGATION_BUDGET_EXCEEDED_ERROR_CODE = 'delegation_budget_exceeded'
 const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
@@ -390,45 +395,46 @@ export function normalizeError(err: unknown): ToolFailure {
       ...nextStepWireFields(step),
     }
   }
-  // #3494: `POST /payments/:id/sign` (every rail it relays, including the
-  // EIP-3009 funding leg) now carries a typed `error_code` on its failure
-  // 502, which this generic-5xx-means-retry-once branch predates. Each of the
-  // four typed codes below (and the two budget codes above) means the intent
-  // is ALREADY FAILED —
-  // `failSubmittedIntent` booked it on the row before the response was sent
-  // — so "retry once" is never the right next step whatever caused it.
-  // #3494 review round 1 (B1, double-pay risk), round 2 (B1'): checked
-  // BEFORE every other sign-failure branch — this is the one case where
-  // "create a new payment" is the WRONG instruction, because the submitted
-  // UserOp may have landed. `next_action` is `stop_and_tell_user`, NOT
-  // `check_status_later`: the backend already marked this intent `failed`
-  // before answering, so `haven_get_payment_status` on this same
-  // payment_id would answer "failed" forever and can never confirm the
-  // outcome — naming it would promise a resolution this code cannot
-  // deliver. See the constant's own doc comment for the full reasoning.
+  // #3564 (the #3494 mapping follow-through): `POST /payments/:id/sign`'s
+  // receipt-unconfirmed case is NO longer a transient 5xx and the backend no
+  // longer books it `failed` — the intent row stays outcome-pending
+  // (`submitted`, userOpHash recorded) and the submission reconciler resolves
+  // it from the chain. Unlike #3494's world, `haven_get_payment_status` IS
+  // truthful here, so with the body's payment_id the step names that read
+  // (the id comes from the body — the SDK builds these errors without a
+  // paymentId arg). What did NOT change: "create a new payment" is still the
+  // wrong instruction — the submitted UserOp may have landed — so the step
+  // never says retry, and without a payment id to poll (older backend or an
+  // unparseable body) the answer is stop_and_tell_user with the user checking
+  // the account's activity or the UserOperation hash, never a new payment.
   if (
     err instanceof HavenApiError &&
     (err.body as { error_code?: string } | undefined)?.error_code === SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE
   ) {
-    const body = err.body as { payment_id?: string; user_op_hash?: string }
-    const userOpHashClause = body.user_op_hash
-      ? `UserOperation ${body.user_op_hash}`
-      : 'the UserOperation hash'
-    const reason =
-      'The payment was submitted but its on-chain outcome is unknown — it may have moved funds even ' +
-      'though Haven recorded it as failed. Do NOT create a new payment. Tell the user to check the ' +
-      `account's activity in Haven (or ${userOpHashClause} on a block explorer) before paying again.`
-    const step = refusalNextStep({
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
-      nextTool: null,
-      nextToolOmittedReason: reason,
-    })
+    const body = err.body as { error_code?: string; payment_id?: string }
+    const step =
+      body.payment_id
+        ? refusalNextStep({
+            nextAction: AgentPaymentNextAction.CheckStatusLater,
+            nextTool: 'haven_get_payment_status',
+            nextArguments: { payment_id: body.payment_id },
+          })
+        : refusalNextStep({
+            // Not check_status_later here: that action's default table names
+            // haven_get_payment_status, which cannot be called without a
+            // payment id. Stop, say why no new payment may be created, and
+            // let the user check the account's activity or the UserOperation
+            // hash.
+            nextAction: AgentPaymentNextAction.StopAndTellUser,
+            nextTool: null,
+            nextToolOmittedReason: SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON,
+          })
     return {
       success: false,
       code: 'SUBMISSION_OUTCOME_UNKNOWN',
       message: err.message,
       statusCode: err.statusCode,
-      paymentId: body.payment_id,
+      paymentId: err.paymentId ?? body.payment_id,
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

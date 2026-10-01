@@ -790,6 +790,33 @@ const start = async () => {
     void runSettlementSweep()
     setInterval(runSettlementSweep, SETTLEMENT_SWEEP_INTERVAL_MS).unref()
 
+    // Submission reconciliation (#3564). A direct payment whose UserOp was
+    // SENT but whose receipt was never confirmed is booked outcome-pending
+    // (`submitted`, never `failed` — the funds may have moved), with the
+    // userOpHash recorded on the row. This tick resolves such a row from the
+    // bundler's receipt index for that hash: landed+succeeded → confirmed
+    // with its tx_hash; landed+reverted → failed with the cause; still not
+    // found inside the bounded window → failed with that cause. A read
+    // failure confirms nothing and writes nothing — the next tick is the
+    // retry, which is what keeps an outage from becoming a wrong terminal
+    // booking.
+    const RECONCILE_INTERVAL_MS = 60_000
+    const runSubmissionReconcile = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.submissionReconcile, async () => {
+          const { runSubmissionReconcileTick } = await import('./modules/payments/index.js')
+          const tick = await runSubmissionReconcileTick(app.log)
+          if (tick.confirmed || tick.failedReverted || tick.failedWindowElapsed) {
+            app.log.info(tick, 'Submission reconcile tick acted')
+          }
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Submission reconcile tick failed')
+      }
+    }
+    void runSubmissionReconcile()
+    setInterval(runSubmissionReconcile, RECONCILE_INTERVAL_MS).unref()
+
     // L0 passport anchor sweep (#972 / #973). Both halves of issuance are
     // fire-and-forget by design — an EAS write must never block agent creation
     // or an owner's revoke — which only holds because something later retries

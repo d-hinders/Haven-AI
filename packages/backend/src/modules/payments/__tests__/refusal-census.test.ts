@@ -146,35 +146,34 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // success response's additive self-transfer warning block, then #3560
     // REVERTED #3528 entirely — net zero shift from that round-trip, so the
     // pins below are the #3503 baseline numbers again.
-    // #3565 removed one line between the 429 site and the sign-route catch,
-    // shifting the six #3494 sign-catch sites below by −1.
     // #3494 added imports for isAccountValidationRevert/boundFailureMessage
-    // and SIX new refuse( sites inside the sign route's failure catch
-    // (submission-outcome-unknown, signature-rejected, account-validation-
-    // failed, task-budget and period-budget reverts confirmed at submit, and
-    // the generic fallback) — all 502, all routed through refuse(..., null):
-    // the catch already books the failure on the intent row via
-    // failSubmittedIntent before classifying, so none of these six is a
-    // policy refusal the ledger owns. Review round 1 (#3494) widened
-    // isAccountValidationRevert's one import to two
-    // (isSignatureRejectedRevert/isAccountValidationFailedRevert) and the
-    // delegation-rail import to include SubmittedUserOpFailedError — net +5
-    // above every site below (the #3503 baseline shifts the same +5 the
-    // first round's +2 sites shifted by, then +3 more for the wider import).
-    { line: 620, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — pre-check before the UserOp is built
-    { line: 782, code: 403, ledger: 'row' }, // #3503 period budget exhausted — pre-check before the UserOp is built
-    { line: 805, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
-    { line: 814, code: 403, ledger: 'row' }, // #3500 transfer-cap revert confirmed against the task budget's own spent figure
-    { line: 823, code: 403, ledger: 'row' }, // #3503 period-budget revert confirmed by a fresh remaining-budget read
-    { line: 829, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 853, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 1152, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 1217, code: 502, ledger: 'skipped' }, // #3494 submission outcome unknown (receipt-unconfirmed) after a post-send failure — allowlisted
-    { line: 1242, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
-    { line: 1268, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
-    { line: 1317, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
-    { line: 1356, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
-    { line: 1410, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
+    // and new refuse( sites inside the sign route's failure catch
+    // (signature-rejected, account-validation-failed, task-budget and
+    // period-budget reverts confirmed at submit, and the generic fallback) —
+    // all 502, all routed through refuse(..., null): the catch already books
+    // the failure on the intent row via failSubmittedIntent before
+    // classifying, so none of these is a policy refusal the ledger owns.
+    // Review round 1 (#3494) widened the delegation-rail import to include
+    // SubmittedUserOpFailedError — net +5 above every site below.
+    // #3564 reworked that same catch: the receipt-unconfirmed variant now
+    // books outcome-PENDING and answers its own 502 BEFORE the terminal
+    // booking (so the #3494 submission-outcome-unknown site is GONE, not
+    // moved), and the typed sites below it shift by the classification
+    // block's +40; the other four #3494 sites keep their relative order.
+    { line: 621, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — pre-check before the UserOp is built
+    { line: 783, code: 403, ledger: 'row' }, // #3503 period budget exhausted — pre-check before the UserOp is built
+    { line: 806, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
+    { line: 815, code: 403, ledger: 'row' }, // #3500 transfer-cap revert confirmed against the task budget's own spent figure
+    { line: 824, code: 403, ledger: 'row' }, // #3503 period-budget revert confirmed by a fresh remaining-budget read
+    { line: 830, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
+    { line: 854, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 1153, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 1192, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
+    { line: 1232, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
+    { line: 1258, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
+    { line: 1307, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 1346, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 1400, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
   ],
 }
 
@@ -211,31 +210,31 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
   ],
   'src/routes/payments.ts': [
     {
-      line: 805,
+      line: 806,
       reason: '#3416 DelegationRailChainUnavailableError — this deployment has no bundler credential for the chain (configuration), not a guardrail refusal',
     },
     {
-      line: 1217,
-      reason: '#3494 submission-outcome-unknown (receipt-unconfirmed) — deliberately not booked: the failed intent row is the record',
+      line: 1192,
+      reason: '#3564 the receipt-unconfirmed submit — the row is booked outcome-pending (never failed) and the submission reconciler resolves it from the chain, so the 502 is a poll instruction, not a policy refusal',
     },
     {
-      line: 1242,
+      line: 1232,
       reason: '#3494 AA24 signature rejection — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1268,
+      line: 1258,
       reason: '#3494 other AA2x account-validation failure — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1317,
+      line: 1307,
       reason: '#3494 task-budget transfer-cap revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1356,
+      line: 1346,
       reason: '#3494 period-budget revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1410,
+      line: 1400,
       reason: 'on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — deliberately not booked: the failed intent row is the record',
     },
   ],

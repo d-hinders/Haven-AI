@@ -244,12 +244,90 @@ export interface RedemptionSubmitResult {
  */
 export class SubmittedUserOpFailedError extends Error {
   readonly userOpHash: Hex
-  readonly reverted: boolean
-  constructor(message: string, userOpHash: Hex, reverted = false) {
+  /**
+   * #3564: which post-send variant threw. `receipt_unconfirmed` — the wait
+   * errored or timed out, the op MAY have landed, its outcome is genuinely
+   * unknown and a caller must NOT book terminal failure. `included_reverted`
+   * — the op landed and reverted, nothing moved, terminal failure is the
+   * honest booking. Everything downstream of this class (the sign route's
+   * booking split, the hosted mapping) keys on this field, so a new variant
+   * must be added here before any caller can see it.
+   */
+  readonly outcome: 'receipt_unconfirmed' | 'included_reverted'
+  constructor(
+    message: string,
+    userOpHash: Hex,
+    outcome: 'receipt_unconfirmed' | 'included_reverted',
+  ) {
     super(message)
     this.name = 'SubmittedUserOpFailedError'
     this.userOpHash = userOpHash
-    this.reverted = reverted
+    this.outcome = outcome
+  }
+  /** #3494's classification predicate, derived from `outcome` (#3564): the
+   * op landed and reverted (nothing moved) vs the outcome-unknown variant. */
+  get reverted(): boolean {
+    return this.outcome === 'included_reverted'
+  }
+}
+
+/**
+ * The ERC-4337 receipt shapes #3564's reconciler reads. Only what the
+ * reconciler consumes is declared: inclusion, execution success, and the
+ * transaction hash.
+ */
+interface BundlerUserOperationReceipt {
+  success: boolean
+  receipt: { transactionHash: string }
+}
+
+export type UserOperationReceiptOutcome =
+  | { state: 'included'; success: boolean; txHash: string }
+  | { state: 'not_found_yet' }
+
+/**
+ * #3564: read the ERC-4337 receipt for a UserOp that was SENT but whose
+ * receipt wait did not confirm (the `receipt_unconfirmed` variant of
+ * {@link SubmittedUserOpFailedError}).
+ *
+ * `not_found_yet` is "not known yet", never "did not land": a bundler's
+ * receipt index can lag inclusion by seconds, and a failed read proves
+ * nothing in either direction. The reconciler therefore answers an RPC
+ * error, a null (unknown hash) and a credential-absent throw alike with
+ * "leave the row unresolved" — a wrong terminal booking on this seam would
+ * tell the agent a moved-funds payment failed.
+ *
+ * This is the SAME bundler the op was submitted through
+ * ({@link delegationRailBundlerUrl}, the credential choke point), not a
+ * second endpoint that could disagree with the submission path.
+ */
+export async function readUserOperationReceipt(
+  chainId: number,
+  userOpHash: Hex,
+): Promise<UserOperationReceiptOutcome> {
+  // The credential resolution and the client build are INSIDE the try on
+  // purpose: a chain whose bundler credential is absent (or was revoked after
+  // the submit) must answer "not known yet", not throw out of the seam — a
+  // throw here would book nothing, but it would also make every caller's
+  // error path reason about a configuration state on a funds-moved question.
+  // The row stays unresolved and the bounded window eventually resolves it.
+  try {
+    // Named `bundlerUrl` deliberately: the #3255 transport guard permits a
+    // bare viem `http(` only when its argument is a `bundlerUrl`-named
+    // binding (the submission path's shape), and the guard's census is the
+    // thing that keeps every RPC read on a failover-capable seam.
+    const bundlerUrl = delegationRailBundlerUrl(chainId)
+    const pimlico = createPimlicoClient({
+      transport: http(bundlerUrl),
+      entryPoint: { address: entryPoint07Address, version: '0.7' },
+    })
+    const receipt = (await pimlico.getUserOperationReceipt({
+      hash: userOpHash,
+    })) as BundlerUserOperationReceipt | null
+    if (receipt === null) return { state: 'not_found_yet' }
+    return { state: 'included', success: receipt.success, txHash: receipt.receipt.transactionHash }
+  } catch {
+    return { state: 'not_found_yet' }
   }
 }
 
@@ -462,16 +540,23 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     try {
       receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
     } catch (err) {
+      // #3564: the receipt-unconfirmed variant. The op was SENT — it MAY have
+      // landed and the funds may have moved — so this outcome is genuinely
+      // unknown and the caller must leave the row non-terminal, never book
+      // `failed`.
       throw new SubmittedUserOpFailedError(
         `redemption UserOp ${userOpHash} was sent but its receipt could not be confirmed: ${err instanceof Error ? err.message : String(err)}`,
         userOpHash,
+        'receipt_unconfirmed',
       )
     }
     if (!receipt.success) {
+      // #3564: the op LANDED and reverted — nothing moved, and terminal
+      // failure is the honest booking. Distinct from the variant above.
       throw new SubmittedUserOpFailedError(
         `redemption UserOp ${userOpHash} included but reverted`,
         userOpHash,
-        true,
+        'included_reverted',
       )
     }
     return {

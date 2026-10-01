@@ -972,20 +972,25 @@ const railUnavailableResponse = {
 } as const
 
 /**
- * #3494: `POST /payments/{id}/sign`'s on-chain/bundler failure — every rail
- * this route relays (a direct payment, or the EIP-3009 funding leg named in
- * `POST /x402/authorize`'s `sign_data.instructions`). The intent is already
- * `failed` by the time this is sent (`failSubmittedIntent` books it first):
- * there is nothing left to retry on this `payment_id` whatever the cause.
- * Six `error_code` values, in the order the route checks them:
- * - `submission_outcome_unknown` (review round 2, B1'/N3) — `sendUserOperation`
- *   resolved but the receipt wait itself errored or timed out: the UserOp MAY
- *   have landed, and Haven never learned the outcome. Do NOT create a new
- *   payment — this intent is ALREADY `failed`, so polling this `payment_id`'s
- *   own status can never confirm it did not settle; check the account's real
- *   activity (Haven's activity view, or the UserOperation hash on an
- *   explorer) before paying again. A fixed remedy `message`, plus the
- *   UserOperation hash in `user_op_hash` and bounded `details`.
+ * `POST /payments/{id}/sign`'s typed 502 — #3494's typed failure contract,
+ * composed with #3564's booking split. One status, TWO mutually exclusive
+ * shapes, split by what the route KNOWS about the submit:
+ *
+ * Outcome PENDING — `error_code: "submission_outcome_unknown"`: the
+ * receipt-unconfirmed submit. `sendUserOperation` resolved but the receipt
+ * wait itself errored or timed out, so the UserOp MAY have landed and the
+ * funds may have moved. The intent is NOT failed: the row stays `submitted`
+ * with the userOpHash recorded, and the submission reconciler resolves it
+ * from the bundler's receipt (landed+succeeded → confirmed with its tx_hash;
+ * landed+reverted or never seen within the bounded window → failed with the
+ * cause). `haven_get_payment_status` is the source of truth: it answers
+ * "outcome pending" (next_action check_status_later, do not create a new
+ * payment) while unresolved, then the real terminal state. Body: `status:
+ * "submitted"`, the `user_op_hash`, and bounded `details`.
+ *
+ * KNOWN failure — an already-`failed` intent (`failSubmittedIntent` books it
+ * first): there is nothing left to retry on this `payment_id` whatever the
+ * cause. Five `error_code` values, in the order the route checks them:
  * - `signature_rejected` — the account rejected the UserOperation signature
  *   during on-chain validation (ERC-4337 `AA24 signature error` only).
  *   Update the signer and sign a NEW payment; this `payment_id` cannot be
@@ -1007,18 +1012,19 @@ const railUnavailableResponse = {
  * - `onchain_execution_failed` — any other on-chain/bundler failure this
  *   route cannot classify more precisely, INCLUDING a submitted UserOp that
  *   executed and reverted on-chain (a KNOWN, confirmed outcome — no funds
- *   moved — unlike `submission_outcome_unknown` above). Create a new
- *   payment. `message` carries the bounded, redacted on-chain/bundler text
- *   when one was recorded, or the literal "On-chain execution failed"
- *   otherwise, and `details` carries the same bounded text (or `null`).
+ *   moved). Create a new payment. `message` carries the bounded, redacted
+ *   on-chain/bundler text when one was recorded, or the literal "On-chain
+ *   execution failed" otherwise, and `details` carries the same bounded text
+ *   (or `null`).
  *
- * The four non-budget codes above carry `details` — the underlying
- * bundler/viem failure text, already scrubbed of vendor secrets and capped
- * at 300 characters plus an ellipsis if longer, never the full dump —
- * `null` when nothing was recorded. Three of the four (`submission_outcome_unknown`,
- * `signature_rejected`, `account_validation_failed`) carry a fixed remedy
- * `message` independent of the on-chain text; `onchain_execution_failed`'s
- * `message` carries the bounded text itself (or the literal fallback).
+ * `details` — the underlying bundler/viem failure text, already scrubbed of
+ * vendor secrets and capped at 300 characters plus an ellipsis if longer,
+ * never the full dump — `null` when nothing was recorded — rides the
+ * outcome-pending body and three of the four known-failure non-budget codes
+ * (`signature_rejected`, `account_validation_failed`,
+ * `onchain_execution_failed`), the latter two with a fixed remedy `message`
+ * independent of the on-chain text; `onchain_execution_failed`'s `message`
+ * carries the bounded text itself (or the literal fallback).
  */
 const signFailureResponse = {
   ...errorResponse,
@@ -1039,19 +1045,20 @@ const signFailureResponse = {
     },
   },
   description:
-    'On-chain execution failed after this route claimed the intent for submission; the intent is ' +
-    'already `failed`. The body carries one of six typed `error_code` values: ' +
-    "`submission_outcome_unknown` (the UserOp's receipt wait itself failed — it may have landed; do NOT " +
-    "pay again, check the account's real activity, never this payment_id's own status), " +
-    '`signature_rejected` (AA24 only — update the signer, then pay again), ' +
+    'On-chain submission failed or its outcome is not yet known. TWO mutually exclusive shapes: ' +
+    '`error_code: "submission_outcome_unknown"` — the receipt-unconfirmed submit (#3564): the intent ' +
+    'is NOT failed, it stays submitted with the user_op_hash recorded and Haven reconciles it from the ' +
+    'chain; do not create a new payment — haven_get_payment_status answers the outcome-pending state ' +
+    "(next_action check_status_later) and then the real terminal state. Otherwise the intent is already " +
+    '`failed` (known cause): `signature_rejected` (AA24 only — update the signer, then pay again), ' +
     '`account_validation_failed` (a different AA2x code, not a signer cause — pay again), ' +
     '`task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 ' +
     'answers — `asset` on `delegation_budget_exceeded` only — neither carries a `message` field), or ' +
     '`onchain_execution_failed` (including a submitted UserOp that executed and reverted — a confirmed, ' +
-    'no-funds-moved outcome — pay again). The four non-budget codes carry bounded, redacted `details` ' +
-    '(300 characters plus an ellipsis if longer, or `null`); three of the four carry a fixed remedy ' +
-    '`message`, while `onchain_execution_failed`\'s `message` carries the bounded text itself (or the ' +
-    'literal fallback "On-chain execution failed").',
+    'no-funds-moved outcome — pay again). The non-budget codes carry bounded, redacted `details` ' +
+    '(300 characters plus an ellipsis if longer, or `null`); two known-failure codes and the ' +
+    'outcome-pending body carry a fixed remedy `message`, while `onchain_execution_failed`\'s `message` ' +
+    'carries the bounded text itself (or the literal fallback "On-chain execution failed").',
 } as const
 
 /**
@@ -1284,6 +1291,17 @@ const agentPaymentStatus = {
     // only when a machine_payment_evidence row records the merchant's
     // response; omitted — never false — when the backend does not know.
     delivered: { type: 'boolean', description: 'True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown.' },
+    // #3564: additive outcome-pending visibility, the same honesty rule as
+    // `delivered` — present (true) only while the payment's submit is
+    // receipt-unconfirmed and not yet reconciled from the chain; omitted —
+    // never false — on every other row.
+    submission_outcome_pending: {
+      type: 'boolean',
+      description:
+        'True while the payment was submitted but its on-chain outcome is not known yet (#3564): ' +
+        'do not create a new payment — the status becomes the real outcome once Haven reconciles ' +
+        'it from the chain. Omitted on every other row.',
+    },
     // #3475 follow-up
     settlement_scheme: {
       anyOf: [

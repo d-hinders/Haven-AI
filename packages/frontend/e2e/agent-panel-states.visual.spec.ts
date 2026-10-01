@@ -140,7 +140,7 @@ test.describe('agent panel empty states and card banners', () => {
     await settle(page)
 
     const card = page.getByTestId('agent-card')
-    await expect(card.getByRole('heading', { name: /still active on-chain/ })).toHaveCount(1)
+    await expect(card.getByRole('heading', { name: /still active on.chain/ })).toHaveCount(1)
     await expect(card.getByRole('button', { name: `Finish revoking ${agent.name}` })).toHaveCount(1)
     await expect(card).toHaveScreenshot('agentcard-half-revoked-desktop.png', SNAPSHOT_OPTIONS)
   })

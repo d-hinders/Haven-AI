@@ -40,9 +40,6 @@ export {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   x402V2PaymentEnvelope,
-  // #3528: the raw→typed prepare-warnings map the MCP surfaces merge into
-  // their own envelope; a type-only re-export of the warning pair.
-  mapRawWarnings,
 } from './x402.js'
 export {
   buildSweepAuthorizationMessage,

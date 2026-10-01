@@ -93,7 +93,6 @@ import {
 } from './types.js'
 import {
   buildX402IdempotencyKey,
-  mapRawWarnings,
   parsePaymentRequiredResponse,
   resolveTokenFromAddress,
   selectStandardPaymentOption,
@@ -215,16 +214,6 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
         }
       : {}),
   }
-}
-
-// #3528: the spread form of the raw→typed warnings map — `undefined` (field
-// absent) when the prepare response carried no warnings, so a stranger's
-// prepare is byte-identical to today's.
-function mapRawWarningsSpread(
-  raw: Array<{ code: string; message: string }> | undefined,
-): { warnings?: AgentPaymentWarning[] } {
-  const mapped = mapRawWarnings(raw)
-  return mapped ? { warnings: mapped } : {}
 }
 
 export class HavenClient {
@@ -428,9 +417,6 @@ export class HavenClient {
       status: 'pending_signature',
       expiresAt: raw.expires_at,
       signData: raw.sign_data,
-      // #3528: the additive self-transfer hint, relayed verbatim (absent
-      // when the recipient is a stranger's address).
-      ...mapRawWarningsSpread(raw.warnings),
     }
   }
 
@@ -554,9 +540,6 @@ export class HavenClient {
       // re-derives this digest a second time from the payload it actually signs.
       expectedTypedDataHash: x402TypedDataDigest(raw.sign_data.typed_data),
       fundingTo,
-      // #3528: the additive self-transfer hint, relayed verbatim (absent when
-      // the recipient is a stranger's address).
-      ...mapRawWarningsSpread(raw.warnings),
     }
   }
 
@@ -1517,12 +1500,6 @@ export class HavenClient {
     paymentId: string
     signData: SignData
     settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>
-    /**
-     * #3528: the additive, WARNING-GRADE prepare hints. Present only when the
-     * recipient is one of the owner's own Haven accounts; advisory — never
-     * blocks, never replaces a refusal.
-     */
-    warnings?: AgentPaymentWarning[]
   }> {
     return this.erc7710.prepare(paymentRequired, options)
   }

@@ -4,7 +4,6 @@ import {
   X402Erc7710AlreadySettledError,
 } from './types.js'
 import type {
-  AgentPaymentWarning,
   RawX402AuthorizeResponse,
   RawX402SettleResponse,
   SignData,
@@ -13,20 +12,10 @@ import type {
   X402PaymentRequired,
 } from './types.js'
 import {
-  mapRawWarnings,
   selectX402SettlementScheme,
   x402AuthorizationAmount,
 } from './x402.js'
 import { chainIdForNetwork, type SettlementChildExpectation } from './settlement-child.js'
-
-// #3528: the spread form of the raw→typed warnings map — `undefined` (field
-// absent) when the authorize response carried no warnings.
-function mapRawWarningsSpread(
-  raw: Array<{ code: string; message: string }> | undefined,
-): { warnings?: AgentPaymentWarning[] } {
-  const mapped = mapRawWarnings(raw)
-  return mapped ? { warnings: mapped } : {}
-}
 
 /**
  * The erc7710 direct-settlement lifecycle (#1619, epic #1613).
@@ -205,12 +194,6 @@ export class X402Erc7710 {
     paymentId: string
     signData: SignData
     settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>
-    /**
-     * #3528: the additive, WARNING-GRADE prepare hints. Present only when the
-     * recipient is one of the owner's own Haven accounts; advisory — never
-     * blocks, never replaces a refusal.
-     */
-    warnings?: AgentPaymentWarning[]
   }> {
 
     // The rail half of the #1450 preference rule is not visible in a 402
@@ -353,9 +336,6 @@ export class X402Erc7710 {
         network: option.network,
         facilitatorAddresses: selection.facilitatorAddresses,
       },
-      // #3528: the additive self-transfer hint, relayed verbatim (absent when
-      // the recipient is a stranger's address).
-      ...mapRawWarningsSpread(raw.warnings),
     }
   }
 

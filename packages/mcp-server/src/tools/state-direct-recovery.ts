@@ -52,7 +52,6 @@ import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
   delegationSignFields,
-  backendPrepareWarningsSpread,
   generateDirectIdempotencyKey,
   submitErc7710WithExpiryMapping,
   submitSignatureWithExpiryMapping,
@@ -581,10 +580,6 @@ export function createStateDirectRecoveryHandlers(
                 amount: args.amount,
                 token: args.asset,
               },
-              // #3528: the backend's additive self-transfer hint rides the
-              // SAME warnings envelope — warning-grade, never blocking;
-              // `safeToContinue` above is untouched either way.
-              ...backendPrepareWarningsSpread(intent.warnings),
             }),
             signer_compatibility: directSignerCompatibilityNotice(),
           }
@@ -663,10 +658,6 @@ export function createStateDirectRecoveryHandlers(
                 amount: args.amount,
                 token: args.token,
               },
-              // #3528: the backend's additive self-transfer hint rides the
-              // SAME warnings envelope — warning-grade, never blocking;
-              // `safeToContinue` above is untouched either way.
-              ...backendPrepareWarningsSpread(intent.warnings),
             }),
             signer_compatibility: directSignerCompatibilityNotice(),
           }

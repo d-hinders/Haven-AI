@@ -159,13 +159,6 @@ export interface PaymentIntent {
 
   /** Data needed to sign the payment */
   signData: SignData
-
-  /**
-   * #3528: the additive, WARNING-GRADE prepare hints. Present only when the
-   * recipient is one of the owner's own Haven accounts (`SELF_TRANSFER`);
-   * advisory — never blocks, never replaces a refusal.
-   */
-  warnings?: AgentPaymentWarning[]
 }
 
 export type PaymentStatus =
@@ -417,12 +410,6 @@ export interface X402Intent {
   expectedTypedDataHash?: string
   /** Delegate EOA the funding transfer tops up (the x402 payer). */
   fundingTo: string
-  /**
-   * #3528: the additive, WARNING-GRADE prepare hints. Present only when the
-   * recipient (the merchant on erc7710, the delegate EOA on a 3009 funding
-   * leg) is one of the owner's own Haven accounts; advisory — never blocks.
-   */
-  warnings?: AgentPaymentWarning[]
 }
 
 export interface X402ExpectedContext {
@@ -1930,15 +1917,6 @@ export const AgentPaymentWarningCode = {
    * settlement can no longer land at all.
    */
   SettlementUnconfirmed: 'SETTLEMENT_UNCONFIRMED',
-  /**
-   * #3528: the recipient of the just-prepared payment is one of the owner's
-   * own Haven accounts. WARNING-GRADE and advisory only — a self-transfer is
-   * legitimate (sweeping between own accounts), and the on-chain authority
-   * for the send is unchanged either way. Carried on the prepare surfaces
-   * (`POST /payments`, both `POST /x402` legs, and the MCP tools that front
-   * them); it never blocks and never replaces a refusal.
-   */
-  SelfTransfer: 'SELF_TRANSFER',
 } as const
 
 export type AgentPaymentWarningCode =
@@ -2219,9 +2197,6 @@ export interface RawX402AuthorizeResponse {
   x402_expected_auth?: X402ExpectedAuth
   resource_url?: string
   explorer_url?: string
-  // #3528: the additive, WARNING-GRADE self-transfer hint. Present exactly
-  // when the recipient is one of the owner's own accounts; advisory only.
-  warnings?: Array<{ code: string; message: string }>
   x402?: RawX402StateContext
   mpp?: RawMppStateContext
   challenge_id?: string
@@ -2298,9 +2273,6 @@ export interface RawCreateResponse {
   }
   error?: string
   supported?: string[]
-  // #3528: the additive, WARNING-GRADE self-transfer hint (present only when
-  // the recipient is one of the owner's own accounts).
-  warnings?: Array<{ code: string; message: string }>
 }
 
 /** @internal */

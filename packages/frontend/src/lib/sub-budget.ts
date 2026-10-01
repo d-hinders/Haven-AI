@@ -60,6 +60,23 @@ export function expiryDateToUnixSeconds(
   return sec > nowSec ? sec : null
 }
 
+/**
+ * True when the chosen calendar date ends after the parent budget does, so
+ * {@link expiryDateToUnixSeconds} will pull it back to the parent's end. The
+ * UI states that clamp instead of applying it silently (#3506 design review).
+ */
+export function endDateIsClamped(date: string, parentExpiresAtSec: number): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!m) return false
+  const endOfDaySec = Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59) / 1000)
+  return Number.isFinite(endOfDaySec) && endOfDaySec > parentExpiresAtSec
+}
+
+/** A unix-seconds instant as a human date, e.g. "2 Jun 2027" (UTC, so stable in every timezone). */
+export function formatSubBudgetDate(sec: number): string {
+  return new Date(sec * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
+
 /** `YYYY-MM-DD` (UTC) for a unix-seconds instant — the `<input type="date">` format. */
 export function unixSecondsToDateInput(sec: number): string {
   return new Date(sec * 1000).toISOString().slice(0, 10)

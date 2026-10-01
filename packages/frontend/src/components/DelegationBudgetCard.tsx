@@ -281,7 +281,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
       </Card.Section>
 
       {subBudgetParent && !budgetsError ? (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--v2-border)] pb-3">
           <p className="text-xs text-[var(--v2-ink-muted)]">
             Share part of this budget with another of your agents.
           </p>

@@ -64,6 +64,8 @@ async function serveIssueResponse(page: Page, outcome: Outcome) {
       agent_id: agentId,
       status: 'pending',
       period_amount_atomic: '25000000',
+      // 2027-01-15 end of day, UTC — what the form asked for.
+      expires_at: 1800057599,
     })
     return route.fulfill({
       status: 201,
@@ -71,7 +73,7 @@ async function serveIssueResponse(page: Page, outcome: Outcome) {
       body: JSON.stringify({
         sub_budget: row('sb-grant', OTHER_AGENT_ID),
         parent_child_sub_budget: row('sb-parent-child', AGENT_ID),
-        next_action: 'agent_signs_then_owner_relays',
+        next_action: 'agent_signs_then_submits',
         sign_targets: [
           { sub_budget_id: 'sb-parent-child', who: 'delegating_agent', what: 'parent-child' },
           { sub_budget_id: 'sb-grant', who: 'delegating_agent', what: 'grant' },
@@ -97,10 +99,12 @@ async function openModal(page: Page) {
   return { dialog, panel }
 }
 
-async function fillForm(page: Page) {
+// The refusal enters more than the 250 USDC per week ceiling, so the
+// "more than … allows" copy matches what the form shows (#3506 design review).
+async function fillForm(page: Page, amount = '25') {
   const dialog = page.getByRole('dialog', { name: 'Issue sub-budget' })
   await dialog.getByLabel('Agent to share with').selectOption(OTHER_AGENT_ID)
-  await dialog.getByLabel('Sub-budget amount').fill('25')
+  await dialog.getByLabel('Sub-budget amount').fill(amount)
   await dialog.getByLabel('Ends on').fill('2027-01-15')
   await dialog.getByLabel('Label').fill('Weekly research')
 }
@@ -123,7 +127,7 @@ test.describe('issue sub-budget modal visual regression (#3506)', () => {
       test.beforeEach(async ({ page }) => {
         await mockHavenApi(page)
         // AFTER `mockHavenApi` — later-registered routes win (#2733).
-        await serveAgentDetailResponses(page, AGENT_ID)
+        await serveAgentDetailResponses(page, AGENT_ID, { otherAgentName: 'Booking agent' })
         await seedAuthenticatedSession(page)
         await page.clock.setFixedTime(FROZEN_NOW)
         await page.setViewportSize({ width: vp.width, height: vp.height })
@@ -138,7 +142,7 @@ test.describe('issue sub-budget modal visual regression (#3506)', () => {
       test('refusal: wider than the parent budget', async ({ page }) => {
         await serveIssueResponse(page, 'refusal')
         const { dialog, panel } = await openModal(page)
-        await fillForm(page)
+        await fillForm(page, '300')
         await dialog.getByRole('button', { name: 'Issue sub-budget', exact: true }).click()
         await expect(dialog.getByRole('alert')).toContainText('more than')
         await capture(page, panel, `agents-issue-sub-budget-refusal-${vp.name}.png`)

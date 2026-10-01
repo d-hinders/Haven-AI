@@ -4,6 +4,8 @@ import {
   parseSubBudgetAmount,
   subBudgetRefusalCopy,
   unixSecondsToDateInput,
+  endDateIsClamped,
+  formatSubBudgetDate,
 } from '../sub-budget'
 
 describe('parseSubBudgetAmount (#3506)', () => {
@@ -79,5 +81,26 @@ describe('subBudgetRefusalCopy (#3506)', () => {
     ] as const) {
       expect(copy(c, r)).not.toMatch(/delegat|caveat|_|\bcode\b/i)
     }
+  })
+})
+
+describe('end-date clamp disclosure (#3506 design review)', () => {
+  // 2027-06-02T23:59:59Z — a parent budget's end.
+  const parentEnd = Date.UTC(2027, 5, 2, 23, 59, 59) / 1000
+
+  it('flags a date past the parent end, which expiryDateToUnixSeconds pulls back', () => {
+    expect(endDateIsClamped('2027-07-01', parentEnd)).toBe(true)
+    expect(expiryDateToUnixSeconds('2027-07-01', 0, parentEnd)).toBe(parentEnd)
+  })
+
+  it('does not flag the parent end day itself, an earlier date, or a malformed one', () => {
+    expect(endDateIsClamped('2027-06-02', parentEnd)).toBe(false)
+    expect(endDateIsClamped('2027-01-15', parentEnd)).toBe(false)
+    expect(endDateIsClamped('', parentEnd)).toBe(false)
+    expect(endDateIsClamped('nope', parentEnd)).toBe(false)
+  })
+
+  it('formats a date for people, in UTC, the same in every timezone', () => {
+    expect(formatSubBudgetDate(parentEnd)).toBe('2 Jun 2027')
   })
 })

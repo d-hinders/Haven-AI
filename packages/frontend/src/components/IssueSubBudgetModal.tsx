@@ -19,7 +19,9 @@ import { issueSubBudget, type IssueSubBudgetResponse } from '@/hooks/useSubBudge
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
 import {
   amountErrorCopy,
+  endDateIsClamped,
   expiryDateToUnixSeconds,
+  formatSubBudgetDate,
   parseSubBudgetAmount,
   subBudgetRefusalCopy,
   unixSecondsToDateInput,
@@ -106,6 +108,8 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budget, to
 
   const amountMessage = parsedAmount.ok ? null : amountErrorCopy(parsedAmount.reason, decimals)
   const endMessage = endDate !== '' && expiresAt === null ? 'Choose an end date in the future.' : null
+  // Stated, never silent: a date past the parent's end is pulled back to it.
+  const endClamped = endMessage === null && endDateIsClamped(endDate, budget.expires_at)
   const recipientMessage = recipientOk ? null : 'Recipient must be a valid wallet address, or blank for any recipient.'
   const complete = subAgentId !== '' && parsedAmount.ok && expiresAt !== null && recipientOk
 
@@ -147,11 +151,11 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budget, to
       Done
     </Button>
   ) : (
-    <div className="flex gap-3">
-      <Button variant="ghost" onClick={onClose} className="flex-1" disabled={busy}>
+    <div className="flex justify-end gap-3">
+      <Button variant="ghost" onClick={onClose} disabled={busy}>
         Cancel
       </Button>
-      <Button onClick={() => void submit()} className="flex-1" disabled={busy}>
+      <Button onClick={() => void submit()} className="whitespace-nowrap" disabled={busy}>
         {busy ? 'Issuing…' : 'Issue sub-budget'}
       </Button>
     </div>
@@ -172,20 +176,20 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budget, to
         <div className="space-y-3" data-testid="sub-budget-pending">
           <p className="text-sm font-medium text-[var(--v2-ink)]">Sub-budget created — waiting for {delegatingName}</p>
           <p className="text-sm text-[var(--v2-ink-2)]">
-            It stays pending until {delegatingName} signs both parts. It can&rsquo;t be spent from yet, and nothing
-            has moved.
+            It stays pending until {delegatingName} approves it with its own key. It can&rsquo;t be spent from yet,
+            and nothing has moved.
+            {result.sub_budget?.expires_at ? ` It ends ${formatSubBudgetDate(result.sub_budget.expires_at)}.` : ''}
           </p>
           <p className="text-sm text-[var(--v2-ink-2)]">
-            Ask {delegatingName} to finish setting it up — it signs the sub-budget the next time it checks its
-            pending signatures (<code className="font-mono text-xs">haven_get_agent</code>). It then shows as
-            active here.
+            Ask {delegatingName} to finish setting it up — it approves the sub-budget the next time it checks in with
+            Haven. It then shows as active here.
           </p>
         </div>
       ) : (
         <div className="space-y-5">
           <p className="text-sm text-[var(--v2-ink-2)]" data-testid="sub-budget-ceiling">
             {delegatingName}&rsquo;s budget is {parentAmount} {symbol} {periodLabel}, until{' '}
-            {unixSecondsToDateInput(budget.expires_at)}. A sub-budget can be this size or smaller, ends no later,
+            {formatSubBudgetDate(budget.expires_at)}. A sub-budget can be this size or smaller, ends no later,
             and refills on the same schedule.
           </p>
 
@@ -248,32 +252,53 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budget, to
             />
             {touched && endDate === '' ? <InlineAlert>Choose when this sub-budget ends.</InlineAlert> : null}
             {endMessage ? <InlineAlert>{endMessage}</InlineAlert> : null}
+            {endClamped ? (
+              <p className="text-xs text-[var(--v2-ink-3)]" data-testid="sub-budget-end-clamped">
+                Ends {formatSubBudgetDate(budget.expires_at)}, when {delegatingName}&rsquo;s budget ends.
+              </p>
+            ) : null}
           </div>
 
-          <Input
-            value={recipient}
-            onChange={(e) => setRecipient(e.target.value)}
-            placeholder="Recipient address"
-            helperText={
-              budget.recipient_address
-                ? `${delegatingName}'s budget pays ${truncateAddress(budget.recipient_address)} only, so this one does too.`
-                : 'Optional — leave blank for any recipient.'
-            }
-            className="font-mono"
-            invalid={!recipientOk}
-            disabled={busy || !!budget.recipient_address}
-            aria-label="Recipient"
-          />
-          {recipientMessage ? <InlineAlert>{recipientMessage}</InlineAlert> : null}
+          <div className="space-y-1.5">
+            <label htmlFor="sub-budget-recipient" className="text-sm font-medium text-[var(--v2-ink)]">
+              Recipient
+            </label>
+            {budget.recipient_address ? (
+              // A pinned parent fixes the recipient: state it, don't show a locked box of hex.
+              <p className="text-sm text-[var(--v2-ink-2)]" id="sub-budget-recipient" data-testid="sub-budget-recipient-pinned">
+                Only <span className="font-mono">{truncateAddress(budget.recipient_address)}</span>.{' '}
+                {delegatingName}&rsquo;s budget pays this recipient only, so this one does too.
+              </p>
+            ) : (
+              <Input
+                id="sub-budget-recipient"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                placeholder="Recipient address"
+                helperText="Optional — leave blank for any recipient."
+                className="font-mono"
+                invalid={!recipientOk}
+                disabled={busy}
+                aria-label="Recipient"
+              />
+            )}
+            {recipientMessage ? <InlineAlert>{recipientMessage}</InlineAlert> : null}
+          </div>
 
-          <Input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="Label (optional)"
-            maxLength={80}
-            disabled={busy}
-            aria-label="Label"
-          />
+          <div className="space-y-1.5">
+            <label htmlFor="sub-budget-label" className="text-sm font-medium text-[var(--v2-ink)]">
+              Label <span className="font-normal text-[var(--v2-ink-3)]">(optional)</span>
+            </label>
+            <Input
+              id="sub-budget-label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. Research tasks"
+              maxLength={80}
+              disabled={busy}
+              aria-label="Label"
+            />
+          </div>
 
           {touched && subAgentId === '' ? <InlineAlert>Choose which agent to share with.</InlineAlert> : null}
           {refusal ? <InlineAlert>{refusal}</InlineAlert> : null}

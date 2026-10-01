@@ -1003,7 +1003,14 @@ export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: stri
  * Scoped deliberately: everything else keeps falling back to the shared
  * fixture, so the agents LIST and every unrelated surface are untouched.
  */
-export async function serveAgentDetailResponses(page: Page, agentId: string) {
+export async function serveAgentDetailResponses(
+  page: Page,
+  agentId: string,
+  // #3506: the shared list's other agent is also named "Research agent", so a
+  // spec that shows BOTH names side by side (the sub-budget modal) can give
+  // it a distinct one. Default unchanged, so no other baseline moves.
+  options: { otherAgentName?: string } = {},
+) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -1018,7 +1025,7 @@ export async function serveAgentDetailResponses(page: Page, agentId: string) {
       // the connect-flow rows the shared list exists for are untouched.
       await fulfillJson(route, {
         agents: [
-          testAgent,
+          options.otherAgentName ? { ...testAgent, name: options.otherAgentName } : testAgent,
           {
             ...testAgent,
             id: agentId,

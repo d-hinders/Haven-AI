@@ -1018,30 +1018,6 @@ const accountingFeatureGate404 = {
  * strictly is the right trade: the alternative is widening the contract of
  * the only rail that can pay to accommodate a row that cannot exist.
  */
-/**
- * #3528 — the prepare-response warning array (additive, WARNING-GRADE).
- * Present exactly when the recipient of a just-prepared payment is one of the
- * owner's own Haven accounts. Advisory only: it never blocks, never replaces
- * a refusal, and no prepare surface refuses on it — the budget delegation's
- * on-chain caveat enforcers remain the only gate either way.
- */
-const paymentWarnings = {
-  type: 'array',
-  items: {
-    type: 'object',
-    required: ['code', 'message'],
-    properties: {
-      code: {
-        type: 'string',
-        enum: ['SELF_TRANSFER'],
-        description: 'The recipient is one of the owner\'s own Haven accounts.',
-      },
-      message: { type: 'string' },
-    },
-    additionalProperties: false,
-  },
-} as const
-
 const paymentSignData = {
   type: 'object',
   required: ['hash', 'signature_scheme', 'typed_data', 'components', 'instructions'],
@@ -1358,6 +1334,11 @@ export const openapiSpec = {
       description:
         'Inbound provider callbacks (#3019). Authenticated by a per-connection capability URL token plus the provider HMAC signature — never a session.',
     },
+    {
+      name: 'Ops',
+      description:
+        'The internal ops console (#3509, epic #3507): founders-only, read-only, GitHub sign-in. Every route answers 404 on a deployment that does not configure it. Nothing here moves funds, signs, or acts as a user.',
+    },
   ],
   paths: {
     '/openapi.json': {
@@ -1645,6 +1626,99 @@ export const openapiSpec = {
           },
           '401': { ...errorResponse, description: 'The operator token is missing or invalid.' },
           '404': { ...errorResponse, description: 'Operator diagnostics are not configured on this deployment.' },
+        },
+      },
+    },
+    // ── Ops console (#3509, epic #3507) ──────────────────────────────────
+    // Founders-only and READ-ONLY. Every /ops/* route answers 404 unless the
+    // deployment configures OPS_*, decided before validation runs.
+    '/ops/auth/github/start': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'startOpsSignIn',
+        summary: 'Begin an ops console sign-in with GitHub.',
+        description:
+          'Redirects the browser to GitHub (no scopes requested) with a signed, 10-minute `state` carrying `return_to` and `nonce`. ' +
+          '`return_to` must exactly equal one of the deployment\'s `OPS_REDIRECT_ORIGINS` (scheme, host and port; no prefix, suffix or wildcard matching). ' +
+          'Returns 404 when the ops console is not configured on this deployment.',
+        security: [],
+        parameters: [
+          { name: 'return_to', in: 'query', required: true, schema: { type: 'string', maxLength: 2048 }, description: 'The ops app origin to return to.' },
+          { name: 'nonce', in: 'query', required: true, schema: { type: 'string', pattern: '^[A-Za-z0-9_-]{16,128}$' }, description: 'The ops app\'s nonce, echoed back in the redirect fragment.' },
+        ],
+        responses: {
+          '302': { description: 'Redirect to GitHub\'s authorize page.' },
+          '400': { ...errorResponse, description: '`return_to` is not an allowed ops origin.' },
+          '404': { ...errorResponse, description: 'The ops console is not configured on this deployment.' },
+          '429': errorResponse,
+        },
+      },
+    },
+    '/ops/auth/github/callback': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'finishOpsSignIn',
+        summary: 'Finish an ops console sign-in (GitHub redirects here).',
+        description:
+          'Verifies the `state` this backend issued, re-checks its origin against `OPS_REDIRECT_ORIGINS`, exchanges the code, reads the GitHub user and discards GitHub\'s token. ' +
+          'An allowlisted numeric GitHub id (with 2FA, when GitHub reports it) is redirected to `<origin>/#token=<ops token>&nonce=<nonce>`; every other outcome to `<origin>/#error=<code>&nonce=<nonce>` ' +
+          '(`not_allowed`, `two_factor_required`, `github_denied`, `github_unavailable`, `missing_code`). Every sign-in that reaches a GitHub identity (allowed, `not_allowed` or `two_factor_required`) is audited first; a failed audit write answers 503 and issues nothing. `github_denied`, `github_unavailable` and `missing_code` have no identity to record.',
+        security: [],
+        parameters: [
+          { name: 'code', in: 'query', schema: { type: 'string', maxLength: 512 }, description: 'Authorization code from GitHub.' },
+          { name: 'state', in: 'query', schema: { type: 'string', maxLength: 4096 }, description: 'The signed state `start` issued.' },
+          { name: 'error', in: 'query', schema: { type: 'string', maxLength: 256 }, description: 'Present when the user declined.' },
+          { name: 'error_description', in: 'query', schema: { type: 'string', maxLength: 2048 } },
+          { name: 'error_uri', in: 'query', schema: { type: 'string', maxLength: 2048 } },
+        ],
+        responses: {
+          '302': { description: 'Redirect back to the ops app with a token or an error code in the fragment.' },
+          '400': { ...errorResponse, description: 'The state is missing, forged, expired, or names an origin no longer allowed.' },
+          '404': { ...errorResponse, description: 'The ops console is not configured on this deployment.' },
+          '429': errorResponse,
+          '503': { ...errorResponse, description: 'The sign-in could not be audited, so nothing was issued.' },
+        },
+      },
+    },
+    '/ops/me': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsSession',
+        summary: 'Read the signed-in ops operator.',
+        security: [{ OpsJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The operator the ops token belongs to.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsSession' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console is not configured on this deployment.' },
+        },
+      },
+    },
+    '/ops/reveal': {
+      post: {
+        tags: ['Ops'],
+        operationId: 'revealOpsField',
+        summary: 'Reveal one masked field of one record, audited.',
+        description:
+          'Accepts only a closed set of `(target_type, field)` pairs and reads through the read-only ops database role. Every reveal writes an audit row before the value is returned; a failed audit write answers 503 with no value. ' +
+          'Returns 404 while the deployment has no read-only ops database configured.',
+        security: [{ OpsJwt: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsRevealRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'The unmasked value.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsRevealResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such record, or the ops console (or its read-only database) is not configured.' },
+          '429': errorResponse,
+          '503': { ...errorResponse, description: 'The reveal could not be audited, so no value was returned.' },
         },
       },
     },
@@ -8430,6 +8504,12 @@ export const openapiSpec = {
         bearerFormat: 'sk_agent_*',
         description: bearerIdentityDescription,
       },
+      OpsJwt: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Ops console session token (#3509), issued by the GitHub sign-in to an allowlisted founder. Signed with its own secret and refused by every customer route; it is read authority over the ops console only, never payment authority.',
+      },
       DashboardJwt: {
         type: 'http',
         scheme: 'bearer',
@@ -9185,6 +9265,37 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+        },
+        additionalProperties: false,
+      },
+      OpsSession: {
+        type: 'object',
+        required: ['github_id', 'login', 'expires_at'],
+        properties: {
+          github_id: { type: 'string', description: 'Numeric GitHub user id (the allowlist key).' },
+          login: { type: 'string', description: 'GitHub login at sign-in time; display only.' },
+          expires_at: { type: 'string', format: 'date-time' },
+        },
+        additionalProperties: false,
+      },
+      OpsRevealRequest: {
+        type: 'object',
+        required: ['target_type', 'target_id', 'field'],
+        properties: {
+          target_type: { type: 'string', enum: ['user'] },
+          target_id: { type: 'string', pattern: `^${UUID_PATTERN}$` },
+          field: { type: 'string', enum: ['email', 'name'] },
+        },
+        additionalProperties: false,
+      },
+      OpsRevealResponse: {
+        type: 'object',
+        required: ['target_type', 'target_id', 'field', 'value'],
+        properties: {
+          target_type: { type: 'string' },
+          target_id: { type: 'string' },
+          field: { type: 'string' },
+          value: { type: ['string', 'null'] },
         },
         additionalProperties: false,
       },
@@ -10305,11 +10416,6 @@ export const openapiSpec = {
           payment_id: uuid,
           status: { type: 'string', enum: ['pending_signature'] },
           expires_at: isoDateTime,
-          // #3528: the additive, WARNING-GRADE self-transfer hint. Present
-          // exactly when the recipient is one of the owner's own accounts;
-          // advisory only — it never blocks, never replaces a refusal, and
-          // no prepare surface refuses on it.
-          warnings: paymentWarnings,
           sign_data: paymentSignData,
         },
         additionalProperties: false,

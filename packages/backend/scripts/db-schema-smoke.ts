@@ -38,6 +38,8 @@ import {
 } from '../src/infra/repositories/delegation-budgets.js'
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
+import { INSERT_OPS_ACCESS_LOG_SQL } from '../src/infra/repositories/ops-access-log.js'
+import { OPS_REVEAL_SQL } from '../src/infra/repositories/ops-reveal.js'
 import {
   FIND_TASK_BUDGET_FOR_AGENT_SQL,
   INSERT_PENDING_TASK_BUDGET_SQL,
@@ -531,6 +533,18 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'audit: agent tool-invocation insert (#999, imported)',
     sql: INSERT_AGENT_TOOL_INVOCATION_SQL,
+  },
+  {
+    name: 'ops: access-log insert (#3509, imported)',
+    sql: INSERT_OPS_ACCESS_LOG_SQL,
+  },
+  {
+    name: 'ops: reveal users.email (#3509, imported)',
+    sql: OPS_REVEAL_SQL.user.email,
+  },
+  {
+    name: 'ops: reveal users.name (#3509, imported)',
+    sql: OPS_REVEAL_SQL.user.name,
   },
   {
     // IMPORTED since #995 — the pasted copy predated the repository.

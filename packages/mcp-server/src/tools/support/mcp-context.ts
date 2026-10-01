@@ -23,9 +23,7 @@ import {
   HavenClient,
   discoverMerchantMcpUrl,
   isSecureX402RetryTarget,
-  mapRawWarnings,
   sameUrl,
-  type AgentPaymentWarning,
   type X402McpTransport,
   type X402Quote,
 } from '@haven_ai/sdk'
@@ -77,22 +75,6 @@ export function delegationSignFields(signData: {
           : {}),
       }
     : {}
-}
-
-/**
- * #3528: the spread form of the backend's raw prepare warnings
- * (`POST /payments` / `POST /x402` 201 bodies) onto a hosted tool result.
- * Uses the SDK's `mapRawWarnings` (absent-preserving, per-entry verbatim) and
- * spreads only when present, so a stranger-address prepare result carries NO
- * `warnings` key exactly as before. The entries are merged INTO whatever
- * envelope the caller already emits — `buildAgentGuidance`'s `warnings`
- * array on the tools that carry it — never a second field: one warning
- * vocabulary per result.
- */
-export function backendPrepareWarningsSpread(
-  raw: Array<{ code: string; message: string }> | undefined,
-): { warnings: AgentPaymentWarning[] } {
-  return { warnings: mapRawWarnings(raw) ?? [] }
 }
 
 /**

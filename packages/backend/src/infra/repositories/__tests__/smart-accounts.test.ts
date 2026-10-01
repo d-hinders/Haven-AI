@@ -12,7 +12,6 @@ import {
   CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL,
   DELETE_USER_ACCOUNT_SQL,
   LIST_ACCOUNTS_FOR_USER_SQL,
-  LIST_OWNER_ADDRESSES_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_ACCOUNT_SQL,
   SET_ACCOUNT_DEFAULT_SQL,
   RENAME_ACCOUNT_FOR_USER_SQL,
@@ -21,7 +20,6 @@ import {
   findOwnedAccountAddress,
   findOwnedAccountDefaultFlag,
   listAccountsForUser,
-  listOwnerAddressesForUser,
   renameAccountForUser,
   setDefaultAccountForUser,
   type Executor,
@@ -54,10 +52,6 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     ]) {
       expect(sql).toMatch(/user_id = \$\d/)
     }
-    // #3528: the owner-directory address read — the self-transfer hint's
-    // lookup — scopes the same way, on BOTH arms of its UNION.
-    expect(LIST_OWNER_ADDRESSES_FOR_USER_SQL.match(/user_id = \$1/g)?.length).toBe(2)
-    expect(LIST_OWNER_ADDRESSES_FOR_USER_SQL).toMatch(/account_type = 'delegator_hybrid'/g)
     // The legacy mirror UPDATE is scoped by the users PK, which IS the tenant.
     expect(SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL).toMatch(/WHERE id = \$2/)
   })
@@ -66,13 +60,6 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     const db = tenantExecutor({ id: 'safe-1' })
     expect(await listAccountsForUser(ATTACKER, db)).toEqual([])
     expect(await listAccountsForUser(OWNER, db)).toHaveLength(1)
-  })
-
-  it('listOwnerAddressesForUser (#3528): scoped to the caller; rows map to plain address strings', async () => {
-    const query = vi.fn(async () => ({ rows: [{ addr: '0xAbc' }, { addr: '0xDef' }] }))
-    const db = { query } as unknown as Executor
-    expect(await listOwnerAddressesForUser(OWNER, db)).toEqual(['0xAbc', '0xDef'])
-    expect(query).toHaveBeenCalledWith(LIST_OWNER_ADDRESSES_FOR_USER_SQL, [OWNER])
   })
 
   // `findSafeIdByAddressAndChain` (import duplicate detection),

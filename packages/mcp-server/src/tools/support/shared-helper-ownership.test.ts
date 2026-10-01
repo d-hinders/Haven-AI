@@ -203,11 +203,6 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // s2809 handlers (haven_send/haven_pay) — see SINGLE_SLICE_RETAINED for why
   // it still lives in shared support beside delegationSignFields.
   generateDirectIdempotencyKey: { module: 'mcp-context', slices: ['s2809'] },
-  // #3528: the spread form of the backend prepare response's raw warnings.
-  // The s2809 direct-payment results (haven_send/haven_pay) and the s2811
-  // plain-HTTP x402 quote surfaces merge the backend's SELF_TRANSFER hint
-  // into the warnings envelope their results already emit.
-  backendPrepareWarningsSpread: { module: 'mcp-context', slices: ['s2809', 's2811'] },
   // tools/paid-mcp-completion.ts — the #2812 capability module itself now owns
   // its single-slice merchant helpers (the carve-out the #2808 map retained
   // them for has landed, so "until #2812 moves them" is satisfied).
@@ -468,7 +463,6 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'submitSignatureWithExpiryMapping',
     'submitErc7710WithExpiryMapping',
     'generateDirectIdempotencyKey',
-    'backendPrepareWarningsSpread', // #3528
   ],
   // The #2812 capability module — a single-slice owner, not shared support,
   // but the four helpers it owns are mapped in HELPER_OWNERSHIP like any

@@ -25,6 +25,7 @@
 
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
+import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
 
 export type { Executor }
 
@@ -335,9 +336,12 @@ export async function markOutboundTxFailed(
   /** Set for a failed same-nonce bump ATTEMPT, so the lane cap counts it. */
   nonce?: bigint,
 ): Promise<OutboundTxRow | null> {
+  // #3510: scrubbed at the write boundary. Every caller passes provider error
+  // text (`describeRevert`, bundler/RPC messages) and the column is readable by
+  // the ops console's read-only role, so a key echoed in a URL must never land.
   const { rows } = await db.query<OutboundTxRow>(MARK_OUTBOUND_TX_FAILED_SQL, [
     id,
-    error,
+    redactVendorSecrets(error),
     nonce?.toString() ?? null,
   ])
   return rows[0] ?? null

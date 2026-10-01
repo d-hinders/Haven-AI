@@ -82,6 +82,8 @@ import machinePaymentRoutes from './routes/machine-payments.js'
 import machinePaymentsReconciliationEventsRoutes from './routes/machine-payments-reconciliation-events.js'
 import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
+import opsRoutes from './routes/ops.js'
+import { getOpsReadDb } from './db/ops-read-pool.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'
@@ -275,6 +277,10 @@ installRequestValidation(app, {
     // drop; the drop's body shape is exactly the enforced schema's, so a
     // malformed drop is refused before any DB read.
     'routes/receive.ts',
+    // #3509 (epic #3507): the ops console is born ENFORCED. Its plugin answers
+    // 404 from an onRequest hook when ops is unconfigured, so validation never
+    // runs on a backend that does not serve the console.
+    'routes/ops.ts',
   ],
 })
 
@@ -370,6 +376,16 @@ registerHealthRoutes(app, {
   trustProxyHops: config.trustProxyHops,
   opsToken: config.opsToken,
   getAccountingCounters: () => getAccountingOpsCounters(),
+})
+
+// Ops console (#3509, epic #3507): founders-only and read-only. Every route
+// answers 404 unless OPS_* is fully configured, and the data routes also
+// need OPS_DATABASE_URL — the read-only role login (#3510) — or they 404 too.
+await app.register(opsRoutes, {
+  prefix: '/ops',
+  ops: config.ops,
+  trustProxyHops: config.trustProxyHops,
+  readDb: getOpsReadDb(),
 })
 
 // The accounting module's ops events (#2872: `accounting.connection.needs_attention`)

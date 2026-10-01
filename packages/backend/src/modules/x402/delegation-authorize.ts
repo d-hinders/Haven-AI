@@ -34,6 +34,8 @@ import {
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
+// #3528: the additive self-transfer hint on both prepare responses.
+import { selfTransferWarning } from '../../domain/self-transfer.js'
 import { classifyRevertForLedger, isTransferCapRevert } from '../payments/refusal-ledger.js'
 import { refuse } from '../payments/refuse.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
@@ -742,6 +744,11 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         x402_expected_auth: fundingExpectedAuth,
         // #1690: gated payer identity on the wire, paired with the context above.
         ...x402PayerWireFields(agent),
+        // #3528: additive, warning-grade self-transfer hint — payTo is the
+        // agent's own delegate EOA here, which is an OWNER-owned address
+        // only when it is also one of the owner's accounts. Never blocks:
+        // no refusal row, nothing read as a gate.
+        ...(await selfTransferWarning(agent.user_id, payTo)),
         sign_data: {
           hash: fundingAuth.prepared.userOpHash,
           signature_scheme: 'eip712_userop',
@@ -1221,6 +1228,10 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       x402_expected_auth: settlementExpectedAuth,
       // #1690: gated payer identity on the wire, paired with the context above.
       ...x402PayerWireFields(agent),
+      // #3528: additive, warning-grade self-transfer hint — payTo IS the
+      // merchant on this direct-settlement leg, so the hint fires exactly
+      // when the merchant is one of the owner's own accounts. Never blocks.
+      ...(await selfTransferWarning(agent.user_id, payTo)),
       sign_data: {
         hash: built.childHash,
         signature_scheme: 'eip712_delegation',

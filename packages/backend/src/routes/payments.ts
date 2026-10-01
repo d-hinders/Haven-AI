@@ -29,6 +29,8 @@ import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { classifyRevertForLedger, isPeriodBudgetRevert, isTransferCapRevert, refuse } from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
+// #3528: the additive self-transfer hint on the prepare response.
+import { selfTransferWarning } from '../domain/self-transfer.js'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).
@@ -907,6 +909,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       payment_id: delegationIntent.id,
       status: delegationIntent.status,
       expires_at: delegationIntent.expires_at,
+      // #3528: additive, warning-grade hint when the recipient is one of the
+      // owner's own accounts. Never blocks — `safe_to_continue` has no
+      // prepare-side gate to flip and no refusal-ledger row is written; the
+      // spread is absent (field omitted) for a stranger's address.
+      ...(await selfTransferWarning(agent.user_id, to)),
       sign_data: {
         hash: authorization.prepared.userOpHash,
         signature_scheme: 'eip712_userop',

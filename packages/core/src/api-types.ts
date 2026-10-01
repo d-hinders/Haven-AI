@@ -14620,6 +14620,7 @@ export interface operations {
                             };
                             refusals: number;
                         }[];
+                        /** @description The tenant's delegation-rail agents, unordered. An agent is listed when it is not revoked (even with no activity in range), when it had a confirmed payment or a refusal in range, or when it is revoked but still holds an active budget delegation (revoking flips only the agent's status). A revoked agent with none of these is omitted (#3540). */
                         agents: {
                             /** Format: uuid */
                             id: string;

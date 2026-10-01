@@ -62,6 +62,7 @@ import { HostedToolError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   catchSettledReplay,
+  eip3009ConfirmedReplayResponse,
   paymentStatusHandoff,
   refusalNextStep,
 } from './support/guidance.js'
@@ -478,6 +479,15 @@ export function createCatalogPurchaseHandlers(
               }),
             }
           }
+          // #3527: a settled EIP-3009 replay (the funding leg already
+          // confirmed — the backend's pre-check and `delegationReplay` both
+          // treat it as replayable) used to surface here as a bare
+          // HavenApiError/API_ERROR. Split by merchant-leg evidence instead
+          // of rethrowing — never a fresh funding sign for an idempotency
+          // key that already funded a payment.
+          if (err instanceof HavenPaymentStateError && err.status === 'confirmed') {
+            return eip3009ConfirmedReplayResponse(haven, err)
+          }
           throw err
         }
       }),
@@ -660,14 +670,40 @@ export function createCatalogPurchaseHandlers(
               merchantTo: catalogSelection.option.payTo,
               // The merchant resource being bought — the ledger dedupe
               // window's discriminating column — never this request's URL.
-              resourceUrl: merchantUrl,
-              // #3492: a replayed idempotency key whose erc7710 authorize
-              // already settled must not refuse here as over-budget against
-              // the now-spent remaining figure — the backend answers
-              // sufficient (replay: true) for that exact shape and runs
-              // today's compare unchanged for every other one, including a
-              // fresh key with no prior payment.
-              ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key as string } : {}),
+              // #3527: the two settlement schemes persist a DIFFERENT value
+              // into the stored x402 row's own resource column at authorize
+              // time — erc7710 persists the caller's resourceUrl (merchantUrl,
+              // step 8 below), eip3009's createX402Intent always persists
+              // `paymentRequired.resource.url` (SDK client.ts) — so the
+              // replay match at the backend (`isSettledX402Replay`) only ever
+              // succeeds when THIS value equals what that scheme will store.
+              // Sending merchantUrl unconditionally made a 3009 replay whose
+              // resource.url differs from the discovered merchant URL a false
+              // key-collision refusal. Falling back to merchantUrl when the
+              // quote carries no resource object keeps erc7710 (and any 3009
+              // quote with no declared resource) byte-identical to before.
+              resourceUrl:
+                catalogSelection.scheme === 'erc7710'
+                  ? merchantUrl
+                  : ((quote.paymentRequired as X402PaymentRequired).resource?.url ?? merchantUrl),
+              // #3492/#3527: a replayed idempotency key whose erc7710 OR
+              // eip3009 authorize already settled must not refuse here as
+              // over-budget against the now-spent remaining figure — the
+              // backend answers sufficient (replay: true) for that exact
+              // shape and runs today's compare unchanged for every other one,
+              // including a fresh key with no prior payment. #3527: the
+              // EFFECTIVE key — the one step 9's `createX402Intent` actually
+              // authorizes with (`args.idempotency_key ?? quote.idempotencyKey`,
+              // never null on this path) — not just the explicit key, so an
+              // agent that never passed one still has its auto-derived
+              // 5-minute-bucket key checked against the same row step 9 will
+              // replay. The erc7710 branch (step 8) still forwards the
+              // EXPLICIT key only, unchanged: its own idempotency key is
+              // never auto-derived on this path.
+              idempotencyKey:
+                catalogSelection.scheme === 'erc7710'
+                  ? (args.idempotency_key as string | undefined)
+                  : ((args.idempotency_key as string | undefined) ?? quote.idempotencyKey),
             })
             allowanceBlock = {
               rail,
@@ -883,7 +919,11 @@ export function createCatalogPurchaseHandlers(
           // intent — IDENTICAL machinery to haven_pay_mcp_tool
           // (mcpCallContext persisted per #1307), so the signer flow from
           // here is IDENTICAL to today's: haven_sign_x402 with payment_id +
-          // payment_required, then haven_settle_mcp_tool.
+          // payment_required, then haven_settle_mcp_tool. #3527: the SAME
+          // effective key step 5b's pre-check now checks
+          // (`args.idempotency_key ?? quote.idempotencyKey`) — a settled
+          // replay of this exact key reaches this call's own confirmed-replay
+          // branch below (`catch (err)`), not a fresh funding intent.
           const intent = await haven.createX402Intent(quote.paymentRequired as X402PaymentRequired, {
             idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
             mcpCallContext: catalogCallContext,
@@ -982,6 +1022,15 @@ export function createCatalogPurchaseHandlers(
                 summary: { payment_id: err.paymentId ?? 'unknown', status: 'pending_approval' },
               }),
             }
+          }
+          // #3527: a settled EIP-3009 replay at step 9 (the budget pre-check
+          // above now answers it sufficient, so this intent create reaches
+          // the backend's own confirmed-replay branch) used to surface as a
+          // bare HavenApiError/API_ERROR. Split by merchant-leg evidence
+          // instead — never a fresh funding sign for an idempotency key that
+          // already funded a payment.
+          if (err instanceof HavenPaymentStateError && err.status === 'confirmed') {
+            return eip3009ConfirmedReplayResponse(haven, err)
           }
           throw err
         }

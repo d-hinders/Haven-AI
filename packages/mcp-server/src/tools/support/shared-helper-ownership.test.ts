@@ -140,6 +140,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // #3423: its settle-side twin — haven_settle_mcp_tool (s2812) and
   // haven_submit's erc7710 branch (s2809).
   catchSettledResettle: { module: 'guidance', slices: ['s2809', 's2812'] },
+  // #3527: the EIP-3009 twin of settledReplayResponse/catchSettledReplay for
+  // createX402Intent's confirmed-replay answer. Both call sites
+  // (haven_prepare_catalog_purchase step 9, haven_pay_mcp_tool's 3009 branch)
+  // live in THIS module (s2810) — see SINGLE_SLICE_RETAINED for why it still
+  // lives in shared support rather than moving into catalog-purchase.ts.
+  eip3009ConfirmedReplayResponse: { module: 'guidance', slices: ['s2810'] },
   // #3101: the status handoff for a refusal that may not know its payment id —
   // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
   // #3495 review S5: s2809 joined it too — haven_send/haven_pay's
@@ -329,6 +335,18 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
   resolveResumeState:
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
+  // #3527: only catalog-purchase.ts calls it (s2810's two confirmed-replay
+  // catches), but it is DELIBERATE: it is the EIP-3009 twin of
+  // settledReplayResponse/catchSettledReplay and stays beside them in
+  // guidance.ts so the two schemes' "already-paid, reached this error on
+  // replay" answers never drift into separate copies — the same reason
+  // catchSettledResettle stays beside catchSettledReplay. plain-http-x402.ts
+  // (s2811) reaches the identical createX402Intent confirmed-replay shape at
+  // its own authorize call and is the natural second caller.
+  eip3009ConfirmedReplayResponse:
+    'Only the #2810 handlers (haven_prepare_catalog_purchase, haven_pay_mcp_tool) call it today, but it is ' +
+    'DELIBERATE: it is the EIP-3009 twin of settledReplayResponse/catchSettledReplay and stays beside them ' +
+    'in guidance.ts, the same reason catchSettledResettle is not owned by one capability.',
   // s3329 (#3329 task budgets):
   taskBudgetNextStep:
     'Only tools/task-budgets.ts calls it today, but it is DELIBERATE, not "until the capability moves ' +
@@ -421,6 +439,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'buildPurchaseSummary',
     'catchSettledReplay',
     'catchSettledResettle',
+    'eip3009ConfirmedReplayResponse',
     'paymentStatusHandoff',
     'refusalNextStep',
     'taskBudgetNextStep',

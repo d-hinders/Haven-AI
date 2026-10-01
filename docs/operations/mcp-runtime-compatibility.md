@@ -778,18 +778,10 @@ last-verified: "2026-10-01"
 > replay: true }` WITHOUT calling `refuse()` — skipping the write, not
 > faking the remaining figure (`remaining_atomic` still reports the true,
 > now-lower number). Any other row shape — no row, a `pending_signature`
-> child, a key collision on a different payee/resource/token/amount, a
-> task/sub-budget-scoped row, or a settled EIP-3009 row
-> (`settlement_scheme: 'eip3009'`) — falls through to today's compare
-> unchanged, including its refusal branch. EIP-3009 is deliberately OUT of
-> scope for this fix, not because `delegationReplay`'s own authorize-side
-> replay would refuse it — it would not: its confirmed+tx_hash branch
-> (`replay.ts:89-110`) answers its stored 200 for ANY settlement scheme, so
-> a settled 3009 replay never reaches a second authorize either. A settled
-> 3009 replay hitting this pre-check still gets the SAME false over-budget
-> refusal and ledger row this issue fixes for erc7710 — known, left as a
-> follow-up, because its funding leg is a separate budget-metered hop (the
-> bridge, #946) this endpoint cannot yet tell has already settled.
+> child, a key collision on a different payee/resource/token/amount, or a
+> task/sub-budget-scoped row — falls through to today's compare unchanged,
+> including its refusal branch. (At the time of this pass a settled EIP-3009
+> row was also deliberately out of scope here; #3527 below closed that gap.)
 > `haven_prepare_catalog_purchase`'s step 5b forwards `args.idempotency_key`
 > onto the pre-check call; `haven_pay_mcp_tool` is unaffected — it never had
 > this bug, because its authorize call runs the replay lookup BEFORE its own
@@ -815,6 +807,41 @@ last-verified: "2026-10-01"
 > backend never sends the field and gets today's (occasionally
 > over-refusing) behavior. Deploy order is backend → hosted MCP either way.
 > Nothing else in this document was re-verified in this pass.
+>
+> **Re-verified #3527:** the #3492 gap above is closed. `isSettledX402Replay`
+> (renamed from `isSettledErc7710Replay`) now accepts a settled EIP-3009 row
+> on the SAME rule — `confirmed` + `tx_hash` is that scheme's FUNDING leg
+> (treasury → delegate), the same fact `delegationReplay`'s own
+> confirmed+tx_hash branch already treats as replayable for every scheme, so
+> the pre-check's prior refusal was always false there too. The resource
+> match is unchanged (it compares the request's `resourceUrl` against
+> whichever value the row's own `x402_resource_url` column stores), but the
+> CALLER now sends the right value per scheme:
+> `haven_prepare_catalog_purchase` step 5b forwards `merchantUrl` on the
+> erc7710 branch (unchanged) and `paymentRequired.resource.url` — the exact
+> field `createX402Intent` persists for a 3009 row — on the 3009 branch, and
+> forwards the EFFECTIVE idempotency key
+> (`args.idempotency_key ?? quote.idempotencyKey`, the same key step 9
+> authorizes with) rather than the explicit key only. On the hosted side, a
+> confirmed EIP-3009 replay reaching `createX402Intent`'s own state-error
+> path (`haven_prepare_catalog_purchase` step 9, `haven_pay_mcp_tool`'s 3009
+> branch) used to surface as a bare `API_ERROR` — `settledReplayResponse`
+> could not be reused as-is, because it hardcodes `settlement_scheme:
+> 'erc7710'` and reports its replayed `tx_hash` as the SETTLEMENT hash, which
+> is wrong on 3009 (that hash is the FUNDING leg; the merchant leg is a
+> separate, re-read fact). A new helper,
+> `eip3009ConfirmedReplayResponse` (`tools/support/guidance.ts`), re-reads
+> `haven_get_payment_status` and splits: a verified merchant settlement or a
+> reported merchant leg answers a DONE state (`funding_tx_hash` = the row's
+> own hash, `settlement_tx_hash` = the verified hash when the wire carries
+> one, else `null` — `getPaymentStatus` exposes only a verified BOOLEAN
+> today, never the merchant's own settlement hash); neither answers the
+> #2290 funded-awaiting-merchant remedy, forwarding the re-read status's own
+> `next_action`/`message` verbatim rather than re-deriving them, and pointed
+> at `haven_get_payment_status` — never a fresh funding sign. No tool added,
+> renamed or re-shaped; the local stdio runtime is not on this path
+> (`haven_pay_mcp_tool` has no pre-check, same as #3492). Nothing else in
+> this document was re-verified in this pass.
 >
 > **Recent re-verification (#3000):** the hosted server's
 > `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of

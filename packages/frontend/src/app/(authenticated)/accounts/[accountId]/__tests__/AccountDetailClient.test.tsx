@@ -429,7 +429,7 @@ describe('AccountDetailClient', () => {
       .fn()
       .mockRejectedValue(
         new ApiRequestError(
-          'Cannot unlink this Haven wallet while an agent has a pending or active budget delegation or recovery is in progress',
+          'Cannot unlink this Haven wallet while an agent has a live (pending, active or replaced) budget delegation or recovery is in progress',
           409,
         ),
       )

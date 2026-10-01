@@ -15,8 +15,8 @@
  * - Approver membership truth is ON-CHAIN (`getOwners()`); the
  *   `safe_approver_metadata` table only decorates owners with a label + type.
  *   Nothing here grants or removes an owner.
- * - Deleting a Safe must not orphan an agent with a pending or active budget
- *   delegation or an in-flight sweep; the transaction locks bound agent rows
+ * - Deleting a Safe must not orphan an agent with a live (pending/active/
+ *   replaced) budget delegation or an in-flight sweep; the transaction locks bound agent rows
  *   before checking this.
  * - The legacy `users.account_address` column mirrors the default Safe; every
  *   default-pointer change keeps it in sync.

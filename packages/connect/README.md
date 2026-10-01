@@ -392,7 +392,8 @@ also yields one rather than failing a completed setup.
 
 **The dashboard offers the revoke, never the connector (#2561).** The same ids
 now ride the install-status report, so the Haven dashboard can put a
-one-click revoke next to the setup that displaced them. The connector does not
+revoke next to the setup that displaced them; it also ends the agent's budget
+with one owner signature (#3542). The connector does not
 and must not do it: `POST /agents/:id/revoke` is owner-authenticated, and an
 agent credential retiring a sibling agent is the "agent editing its own
 authority" the re-key routes refuse. Nothing is revoked automatically — the

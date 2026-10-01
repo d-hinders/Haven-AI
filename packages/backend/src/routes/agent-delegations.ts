@@ -780,7 +780,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
 
     let targets = await listNonRevokedDelegationsForAgent(request.params.id)
     if (targets.length === 0) {
-      return reply.code(409).send({ error: 'Nothing to revoke — the agent has no pending or active budget delegations.' })
+      return reply.code(409).send({ error: 'Nothing to revoke — the agent has no pending, active or replaced budget delegations.' })
     }
 
     if (targets.length > RECONCILE_READ_CEILING) {
@@ -909,7 +909,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const expectedRows = await listNonRevokedDelegationsForAgent(request.params.id)
     if (expectedRows.length === 0) {
       return reply.code(409).send({
-        error: 'Nothing to revoke — the agent has no pending or active budget delegations. Re-prepare.',
+        error: 'Nothing to revoke — the agent has no pending, active or replaced budget delegations. Re-prepare.',
       })
     }
 

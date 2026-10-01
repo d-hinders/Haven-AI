@@ -201,9 +201,10 @@ export default function AccountDetailClient() {
   // the copy names that instead of restating the server's sentence.
   //
   // Two words in it are load-bearing, both from the design review:
-  //  - "a budget", not "an active budget" — `HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL`
-  //    matches `status IN ('pending', 'active')`, so a grant that was never
-  //    activated blocks the unlink too.
+  //  - "a budget", not "an active budget" — `HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`
+  //    matches `LIVE_DELEGATION_STATUSES_SQL` (pending/active/replaced), so a
+  //    grant that was never activated, or one replaced but not yet disabled,
+  //    blocks the unlink too.
   //  - "recovering funds", not "a recovery" — this page already renders a
   //    "Backup & recovery" card (`AccountSignersCard`), which is signer
   //    replacement and has nothing to do with the sweep this refusal means.

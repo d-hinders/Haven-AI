@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Re-export shim (#3508). `PageHeader` moved to `@haven_ai/ui`
  * (`packages/ui/src/PageHeader.tsx`) as part of the shared ops-console design

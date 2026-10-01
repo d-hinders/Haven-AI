@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Re-export shim (#3508). `Skeleton` moved to `@haven_ai/ui`
  * (`packages/ui/src/Skeleton.tsx`) as part of the shared ops-console design

@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Re-export shim (#3508). `StatusBadge` moved to `@haven_ai/ui`
  * (`packages/ui/src/StatusBadge.tsx`) as part of the shared ops-console design

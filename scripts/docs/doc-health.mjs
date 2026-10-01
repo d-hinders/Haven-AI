@@ -84,8 +84,16 @@ export function docEntry(path, fm, generatedAt) {
  *
  * @param {{ docs: Array<{ path: string, raw: string }>, packageDocs: Array<{ doc: string, owner?: string, status?: string, covers?: string[], 'last-verified'?: string }>, generatedAt: string }} input
  */
-export function buildDocHealth({ docs, packageDocs, generatedAt }) {
-  if (Number.isNaN(Date.parse(generatedAt))) throw new Error(`generatedAt is not a date: ${generatedAt}`)
+// A date, or a date-time with an explicit zone: a zone-less time parses as
+// LOCAL time, so the day count would depend on the machine running it.
+const ISO_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2}))?$/
+
+export function buildDocHealth({ docs, packageDocs, generatedAt: given }) {
+  if (!ISO_RE.test(given) || Number.isNaN(Date.parse(given))) {
+    throw new Error(`generatedAt must be an ISO date or a date-time with Z or an offset: ${given}`)
+  }
+  // Normalised, so the report always carries one ISO shape.
+  const generatedAt = new Date(given).toISOString()
   const entries = []
   for (const { path, raw } of docs) {
     if (isArchived(path)) continue
@@ -109,13 +117,16 @@ export async function readRepoDocs() {
 
 function parseArgs(argv) {
   const args = { out: null, generatedAt: null }
+  const value = (flag, i) => {
+    const v = argv[i]
+    if (v === undefined || v.startsWith('--')) throw new Error(`${flag} needs a value`)
+    return v
+  }
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--out') args.out = argv[++i]
-    else if (argv[i] === '--generated-at') args.generatedAt = argv[++i]
+    if (argv[i] === '--out') args.out = value('--out', ++i)
+    else if (argv[i] === '--generated-at') args.generatedAt = value('--generated-at', ++i)
     else throw new Error(`unknown argument: ${argv[i]}`)
   }
-  if (args.out === undefined) throw new Error('--out needs a path')
-  if (args.generatedAt === undefined) throw new Error('--generated-at needs an ISO timestamp')
   return args
 }
 

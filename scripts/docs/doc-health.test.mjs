@@ -153,3 +153,17 @@ test('the CLI refuses an unknown argument and a bad --generated-at', () => {
   const date = spawnSync(process.execPath, [SCRIPT, '--generated-at', 'yesterday'], { encoding: 'utf8' })
   assert.notEqual(date.status, 0)
 })
+
+test('generatedAt: a zone-less time or free text is refused; a date or zoned time is normalised to ISO', () => {
+  const run = (generatedAt) => buildDocHealth({ docs: [], packageDocs: [], generatedAt })
+  assert.throws(() => run('October 1, 2026'), /ISO date/)
+  assert.throws(() => run('2026-10-01T00:00:00'), /ISO date/)
+  assert.equal(run('2026-10-01').generatedAt, '2026-10-01T00:00:00.000Z')
+  assert.equal(run('2026-10-01T02:00:00+02:00').generatedAt, '2026-10-01T00:00:00.000Z')
+})
+
+test('the CLI names the flag whose value is missing', () => {
+  const r = spawnSync(process.execPath, [SCRIPT, '--out', '--generated-at', AT], { encoding: 'utf8' })
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, /--out needs a value/)
+})

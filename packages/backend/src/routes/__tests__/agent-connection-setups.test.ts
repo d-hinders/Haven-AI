@@ -184,8 +184,15 @@ async function buildApp(): Promise<FastifyInstance> {
 
 function mockWalletApprovalPersist(setup: SetupFixture = CONNECTED_SETUP) {
   mockClientQuery.mockImplementation(async (sql: string) => {
-    if (String(sql).includes('FROM agent_connection_setups')) {
+    const text = String(sql)
+    if (text.includes('FROM agent_connection_setups')) {
       return { rows: [setup] }
+    }
+    // #3544: `ACTIVATE_AGENT_SQL` now `RETURNING id` and `applyApprovalState`
+    // abandons when the activation matches no row — answer it the way the
+    // real database answers an agent UPDATE that matched its row.
+    if (text.includes('UPDATE agents') && text.includes("SET status = 'active'")) {
+      return { rows: [{ id: setup.agent_id ?? 'agent-1' }] }
     }
     return { rows: [] }
   })

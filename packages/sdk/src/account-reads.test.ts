@@ -389,6 +389,24 @@ describe('AccountReads', () => {
     expect(taskBudgetQueries).toEqual(refusesLive ? ['?status=live', '?status=all'] : ['?status=live'])
   })
 
+  it('#3518: a non-400 failure of status=live is NOT retried as the unbounded status=all read — the list soft-fails to []', async () => {
+    const taskBudgetQueries: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/machine-payments/agent') return json(agent('delegation'))
+      if (url.pathname === '/machine-payments/allowances') return json(allowance())
+      if (url.pathname === '/task-budgets') {
+        taskBudgetQueries.push(url.search)
+        return json({ error: 'upstream unavailable' }, 503)
+      }
+      throw new Error(`Unexpected ${url.pathname}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    const summary = await service.getAgentSummary()
+    expect(summary.taskBudgets).toEqual([])
+    expect(taskBudgetQueries.every((q) => q === '?status=live')).toBe(true)
+  })
+
   // #3518: the allowance rows carry each budget's SCOPE (the recipient pin,
   // the merchant lock) and the Haven-side reservation beside the on-chain
   // figure — the fields that let an agent name the merchant-locked budget

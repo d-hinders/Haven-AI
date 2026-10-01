@@ -829,6 +829,11 @@ export class HavenClient {
    * degrade-to-warning path and the ledger row would still land while the
    * purchase proceeded.
    *
+   * #3518: without `merchantTo`, an agent whose budgets for the token are all
+   * merchant-locked gets 409 `budget_requires_recipient` (thrown, nothing
+   * recorded) naming the pins in `budget_recipient_addresses` — repeat the
+   * check with `merchantTo`.
+   *
    * camelCase body like the route family; the response mirrors the wire
    * (`sufficient`, `remaining_atomic`). `resourceUrl` is the merchant
    * resource being bought — the ledger dedupe window's discriminating

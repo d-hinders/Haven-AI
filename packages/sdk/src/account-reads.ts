@@ -22,7 +22,7 @@ import type {
   RawTaskBudget,
   HavenPaymentReceiptsPage,
 } from './types.js'
-import { AgentPaymentWarningCode } from './types.js'
+import { AgentPaymentWarningCode, HavenApiError } from './types.js'
 import { HavenApiTransport } from './haven-api-transport.js'
 import { mapPaymentReceipt } from './payment-mappers.js'
 import { resolveTokenFromAddress } from './x402.js'
@@ -305,16 +305,23 @@ export class AccountReads {
    *
    * The same filter also runs here, client-side: it is what keeps the list
    * bounded against a backend that predates `status=live`, which refuses the
-   * value — that refusal falls back to `status=all`. A row whose wire carries
+   * value with a 400 — that refusal (and only that) falls back to
+   * `status=all`. A row whose wire carries
    * no `is_expired` is treated as unexpired — the degraded read errs toward
    * KEEPING rows, never toward hiding one the agent could still act on.
    */
   private async listTaskBudgetsSummary(): Promise<HavenTaskBudgetSummary[]> {
     try {
       type RawList = { task_budgets?: RawTaskBudget[] } | null | undefined
-      const raw = await this.transport
-        .get<RawList>('/task-budgets?status=live')
-        .catch(() => this.transport.get<RawList>('/task-budgets?status=all'))
+      // Only an older backend's 400 (its enforced schema refuses `live`)
+      // earns the unbounded `status=all` read: a 401, 5xx or timeout on a
+      // new backend is not retried into the heavier query.
+      const raw = await this.transport.get<RawList>('/task-budgets?status=live').catch((error: unknown) => {
+        if (error instanceof HavenApiError && error.statusCode === 400) {
+          return this.transport.get<RawList>('/task-budgets?status=all')
+        }
+        throw error
+      })
       const rows = raw?.task_budgets
       if (!Array.isArray(rows)) return []
       // The boundedness filter (comment above): closing rows always ride;

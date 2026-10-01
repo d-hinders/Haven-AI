@@ -232,7 +232,9 @@ export function RemoveAgentDialog({
             <InlineAlert>
               {finish
                 ? 'The budget has ended, but the credential could not be stopped. Choose Finish revoking to retry.'
-                : 'The agent can no longer spend, but it could not be moved to Removed. Choose Finish removal to retry.'}
+                : cannotEndBudgetHere
+                  ? 'The agent could not be moved to Removed, and its budget may still be active on the account it was removed from.'
+                  : 'The agent can no longer spend, but it could not be moved to Removed. Choose Finish removal to retry.'}
             </InlineAlert>
           )}
           {/* #1437: the backend refuses an oversized batch by naming the

@@ -27,7 +27,7 @@ const { mockRevoke, mockAgents, mockRevokeAll, mockMarkBudgetEnded, mockBudgetHo
     mockAgents: { current: [] as MockAgent[] },
     mockRevokeAll: vi.fn(),
     mockMarkBudgetEnded: vi.fn(),
-    mockBudgetHook: { ready: true, busy: false },
+    mockBudgetHook: { ready: true, busy: false, signersLoading: false },
     // Every `useDelegationBudget(agentId, chainId)` call, so a test can assert
     // the hook is mounted for the agent pending confirmation ONLY, and on that
     // agent's own chain.
@@ -43,6 +43,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
       revokeAll: mockRevokeAll,
       ready: mockBudgetHook.ready,
       busy: mockBudgetHook.busy,
+      signersLoading: mockBudgetHook.signersLoading,
     }
   },
 }))
@@ -87,6 +88,7 @@ beforeEach(() => {
   mockRevokeAll.mockResolvedValue({ ok: true })
   mockBudgetHook.ready = true
   mockBudgetHook.busy = false
+  mockBudgetHook.signersLoading = false
   mockBudgetCalls.length = 0
   mockState.error = null
   mockState.loading = false
@@ -417,6 +419,20 @@ describe('SupersededAgentsCard', () => {
       expect(mockRevokeAll).not.toHaveBeenCalled()
       expect(await screen.findByRole('alert')).toHaveTextContent(/budget is still active/i)
       expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeInTheDocument()
+    })
+
+    it('while the signer set is still loading, the confirm waits and does not claim the device cannot sign', async () => {
+      mockBudgetHook.ready = false
+      mockBudgetHook.signersLoading = true
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
+      expect(screen.queryByText(/cannot sign for the account/i)).not.toBeInTheDocument()
+      // The confirm shows its working state and cannot be clicked.
+      const confirm = screen.getByRole('button', { name: /working/i })
+      expect(confirm).toBeDisabled()
+      expect(screen.queryByRole('button', { name: /^revoke agent$/i })).not.toBeInTheDocument()
+      expect(mockRevoke).not.toHaveBeenCalled()
     })
 
     it('too many budgets points to the budget card instead of offering a retry that cannot work', async () => {

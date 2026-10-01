@@ -647,6 +647,10 @@ export function useDelegationBudget(
     revokeAll,
     busy,
     ready: signingPath !== null,
+    // #3542 review: `ready` reads false while the signer set is still loading,
+    // which is not the same as "this device cannot sign". Callers that act on
+    // `!ready` (the replaced-agents card) wait on this first.
+    signersLoading: signers === null && !signersError,
     reload,
     budgetsError,
     signersError,

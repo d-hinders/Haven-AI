@@ -271,6 +271,16 @@ describe('RemoveAgentDialog', () => {
     expect(confirm.disabled).toBe(true)
   })
 
+  it('a failed list read keeps the signature required and never says "already ended"', () => {
+    mockBudgetState.budgets = null
+    mockBudgetState.budgetsError = true
+    mockBudgetState.ready = false
+    renderDialog(agentFixture({ status: 'revoked' }))
+    expect(screen.queryByText(/already ended/i)).not.toBeInTheDocument()
+    const confirm = screen.getByRole('button', { name: 'Remove agent' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+  })
+
   it('a revoked agent with a live row and no signer is blocked, and told why', () => {
     mockBudgetState.ready = false
     renderDialog(agentFixture({ status: 'revoked' }))

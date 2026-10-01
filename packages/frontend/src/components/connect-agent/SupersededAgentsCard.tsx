@@ -58,7 +58,7 @@ function RevokeAndEndBudgetDialog({
   onConfirm: (signer: BudgetSigner) => void
   onCancel: () => void
 }) {
-  const { revokeAll, ready, busy } = useDelegationBudget(agent.id, chainId)
+  const { revokeAll, ready, busy, signersLoading } = useDelegationBudget(agent.id, chainId)
   return (
     <ConfirmDialog
       open
@@ -67,7 +67,7 @@ function RevokeAndEndBudgetDialog({
       body={
         <>
           <RevokeConfirmBody linked />
-          {!ready && (
+          {!ready && !signersLoading && (
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               This device cannot sign for the account. The key is still revoked, and the budget
               stays active until you finish on a device that can.
@@ -77,7 +77,9 @@ function RevokeAndEndBudgetDialog({
       }
       confirmLabel="Revoke agent"
       cancelLabel="Keep it"
-      loading={loading || busy}
+      // While the signer set loads, `ready` is not yet an answer: a click now
+      // would revoke the credential and skip the signature for no reason.
+      loading={loading || busy || signersLoading}
       onConfirm={() => onConfirm({ revokeAll, ready })}
       onCancel={onCancel}
     />

@@ -170,12 +170,13 @@ type Probe = {
 }
 
 /**
- * Anchor on `aria-label`, never on a class string — the class strings are what
- * this fix changes.
+ * Anchor on the named link inside the explicit card test hook, never on a
+ * class string — the class strings are what this fix changes.
  */
 async function probeCard(page: Page, label: string): Promise<Probe> {
   return page.evaluate((accountName) => {
-    const card = document.querySelector(`a[aria-label="${accountName}"]`) as HTMLElement | null
+    const card = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="account-card"]'))
+      .find((candidate) => candidate.querySelector('a')?.textContent?.trim() === accountName) ?? null
     if (!card) throw new Error(`no /accounts card labelled "${accountName}"`)
     const buttons = Array.from(card.querySelectorAll('button')) as HTMLElement[]
     if (buttons.length === 0) throw new Error(`the card labelled "${accountName}" renders no action buttons`)
@@ -270,7 +271,7 @@ async function openAccountsWithBothCards(page: Page) {
     },
   ])
   await page.goto('/accounts')
-  await page.waitForSelector('a[aria-label] h3', { timeout: 60_000 })
+  await page.waitForSelector('[data-testid="account-card"] h3 a', { timeout: 60_000 })
   /*
     Below `lg` the nav drawer overlays the grid and would own every
     `elementFromPoint` reading underneath it (#1749). The established call, and
@@ -278,7 +279,7 @@ async function openAccountsWithBothCards(page: Page) {
     `tooltip-reachability.spec.ts` make before their own hit-dependent reads.
   */
   await dismissMobileSidebar(page)
-  await page.locator(`a[aria-label="${ACTION_CARD}"]`).scrollIntoViewIfNeeded()
+  await page.getByTestId('account-card').filter({ hasText: ACTION_CARD }).scrollIntoViewIfNeeded()
   /*
     The wrapper carries `transition-opacity`. Reading it mid-transition would
     make the visibility assertion flaky in the direction that hides a
@@ -459,7 +460,7 @@ test('/accounts: the card offers no set-default control', async ({ page }) => {
  *     repurposed: `PUT /user/accounts/:id/default` is intercepted and must never
  *     fire, which is a second, network-level reading of #2374's removal.
  */
-test('/accounts: a real tap on the visible "Set active" switches the account and does not navigate', async ({
+test('/accounts: a real tap on the sibling "Set active" switches the account without link navigation', async ({
   page,
 }) => {
   test.slow()
@@ -491,7 +492,7 @@ test('/accounts: a real tap on the visible "Set active" switches the account and
     )
   })
 
-  await page.tap(`a[aria-label="${ACTION_CARD}"] button[aria-label="Set ${ACTION_CARD} as active"]`)
+  await page.getByRole('button', { name: `Set ${ACTION_CARD} as active` }).tap()
   await page.waitForTimeout(1200)
   const probe = await page.evaluate(
     () => (window as unknown as { __tapProbe: { defaultPrevented: boolean | null } }).__tapProbe,
@@ -512,11 +513,37 @@ test('/accounts: a real tap on the visible "Set active" switches the account and
   ).not.toBeNull()
   expect(
     probe.defaultPrevented,
-    "the click ended un-prevented — the card link's native navigation is still armed under the button",
-  ).toBe(true)
+    'the sibling control unexpectedly prevented its click; it should no longer need anchor containment workarounds',
+  ).toBe(false)
+  expect(new URL(page.url()).pathname).toBe('/accounts')
 
   expect(
     defaultWrite,
     `tapping "Set active" sent ${defaultWrite} — a set-default write left a page that has no set-default control (#2374)`,
   ).toBeNull()
+})
+
+test('/accounts: a real pointer press on card body activates and opens the account', async ({ page }) => {
+  test.slow()
+  await openAccountsWithBothCards(page)
+
+  const activeAccountBefore = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
+  const card = page.getByTestId('account-card').filter({ hasText: ACTION_CARD })
+  const bodyText = card.getByText(/agent(?:s)?$/).first()
+  const box = await bodyText.boundingBox()
+  if (!box) throw new Error('the account-card body point has no rendered box')
+  await page.evaluate(() => {
+    ;(window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation = 'alive'
+  })
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+
+  await page.waitForURL('**/accounts/safe-second')
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation,
+    ),
+    'account-card body navigation performed a full reload',
+  ).toBe('alive')
+  const activeAccountAfter = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
+  expect(activeAccountAfter).not.toBe(activeAccountBefore)
 })

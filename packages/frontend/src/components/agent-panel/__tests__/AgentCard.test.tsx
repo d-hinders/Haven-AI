@@ -54,11 +54,9 @@ function renderCard(
   } = {},
 ) {
   const onRestore = vi.fn()
-  const onViewDetails = vi.fn()
   const { container } = render(
     <AgentCard
       agent={agent}
-      onViewDetails={onViewDetails}
       onPause={vi.fn()}
       onResume={vi.fn()}
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
@@ -69,7 +67,7 @@ function renderCard(
       organizations={organizations}
     />,
   )
-  return { onRestore, onViewDetails, container }
+  return { onRestore, container }
 }
 
 /**
@@ -112,6 +110,14 @@ describe('AgentCard stranded-funds notice (#2195)', () => {
   it('shows nothing when the agent has no open reconciliation event', () => {
     renderCard(agentFixture())
     expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
+  })
+
+  it('keeps the recovery instruction plain text inside the stretched-link card', () => {
+    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
+    const copy = screen.getByText(/Open the agent to recover these funds\./)
+    expect(copy).toBeInTheDocument()
+    expect(copy.closest('a')).toBeNull()
+    expect(screen.queryByText('View agent to recover these funds.')).toBeNull()
   })
 
 })
@@ -248,13 +254,9 @@ describe('AgentCard paused notice copy (#2230)', () => {
 })
 
 describe('AgentCard action-row matrix (#1402)', () => {
-  // #3168: the first action is "Details" on every operational card — the
-  // Edit/Details fork is gone, so the old "Edit <name>" button no longer
-  // renders anywhere on the card.
-  it('active delegation agent: Details first, Remove shown, Safe Revoke hidden', () => {
+  it('active delegation agent: linked name, Remove shown, Safe Revoke hidden', () => {
     renderCard(agentFixture())
     const actions = [
-      screen.getByRole('button', { name: 'Open details for Research agent' }),
       screen.getByRole('button', { name: 'Pause Research agent' }),
       screen.getByRole('button', { name: 'Remove Research agent' }),
     ]
@@ -263,29 +265,30 @@ describe('AgentCard action-row matrix (#1402)', () => {
       expect(action.className).toContain('min-h-11')
       expect(action.className).toContain('min-w-11')
     }
+    expect(screen.getByRole('link', { name: 'Research agent' })).toHaveAttribute(
+      'href',
+      '/agents/agent-1',
+    )
+    expect(screen.queryByRole('button', { name: /Open details/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Edit Research agent' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
   })
 
-  /**
-   * #3168: "Details" navigates via onViewDetails — the same handler the
-   * `canUseWalletActions === false` branch always used — and navigation is
-   * disabled while a card action is in flight, so the user cannot leave
-   * mid-action. The hook half (router.push) is asserted in
-   * `useAgentPanelState.test.tsx`.
-   */
-  it('Details navigates to the agent detail page (#3168)', () => {
-    const { onViewDetails } = renderCard(agentFixture())
-    const details = screen.getByRole('button', { name: 'Open details for Research agent' })
-    fireEvent.click(details)
-    expect(onViewDetails).toHaveBeenCalledTimes(1)
-    expect(onViewDetails).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-1' }))
+  it('keeps the stretched name link live while an action is in flight', () => {
+    renderCard(agentFixture(), { busyAction: 'pause' })
+    const link = screen.getByRole('link', { name: 'Research agent' })
+    expect(link).toHaveAttribute('href', '/agents/agent-1')
+    expect(link.className).toContain('after:absolute')
+    expect(link).not.toHaveAttribute('aria-disabled')
   })
 
-  it('Details is disabled while an action is in flight (#3168 busy state)', () => {
-    renderCard(agentFixture(), { busyAction: 'pause' })
-    const details = screen.getByRole('button', { name: 'Open details for Research agent' })
-    expect(details).toBeDisabled()
+  it('renders no interactive descendant inside the stretched name link', () => {
+    const { container } = renderCard(agentFixture({ labels: [
+      { id: 'label-1', name: 'prod', color: 'brand' },
+    ] } as Partial<Agent>))
+    const link = screen.getByRole('link', { name: 'Research agent' })
+    expect(link.querySelector('a, button')).toBeNull()
+    expect(container.querySelector('a a, a button')).toBeNull()
   })
 
   it('keeps the live delegation budget row and does not render the historical meter', () => {
@@ -371,7 +374,6 @@ describe('AgentCard half-revoked marker (#3542)', () => {
       const { unmount } = render(
         <AgentCard
           agent={agentFixture({ status: 'revoked', live_delegation_count: live })}
-          onViewDetails={vi.fn()}
           onPause={vi.fn()}
           onResume={vi.fn()}
           onRevokeCredential={vi.fn()}
@@ -504,7 +506,7 @@ describe('AgentCard organization actions (#3222 re-review)', () => {
     const { container } = renderCard(agentFixture({ status: 'paused' }), { organizations: [ORG] })
     const row = container.querySelector('[data-testid="agent-card-actions"]') as HTMLElement
     const pipes = [...row.querySelectorAll('span')].filter((el) => el.textContent === '|')
-    expect(pipes.length).toBe(3)
+    expect(pipes.length).toBe(1)
     for (const pipe of pipes) {
       expect(pipe.className).toMatch(/(^|\s)hidden(\s|$)/)
       expect(pipe.className).toMatch(/(^|\s)lg:inline(\s|$)/)

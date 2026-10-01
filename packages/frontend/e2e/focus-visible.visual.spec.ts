@@ -55,13 +55,14 @@
  * #1863 reached six, and said why the other five were out of reach. The
  * inventory was eleven then, ten after #2258 deleted `Revoke`, and is NINE
  * now: #3168 deleted `Edit` with the name/description modal it opened, so the
- * card contributes six controls (#2687 had re-derived seven from the
- * `aria-label`s in `AgentCard.tsx`).
+ * card contributes five footer controls plus the stretched name link. #3550
+ * removed Details from the footer and added the link-focused card capture, so
+ * the total remains nine.
  *
  *   Sidebar kebab popover   Profile · Settings · Log out          3/3  captured
  *   AgentCard action row    Edit · Pause · Revoke                 3/8  captured  (as #1863 measured it)
  *
- * `AgentCard`'s footer NEVER renders all six at once — `isOperational`,
+ * `AgentCard` NEVER renders all six card controls at once — `isOperational`,
  * `isRevoked` and `isArchived` are mutually exclusive, and `canUseWalletActions`
  * split the operational branch further until #3168 deleted it with the Edit
  * modal it guarded (as did `isDelegationAgent`, until #2413 deleted it with the
@@ -73,11 +74,10 @@
  * shared fixture carried no `account_type`, so `railOf` read it as a legacy
  * Safe and the row was Edit · Pause · **Revoke** — the AllowanceModule teardown,
  * on a rail that answers HTTP 410 in production (#1986). The default is now the
- * live delegation rail, where the row is Details · Pause · **Remove** (#1402;
- * #3168 made Details the first control on every operational card and retired
- * Edit). `Revoke` has NO capture here any more, and there is nothing left to
- * seed it with: #2258 deleted the control (the default row below is Details +
- * Pause), #2413 removed the legacy branch that rendered it, and #2459 deleted
+ * live delegation rail, where the card has a name link and the row is Pause ·
+ * **Remove** (#1402; #3550 removed Details). `Revoke` has NO capture here any
+ * more, and there is nothing left to seed it with: #2258 deleted the control,
+ * #2413 removed the legacy branch that rendered it, and #2459 deleted
  * the legacy opt-down itself — `e2e/fixtures/haven-api.ts` records that "a spec
  * that wants a retired-rail page today has nothing to opt down TO".
  *
@@ -85,9 +85,7 @@
  * not capture work. #1873 does it, and all of them are reached.
  *
  *   control              needs                                    rendered by
- *   Details              the default first control; seeded on     every operational card
- *                        a different account_id (the case that
- *                        forked before #3168)
+ *   Agent name link      every card; focus rings the card         every agent card
  *   Resume from pause    status: 'paused'                         the paused branch
  *   Remove (delegation)  account_type: 'delegator_hybrid', active the operational branch
  *   Remove (revoked)     status: 'revoked', not archived          the isRevoked branch
@@ -131,7 +129,7 @@
  * **Seeding a state is not the same as rendering the branch**, so every test
  * asserts the row's FULL control set before it captures (`expectRowControls`).
  * `status: 'paused'` reaching the API mock proves nothing about which of
- * `AgentCard`'s five footer branches ran; "this row holds exactly Details,
+ * `AgentCard`'s five footer branches ran; "this row holds exactly Move,
  * Resume from pause, Remove" does. It is also what turns a future branch edit
  * into a named failure instead of a silently re-pointed baseline.
  *
@@ -177,7 +175,12 @@
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { mockHavenApi, seedAuthenticatedSession, testAgent } from './fixtures/haven-api'
+import {
+  dismissMobileSidebar,
+  mockHavenApi,
+  seedAuthenticatedSession,
+  testAgent,
+} from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
 // the screenshot script and the resting-state pixel gate so all three render at
@@ -209,7 +212,7 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  * the lesson below is the reusable part; the post-#1909 heights are underneath.
  *
  *   branch              macOS 1280   macOS 390   COMMITTED (Linux 1280)
- *   Details             438 x 37     300 x 37    438 x 37
+ *   Details (retired #3550) 438 x 37 300 x 37    438 x 37
  *   Resume from pause   438 x 37     300 x 37    438 x 37
  *   Remove (delegation) 438 x 37     300 x 37    438 x 37
  *   Remove (revoked)    438 x 37     300 x 37    438 x 37
@@ -732,6 +735,46 @@ async function gotoDesktop(page: Page, path: string) {
   await page.waitForLoadState('networkidle')
 }
 
+test('agent card stretched link: body pointer opens the agent while action controls do not navigate', async ({
+  page,
+}) => {
+  await mockHavenApi(page)
+  await seedAuthenticatedSession(page)
+
+  for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
+    if (!viewport) throw new Error('focus gate: no desktop viewport configured')
+    await page.setViewportSize(viewport)
+    await page.goto('/agents')
+    await dismissMobileSidebar(page)
+
+    const card = page.getByTestId('agent-card')
+    const budgetLabel = card.getByText('Agent budget')
+    const bodyBox = await budgetLabel.boundingBox()
+    if (!bodyBox) throw new Error('the agent-card body point has no rendered box')
+    await page.evaluate(() => {
+      ;(window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation = 'alive'
+    })
+    await page.mouse.click(bodyBox.x + bodyBox.width / 2, bodyBox.y + bodyBox.height / 2)
+    await page.waitForURL(`**/agents/${testAgent.id}`)
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation,
+      ),
+      `${viewport.width}px card-body navigation performed a full reload`,
+    ).toBe('alive')
+
+    await page.goto('/agents')
+    await dismissMobileSidebar(page)
+    await page.getByRole('button', { name: `Pause ${testAgent.name}` }).click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+    await expect(page.getByRole('heading', { name: `Pause ${testAgent.name}?` })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    await page.getByRole('button', { name: 'Copy MCP server name' }).click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+  }
+})
+
 test.describe('driven focus-state visual regression', () => {
   test.skip(
     !VISUAL_SPECS_ENABLED,
@@ -790,9 +833,9 @@ test.describe('driven focus-state visual regression', () => {
   //
   // #2258: `Revoke` was a legacy Safe control and is deleted with the retired
   // agent-management surface. `Pause` stays for live delegation agents;
-  // #3168 retired `Edit` (the card's first action is now "Details", which
-  // navigates to the detail page), so this loop captures Pause only. The
-  // baseline captures the row with the live `Remove` control.
+  // #3550 moved navigation to the stretched name link and removed Details, so
+  // this loop captures Pause only. The baseline captures the row with the live
+  // `Remove` control.
   const rowControls = [
     { slug: 'pause', label: 'Pause', tone: 'brand' },
   ] as const
@@ -834,6 +877,21 @@ test.describe('driven focus-state visual regression', () => {
     })
   }
 
+  test('agent card name link — focus rings the whole card', async ({ page }) => {
+    await gotoDesktop(page, '/agents')
+
+    const card = page.getByTestId('agent-card')
+    const target = card.getByRole('link', { name: testAgent.name, exact: true })
+    await expect(target).toHaveCount(1)
+    await tabToTarget(page, target, 'AgentCard name link')
+    await expect(target).toBeFocused()
+    await expect(card).toHaveCSS('outline-style', 'none')
+    const ring = await card.evaluate((el) => getComputedStyle(el).boxShadow)
+    expect(ring, 'the focused name link did not paint the shared card ring').not.toBe('none')
+
+    await expect(card).toHaveScreenshot('focus-agentcard-name-link-desktop.png', SNAPSHOT_OPTIONS)
+  })
+
   // ── AgentCard's other four footer branches — the remaining 5 of 11 (#1873) ─
   //
   // One seeded agent per test, one control per test, one capture per test. The
@@ -841,43 +899,12 @@ test.describe('driven focus-state visual regression', () => {
   // reached the intended branch rather than merely carrying the intended field.
   const seededControls = [
     {
-      slug: 'details',
-      // #3168: the `canUseWalletActions` fork is gone, so this branch is no
-      // longer how a second account is reached — but the seed still exercises
-      // an agent on a DIFFERENT account than the active one, which is exactly
-      // the case that used to fork. Its row proves the first control is
-      // "Open details for …" here too, same as every operational card.
-      agent: agentState({
-        id: 'agent-other-safe',
-        name: 'Ledger agent',
-        account_id: 'safe-secondary',
-        account_name: 'Treasury',
-      }),
-      control: 'Open details for Ledger agent',
-      // #2264: `Remove` joins the row. #3168 removed the fork that hid
-      // Details behind `canUseWalletActions` (and nothing else — `Revoke` is
-      // gone since #2258), but Remove is not gated at all: it renders
-      // unconditionally inside `isOperational` (#2413 deleted
-      // `isDelegationAgent`). #3164 adds `Move` between Details and the
-      // pause/resume control on every operational card — four controls.
-      rowControls: [
-        'Open details for Ledger agent',
-        'Move Ledger agent to an organization',
-        'Pause Ledger agent',
-        'Remove Ledger agent',
-      ],
-      tone: 'brand',
-      label: 'Details',
-    },
-    {
       slug: 'resume',
       agent: agentState({ id: 'agent-paused', name: 'Paused agent', status: 'paused' }),
       control: 'Resume Paused agent',
       // #2264: Remove, not Revoke — same rail branch as the row above.
-      // #3168: the first control is now Details, not Edit.
-      // #3164: Move joins every operational row, Details first.
+      // #3164: Move joins every operational row.
       rowControls: [
-        'Open details for Paused agent',
         'Move Paused agent to an organization',
         'Resume Paused agent',
         'Remove Paused agent',
@@ -909,11 +936,8 @@ test.describe('driven focus-state visual regression', () => {
         account_type: 'delegator_hybrid',
       }),
       control: 'Remove Delegation agent',
-      // #3168: the first control is now Details, not Edit — same substitution
-      // as the paused branch above.
-      // #3164: Move joins every operational row, Details first.
+      // #3164: Move joins every operational row.
       rowControls: [
-        'Open details for Delegation agent',
         'Move Delegation agent to an organization',
         'Pause Delegation agent',
         'Remove Delegation agent',

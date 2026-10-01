@@ -82,7 +82,7 @@ function agentAccessSummary(agent: Agent, chainId: number | null): ReactNode {
   const activity = formatAgentLastActivity(agent.mcp_last_seen_at)
   if (!isHalfRevoked(agent)) return `${agentBudgetSummary(agent, chainId)} · ${activity}`
   // #3542: warning tone for the half-revoked line, so the status badge beside
-  // it does not outweigh it. Short enough to stay readable at 390px.
+  // it does not outweigh it. Short enough to fit at 390px without truncating.
   return (
     <>
       <span className="font-medium text-[var(--v2-warning)]">{agentBudgetSummary(agent, chainId)}</span>

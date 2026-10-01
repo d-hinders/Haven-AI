@@ -174,7 +174,7 @@ export function RemoveAgentDialog({
                 </li>
                 <li>
                   <span className="font-medium text-[var(--v2-ink)]">Its history stays.</span> Nothing
-                  moves and every payment and record remains readable.
+                  moves, and you can still open every payment and record.
                 </li>
               </ul>
             </>

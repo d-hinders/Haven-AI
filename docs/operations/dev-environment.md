@@ -244,6 +244,7 @@ Isolation rules that are non-negotiable for a payments product:
 
 - **Separate Postgres** from prod (`DATABASE_URL` points at the dev instance).
 - **Dev-only `JWT_SECRET`** — prevents cross-environment token confusion.
+- **Dev-only `OPS_JWT_SECRET` and GitHub OAuth App** — the ops console (#3509) gets its own dev values, never the prod ones, for the same reason.
 - **`RELAYER_PRIVATE_KEY`** — since the #908 owner decision (2026-07-19) the
   SAME relayer EOA (`0xC825…9D7E`) serves Base mainnet and Base Sepolia,
   funded on both; it is gas-only either way (customer funds are unreachable
@@ -474,8 +475,8 @@ Isolation rules that are non-negotiable for a payments product:
   added to `enforcedModules` in their first commit; the request schema comes
   from the OpenAPI spec, so a body that is not exactly
   `{ tax_declaration_enabled: boolean }` is refused before the handler. #3509's
-  `routes/ops.ts` did the same; its plugin answers 404 from an `onRequest`
-  hook when the ops console is unconfigured, so validation never runs there. The
+  `routes/ops.ts` did the same; its plugin answers 404 before validation
+  when the ops console is unconfigured. The
   `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are

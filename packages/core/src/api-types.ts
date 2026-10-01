@@ -214,7 +214,7 @@ export type paths = {
         };
         /**
          * Finish an ops console sign-in (GitHub redirects here).
-         * @description Verifies the `state` this backend issued, re-checks its origin against `OPS_REDIRECT_ORIGINS`, exchanges the code, reads the GitHub user and discards GitHub's token. An allowlisted numeric GitHub id (with 2FA, when GitHub reports it) is redirected to `<origin>/#token=<ops token>&nonce=<nonce>`; every other outcome to `<origin>/#error=<code>&nonce=<nonce>` (`not_allowed`, `two_factor_required`, `github_denied`, `github_unavailable`, `missing_code`). Every allowed or refused sign-in is audited first; a failed audit write answers 503 and issues nothing.
+         * @description Verifies the `state` this backend issued, re-checks its origin against `OPS_REDIRECT_ORIGINS`, exchanges the code, reads the GitHub user and discards GitHub's token. An allowlisted numeric GitHub id (with 2FA, when GitHub reports it) is redirected to `<origin>/#token=<ops token>&nonce=<nonce>`; every other outcome to `<origin>/#error=<code>&nonce=<nonce>` (`not_allowed`, `two_factor_required`, `github_denied`, `github_unavailable`, `missing_code`). Every sign-in that reaches a GitHub identity (allowed, `not_allowed` or `two_factor_required`) is audited first; a failed audit write answers 503 and issues nothing. `github_denied`, `github_unavailable` and `missing_code` have no identity to record.
          */
         get: operations["finishOpsSignIn"];
         put?: never;

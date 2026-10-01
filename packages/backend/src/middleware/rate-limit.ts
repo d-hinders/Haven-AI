@@ -21,7 +21,9 @@
  *   returns no limit at all unless the deployment trusts its proxy
  *   (TRUST_PROXY_HOPS > 0), because these are the product's front door and a
  *   per-IP limit whose "IP" is one shared proxy address is a cheap global
- *   login denial-of-service, not a protection.
+ *   login denial-of-service, not a protection. Also the ops console's
+ *   unauthenticated GitHub sign-in pair (`ops_auth`, #3509).
+ * - opsRevealRateLimit — `POST /ops/reveal` (#3509), per ops token.
  *
  * Constants, not env: tuning is a code change with review, and the values are
  * deliberately generous — the goal is a ceiling, not throttling real use.

@@ -30,7 +30,7 @@ const DASH_SECRET = 'dashboard-secret-for-tests'
 const OPS: OpsConfig = {
   githubClientId: 'gh-client-id',
   githubClientSecret: 'gh-client-secret',
-  jwtSecret: 'ops-secret-for-tests-0123456789',
+  jwtSecret: 'ops-secret-for-tests-0123456789-abcdef',
   allowedGithubIds: [111],
   redirectOrigins: [ORIGIN],
   publicOrigin: API,
@@ -305,6 +305,8 @@ describe('ops console — GET /ops/me and the ops token', () => {
     await dash.ready()
     const dashboardJwt = dash.jwt.sign({ sub: 'user-1', email: 'a@b.example' })
     await dash.close()
+    // A dashboard-shaped token signed with the OPS secret: only aud/iss/purpose can refuse it.
+    const dashShapedOpsSecret = createSigner({ key: OPS.jwtSecret, expiresIn: 60_000 })({ sub: '111', email: 'a@b.example' })
     const base = { sub: '111', login: 'x', purpose: 'ops' }
     const wrongAud = createSigner({ key: OPS.jwtSecret, aud: 'not-haven-ops', iss: API, expiresIn: 60_000 })(base)
     const wrongIss = createSigner({ key: OPS.jwtSecret, aud: 'haven-ops', iss: 'https://other-backend.example', expiresIn: 60_000 })(base)
@@ -315,6 +317,7 @@ describe('ops console — GET /ops/me and the ops token', () => {
       ['missing', undefined],
       ['not bearer', `Token ${tokenFor(111)}`],
       ['dashboard JWT', `Bearer ${dashboardJwt}`],
+      ['dashboard-shaped, ops secret', `Bearer ${dashShapedOpsSecret}`],
       ['wrong aud', `Bearer ${wrongAud}`],
       ['wrong iss', `Bearer ${wrongIss}`],
       ['wrong alg', `Bearer ${wrongAlg}`],

@@ -97,15 +97,42 @@ export function parseOpsRedirectOrigins(raw: string | undefined | null): string[
  * equal `OPS_JWT_SECRET` would let one secret mint both kinds of token, so it
  * refuses outright rather than disabling quietly.
  */
+export const OPS_ENV_VARS = [
+  'OPS_GITHUB_CLIENT_ID',
+  'OPS_GITHUB_CLIENT_SECRET',
+  'OPS_JWT_SECRET',
+  'OPS_ALLOWED_GITHUB_IDS',
+  'OPS_REDIRECT_ORIGINS',
+  'OPS_PUBLIC_ORIGIN',
+] as const
+
+/** The ops secret guards read access to every customer record: no short secrets. */
+export const OPS_JWT_SECRET_MIN_LENGTH = 32
+
 export function parseOpsConfig(
   env: Record<string, string | undefined>,
   dashboardJwtSecret: string,
+  warn: (message: string) => void = (message) => console.warn(message),
 ): OpsConfig {
   const jwtSecret = env.OPS_JWT_SECRET ?? ''
   if (jwtSecret !== '' && jwtSecret === dashboardJwtSecret) {
     throw new Error(
       'OPS_JWT_SECRET is equal to JWT_SECRET. Refusing to start: the ops console must sign its ' +
         'tokens with a secret of its own. Generate one with `openssl rand -base64 48`.',
+    )
+  }
+  if (jwtSecret !== '' && jwtSecret.length < OPS_JWT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `OPS_JWT_SECRET is shorter than ${OPS_JWT_SECRET_MIN_LENGTH} characters. Refusing to start: it ` +
+        'signs read access to every customer record. Generate one with `openssl rand -base64 48`.',
+    )
+  }
+  // Partly configured is "off" — say so, or the 404s are a mystery to the operator.
+  const missing = OPS_ENV_VARS.filter((name) => (env[name] ?? '').trim() === '')
+  if (missing.length > 0 && missing.length < OPS_ENV_VARS.length) {
+    warn(
+      `The ops console is partly configured and stays OFF (every /ops/* route answers 404). ` +
+        `Missing: ${missing.join(', ')}. Set all ${OPS_ENV_VARS.length} OPS_* variables, or none.`,
     )
   }
   const rawPublicOrigin = (env.OPS_PUBLIC_ORIGIN ?? '').trim()

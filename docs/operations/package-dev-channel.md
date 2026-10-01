@@ -292,7 +292,7 @@ and the `release` skill.
 > (`git diff origin/dev -- packages/backend/src/config.ts`). `last-verified` is
 > not bumped. Scope of this note: the config claims — nothing else in this
 > document was re-verified.
-
+>
 > **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
 > is in this doc's `covers:`. The only edit there is a comment: the sentence
 > saying the public release documents "will read" the table became "read", now

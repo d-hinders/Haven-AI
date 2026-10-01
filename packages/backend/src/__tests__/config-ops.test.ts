@@ -14,7 +14,7 @@ import {
 const FULL = {
   OPS_GITHUB_CLIENT_ID: 'cid',
   OPS_GITHUB_CLIENT_SECRET: 'csecret',
-  OPS_JWT_SECRET: 'ops-secret',
+  OPS_JWT_SECRET: 'ops-secret-0123456789abcdef0123456789',
   OPS_ALLOWED_GITHUB_IDS: '124281397, 3707311,35528685',
   OPS_REDIRECT_ORIGINS: 'https://haven-ops.vercel.app,http://localhost:3002',
   OPS_PUBLIC_ORIGIN: 'https://api.example.com',
@@ -33,9 +33,24 @@ describe('parseOpsConfig', () => {
     expect(isOpsConfigured(cfg)).toBe(false)
   })
 
-  it.each(Object.keys(FULL))('is off when %s alone is missing', (key) => {
-    const cfg = parseOpsConfig({ ...FULL, [key]: '' }, 'dashboard-secret')
+  it.each(Object.keys(FULL))('is off — and warns naming it — when %s alone is missing', (key) => {
+    const warnings: string[] = []
+    const cfg = parseOpsConfig({ ...FULL, [key]: '' }, 'dashboard-secret', (m) => warnings.push(m))
     expect(isOpsConfigured(cfg)).toBe(false)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain(`Missing: ${key}.`)
+  })
+
+  it('does not warn when ops is fully configured or entirely unset', () => {
+    const warnings: string[] = []
+    parseOpsConfig(FULL, 'dashboard-secret', (m) => warnings.push(m))
+    parseOpsConfig({}, 'dashboard-secret', (m) => warnings.push(m))
+    expect(warnings).toEqual([])
+  })
+
+  it('refuses to boot on an OPS_JWT_SECRET shorter than 32 characters', () => {
+    expect(() => parseOpsConfig({ ...FULL, OPS_JWT_SECRET: 'x'.repeat(31) }, 'dashboard-secret')).toThrow(/shorter than 32/)
+    expect(() => parseOpsConfig({ ...FULL, OPS_JWT_SECRET: 'x'.repeat(32) }, 'dashboard-secret')).not.toThrow()
   })
 
   it('refuses to boot when OPS_JWT_SECRET equals JWT_SECRET', () => {

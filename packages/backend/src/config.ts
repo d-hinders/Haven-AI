@@ -91,7 +91,7 @@ export function parseTrustProxyHops(raw: string | undefined): number {
     // eslint-disable-next-line no-console
     console.warn(
       'TRUST_PROXY_HOPS is not set — treating it as 0: the proxy stays UNTRUSTED and the ' +
-      'per-IP auth rate limits (signup, login, device_start, device_lookup, device_token) stay ' +
+      'per-IP auth rate limits (signup, login, device_start, device_lookup, device_token, ops_auth) stay ' +
       'DISARMED. Set TRUST_PROXY_HOPS to the number of trusted proxy hops in front of this ' +
       'process (Railway terminates in exactly one edge proxy, so that is usually 1) to arm them.',
     )
@@ -113,7 +113,7 @@ export function parseTrustProxyHops(raw: string | undefined): number {
     console.warn(
       `TRUST_PROXY_HOPS is explicitly set to ${JSON.stringify(raw)}, which resolves to 0 — the proxy ` +
       'stays UNTRUSTED and the per-IP auth rate limits (signup, login, device_start, device_lookup, ' +
-      'device_token) stay DISARMED, exactly as if the variable were unset. There is no deployment ' +
+      'device_token, ops_auth) stay DISARMED, exactly as if the variable were unset. There is no deployment ' +
       'where 0 is the intended posture (#2667): set the real hop count (Railway terminates in exactly ' +
       'one edge proxy, so that is usually 1) to arm them, or remove the variable if no proxy fronts ' +
       'this process.',

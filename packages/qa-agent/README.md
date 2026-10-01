@@ -102,7 +102,8 @@ their env requirements and skip conditions, in the canonical table in
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
 
 **Budget-authority legs (#3505).** Three legs, each on a throwaway identity
-whose agents are revoked on every exit (#3459), and none of which may skip:
+whose agents are revoked on every exit (#3459), and each of which never skips on a data condition (a missing-config skip is
+turned into a failure by `QA_REQUIRE_ALL_LEGS=1`):
 `task-budget-lifecycle` (open and close signed from `GET /task-budgets/:id/sign-context`,
 never the inline `POST /close` bytes), `sub-budget-redemption` (A→B grant
 redeemed; an amount above both child links but within A's root is refused 403

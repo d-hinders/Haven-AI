@@ -189,7 +189,7 @@ to run when one is definitively below its floor:
 preflight — resources this run consumes:
   ✗ merchant settlement wallet (gas) 0xC03F…22c1: 0.000000255 ETH (0 settlement(s))
       below the merchant's fail floor (warn 25/fail 12) — a run cannot
-      complete: 0 settlement(s) of gas left, ~8 per run. Top this wallet up,
+      complete: 0 settlement(s) of gas left, ~9 per run. Top this wallet up,
       or every x402 leg needing a merchant-side settlement will fail with a
       merchant error that does not name gas (the 2026-08-17 outage)
   ⚠ merchant settlement wallet (gas) 0xC03F…22c1: 0.00006 ETH (24 settlement(s))
@@ -263,11 +263,11 @@ never restate). The floors live in `packages/demo-merchant-mcp/src/x402.ts`:
 - **`MIN_SETTLEMENT_HEADROOM_FAIL = 12`** — below this the run is refused. The
   anchor is what one full run consumes: seven 0.001-USDC settling merchant
   legs plus the 0.010 direct settle (the treasury floor's derivation above; #3505's
-  `merchant-locked-budget` adds one more merchant settlement), i.e. ~8 settlements. Not 8 — that admits a run that
+  `merchant-locked-budget` adds one more merchant settlement), i.e. ~9 settlements. Not 9 — that admits a run that
   spends the wallet to zero with no margin for a retry leg or fee drift. Not
   16 — a floor near the old single value re-creates #2485 at a smaller scale,
   refusing runs while real capacity sits unused. 12 is one run plus half a
-  run of headroom: a run admitted at the floor still ends with ≥ 4
+  run of headroom: a run admitted at the floor still ends with ≥ 3
   settlements left. It must keep catching the condition #1530 was built for —
   at the 2026-08-17 outage balance (255 gwei) the wallet holds 0 settlements,
   far below the floor, so that state still blocks.

@@ -143,7 +143,7 @@ export async function checkMerchantSettlement(
           ok: false,
           detail:
             `below the merchant's fail floor (${floors}) — a run cannot complete: ${remaining} ` +
-            'settlement(s) of gas left, ~8 per run. Top this wallet up, or every x402 leg ' +
+            'settlement(s) of gas left, ~9 per run. Top this wallet up, or every x402 leg ' +
             'needing a merchant-side settlement will fail with a merchant error that does ' +
             'not name gas (the 2026-08-17 outage)',
         }

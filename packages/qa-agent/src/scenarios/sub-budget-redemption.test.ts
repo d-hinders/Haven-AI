@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScenarioContext } from './types.js'
 
-const { mockSign, mockProve, mockWaitDisabled, mockReadBudget } = vi.hoisted(() => ({
+const { mockSign, mockProve, mockWaitDisabled, mockReadBudget, mockBlock } = vi.hoisted(() => ({
+  mockBlock: vi.fn(),
   mockSign: vi.fn(),
   mockProve: vi.fn(),
   mockWaitDisabled: vi.fn(),
@@ -12,13 +13,16 @@ vi.mock('../lib/chain.js', async (original) => ({
   ...(await original<typeof import('../lib/chain.js')>()),
   proveUsdcTransfer: mockProve,
   waitForDisabled: mockWaitDisabled,
+  observerProvider: () => ({ getBlockNumber: mockBlock }),
 }))
 vi.mock('../lib/delegation-budget.js', async (original) => ({
   ...(await original<typeof import('../lib/delegation-budget.js')>()),
   readOnchainDelegationBudget: mockReadBudget,
 }))
 
-const { subBudgetRedemption } = await import('./sub-budget-redemption.js')
+const { subBudgetRedemption, TIMING } = await import('./sub-budget-redemption.js')
+TIMING.pollIntervalMs = 1
+TIMING.catchUpWaitMs = 200
 const API = 'https://api.example'
 const TREASURY_A = '0x' + '11'.repeat(20)
 const TREASURY_STANDING = '0x' + '22'.repeat(20)
@@ -104,6 +108,8 @@ function installApi(options: Options = {}) {
 
 beforeEach(() => {
   mockSign.mockReset().mockResolvedValue('0x' + 'aa'.repeat(65))
+  let block = 0
+  mockBlock.mockReset().mockImplementation(async () => block++)
   mockProve.mockReset().mockResolvedValue({ ok: true })
   mockWaitDisabled.mockReset().mockResolvedValue({ ok: true })
   mockReadBudget.mockReset().mockImplementation(async (_chain: number, hash: string) => ({
@@ -138,8 +144,8 @@ describe('sub-budget redemption', () => {
     installApi({ refusalStatus: 502, refusalBody: { error: 'execution reverted' } })
     const reverted = await subBudgetRedemption.run(ctx)
     expect(reverted.pass).toBe(false)
-    expect(reverted.detail).toMatch(/precheck read failed open/)
-    expect(reverted.detail).toMatch(/on-chain enforcer caught/)
+    expect(reverted.detail).toMatch(/read failed or lagged/)
+    expect(reverted.detail).toMatch(/enforcer refused/)
   })
 
   it('fails when an exact Transfer is missing or a sign-context read returns 500', async () => {
@@ -152,5 +158,26 @@ describe('sub-budget redemption', () => {
     mockProve.mockResolvedValue({ ok: true })
     installApi({ signContext500: true })
     expect((await subBudgetRedemption.run(ctx)).detail).toMatch(/sign-context failed \(500\)/)
+  })
+
+  it('waits for the observer to reflect B\'s payment before sending the refusal, and fails if it never does', async () => {
+    installApi()
+    let grantReads = 0
+    mockReadBudget.mockImplementation(async (_chain: number, hash: string) => {
+      if (hash === '0xroot') return { remaining: 8_000n, configured: '10000' }
+      if (hash === '0xgrant') grantReads += 1
+      return { remaining: hash === '0xgrant' && grantReads === 1 ? 3_000n : 2_000n, configured: '3000' }
+    })
+    expect((await subBudgetRedemption.run(ctx)).pass).toBe(true)
+    expect(grantReads).toBeGreaterThanOrEqual(2)
+    expect(mockBlock.mock.calls.length).toBeGreaterThanOrEqual(3)
+
+    installApi()
+    mockReadBudget.mockImplementation(async (_c: number, hash: string) => ({
+      remaining: hash === '0xroot' ? 8_000n : 3_000n, configured: '3000',
+    }))
+    const stale = await subBudgetRedemption.run(ctx)
+    expect(stale.pass).toBe(false)
+    expect(stale.detail).toMatch(/never saw B's 0.001 USDC reflected/)
   })
 })

@@ -1,7 +1,7 @@
 /** Deterministic A→B sub-budget redemption and grant-only refusal (#3505/#3519). */
 
 import { signUserOpTypedDataForDelegation } from '@haven_ai/sdk'
-import { SEPOLIA_USDC, proveUsdcTransfer, waitForDisabled } from '../lib/chain.js'
+import { SEPOLIA_USDC, observerProvider, proveUsdcTransfer, waitForDisabled } from '../lib/chain.js'
 import { readOnchainDelegationBudget } from '../lib/delegation-budget.js'
 import {
   payViaDelegation,
@@ -19,7 +19,7 @@ const PREDEPLOY_HUMAN = '0.001'
 const REDEEM_HUMAN = '0.001'
 const ONE_MILLI_USDC = 1_000n
 const GRANT_ATOMIC = '3000'
-export const TIMING = { receiptWaitMs: 60_000, pollIntervalMs: 3_000 }
+export const TIMING = { receiptWaitMs: 60_000, pollIntervalMs: 3_000, catchUpBlocks: 2, catchUpWaitMs: 30_000 }
 
 type Json = Record<string, unknown>
 
@@ -150,8 +150,29 @@ async function runSubBudget(
   )
   if (!transfer.ok) return fail(`B redemption has no exact Transfer: ${transfer.error}`)
 
-  const grant = await readOnchainDelegationBudget(CHAIN_ID, grantHash, delegations.get(grantId)!, GRANT_ATOMIC)
+  // The backend's pre-check reads ITS node, not this observer. Wait until the
+  // observer's grant reading reflects B's payment, then a couple more blocks so
+  // the backend's node has caught up too — a lagging node would otherwise still
+  // see the pre-payment remaining, pass the pre-check, and 502 at the enforcer.
+  const expectedGrantRemaining = BigInt(GRANT_ATOMIC) - ONE_MILLI_USDC
+  const deadline = Date.now() + TIMING.catchUpWaitMs
+  let grant = await readOnchainDelegationBudget(CHAIN_ID, grantHash, delegations.get(grantId)!, GRANT_ATOMIC)
+  while (!('error' in grant) && grant.remaining > expectedGrantRemaining && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+    grant = await readOnchainDelegationBudget(CHAIN_ID, grantHash, delegations.get(grantId)!, GRANT_ATOMIC)
+  }
   if ('error' in grant) return fail(`grant live-read failed: ${grant.error}`)
+  if (grant.remaining > expectedGrantRemaining) {
+    return fail(
+      `the observer never saw B's 0.001 USDC reflected in the grant (remaining ${grant.remaining}, expected ` +
+        `${expectedGrantRemaining}) within ${TIMING.catchUpWaitMs / 1000}s — cannot isolate the refusal`,
+    )
+  }
+  const provider = observerProvider()
+  const startBlock = await provider.getBlockNumber()
+  while ((await provider.getBlockNumber()) < startBlock + TIMING.catchUpBlocks && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+  }
   const parent = await readOnchainDelegationBudget(CHAIN_ID, parentHash, delegations.get(parentId)!, GRANT_ATOMIC)
   if ('error' in parent) return fail(`parent-child live-read failed: ${parent.error}`)
   const root = await readOnchainDelegationBudget(
@@ -184,8 +205,8 @@ async function runSubBudget(
   if (refused.ok) return fail(`grant-over-budget payment unexpectedly succeeded (${refused.tx ?? 'no tx'})`)
   if (refused.status === 502) {
     return fail(
-      `grant-over-budget payment returned 502: the per-link precheck read failed open, then the ` +
-        `on-chain enforcer caught the over-budget redemption (${refused.error})`,
+      `grant-over-budget payment returned 502: the per-link precheck read failed or lagged (the backend's ` +
+        `node may be behind), or the on-chain enforcer refused it — either way no typed 403 (${refused.error})`,
     )
   }
   if (refused.status !== 403 || refused.data.error_code !== 'delegation_budget_exceeded') {

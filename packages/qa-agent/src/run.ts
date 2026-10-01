@@ -111,9 +111,9 @@ import { formatRunReport, type ScenarioOutcome } from './lib/run-report.js'
 // guided-path failure is diagnosed against a topology the sibling leg has
 // already shown to be healthy.
 // The three budget-authority legs (#3505) run last, each on its own throwaway
-// identity, and NONE may skip on a data condition: a skipped leg reads as
-// coverage (#1044), so with `QA_REQUIRE_ALL_LEGS=1` a missing config is a
-// failure and a merchant that stops qualifying is a failure with its cause.
+// identity, and each NEVER skips on a data condition (a missing-config skip is
+// turned into a failure by `QA_REQUIRE_ALL_LEGS=1`; a skipped leg reads as
+// coverage, #1044), so a merchant that stops qualifying is a failure with its cause.
 //
 // `task-budget-lifecycle` opens and closes a task budget signing ONLY from
 // `GET /task-budgets/:id/sign-context` — the re-servable bytes (#3491), not the

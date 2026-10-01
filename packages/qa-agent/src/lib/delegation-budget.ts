@@ -21,6 +21,15 @@
  */
 
 import type { HavenApi } from './haven-api.js'
+import {
+  createCaveatEnforcerClient,
+  getSmartAccountsEnvironment,
+  type Delegation,
+} from '@metamask/smart-accounts-kit'
+import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
+import { createPublicClient, http } from 'viem'
+import { baseSepolia } from 'viem/chains'
+import { BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_RPC } from './chain.js'
 
 export interface OnchainBudget {
   /** Live remaining period budget, atomic units. */
@@ -89,6 +98,55 @@ export async function readOnchainBudget(
     }
   }
   return { remaining, configured: row.configured_amount ?? '?' }
+}
+
+/**
+ * Read one exact period delegation by its hash (#3505).
+ *
+ * Symbol lookup is ambiguous when an agent owns both an open and a
+ * merchant-pinned USDC grant. The caller therefore supplies the delegation
+ * bytes it signed and the hash the backend recorded; this helper verifies the
+ * binding before asking the enforcer for that delegation's live remainder.
+ * A failed read is an error, never a fallback — QA evidence must come from the
+ * authority the chain applies.
+ */
+export async function readOnchainDelegationBudget(
+  chainId: number,
+  delegationHash: string,
+  delegation: Record<string, unknown>,
+  configuredAtomic: string,
+): Promise<OnchainBudget | { error: string }> {
+  if (chainId !== BASE_SEPOLIA_CHAIN_ID) {
+    return { error: `per-delegation QA reads support Base Sepolia only, got chain ${chainId}` }
+  }
+  let actualHash: string
+  try {
+    actualHash = hashDelegation(delegation as unknown as Delegation)
+  } catch (error) {
+    return { error: `could not hash delegation ${delegationHash}: ${error instanceof Error ? error.message : String(error)}` }
+  }
+  if (actualHash.toLowerCase() !== delegationHash.toLowerCase()) {
+    return {
+      error: `delegation bytes hash to ${actualHash}, not the requested ${delegationHash}`,
+    }
+  }
+  try {
+    const client = createPublicClient({ chain: baseSepolia, transport: http(BASE_SEPOLIA_RPC) })
+    const enforcer = createCaveatEnforcerClient({
+      client,
+      environment: getSmartAccountsEnvironment(chainId),
+    })
+    const { availableAmount } = await enforcer.getErc20PeriodTransferEnforcerAvailableAmount({
+      delegation: delegation as unknown as Delegation,
+    })
+    return { remaining: availableAmount, configured: configuredAtomic }
+  } catch (error) {
+    return {
+      error:
+        `could not read live remaining for delegation ${delegationHash}: ` +
+        (error instanceof Error ? error.message : String(error)),
+    }
+  }
 }
 
 /** An amount comfortably above `remaining`, atomic units. */

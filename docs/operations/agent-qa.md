@@ -189,7 +189,7 @@ to run when one is definitively below its floor:
 preflight — resources this run consumes:
   ✗ merchant settlement wallet (gas) 0xC03F…22c1: 0.000000255 ETH (0 settlement(s))
       below the merchant's fail floor (warn 25/fail 12) — a run cannot
-      complete: 0 settlement(s) of gas left, ~8 per run. Top this wallet up,
+      complete: 0 settlement(s) of gas left, ~9 per run. Top this wallet up,
       or every x402 leg needing a merchant-side settlement will fail with a
       merchant error that does not name gas (the 2026-08-17 outage)
   ⚠ merchant settlement wallet (gas) 0xC03F…22c1: 0.00006 ETH (24 settlement(s))
@@ -237,8 +237,10 @@ The address is derived at runtime (`GET /machine-payments/agent` →
 restated in config; absent that key the check skips like everything else. The
 floor is derived from every standing-treasury debit: 0.010 USDC for the direct
 settle, seven 0.001-USDC settling merchant legs (including the #2159 resume
-leg), 0.006 USDC to the fresh-agent fixture, and 0.004 USDC net for the
-`delegation-lifecycle` fixture — **0.027 USDC**. The sweep leg's 0.001 USDC is
+leg), 0.006 USDC to the fresh-agent fixture, 0.004 USDC net for the
+`delegation-lifecycle` fixture, 0.004 USDC net for the `sub-budget-redemption`
+fixture and 0.003 USDC for the `merchant-locked-budget` fixture (#3505;
+`task-budget-lifecycle` funds nothing) — **0.034 USDC**. The sweep leg's 0.001 USDC is
 temporarily spent then returned. A below-floor detail line names the token
 contract and that any source works, per the **Top-up** bullet under
 *The delegation-rail QA identity (#1063)* below.
@@ -260,12 +262,12 @@ never restate). The floors live in `packages/demo-merchant-mcp/src/x402.ts`:
 
 - **`MIN_SETTLEMENT_HEADROOM_FAIL = 12`** — below this the run is refused. The
   anchor is what one full run consumes: seven 0.001-USDC settling merchant
-  legs plus the 0.010 direct settle (the same derivation as the treasury's
-  0.027-USDC floor above), i.e. ~8 settlements. Not 8 — that admits a run that
+  legs plus the 0.010 direct settle (the treasury floor's derivation above; #3505's
+  `merchant-locked-budget` adds one more merchant settlement), i.e. ~9 settlements. Not 9 — that admits a run that
   spends the wallet to zero with no margin for a retry leg or fee drift. Not
   16 — a floor near the old single value re-creates #2485 at a smaller scale,
   refusing runs while real capacity sits unused. 12 is one run plus half a
-  run of headroom: a run admitted at the floor still ends with ≥ 4
+  run of headroom: a run admitted at the floor still ends with ≥ 3
   settlements left. It must keep catching the condition #1530 was built for —
   at the 2026-08-17 outage balance (255 gwei) the wallet holds 0 settlements,
   far below the floor, so that state still blocks.
@@ -352,7 +354,7 @@ QA identities.
 
 ## Money-flow QA
 
-The deterministic harness runs fourteen scenarios in order:
+The deterministic harness runs seventeen scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
@@ -370,6 +372,9 @@ The deterministic harness runs fourteen scenarios in order:
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 | `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*`. **Skips** (#1441) when the hosted quote comes back **erc7710-shaped**: #1450's preference rule selects erc7710 whenever the merchant advertises it, and this leg's invariant is the FUNDING-LEG one, so against such a merchant it is unreachable rather than violated. Nothing goes uncovered — hosted erc7710 is `x402-erc7710-hosted`, and `x402-catalog-guided-purchase` is scheme-aware since #1547 (erc7710 expected on dev, the 3009 two-leg proof kept as its fallback shape; same topology, zero residual either way). What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT on the funding path; point it at a merchant that does not advertise erc7710 to exercise that, and note `QA_REQUIRE_ALL_LEGS=1` turns the skip into a run failure |
 | `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, then branches on the preflight's `settlement_scheme` (#1547 — the guided prepare runs the #1450 preference): on **erc7710** (expected on dev) it signs via `haven_sign` by **`payment_id`** alone and settles with **only `payment_id` + `signature`** — no `payment_header` (Haven assembles it at settle), money proof inverted (a `funding_tx_hash` is a FAILURE, treasury debit = merchant credit, delegate untouched); on the **eip3009 fallback shape** it signs via `haven_sign_x402` by `payment_id` alone (#1549 — the compact preflight no longer echoes `payment_required`; the signer fetches it by payment_id, and the leg FAILS if the echo reappears) and settles with **only `payment_id` + `signature` + `payment_header`**. Neither shape ever re-sends `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy). **FAILS (never skips)**, before any of that, if the merchant's discovery document is unreachable, a `qa_fixture` product it names has a listed catalog row on this host, or a `qa_fixture` product cannot be mapped to a catalog `(tool_name, tool_arguments)` pair (#3421 tripwire) |
+| `task-budget-lifecycle` | A task budget opens and closes from **re-served bytes** (#3505, #3491): on a throwaway identity (its agent revoked when the leg ends, #3459; funds nothing) `POST /task-budgets`, then **both** the open and the close are signed from `GET /task-budgets/:id/sign-context` — never the inline typed data `POST /close` also returns, which is the path that passed on the pre-#3491 500 — and the close must return `closed` + `close_tx_hash` and the child must read **disabled on-chain** on the observer. Env: none beyond the base config |
+| `sub-budget-redemption` | An A→B sub-budget is redeemable and its own cap refuses (#3505, #3519): throwaway identity funded ~0.006 USDC from the standing delegation identity; A's budget is partly spent, A issues B a 0.003 grant (the parent-child link is built from the same amount, so the two links are equal by construction), both signed from `GET /sub-budgets/:id/sign-context`; B redeems 0.001 USDC (exact `Transfer` on the observer); then an amount **above both child links and at or below A's root remaining** must be refused **403 `delegation_budget_exceeded`** whose `remaining_atomic` equals **both** child-link readings (read by delegation hash) and is strictly below A's root. **A 502 is a failure, not a pass** — since #3519 the pre-check refuses on a healthy run, so a 502 means the per-link read failed open AND the on-chain enforcer then caught the payment; the result names both causes. The grant is closed through `GET /sub-budgets/:id/sign-context` and read disabled on-chain. Both agents are revoked on every exit. Env: `QA_DELEGATION_AGENT_API_KEY` / `QA_DELEGATION_DELEGATE_PRIVATE_KEY` (funding source only; the standing delegation is never revoked or replaced) |
+| `merchant-locked-budget` | A merchant-locked budget is spent before the open one (#3505, #3331): throwaway identity (open grant from provisioning) plus a second grant built with `merchant_slug: haven-demo-store` and owner-signed client-side; it asserts the merchant **qualifies at run time** (`GET /merchants/haven-demo-store` `funding`: verified payTo + erc7710 — otherwise the leg **fails with the cause, it never skips**), buys a settling product (NordShield VPN Basic) by erc7710, requires the exact USDC `Transfer` treasury→payTo from the observer's logs, and reads both delegations **by hash** (`readOnchainBudget` is by symbol and cannot tell two USDC grants apart): the pinned delegation's remaining dropped by exactly the amount and the open one did not move. Funded ~0.003 USDC per run from the standing identity. Env: `QA_DEMO_MERCHANT_URL` plus the standing delegation identity, as `x402-erc7710-fresh-agent` |
 
 The harness exits non-zero if any non-skipped scenario fails. **A skip IS a
 failure (#1066).** Since every leg's identity is provisioned (#1063) and the

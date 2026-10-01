@@ -10226,10 +10226,11 @@ export const openapiSpec = {
             type: 'string',
             minLength: 1,
             description:
-              '#3330: an OPEN sub-budget another agent in the same account granted THIS agent — the redemption chain becomes [grant, parent-child, budget]. Mutually exclusive with task_budget_id (400 when both). Refused with 404 sub_budget_not_found, 409 sub_budget_not_open/sub_budget_parent_mismatch, or (#3519) 403 delegation_budget_exceeded when the smallest live remaining across the three links cannot cover the amount (fails open per link on an unreadable read).',
+              '#3330: an OPEN sub-budget another agent in the same account granted THIS agent — the redemption chain becomes [grant, parent-child, budget]. Mutually exclusive with task_budget_id (400 when both). Refused with 404 sub_budget_not_found, 409 sub_budget_not_open/sub_budget_parent_mismatch/sub_budget_token_mismatch/sub_budget_recipient_mismatch, or (#3519) 403 delegation_budget_exceeded when the smallest live remaining across the three links cannot cover the amount (fails open per link on an unreadable read). Part of the idempotency pin, like task_budget_id: a key replayed under a different sub-budget is a 409.',
           },
         },
-        // #3031: CLOSED. The shipped SDK sends exactly the four fields above
+        // #3031: CLOSED. The shipped SDK sends exactly the fields above (six since
+        // #3329/#3330 added task_budget_id and sub_budget_id)
         // (`createIntent`), and every field the handler used to rung out is
         // declared. An undeclared field used to ride through to the handler,
         // which ignored it — on a route that mints a payment intent that is
@@ -10533,7 +10534,7 @@ export const openapiSpec = {
             type: 'string',
             minLength: 1,
             description:
-              '#3330: an OPEN sub-budget another agent in the same account granted THIS agent. erc7710: the settlement child is carved under the grant ([settlement, grant, parent-child, budget]). Mutually exclusive with taskBudgetId. Refused with 404 sub_budget_not_found or 409 sub_budget_not_open/sub_budget_parent_mismatch.',
+              '#3330: an OPEN sub-budget another agent in the same account granted THIS agent. erc7710: the settlement child is carved under the grant ([settlement, grant, parent-child, budget]). EIP-3009: the funding leg redeems [grant, parent-child, budget] to fund the agent\'s delegate EOA. Mutually exclusive with taskBudgetId (400 when both). Refused with 404 sub_budget_not_found, 409 sub_budget_not_open/sub_budget_parent_mismatch/sub_budget_token_mismatch/sub_budget_recipient_mismatch, or 403 delegation_budget_exceeded. Shared by POST /x402 and POST /x402/authorize.',
           },
         },
         additionalProperties: false,

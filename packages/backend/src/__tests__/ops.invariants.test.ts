@@ -11,8 +11,14 @@
  * 2. The routes the plugin actually registers (recorded with an `onRoute`
  *    hook, not read from source) are all GET, except `POST /ops/reveal`.
  *
- * A failure here means a change gave the ops console write or spend reach —
- * get the review the epic's threat model requires rather than "fixing" this.
+ * A failure of either means a change gave the ops console write or spend
+ * reach — get the review the epic's threat model requires rather than
+ * "fixing" this.
+ *
+ * One more check rides here because it needs the same route recorder, and is
+ * NOT invariant 1: `/ops/search` and `/ops/reveal` carry their own rate-limit
+ * configs (#3512), so searching never spends the reveal budget. A failure of
+ * that one is a limiter-wiring regression, not write reach.
  */
 import Fastify from 'fastify'
 import { existsSync, readFileSync } from 'node:fs'

@@ -2235,7 +2235,15 @@ agent page. The revoke route is owner-authenticated; the connector holds agent
 keys only. Since #3542 the dashboard's revoke of a superseded agent also ends
 its budget with one owner signature (`revoke-all`); a revoke that stops at the
 credential leaves the agent marked "budget still active" with a Finish revoking
-action. Nothing the connector sends or does changes.
+action. Since #3544 the same revoke also retires a connect-modal agent still
+`pending_approval` — the owner can cleanly Remove an agent whose connect flow
+never finished instead of leaving it dangling — and the revoke transaction
+cancels the agent's open connection setup, so a connector half-way through that
+setup can no longer carry its `budget-approval` to an approved budget for a
+revoked agent; the approval answers the route's typed refusal instead (404, or
+409 with an `error_code`: `already_revoked` is "done", anything else is a real
+refusal). Installed CLIs are unaffected: 404 and 409 map to the same exit
+class. Nothing the connector sends or does changes.
 
 `runtime_config_unreadable` is the exception, and the only one of the six that
 reaches the dashboard (`runtimeStatusHelper`; the routing is pinned by

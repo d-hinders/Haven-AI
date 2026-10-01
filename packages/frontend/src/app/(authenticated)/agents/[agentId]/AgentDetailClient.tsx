@@ -22,6 +22,14 @@ import { truncate, timeAgo } from '@/lib/format'
 import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import {
+  FINISH_REVOKING_LABEL,
+  HALF_REVOKED_BODY,
+  HALF_REVOKED_TITLE,
+  HALF_REVOKED_UNLINKED_BODY,
+  canFinishRevoking,
+  isHalfRevoked,
+} from '@/lib/half-revoked'
+import {
   STRANDED_FUNDS_TITLE,
   reviewStrandedPaymentsLabel,
   strandedFundsCauseWithLocation,
@@ -300,6 +308,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     revokeAgent,
     archiveAgent,
     unarchiveAgent,
+    markBudgetEnded,
     refetch,
   } = useAgents()
   const agent = agents.find((item) => item.id === agentId) ?? null
@@ -362,6 +371,9 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [removeOpen, setRemoveOpen] = useState(false)
+  // #3542: the Remove dialog in finish mode — ends the remaining budget of a
+  // revoked/archived agent and, unlike Remove, keeps the user on this page.
+  const [finishOpen, setFinishOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [replaceKeyOpen, setReplaceKeyOpen] = useState(false)
   const [labelsManagerOpen, setLabelsManagerOpen] = useState(false)
@@ -463,6 +475,8 @@ export default function AgentDetailClient({ agentId }: Props) {
     seenBudgetTokens.add(address.toLowerCase())
   }
   const agentStatus = agentStatusPresentation(currentAgent.status)
+  const halfRevoked = isHalfRevoked(currentAgent)
+  const canFinish = canFinishRevoking(currentAgent)
 
   async function handlePause() {
     setPendingAction('pause')
@@ -573,6 +587,29 @@ export default function AgentDetailClient({ agentId }: Props) {
           <LabelChipRow labels={currentAgent.labels} />
         </div>
       )}
+
+      {/* #3542: revoked or removed, but a budget delegation is still redeemable
+          on-chain — the status badge says "Revoked", which is only half true.
+          Above the budget card so the page opens on the thing that needs doing. */}
+      {halfRevoked ? (
+        <div className="mb-6 mt-4" data-testid="half-revoked-callout">
+          <ApprovalRequiredBanner title={HALF_REVOKED_TITLE} tone="warning" density="compact">
+            <span>{canFinish ? HALF_REVOKED_BODY : HALF_REVOKED_UNLINKED_BODY}</span>
+            {canFinish ? (
+              <div className="mt-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFinishOpen(true)}
+                  disabled={pendingAction !== null}
+                >
+                  {FINISH_REVOKING_LABEL}
+                </Button>
+              </div>
+            ) : null}
+          </ApprovalRequiredBanner>
+        </div>
+      ) : null}
 
       {/* Second on a phone, first from `lg` (#2821).
 
@@ -846,7 +883,9 @@ export default function AgentDetailClient({ agentId }: Props) {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-[var(--v2-ink-3)]">
                   {isRevoked
-                    ? 'This agent no longer has access through Haven.'
+                    ? halfRevoked
+                      ? 'This agent’s credential is revoked, but its budget is still active.'
+                      : 'This agent no longer has access through Haven.'
                     : isPaused
                       ? 'Paused agents cannot start new payments through Haven.'
                       : 'Pause the agent or remove its budget if you need to stop access.'}
@@ -961,7 +1000,22 @@ export default function AgentDetailClient({ agentId }: Props) {
             // there rather than on a page whose actions just disappeared.
             router.push('/agents')
           }}
+          onBudgetEnded={() => markBudgetEnded(currentAgent.id)}
           onClose={() => setRemoveOpen(false)}
+        />
+      ) : null}
+
+      {finishOpen && currentAgent ? (
+        // Finish mode never navigates: the page is where the owner sees the
+        // marker clear. Nothing is archived or restored by it.
+        <RemoveAgentDialog
+          agent={currentAgent}
+          chainId={chainId}
+          mode="finish"
+          onRevokeCredential={() => revokeAgent(currentAgent.id)}
+          onArchive={async () => {}}
+          onBudgetEnded={() => markBudgetEnded(currentAgent.id)}
+          onClose={() => setFinishOpen(false)}
         />
       ) : null}
 

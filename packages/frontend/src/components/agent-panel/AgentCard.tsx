@@ -7,6 +7,14 @@ import { useState } from 'react'
 import { type Agent } from '@/hooks/useAgents'
 import type { Organization } from '@/hooks/useOrganizations'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import {
+  FINISH_REVOKING_LABEL,
+  HALF_REVOKED_BODY,
+  HALF_REVOKED_TITLE,
+  HALF_REVOKED_UNLINKED_BODY,
+  canFinishRevoking,
+  isHalfRevoked,
+} from '@/lib/half-revoked'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
@@ -38,6 +46,7 @@ export function AgentCard({
   onArchive,
   onRestore,
   onMoveToOrganization,
+  onBudgetEnded,
   busyAction,
   chainId = DEFAULT_CHAIN_ID,
   organizations = [],
@@ -53,6 +62,11 @@ export function AgentCard({
   onRestore: (agent: Agent) => void
   /** #3164: the card hosts the Move modal; this delivers the saved agent back. */
   onMoveToOrganization: (agent: Agent) => void
+  /**
+   * #3542: called once Finish revoking (or Remove) has ended the agent's budget,
+   * so the owner of the agent list can clear the half-revoked marker.
+   */
+  onBudgetEnded?: (agentId: string) => void
   busyAction: AgentBusyAction
   chainId?: number
   /** #3164: the user's organization tree, for the card's Move picker. */
@@ -60,6 +74,9 @@ export function AgentCard({
 }) {
   const [pauseModalOpen, setPauseModalOpen] = useState(false)
   const [removeModalOpen, setRemoveModalOpen] = useState(false)
+  // #3542: the same dialog in its finish mode — ends the remaining budget of an
+  // agent that is already revoked or archived, and moves nothing.
+  const [finishModalOpen, setFinishModalOpen] = useState(false)
   // #3164: mounted only while open (the per-agent modal, same pattern as
   // RemoveAgentDialog below).
   const [moveModalOpen, setMoveModalOpen] = useState(false)
@@ -70,6 +87,8 @@ export function AgentCard({
   const isArchived = Boolean(agent.archived_at)
   const isOperational = !isRevoked && !isArchived
   const isBusy = busyAction !== null
+  const halfRevoked = isHalfRevoked(agent)
+  const canFinish = canFinishRevoking(agent)
 
   async function handleConfirmPause() {
     setPauseModalOpen(false)
@@ -321,6 +340,18 @@ export function AgentCard({
         </div>
       )}
 
+      {/* #3542: revoked or removed, yet a budget delegation is still redeemable
+          on-chain. `status` alone says the opposite ("revoked"), so this is the
+          one place the card tells the truth about it. The action lives in the
+          row below, next to Remove / Restore. */}
+      {halfRevoked && (
+        <div className="mb-3" data-testid="half-revoked-marker">
+          <ApprovalRequiredBanner title={HALF_REVOKED_TITLE} tone="warning" density="compact">
+            {canFinish ? HALF_REVOKED_BODY : HALF_REVOKED_UNLINKED_BODY}
+          </ApprovalRequiredBanner>
+        </div>
+      )}
+
       {isOperational && (
         <div className="mb-3">
           <div className="space-y-2">
@@ -470,10 +501,28 @@ export function AgentCard({
         )}
         {isRevoked && !isArchived && (
           <>
-            <span className="text-xs text-[var(--v2-ink-3)]">
-              Network access already revoked
-            </span>
-            <span className="text-[var(--v2-border-strong)]">|</span>
+            {halfRevoked ? (
+              canFinish && (
+                <>
+                  <button
+                    onClick={() => setFinishModalOpen(true)}
+                    disabled={isBusy}
+                    aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
+                    className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
+                  >
+                    {FINISH_REVOKING_LABEL}
+                  </button>
+                  <span className="text-[var(--v2-border-strong)]">|</span>
+                </>
+              )
+            ) : (
+              <>
+                <span className="text-xs text-[var(--v2-ink-3)]">
+                  Network access already revoked
+                </span>
+                <span className="text-[var(--v2-border-strong)]">|</span>
+              </>
+            )}
             <button
               onClick={() => setRemoveModalOpen(true)}
               disabled={isBusy}
@@ -523,8 +572,20 @@ export function AgentCard({
             >
               {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
             </button>
+            {canFinish && (
+              <button
+                onClick={() => setFinishModalOpen(true)}
+                disabled={isBusy}
+                aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
+                className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
+              >
+                {FINISH_REVOKING_LABEL}
+              </button>
+            )}
             <span className="ml-auto text-xs text-[var(--v2-ink-3)]">
-              History stays readable; restoring never re-enables spending
+              {halfRevoked
+                ? 'Restoring to the list does not end its budget'
+                : 'History stays readable; restoring never re-enables spending'}
             </span>
           </>
         )}
@@ -569,7 +630,20 @@ export function AgentCard({
         chainId={chainId}
         onRevokeCredential={() => onRevokeCredential(agent.id)}
         onArchive={() => onArchive(agent)}
+        onBudgetEnded={() => onBudgetEnded?.(agent.id)}
         onClose={() => setRemoveModalOpen(false)}
+      />
+    )}
+
+    {finishModalOpen && (
+      <RemoveAgentDialog
+        agent={agent}
+        chainId={chainId}
+        mode="finish"
+        onRevokeCredential={() => onRevokeCredential(agent.id)}
+        onArchive={() => onArchive(agent)}
+        onBudgetEnded={() => onBudgetEnded?.(agent.id)}
+        onClose={() => setFinishModalOpen(false)}
       />
     )}
 

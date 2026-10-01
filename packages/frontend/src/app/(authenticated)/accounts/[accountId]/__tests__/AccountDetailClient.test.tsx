@@ -351,6 +351,55 @@ describe('AccountDetailClient', () => {
     expect(screen.queryByText('Connected')).not.toBeInTheDocument()
   })
 
+  // #3542 (D): "Access revoked" is false while a budget delegation is still
+  // redeemable on-chain. The summary was decided from `status` before the
+  // allowances (a view of ACTIVE rows) were ever read.
+  describe('half-revoked agents (#3542)', () => {
+    function withAgent(overrides: Record<string, unknown>) {
+      mockUseAgents.mockReturnValue({
+        agents: [
+          {
+            id: 'agent-9',
+            name: 'Old agent',
+            account_id: 'safe-1',
+            status: 'revoked',
+            account_type: 'delegator_hybrid',
+            mcp_last_seen_at: null,
+            allowances: [],
+            ...overrides,
+          },
+        ],
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+    }
+
+    it('revoked + live budget: says the budget is still active, links to the agent, offers no action', () => {
+      withAgent({ live_delegation_count: 1 })
+      render(<AccountDetailClient />)
+
+      expect(screen.getByText(/Budget still active/)).toBeInTheDocument()
+      expect(screen.queryByText(/Access revoked/)).not.toBeInTheDocument()
+      const row = screen.getByRole('link', { name: /Old agent/ })
+      expect(row).toHaveAttribute('href', '/agents/agent-9')
+      expect(screen.queryByRole('button', { name: /Finish revoking/ })).not.toBeInTheDocument()
+    })
+
+    it('archived + live budget: same', () => {
+      withAgent({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z', live_delegation_count: 2 })
+      render(<AccountDetailClient />)
+      expect(screen.getByText(/Budget still active/)).toBeInTheDocument()
+    })
+
+    it('revoked + count 0: unchanged — still "Access revoked"', () => {
+      withAgent({ live_delegation_count: 0 })
+      render(<AccountDetailClient />)
+      expect(screen.getByText(/Access revoked/)).toBeInTheDocument()
+      expect(screen.queryByText(/Budget still active/)).not.toBeInTheDocument()
+    })
+  })
+
   // #1089: backup & recovery is an account capability — it must work before
   // any agent exists, not gate on one.
   /**

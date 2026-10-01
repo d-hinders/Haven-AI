@@ -13,9 +13,38 @@ import { SupersededAgentsCard } from '../SupersededAgentsCard'
  * built to avoid, so it is the failure most of these assert.
  */
 
-const { mockRevoke, mockAgents } = vi.hoisted(() => ({
-  mockRevoke: vi.fn(),
-  mockAgents: { current: [] as Array<{ id: string; name: string; status: string }> },
+type MockAgent = {
+  id: string
+  name: string
+  status: string
+  account_id?: string | null
+  account_chain_id?: number | null
+}
+
+const { mockRevoke, mockAgents, mockRevokeAll, mockMarkBudgetEnded, mockBudgetHook, mockBudgetCalls } =
+  vi.hoisted(() => ({
+    mockRevoke: vi.fn(),
+    mockAgents: { current: [] as MockAgent[] },
+    mockRevokeAll: vi.fn(),
+    mockMarkBudgetEnded: vi.fn(),
+    mockBudgetHook: { ready: true, busy: false },
+    // Every `useDelegationBudget(agentId, chainId)` call, so a test can assert
+    // the hook is mounted for the agent pending confirmation ONLY, and on that
+    // agent's own chain.
+    mockBudgetCalls: [] as Array<[string, number]>,
+  }))
+
+vi.mock('@/hooks/useDelegationBudget', () => ({
+  useDelegationBudget: (agentId: string, chainId: number) => {
+    mockBudgetCalls.push([agentId, chainId])
+    return {
+      budgets: [{ id: 'd-1', status: 'active' }],
+      budgetsError: false,
+      revokeAll: mockRevokeAll,
+      ready: mockBudgetHook.ready,
+      busy: mockBudgetHook.busy,
+    }
+  },
 }))
 
 const { mockState } = vi.hoisted(() => ({
@@ -33,18 +62,32 @@ vi.mock('@/hooks/useAgents', () => ({
     error: mockState.error,
     refetch: mockState.refetch,
     revokeAgent: mockRevoke,
+    markBudgetEnded: mockMarkBudgetEnded,
   }),
 }))
 
-const OWNED = [
-  { id: 'agt_old', name: 'Research agent', status: 'active' },
-  { id: 'agt_other', name: 'Ops agent', status: 'active' },
+const OWNED: MockAgent[] = [
+  { id: 'agt_old', name: 'Research agent', status: 'active', account_id: 'acc-1', account_chain_id: 84532 },
+  { id: 'agt_other', name: 'Ops agent', status: 'active', account_id: 'acc-1', account_chain_id: 84532 },
 ]
+
+/** What the real `useAgents.revokeAgent` does on success: patch status locally. */
+function revokeSucceeds() {
+  mockRevoke.mockImplementation(async (id: string) => {
+    mockAgents.current = mockAgents.current.map((a) =>
+      a.id === id ? { ...a, status: 'revoked' } : a,
+    )
+  })
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
   mockAgents.current = OWNED
-  mockRevoke.mockResolvedValue(undefined)
+  revokeSucceeds()
+  mockRevokeAll.mockResolvedValue({ ok: true })
+  mockBudgetHook.ready = true
+  mockBudgetHook.busy = false
+  mockBudgetCalls.length = 0
   mockState.error = null
   mockState.loading = false
   mockState.refetch = vi.fn()
@@ -284,5 +327,151 @@ describe('SupersededAgentsCard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
     expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument()
     expect(screen.getByText(/stops working immediately/i)).toBeInTheDocument()
+  })
+
+  /**
+   * #3542 (B). `POST /agents/:id/revoke` only stops the credential; the budget
+   * delegation stays redeemable on-chain until the owner signs revoke-all. This
+   * card used to revoke the credential, claim "Revoking stops that" and "it
+   * cannot spend again", and drop the row — leaving a live budget behind a
+   * dead credential with nothing on screen saying so.
+   */
+  describe('revoking ends the budget too, not just the credential (#3542)', () => {
+    async function openConfirm(name = 'Research agent') {
+      await userEvent.click(screen.getByRole('button', { name: `Revoke ${name}` }))
+      return screen.findByRole('button', { name: /^revoke agent$/i })
+    }
+
+    it('never claims spending ended before a signature landed', async () => {
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+      // The list copy: the credential and the budget are named as two things.
+      expect(screen.queryByText(/Revoking stops that/i)).not.toBeInTheDocument()
+      expect(screen.getByText(/one signature from you ends its budget/i)).toBeInTheDocument()
+
+      await openConfirm()
+      expect(document.body.textContent).not.toMatch(/cannot spend again/i)
+      expect(document.body.textContent).toMatch(/budget stays active/i)
+    })
+
+    it('revokes the credential first, THEN signs revoke-all — on the agent\'s own chain', async () => {
+      const order: string[] = []
+      mockRevoke.mockImplementation(async (id: string) => {
+        order.push(`credential:${id}`)
+        mockAgents.current = mockAgents.current.map((a) =>
+          a.id === id ? { ...a, status: 'revoked' } : a,
+        )
+      })
+      mockRevokeAll.mockImplementation(async () => {
+        order.push('revokeAll')
+        return { ok: true }
+      })
+      mockAgents.current = [
+        { ...OWNED[0], account_chain_id: 100 },
+        OWNED[1],
+      ]
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old', 'agt_other']} />)
+
+      await userEvent.click(await openConfirm())
+      await waitFor(() => expect(mockMarkBudgetEnded).toHaveBeenCalledWith('agt_old'))
+      expect(order).toEqual(['credential:agt_old', 'revokeAll'])
+      // Mounted for the agent pending confirmation only — never one hook per
+      // row — and on THAT agent's chain, not a default.
+      expect(mockBudgetCalls.length).toBeGreaterThan(0)
+      expect(new Set(mockBudgetCalls.map((c) => c.join('@')))).toEqual(new Set(['agt_old@100']))
+      // Fully done: the row is gone, and nothing is left saying "still active".
+      await waitFor(() => expect(screen.queryByText('Research agent')).not.toBeInTheDocument())
+    })
+
+    it('mounts no budget hook before anything is pending', () => {
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old', 'agt_other']} />)
+      expect(mockBudgetCalls).toEqual([])
+    })
+
+    it('a cancelled signature leaves the credential revoked and says the budget is STILL active', async () => {
+      mockRevokeAll.mockResolvedValue({ ok: false, reason: 'cancelled' })
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+
+      await userEvent.click(await openConfirm())
+
+      expect(mockRevoke).toHaveBeenCalledWith('agt_old')
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent(/key is revoked, but its budget is still active/i)
+      // The row stays, with the one action that finishes it.
+      expect(screen.getByText('Research agent')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeInTheDocument()
+      expect(mockMarkBudgetEnded).not.toHaveBeenCalled()
+    })
+
+    it('a device that cannot sign still revokes the credential, and says the budget stays active', async () => {
+      mockBudgetHook.ready = false
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
+      expect(await screen.findByText(/cannot sign for the account/i)).toBeInTheDocument()
+      // Not disabled: the credential half needs no signature.
+      const confirm = screen.getByRole('button', { name: /^revoke agent$/i })
+      expect(confirm).not.toBeDisabled()
+      await userEvent.click(confirm)
+
+      await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('agt_old'))
+      expect(mockRevokeAll).not.toHaveBeenCalled()
+      expect(await screen.findByRole('alert')).toHaveTextContent(/budget is still active/i)
+      expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeInTheDocument()
+    })
+
+    it('too many budgets points to the budget card instead of offering a retry that cannot work', async () => {
+      mockRevokeAll.mockResolvedValue({ ok: false, reason: 'too_many' })
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+
+      await userEvent.click(await openConfirm())
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/too many budgets/i)
+      const link = screen.getByRole('link', { name: /budget card/i })
+      expect(link).toHaveAttribute('href', '/agents/agt_old')
+      expect(screen.queryByRole('button', { name: /finish revoking/i })).not.toBeInTheDocument()
+    })
+
+    it('a failed credential revoke never reaches the budget step', async () => {
+      mockRevoke.mockRejectedValue(new Error('Agent not found'))
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+
+      await userEvent.click(await openConfirm())
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Agent not found')
+      expect(mockRevokeAll).not.toHaveBeenCalled()
+    })
+
+    it('Finish revoking retries just the budget, and clears the row on success', async () => {
+      mockRevokeAll.mockResolvedValueOnce({ ok: false, reason: 'cancelled' })
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+      await userEvent.click(await openConfirm())
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'Finish revoking Research agent' }),
+      )
+
+      mockRevokeAll.mockResolvedValueOnce({ ok: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Finish revoking' }))
+
+      await waitFor(() => expect(mockMarkBudgetEnded).toHaveBeenCalledWith('agt_old'))
+      expect(mockRevokeAll).toHaveBeenCalledTimes(2)
+      // The credential was revoked once, not again.
+      expect(mockRevoke).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(screen.queryByText('Research agent')).not.toBeInTheDocument())
+    })
+
+    it('an agent with no linked account: revokes the credential, says Haven cannot end the budget, no signing', async () => {
+      mockAgents.current = [
+        { id: 'agt_old', name: 'Research agent', status: 'active', account_id: null, account_chain_id: null },
+      ]
+      render(<SupersededAgentsCard supersededAgentIds={['agt_old']} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Revoke Research agent' }))
+      await userEvent.click(await screen.findByRole('button', { name: /^revoke agent$/i }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/cannot end it from here/i)
+      expect(mockRevokeAll).not.toHaveBeenCalled()
+      expect(mockBudgetCalls).toEqual([])
+      expect(screen.queryByRole('button', { name: /finish revoking/i })).not.toBeInTheDocument()
+    })
   })
 })

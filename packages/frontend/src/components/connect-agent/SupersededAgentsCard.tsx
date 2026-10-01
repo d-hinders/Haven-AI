@@ -1,10 +1,88 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import ConfirmDialog from '@/components/ConfirmDialog'
-import { useAgents } from '@/hooks/useAgents'
+import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
+import { useAgents, type Agent } from '@/hooks/useAgents'
+import { useDelegationBudget, type BudgetResult } from '@/hooks/useDelegationBudget'
+import { FINISH_REVOKING_LABEL } from '@/lib/half-revoked'
+
+/**
+ * What is left after the credential was revoked but the budget was not ended
+ * (#3542). The row stays on screen, saying which half happened.
+ */
+type Unfinished = 'signature' | 'too_many' | 'unlinked'
+
+/** What the confirm dialog hands the card so the card owns every state change. */
+interface BudgetSigner {
+  revokeAll: () => Promise<BudgetResult>
+  ready: boolean
+}
+
+function RevokeConfirmBody({ linked }: { linked: boolean }) {
+  return (
+    <>
+      <p>
+        Its key stops working immediately.{' '}
+        {linked
+          ? 'You then sign once to end its budget — until you do, the budget stays active.'
+          : 'Its budget may still be active on the account it was removed from, and Haven cannot end it from here.'}{' '}
+        This cannot be undone — a replacement agent gets a new key and a new budget you approve.
+      </p>
+      <p className="mt-2">
+        Anything still running as this agent will start failing rather than stopping quietly. That
+        is expected, not a fault to chase.
+      </p>
+    </>
+  )
+}
+
+/**
+ * The confirm for an agent with a linked account. Mounts `useDelegationBudget`
+ * for THIS agent only — never one hook per row — on the agent's own chain, so
+ * the budget signature is prepared against the network the agent lives on.
+ */
+function RevokeAndEndBudgetDialog({
+  agent,
+  chainId,
+  loading,
+  onConfirm,
+  onCancel,
+}: {
+  agent: Agent
+  chainId: number
+  loading: boolean
+  onConfirm: (signer: BudgetSigner) => void
+  onCancel: () => void
+}) {
+  const { revokeAll, ready, busy } = useDelegationBudget(agent.id, chainId)
+  return (
+    <ConfirmDialog
+      open
+      tone="danger"
+      title={`Revoke ${agent.name}?`}
+      body={
+        <>
+          <RevokeConfirmBody linked />
+          {!ready && (
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              This device cannot sign for the account. The key is still revoked, and the budget
+              stays active until you finish on a device that can.
+            </p>
+          )}
+        </>
+      }
+      confirmLabel="Revoke agent"
+      cancelLabel="Keep it"
+      loading={loading || busy}
+      onConfirm={() => onConfirm({ revokeAll, ready })}
+      onCancel={onCancel}
+    />
+  )
+}
 
 /**
  * "This setup replaced agent(s) X — revoke them?" (#2561).
@@ -54,10 +132,14 @@ export function SupersededAgentsCard({
   /** Tri-state from `install_status`: list, `[]`, or `null`/absent. */
   supersededAgentIds?: readonly string[] | null
 }) {
-  const { agents, error, refetch, revokeAgent } = useAgents()
+  const { agents, error, refetch, revokeAgent, markBudgetEnded } = useAgents()
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [failed, setFailed] = useState<Record<string, string>>({})
+  // Agents whose credential is revoked but whose budget is not yet ended. They
+  // stay listed (#3542) — the row must not vanish on the credential half.
+  const [unfinished, setUnfinished] = useState<Record<string, Unfinished>>({})
+  const [finishId, setFinishId] = useState<string | null>(null)
   // Set only by THIS card's own Try again. `useAgents`' `loading` cannot stand
   // in for it: it is `true` on first mount too, before anything has failed, so
   // branching on it made a fresh completed setup announce that the agent list
@@ -73,8 +155,14 @@ export function SupersededAgentsCard({
     // for null, for `[]`, and for a report naming agents this owner does not
     // have — three different facts with the same correct rendering.
     const reported = new Set(supersededAgentIds ?? [])
-    return agents.filter((agent) => reported.has(agent.id) && agent.status !== 'revoked')
-  }, [supersededAgentIds, agents])
+    return agents.filter(
+      (agent) =>
+        reported.has(agent.id) &&
+        // Revoked agents are dropped — except the ones this card is mid-revoke
+        // on or has left half-revoked, which still need the owner's attention.
+        (agent.status !== 'revoked' || busyId === agent.id || agent.id in unfinished),
+    )
+  }, [supersededAgentIds, agents, busyId, unfinished])
 
   // The same discipline this component applies to the REPORT, applied to the
   // other half of the intersection (#2561 review). The card reads the owner's
@@ -135,7 +223,10 @@ export function SupersededAgentsCard({
 
   const pending = offered.find((agent) => agent.id === pendingId) ?? null
 
-  async function confirmRevoke(id: string) {
+  const finishAgent = agents.find((agent) => agent.id === finishId) ?? null
+
+  async function confirmRevoke(agent: Agent, signer: BudgetSigner | null) {
+    const id = agent.id
     setBusyId(id)
     setFailed((prev) => {
       const next = { ...prev }
@@ -143,8 +234,9 @@ export function SupersededAgentsCard({
       return next
     })
     try {
+      // Credential first: it needs no signature, so it works even when this
+      // device cannot sign. A failure here changed nothing.
       await revokeAgent(id)
-      setPendingId(null)
     } catch (err) {
       // Named per agent rather than as one banner: a partial failure across
       // several agents has to say WHICH one is still live.
@@ -152,9 +244,28 @@ export function SupersededAgentsCard({
         ...prev,
         [id]: err instanceof Error ? err.message : 'Could not revoke this agent.',
       }))
-    } finally {
       setBusyId(null)
+      return
     }
+
+    // Then the budget (#3542): revoking the credential does not end the budget
+    // delegation — it stays redeemable on-chain until the owner signs revoke-all.
+    let leftover: Unfinished | null = null
+    if (!signer) {
+      leftover = 'unlinked'
+    } else if (!signer.ready) {
+      leftover = 'signature'
+    } else {
+      const result = await signer.revokeAll()
+      if (result.ok) markBudgetEnded(id)
+      else leftover = result.reason === 'too_many' ? 'too_many' : 'signature'
+    }
+    if (leftover) {
+      const reason = leftover
+      setUnfinished((prev) => ({ ...prev, [id]: reason }))
+    }
+    setPendingId(null)
+    setBusyId(null)
   }
 
   return (
@@ -169,9 +280,10 @@ export function SupersededAgentsCard({
           <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             {offered.length === 1 ? 'It is' : 'They are'} still active with{' '}
             {offered.length === 1 ? 'its' : 'their'} own key, and anything that was already
-            running keeps spending as {offered.length === 1 ? 'it' : 'them'}. Revoking stops that.
-            You can also leave {offered.length === 1 ? 'it' : 'them'} — nothing here happens on its
-            own.
+            running keeps spending as {offered.length === 1 ? 'it' : 'them'}. Revoking ends{' '}
+            {offered.length === 1 ? 'its' : 'their'} key, and one signature from you ends{' '}
+            {offered.length === 1 ? 'its' : 'their'} budget. You can also leave{' '}
+            {offered.length === 1 ? 'it' : 'them'} — nothing here happens on its own.
           </p>
         </Card.Section>
         <Card.Section divided>
@@ -185,47 +297,96 @@ export function SupersededAgentsCard({
                       {failed[agent.id]}
                     </p>
                   )}
+                  {unfinished[agent.id] && (
+                    <p role="alert" className="text-xs text-[var(--v2-warning)]">
+                      {unfinished[agent.id] === 'unlinked'
+                        ? 'Its key is revoked. Its budget may still be active on the account it was removed from, and Haven cannot end it from here.'
+                        : unfinished[agent.id] === 'too_many'
+                          ? 'Its key is revoked, but its budget is still active — it holds too many budgets to end in one signature. Stop them one by one on the agent’s budget card.'
+                          : 'Its key is revoked, but its budget is still active. Finish revoking to end it.'}
+                    </p>
+                  )}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  // Named per agent: a list of buttons all reading "Revoke" is
-                  // ambiguous in a screen reader's forms list, and the sibling
-                  // `AgentCard` already carries this exact fix.
-                  aria-label={`Revoke ${agent.name}`}
-                  disabled={busyId !== null}
-                  onClick={() => setPendingId(agent.id)}
-                >
-                  Revoke
-                </Button>
+                {unfinished[agent.id] === 'signature' ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
+                    disabled={busyId !== null}
+                    onClick={() => setFinishId(agent.id)}
+                  >
+                    {FINISH_REVOKING_LABEL}
+                  </Button>
+                ) : unfinished[agent.id] === 'too_many' ? (
+                  <Link
+                    href={`/agents/${agent.id}`}
+                    className="text-xs text-[var(--v2-brand)] underline-offset-2 hover:underline"
+                  >
+                    Open budget card
+                  </Link>
+                ) : unfinished[agent.id] === 'unlinked' ? null : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    // Named per agent: a list of buttons all reading "Revoke" is
+                    // ambiguous in a screen reader's forms list, and the sibling
+                    // `AgentCard` already carries this exact fix.
+                    aria-label={`Revoke ${agent.name}`}
+                    disabled={busyId !== null}
+                    onClick={() => setPendingId(agent.id)}
+                  >
+                    Revoke
+                  </Button>
+                )}
               </li>
             ))}
           </ul>
         </Card.Section>
       </Card>
 
-      {pending && (
-        <ConfirmDialog
-          open
-          tone="danger"
-          title={`Revoke ${pending.name}?`}
-          body={
-            <>
-              <p>
-                Its key stops working immediately and it cannot spend again. This cannot be undone
-                — a replacement agent gets a new key and a new budget you approve.
-              </p>
-              <p className="mt-2">
-                Anything still running as this agent will start failing rather than stopping
-                quietly. That is expected, not a fault to chase.
-              </p>
-            </>
-          }
-          confirmLabel="Revoke agent"
-          cancelLabel="Keep it"
-          loading={busyId === pending.id}
-          onConfirm={() => void confirmRevoke(pending.id)}
-          onCancel={() => setPendingId(null)}
+      {pending &&
+        (pending.account_id && pending.account_chain_id != null ? (
+          <RevokeAndEndBudgetDialog
+            agent={pending}
+            // The agent's own chain, never the default: the budget signature is
+            // prepared against the network the agent actually lives on.
+            chainId={pending.account_chain_id}
+            loading={busyId === pending.id}
+            onConfirm={(signer) => void confirmRevoke(pending, signer)}
+            onCancel={() => setPendingId(null)}
+          />
+        ) : (
+          <ConfirmDialog
+            open
+            tone="danger"
+            title={`Revoke ${pending.name}?`}
+            body={<RevokeConfirmBody linked={false} />}
+            confirmLabel="Revoke agent"
+            cancelLabel="Keep it"
+            loading={busyId === pending.id}
+            onConfirm={() => void confirmRevoke(pending, null)}
+            onCancel={() => setPendingId(null)}
+          />
+        ))}
+
+      {finishAgent && (
+        // Retry for the budget half: the credential is already revoked, so this
+        // is the Remove dialog's finish mode — it ends the budget and nothing else.
+        <RemoveAgentDialog
+          agent={finishAgent}
+          chainId={finishAgent.account_chain_id ?? undefined}
+          mode="finish"
+          onRevokeCredential={() => revokeAgent(finishAgent.id)}
+          onArchive={async () => {}}
+          onBudgetEnded={() => {
+            markBudgetEnded(finishAgent.id)
+            setUnfinished((prev) => {
+              const next = { ...prev }
+              delete next[finishAgent.id]
+              return next
+            })
+          }}
+          onClose={() => setFinishId(null)}
         />
       )}
     </>

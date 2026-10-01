@@ -45,6 +45,7 @@ import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatFiat, truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { isHalfRevoked } from '@/lib/half-revoked'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -58,6 +59,11 @@ function formatResetPeriod(minutes: number): string {
 }
 
 function agentBudgetSummary(agent: Agent, chainId: number | null): string {
+  // #3542: "Access revoked" is false while a budget delegation is still
+  // redeemable on-chain — checked before status, and before the allowances,
+  // which are a view of ACTIVE rows only. The row links to the agent page,
+  // which is where the budget is ended; nothing here acts.
+  if (isHalfRevoked(agent)) return 'Budget still active — open the agent to end it'
   if (agent.status === 'revoked') return 'Access revoked'
   const allowances = agent.allowances ?? []
   if (allowances.length === 0) return 'No agent budget set'

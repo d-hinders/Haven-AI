@@ -13,7 +13,16 @@ import type { Agent } from '@/hooks/useAgents'
 
 const { mockRevokeAll, mockBudgetState, mockBalanceState } = vi.hoisted(() => ({
   mockRevokeAll: vi.fn(),
-  mockBudgetState: { ready: true, busy: false },
+  // `budgets` is the dialog's own delegation list (#3542): the signature is
+  // decided from it, never from `agent.status` or `agent.allowances`. `null` is
+  // "still loading". The signature-expecting tests below get a live row by
+  // default (see `beforeEach`) — the agent fixture itself stays allowance-free.
+  mockBudgetState: {
+    ready: true,
+    busy: false,
+    budgets: null as null | Array<{ id: string; status: string }>,
+    budgetsError: false,
+  },
   mockBalanceState: {
     balance: null as null | Record<string, unknown>,
     hasRecoverableUsdc: false,
@@ -25,7 +34,8 @@ const { mockRevokeAll, mockBudgetState, mockBalanceState } = vi.hoisted(() => ({
 
 vi.mock('@/hooks/useDelegationBudget', () => ({
   useDelegationBudget: () => ({
-    budgets: null,
+    budgets: mockBudgetState.budgets,
+    budgetsError: mockBudgetState.budgetsError,
     grant: vi.fn(),
     revoke: vi.fn(),
     revokeAll: mockRevokeAll,
@@ -87,6 +97,8 @@ beforeEach(() => {
   mockRevokeAll.mockReset()
   mockBudgetState.ready = true
   mockBudgetState.busy = false
+  mockBudgetState.budgets = [{ id: 'd-1', status: 'active' }]
+  mockBudgetState.budgetsError = false
   mockBalanceState.balance = null
   mockBalanceState.hasRecoverableUsdc = false
 })
@@ -155,8 +167,9 @@ describe('RemoveAgentDialog', () => {
     expect(screen.getByRole('button', { name: 'Finish removal' })).toBeTruthy()
   })
 
-  it('an already-revoked agent skips both the signature and the credential step', async () => {
-    const { onRevokeCredential, onClose } = renderDialog(
+  it('an already-revoked agent with NO live delegation skips both the signature and the credential step', async () => {
+    mockBudgetState.budgets = []
+    const { onRevokeCredential, onArchive, onClose } = renderDialog(
       agentFixture({ status: 'revoked' }),
     )
 
@@ -164,6 +177,252 @@ describe('RemoveAgentDialog', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(mockRevokeAll).not.toHaveBeenCalled()
     expect(onRevokeCredential).not.toHaveBeenCalled()
+    expect(onArchive).toHaveBeenCalled()
+  })
+
+  // #3542 (C): `POST /agents/:id/revoke` only flips the status, so a REVOKED
+  // agent can still hold a redeemable budget. Skipping the signature for it
+  // archived nothing and 409'd into `filing_failed`.
+  it('a revoked agent whose delegation list holds a live row signs, then archives (no credential step)', async () => {
+    const order: string[] = []
+    mockRevokeAll.mockImplementation(async () => {
+      order.push('revokeAll')
+      return { ok: true }
+    })
+    mockBudgetState.budgets = [{ id: 'd-1', status: 'active' }]
+    const { onRevokeCredential, onClose } = renderDialog(agentFixture({ status: 'revoked' }), {
+      onArchive: vi.fn(async () => {
+        order.push('archive')
+      }),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(order).toEqual(['revokeAll', 'archive'])
+    expect(onRevokeCredential).not.toHaveBeenCalled()
+  })
+
+  it('an agent whose only row is `replaced` (allowances: []) still signs — active or revoked', async () => {
+    // `allowances` is projected from ACTIVE rows only; a replaced row is still
+    // redeemable and is in revoke-all's target set. The revoked case is the one
+    // the old status-keyed gate got wrong.
+    for (const status of ['active', 'revoked'] as const) {
+      mockRevokeAll.mockReset()
+      mockRevokeAll.mockResolvedValue({ ok: true })
+      mockBudgetState.budgets = [{ id: 'd-1', status: 'replaced' }]
+      const onClose = vi.fn()
+      const { unmount } = render(
+        <RemoveAgentDialog
+          agent={agentFixture({ status, allowances: [] })}
+          chainId={84532}
+          onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
+          onArchive={vi.fn().mockResolvedValue(undefined)}
+          onClose={onClose}
+        />,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+      await waitFor(() => expect(onClose).toHaveBeenCalled())
+      expect(mockRevokeAll, status).toHaveBeenCalledTimes(1)
+      unmount()
+    }
+  })
+
+  it('a list holding only revoked rows needs no signature', async () => {
+    mockBudgetState.budgets = [{ id: 'd-1', status: 'revoked' }]
+    const { onClose } = renderDialog(agentFixture({ status: 'revoked' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(mockRevokeAll).not.toHaveBeenCalled()
+  })
+
+  it('says "already ended" only once the list has loaded and is empty', () => {
+    mockBudgetState.budgets = []
+    const { unmount } = render(
+      <RemoveAgentDialog
+        agent={agentFixture({ status: 'revoked' })}
+        chainId={84532}
+        onRevokeCredential={vi.fn()}
+        onArchive={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(document.body.textContent).toMatch(/spending authority is already ended/i)
+    unmount()
+
+    // Still loading: no verdict is claimed either way.
+    mockBudgetState.budgets = null
+    renderDialog(agentFixture({ status: 'revoked' }))
+    expect(document.body.textContent).not.toMatch(/already ended/i)
+  })
+
+  it('a live row never says "already ended"', () => {
+    mockBudgetState.budgets = [{ id: 'd-1', status: 'active' }]
+    renderDialog(agentFixture({ status: 'revoked' }))
+    expect(document.body.textContent).not.toMatch(/already ended/i)
+    expect(document.body.textContent).toMatch(/you sign once/i)
+  })
+
+  it('while the list loads, a signature is still required (Remove waits for a signer)', () => {
+    mockBudgetState.budgets = null
+    mockBudgetState.ready = false
+    renderDialog(agentFixture({ status: 'revoked' }))
+    const confirm = screen.getByRole('button', { name: 'Remove agent' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+  })
+
+  it('a revoked agent with a live row and no signer is blocked, and told why', () => {
+    mockBudgetState.ready = false
+    renderDialog(agentFixture({ status: 'revoked' }))
+    const confirm = screen.getByRole('button', { name: 'Remove agent' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    expect(screen.getByText(/connect a wallet or use a passkey/i)).toBeTruthy()
+  })
+
+  it('an unlinked revoked agent is not gated behind a signature Haven cannot collect', async () => {
+    mockBudgetState.ready = false
+    const { onClose, onArchive } = renderDialog(
+      agentFixture({ status: 'revoked', account_id: null, live_delegation_count: 1 }),
+    )
+    expect(document.body.textContent).toMatch(/cannot end its budget from here/i)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(onArchive).toHaveBeenCalled()
+    expect(mockRevokeAll).not.toHaveBeenCalled()
+  })
+
+  it('tells the caller the budget ended, after the filing steps settle', async () => {
+    const order: string[] = []
+    mockRevokeAll.mockResolvedValue({ ok: true })
+    const onBudgetEnded = vi.fn(() => {
+      order.push('ended')
+    })
+    const onArchive = vi.fn(async () => {
+      order.push('archive')
+    })
+    const onClose = vi.fn()
+    render(
+      <RemoveAgentDialog
+        agent={agentFixture()}
+        chainId={84532}
+        onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
+        onArchive={onArchive}
+        onBudgetEnded={onBudgetEnded}
+        onClose={onClose}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(order).toEqual(['archive', 'ended'])
+  })
+
+  it('does NOT tell the caller the budget ended when the signature is cancelled', async () => {
+    mockRevokeAll.mockResolvedValue({ ok: false, reason: 'cancelled' })
+    const onBudgetEnded = vi.fn()
+    render(
+      <RemoveAgentDialog
+        agent={agentFixture()}
+        chainId={84532}
+        onRevokeCredential={vi.fn()}
+        onArchive={vi.fn()}
+        onBudgetEnded={onBudgetEnded}
+        onClose={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(onBudgetEnded).not.toHaveBeenCalled()
+  })
+
+  describe('finish mode (#3542 D): ends the remaining budget of an already revoked/archived agent', () => {
+    function renderFinish(agent: Agent, extra: { onBudgetEnded?: () => void } = {}) {
+      const onRevokeCredential = vi.fn().mockResolvedValue(undefined)
+      const onArchive = vi.fn().mockResolvedValue(undefined)
+      const onClose = vi.fn()
+      render(
+        <RemoveAgentDialog
+          agent={agent}
+          chainId={84532}
+          mode="finish"
+          onRevokeCredential={onRevokeCredential}
+          onArchive={onArchive}
+          onBudgetEnded={extra.onBudgetEnded}
+          onClose={onClose}
+        />,
+      )
+      return { onRevokeCredential, onArchive, onClose }
+    }
+
+    it('speaks of ending the budget, not of moving the agent or stopping its credential', () => {
+      renderFinish(agentFixture({ status: 'revoked', live_delegation_count: 1 }))
+      expect(screen.getByText('Finish revoking Research agent?')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Finish revoking' })).toBeTruthy()
+      const text = document.body.textContent ?? ''
+      expect(text).toMatch(/remaining budget ends/i)
+      expect(text).not.toMatch(/moves to Removed/i)
+      expect(text).not.toMatch(/credential stops working/i)
+    })
+
+    it('signs once, leaves the agent where it is, and reports the budget ended', async () => {
+      mockRevokeAll.mockResolvedValue({ ok: true })
+      const onBudgetEnded = vi.fn()
+      const { onRevokeCredential, onArchive, onClose } = renderFinish(
+        agentFixture({ status: 'revoked', live_delegation_count: 1 }),
+        { onBudgetEnded },
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Finish revoking' }))
+      await waitFor(() => expect(onClose).toHaveBeenCalled())
+      expect(mockRevokeAll).toHaveBeenCalledTimes(1)
+      expect(onBudgetEnded).toHaveBeenCalledTimes(1)
+      expect(onRevokeCredential).not.toHaveBeenCalled()
+      // Finish never files anything: no archive, so nothing for a caller to
+      // navigate away over.
+      expect(onArchive).not.toHaveBeenCalled()
+    })
+
+    it('an archived agent: signs, leaves it archived, and does not restore it', async () => {
+      mockRevokeAll.mockResolvedValue({ ok: true })
+      const { onArchive, onClose } = renderFinish(
+        agentFixture({
+          status: 'revoked',
+          archived_at: '2026-06-01T00:00:00Z',
+          live_delegation_count: 1,
+        }),
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Finish revoking' }))
+      await waitFor(() => expect(onClose).toHaveBeenCalled())
+      expect(mockRevokeAll).toHaveBeenCalledTimes(1)
+      expect(onArchive).not.toHaveBeenCalled()
+    })
+
+    it('a cancelled signature says the budget is still active and keeps the dialog open', async () => {
+      mockRevokeAll.mockResolvedValue({ ok: false, reason: 'cancelled' })
+      const onBudgetEnded = vi.fn()
+      const { onClose } = renderFinish(
+        agentFixture({ status: 'revoked', live_delegation_count: 1 }),
+        { onBudgetEnded },
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Finish revoking' }))
+      await waitFor(() =>
+        expect(screen.getByRole('alert').textContent).toMatch(/budget is still active/i),
+      )
+      expect(onClose).not.toHaveBeenCalled()
+      expect(onBudgetEnded).not.toHaveBeenCalled()
+    })
+
+    it('stops a credential that is somehow still live, only when status is not revoked', async () => {
+      mockRevokeAll.mockResolvedValue({ ok: true })
+      const { onRevokeCredential, onClose } = renderFinish(
+        agentFixture({
+          status: 'active',
+          archived_at: '2026-06-01T00:00:00Z',
+          live_delegation_count: 1,
+        }),
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Finish revoking' }))
+      await waitFor(() => expect(onClose).toHaveBeenCalled())
+      expect(onRevokeCredential).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('no reachable signer disables Remove and says why — for agents that need a signature', () => {
@@ -174,8 +433,9 @@ describe('RemoveAgentDialog', () => {
     expect(screen.getByText(/connect a wallet or use a passkey/i)).toBeTruthy()
   })
 
-  it('no-signer does NOT block removing an already-revoked agent (archive-only leg)', () => {
+  it('no-signer does NOT block removing an already-revoked agent with no live budget (archive-only leg)', () => {
     mockBudgetState.ready = false
+    mockBudgetState.budgets = []
     renderDialog(agentFixture({ status: 'revoked' }))
     const confirm = screen.getByRole('button', { name: 'Remove agent' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(false)

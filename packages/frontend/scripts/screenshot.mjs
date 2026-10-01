@@ -965,6 +965,68 @@ export const FIXTURE_ORGANIZATIONS = [
   },
 ]
 
+/**
+ * #3542: the two HALF-REVOKED agents — credential ended in Haven (revoked) or
+ * filed under Removed (archived), while the budget delegation is still
+ * redeemable on-chain, so `live_delegation_count` is 1 on each.
+ *
+ * Deliberately NOT part of `FIXTURE_AGENTS`: that list feeds the dashboard
+ * overview, the account page, the connected-agents counts and a dozen other
+ * captures, and appending two revoked agents would change every one of them.
+ * Only the `half-revoked-agents` scenario serves them (merged into `/agents`
+ * there); the matching `/agents/:id/delegations` and `/delegate-balance` reads
+ * are keyed below, in `fixtureFor` and `FIXTURE_DELEGATE_BALANCES`, so the
+ * detail pages of these two agents render their real budget card and no
+ * false "recoverable funds" banner.
+ *
+ * Shape: spread from the showcase agent so every key a hook reads is present
+ * (the fixture-shape parity suite compares against the typed e2e fixture).
+ * `allowances` keeps its active-row projection — revoking the credential does
+ * not touch the delegation, which is the whole defect.
+ */
+const FIXTURE_HALF_REVOKED_BASE = {
+  ...FIXTURE_AGENTS[0],
+  // No delegate address: the same pre-column legacy shape `agent-retired`
+  // carries, so `/delegate-balance` answers its real 422 and no stranded-funds
+  // banner is invented for an agent that never paid.
+  delegate_address: null,
+  has_stranded_funds: false,
+  mcp_server_name: null,
+  mcp_last_seen_at: '2026-07-01T09:00:00.000Z',
+  status: 'revoked',
+  organization_id: null,
+  labels: [],
+  live_delegation_count: 1,
+}
+export const FIXTURE_HALF_REVOKED_AGENTS = [
+  {
+    ...FIXTURE_HALF_REVOKED_BASE,
+    id: 'agent-half-revoked', name: 'Legacy research agent',
+    description: 'Revoked in Haven; its weekly budget was never ended',
+    api_key_prefix: 'hvn_d4e5f6',
+    created_at: '2026-05-20T10:00:00.000Z',
+    allowances: [{
+      id: 'alw-half-revoked', agent_id: 'agent-half-revoked',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '150.000000', reset_period_min: 10080,
+    }],
+    archived_at: null,
+  },
+  {
+    ...FIXTURE_HALF_REVOKED_BASE,
+    id: 'agent-half-removed', name: 'Old data-feed agent',
+    description: 'Removed from the list; its daily budget was never ended',
+    api_key_prefix: 'hvn_a7b8c9',
+    created_at: '2026-04-12T10:00:00.000Z',
+    allowances: [{
+      id: 'alw-half-removed', agent_id: 'agent-half-removed',
+      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      token_symbol: 'USDC', allowance_amount: '75.000000', reset_period_min: 1440,
+    }],
+    archived_at: '2026-08-02T10:00:00.000Z',
+  },
+]
+
 const FIXTURE_PORTFOLIO = {
   // #3127 (finding 8): SEK joins the priced totals — ~10.76 SEK/USD — with
   // the token rows' `sekValue` summing to it.
@@ -1251,6 +1313,9 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // balance reads — it answers 422 at `routes/agents.ts:140-142`. Served as a
   // real 422 by `fixtureFor` below.
   'agent-retired': null,
+  // #3542: the half-revoked scenario's agents carry no delegate address either.
+  'agent-half-revoked': null,
+  'agent-half-removed': null,
 }
 
 export const FIXTURE_AGENT_STATS = {
@@ -1874,6 +1939,39 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-05-18T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 4, 18) / 1000),
           created_at: '2026-05-18T10:00:00.000Z',
+        }],
+      }
+    }
+    // #3542: the budget delegations the two half-revoked agents still hold.
+    // `status: 'active'` on a REVOKED agent is the defect itself — the route
+    // has no status filter, so it serves the row, and revoke-all targets it.
+    if (pathname === `/agents/agent-half-revoked/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-half-1', chain_id: FIXTURE_ACCOUNT.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: null,
+          delegation_hash: '0x' + '6f'.repeat(32),
+          version: 1, status: 'active',
+          budget_atomic: '150000000', period_seconds: 604_800,
+          start_date: '2026-05-20T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 4, 20) / 1000),
+          created_at: '2026-05-20T10:00:00.000Z',
+        }],
+      }
+    }
+    if (pathname === `/agents/agent-half-removed/delegations`) {
+      return {
+        delegations: [{
+          id: 'dlg-half-2', chain_id: FIXTURE_ACCOUNT.chain_id,
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          recipient_address: null,
+          delegation_hash: '0x' + '7a'.repeat(32),
+          version: 1, status: 'active',
+          budget_atomic: '75000000', period_seconds: 86_400,
+          start_date: '2026-04-12T10:00:00.000Z',
+          expires_at: Math.floor(Date.UTC(2027, 3, 12) / 1000),
+          created_at: '2026-04-12T10:00:00.000Z',
         }],
       }
     }
@@ -3512,6 +3610,61 @@ export const SCENARIOS = {
       await page.getByText('haven-data-feed', { exact: true }).first().waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'list')
+    },
+  },
+
+  'half-revoked-agents': {
+    description:
+      'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the collapsed Removed toggle carrying its warning, the expanded Removed group, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
+    api(apiPath) {
+      if (apiPath === '/agents') {
+        return {
+          agents: [...FIXTURE_AGENTS, ...FIXTURE_HALF_REVOKED_AGENTS],
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // ── /agents: list card, collapsed toggle, expanded Removed group ──────
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const revokedCard = page.getByTestId('agent-card').filter({ hasText: 'Legacy research agent' })
+      await revokedCard.getByRole('button', { name: 'Finish revoking Legacy research agent' }).waitFor({ timeout: 20_000 })
+      await revokedCard.scrollIntoViewIfNeeded()
+      await shoot(revokedCard, 'list-card-revoked')
+
+      // The toggle carries the warning while the group is COLLAPSED — that is
+      // the state the owner sees by default, and the whole reason for it.
+      const toggle = page.getByRole('button', { name: /Removed/ })
+      await toggle.getByText(/still has an active budget/).waitFor({ timeout: 20_000 })
+      await toggle.scrollIntoViewIfNeeded()
+      await shoot(toggle.locator('xpath=..'), 'removed-toggle-collapsed')
+
+      await toggle.click()
+      const removedGroup = page.getByRole('group', { name: 'Removed agents' })
+      await removedGroup.getByRole('button', { name: 'Finish revoking Old data-feed agent' }).waitFor({ timeout: 20_000 })
+      await removedGroup.scrollIntoViewIfNeeded()
+      await shoot(removedGroup, 'removed-expanded')
+
+      // ── Agent detail: the callout above the budget card ───────────────────
+      for (const [id, label] of [
+        ['agent-half-revoked', 'detail-revoked'],
+        ['agent-half-removed', 'detail-archived'],
+      ]) {
+        await page.goto(`${BASE_URL}/agents/${id}`, { waitUntil: 'networkidle', timeout: 60_000 })
+        await dismissMobileSidebar(page, vp)
+        await page.getByTestId('half-revoked-callout').waitFor({ timeout: 20_000 })
+        await page.getByRole('button', { name: 'Finish revoking', exact: true }).waitFor({ timeout: 20_000 })
+        await shoot(page.locator('main').first(), label)
+      }
+
+      // ── Account page: the agent summary says the budget is still active ───
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText(/Budget still active/).first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'account-summary')
     },
   },
 

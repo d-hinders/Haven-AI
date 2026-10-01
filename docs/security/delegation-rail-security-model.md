@@ -2129,8 +2129,11 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **#3553 (2026-10-01).** Sub-budget issuance (`POST /agents/:id/sub-budgets`)
 > and the owner's signature relay (`POST /agents/:id/sub-budgets/:sub/sign`)
 > now refuse a revoked or archived issuing agent with 409 `issuer_retired`,
-> before body validation, and issuance refuses a revoked, archived or
-> `pending_approval` receiving agent with 409 `sub_agent_retired`. A
+> before the handler's body checks, and issuance refuses a revoked, archived or
+> `pending_approval` receiving agent with 409 `sub_agent_retired`. Opening a
+> grant row is refused with the same code when its receiving agent is retired,
+> in both the owner relay and the agent's `POST /sub-budgets/:id/submit` (the
+> row stays pending; close submits are never gated). A
 > half-revoked issuer could previously have new sub-budgets carved from its
 > still-active budget, and the relay would open a `pending` row with a
 > signature made before revocation. The gate sits in the two routes, not in

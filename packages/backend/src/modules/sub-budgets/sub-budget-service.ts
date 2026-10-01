@@ -12,6 +12,7 @@
 import type { Address, Hex } from 'viem'
 import type { Delegation } from '@metamask/smart-accounts-kit'
 import { getUserOperationHash, entryPoint07Address } from 'viem/account-abstraction'
+import { findAgentLifecycleById } from '../../infra/repositories/agents.js'
 import { sumOpenReservedForParent, type SubBudgetRow } from '../../infra/repositories/sub-budgets.js'
 import type { DelegationForPaymentRow } from '../../infra/repositories/delegation-budgets.js'
 import { computeHybridAccountAddress } from '../../rails/hybrid-provisioning.js'
@@ -441,4 +442,22 @@ export async function isSubBudgetChildDisabledOnChain(
   } catch {
     return false
   }
+}
+
+/** #3553: only an `active` or `paused`, un-archived agent may receive a sub-budget. */
+export const SUB_BUDGET_SUB_AGENT_RETIRED_CODE = 'sub_agent_retired'
+export const SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL =
+  'A revoked, archived or pending-approval agent cannot receive a sub-budget'
+
+/**
+ * #3553: true when `row` is a GRANT (`parent_sub_budget_id` set) whose receiving
+ * agent is revoked, archived or pending_approval — opening it would create new
+ * spend authority for a retired agent. The parent-child row (agent_id = issuer)
+ * and close submits are not this gate's business: closing is authority-reducing.
+ */
+export async function isGrantReceiverRetired(row: SubBudgetRow): Promise<boolean> {
+  if (row.parent_sub_budget_id == null) return false
+  const receiver = await findAgentLifecycleById(row.agent_id)
+  if (!receiver) return false
+  return receiver.status === 'revoked' || receiver.status === 'pending_approval' || receiver.archived_at != null
 }

@@ -53,7 +53,10 @@ import {
 } from '../infra/repositories/sub-budgets.js'
 import type { Delegation } from '../rails/delegation-policy.js'
 import {
+  SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+  SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
   buildSubBudgetChildren,
+  isGrantReceiverRetired,
   checkNarrowingRefusal,
   prepareSubBudgetClose,
   recoverSubBudgetChildSigner,
@@ -73,10 +76,6 @@ import {
 export const SUB_BUDGET_ISSUER_RETIRED_CODE = 'issuer_retired'
 export const SUB_BUDGET_ISSUER_RETIRED_REFUSAL =
   'This agent is revoked or archived and cannot issue new sub-budgets'
-/** #3553: only an `active` or `paused`, un-archived agent may receive a sub-budget. */
-export const SUB_BUDGET_SUB_AGENT_RETIRED_CODE = 'sub_agent_retired'
-export const SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL =
-  'A revoked, archived or pending-approval agent cannot receive a sub-budget'
 
 function isRetired(a: { status: string; archived_at: Date | string | null }): boolean {
   return a.status === 'revoked' || a.archived_at != null
@@ -127,7 +126,7 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent || !agent.delegate_address) return reply.code(404).send({ error: 'Agent not found' })
-    // #3553: lifecycle gate BEFORE body validation, as the delegation build route does.
+    // #3553: lifecycle gate BEFORE the handler's body checks, as the delegation build route does.
     if (isRetired(agent)) {
       return reply.code(409).send({
         error: SUB_BUDGET_ISSUER_RETIRED_REFUSAL,
@@ -349,6 +348,13 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     if (!row) return reply.code(404).send({ error: 'Sub-budget not found' })
     if (row.status !== 'pending') {
       return reply.code(409).send({ error: `Sub-budget is '${row.status}' — nothing to sign`, error_code: 'not_pending' })
+    }
+    // #3553: a grant whose receiving agent was retired after issuance must not open.
+    if (await isGrantReceiverRetired(row)) {
+      return reply.code(409).send({
+        error: SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
+        error_code: SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+      })
     }
 
     // The signature is A's delegate key over the child typed data the

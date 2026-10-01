@@ -38,7 +38,10 @@ import {
 } from '../infra/repositories/sub-budgets.js'
 import {
   buildSubBudgetSignContext,
+  SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+  SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
   checkNarrowingRefusal,
+  isGrantReceiverRetired,
   isSubBudgetChildDisabledOnChain,
   prepareSubBudgetClose,
   recoverSubBudgetChildSigner,
@@ -146,6 +149,14 @@ export default async function subBudgetRoutes(app: FastifyInstance): Promise<voi
       if (!row) return reply.code(404).send({ error: 'Sub-budget not found' })
 
       if (row.status === 'pending') {
+        // #3553: a grant whose receiving agent was retired after issuance must
+        // not open (row stays pending). Close submits are never gated.
+        if (await isGrantReceiverRetired(row)) {
+          return reply.code(409).send({
+            error: SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
+            error_code: SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+          })
+        }
         let signer: string
         try {
           signer = await recoverSubBudgetChildSigner(row, agent.chain_id, signature as Hex)

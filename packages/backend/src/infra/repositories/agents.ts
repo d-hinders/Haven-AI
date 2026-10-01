@@ -136,6 +136,22 @@ export async function loadOwnedDelegationAgent(
 }
 
 /**
+ * #3553: lifecycle-only read by agent id (no owner scope — the caller already
+ * holds a row whose ownership it verified). Used to refuse opening a sub-budget
+ * grant whose receiving agent has since been retired.
+ */
+export async function findAgentLifecycleById(
+  agentId: string,
+  db: Executor = pool,
+): Promise<{ status: string; archived_at: Date | string | null } | null> {
+  const result = await db.query<{ status: string; archived_at: Date | string | null }>(
+    `SELECT status, archived_at FROM agents WHERE id = $1`,
+    [agentId],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
  * Serializes an activation with agent credential revocation (#2025). The
  * caller supplies its transaction executor, so the row lock lasts through the
  * delegation status write rather than just this read.

@@ -14,7 +14,7 @@
  * for a revoked issuer: the gate lives in the two issuance-side routes, not in
  * `loadOwnedDelegationAgent`.
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import Fastify, { FastifyError, FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
@@ -23,6 +23,7 @@ import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helper
 import { installRequestValidation } from '../../openapi/request-validation.js'
 import { insertPendingSubBudget } from '../../infra/repositories/sub-budgets.js'
 import agentSubBudgetsOwnerRoutes from '../agent-sub-budgets.js'
+import subBudgetRoutes from '../sub-budgets.js'
 
 const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 const CHAIN_ID = 8453
@@ -32,17 +33,26 @@ let seq = 0
 interface World {
   userId: string
   issuerId: string
+  /** The issuer's agent API key (its hash is what the row stores). */
+  issuerKey: string
   subAgentId: string
 }
 
 type AgentSeedStatus = 'active' | 'paused' | 'revoked' | 'pending_approval'
 
-async function seedAgent(userId: string, accountId: string, name: string, fill: string): Promise<string> {
+async function seedAgent(
+  userId: string,
+  accountId: string,
+  name: string,
+  fill: string,
+  apiKey?: string,
+): Promise<string> {
   seq += 1
+  const key = apiKey ?? `sk_agent_gate_${seq}_${Date.now()}`
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO agents (user_id, account_id, name, delegate_address, api_key_hash, api_key_prefix, status)
      VALUES ($1, $2, $3, $4, $5, 'sk_agent_gt', 'active') RETURNING id`,
-    [userId, accountId, `${name} ${seq}`, `0x${String(seq).padStart(40, fill)}`, `hash-gate-${seq}-${Date.now()}`],
+    [userId, accountId, `${name} ${seq}`, `0x${String(seq).padStart(40, fill)}`, createHash('sha256').update(key).digest('hex')],
   )
   return rows[0].id
 }
@@ -60,9 +70,10 @@ async function seedWorld(): Promise<World> {
     [userId, `0x${String(seq).padStart(40, 'a')}`, CHAIN_ID],
   )
   const accountId = account.rows[0].id
-  const issuerId = await seedAgent(userId, accountId, 'Issuer', 'b')
+  const issuerKey = `sk_agent_issuer_${seq}_${Date.now()}`
+  const issuerId = await seedAgent(userId, accountId, 'Issuer', 'b', issuerKey)
   const subAgentId = await seedAgent(userId, accountId, 'Sub agent', 'c')
-  return { userId, issuerId, subAgentId }
+  return { userId, issuerId, issuerKey, subAgentId }
 }
 
 async function setStatus(agentId: string, status: AgentSeedStatus): Promise<void> {
@@ -107,6 +118,29 @@ async function seedPendingRow(issuerId: string): Promise<string> {
   return id
 }
 
+/** The two-row tree as issuance wrote it: the issuer's parent-child plus the sub-agent's grant. */
+async function seedPendingTree(w: World): Promise<{ parentId: string; grantId: string }> {
+  const parentId = await seedPendingRow(w.issuerId)
+  seq += 1
+  const grantId = randomUUID()
+  await insertPendingSubBudget({
+    id: grantId,
+    agentId: w.subAgentId,
+    parentAgentId: w.issuerId,
+    parentSubBudgetId: parentId,
+    chainId: CHAIN_ID,
+    tokenAddress: USDC_BASE,
+    recipientAddress: null,
+    parentDelegationHash: `0x${'b'.repeat(64)}`,
+    delegationHash: `0x${String(seq).padStart(64, '2')}`,
+    delegationJson: JSON.stringify({ unsigned: true, seq }),
+    label: 'gate test grant',
+    periodAmountAtomic: '500000',
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+  })
+  return { parentId, grantId }
+}
+
 async function subBudgetCount(): Promise<number> {
   const { rows } = await db.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM agent_sub_budgets`)
   return Number(rows[0].n)
@@ -133,8 +167,12 @@ describeDb('sub-budget issuance + sign relay lifecycle gate (#3553)', () => {
     })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     // Born enforced in `src/index.ts` (#3330); run the suite as production does.
-    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/agent-sub-budgets.ts'] })
+    installRequestValidation(app, {
+      mode: 'enforce',
+      enforcedModules: ['routes/agent-sub-budgets.ts', 'routes/sub-budgets.ts'],
+    })
     await app.register(agentSubBudgetsOwnerRoutes, { prefix: '/agents' })
+    await app.register(subBudgetRoutes, { prefix: '/sub-budgets' })
     await app.ready()
   })
 
@@ -296,6 +334,71 @@ describeDb('sub-budget issuance + sign relay lifecycle gate (#3553)', () => {
     const res = await relay(w, rowId)
     expect(res.body.error_code).not.toBe('issuer_retired')
     expect(await rowStatus(rowId)).toBe('pending')
+  })
+
+  // ── opening a GRANT whose receiving agent was retired after issuance ──────
+
+  async function agentSubmit(w: World, rowId: string) {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/sub-budgets/${rowId}/submit`,
+      headers: { authorization: `Bearer ${w.issuerKey}` },
+      payload: { signature: `0x${'11'.repeat(65)}` },
+    })
+    return { status: res.statusCode, body: res.json() as ErrBody }
+  }
+
+  for (const how of ['revoked', 'pending_approval', 'archived'] as const) {
+    it(`owner relay refuses to open a grant whose sub-agent became ${how}; the row stays pending`, async () => {
+      const w = await seedWorld()
+      const { grantId } = await seedPendingTree(w) // seeded while the sub-agent was ACTIVE
+      if (how === 'archived') await archive(w.subAgentId)
+      else await setStatus(w.subAgentId, how)
+      const res = await relay(w, grantId)
+      expect(res.status).toBe(409)
+      expect(res.body.error_code).toBe('sub_agent_retired')
+      expect(await rowStatus(grantId)).toBe('pending')
+    })
+
+    it(`agent submit refuses to open a grant whose sub-agent became ${how}; the row stays pending`, async () => {
+      const w = await seedWorld()
+      const { grantId } = await seedPendingTree(w)
+      if (how === 'archived') await archive(w.subAgentId)
+      else await setStatus(w.subAgentId, how)
+      const res = await agentSubmit(w, grantId)
+      expect(res.status).toBe(409)
+      expect(res.body.error_code).toBe('sub_agent_retired')
+      expect(await rowStatus(grantId)).toBe('pending')
+    })
+  }
+
+  it('the grant gate does not touch the parent-child row (agent_id = issuer)', async () => {
+    const w = await seedWorld()
+    const { parentId } = await seedPendingTree(w)
+    await setStatus(w.subAgentId, 'revoked')
+    const owner = await relay(w, parentId)
+    expect(owner.body.error_code).not.toBe('sub_agent_retired')
+    const agent = await agentSubmit(w, parentId)
+    expect(agent.body.error_code).not.toBe('sub_agent_retired')
+    expect(await rowStatus(parentId)).toBe('pending')
+  })
+
+  it('a paused sub-agent does not block opening its grant (it fails on the bogus signature instead)', async () => {
+    const w = await seedWorld()
+    const { grantId } = await seedPendingTree(w)
+    await setStatus(w.subAgentId, 'paused')
+    const res = await agentSubmit(w, grantId)
+    expect(res.body.error_code).not.toBe('sub_agent_retired')
+  })
+
+  it('a closing grant is still closable: the agent submit gate does not apply to close submits', async () => {
+    const w = await seedWorld()
+    const { grantId } = await seedPendingTree(w)
+    await db.query(`UPDATE agent_sub_budgets SET status = 'closing' WHERE id = $1`, [grantId])
+    await setStatus(w.subAgentId, 'revoked')
+    const res = await agentSubmit(w, grantId)
+    // It proceeds into the close path (which fails on the unprepared op) — never the retired-receiver refusal.
+    expect(res.body.error_code).not.toBe('sub_agent_retired')
   })
 
   // ── authority-reducing and read routes stay open ──────────────────────────

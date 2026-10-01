@@ -99,6 +99,33 @@ last-verified: "2026-10-01"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified #3497 (2026-10-01, agent-surface polish from the 2026-09-30
+> purchase run):** this diff touches files under a covered tree —
+> `packages/mcp-server/src/tools/**` (`catalog-purchase.ts`,
+> `plain-http-x402.ts`, `paid-mcp-completion.ts`, `contracts.ts`,
+> `state-direct-recovery.ts`, `support/signer-compat.ts`, `support/index.ts`,
+> and the new `support/allowance-block.ts`). Three changes, all
+> text-and-summaries: response prose no longer carries internal issue
+> references (guidance `reason`, `signer_compatibility.check`, the
+> strict-input refusal messages, the direct-sign fallback — a signer VERSION
+> is what an agent acts on, pinned by a source scan in
+> `response-prose.test.ts`); `agent_summary.product` on the settled erc7710
+> arms reports the merchant's product name with the tool name as fallback
+> (value change, field and shape unchanged); and the delegation-rail
+> `allowance` block `haven_pay_x402_quote` has carried since #3476 moved
+> VERBATIM to `support/allowance-block.ts` and is now attached to
+> `haven_pay_mcp_tool`'s successful results too — an optional additive field
+> with the same read-only derived-budget shape, never a refusal, the over-budget
+> decision staying with the backend's typed 403 on each settlement leg. No tool
+> is added, renamed or re-shaped on either runtime, no argument or input schema
+> changes, and the version-skew and consent-hash contracts do not move:
+> response payloads are not a skew axis, and the local consent hash covers tool
+> names, not their inputs or responses (`packages/mcp/src/consent.ts`). An
+> older SDK/hosted build that lacks the field is only less informative; a
+> newer one adds visibility the backend already exposes. `last-verified` is
+> not re-stamped: it already reads 2026-10-01 and this block is the scope.
+> Nothing else in this document was re-verified.
+>
 > **Re-verified #3501 (2026-09-30, task budgets report spent/remaining):**
 > this diff touches four files this document covers —
 > `packages/sdk/src/types.ts` (`RawTaskBudget` gains optional

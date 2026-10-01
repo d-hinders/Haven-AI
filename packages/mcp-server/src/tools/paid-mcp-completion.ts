@@ -848,7 +848,12 @@ export function createPaidMcpCompletionHandlers(
                   // #3423 review round 1 (F1): additive, not a replacement —
                   // `product` stayed the field this summary carried before
                   // this fix, and `purchase_summary` is new alongside it.
-                  product: args.tool_name,
+                  // #3497 item 2: `product` now reports the MERCHANT's product
+                  // name when the delivered result carries one (the same
+                  // source `purchase_summary.product` reads), falling back to
+                  // the tool name — the tool name is what called the merchant,
+                  // not what the user bought.
+                  product: purchaseSummary.product ?? merchantContext.toolName,
                   purchase_summary: purchaseSummary,
                 },
                 warnings: summary7710.warnings,
@@ -1008,6 +1013,12 @@ export function createPaidMcpCompletionHandlers(
             summary: {
               payment_id: args.payment_id,
               status: 'settled',
+              // #3497 item 2: the merchant's product name when the delivered
+              // result carries one, falling back to the tool name — same
+              // fallback as the erc7710 settled arm above. `tool_name` is
+              // always present on this path (resolveMerchantCallContext
+              // requires it), so `product` is never undefined here.
+              product: purchaseSummary.product ?? merchantContext.toolName,
               purchase_summary: purchaseSummary,
             },
             warnings,

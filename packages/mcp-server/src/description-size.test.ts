@@ -291,6 +291,12 @@ describe('tool description payload (#1591)', () => {
     // The history is for maintainers — it lives in code comments, and a
     // Codex/GPT agent burning context on "#1308" learns nothing from it.
     // Allowlist NOTHING (the AC's words).
+    //
+    // #3497: the rule now also covers response PROSE (guidance reason /
+    // signer_compatibility check / strict-input messages) — enforced as a
+    // source scan over src/tools/** in `response-prose.test.ts`, which is
+    // where the live run's leaks ("(#1455)", "(#1547)", "predating #3271")
+    // actually lived. This file keeps guarding what it always has.
     const offenders = Object.entries(toolDescriptions)
       .filter(([, description]) => /#\d+/.test(description))
       .map(([name]) => name)

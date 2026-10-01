@@ -20,6 +20,7 @@ export {
   type MaxAmountCap,
 } from './cap-price.js'
 export { getUsableCatalogMcpEntry } from './catalog-entry.js'
+export { delegationAllowanceBlock, type DelegationAllowanceBlock } from './allowance-block.js'
 export {
   HostedToolError,
   isX402PaymentWindowExpired,

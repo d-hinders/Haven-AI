@@ -73,6 +73,7 @@ export type HostedToolName =
   | 'haven_submit_catalog_entry'
   | 'haven_open_task_budget'
   | 'haven_close_task_budget'
+  | 'haven_get_task_budget'
 
 /**
  * #2282: the hosted MCP tool boundary spells arguments in **snake_case**
@@ -261,6 +262,12 @@ export const toolSchemas = {
     token: z.string().optional(),
   },
   haven_close_task_budget: {
+    task_budget_id: z.string().min(1),
+  },
+  // #3518: read ONE task budget by id — the status check a close refusal's
+  // "re-check the budget's status" points at, including pending/closing
+  // rows the agent summary now lists with `status`.
+  haven_get_task_budget: {
     task_budget_id: z.string().min(1),
   },
   haven_pay_mcp_tool: {
@@ -879,6 +886,9 @@ export const STRICT_INPUT_TOOLS = {
   haven_close_task_budget:
     'This tool declares task_budget_id only; which budget closes is never inferred from ' +
     'anything else, so an undeclared key is refused rather than dropped.',
+  haven_get_task_budget:
+    'This tool declares task_budget_id only; which budget is read is never inferred from ' +
+    'anything else, so an undeclared key is refused rather than dropped.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
@@ -1213,6 +1223,16 @@ const CLOSE_TASK_BUDGET_DESCRIPTION = [
   'recovery route if the signer predates task budgets.',
 ].join(' ')
 
+// #3518: the status check a close refusal's "re-check the budget's status"
+// names — reads ONE task budget by id, any status (pending/closing rows
+// included; haven_get_agent lists them with their status too).
+const GET_TASK_BUDGET_DESCRIPTION = [
+  'Read one task budget by id, any status.',
+  'Returns { task_budget } with status (pending | open | closing | closed), is_expired, max, recipient, label and expiry —',
+  'the check to run after a close or submit refusal says to re-check the budget\'s status.',
+  'haven_get_agent lists every task budget with its status; this reads one, including rows that list shows.',
+].join(' ')
+
 const CHECK_FUNDS_DESCRIPTION = [
   sharedDescriptions.checkFunds.summary + '.',
   'Pass the token address or allowance symbol and ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic).',
@@ -1255,6 +1275,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
   haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
   haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
+  haven_get_task_budget: GET_TASK_BUDGET_DESCRIPTION,
 }
 
 export interface ToolSuccess<T> {

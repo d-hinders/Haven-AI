@@ -15,6 +15,20 @@ export interface ActiveDelegationRow {
   token_address: string
   budget_atomic: string
   period_seconds: number
+  /**
+   * #3518: the row's own identity and scope, so every consumer can tell
+   * WHICH budget it is looking at and who it is pinned to — the selection
+   * rule a payment runs (`SELECT_DELEGATION_FOR_PAYMENT_SQL`) is per-hash
+   * and recipient-scoped, so a per-token first-match report can describe a
+   * budget that did not pay. `recipient_address` is the pin (null = open),
+   * `merchant_id` the #3331 merchant lock (never set without a pin).
+   */
+  delegation_hash: string
+  recipient_address: string | null
+  merchant_id: string | null
+  /** Unix-second BIGINTs (node-postgres decodes them as strings) — the #1698 live window the payment selection filters on. */
+  start_date: string
+  expires_at: string
 }
 
 /**
@@ -43,8 +57,15 @@ export async function listActiveDelegations(
   agentIds: string[],
 ): Promise<ActiveDelegationRow[]> {
   if (agentIds.length === 0) return []
+  // #3518: `delegation_hash` / `recipient_address` / `merchant_id` join the
+  // select — the derived budget view carries each budget's identity and
+  // scope (recipient pin, merchant lock) beside its amount, so every reader
+  // can tell WHICH budget a row describes. The dashboard-facing narrow
+  // projection (`deriveDelegationAllowances`) still strips to its frozen
+  // six fields, so nothing leaks onto that wire.
   const result = await pool.query<ActiveDelegationRow>(
-    `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds
+    `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds,
+            delegation_hash, recipient_address, merchant_id, start_date, expires_at
      FROM agent_delegations
      WHERE agent_id = ANY($1) AND status = 'active'
      ORDER BY created_at ASC`,
@@ -273,6 +294,70 @@ export async function selectDelegationForPayment(
     toAddress,
   ])
   return result.rows[0] ?? null
+}
+
+// ── Budget REPORT selection (#3518) ──────────────────────────────────────────
+
+/**
+ * #3518: the SAME selection a payment runs (`SELECT_DELEGATION_FOR_PAYMENT_SQL`
+ * above), as a REPORT-side lookup: it takes the LIST of budgets the derived
+ * view already read (never a second DB round trip) and answers which one pays
+ * the `toAddress` — a recipient-pinned budget for that recipient wins, a pin
+ * to a different recipient is excluded, and among the remaining (the pinned
+ * match plus the open budget) the soonest-expiring active row wins, exactly
+ * the payment rule's `ORDER BY (recipient_address IS NULL), expires_at ASC,
+ * created_at DESC`.
+ *
+ * Deliberately NOT a re-derivation of the window: the DB-side predicate sees
+ * the DATABASE clock, while this function compares against a `nowSec` the
+ * CALLER passes — and callers that already hold live budgets can pass their
+ * own clock. A row whose window has moved since the view read it can be
+ * picked by the payment path seconds later anyway; the report names the row
+ * by `delegation_hash`, so a consumer can always re-derive its liveness
+ * exactly. The compare inputs that matter (remaining, sufficiency) always
+ * describe the row this function returns.
+ *
+ * `toAddress: null` is the NO-MERCHANT-TO fallback (#3518's stated answer):
+ * the quote did not name a payee, so only the OPEN budget is eligible — the
+ * recipient-pinned rows are for specific recipients and a pinless quote
+ * cannot claim one. That mirrors the payment rule (a pin to anyone wins over
+ * the open row only when the recipient matches) with the pin side removed.
+ */
+export function selectBudgetForPaymentReport<
+  T extends {
+    id: string
+    recipient_address: string | null
+  },
+>(budgets: T[], toAddress: string | null, nowSec: number, expiresAtOf: (b: T) => number, startAtOf: (b: T) => number): T | null {
+  const now = BigInt(nowSec)
+  const pinned = toAddress
+    ? budgets.filter(
+        (b) => b.recipient_address != null && b.recipient_address.toLowerCase() === toAddress.toLowerCase(),
+      )
+    : []
+  const open = budgets.filter((b) => b.recipient_address == null)
+  const candidates = [...pinned, ...open].filter((b) => expiresAtOf(b) > now && startAtOf(b) <= now)
+  if (candidates.length === 0) return null
+  // A pinned match ALWAYS sorts before an open budget; ties inside each
+  // group resolve soonest-expiry first, then newest-created (the payment
+  // rule's created_at DESC) — the same total order, on the fields the view
+  // carries. `created_at` is not in the projection, so recency is preserved
+  // by the caller feeding rows in `ORDER BY created_at ASC` order: a stable
+  // sort keeps it as the final tie break, matching the SQL exactly.
+  return (
+    candidates
+      .map((b, index) => ({ b, index }))
+      .sort((a, z) => {
+        const aPinned = a.b.recipient_address != null ? 0 : 1
+        const zPinned = z.b.recipient_address != null ? 0 : 1
+        if (aPinned !== zPinned) return aPinned - zPinned
+        const aExp = expiresAtOf(a.b)
+        const zExp = expiresAtOf(z.b)
+        if (aExp !== zExp) return aExp < zExp ? -1 : 1
+        return a.index - z.index
+      })
+      .map((entry) => entry.b)[0] ?? null
+  )
 }
 
 /**

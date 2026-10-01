@@ -662,6 +662,26 @@ export interface HavenAllowance {
   configuredAmount: string
   resetPeriodMin: number
   /**
+   * #3518: this budget's SCOPE, so an agent holding more than one budget
+   * for a token can name the merchant-locked one before paying. The
+   * recipient pin is null for an open budget; `merchantId` is set only on a
+   * #3331 merchant-locked budget (which always carries a pin). Additive —
+   * undefined on an older backend that does not send them.
+   */
+  delegationHash?: string
+  recipientAddress?: string | null
+  merchantId?: string | null
+  /**
+   * #3518: the Haven-side reservation against this budget — the sum of its
+   * open, unexpired task- and sub-budget children's caps, in ATOMIC units.
+   * Reported beside `onchain.remaining` and never folded into it (the
+   * on-chain figure stays authoritative; a reservation releases on
+   * close/expire without any chain event). `'0'` also covers a failed
+   * read — the sum is best-effort server-side. Additive; undefined on an
+   * older backend.
+   */
+  reservedHavenAtomic?: string
+  /**
    * #3128: human-readable `onchain.remaining`, e.g. "4.96 USDC" — the SAME
    * string {@link HavenAgentAllowanceSummary.remainingDisplay} carries for
    * this allowance, computed by one function from `onchain.remaining` and
@@ -1049,6 +1069,16 @@ export interface HavenTaskBudgetSummary {
   remainingDisplay: string | null
   recipientAddress: string | null
   expiresAt: number
+  /**
+   * #3518: the budget's lifecycle status (`pending` | `open` | `closing` |
+   * `closed`) — `haven_get_agent` lists closing and pending budgets too (a
+   * close refusal says "re-check the budget's status", so the status must
+   * be readable there), and an agent that only ever saw open rows could
+   * not. Additive; undefined on a stale cached read from an older client
+   * build.
+   */
+  status?: string
+  isExpired?: boolean
 }
 
 /** #3329: `POST /task-budgets` and `POST /task-budgets/:id/close` — the sign-then-submit envelope. */
@@ -1930,6 +1960,13 @@ export interface PaymentStatusResult {
    * `delivered`'s own honesty rule.
    */
   merchantSettlementRecorded?: boolean
+  /**
+   * #3518: the budget delegation that METERED this payment, recorded at
+   * authorize (migration 053) — the settle summary's authoritative answer
+   * to "which budget paid". Absent on the legacy rail and on rows
+   * predating migration 053.
+   */
+  budgetDelegationHash?: string
   /** Platform fee surfaced so it's never silently collected (#386). */
   fee?: PaymentFee | null
   amountAtomic?: string | null
@@ -2194,6 +2231,13 @@ export interface RawPaymentStatusResult {
    * `delivered`'s own honesty rule.
    */
   merchant_settlement_recorded?: boolean
+  /**
+   * #3518: the budget delegation that METERED this payment, recorded at
+   * authorize (migration 053). The settle summary keys its allowance rows
+   * on this — the budget that PAID, never a re-derived first match.
+   * Absent on the legacy rail and pre-053 rows.
+   */
+  budget_delegation_hash?: string
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
@@ -2222,6 +2266,14 @@ export interface RawHavenAllowance {
   token_symbol: string
   configured_amount: string
   reset_period_min: number
+  /**
+   * #3518: scope + Haven-side reservation, additive/optional — an older
+   * backend's rows omit all four and the mapping keeps them absent.
+   */
+  delegation_hash?: string
+  recipient_address?: string | null
+  merchant_id?: string | null
+  reserved_haven_atomic?: string
   onchain: {
     amount: string
     spent: string

@@ -64,11 +64,24 @@ export interface DerivedAllowance {
  * `/machine-payments/allowances` endpoint reports remaining spend authority in
  * atomic units, so it needs the budget before formatting. ONE derivation —
  * {@link deriveDelegationAllowances} is a projection of this.
+ *
+ * #3518: `delegation_hash` / `recipient_address` / `merchant_id` carry the
+ * budget's identity and SCOPE — the recipient pin (null = open) and the
+ * #3331 merchant lock, so an agent can name the merchant-locked budget
+ * before paying, and a report can join reservations (keyed by hash) to the
+ * parent they reserve from. The narrow dashboard projection below strips
+ * them: its wire is byte-frozen.
  */
 export interface DerivedDelegationBudget extends DerivedAllowance {
   chain_id: number
   budget_atomic: string
   period_seconds: number
+  delegation_hash: string
+  recipient_address: string | null
+  merchant_id: string | null
+  /** The #1698 live window (unix-second strings, BIGINT decode) — report-side selection filters on it. */
+  start_date: string
+  expires_at: string
 }
 
 function tokenView(chainId: number, tokenAddress: string): { symbol: string; decimals: number } {
@@ -109,6 +122,12 @@ export async function deriveDelegationBudgets(
       reset_period_min: Math.round(row.period_seconds / 60),
       budget_atomic: row.budget_atomic,
       period_seconds: row.period_seconds,
+      // #3518: identity + scope (see the interface's comment).
+      delegation_hash: row.delegation_hash,
+      recipient_address: row.recipient_address,
+      merchant_id: row.merchant_id,
+      start_date: row.start_date,
+      expires_at: row.expires_at,
     })
     derived.set(row.agent_id, existing)
   }

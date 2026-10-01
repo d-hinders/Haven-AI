@@ -150,6 +150,11 @@ function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummar
     remainingDisplay: spendDisplay(taskBudget.remainingAtomic ?? null),
     recipientAddress: taskBudget.recipientAddress,
     expiresAt: taskBudget.expiresAt,
+    // #3518: lifecycle status + derived expiry ride the summary — a
+    // close/pending row must be visible AS closing/pending, not silently
+    // dropped from the agent read.
+    status: taskBudget.status,
+    isExpired: taskBudget.isExpired,
   }
 }
 
@@ -194,7 +199,7 @@ export class AccountReads {
     const [agent, allowanceSummary, taskBudgets] = await Promise.all([
       this.getAgent(),
       this.getAllowances(),
-      this.listOpenTaskBudgetsSummary(),
+      this.listTaskBudgetsSummary(),
     ])
     // #3128: every field here is the HavenAllowance's own (or, for the display
     // string, derived by the same function `getAllowances` used), so the two
@@ -225,11 +230,18 @@ export class AccountReads {
    * `getAgentSummary`'s identity + readiness + allowances fields are what
    * callers depend on, and this read must never be why the whole summary
    * fails.
+   *
+   * #3518: the query is `status=all` now. The close refusal tells the caller
+   * to RE-CHECK the budget's status, and `haven_get_agent` is the read an
+   * agent is holding — so a `closing` (or `pending`) budget must appear
+   * there with its status, not vanish the moment its close starts. Every
+   * row carries `status` (+ `isExpired`) so the reader distinguishes them;
+   * the soft-fail contract is unchanged.
    */
-  private async listOpenTaskBudgetsSummary(): Promise<HavenTaskBudgetSummary[]> {
+  private async listTaskBudgetsSummary(): Promise<HavenTaskBudgetSummary[]> {
     try {
       const raw = await this.transport.get<{ task_budgets?: RawTaskBudget[] } | null | undefined>(
-        '/task-budgets?status=open',
+        '/task-budgets?status=all',
       )
       const rows = raw?.task_budgets
       if (!Array.isArray(rows)) return []
@@ -260,6 +272,14 @@ export class AccountReads {
         tokenSymbol: allowance.token_symbol,
         configuredAmount: allowance.configured_amount,
         resetPeriodMin: allowance.reset_period_min,
+        // #3518: scope + Haven-side reservation, additive — undefined on an
+        // older backend whose rows do not carry them.
+        ...(allowance.delegation_hash !== undefined ? { delegationHash: allowance.delegation_hash } : {}),
+        ...(allowance.recipient_address !== undefined ? { recipientAddress: allowance.recipient_address } : {}),
+        ...(allowance.merchant_id !== undefined ? { merchantId: allowance.merchant_id } : {}),
+        ...(allowance.reserved_haven_atomic !== undefined
+          ? { reservedHavenAtomic: allowance.reserved_haven_atomic }
+          : {}),
         remainingDisplay: formatRemainingDisplay(allowance.token_address, allowance.token_symbol, allowance.onchain.remaining),
         onchain: {
           amount: allowance.onchain.amount,
@@ -337,9 +357,24 @@ export class AccountReads {
     try {
       const tokenAddress = payment.asset ?? payment.x402?.asset ?? null
       if (!tokenAddress) return unavailable('the settled payment does not carry a resolvable token address', payment)
-      const match = allowanceResult.value.allowances.find(
+      // #3518: report the budget that PAID, never a re-derived first match.
+      // The payment status carries `budgetDelegationHash` (recorded at
+      // authorize, migration 053) — the allowance row whose
+      // `delegationHash` equals it is the one whose remaining figure is
+      // honest here. Re-deriving (token, payee) selection at settle time is
+      // wrong twice over: the grants' window can have moved between pay and
+      // settle, and task/sub-budget payments meter their PARENT by hash
+      // while the payee matches no pin at all. The token match below is the
+      // fallback for an older backend whose status predates the field — the
+      // old first-match behaviour, kept only where nothing better exists.
+      const tokenRows = allowanceResult.value.allowances.filter(
         (allowance) => allowance.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
       )
+      const payingHash = payment.budgetDelegationHash ?? null
+      const match =
+        (payingHash && tokenRows.find((allowance) => allowance.delegationHash === payingHash)) ||
+        tokenRows[0] ||
+        null
       if (!match) return unavailable('no allowance/budget row matches the settled token', payment)
       // #3464: the ONE shared formatter — `haven_get_agent`'s allowances[]
       // rows use the same `formatRemainingDisplay` call, so the settle summary

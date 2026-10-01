@@ -91,6 +91,9 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     // carried through even when `null` (a real, known answer).
     ...(raw.settlement_scheme !== undefined ? { settlementScheme: raw.settlement_scheme } : {}),
     ...(raw.merchant_settlement_recorded === true ? { merchantSettlementRecorded: true as const } : {}),
+    // #3518: which budget metered this payment — absent from the raw
+    // payload (older backend) stays absent here.
+    ...(raw.budget_delegation_hash !== undefined ? { budgetDelegationHash: raw.budget_delegation_hash } : {}),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

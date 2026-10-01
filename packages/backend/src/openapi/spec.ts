@@ -1219,6 +1219,18 @@ const agentPaymentStatus = {
         'on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the ' +
         'confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown.',
     },
+    // #3518: WHICH budget metered this payment — recorded at authorize
+    // (migration 053), the settle summary's join key for its allowance
+    // block. Omitted on the legacy rail and on rows predating migration
+    // 053, matching the handler's omit-when-absent honesty rule.
+    budget_delegation_hash: {
+      type: 'string',
+      pattern: '^0x[0-9a-fA-F]{64}$',
+      description:
+        'The budget delegation that metered this payment (#1059), recorded at authorize. The settle ' +
+        'summary keys its allowance rows on this — the budget that PAID, never a re-derived ' +
+        '(token, payee) first match. Omitted on the legacy rail and on intents predating migration 053.',
+    },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
     fee: {
@@ -10853,6 +10865,31 @@ export const openapiSpec = {
                 // number, side by side, both previously bare strings.
                 configured_amount: allowanceHumanAmount,
                 reset_period_min: { type: 'integer' },
+                // #3518: the budget's identity and SCOPE, so an agent can
+                // name the merchant-locked budget before paying.
+                delegation_hash: {
+                  type: 'string',
+                  pattern: '^0x[0-9a-fA-F]{64}$',
+                  description:
+                    '#3518: this budget delegation\'s hash — the identifier a payment authorization records as budget_delegation_hash and the key `reserved_haven_atomic` sums children under.',
+                },
+                recipient_address: {
+                  type: ['string', 'null'],
+                  pattern: '^0x[0-9a-f]{40}$',
+                  description:
+                    '#3518: the recipient pin — null for an open budget; a recipient-scoped budget pays ONLY this address (a payment\'s selection prefers the pin matching its payee).',
+                },
+                merchant_id: {
+                  type: ['string', 'null'],
+                  format: 'uuid',
+                  description:
+                    '#3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.',
+                },
+                reserved_haven_atomic: {
+                  type: 'string',
+                  description:
+                    '#3518: Haven-side reservation — the sum of this budget\'s OPEN, unexpired task- and sub-budget children\'s caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort).',
+                },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],
@@ -10963,6 +11000,30 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          budget_id: {
+            type: 'string',
+            format: 'uuid',
+            description:
+              '#3518: the budget row the remaining figure describes — the payment-selection mirror\'s winner (recipient match for merchantTo, else the open budget), not the first per-token row. Absent when no row matched.',
+          },
+          budget_delegation_hash: {
+            type: 'string',
+            pattern: '^0x[0-9a-fA-F]{64}$',
+            description:
+              '#3518: the selected budget\'s delegation hash — the same identifier a payment authorization records as budget_delegation_hash, so a caller can verify report and payment name the same budget.',
+          },
+          budget_recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description:
+              '#3518: the selected budget\'s recipient pin — null for an open budget, the merchant payee for a pinned/merchant-locked one.',
+          },
+          budget_merchant_id: {
+            type: ['string', 'null'],
+            format: 'uuid',
+            description:
+              '#3518: the merchant the selected budget was issued for (#3331), null for every other budget.',
           },
           replay: {
             type: 'boolean',

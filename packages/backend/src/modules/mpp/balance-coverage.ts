@@ -55,7 +55,7 @@ import {
   allowanceModuleRailRetired,
 } from '../../rails/execution-rail.js'
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
-import { listDelegationJsonByIds } from '../../infra/repositories/delegation-budgets.js'
+import { listDelegationJsonByIds, selectBudgetForPaymentReport } from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { getChainClient } from '../../infra/chain/index.js'
 import { toCanonicalAddress } from '../transactions/index.js'
@@ -116,12 +116,26 @@ export async function handleBalanceCoverage(
   const tokenAddress = query.token
 
   // The SAME derivation the allowances read runs (comment there for the
-  // #1090/#1145 provenance), chain-scoped like that read. One budget per
-  // agent is enforced upstream (agent-connection-setups); the token match
-  // below stays explicit rather than relying on that invariant.
+  // #1090/#1145 provenance), chain-scoped like that read. #3518: "one budget
+  // per agent is enforced upstream" is no longer true — a holder can carry
+  // an open AND a recipient-pinned (or merchant-locked) grant for the same
+  // token, so the token match below runs the payment's OWN selection
+  // (`selectBudgetForPaymentReport`, the mirror of
+  // `SELECT_DELEGATION_FOR_PAYMENT_SQL`): a pinned budget for the checked
+  // `to` wins, an open budget covers everything else, and the reported
+  // `budget_remaining_atomic` describes the budget that would PAY, not the
+  // first row created. No `to` in the query (this route never carries one —
+  // the amount is the only variable) means the open budget answers, the
+  // same no-guess fallback the precheck uses.
   const all = (await deriveDelegationBudgets([agent.id])).get(agent.id) ?? []
   const budgets = all.filter((b) => b.chain_id === agent.chain_id)
-  const match = budgets.find((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase())
+  const match = selectBudgetForPaymentReport(
+    budgets.filter((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase()),
+    null,
+    Math.floor(Date.now() / 1000),
+    (b) => Number(b.expires_at),
+    (b) => Number(b.start_date),
+  )
 
   // The AUTHORITY figure (permitted), from the same read GET /allowances
   // reports: enforcer-derived when the delegation json is readable, the

@@ -286,14 +286,8 @@ export async function handleBudgetPrecheck(
 
   // The hosted tool's compare, verbatim in semantics: match on the SELECTED
   // option's token, no match means the budget for this token is zero.
-  // #3518: "selected" is the PAYMENT's own selection — the recipient match,
-  // window and ordering of `SELECT_DELEGATION_FOR_PAYMENT_SQL`, not
-  // the first token row (see the module comment for why the first match
-  // refused and allowed the wrong payments). `merchantTo` is lowercased
-  // once here; `selectBudgetForPaymentReport` compares case-insensitively
-  // and treats null as "open budget only".
-  // ── #3518: scope the selection to the QUOTED TOKEN first, then run the
-  // payment's own selection inside it — the recipient match + window +
+  // #3518: scope the selection to the QUOTED TOKEN first, then run the
+  // payment's own selection inside it — the recipient match, window and
   // ordering of `SELECT_DELEGATION_FOR_PAYMENT_SQL`, not the first token
   // row (see the module comment for why the first match refused and
   // allowed the wrong payments). `merchantTo` is lowercased once here;

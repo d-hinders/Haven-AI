@@ -59,12 +59,14 @@ const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
   // #3329:
   'haven_open_task_budget',
   'haven_close_task_budget',
+  // #3518:
+  'haven_get_task_budget',
 ]
 
 describe('hosted tool contract surface (#2807 characterization)', () => {
-  it('advertises exactly the 26 hosted tool names, each exactly once', () => {
+  it('advertises exactly the 27 hosted tool names, each exactly once', () => {
     const schemaKeys = Object.keys(toolSchemas)
-    expect(schemaKeys).toHaveLength(26)
+    expect(schemaKeys).toHaveLength(27)
     expect(new Set(schemaKeys).size).toBe(26)
     expect([...schemaKeys].sort()).toEqual([...HOSTED_TOOL_NAMES].sort())
   })

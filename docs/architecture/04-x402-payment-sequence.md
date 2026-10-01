@@ -857,7 +857,13 @@ Sequence:
    erc7710 payment for this exact quote, the budget-precheck answers
    sufficient (`replay: true`) instead — this bullet's refusal never fires —
    and the authorize step that follows falls through to the #3417 done
-   state for the same settled replay, rather than a fresh purchase.
+   state for the same settled replay, rather than a fresh purchase. **#3527:**
+   the same bypass extends to a settled EIP-3009 replay (confirmed funding
+   leg); step 9's `createX402Intent` call then reaches its own confirmed
+   state, answered either as the `eip3009ConfirmedReplayResponse` done state
+   (funding_tx_hash set, settlement_tx_hash always null; `settled: true` only when the merchant settlement is verified) or, with no
+   merchant-leg evidence yet, the funded-awaiting-merchant / check-status-later
+   answer — see the compat note's #3527 entry for the exact split.
 
    > **#3518 re-verification, 2026-10-01 — WHICH budget the compare runs
    > against.** The pre-check selects the payment's OWN budget

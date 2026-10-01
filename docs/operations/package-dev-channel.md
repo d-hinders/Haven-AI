@@ -286,7 +286,8 @@ and the `release` skill.
 >
 > **Re-verification (#3509):** coupled because `packages/backend/src/config.ts`
 > is in this doc's `covers:`. The only change there adds one field, `config.ops`
-> (the ops console's settings, parsed by `config/ops.ts`), plus its import.
+> (the ops console's settings, parsed by `config/ops.ts`), plus its import, and
+> adds `ops_auth` to the two TRUST_PROXY_HOPS boot-warning strings.
 > `connectorChannel` / `parseConnectorChannel` and `requestValidationMode`, the
 > two `config.ts` claims this document makes, have no diff
 > (`git diff origin/dev -- packages/backend/src/config.ts`). `last-verified` is

@@ -3,10 +3,10 @@ import type { PoolClient } from 'pg'
 /**
  * 104 — ops console access log (#3509, epic #3507 invariant 6).
  *
- * One row per ops sign-in (allowed or refused), search, detail view and
- * reveal. It is written through the MAIN pool before the response is sent,
- * and a failed insert fails the request: the ops console never shows data it
- * could not record showing. The read-only ops role (#3510) is never granted
+ * One row per ops sign-in that reaches a GitHub identity (allowed or
+ * refused), search, detail view and reveal. It is written through the MAIN
+ * pool before the response is sent, and a failed insert fails the request:
+ * the ops console never shows data it could not record showing. The read-only ops role (#3510) is never granted
  * this table.
  *
  * Who: `operator_github_id` is GitHub's immutable numeric id (the allowlist

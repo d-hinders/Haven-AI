@@ -24,8 +24,8 @@
  *      reports it), writes the audit row, and redirects to
  *      `<origin>/#token=<ops token>&nonce=<n>` — or `#error=<code>&nonce=<n>`.
  *
- * Every sign-in (allowed or refused) and every reveal writes an
- * `ops_access_log` row through the MAIN pool before the response is sent; a
+ * Every sign-in that reaches a GitHub identity (allowed or refused) and every
+ * reveal writes an `ops_access_log` row through the MAIN pool before the response is sent; a
  * failed write answers 503 and returns nothing (invariant 6).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'

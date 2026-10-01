@@ -91,12 +91,6 @@ export function parseOpsRedirectOrigins(raw: string | undefined | null): string[
   return [...new Set(value.split(',').map((part) => parseOpsOrigin('OPS_REDIRECT_ORIGINS', part)))]
 }
 
-/**
- * Build the ops config from the environment, or refuse the boot when it is
- * dangerously wrong. `dashboardJwtSecret` is the backend's `JWT_SECRET`: an
- * equal `OPS_JWT_SECRET` would let one secret mint both kinds of token, so it
- * refuses outright rather than disabling quietly.
- */
 export const OPS_ENV_VARS = [
   'OPS_GITHUB_CLIENT_ID',
   'OPS_GITHUB_CLIENT_SECRET',
@@ -109,6 +103,14 @@ export const OPS_ENV_VARS = [
 /** The ops secret guards read access to every customer record: no short secrets. */
 export const OPS_JWT_SECRET_MIN_LENGTH = 32
 
+/**
+ * Build the ops config from the environment, or refuse the boot when it is
+ * dangerously wrong. `dashboardJwtSecret` is the backend's `JWT_SECRET`: an
+ * equal `OPS_JWT_SECRET` would let one secret mint both kinds of token, so it
+ * refuses outright rather than disabling quietly, as does a secret shorter
+ * than `OPS_JWT_SECRET_MIN_LENGTH`. A partly configured console stays off and
+ * `warn`s the missing variable names, so its 404s are not a mystery.
+ */
 export function parseOpsConfig(
   env: Record<string, string | undefined>,
   dashboardJwtSecret: string,

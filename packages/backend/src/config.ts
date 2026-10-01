@@ -361,8 +361,9 @@ export const config = {
   opsToken: process.env.HAVEN_OPS_TOKEN ?? '',
 
   // Ops console (#3509, epic #3507): founders-only, read-only, GitHub sign-in.
-  // Off unless every variable is set (`isOpsConfigured`); a malformed value or
-  // an OPS_JWT_SECRET equal to JWT_SECRET refuses the boot. See config/ops.ts.
+  // Off unless every variable is set (`isOpsConfigured`); a malformed value, or
+  // an OPS_JWT_SECRET equal to JWT_SECRET or shorter than 32 characters,
+  // refuses the boot. See config/ops.ts.
   ops: parseOpsConfig(
     {
       OPS_GITHUB_CLIENT_ID: process.env.OPS_GITHUB_CLIENT_ID,

@@ -37,8 +37,14 @@ const HOSTED = (name: string) => ({
  * reason-bearing evidence-refusal arm — a refused report whose backend
  * relayed a `reason` (only the eip3009 settlement seam emits one) is its
  * own emission, keyed on the reason's PRESENCE, never on payment status.
+ * #3527 adds TWO more: `eip3009ConfirmedReplayResponse` (`guidance.ts`) is
+ * the EIP-3009 twin of `settledReplayResponse` for a confirmed
+ * `createX402Intent` replay, and it is two full call sites of its own
+ * (merchant-leg verified/reported → done; otherwise → the #2290 remedy),
+ * shared by `haven_prepare_catalog_purchase` step 9 and
+ * `haven_pay_mcp_tool`'s 3009 branch.
  */
-export const EMISSION_SITE_COUNT = 24
+export const EMISSION_SITE_COUNT = 26
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
  * null-id sites share one helper, the report-outcome accepted site has two
@@ -46,9 +52,12 @@ export const EMISSION_SITE_COUNT = 24
  * follow-up), the missing-settlement-hash success no-op is its own site
  * (#3475 follow-up review round 1, S3), and the no-sign-data replay guard
  * (#3495 review round 1, S5) is two full sites of its own (confirmed / still
- * resolving) — one fixture each, matching the two call sites.
+ * resolving) — one fixture each, matching the two call sites. #3529 adds
+ * one (the reason-bearing evidence-refusal arm). #3527 adds two more:
+ * `eip3009ConfirmedReplayResponse`'s done-state and
+ * funded-awaiting-merchant-remedy branches, one fixture each.
  */
-export const EMISSION_FIXTURE_COUNT = 28
+export const EMISSION_FIXTURE_COUNT = 30
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -97,6 +106,9 @@ export const EMISSION_SITES = [
   // branches: confirmed (no tool follows) and still-resolving (poll status).
   { site: 'state-direct-recovery.ts no-sign-data replay: confirmed (no tool)', action: AgentPaymentNextAction.None, tool: null, reason: 'this idempotency_key already settled; there is nothing left to sign', expect: { next_tool_omitted_reason: 'this idempotency_key already settled; there is nothing left to sign' } },
   { site: 'state-direct-recovery.ts no-sign-data replay: still resolving', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
+  // #3527: guidance.ts's eip3009ConfirmedReplayResponse — the EIP-3009 twin of the erc7710 settled-replay answer, shared by haven_prepare_catalog_purchase step 9 and haven_pay_mcp_tool's 3009 branch.
+  { site: 'guidance.ts eip3009 confirmed replay: merchant leg verified/reported (no tool)', action: AgentPaymentNextAction.None, tool: null, reason: 'this idempotency_key already funded this payment and the merchant leg is recorded; there is nothing left to sign or pay', expect: { next_tool_omitted_reason: 'this idempotency_key already funded this payment and the merchant leg is recorded; there is nothing left to sign or pay' } },
+  { site: 'guidance.ts eip3009 confirmed replay: funded-awaiting-merchant (poll status)', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
 ] as const
 
 

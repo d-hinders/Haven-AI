@@ -829,12 +829,12 @@ export class HavenClient {
     merchantTo?: string
     resourceUrl?: string
     /**
-     * #3492: the x402 idempotency key of the quote this pre-check describes.
-     * When it resolves to an already-settled erc7710 replay of the SAME
-     * quote, the response answers sufficient (with `replay: true`) instead
-     * of comparing against the now-lower remaining budget — see
-     * `BudgetPrecheckRequest.idempotencyKey` in the OpenAPI spec. Omitted:
-     * unchanged behavior.
+     * #3492/#3527: the x402 idempotency key of the quote this pre-check
+     * describes. When it resolves to an already-settled erc7710 OR eip3009
+     * replay of the SAME quote, the response answers sufficient (with
+     * `replay: true`) instead of comparing against the now-lower remaining
+     * budget — see `BudgetPrecheckRequest.idempotencyKey` in the OpenAPI
+     * spec. Omitted: unchanged behavior.
      */
     idempotencyKey?: string
   }): Promise<BudgetPrecheckResult> {

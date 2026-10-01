@@ -546,9 +546,11 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     })
   })
 
-  it('a settled EIP-3009 row (settlement_scheme eip3009) is still refused — this fix is erc7710-only', async () => {
+  // ── #3527: a settled EIP-3009 replay is sufficient — no refusal, no row ──
+
+  it('a confirmed keyed EIP-3009 row (funding leg confirmed) with LOW remaining budget answers sufficient (no 403, no refusal row)', async () => {
     const { userId, agentId } = await seedDelegationAgent()
-    await seedActiveDelegation(agentId, '100')
+    await seedActiveDelegation(agentId, '100') // far below the quote's 1000000
     await seedX402Intent({ userId, agentId }, 'catalog-eip3009-key-1', {
       settlementScheme: 'eip3009',
     })
@@ -558,6 +560,174 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
       url: '/machine-payments/budget-precheck',
       headers,
       payload: precheckBody({ idempotencyKey: 'catalog-eip3009-key-1' }),
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expectMatchesSpec('POST', '/machine-payments/budget-precheck', body)
+    expect(body.sufficient).toBe(true)
+    expect(body.replay).toBe(true)
+    // The remaining figure is still the TRUE (now-spent) figure — the
+    // replay branch never fabricates headroom, it only skips the refusal.
+    expect(body.remaining_atomic).toBe('100')
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await refusalRows(agentId)).toHaveLength(0)
+  })
+
+  // #3527 review round 1 (S3): a confirmed row whose settlement_scheme is
+  // UNKNOWN (neither erc7710 nor eip3009) is still refused — the scheme
+  // guard in isSettledX402Replay is a closed set, not "anything confirmed".
+  it('a confirmed keyed row with an UNKNOWN settlement_scheme is still refused — the scheme guard is a closed set', async () => {
+    const { userId, agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    await seedX402Intent({ userId, agentId }, 'catalog-unknown-scheme-key-1', {
+      settlementScheme: 'unknown',
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-unknown-scheme-key-1' }),
+    })
+    expect(res.statusCode).toBe(403)
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
+  it('a settled EIP-3009 row whose stored resource differs from the request resourceUrl is still refused (the key collision rule applies to eip3009 too)', async () => {
+    const { userId, agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    await seedX402Intent({ userId, agentId }, 'catalog-eip3009-resource-mismatch-1', {
+      settlementScheme: 'eip3009',
+      resourceUrl: 'https://merchant.example/the-actual-3009-resource',
+    })
+
+    // The request names the MERCHANT URL, not the stored resource — this is
+    // exactly the #3527 gap the hosted step 5b fix closes by forwarding the
+    // stored value instead; this pre-check test pins the backend's own side
+    // of the contract (it never substitutes merchantUrl for the stored field).
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-eip3009-resource-mismatch-1' }),
+    })
+    expect(res.statusCode).toBe(403)
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
+  it('a settled EIP-3009 row matched against the SAME stored resource answers sufficient (the forwarded-resource contract)', async () => {
+    const { userId, agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    const storedResource = 'https://merchant.example/the-actual-3009-resource'
+    await seedX402Intent({ userId, agentId }, 'catalog-eip3009-resource-match-1', {
+      settlementScheme: 'eip3009',
+      resourceUrl: storedResource,
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-eip3009-resource-match-1', resourceUrl: storedResource }),
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ sufficient: true, replay: true })
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await refusalRows(agentId)).toHaveLength(0)
+  })
+
+  it('a pending_signature EIP-3009 child (unexpired) is still refused — only a SETTLED row bypasses the compare', async () => {
+    const { userId, agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    await seedX402Intent({ userId, agentId }, 'catalog-eip3009-pending-key-1', {
+      settlementScheme: 'eip3009',
+      status: 'pending_signature',
+      txHash: null,
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-eip3009-pending-key-1' }),
+    })
+    expect(res.statusCode).toBe(403)
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
+  it('a key collision on a DIFFERENT payee is still refused for an EIP-3009 row too', async () => {
+    const { userId, agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    await seedX402Intent({ userId, agentId }, 'catalog-eip3009-mismatch-payee-1', {
+      settlementScheme: 'eip3009',
+      merchantTo: '0x' + 'ff'.repeat(20),
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-eip3009-mismatch-payee-1' }),
+    })
+    expect(res.statusCode).toBe(403)
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
+  it('a task-budget-scoped EIP-3009 row is still refused', async () => {
+    const { userId, agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO agent_task_budgets
+         (agent_id, chain_id, token_address, parent_delegation_hash, delegation_hash,
+          delegation_json, max_atomic, status, expires_at)
+       VALUES ($1, $2, $3, $4, $5, '{}', '5000000', 'open', $6) RETURNING id`,
+      [agentId, CHAIN, USDC, `0x${String(++seq).padStart(64, '5')}`, `0x${String(++seq).padStart(64, '6')}`, Date.now() + 600_000],
+    )
+    await seedX402Intent({ userId, agentId }, 'catalog-eip3009-taskbudget-key-1', {
+      settlementScheme: 'eip3009',
+      taskBudgetId: rows[0].id,
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-eip3009-taskbudget-key-1' }),
+    })
+    expect(res.statusCode).toBe(403)
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
+  it('a different agent\'s settled EIP-3009 row under the same key never replays for this agent', async () => {
+    const { agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    const other = await seedDelegationAgent()
+    await seedX402Intent({ userId: other.userId, agentId: other.agentId }, 'catalog-eip3009-cross-agent-key-1', {
+      settlementScheme: 'eip3009',
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-eip3009-cross-agent-key-1' }),
     })
     expect(res.statusCode).toBe(403)
 

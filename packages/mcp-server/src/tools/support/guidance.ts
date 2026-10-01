@@ -14,6 +14,7 @@
 import {
   AgentPaymentNextAction,
   HavenClient,
+  HavenPaymentStateError,
   createNextStepBuilder,
   type AgentNextStep,
   type AgentPaymentSummary,
@@ -317,6 +318,171 @@ export function catchSettledReplay(err: unknown): { settledReplay: ReturnType<ty
 export function catchSettledResettle(err: unknown): { settledReplay: ReturnType<typeof settledReplayResponse> } {
   if (err instanceof X402Erc7710AlreadySettledError) return { settledReplay: settledReplayResponse(err, 'settle') }
   throw err
+}
+
+/**
+ * #3527: the EIP-3009 twin of {@link settledReplayResponse} /
+ * {@link catchSettledReplay} for `createX402Intent`'s confirmed-replay answer
+ * (`haven_prepare_catalog_purchase` step 9 and `haven_pay_mcp_tool`'s 3009
+ * branch). It is NOT a reuse of the erc7710 helper: that one hardcodes
+ * `settlement_scheme: 'erc7710'` and reports its replayed `tx_hash` AS the
+ * settlement hash, which is correct there (no funding leg — the confirmed
+ * intent IS the settlement) and WRONG here, where `confirmed` + `tx_hash`
+ * means only the FUNDING leg confirmed (treasury → delegate); the merchant
+ * leg is a separate fact this helper must check before saying anything about
+ * it (spec review, #3527).
+ *
+ * The backend's pre-check now answers a settled eip3009 key as sufficient
+ * (#3527's other half, `isSettledX402Replay`), so `createX402Intent` reaches
+ * its OWN confirmed-replay branch (`delegationReplay`'s scheme-agnostic
+ * confirmed+tx_hash answer) and the SDK surfaces that as
+ * `HavenPaymentStateError` with `state.status === 'confirmed'` — previously
+ * rethrown as-is, which `normalizeError` turned into a bare `API_ERROR` (the
+ * spec review's finding). Both hosted call sites catch it in their existing
+ * `catch (err)` block (alongside the pre-existing pending-approval branch) and
+ * `return` this helper's result instead of rethrowing.
+ *
+ * `haven.getPaymentStatus` is RE-READ (one extra round trip) because the
+ * state error's own `state` carries only the funding leg's facts — the
+ * merchant-leg evidence this split needs (`merchantSettlementRecorded`,
+ * `delivered`) lives on the status projection (#3475 follow-up,
+ * `agent-payment-status.ts`), not on the authorize response the error wraps.
+ * A failed re-read (older backend, transport error) is NOT a done state —
+ * see the `else` branch below, the safe default either way.
+ *
+ * - A merchant settlement VERIFIED on-chain (`merchantSettlementRecorded`)
+ *   → a DONE state, `settled: true`. `funding_tx_hash` is the row's own
+ *   (funding) hash; `settlement_tx_hash` is deliberately `null` — the status
+ *   projection carries only a VERIFIED BOOLEAN today, never the merchant's
+ *   own settlement hash, so this never backfills one from the funding hash
+ *   (the exact mislabeling the spec review flagged in the erc7710 helper's
+ *   reuse for this scheme).
+ * - A reported-but-unverified merchant leg (`delivered`, #3420's vocabulary
+ *   for `merchant_leg_reported`) is ALSO a done state (nothing left to sign
+ *   or pay), but `settled` stays `false` — review round 1 S1: `settled: true`
+ *   must mean a verified on-chain settlement, never merely "the merchant
+ *   answered". `merchant_leg_reported` rides the body so a caller can tell
+ *   the two done shapes apart instead of inferring it from `settled`'s
+ *   absence.
+ * - Neither verified nor reported → the #2290 funded-awaiting-merchant
+ *   remedy, NEVER a fresh funding sign. The re-read status's own
+ *   `next_action`/`message` are forwarded VERBATIM only when that action is
+ *   one of the two real funded-awaiting-merchant producers
+ *   (`retry_original_x402_request` once the grace window has passed,
+ *   `sweep_stranded_funds` if the merchant rejected the retry) —
+ *   review round 1 B1: `isFundedX402AwaitingMerchantLeg` is false INSIDE its
+ *   own 15-minute grace window (`MERCHANT_REPORT_GRACE_MIN`,
+ *   `agent-payment-status.ts`), so a status read taken moments after funding
+ *   falls through to the PLAIN confirmed mapping (`next_action: none`,
+ *   `message: "The payment is confirmed."`) even though NO merchant evidence
+ *   exists yet. Forwarding that verbatim would answer a done state with
+ *   `next_action: none` paired with a `next_tool` and no evidence behind it —
+ *   the exact claim this helper exists to never make. Any other action
+ *   (including `none`, a failed re-read's fallback, or an unrecognized
+ *   value) answers the honest in-between: `check_status_later`, pointed at
+ *   `haven_get_payment_status`, with a reason that says plainly that funding
+ *   confirmed and the merchant's delivery is not recorded yet.
+ */
+const EIP3009_REPLAY_TEXT = {
+  settledOmitted:
+    'this idempotency_key already funded this payment and the merchant leg is recorded; there is nothing left to sign or pay',
+  settledReason:
+    'Idempotent replay: this idempotency_key already funded this x402 payment via the EIP-3009 bridge, ' +
+    "and the merchant leg is recorded (settled or reported). Nothing new was signed and nothing new was " +
+    "charged. Haven cannot re-deliver the merchant's result: if you received it earlier, report that " +
+    'purchase from payment_id and funding_tx_hash/settlement_tx_hash; if you did not, tell the user it was ' +
+    'paid but the result was not received. To buy again, use a new idempotency_key.',
+  // #3527 review round 1 B1: never forwards the status read's own `none` /
+  // "The payment is confirmed." — that pairing would claim a done state (or
+  // at least "nothing to worry about") with zero merchant-leg evidence.
+  awaitingMerchantEvidence:
+    "This idempotency_key's funding leg is confirmed on-chain, but Haven holds no merchant-leg evidence " +
+    '(settlement or delivery) for this payment yet. If you hold the merchant\'s response, report it with ' +
+    'haven_report_x402_outcome; otherwise check haven_get_payment_status again shortly. Do not sign or pay ' +
+    'again for this idempotency_key.',
+} as const
+
+/**
+ * #3527 review round 1 B1: the only two statuses `isFundedX402AwaitingMerchantLeg`
+ * actually produces — forwarding any OTHER status verbatim (including its own
+ * `none` fallback inside the 15-minute grace window) would relay a claim this
+ * helper has not verified.
+ */
+const FUNDED_AWAITING_MERCHANT_ACTIONS: ReadonlySet<string> = new Set([
+  AgentPaymentNextAction.RetryOriginalX402Request,
+  AgentPaymentNextAction.SweepStrandedFunds,
+])
+
+export async function eip3009ConfirmedReplayResponse(
+  haven: HavenClient,
+  err: HavenPaymentStateError,
+): Promise<Record<string, unknown>> {
+  const status = await haven.getPaymentStatus(err.state.paymentId).catch(() => null)
+  const fundingTxHash = err.state.txHash ?? status?.txHash ?? null
+  const merchantVerified = status?.merchantSettlementRecorded === true
+  const merchantLegReported = status?.delivered === true
+
+  if (merchantVerified || merchantLegReported) {
+    return {
+      payment_id: err.state.paymentId,
+      status: 'confirmed',
+      settlement_scheme: 'eip3009' as const,
+      // #3527 review round 1 S1: `settled: true` means a VERIFIED on-chain
+      // settlement — never merely "the merchant answered" (that is
+      // `merchant_leg_reported` below, visible on its own).
+      settled: merchantVerified,
+      merchant_leg_reported: merchantLegReported,
+      idempotent_replay: true,
+      funding_tx_hash: fundingTxHash,
+      // #3527: getPaymentStatus carries only the VERIFIED flag today, never
+      // the merchant's own settlement transaction hash — this is never
+      // fabricated from the funding hash above.
+      settlement_tx_hash: null,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.None,
+        nextTool: null,
+        nextToolOmittedReason: EIP3009_REPLAY_TEXT.settledOmitted,
+        safeToContinue: true,
+        reason: EIP3009_REPLAY_TEXT.settledReason,
+        summary: {
+          payment_id: err.state.paymentId,
+          status: 'confirmed',
+          ...(status?.amount !== undefined ? { amount: status.amount } : {}),
+          ...(status?.token !== undefined ? { token: status.token } : {}),
+        },
+      }),
+    }
+  }
+
+  // Neither verified nor reported — never claim the merchant was paid, and
+  // never a fresh funding sign. Forward the re-read status's own
+  // next_action/message ONLY when it is one of the two real
+  // funded-awaiting-merchant producers; any other value (including the
+  // in-grace-window `none` fallback, or a failed re-read) answers the
+  // honest in-between instead of relaying an unverified "all clear".
+  const isRealRemedy = status !== null && FUNDED_AWAITING_MERCHANT_ACTIONS.has(status.nextAction)
+  const nextAction = isRealRemedy ? status.nextAction : AgentPaymentNextAction.CheckStatusLater
+  const reason = isRealRemedy ? status.message : EIP3009_REPLAY_TEXT.awaitingMerchantEvidence
+  return {
+    payment_id: err.state.paymentId,
+    status: status?.status ?? 'confirmed',
+    settlement_scheme: 'eip3009' as const,
+    merchant_leg_reported: false,
+    idempotent_replay: true,
+    funding_tx_hash: fundingTxHash,
+    settlement_tx_hash: null,
+    ...buildAgentGuidance({
+      nextAction,
+      nextTool: 'haven_get_payment_status',
+      nextArguments: { payment_id: err.state.paymentId },
+      safeToContinue: true,
+      reason,
+      summary: {
+        payment_id: err.state.paymentId,
+        status: status?.status ?? 'confirmed',
+      },
+    }),
+  }
 }
 
 /**

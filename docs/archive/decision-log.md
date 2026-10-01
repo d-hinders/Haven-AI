@@ -78,6 +78,13 @@ and nothing it accepts is wider than what A's own route accepts. Threat model
 confirmed by the owner on #3506 (2026-10-01): a compromised owner session can
 grant a sub-budget, the same residual as granting any budget today.
 
+No agent-side sub-budget close tool is added. A stale or unconfirmed close is
+recovered inside `haven_submit { sub_budget_id }`: it re-prepares through
+`POST /sub-budgets/:id/close`, which checks the chain first, and names
+`haven_sign` for the fresh operation (or reports `closed`). An owner-initiated
+close surfaces in `haven_get_agent`'s `pendingSubBudgetSignatures` as a row to
+sign. That closes the agent's dead ends without new tool surface.
+
 ## 2026-09-27 — sub-agent budgets: issuance is owner-governed; the delegate key only signs (#3330)
 
 Issue #3330's "Rule conflict to resolve first". CLAUDE.md § Agent Model makes an

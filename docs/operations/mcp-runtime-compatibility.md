@@ -1050,7 +1050,11 @@ last-verified: "2026-10-01"
 > agent must sign (the opens of an owner-issued sub-budget, or a `closing` row
 > after an owner close), each with its `haven_sign` step. It reads
 > `GET /sub-budgets?status=awaiting_signature`, and an older backend answer
-> fails soft to `[]`. `next-step-signer-parity.test.ts` now pins both
+> fails soft to `[]`. A stale sub-budget close (`close_needs_reprepare`) is
+> recovered inside `haven_submit`, which re-prepares through
+> `POST /sub-budgets/:id/close` and names `haven_sign` (or reports `closed`);
+> `close_outcome_unconfirmed` asks to repeat the call later. No close tool is
+> added. `next-step-signer-parity.test.ts` now pins both
 > `haven_submit` handoffs (`SIGNER_HOSTED_HANDOFF_SHAPES`
 > `'haven_submit#task_budget'` and `'haven_submit#sub_budget'`). The signer's
 > `initialize` block gains `sub_budget_sign_context_versions` (additive) and

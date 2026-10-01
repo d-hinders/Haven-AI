@@ -216,3 +216,28 @@ describe('consent surface version (#1263)', () => {
     expect(SIGNER_CONSENT_SURFACE_VERSION).toBe(2)
   })
 })
+
+describe('#3506: sub-budget consent copy is copy-only (owner decision 2026-09-30)', () => {
+  // The hash covers identity, tool NAMES and SIGNER_CONSENT_SURFACE_VERSION,
+  // never the summaries. Naming sub-budget signing in the consent text must
+  // not re-prompt any operator: this pins the v2 hash for a fixed identity, so
+  // a change that moves it (a version bump, a summary leaking into the hash)
+  // goes red here and has to be argued, not slipped in.
+  const fixed: SignerConsentInput = {
+    delegateAddress: '0x000000000000000000000000000000000000dEaD',
+    accountAddress: '0x000000000000000000000000000000000000Cafe',
+    agentId: 'agt_test',
+    chainId: 100,
+    network: 'Gnosis Chain',
+    toolNames: ['haven_sign', 'haven_x402_sign_header', 'haven_sign_x402', 'haven_sign_sweep_delegate'],
+  }
+
+  it('keeps SIGNER_CONSENT_SURFACE_VERSION at 2 and the hash for a fixed identity unchanged', () => {
+    expect(SIGNER_CONSENT_SURFACE_VERSION).toBe(2)
+    expect(computeSignerConsentHash(fixed)).toBe('6705a7d8ec919961')
+  })
+
+  it('names sub-budget signing in the haven_sign summary', () => {
+    expect(toolSummaries.haven_sign).toMatch(/task-budget or sub-budget open or close/)
+  })
+})

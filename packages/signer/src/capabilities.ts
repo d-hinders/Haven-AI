@@ -3,7 +3,11 @@ import {
   SUPPORTED_SWEEP_BINDING_VERSIONS,
   SUPPORTED_X402_EXPECTED_VERSIONS,
 } from './core.js'
-import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS, SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
+import {
+  SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS,
+  SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS,
+  SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS,
+} from './sign-context.js'
 
 /**
  * Pre-payment skew detection (#1155).
@@ -63,6 +67,13 @@ export interface SignerCompatibility {
    * discipline as `direct_sign_context_versions`.
    */
   task_sign_context_versions: number[]
+  /**
+   * #3506: `sub_budget_sign_context_version`s this signer will fetch and
+   * verify from `GET /sub-budgets/:id/sign-context` — derived from
+   * `SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS`, never a second literal.
+   * Additive: 0.7.0 already signed sub-budgets but did not say so here.
+   */
+  sub_budget_sign_context_versions: number[]
 }
 
 /** The supported sets this signer enforces, as a plain serialisable object. */
@@ -72,6 +83,7 @@ export function signerCompatibility(): SignerCompatibility {
     sweep_binding_versions: [...SUPPORTED_SWEEP_BINDING_VERSIONS],
     direct_sign_context_versions: [...SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS],
     task_sign_context_versions: [...SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS],
+    sub_budget_sign_context_versions: [...SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS],
   }
 }
 
@@ -114,6 +126,7 @@ export function signerInstructions(): string {
     `- sweep authorization binding versions supported: ${compatibility.sweep_binding_versions.join(', ')}`,
     `- direct-payment (haven_send / haven_pay) sign-context versions supported: ${compatibility.direct_sign_context_versions.join(', ')} — pass payment_id alone to haven_sign; this signer fetches the exact bytes`,
     `- task-budget sign-context versions supported: ${compatibility.task_sign_context_versions.join(', ')} — pass task_budget_id alone to haven_sign; this signer fetches the exact bytes`,
+    `- sub-budget sign-context versions supported: ${compatibility.sub_budget_sign_context_versions.join(', ')} — pass sub_budget_id alone to haven_sign; this signer fetches the exact bytes (a sub-budget your owner issued narrows your own budget for another agent of your account)`,
     '',
     'Haven quote and prepare results report the expected-context version they will emit',
     '(signer_compatibility.x402_expected_context_version). If that version is not in the list',

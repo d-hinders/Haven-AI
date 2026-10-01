@@ -296,7 +296,7 @@ and the `release` skill.
 >
 > **Re-verification (#3510):** coupled for the same reason. The only change to
 > `packages/backend/src/config.ts` adds one field, `opsDatabaseUrl` (parsed by
-> `parseOpsDatabaseUrl` in `config/ops.ts`), plus its import.
+> `parseOpsDatabaseUrl` in `config/ops.ts`) and its comment, plus its import.
 > `connectorChannel` / `parseConnectorChannel` and `requestValidationMode` have
 > no diff. `last-verified` is not bumped; nothing else here was re-verified.
 >

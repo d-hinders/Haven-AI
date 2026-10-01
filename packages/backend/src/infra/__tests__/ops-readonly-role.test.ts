@@ -61,6 +61,12 @@ const SECRET_SAMPLES: ReadonlyArray<[string, boolean]> = [
   ['https://bundler.example/RPC/0123456789abcdef0123', false], // path match is case-sensitive, as in JS
   ['https://bundler.example/rpc/short', false],
   ['', false],
+  // Unicode: JS `\s` includes NBSP, and JS `\b` (no `u` flag) treats é / π as non-word.
+  ['key=REDACTED\u00a0more', false],
+  ['key=abc\u00a0def', true],
+  ['\u00e9key=SECRETVALUE', true],
+  ['\u03c0key=xyz', true],
+  ['https://user:p\u2028ss@host', false],
 ]
 
 /** Run `fn` as the role, always rolled back. Rejections propagate. */
@@ -245,13 +251,30 @@ describeDb('ops read-only role (#3510)', () => {
       expect(await opsReadRoleProblems(c)).toEqual([])
     })
     expect(await opsReadRoleProblems(db)).toEqual(
-      expect.arrayContaining(['can read users.password_hash', 'can read payment_intents.signature', 'can write users']),
+      expect.arrayContaining([
+        ...Object.keys(OPS_NEVER_GRANT).map((q) => `can read ${q}`),
+        'can write a table',
+        'can CREATE in its schema',
+      ]),
     )
     let reported = 0
     const guarded = guardOpsReadExecutor(db, () => reported++)
     await expect(guarded.query('SELECT 1')).rejects.toBeInstanceOf(OpsReadRoleUnsafeError)
     await expect(guarded.query('SELECT 1')).rejects.toBeInstanceOf(OpsReadRoleUnsafeError)
     expect(reported).toBe(1)
+  })
+
+  it('the self-check refuses a login granted any never-grant column, or a write on any table', async () => {
+    await asRole(async (c) => {
+      await c.query('SET LOCAL default_transaction_read_only = on')
+      expect(await opsReadRoleProblems(c)).toEqual([])
+    })
+    await db.query(`GRANT SELECT (api_key_prefix) ON "${SCHEMA}".agents TO "${ROLE}"`)
+    await db.query(`GRANT INSERT ON "${SCHEMA}".payment_refusals TO "${ROLE}"`)
+    await asRole(async (c) => {
+      await c.query('SET LOCAL default_transaction_read_only = on')
+      expect(await opsReadRoleProblems(c)).toEqual(['can read agents.api_key_prefix', 'can write a table'])
+    })
   })
 
   it('a self-check that could not run is retried, not remembered', async () => {
@@ -262,7 +285,7 @@ describeDb('ops read-only role (#3510)', () => {
         if (calls === 1) throw new Error('connection refused')
         if (calls === 2) {
           return {
-            rows: [{ reads_password_hash: false, reads_signature: false, writes_users: false, creates_in_schema: false, read_only: true }],
+            rows: [{ 'can read users.password_hash': false, 'can write a table': false }],
             rowCount: 1,
           }
         }

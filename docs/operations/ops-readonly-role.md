@@ -7,6 +7,8 @@ covers:
   - packages/backend/src/infra/repositories/ops-read-role.ts
   - packages/backend/src/db/ops-read-pool.ts
   - packages/backend/src/config/ops.ts
+  - packages/backend/src/routes/ops.ts
+  - packages/backend/src/domain/redact-vendor-secrets.ts
 last-verified: "2026-10-01"
 ---
 
@@ -50,9 +52,14 @@ user in Railway → Postgres → Query.
      (`OPS_FREE_TEXT_COLUMNS`) has an old row that predates the redaction at
      its writer. Scrub it (below), then re-run.
    - **"can still CREATE in schema":** PUBLIC holds `CREATE` on the schema.
-     This is the default before Postgres 15, and survives a `pg_upgrade`. Run
-     `REVOKE CREATE ON SCHEMA public FROM PUBLIC;` (the backend's own user
-     owns the schema, so it keeps `CREATE`), then re-run.
+     This is the default before Postgres 15, and survives a `pg_upgrade`.
+     First make sure the backend's own user keeps `CREATE` without PUBLIC,
+     or the next deploy's migrations fail:
+     `SELECT nspowner::regrole FROM pg_namespace WHERE nspname = 'public';`
+     must name that user (or `pg_database_owner` when it owns the
+     database), or the user must be a superuser. If not, run
+     `GRANT CREATE ON SCHEMA public TO <backend user>;` first. Then run
+     `REVOKE CREATE ON SCHEMA public FROM PUBLIC;` and re-run.
 3. **Give the role a login.** The password goes to the secret store, never
    to the repo:
 
@@ -69,8 +76,9 @@ user in Railway → Postgres → Query.
    Before its first read, the pool also asks the database what the login can
    do. If the login can do any of the following, the ops data routes (today
    `POST /ops/reveal`) answer 404 and the log says `Ops console data reads are OFF: …`:
-   - read `users.password_hash` or `payment_intents.signature`;
-   - write `users`;
+   - read any column on the never-grant list (`OPS_NEVER_GRANT`: the
+     password, API-key, signature and idempotency-key columns);
+   - write any table in its schema;
    - create in its schema;
    - run outside a read-only transaction.
 

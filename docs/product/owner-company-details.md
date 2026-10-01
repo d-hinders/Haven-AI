@@ -13,7 +13,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/frontend/src/hooks/useCompanyDetails.ts
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
-last-verified: "2026-10-01"
+last-verified: "2026-09-28"
 ---
 
 # Owner company details

@@ -41,7 +41,12 @@ export function createOpsReadPool(connectionString: string): pg.Pool {
   return created
 }
 
-/** The ops read executor, or null when the deployment configures none. */
+/**
+ * The ops read executor, or null when the deployment configures none. It has
+ * no `connect`, so `withTransaction` runs inline on it with no BEGIN: a data
+ * slice that needs one snapshot across several reads must not assume a
+ * transaction here.
+ */
 export function getOpsReadDb(): Executor | null {
   if (config.opsDatabaseUrl === '') return null
   opsReadDb ??= guardOpsReadExecutor(createOpsReadPool(config.opsDatabaseUrl), (err) => {

@@ -192,6 +192,15 @@ export const OPS_REVIEWED_STRUCTURED_COLUMNS: Readonly<Record<string, string>> =
 }
 
 /**
+ * JS `\s` (ECMAScript WhiteSpace + LineTerminator) spelled out for a Postgres
+ * bracket expression: `[:space:]` depends on the database's ctype and, under
+ * C.UTF-8, misses NBSP and the other Unicode spaces JS includes.
+ */
+const S = String.raw`\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff`
+/** JS `\b` before a word character (no `u` flag: ASCII word characters only). PG's `\y` counts non-ASCII letters too. */
+const WB = String.raw`(?<![A-Za-z0-9_])`
+
+/**
  * The three shapes `redactVendorSecrets` (domain/redact-vendor-secrets.ts)
  * removes, as Postgres ARE regexes with the same replacement and flags. The
  * parity test runs every pattern in both engines over the same samples, so
@@ -208,17 +217,19 @@ export const VENDOR_SECRET_PG_PATTERNS: ReadonlyArray<{
   {
     // `key=<value>`, unless the value is already `REDACTED` — or a prefix of
     // it at the very end, which the passport writers' `.slice(0, 500)` after
-    // redaction can leave (`apikey=RED`).
+    // redaction can leave (`apikey=RED`). Detection is case-insensitive, so
+    // `apikey=red` / `secret=R` at the very end also read as clean though JS
+    // would rewrite them — accepted: no real vendor secret has that shape.
     detect:
-      String.raw`\y(api[_-]?key|key|token|secret)=(?!REDACTED([&[:space:]"'\\)]|$))(?!R(E(D(A(C(T(E(D)?)?)?)?)?)?)?$)[^&[:space:]"'\\)]+`,
-    pattern: String.raw`\y(api[_-]?key|key|token|secret)=[^&[:space:]"'\\)]+`,
+      String.raw`${WB}(api[_-]?key|key|token|secret)=(?!REDACTED([&${S}"'\\)]|$))(?!R(E(D(A(C(T(E(D)?)?)?)?)?)?)?$)[^&${S}"'\\)]+`,
+    pattern: String.raw`${WB}(api[_-]?key|key|token|secret)=[^&${S}"'\\)]+`,
     replacement: String.raw`\1=REDACTED`,
     flags: 'gi',
   },
   {
     // Basic-auth: the redacted form `https://REDACTED@` has no `:`, so it never matches.
-    detect: String.raw`https?://[^[:space:]/@]+:[^[:space:]@]+@`,
-    pattern: String.raw`(https?://)[^[:space:]/@]+:[^[:space:]@]+@`,
+    detect: String.raw`https?://[^${S}/@]+:[^${S}@]+@`,
+    pattern: String.raw`(https?://)[^${S}/@]+:[^${S}@]+@`,
     replacement: String.raw`\1REDACTED@`,
     flags: 'gi',
   },

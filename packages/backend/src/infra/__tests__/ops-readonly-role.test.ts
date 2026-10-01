@@ -31,6 +31,7 @@ import { LIST_UNMINED_OUTBOUND_TXS_SQL } from '../repositories/outbound-txs.js'
 import { FIND_SWEEPABLE_ERC7710_INTENTS_SQL } from '../repositories/x402-authorizations.js'
 import { LIST_STUCK_REVOCATIONS_SQL } from '../repositories/agent-passports.js'
 import { OPS_REVEAL_SQL } from '../repositories/ops-reveal.js'
+import * as OPS_READS from '../repositories/ops-reads.js'
 
 const SCHEMA = workerSchemaName()
 const ROLE = `haven_ops_ro_${SCHEMA}`.slice(0, 63)
@@ -335,6 +336,22 @@ describeDb('ops read-only role (#3510)', () => {
       await c.query(LIST_STUCK_REVOCATIONS_SQL, [3600])
       await c.query(OPS_REVEAL_SQL.user.email, ['00000000-0000-4000-8000-000000000000'])
       await c.query(OPS_REVEAL_SQL.user.name, ['00000000-0000-4000-8000-000000000000'])
+      // #3512: every ops data read runs as the role. Each `*_SQL` export of
+      // ops-reads.ts is executed with a parameter of the type it expects.
+      const opsSql = Object.entries(OPS_READS).filter(([name]) => name.endsWith('_SQL')) as [string, string][]
+      expect(opsSql.length).toBeGreaterThanOrEqual(20)
+      for (const [name, sql] of opsSql) {
+        const params = !sql.includes('$1')
+          ? []
+          : /email\) LIKE/.test(sql)
+            ? ['ada%']
+            : /lower\(/.test(sql)
+              ? ['0x00']
+              : ['00000000-0000-4000-8000-000000000000']
+        await c.query(sql, params).catch((err: Error) => {
+          throw new Error(`${name} failed as the ops role: ${err.message}`)
+        })
+      }
     })
   })
 

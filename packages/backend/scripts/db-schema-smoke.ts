@@ -40,6 +40,7 @@ import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-sign
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import { INSERT_OPS_ACCESS_LOG_SQL } from '../src/infra/repositories/ops-access-log.js'
 import { OPS_REVEAL_SQL } from '../src/infra/repositories/ops-reveal.js'
+import * as OPS_READS from '../src/infra/repositories/ops-reads.js'
 import {
   FIND_TASK_BUDGET_FOR_AGENT_SQL,
   INSERT_PENDING_TASK_BUDGET_SQL,
@@ -546,6 +547,10 @@ const QUERIES: SmokeQuery[] = [
     name: 'ops: reveal users.name (#3509, imported)',
     sql: OPS_REVEAL_SQL.user.name,
   },
+  // #3512: every ops data read (overview, search, customer detail), imported.
+  ...Object.entries(OPS_READS)
+    .filter(([name]) => name.endsWith('_SQL'))
+    .map(([name, sql]) => ({ name: `ops: ${name} (#3512, imported)`, sql: sql as string })),
   {
     // IMPORTED since #995 — the pasted copy predated the repository.
     name: 'x402: exact-amount idempotency reload',

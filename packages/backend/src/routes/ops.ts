@@ -4,8 +4,9 @@
  * A founders-only, READ-ONLY window onto this backend. Nothing under `/ops`
  * moves funds, signs, changes signers or delegations, or acts as a user
  * (invariant 1, pinned by `__tests__/ops.invariants.test.ts`). This slice
- * ships sign-in, the session check and the reveal contract; the data reads
- * arrive with #3512–#3514.
+ * shipped sign-in, the session check and the reveal contract; #3512 adds the
+ * first data reads — `GET /ops/overview`, `GET /ops/search` and
+ * `GET /ops/users/:id` — and #3513–#3514 add the rest.
  *
  * Off by default. Whether ops is configured is decided in this plugin's
  * `onRequest` hook — before request validation, auth and rate limiting — so
@@ -24,15 +25,23 @@
  *      reports it), writes the audit row, and redirects to
  *      `<origin>/#token=<ops token>&nonce=<n>` — or `#error=<code>&nonce=<n>`.
  *
- * Every sign-in that reaches a GitHub identity (allowed or refused) and every
- * reveal writes an `ops_access_log` row through the MAIN pool before the response is sent; a
- * failed write answers 503 and returns nothing (invariant 6).
+ * Every sign-in that reaches a GitHub identity (allowed or refused), every
+ * data read and every reveal writes an `ops_access_log` row through the MAIN
+ * pool before the response is sent; a failed write answers 503 and returns
+ * nothing (invariant 6). Data reads themselves go through `readDb`, the
+ * read-only role (#3510), and answer 404 while it is not configured or its
+ * login fails the privilege self-check.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { isOpsConfigured, type OpsConfig } from '../config/ops.js'
 import { authRateLimit, opsRevealRateLimit } from '../middleware/rate-limit.js'
 import { createOpsAuth, opsOperatorOf } from '../middleware/ops-auth.js'
 import {
+  buildOpsOverview,
+  buildOpsUserDetail,
+  detectOpsSearchKey,
+  maskSearchTerm,
+  runOpsSearch,
   exchangeGithubCode,
   fetchGithubUser,
   githubAuthorizeUrl,
@@ -186,6 +195,81 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
       login: operator.login,
       expires_at: new Date(operator.exp * 1000).toISOString(),
     })
+  })
+
+  /**
+   * The shared shape of a data read (#3512): off (404) without the read-only
+   * role or when its login fails the self-check; the audit row is written
+   * through the main pool after the read and before anything is sent.
+   */
+  async function dataRead<T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    read: (db: Executor) => Promise<T>,
+    entry: (result: T) => Omit<OpsAccessLogEntry, 'requestId' | 'operatorGithubId' | 'operatorLogin'>,
+  ): Promise<{ result: T } | null> {
+    const readDb = opts.readDb
+    if (!readDb) {
+      await reply.callNotFound()
+      return null
+    }
+    let result: T
+    try {
+      result = await read(readDb)
+    } catch (err) {
+      if (err instanceof OpsReadRoleUnsafeError) {
+        await reply.callNotFound()
+        return null
+      }
+      throw err
+    }
+    const operator = opsOperatorOf(request)
+    const ok = await recordOrRefuse(request, reply, {
+      operatorGithubId: operator.githubId,
+      operatorLogin: operator.login,
+      ...entry(result),
+    })
+    return ok ? { result } : null
+  }
+
+  // GET /ops/overview — platform counts.
+  app.get('/overview', { onRequest: opsAuth }, async (request, reply) => {
+    const done = await dataRead(request, reply, (db) => buildOpsOverview(db, opts.now), () => ({
+      action: 'view',
+      targetType: 'overview',
+    }))
+    if (!done) return reply
+    return reply.headers(NO_STORE).send(done.result)
+  })
+
+  // GET /ops/search?q= — find a customer record by what was pasted.
+  app.get<{ Querystring: { q: string } }>(
+    '/search',
+    { onRequest: opsAuth, config: opsRevealRateLimit },
+    async (request, reply) => {
+      const key = detectOpsSearchKey(request.query.q)
+      if ('error' in key) return reply.code(400).headers(NO_STORE).send({ error: key.error })
+      const done = await dataRead(request, reply, (db) => runOpsSearch(db, key, { now: opts.now }), () => ({
+        action: 'search',
+        targetType: key.keyType,
+        // The masked term only — the raw query may be a customer's email.
+        detail: maskSearchTerm(request.query.q),
+      }))
+      if (!done) return reply
+      return reply.headers(NO_STORE).send(done.result)
+    },
+  )
+
+  // GET /ops/users/:id — one customer's record, masked.
+  app.get<{ Params: { id: string } }>('/users/:id', { onRequest: opsAuth }, async (request, reply) => {
+    const done = await dataRead(request, reply, (db) => buildOpsUserDetail(db, request.params.id), () => ({
+      action: 'view',
+      targetType: 'user',
+      targetId: request.params.id,
+    }))
+    if (!done) return reply
+    if (!done.result) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
+    return reply.headers(NO_STORE).send(done.result)
   })
 
   // POST /ops/reveal — one unmasked field, audited.

@@ -21,6 +21,7 @@ import {
   listActiveDelegations,
   listDelegationJsonByIds,
   selectActiveDelegationByHash,
+  liveRecipientPins,
   selectBudgetForPaymentReport,
   selectDelegationForPayment,
   withDelegationBuildSlotLock,
@@ -467,6 +468,49 @@ describeDb('selectBudgetForPaymentReport — the payment rule over read rows (#3
     // And the payment's own SQL orders the same two rows the same way.
     const paying = await selectDelegationForPayment(agent, USDC, MERCHANT)
     expect(paying?.delegation_hash).toBe(newerHash)
+  })
+
+  it('a matching pin beats an open budget that expires SOONER and is NEWER — the group order is not a tie-break', async () => {
+    // Review M5: with equal expiries and the pin created second, dropping the
+    // pinned-before-open key still passed every fixture (expiry, then
+    // created_at DESC, picked the pin anyway). Here both later keys favour
+    // the OPEN row, so only the group order can hand the payment to the pin.
+    const agent = await seedUserAndAgent()
+    const pinnedHash = await seedAndGetHash({
+      agentId: agent,
+      recipientAddress: MERCHANT,
+      expiresAt: NOW + 30 * 86400,
+      createdAt: '2026-09-30T20:00:00Z',
+    })
+    const openHash = await seedAndGetHash({
+      agentId: agent,
+      expiresAt: NOW + 86400,
+      createdAt: '2026-09-30T22:00:00Z',
+    })
+
+    expect(pick(await viewRows(agent), MERCHANT)?.delegation_hash).toBe(pinnedHash)
+    const paying = await selectDelegationForPayment(agent, USDC, MERCHANT)
+    expect(paying?.delegation_hash).toBe(pinnedHash)
+    expect(paying?.delegation_hash).not.toBe(openHash)
+  })
+
+  it('liveRecipientPins names the live pins only — unique, sorted; open, expired and future rows excluded', async () => {
+    const agent = await seedUserAndAgent()
+    const other = '0x00000000000000000000000000000000000000aa'
+    await seedDelegation({ agentId: agent, recipientAddress: MERCHANT })
+    await seedDelegation({ agentId: agent, recipientAddress: MERCHANT })
+    await seedDelegation({ agentId: agent, recipientAddress: other })
+    await seedDelegation({ agentId: agent })
+    await seedDelegation({ agentId: agent, recipientAddress: '0x00000000000000000000000000000000000000dd', expiresAt: NOW - 10 })
+    await seedDelegation({ agentId: agent, recipientAddress: '0x00000000000000000000000000000000000000ee', startDate: NOW + 3600 })
+
+    const pins = liveRecipientPins(
+      await viewRows(agent),
+      NOW,
+      (b) => Number(b.expires_at),
+      (b) => Number(b.start_date),
+    )
+    expect(pins).toEqual([other, MERCHANT])
   })
 })
 

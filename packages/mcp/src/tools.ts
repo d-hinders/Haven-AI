@@ -248,7 +248,7 @@ const GET_TASK_BUDGET_DESCRIPTION = [
   'Read one task budget by id, any status.',
   'Returns { task_budget } with status (pending | open | closing | closed), isExpired, maxDisplay, recipientAddress, label and expiresAt —',
   'the check to run after a close or submit refusal says to re-check the budget\'s status.',
-  'haven_get_agent lists every task budget with its status; this reads one, including rows that list shows.',
+  'haven_get_agent lists live task budgets only; this reads any one, closed or expired included.',
 ].join(' ')
 
 const SUBMIT_DESCRIPTION = [

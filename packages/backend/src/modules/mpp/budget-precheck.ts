@@ -96,7 +96,11 @@ import {
   allowanceModuleRailRetired,
 } from '../../rails/execution-rail.js'
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
-import { listDelegationJsonByIds, selectBudgetForPaymentReport } from '../../infra/repositories/delegation-budgets.js'
+import {
+  listDelegationJsonByIds,
+  liveRecipientPins,
+  selectBudgetForPaymentReport,
+} from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { AgentPaymentPhase, AgentPaymentNextAction } from '../../domain/agent-payment-taxonomy.js'
@@ -295,14 +299,42 @@ export async function handleBudgetPrecheck(
   // null as "open budget only".
   const amountAtomic = BigInt(amountAtomicString)
   const merchantTo = body.merchantTo ? body.merchantTo.toLowerCase() : null
+  const nowSec = Math.floor(Date.now() / 1000)
+  const tokenBudgets = budgets.filter((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase())
   const match = selectBudgetForPaymentReport(
-    budgets.filter((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase()),
+    tokenBudgets,
     merchantTo,
-    Math.floor(Date.now() / 1000),
+    nowSec,
     (b) => Number(b.expires_at),
     (b) => Number(b.start_date),
     (b) => b.created_at.getTime(),
   )
+
+  // #3518 review: no payee named, no open budget, but live merchant-locked
+  // budgets for this token. That is an INCOMPLETE question, not an exhausted
+  // budget: answering "remaining 0 — ask the owner to raise the budget" (and
+  // ledgering a delegation_budget_exceeded refusal) misstates why, while the
+  // agent holds a funded pin. Answer 409 naming the pins, write nothing; the
+  // caller repeats the check with merchantTo. A replay of a settled payment
+  // never reaches here (it requires merchantTo).
+  if (!match && merchantTo === null) {
+    const pins = liveRecipientPins(tokenBudgets, nowSec, (b) => Number(b.expires_at), (b) => Number(b.start_date))
+    if (pins.length > 0) {
+      return {
+        statusCode: 409,
+        body: {
+          error:
+            "This agent's budget for this token is locked to specific recipients, and the check named none. " +
+            'Repeat it with merchantTo set to the payee; a payment to any other address has no budget.',
+          error_code: 'budget_requires_recipient',
+          next_action: AgentPaymentNextAction.RetryWithExplicitContext,
+          chain_id: agent.chain_id,
+          asset: tokenAddress,
+          budget_recipient_addresses: pins,
+        },
+      }
+    }
+  }
   const remainingAtomic = match ? (remainingById.get(match.id)?.remainingAtomic ?? match.budget_atomic) : '0'
   const token = tokenView(agent.chain_id, tokenAddress)
   // A budget row's registry-derived symbol wins when it names the same

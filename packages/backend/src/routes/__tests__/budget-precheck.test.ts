@@ -920,4 +920,36 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     expect(res.json().remaining_atomic).toBe('3000000')
     expect(res.json().budget_recipient_address).toBeNull()
   })
+  it('ONLY merchant-locked budgets and NO merchantTo: 409 budget_requires_recipient naming the pins — never a budget refusal, nothing recorded (#3518 review)', async () => {
+    // Before the review fix this answered 403 delegation_budget_exceeded
+    // "remaining 0 … ask the owner to raise the budget" and ledgered a
+    // refusal while the agent held a funded 9.99 USDC pin.
+    const { agentId } = await seedDelegationAgent()
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds,
+          start_date, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 1, 'active', '9990000', 604800, 0, 99999999999)`,
+      [agentId, CHAIN, USDC, precheckMerchant, `0x${String(++seq).padStart(64, '4')}`, JSON.stringify({ kind: 'test-fixture' })],
+    )
+
+    const body = precheckBody()
+    delete (body as Record<string, unknown>).merchantTo
+    const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: body })
+    expect(res.statusCode).toBe(409)
+    const json = res.json()
+    expect(json.error_code).toBe('budget_requires_recipient')
+    expect(json.next_action).toBe('retry_with_explicit_context')
+    expect(json.budget_recipient_addresses).toEqual([precheckMerchant.toLowerCase()])
+    expect(json.remaining_atomic).toBeUndefined()
+
+    // The same check naming the payee answers from the pin.
+    const named = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
+    expect(named.statusCode).toBe(200)
+    expect(named.json().remaining_atomic).toBe('9990000')
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await refusalRows(agentId)).toHaveLength(0)
+  })
 })

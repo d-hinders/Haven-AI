@@ -994,9 +994,10 @@ whose winner can move between pay and settle (the grants' window can shift,
 and task-/sub-budget payments meter their PARENT by hash while the payee
 matches no pin at all). The token first-match remains only as the fallback
 for an older backend whose status predates the field. A status payload that
-carries the field but matches no listed row still reports the row set it
-has, never a fabricated figure; the failed-read degradation above is
-unchanged.
+carries the field but matches none of the agent's own rows (a sub-budget
+payment metering another agent's budget, or a re-key between pay and settle)
+reports the figure unavailable (`ALLOWANCE_CHECK_UNAVAILABLE`), never another
+budget's remaining; the failed-read degradation above is unchanged.
 
 ## Resuming An Authorized Payment
 
@@ -2188,8 +2189,10 @@ reservation releases on close/expire without any chain event). The
 sub-budget half of that sum walks grant → parent-child → the budget
 delegation's hash (`SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL`) —
 `sumOpenReservedForParent` keys on the parent-child row's OWN hash and
-would answer 0 here. `GET /task-budgets?status=all` (and the MCP/SDK reads
-over it) list closing and pending rows with their `status`, and
+would answer 0 here. `GET /task-budgets?status=live` (and the MCP/SDK reads
+over it) list closing rows always and unexpired pending and open rows, each
+with its `status` (closed and expired rows omitted; `status=all` still
+answers every row), and
 `GET /task-budgets/:id` is the read-by-id the MCP
 `haven_get_task_budget` surfaces — the status check a close refusal's
 "re-check the budget's status" points at, for any status.

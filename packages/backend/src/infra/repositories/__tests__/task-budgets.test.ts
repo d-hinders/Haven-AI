@@ -177,6 +177,29 @@ describeDb('agent_task_budgets repository (#3329)', () => {
     expect(all).toHaveLength(3)
   })
 
+  it('listForAgent status=live (#3518) keeps closing rows always and unexpired pending/open rows; drops closed and expired', async () => {
+    const seeded = await seedAgent()
+    const past = Math.floor(Date.now() / 1000) - 10
+    const signed = JSON.stringify({ signed: true })
+
+    const openRow = await insertPendingTaskBudget(pendingInput(seeded.agentId))
+    await markOpen(openRow.id, seeded.agentId, signed)
+    const pendingRow = await insertPendingTaskBudget(pendingInput(seeded.agentId))
+    const expiredOpen = await insertPendingTaskBudget(pendingInput(seeded.agentId, { expiresAt: past }))
+    await markOpen(expiredOpen.id, seeded.agentId, signed)
+    await insertPendingTaskBudget(pendingInput(seeded.agentId, { expiresAt: past })) // expired pending
+    const expiredClosing = await insertPendingTaskBudget(pendingInput(seeded.agentId, { expiresAt: past }))
+    await markOpen(expiredClosing.id, seeded.agentId, signed)
+    await markClosing(expiredClosing.id, seeded.agentId, JSON.stringify({}))
+    const closedRow = await insertPendingTaskBudget(pendingInput(seeded.agentId))
+    await markOpen(closedRow.id, seeded.agentId, signed)
+    await markClosed(closedRow.id, seeded.agentId, '0xclosed')
+
+    const live = await listForAgent(seeded.agentId, { status: 'live' })
+    expect(new Set(live.map((r) => r.id))).toEqual(new Set([openRow.id, pendingRow.id, expiredClosing.id]))
+    expect(await listForAgent(seeded.agentId, { status: 'all' })).toHaveLength(6)
+  })
+
   it('listForOwner scopes through agents.user_id', async () => {
     const seeded = await seedAgent()
     const other = await seedAgent()

@@ -375,6 +375,27 @@ export function selectBudgetForPaymentReport<
 }
 
 /**
+ * #3518 review: the recipients of the LIVE recipient-pinned budgets among
+ * `budgets` (inside the start/expiry window), lowercased, unique, sorted.
+ * Callers that select with no payee (`toAddress` null) use it to tell
+ * "no budget for this token" apart from "only merchant-locked budgets, and
+ * the question named no merchant" — the second is not an exhausted budget,
+ * and must never be reported (or ledgered) as one.
+ */
+export function liveRecipientPins<T extends { recipient_address: string | null }>(
+  budgets: T[],
+  nowSec: number,
+  expiresAtOf: (b: T) => number,
+  startAtOf: (b: T) => number,
+): string[] {
+  const now = BigInt(nowSec)
+  const pins = budgets
+    .filter((b) => b.recipient_address != null && expiresAtOf(b) > now && startAtOf(b) <= now)
+    .map((b) => (b.recipient_address as string).toLowerCase())
+  return [...new Set(pins)].sort()
+}
+
+/**
  * #3329 review finding E: the delegation a TASK BUDGET names as its parent
  * (`agent_task_budgets.parent_delegation_hash`), by its OWN identity — never
  * re-derived by (token, to). An agent holding both an open and a pinned

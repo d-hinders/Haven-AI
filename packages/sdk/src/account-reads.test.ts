@@ -6,8 +6,8 @@ import { AgentPaymentWarningCode, type PaymentStatusResult } from './types.js'
 const BASE_URL = 'https://haven.test'
 const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 
-function json(body: unknown): Response {
-  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
 function agent(executionRail = 'legacy') {
@@ -328,25 +328,41 @@ describe('AccountReads', () => {
     expect(summary.allowance?.remaining_atomic).toBe('1000')
   })
 
-  it('#3518: a hash that matches no listed row still reports the row set it has (never a fabricated figure)', async () => {
+  it('#3518: a recorded hash that matches none of the agent\'s rows is unavailable — never another budget\'s figure', async () => {
+    // A sub-budget payment meters the PARENT agent's budget, and a re-key
+    // between pay and settle retires the hash: either way the caller's first
+    // per-token row did not pay, and reporting it is the #3518 bug.
     const service = settleReads({
       paymentId: 'pay_1', asset: USDC, status: 'settled',
       budgetDelegationHash: `0x${'cc'.repeat(32)}`,
     })
     const summary = await service.getPostPurchaseAllowanceSummary('pay_1')
-    expect(summary.allowance?.remaining_atomic).toBe('1000')
-    expect(summary.warnings).toEqual([])
+    expect(summary.allowance).toBeNull()
+    expect(summary.warnings).toHaveLength(1)
+    expect(summary.warnings[0].code).toBe('ALLOWANCE_CHECK_UNAVAILABLE')
+    expect(summary.warnings[0].message).toContain("not one of this agent's own budgets")
   })
 
-  // #3518: the agent read's task-budget list reads `status=all` and filters
-  // client-side — closing rows always ride, closed and expired rows drop —
-  // and every mapped row carries its lifecycle status.
-  it('#3518: a closing or pending task budget rides getAgentSummary with its status; closed and expired rows drop', async () => {
+  // #3518: the agent read's task-budget list asks for `status=live` (the
+  // backend bounds it) and ALSO filters client-side — closing rows always
+  // ride, closed and expired rows drop — so a backend that refuses `live`
+  // and is re-asked for `status=all` yields the same list. Every mapped row
+  // carries its lifecycle status.
+  it.each([
+    ['a backend that answers status=live', false],
+    ['an older backend that refuses status=live (falls back to status=all)', true],
+  ])('#3518: a closing or pending task budget rides getAgentSummary with its status; closed and expired rows drop — %s', async (_label, refusesLive) => {
+    const taskBudgetQueries: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      const path = new URL(String(input)).pathname
+      const url = new URL(String(input))
+      const path = url.pathname
       if (path === '/machine-payments/agent') return json(agent('delegation'))
       if (path === '/machine-payments/allowances') return json(allowance())
       if (path === '/task-budgets') {
+        taskBudgetQueries.push(url.search)
+        if (refusesLive && url.searchParams.get('status') === 'live') {
+          return json({ error: 'querystring/status must be equal to one of the allowed values' }, 400)
+        }
         const row = (id: string, status: string, isExpired: boolean) => ({
           id, agent_id: 'agent_1', chain_id: 8453, token_address: USDC,
           recipient_address: null, parent_delegation_hash: `0x${'ab'.repeat(32)}`,
@@ -370,6 +386,7 @@ describe('AccountReads', () => {
     expect(summary.taskBudgets.map((row) => row.id)).toEqual(['tb-pending', 'tb-open', 'tb-closing-expired'])
     expect(summary.taskBudgets.map((row) => row.status)).toEqual(['pending', 'open', 'closing'])
     expect(summary.taskBudgets.map((row) => row.isExpired)).toEqual([false, false, true])
+    expect(taskBudgetQueries).toEqual(refusesLive ? ['?status=live', '?status=all'] : ['?status=live'])
   })
 
   // #3518: the allowance rows carry each budget's SCOPE (the recipient pin,

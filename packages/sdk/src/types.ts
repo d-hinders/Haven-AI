@@ -858,6 +858,13 @@ export interface HavenBalanceCoverage {
    * token (nothing was read).
    */
   budgetRemainingIsFromChain?: boolean
+  /**
+   * #3518: present only when `budgetRemainingAtomic` is "0" because the
+   * agent has no OPEN budget for the token but holds live merchant-locked
+   * budgets — their recipients (lowercase). Those budgets pay only these
+   * addresses; `getAllowances()` reports their remaining figures.
+   */
+  budgetRecipientAddresses?: string[]
 }
 
 /** @internal wire shape of {@link HavenBalanceCoverage}. */
@@ -870,6 +877,7 @@ export interface RawHavenBalanceCoverage {
   checked_amount_atomic: string
   budget_remaining_atomic: string
   budget_remaining_is_from_chain?: boolean
+  budget_recipient_addresses?: string[]
 }
 
 /**
@@ -1206,8 +1214,24 @@ export interface HavenTaskBudgetSummary {
    * not. Additive; undefined on a stale cached read from an older client
    * build.
    */
-  status?: string
+  status?: HavenTaskBudgetStatus
   isExpired?: boolean
+}
+
+/**
+ * `precheckBudget()`'s 200 answer. #3518: the `budget_*` fields name the
+ * budget the compare ran against — the one the payment would draw on
+ * (absent when no budget row matched the token).
+ */
+export interface BudgetPrecheckResult {
+  sufficient: boolean
+  remaining_atomic: string
+  remaining_is_from_chain?: boolean
+  replay?: boolean
+  budget_id?: string
+  budget_delegation_hash?: string
+  budget_recipient_address?: string | null
+  budget_merchant_id?: string | null
 }
 
 /** #3329: `POST /task-budgets` and `POST /task-budgets/:id/close` — the sign-then-submit envelope. */

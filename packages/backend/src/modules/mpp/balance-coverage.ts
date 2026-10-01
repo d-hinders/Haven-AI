@@ -55,7 +55,11 @@ import {
   allowanceModuleRailRetired,
 } from '../../rails/execution-rail.js'
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
-import { listDelegationJsonByIds, selectBudgetForPaymentReport } from '../../infra/repositories/delegation-budgets.js'
+import {
+  listDelegationJsonByIds,
+  liveRecipientPins,
+  selectBudgetForPaymentReport,
+} from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { getChainClient } from '../../infra/chain/index.js'
 import { toCanonicalAddress } from '../transactions/index.js'
@@ -129,14 +133,22 @@ export async function handleBalanceCoverage(
   // same no-guess fallback the precheck uses.
   const all = (await deriveDelegationBudgets([agent.id])).get(agent.id) ?? []
   const budgets = all.filter((b) => b.chain_id === agent.chain_id)
+  const nowSec = Math.floor(Date.now() / 1000)
+  const tokenBudgets = budgets.filter((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase())
   const match = selectBudgetForPaymentReport(
-    budgets.filter((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase()),
+    tokenBudgets,
     null,
-    Math.floor(Date.now() / 1000),
+    nowSec,
     (b) => Number(b.expires_at),
     (b) => Number(b.start_date),
     (b) => b.created_at.getTime(),
   )
+  // #3518 review: with no open budget, a "0" remaining must not read as "no
+  // budget" when merchant-locked budgets exist — name their recipients so the
+  // figure is not contradicted by haven_get_allowances.
+  const recipientLocked = match
+    ? []
+    : liveRecipientPins(tokenBudgets, nowSec, (b) => Number(b.expires_at), (b) => Number(b.start_date))
 
   // The AUTHORITY figure (permitted), from the same read GET /allowances
   // reports: enforcer-derived when the delegation json is readable, the
@@ -192,6 +204,7 @@ export async function handleBalanceCoverage(
       // only when a budget row matched (the no-row case read nothing from
       // anywhere, so there is no provenance to state).
       ...(budgetFromChain !== null ? { budget_remaining_is_from_chain: budgetFromChain } : {}),
+      ...(recipientLocked.length > 0 ? { budget_recipient_addresses: recipientLocked } : {}),
     },
   }
 }

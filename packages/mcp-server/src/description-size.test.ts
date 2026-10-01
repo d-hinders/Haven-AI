@@ -354,13 +354,16 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * pin: 26,045 / 27 = 964.6296…, pinned at the two-decimal ceiling (964.63)
  * — below round 15's 970.27 because the 27th tool joins the denominator,
  * and the stricter of the two holds; shrink-only still applies.
+ *
+ * **Shrunk — round 17, #3518 review.** The `haven_get_task_budget` and
+ * `haven_get_agent` descriptions stopped claiming the agent read lists every
+ * task budget (it lists live rows only). Measured 26,029 bytes / 27 tools;
+ * both pins ratchet down to the measured values.
  */
-const MAX_TOTAL_BYTES = 26_045
-// Mean pin: re-derived — round 16, #3518 ∪ #3506 ∪ #3529 three-way union
-// (block above): 26,045 / 27 = 964.6296…, pinned at the two-decimal ceiling
-// (964.63). It sits below round 15's 970.27 because the new tool joins the
-// denominator, and the stricter of the two holds. Shrink-only from here.
-const MAX_MEAN_BYTES = 964.63
+const MAX_TOTAL_BYTES = 26_029
+// Mean pin: round 17 (block above): 26,029 / 27 = 964.0370…, pinned at the
+// two-decimal ceiling (964.04). Shrink-only from here.
+const MAX_MEAN_BYTES = 964.04
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

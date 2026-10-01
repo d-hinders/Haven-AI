@@ -6204,14 +6204,14 @@ export const openapiSpec = {
         operationId: 'listTaskBudgets',
         summary: 'List task budgets for the authenticated agent.',
         description:
-          "Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.",
+          "Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — closing rows always, pending and open rows while not expired; closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.",
         security: [{ AgentApiKey: [] }],
         parameters: [
           {
             name: 'status',
             in: 'query',
             required: false,
-            schema: { type: 'string', enum: ['open', 'all'] },
+            schema: { type: 'string', enum: ['open', 'live', 'all'] },
           },
         ],
         responses: {
@@ -7179,6 +7179,15 @@ export const openapiSpec = {
               '"fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
               'amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / ' +
               'merchant_address when the request carried them.',
+          },
+          '409': {
+            ...errorResponse,
+            description:
+              '#3518: the request named no merchantTo, the agent has no open budget for the token, ' +
+              'and it holds live merchant-locked budgets for it. Not a refusal — nothing is recorded ' +
+              'in payment_refusals. Carries error_code "budget_requires_recipient", next_action ' +
+              '"retry_with_explicit_context" and budget_recipient_addresses (the pins, lowercase); ' +
+              'repeat the check with merchantTo set to the payee.',
           },
           '410': {
             ...errorResponse,
@@ -11003,9 +11012,12 @@ export const openapiSpec = {
           merchantTo: {
             type: 'string',
             description:
-              'Advisory for the ordinary compare: the merchant payTo address from the selected ' +
-              'option, carried onto the refusal row; it does not scope THAT compare — the budget ' +
-              'is per-token and the enforcer is the gate on recipients. #3492: when `idempotencyKey` ' +
+              'The merchant payTo address from the selected option, carried onto the refusal row. ' +
+              '#3518: it scopes the compare the way the payment selects its budget — a ' +
+              'recipient-pinned budget for this payee wins, a pin to another payee is excluded, ' +
+              'and the open budget covers the rest. Absent: only the open budget is eligible; when ' +
+              'the agent holds only merchant-locked budgets for the token the answer is 409 ' +
+              'budget_requires_recipient (nothing recorded), never a budget refusal. #3492: when `idempotencyKey` ' +
               'is also present, this field additionally scopes the settled-replay match below — a ' +
               'replay answer requires it to equal the stored row\'s payee.',
           },
@@ -11134,6 +11146,12 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          budget_recipient_addresses: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              '#3518: present only when budget_remaining_atomic is "0" because the agent has no OPEN budget for the token but holds live merchant-locked budgets — their recipients, lowercase. Those budgets pay only these addresses; haven_get_allowances reports their remaining figures.',
           },
         },
         additionalProperties: false,

@@ -425,6 +425,10 @@ export function createStateDirectRecoveryHandlers(
           ...(coverage.budgetRemainingIsFromChain !== undefined
             ? { budget_remaining_is_from_chain: coverage.budgetRemainingIsFromChain }
             : {}),
+          // #3518: "0" with merchant-locked budgets is not "no budget".
+          ...(coverage.budgetRecipientAddresses !== undefined
+            ? { budget_recipient_addresses: coverage.budgetRecipientAddresses }
+            : {}),
           next_step:
             coverage.covered === false
               ? 'The budget is backed by an empty account — stop and tell the user the funds are missing rather than attempting the payment.'

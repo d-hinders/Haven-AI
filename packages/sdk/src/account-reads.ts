@@ -287,37 +287,38 @@ export class AccountReads {
    * the soft-fail contract is unchanged.
    *
    * #3518 boundedness: `status=all` answers EVERY row this agent ever held —
-   * closed and long-expired included (the repository's all-branch has no
-   * window at all), so mapping it verbatim would grow `haven_get_agent`
-   * without bound. The list filters CLIENT-SIDE to the rows an agent can
-   * still act on, and read-by-id (`haven_get_task_budget`) is the any-status
-   * surface for everything else:
+   * closed and long-expired included (nothing ever moves an expired task
+   * budget out of `open`), so reading it would grow `haven_get_agent` — and
+   * the backend's per-row on-chain reads behind it — without bound. The read
+   * asks for `status=live` (#3518 review): the backend returns only the rows
+   * an agent can still act on, and read-by-id (`haven_get_task_budget`) is
+   * the any-status surface for everything else:
    *
    * - `closing` ALWAYS stays visible, expired or not — the close submit is
    *   in flight and the signer's close refusal tells the caller to re-check
    *   exactly this row's status;
    * - `closed` rows drop (terminal — `closed_at` names what happened, and
    *   the read-by-id tool answers any status);
-   * - a non-closing row past its `expires_at` drops (an expired open budget
-   *   reserves nothing and pays nothing) — the backend's `is_expired` is
-   *   derived from the same field, so the filter agrees with what the wire
-   *   would have said;
-   * - `pending` and live `open` rows stay, whatever their expiry.
+   * - a `pending` or `open` row past its `expires_at` drops (an expired
+   *   budget reserves nothing and pays nothing);
+   * - unexpired `pending` and `open` rows stay.
    *
-   * A row whose wire carries no `is_expired` is treated as unexpired — the
-   * degraded read errs toward KEEPING rows, never toward hiding one the
-   * agent could still act on. (No deployed backend has that shape: `status`
-   * and `is_expired` landed together in #3329's wire.)
+   * The same filter also runs here, client-side: it is what keeps the list
+   * bounded against a backend that predates `status=live`, which refuses the
+   * value — that refusal falls back to `status=all`. A row whose wire carries
+   * no `is_expired` is treated as unexpired — the degraded read errs toward
+   * KEEPING rows, never toward hiding one the agent could still act on.
    */
   private async listTaskBudgetsSummary(): Promise<HavenTaskBudgetSummary[]> {
     try {
-      const raw = await this.transport.get<{ task_budgets?: RawTaskBudget[] } | null | undefined>(
-        '/task-budgets?status=all',
-      )
+      type RawList = { task_budgets?: RawTaskBudget[] } | null | undefined
+      const raw = await this.transport
+        .get<RawList>('/task-budgets?status=live')
+        .catch(() => this.transport.get<RawList>('/task-budgets?status=all'))
       const rows = raw?.task_budgets
       if (!Array.isArray(rows)) return []
       // The boundedness filter (comment above): closing rows always ride;
-      // closed and expired rows drop.
+      // closed and expired rows drop. A no-op on a `status=live` answer.
       return rows
         .map((row) => mapTaskBudget(row))
         .filter((tb) => tb.status === 'closing' || (!tb.isExpired && tb.status !== 'closed'))
@@ -417,6 +418,9 @@ export class AccountReads {
       ...(raw.budget_remaining_is_from_chain !== undefined
         ? { budgetRemainingIsFromChain: raw.budget_remaining_is_from_chain }
         : {}),
+      ...(raw.budget_recipient_addresses !== undefined
+        ? { budgetRecipientAddresses: raw.budget_recipient_addresses }
+        : {}),
     }
   }
 
@@ -461,14 +465,20 @@ export class AccountReads {
       // while the payee matches no pin at all. The token match below is the
       // fallback for an older backend whose status predates the field — the
       // old first-match behaviour, kept only where nothing better exists.
+      // A RECORDED hash that matches none of the caller's rows (a sub-budget
+      // payment metering another agent's budget, or a re-key between pay and
+      // settle) is unavailable, never the first row: naming a budget that did
+      // not pay is the bug #3518 exists to remove.
       const tokenRows = allowanceResult.value.allowances.filter(
         (allowance) => allowance.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
       )
       const payingHash = payment.budgetDelegationHash ?? null
-      const match =
-        (payingHash && tokenRows.find((allowance) => allowance.delegationHash === payingHash)) ||
-        tokenRows[0] ||
-        null
+      const match = payingHash
+        ? tokenRows.find((allowance) => allowance.delegationHash === payingHash) ?? null
+        : tokenRows[0] ?? null
+      if (!match && payingHash) {
+        return unavailable("the budget that paid is not one of this agent's own budgets", payment)
+      }
       if (!match) return unavailable('no allowance/budget row matches the settled token', payment)
       // #3464: the ONE shared formatter — `haven_get_agent`'s allowances[]
       // rows use the same `formatRemainingDisplay` call, so the settle summary

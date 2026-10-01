@@ -121,10 +121,10 @@ async function runSubBudget(
 
   const delegations = new Map<string, Record<string, unknown>>()
   for (const id of [parentId, grantId]) {
-    const context = await call<{ sign_data?: { typed_data?: TypedData }; error?: string }>(
+    const context = await call<{ typed_data?: TypedData; error?: string }>(
       api, identity.agentApiKey, 'GET', `/sub-budgets/${id}/sign-context`,
     )
-    const typedData = context.json.sign_data?.typed_data
+    const typedData = context.json.typed_data
     if (context.status !== 200 || !typedData) {
       return fail(`sub-budget ${id} sign-context failed (${context.status}): ${context.json.error ?? ''}`)
     }
@@ -225,10 +225,10 @@ async function runSubBudget(
 
   const close = await call<{ error?: string }>(api, identity.agentApiKey, 'POST', `/sub-budgets/${grantId}/close`, {})
   if (close.status !== 200) return fail(`grant close prepare failed (${close.status}): ${close.json.error ?? ''}`)
-  const closeContext = await call<{ sign_data?: { typed_data?: TypedData }; error?: string }>(
+  const closeContext = await call<{ typed_data?: TypedData; error?: string }>(
     api, identity.agentApiKey, 'GET', `/sub-budgets/${grantId}/sign-context`,
   )
-  const closeTypedData = closeContext.json.sign_data?.typed_data
+  const closeTypedData = closeContext.json.typed_data
   if (closeContext.status !== 200 || !closeTypedData) {
     return fail(`grant close sign-context failed (${closeContext.status}): ${closeContext.json.error ?? ''}`)
   }

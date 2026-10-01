@@ -63,6 +63,20 @@ export const moneyPathRateLimit = {
   },
 } as const
 
+/**
+ * `POST /ops/reveal` (#3509): one unmasked customer field per call, by a
+ * signed-in founder. Keyed per ops token (`rateLimitKeyFor` hashes the
+ * Authorization header). Tight on purpose — a reveal is a deliberate click,
+ * and a script walking the customer table one reveal at a time is exactly
+ * what this ceiling exists to slow down.
+ */
+export const opsRevealRateLimit = {
+  rateLimit: {
+    max: 20,
+    timeWindow: '1 minute',
+  },
+} as const
+
 export const demoRateLimit = {
   rateLimit: {
     max: 30,
@@ -199,7 +213,7 @@ export const publicIssuerRateLimit = {
  */
 export function authRateLimit(
   trustProxyHops: number,
-  route: 'signup' | 'login' | 'device_start' | 'device_token' | 'device_lookup',
+  route: 'signup' | 'login' | 'device_start' | 'device_token' | 'device_lookup' | 'ops_auth',
 ): { rateLimit?: { max: number; timeWindow: string } } {
   if (trustProxyHops <= 0) return {}
   return {
@@ -221,8 +235,12 @@ export function authRateLimit(
       // a limit near login's would 429 the happy path. It is deliberately the
       // loosest of the four, and it is not the guessing surface: the device
       // code is 32 random bytes, not eight typed characters.
+      //
+      // `ops_auth` is the ops console's unauthenticated GitHub sign-in pair
+      // (`/ops/auth/github/start` and `/callback`, #3509). A founder signs in
+      // a few times a day; ten a minute is a ceiling on automation only.
       max:
-        route === 'signup'
+        route === 'signup' || route === 'ops_auth'
           ? 10
           : route === 'device_start'
             ? 5

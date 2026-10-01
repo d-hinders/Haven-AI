@@ -233,31 +233,6 @@ const ONCHAIN_EXECUTION_FAILED_ERROR_CODE = 'onchain_execution_failed'
 const ONCHAIN_EXECUTION_FAILED_OMITTED_REASON =
   'this payment_id already failed on-chain and cannot be retried; tell the user what the message says, and create a new payment if they still want to pay'
 
-/**
- * #3494 review round 1 (B1, double-pay risk), round 2 (B1', N3): the
- * backend's `error_code` when `sendUserOperation` resolved but the receipt
- * wait itself errored or timed out — `SubmittedUserOpFailedError` with
- * `reverted: false` (the default) — so the UserOp MAY have landed, and
- * Haven never learned the outcome. The SAME error class's `reverted: true`
- * case (the op executed and reverted — a KNOWN outcome, no funds moved)
- * answers `ONCHAIN_EXECUTION_FAILED` above instead; this code is strictly
- * the "truly unknown" half.
- *
- * Round 2 (B1'): `next_action` is `stop_and_tell_user`, NOT
- * `check_status_later` — the sign route's `failSubmittedIntent` already
- * marked this intent `failed` BEFORE this response was built, so
- * `haven_get_payment_status` on this same payment_id will answer "failed"
- * immediately and forever. Polling status can never come back "landed";
- * naming it as the next step would read as a promise this code cannot keep,
- * and round 1's wording made exactly that promise ("poll status, pay again
- * once it confirms this one did not settle") — which invites reading the
- * permanent "failed" answer AS that confirmation, and paying again. The
- * honest remedy is a human check against the account's REAL activity (not
- * this payment's own status): Haven's own activity view, or the
- * UserOperation hash on a block explorer.
- */
-const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
-
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {

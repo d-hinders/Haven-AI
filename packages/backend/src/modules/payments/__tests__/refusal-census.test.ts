@@ -169,11 +169,11 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     { line: 854, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
     { line: 1153, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
     { line: 1192, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
-    { line: 1232, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
-    { line: 1258, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
-    { line: 1307, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
-    { line: 1346, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
-    { line: 1400, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
+    { line: 1238, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
+    { line: 1264, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
+    { line: 1313, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 1352, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 1406, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
   ],
 }
 
@@ -218,23 +218,23 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
       reason: '#3564 the receipt-unconfirmed submit — the row is booked outcome-pending (never failed) and the submission reconciler resolves it from the chain, so the 502 is a poll instruction, not a policy refusal',
     },
     {
-      line: 1232,
+      line: 1238,
       reason: '#3494 AA24 signature rejection — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1258,
+      line: 1264,
       reason: '#3494 other AA2x account-validation failure — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1307,
+      line: 1313,
       reason: '#3494 task-budget transfer-cap revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1346,
+      line: 1352,
       reason: '#3494 period-budget revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1400,
+      line: 1406,
       reason: 'on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — deliberately not booked: the failed intent row is the record',
     },
   ],

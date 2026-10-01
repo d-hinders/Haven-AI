@@ -770,7 +770,9 @@ describe('POST /payments — the refusal ledger on the direct paths (#2945)', ()
       status: 'failed',
       error: 'On-chain execution failed',
     })
-    expect(response.json().error_code).toBeUndefined()
+    // #3494's typed classification (which this variant falls through to)
+    // answers the generic code — never submission_outcome_unknown.
+    expect(response.json().error_code).toBe('onchain_execution_failed')
     expect(response.json().user_op_hash).toBeUndefined()
     // The fail write runs; the outcome-pending booking never does.
     expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(true)

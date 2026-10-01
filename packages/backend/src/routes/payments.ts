@@ -1201,6 +1201,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
             null,
           )
         }
+        // Every KNOWN failure — the `included but reverted` variant of
+        // SubmittedUserOpFailedError (the op landed and reverted, so no funds
+        // moved) and every pre-send bundler rejection — is terminal: book
+        // `failed` BEFORE classifying (the classification below describes a
+        // row that is already terminal; nothing here is retryable).
+        await failSubmittedIntent(errorMsg, id, agent.id)
         // #3494: a typed `error_code` + cause class on the 502, instead of
         // one untyped "On-chain execution failed" for everything a bundler
         // can throw after this route already claimed the intent to

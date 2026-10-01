@@ -11,6 +11,7 @@ import {
   findIntentForAgent,
   getIntentStatus,
   findSendIntentByIdempotencyKey,
+  hasConfirmedPaymentToRecipient,
   insertDelegationIntent,
   listIntentsForAgent,
   releaseSubmittedClaim,
@@ -201,6 +202,25 @@ interface PaymentIntentRow {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
+/**
+ * #3531: advisory `recipient.class` on `POST /payments` — `previously_paid`
+ * when THIS agent has a prior CONFIRMED direct-rail payment to this exact
+ * recipient address on this chain, `new_address` otherwise. History-only by
+ * owner decision (2026-10-01): no `own_account`/`contact`/`catalog_merchant`
+ * lookup, so an agent can never probe for the owner's accounts or contacts by
+ * guessing addresses — only its own settled payment history, which it already
+ * knows. Never affects policy or signing; it is informational for the caller.
+ */
+type RecipientClass = 'previously_paid' | 'new_address'
+
+async function classifyRecipient(
+  agent: Pick<AgentContext, 'id' | 'chain_id'>,
+  toAddressLower: string,
+): Promise<{ class: RecipientClass }> {
+  const previouslyPaid = await hasConfirmedPaymentToRecipient(agent.id, agent.chain_id, toAddressLower)
+  return { class: previouslyPaid ? 'previously_paid' : 'new_address' }
+}
+
 /** Resolve a token symbol to its config for a specific chain. */
 function resolveToken(chainId: number, symbol: string) {
   const chain = getChain(chainId)
@@ -337,6 +357,11 @@ async function replayIntentBody(
       status: pi.status,
       expires_at: pi.expires_at,
       idempotent_replay: true,
+      // #3531: recomputed on every replay (never carried on the row) — it
+      // reads the agent's CURRENT confirmed history, which can only grow
+      // between the original request and a retry, so this is at worst a
+      // same-request-window-consistent read, never a stale one.
+      recipient: await classifyRecipient(agent, pi.to_address),
       sign_data: {
         hash,
         signature_scheme,
@@ -919,6 +944,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       payment_id: delegationIntent.id,
       status: delegationIntent.status,
       expires_at: delegationIntent.expires_at,
+      // #3531: advisory only, computed from this agent's own confirmed
+      // history — never consulted by the sign_data below or by any
+      // authorization check above.
+      recipient: await classifyRecipient(agent, to.toLowerCase()),
       sign_data: {
         hash: authorization.prepared.userOpHash,
         signature_scheme: 'eip712_userop',

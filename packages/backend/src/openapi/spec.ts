@@ -10795,6 +10795,22 @@ export const openapiSpec = {
           status: { type: 'string', enum: ['pending_signature'] },
           expires_at: isoDateTime,
           sign_data: paymentSignData,
+          // #3531: advisory, never part of sign_data and never checked by any
+          // authorization path — history-only, from the CALLING agent's own
+          // confirmed payments to this recipient address. Optional and
+          // top-level so an existing integrator decoding this shape is
+          // unaffected; owner decision (2026-10-01) scoped the enum to these
+          // two values only — no own_account/contact/catalog_merchant class,
+          // so an agent cannot learn anything about the owner's accounts or
+          // contacts by probing addresses.
+          recipient: {
+            type: 'object',
+            required: ['class'],
+            properties: {
+              class: { type: 'string', enum: ['previously_paid', 'new_address'] },
+            },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
       },

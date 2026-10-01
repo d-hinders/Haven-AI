@@ -4636,6 +4636,10 @@ export type components = {
                 };
                 instructions: string;
             };
+            recipient?: {
+                /** @enum {string} */
+                class: "previously_paid" | "new_address";
+            };
         };
         DirectSignContext: {
             /** Format: uuid */

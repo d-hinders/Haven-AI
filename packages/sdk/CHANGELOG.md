@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **`createIntent()`'s `PaymentIntent` gains `recipient.class` (#3531).** `'previously_paid'` when this agent has a prior CONFIRMED direct payment to the exact recipient address on this chain, `'new_address'` otherwise — advisory only, history-only (this agent's own confirmed payments, nothing about the owner's accounts or contacts), never consulted by signing or policy. Absent against an older backend. Additive; no update needed.
+
 - **`PaymentStatusResult.failureReason` (#3494).** `getPaymentStatus()` now additionally reports a bounded, redacted cause on a `failed` payment — present (possibly `null`, when no message was recorded) only when `status` is `'failed'`, absent on every other status. An older backend simply omits it. Additive; no update needed.
 
 - **A direct payment's status now reports its own `idempotencyKey` (#3494, backend-only change — no SDK code change).** `getPaymentStatus()` on a direct (non-x402/non-mpp) payment previously answered `idempotencyKey: null` even when the send call passed one — the field is now populated from the stored `send_idempotency_key`. An older backend still answers `null`; `payment-mappers.ts` already read `idempotency_key` generically, so this applies automatically once the backend ships it, with no SDK release needed (unlike `failureReason` above, which DOES need this SDK's mapper). No update needed.

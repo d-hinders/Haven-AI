@@ -159,6 +159,16 @@ export interface PaymentIntent {
 
   /** Data needed to sign the payment */
   signData: SignData
+
+  /**
+   * #3531: advisory, history-only recipient classification — `previously_paid`
+   * when this agent has a prior confirmed payment to this recipient,
+   * `new_address` otherwise. Never affects signing or policy. Absent against
+   * an older backend.
+   */
+  recipient?: {
+    class: 'previously_paid' | 'new_address'
+  }
 }
 
 export type PaymentStatus =
@@ -2276,6 +2286,14 @@ export interface RawCreateResponse {
       nonce: number
     }
     instructions: string
+  }
+  /**
+   * #3531: advisory, history-only — `previously_paid` when this agent has a
+   * prior confirmed payment to this recipient, `new_address` otherwise.
+   * Optional: older backends omit it, and `createIntent` must not require it.
+   */
+  recipient?: {
+    class: 'previously_paid' | 'new_address'
   }
   error?: string
   supported?: string[]

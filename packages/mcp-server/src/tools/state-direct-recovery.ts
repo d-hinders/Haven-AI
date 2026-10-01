@@ -564,6 +564,9 @@ export function createStateDirectRecoveryHandlers(
             asset: args.asset,
             amount: args.amount,
             recipient: args.recipient,
+            // #3531: advisory, history-only — present only when the backend
+            // sent it (an older backend omits `intent.recipient` entirely).
+            ...(intent.recipient ? { recipient_class: intent.recipient.class } : {}),
             // #3277: the byte-free signing handoff, always named (owner
             // decision: refusal recovery, the #1547 pattern — see
             // DIRECT_SIGN_REASON). Since #3495 the relay fields above are an
@@ -642,6 +645,9 @@ export function createStateDirectRecoveryHandlers(
                 ? { signature_scheme: intent.signData.signature_scheme }
                 : {}),
             meta: { token: args.token, amount: args.amount, to: args.to },
+            // #3531: advisory, history-only — present only when the backend
+            // sent it (an older backend omits `intent.recipient` entirely).
+            ...(intent.recipient ? { recipient_class: intent.recipient.class } : {}),
             // #3277: the byte-free signing handoff, always named (owner
             // decision: refusal recovery, the #1547 pattern — see
             // DIRECT_SIGN_REASON). Since #3495 the relay fields above are an

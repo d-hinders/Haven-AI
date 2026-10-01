@@ -116,6 +116,24 @@ export const OPS_REVIEWED_SENSITIVE_COLUMNS: Readonly<Record<string, string>> = 
   'agent_task_budgets.parent_delegation_hash': 'keccak identity of a delegation, not a credential',
   'agent_sub_budgets.delegation_hash': 'keccak identity of a delegation, not a credential',
   'agent_sub_budgets.parent_delegation_hash': 'keccak identity of a delegation, not a credential',
+  // On-chain public identifiers: a token contract, a transaction or an
+  // attestation id — anyone can read them from the chain.
+  'agent_delegations.token_address': 'ERC-20 contract address',
+  'agent_task_budgets.token_address': 'ERC-20 contract address',
+  'agent_sub_budgets.token_address': 'ERC-20 contract address',
+  'payment_intents.token_address': 'ERC-20 contract address',
+  'payment_intents.token_symbol': 'token ticker (USDC)',
+  'payment_refusals.token_symbol': 'token ticker (USDC)',
+  'payment_intents.tx_hash': 'public transaction hash',
+  'outbound_txs.tx_hash': 'public transaction hash',
+  'agent_task_budgets.close_tx_hash': 'public transaction hash',
+  'agent_sub_budgets.close_tx_hash': 'public transaction hash',
+  'agent_passports.tx_hash': 'public transaction hash',
+  'agent_passports.revocation_tx_hash': 'public transaction hash',
+  'agent_passports.attestation_uid': 'public EAS attestation uid',
+  'hybrid_account_passkeys.public_key_x': 'passkey PUBLIC key coordinate',
+  'hybrid_account_passkeys.public_key_y': 'passkey PUBLIC key coordinate',
+  'agent_delegations.rekey_id': 'foreign key to a re-key record ("rekey" matches /key/), not key material',
 }
 
 /** Names that need a review entry before they may be granted. */

@@ -8,6 +8,7 @@ import {
   isOpsConfigured,
   parseOpsAllowedGithubIds,
   parseOpsConfig,
+  parseOpsDatabaseUrl,
   parseOpsRedirectOrigins,
 } from '../config/ops.js'
 
@@ -88,5 +89,25 @@ describe('parseOpsRedirectOrigins', () => {
       'https://a.example:8443',
       'http://127.0.0.1:3002',
     ])
+  })
+})
+
+describe('parseOpsDatabaseUrl (#3510)', () => {
+  const MAIN = 'postgres://haven:pw@db.internal:5432/haven'
+
+  it('is the quiet off state when unset', () => {
+    expect(parseOpsDatabaseUrl(undefined, MAIN)).toBe('')
+    expect(parseOpsDatabaseUrl('  ', MAIN)).toBe('')
+  })
+
+  it('accepts the read-only role login', () => {
+    expect(parseOpsDatabaseUrl('postgres://haven_ops_readonly:pw@db.internal:5432/haven', MAIN)).toBe(
+      'postgres://haven_ops_readonly:pw@db.internal:5432/haven',
+    )
+  })
+
+  it('refuses to boot when it is the main DATABASE_URL — no fallback through the main login', () => {
+    expect(() => parseOpsDatabaseUrl(MAIN, MAIN)).toThrow(/OPS_DATABASE_URL is equal to DATABASE_URL/)
+    expect(() => parseOpsDatabaseUrl(` ${MAIN} `, MAIN)).toThrow(/OPS_DATABASE_URL is equal to DATABASE_URL/)
   })
 })

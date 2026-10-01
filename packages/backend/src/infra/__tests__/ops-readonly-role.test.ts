@@ -166,6 +166,11 @@ describeDb('ops read-only role (#3510)', () => {
   })
 
   it('sets the read-only, timeout and connection-limit bounds on the role', async () => {
+    // Role settings are cluster-wide and outlive a run: clear them first, so
+    // only THIS application of the script can make the assertions true.
+    await db.query(`ALTER ROLE "${ROLE}" RESET ALL`)
+    await db.query(`ALTER ROLE "${ROLE}" CONNECTION LIMIT -1`)
+    await applyScript()
     const { rows } = await db.query<{ rolconnlimit: number; rolcanlogin: boolean; settings: string[] | null }>(
       `SELECT r.rolconnlimit, r.rolcanlogin, s.setconfig AS settings
          FROM pg_roles r LEFT JOIN pg_db_role_setting s ON s.setrole = r.oid AND s.setdatabase = 0
@@ -200,8 +205,9 @@ describeDb('ops read-only role (#3510)', () => {
       const leak = 'HTTP request failed. URL: https://rpc.example/v2/84532?apikey=LEAKED_SECRET_123'
       if (table === 'payment_intents') {
         await db.query(
-          `INSERT INTO payment_intents (agent_id, user_id, token_symbol, token_address, to_address, amount_raw, amount_human, status, error_message)
-           VALUES ($1, $2, 'USDC', $3, $3, '1', '0.000001', 'failed', $4)`,
+          `INSERT INTO payment_intents (agent_id, user_id, account_address, token_symbol, token_address, to_address, amount_raw, amount_human,
+                                        delegate_address, allowance_nonce, sign_hash, expires_at, status, error_message)
+           VALUES ($1, $2, $3, 'USDC', $3, $3, '1', '0.000001', $3, 0, '0x' || repeat('22', 32), NOW() + interval '1 hour', 'failed', $4)`,
           [agents[0].id, users[0].id, '0x' + '11'.repeat(20), leak],
         )
       } else if (table === 'outbound_txs') {

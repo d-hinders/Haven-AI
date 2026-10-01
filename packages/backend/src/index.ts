@@ -83,7 +83,7 @@ import machinePaymentsReconciliationEventsRoutes from './routes/machine-payments
 import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
 import opsRoutes from './routes/ops.js'
-import { getOpsReadDb } from './infra/ops-db.js'
+import { getOpsReadDb } from './db/ops-read-pool.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'

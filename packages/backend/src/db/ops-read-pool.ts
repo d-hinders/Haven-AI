@@ -13,7 +13,7 @@
  */
 import pg from 'pg'
 import { config } from '../config.js'
-import type { Executor } from './transaction.js'
+import type { Executor } from '../infra/transaction.js'
 
 /** Small on purpose: the role itself is capped at CONNECTION LIMIT 5. */
 export const OPS_READ_POOL_MAX = 3

@@ -544,6 +544,17 @@ describeDb('findOutboundTxByHash (#1745)', () => {
     expect(await listLiveBroadcastNoncesFrom(CHAIN, 7n)).toEqual([7n, 9n, 900n])
   })
 
+})
+
+describeDb('markOutboundTxFailed redacts vendor secrets (#3510)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+    CHAIN = ++chainCounter
+  })
+
   it('stores failure reasons verbatim, except vendor secrets, which it redacts (#3510)', async () => {
     // Characterisation: an ordinary reason lands byte-for-byte as before.
     const plain = await enqueueOutboundTx({ chainId: CHAIN, submitter: 'sweep', toAddress: TO, data: DATA, valueAtomic: 0n })

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { eligibleSubBudgetParents } from '@/lib/sub-budget'
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
 
 const { mockIssue } = vi.hoisted(() => ({ mockIssue: vi.fn() }))
@@ -31,9 +32,9 @@ function budget(overrides: Record<string, unknown> = {}): DelegationBudget {
   } as DelegationBudget
 }
 
-function renderModal(onIssued = vi.fn()) {
+function renderModal(onIssued = vi.fn(), budgets: DelegationBudget[] = [budget()]) {
   render(
-    <IssueSubBudgetModal open onClose={vi.fn()} agentId="agent-a" budget={budget()} tokens={TOKENS} onIssued={onIssued} />,
+    <IssueSubBudgetModal open onClose={vi.fn()} agentId="agent-a" budgets={budgets} tokens={TOKENS} onIssued={onIssued} />,
   )
   return onIssued
 }
@@ -93,5 +94,64 @@ describe('IssueSubBudgetModal (#3506)', () => {
       expect(screen.getByText("This is more than Atlas's own budget allows per period. Lower the amount.")).toBeTruthy(),
     )
     expect(screen.queryByTestId('sub-budget-pending')).toBeNull()
+  })
+
+  describe('several budgets (#3506 S4)', () => {
+    const PIN = '0x' + 'cc'.repeat(20)
+    const open = budget()
+    const pinned = budget({
+      delegation_hash: '0x' + 'cd'.repeat(32), recipient_address: PIN, budget_atomic: '10000000', period_seconds: 86_400,
+    })
+
+    it('shows no picker with one eligible budget', () => {
+      renderModal()
+      expect(screen.queryByLabelText('From budget')).toBeNull()
+    })
+
+    it('shows a picker listing each budget by amount, period and pin', () => {
+      renderModal(vi.fn(), [open, pinned])
+      const labels = Array.from(screen.getByLabelText('From budget').querySelectorAll('option')).map((o) => o.textContent)
+      expect(labels).toHaveLength(2)
+      expect(labels[0]).toMatch(/50 USDC per week/)
+      expect(labels[1]).toMatch(/10 USDC per day · to 0xcc/)
+    })
+
+    it('the selected budget drives the ceiling and the request', async () => {
+      mockIssue.mockResolvedValueOnce({ sub_budget: {}, parent_child_sub_budget: {}, next_action: 'x', sign_targets: [] })
+      renderModal(vi.fn(), [open, pinned])
+      expect(screen.getByTestId('sub-budget-ceiling').textContent).toMatch(/50 USDC per week/)
+      fireEvent.change(screen.getByLabelText('From budget'), { target: { value: pinned.delegation_hash } })
+      expect(screen.getByTestId('sub-budget-ceiling').textContent).toMatch(/10 USDC per day/)
+      expect(screen.getByTestId('sub-budget-recipient-pinned')).toBeTruthy()
+      fill()
+      fireEvent.click(screen.getByText('Issue sub-budget', { selector: 'button' }))
+      await waitFor(() => expect(mockIssue).toHaveBeenCalled())
+      expect(mockIssue.mock.calls[0][1]).toMatchObject({ token_address: USDC, recipient_address: PIN })
+    })
+
+    it('an open budget sends no recipient', async () => {
+      mockIssue.mockResolvedValueOnce({ sub_budget: {}, parent_child_sub_budget: {}, next_action: 'x', sign_targets: [] })
+      renderModal(vi.fn(), [pinned, open])
+      fireEvent.change(screen.getByLabelText('From budget'), { target: { value: open.delegation_hash } })
+      fill()
+      fireEvent.click(screen.getByText('Issue sub-budget', { selector: 'button' }))
+      await waitFor(() => expect(mockIssue).toHaveBeenCalled())
+      expect(mockIssue.mock.calls[0][1]).not.toHaveProperty('recipient_address')
+    })
+  })
+})
+
+describe('eligibleSubBudgetParents (#3506 S4)', () => {
+  const now = 1_000
+  const b = (o: Record<string, unknown>) => ({ status: 'active', expires_at: 2_000, merchant_slug: null, ...o })
+  it('excludes expired, merchant-locked and non-active budgets', () => {
+    const rows = [
+      b({ id: 'ok' }),
+      b({ id: 'expired', expires_at: 999 }),
+      b({ id: 'merchant', merchant_slug: 'acme' }),
+      b({ id: 'pending', status: 'pending' }),
+    ]
+    expect(eligibleSubBudgetParents(rows, now).map((r) => (r as { id?: string }).id)).toEqual(['ok'])
+    expect(eligibleSubBudgetParents(null, now)).toEqual([])
   })
 })

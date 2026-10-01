@@ -118,3 +118,13 @@ export function subBudgetRefusalCopy(
   if (err.status === 404) return `Haven could not find ${subAgentName} in this account. Pick another agent.`
   return 'Haven could not issue this sub-budget. Check the details and try again.'
 }
+
+/**
+ * The budgets a sub-budget can be carved from (#3506 S4): active, unexpired and
+ * not merchant-locked. Order is preserved, so the first is the default.
+ */
+export function eligibleSubBudgetParents<
+  B extends { status: string; expires_at: number; merchant_slug?: string | null },
+>(budgets: readonly B[] | null | undefined, nowSec: number): B[] {
+  return (budgets ?? []).filter((b) => b.status === 'active' && b.expires_at > nowSec && !b.merchant_slug)
+}

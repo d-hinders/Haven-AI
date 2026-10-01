@@ -44,20 +44,48 @@ interface Props {
   onClose: () => void
   /** The agent whose budget the slice comes out of. */
   agentId: string
-  /** That agent's ACTIVE budget — the ceiling the slice must fit inside. */
-  budget: DelegationBudget
+  /**
+   * That agent's ELIGIBLE budgets (`eligibleSubBudgetParents`) — the ceiling the
+   * slice must fit inside is the selected one. Never empty; with more than one a
+   * "From budget" picker is shown.
+   */
+  budgets: DelegationBudget[]
   tokens: TokenOption[]
   /** Fires once after a successful issue so the tree can refresh. */
   onIssued?: () => void
 }
 
+function describeBudget(b: DelegationBudget, tokens: TokenOption[]): string {
+  const t = tokens.find((x) => x.address.toLowerCase() === b.token_address.toLowerCase())
+  let amount = b.budget_atomic
+  try {
+    amount = formatUnits(BigInt(b.budget_atomic), t?.decimals ?? 6)
+  } catch {
+    // keep the raw amount
+  }
+  const period = PERIOD_LABELS[b.period_seconds] ?? `every ${b.period_seconds}s`
+  const pin = b.recipient_address ? `to ${truncateAddress(b.recipient_address)}` : 'to any recipient'
+  return `${amount} ${t?.symbol ?? ''} ${period} · ${pin}`.replace(/\s+/g, ' ')
+}
+
 const PERIOD_LABELS: Record<number, string> = { 86_400: 'per day', 604_800: 'per week', 2_592_000: 'per month' }
 
-export default function IssueSubBudgetModal({ open, onClose, agentId, budget, tokens, onIssued }: Props) {
+export default function IssueSubBudgetModal({ open, onClose, agentId, budgets, tokens, onIssued }: Props) {
   const { agents, loading: agentsLoading } = useAgents()
   const delegating = agents.find((a) => a.id === agentId) ?? null
   const delegatingName = delegating?.name ?? 'This agent'
 
+  // #3506 S4: the owner picks WHICH budget to slice when there are several. The
+  // request is built so the backend's own parent selection lands on the same
+  // row: it runs `selectDelegationForPayment(token, recipient ?? treasury)`,
+  // which prefers a recipient-pinned row matching the sent recipient and
+  // otherwise the open row. So a pinned budget sends its pin; an open budget
+  // sends only what the owner typed (usually nothing). LIMIT: two budgets the
+  // backend cannot tell apart (same token and same pin/open) would resolve to
+  // the one expiring first, whatever is picked here — the (token, recipient)
+  // slot is meant to hold one active budget, so this is not expected to occur.
+  const [parentHash, setParentHash] = useState(budgets[0]?.delegation_hash ?? '')
+  const budget = budgets.find((b) => b.delegation_hash === parentHash) ?? budgets[0]
   const token = tokens.find((t) => t.address.toLowerCase() === budget.token_address.toLowerCase())
   const decimals = token?.decimals ?? 6
   const symbol = token?.symbol ?? ''
@@ -89,16 +117,24 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budget, to
   // may survive a close/reopen or a switch of agent.
   useEffect(() => {
     if (!open) return
+    setParentHash(budgets[0]?.delegation_hash ?? '')
+    setRecipient(budgets[0]?.recipient_address ?? '')
     setSubAgentId('')
     setAmount('')
     setEndDate('')
-    setRecipient(budget.recipient_address ?? '')
     setLabel('')
     setTouched(false)
     setBusy(false)
     setRefusal(null)
     setResult(null)
-  }, [open, agentId, budget.delegation_hash, budget.recipient_address])
+    // `budgets` is deliberately not a dependency: a background refresh must not wipe the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, agentId])
+
+  // Switching budget re-pins the recipient to that budget's pin (or clears it).
+  useEffect(() => {
+    setRecipient(budget.recipient_address ?? '')
+  }, [budget.delegation_hash, budget.recipient_address])
 
   const subAgentName = candidates.find((a) => a.id === subAgentId)?.name ?? 'The other agent'
   const nowSec = Math.floor(Date.now() / 1000)
@@ -187,6 +223,27 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budget, to
         </div>
       ) : (
         <div className="space-y-5">
+          {budgets.length > 1 ? (
+            <div className="space-y-1.5">
+              <label htmlFor="sub-budget-parent" className="text-sm font-medium text-[var(--v2-ink)]">
+                From budget
+              </label>
+              <Select
+                id="sub-budget-parent"
+                value={budget.delegation_hash}
+                onChange={(e) => setParentHash(e.target.value)}
+                disabled={busy}
+                aria-label="From budget"
+              >
+                {budgets.map((b) => (
+                  <option key={b.delegation_hash} value={b.delegation_hash}>
+                    {describeBudget(b, tokens)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          ) : null}
+
           <p className="text-sm text-[var(--v2-ink-2)]" data-testid="sub-budget-ceiling">
             {delegatingName}&rsquo;s budget is {parentAmount} {symbol} {periodLabel}, until{' '}
             {formatSubBudgetDate(budget.expires_at)}. A sub-budget can be this size or smaller, ends no later,

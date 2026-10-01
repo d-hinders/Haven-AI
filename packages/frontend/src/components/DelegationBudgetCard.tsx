@@ -18,6 +18,7 @@ import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
+import { eligibleSubBudgetParents } from '@/lib/sub-budget'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
@@ -224,9 +225,8 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   const active = (budgets ?? []).filter((b) => b.status === 'active')
   // #3506: a sub-budget is carved from a LIVE budget — the entry point exists
   // only when this agent has an active, unexpired one (the card itself renders
-  // only on the delegation rail). The first such budget is the ceiling shown.
-  const subBudgetParent =
-    active.find((b) => b.expires_at > Math.floor(Date.now() / 1000) && !b.merchant_slug) ?? null
+  // only on the delegation rail). The modal offers a picker when several qualify.
+  const subBudgetParents = eligibleSubBudgetParents(budgets, Math.floor(Date.now() / 1000))
 
   return (
     <Card hover={false} className="mt-6 p-5 md:p-6">
@@ -280,7 +280,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         )}
       </Card.Section>
 
-      {subBudgetParent && !budgetsError ? (
+      {subBudgetParents.length > 0 && !budgetsError ? (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--v2-border)] pb-3">
           <p className="text-xs text-[var(--v2-ink-muted)]">
             Share part of this budget with another of your agents.
@@ -391,12 +391,12 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         </Card.Section>
       ) : null}
 
-      {subBudgetParent && issuingSubBudget ? (
+      {subBudgetParents.length > 0 && issuingSubBudget ? (
         <IssueSubBudgetModal
           open
           onClose={() => setIssuingSubBudget(false)}
           agentId={agentId}
-          budget={subBudgetParent}
+          budgets={subBudgetParents}
           tokens={tokens}
           onIssued={() => void reloadSubBudgets()}
         />

@@ -8,17 +8,25 @@
  *
  * There is no fallback (owner decision, #3510): with `OPS_DATABASE_URL`
  * unset this returns null and the ops data routes answer 404. Pointing it at
- * the main `DATABASE_URL` refuses the boot (`config/ops.ts`), because that
- * login can read every secret column the role exists to withhold.
+ * the main login refuses the boot (`config/ops.ts`, by user name), and the
+ * executor checks the login's actual privileges before its first read
+ * (`guardOpsReadExecutor`): an unsafe login fails every ops read, and the
+ * routes answer 404.
  */
 import pg from 'pg'
 import { config } from '../config.js'
 import type { Executor } from '../infra/transaction.js'
+import { guardOpsReadExecutor } from '../infra/repositories/ops-read-role.js'
 
-/** Small on purpose: the role itself is capped at CONNECTION LIMIT 5. */
-export const OPS_READ_POOL_MAX = 3
+/**
+ * Per process. The role is capped at CONNECTION LIMIT 5
+ * (`OPS_READONLY_CONNECTION_LIMIT`), so this fits two backend replicas with
+ * one connection to spare for an operator's console session; a third replica
+ * would need the limit raised in the role script.
+ */
+export const OPS_READ_POOL_MAX = 2
 
-let opsPool: pg.Pool | null = null
+let opsReadDb: Executor | null = null
 
 export function createOpsReadPool(connectionString: string): pg.Pool {
   const created = new pg.Pool({
@@ -36,6 +44,8 @@ export function createOpsReadPool(connectionString: string): pg.Pool {
 /** The ops read executor, or null when the deployment configures none. */
 export function getOpsReadDb(): Executor | null {
   if (config.opsDatabaseUrl === '') return null
-  opsPool ??= createOpsReadPool(config.opsDatabaseUrl)
-  return opsPool
+  opsReadDb ??= guardOpsReadExecutor(createOpsReadPool(config.opsDatabaseUrl), (err) => {
+    console.error(`Ops console data reads are OFF: ${err.message}`)
+  })
+  return opsReadDb
 }

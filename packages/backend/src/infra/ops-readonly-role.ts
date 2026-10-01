@@ -13,7 +13,9 @@
  * - **Column-level grants only.** Never a table-level `GRANT SELECT`, which
  *   would silently extend to every column a later migration adds. A new
  *   column stays unreadable (fails closed) until this list names it and the
- *   script is re-run; the drift test flags it.
+ *   script is re-run. Nothing flags a new unlisted column — it is simply
+ *   unreadable — except on `outbound_txs`, whose `SELECT *` query test goes
+ *   red.
  * - **A positive allowlist.** Tables not listed are not readable at all
  *   (`agent_connection_setups`, `device_authorizations`,
  *   `accounting_connections`, `catalog_submissions`, `user_passkeys`,
@@ -23,7 +25,15 @@
  *   cannot starve the primary.
  * - **No unredacted vendor secret in a free-text column.** The script refuses
  *   (raises, nothing granted) while any granted free-text column still holds
- *   one — older rows predate the write-boundary scrub.
+ *   one — older rows predate the write-boundary scrub. `buildOpsScrubSql`
+ *   generates the one-off clean-up, from the same patterns.
+ * - **Never the credential columns in `OPS_NEVER_GRANT`**, whatever a later
+ *   review entry says: the builder throws if the allowlist names one.
+ * - **No CREATE on the schema**, directly or through PUBLIC (the
+ *   CVE-2018-1058 class): the script revokes the direct grant and refuses
+ *   while PUBLIC still holds one.
+ *
+ * Operator steps: `docs/operations/ops-readonly-role.md`.
  */
 
 /** Columns the role may SELECT, per table. Anything absent is unreadable. */
@@ -62,8 +72,10 @@ export const OPS_READONLY_GRANTS: Readonly<Record<string, readonly string[]>> = 
     'period_amount_atomic', 'status', 'expires_at', 'prepared_user_op', 'close_tx_hash',
     'created_at', 'updated_at', 'opened_at', 'closed_at',
   ],
-  // `signature` and the three idempotency keys withheld (the agent's signature
-  // over a prepared operation, and client-chosen replay keys — ops needs none).
+  // `signature` and the three idempotency keys withheld — see OPS_NEVER_GRANT.
+  // `prepared_user_op` IS granted, and for an erc7710 payment it holds the
+  // UNSIGNED settlement child plus the budget delegation: withholding
+  // `signature` is what keeps that child unredeemable from this role.
   payment_intents: [
     'id', 'agent_id', 'user_id', 'account_address', 'token_symbol', 'token_address', 'to_address',
     'amount_raw', 'amount_human', 'delegate_address', 'allowance_nonce', 'sign_hash', 'tx_hash',
@@ -96,6 +108,22 @@ export const OPS_READONLY_GRANTS: Readonly<Record<string, readonly string[]>> = 
   ],
   // Public-key material only (`user_passkeys`, which holds `raw_attestation`, is not granted).
   hybrid_account_passkeys: ['id', 'account_id', 'key_id', 'public_key_x', 'public_key_y', 'label', 'created_at'],
+}
+
+/**
+ * Columns that are never granted, with the reason. A review entry in
+ * `OPS_REVIEWED_SENSITIVE_COLUMNS` cannot override these: the builder throws
+ * if `OPS_READONLY_GRANTS` names one, and the test pins the list.
+ */
+export const OPS_NEVER_GRANT: Readonly<Record<string, string>> = {
+  'users.password_hash': 'dashboard credential',
+  'agents.api_key_hash': 'agent credential verifier',
+  'agents.api_key_prefix': 'narrows an agent API key search; credential material',
+  'payment_intents.signature':
+    "the agent's signature over prepared_user_op — together they are a redeemable erc7710 settlement child",
+  'payment_intents.x402_idempotency_key': 'client-chosen replay key',
+  'payment_intents.machine_idempotency_key': 'client-chosen replay key',
+  'payment_intents.send_idempotency_key': 'client-chosen replay key',
 }
 
 /**
@@ -159,19 +187,64 @@ export const FREE_TEXT_COLUMN_NAME = /error|message|reason|detail/i
  * allowlisted JSON shape), so they need no write-boundary redaction.
  */
 export const OPS_REVIEWED_STRUCTURED_COLUMNS: Readonly<Record<string, string>> = {
-  'payment_refusals.reason': 'closed classification from classifyRevertForLedger',
-  'payment_refusals.detail': 'JSONB with an allowlisted key set (migration 087)',
+  'payment_refusals.reason': 'closed CHECK enum (migration 086, payment_refusals_reason_check)',
+  'payment_refusals.detail': 'JSONB with an allowlisted key set (migration 086, payment_refusals_detail_allowlist_check; pickRefusalDetail at the writer)',
 }
 
 /**
- * Postgres regex for an UNREDACTED vendor secret — the three shapes
- * `redactVendorSecrets` removes, minus their already-redacted forms. Used by
- * the script's refusal guard.
+ * The three shapes `redactVendorSecrets` (domain/redact-vendor-secrets.ts)
+ * removes, as Postgres ARE regexes with the same replacement and flags. The
+ * parity test runs every pattern in both engines over the same samples, so
+ * the JS writer and this script cannot drift apart.
  */
-export const UNREDACTED_SECRET_PG_REGEX =
-  String.raw`(api[_-]?key|key|token|secret)=(?!REDACTED)[^&[:space:]"'\\)]+` +
-  String.raw`|https?://[^[:space:]/@]+:[^[:space:]@]+@` +
-  String.raw`|/(rpc|v2)/(?!REDACTED)[A-Za-z0-9_-]{16,}`
+export const VENDOR_SECRET_PG_PATTERNS: ReadonlyArray<{
+  /** Matches a still-unredacted secret; the refusal guard. */
+  detect: string
+  /** The `regexp_replace` pattern, replacement and flags the scrub uses. */
+  pattern: string
+  replacement: string
+  flags: 'gi' | 'g'
+}> = [
+  {
+    // `key=<value>`, unless the value is already `REDACTED` — or a prefix of
+    // it at the very end, which the passport writers' `.slice(0, 500)` after
+    // redaction can leave (`apikey=RED`).
+    detect:
+      String.raw`\y(api[_-]?key|key|token|secret)=(?!REDACTED([&[:space:]"'\\)]|$))(?!R(E(D(A(C(T(E(D)?)?)?)?)?)?)?$)[^&[:space:]"'\\)]+`,
+    pattern: String.raw`\y(api[_-]?key|key|token|secret)=[^&[:space:]"'\\)]+`,
+    replacement: String.raw`\1=REDACTED`,
+    flags: 'gi',
+  },
+  {
+    // Basic-auth: the redacted form `https://REDACTED@` has no `:`, so it never matches.
+    detect: String.raw`https?://[^[:space:]/@]+:[^[:space:]@]+@`,
+    pattern: String.raw`(https?://)[^[:space:]/@]+:[^[:space:]@]+@`,
+    replacement: String.raw`\1REDACTED@`,
+    flags: 'gi',
+  },
+  {
+    // Key-in-path; case-sensitive like the JS. `REDACTED` is 8 characters, under the 16 this needs.
+    detect: String.raw`/(rpc|v2)/[A-Za-z0-9_-]{16,}`,
+    pattern: String.raw`(/(rpc|v2)/)[A-Za-z0-9_-]{16,}`,
+    replacement: String.raw`\1REDACTED`,
+    flags: 'g',
+  },
+]
+
+/** SQL boolean: does `expr` still hold an unredacted vendor secret? */
+export function unredactedSecretCondition(expr: string): string {
+  return VENDOR_SECRET_PG_PATTERNS.map(
+    (p) => `${expr} ${p.flags === 'gi' ? '~*' : '~'} ${literal(p.detect)}`,
+  ).join(' OR ')
+}
+
+/** SQL expression: `expr` with every vendor secret redacted, as `redactVendorSecrets` would. */
+export function redactedExpression(expr: string): string {
+  return VENDOR_SECRET_PG_PATTERNS.reduce(
+    (inner, p) => `regexp_replace(${inner}, ${literal(p.pattern)}, ${literal(p.replacement)}, ${literal(p.flags)})`,
+    expr,
+  )
+}
 
 export const DEFAULT_OPS_READONLY_ROLE = 'haven_ops_readonly'
 export const OPS_READONLY_STATEMENT_TIMEOUT = '5s'
@@ -198,9 +271,13 @@ export function buildOpsReadonlyRoleSql(opts: { role?: string; schema: string })
   const roleName = opts.role ?? DEFAULT_OPS_READONLY_ROLE
   const role = ident(roleName, 'role')
   const schema = ident(opts.schema, 'schema')
+  const never = Object.entries(OPS_READONLY_GRANTS)
+    .flatMap(([table, cols]) => cols.map((c) => `${table}.${c}`))
+    .filter((q) => q in OPS_NEVER_GRANT)
+  if (never.length > 0) throw new Error(`OPS_READONLY_GRANTS names never-grant column(s): ${never.join(', ')}`)
   const guards = Object.keys(OPS_FREE_TEXT_COLUMNS).map((qualified) => {
     const [table, column] = qualified.split('.')
-    return `EXISTS (SELECT 1 FROM ${schema}.${ident(table, 'table')} WHERE ${ident(column, 'column')} ~* ${literal(UNREDACTED_SECRET_PG_REGEX)})`
+    return `EXISTS (SELECT 1 FROM ${schema}.${ident(table, 'table')} WHERE ${unredactedSecretCondition(ident(column, 'column'))})`
   })
   const lines: string[] = [
     '-- Ops console read-only role (#3510). Generated by packages/backend/src/infra/ops-readonly-role.ts.',
@@ -211,12 +288,20 @@ export function buildOpsReadonlyRoleSql(opts: { role?: string; schema: string })
     `    CREATE ROLE ${role} NOLOGIN;`,
     '  END IF;',
     `  IF ${guards.join('\n     OR ')} THEN`,
-    `    RAISE EXCEPTION 'ops read-only role: a granted free-text column still holds an unredacted vendor secret; scrub it before granting (see the ops-console runbook)';`,
+    `    RAISE EXCEPTION 'ops read-only role: a granted free-text column still holds an unredacted vendor secret; scrub it first (npm run -s ops:readonly-role-sql -w packages/backend -- --scrub; docs/operations/ops-readonly-role.md)';`,
     '  END IF;',
     'END',
     '$ops$;',
     `REVOKE ALL ON ALL TABLES IN SCHEMA ${schema} FROM ${role};`,
+    `REVOKE CREATE ON SCHEMA ${schema} FROM ${role};`,
     `GRANT USAGE ON SCHEMA ${schema} TO ${role};`,
+    'DO $ops$',
+    'BEGIN',
+    `  IF has_schema_privilege(${literal(roleName)}, ${literal(opts.schema)}, 'CREATE') THEN`,
+    `    RAISE EXCEPTION 'ops read-only role: the role can still CREATE in schema ${opts.schema} (through PUBLIC); run REVOKE CREATE ON SCHEMA ${opts.schema} FROM PUBLIC first (docs/operations/ops-readonly-role.md)';`,
+    '  END IF;',
+    'END',
+    '$ops$;',
   ]
   for (const [table, columns] of Object.entries(OPS_READONLY_GRANTS)) {
     const cols = columns.map((c) => ident(c, 'column')).join(', ')
@@ -228,5 +313,25 @@ export function buildOpsReadonlyRoleSql(opts: { role?: string; schema: string })
     `ALTER ROLE ${role} CONNECTION LIMIT ${OPS_READONLY_CONNECTION_LIMIT};`,
     'COMMIT;',
   )
+  return `${lines.join('\n')}\n`
+}
+
+/**
+ * The one-off scrub for rows older than the write-boundary redaction: every
+ * granted free-text column, rewritten exactly as `redactVendorSecrets` would,
+ * only where a secret is still present. Run as the database owner, once,
+ * before the role script; idempotent.
+ */
+export function buildOpsScrubSql(opts: { schema: string }): string {
+  const schema = ident(opts.schema, 'schema')
+  const lines = ['-- Ops console: scrub unredacted vendor secrets from free-text columns (#3510).', 'BEGIN;']
+  for (const qualified of Object.keys(OPS_FREE_TEXT_COLUMNS)) {
+    const [table, column] = qualified.split('.')
+    const col = ident(column, 'column')
+    lines.push(
+      `UPDATE ${schema}.${ident(table, 'table')} SET ${col} = ${redactedExpression(col)} WHERE ${unredactedSecretCondition(col)};`,
+    )
+  }
+  lines.push('COMMIT;')
   return `${lines.join('\n')}\n`
 }

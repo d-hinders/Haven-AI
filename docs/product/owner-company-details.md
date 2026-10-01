@@ -13,7 +13,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/frontend/src/hooks/useCompanyDetails.ts
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
-last-verified: "2026-09-28"
+last-verified: "2026-10-01"
 ---
 
 # Owner company details
@@ -240,6 +240,9 @@ the form no longer repeats that detail.
   `agent_rekeys.initiated_by_user_id`); a future self-serve account-deletion
   flow will need to delete rows in those (and this) table explicitly rather
   than relying on cascades alone.
+- **The ops console cannot read these details.** Its read-only database role
+  (#3510, [`ops-readonly-role.md`](../operations/ops-readonly-role.md)) is not granted
+  `owner_company_details`, so internal ops access adds no new reader.
 
 ## Env var
 

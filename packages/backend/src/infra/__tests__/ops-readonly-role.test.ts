@@ -13,14 +13,20 @@ import { describeDb, initDbHarness, resetDb } from './helpers/db-harness.js'
 import { workerSchemaName } from './helpers/worker-schema.js'
 import {
   buildOpsReadonlyRoleSql,
+  buildOpsScrubSql,
   FREE_TEXT_COLUMN_NAME,
   OPS_FREE_TEXT_COLUMNS,
+  OPS_NEVER_GRANT,
   OPS_READONLY_CONNECTION_LIMIT,
   OPS_READONLY_GRANTS,
   OPS_REVIEWED_SENSITIVE_COLUMNS,
   OPS_REVIEWED_STRUCTURED_COLUMNS,
+  redactedExpression,
   SENSITIVE_COLUMN_NAME,
+  unredactedSecretCondition,
 } from '../ops-readonly-role.js'
+import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
+import { guardOpsReadExecutor, opsReadRoleProblems, OpsReadRoleUnsafeError } from '../repositories/ops-read-role.js'
 import { LIST_UNMINED_OUTBOUND_TXS_SQL } from '../repositories/outbound-txs.js'
 import { FIND_SWEEPABLE_ERC7710_INTENTS_SQL } from '../repositories/x402-authorizations.js'
 import { LIST_STUCK_REVOCATIONS_SQL } from '../repositories/agent-passports.js'
@@ -32,6 +38,30 @@ const ROLE = `haven_ops_ro_${SCHEMA}`.slice(0, 63)
 async function applyScript(): Promise<void> {
   await db.query(buildOpsReadonlyRoleSql({ role: ROLE, schema: SCHEMA }))
 }
+
+/**
+ * Vendor-secret samples for the JS-vs-Postgres parity test, each with whether
+ * it still holds an unredacted secret (`dirty`).
+ */
+const SECRET_SAMPLES: ReadonlyArray<[string, boolean]> = [
+  ['HTTP request failed. URL: https://rpc.example/v2/84532?apikey=LEAKED_SECRET_123', true],
+  ['https://api.pimlico.io/v2/84532/rpc?api_key=pim_abcDEF123&x=1', true],
+  ['call failed: api-key=abc123) next', true],
+  ['token=tok_1 secret=s3cr3t key=k', true],
+  ['APIKEY=UPPER_CASE_KEY', true],
+  ['https://user:p4ss@rpc.example/path', true],
+  ['HTTPS://User:P4ss@rpc.example', true],
+  ['https://bundler.example/rpc/0123456789abcdef0123', true],
+  ['https://bundler.example/v2/AbCdEf_-0123456789xyz/more', true],
+  ['https://rpc.example/v2/84532?apikey=REDACTED', false],
+  ['https://REDACTED@rpc.example/rpc/REDACTED', false],
+  ['passport failed: apikey=RED', false], // `.slice(0, 500)` after redaction
+  ['execution reverted: TransferAmountExceedsBalance', false],
+  ['publicKey=0xabc monkey=1 x_key=2', false], // no word boundary before `key`
+  ['https://bundler.example/RPC/0123456789abcdef0123', false], // path match is case-sensitive, as in JS
+  ['https://bundler.example/rpc/short', false],
+  ['', false],
+]
 
 /** Run `fn` as the role, always rolled back. Rejections propagate. */
 async function asRole<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -122,6 +152,126 @@ describeDb('ops read-only role (#3510)', () => {
     // Positive control: the patterns do match what they are meant to.
     expect(SENSITIVE_COLUMN_NAME.test('password_hash')).toBe(true)
     expect(FREE_TEXT_COLUMN_NAME.test('error_message')).toBe(true)
+  })
+
+  it('never grants a never-grant column, and the builder refuses one a review entry tries to add', () => {
+    expect(Object.keys(OPS_NEVER_GRANT).sort()).toEqual([
+      'agents.api_key_hash',
+      'agents.api_key_prefix',
+      'payment_intents.machine_idempotency_key',
+      'payment_intents.send_idempotency_key',
+      'payment_intents.signature',
+      'payment_intents.x402_idempotency_key',
+      'users.password_hash',
+    ])
+    expect(ALLOWLIST.filter((q) => q in OPS_NEVER_GRANT)).toEqual([])
+    expect(Object.keys(OPS_REVIEWED_SENSITIVE_COLUMNS).filter((q) => q in OPS_NEVER_GRANT)).toEqual([])
+    const grants = OPS_READONLY_GRANTS as Record<string, string[]>
+    const saved = grants.payment_intents
+    grants.payment_intents = [...saved, 'signature']
+    try {
+      expect(() => buildOpsReadonlyRoleSql({ role: ROLE, schema: SCHEMA })).toThrow(/never-grant column\(s\): payment_intents.signature/)
+    } finally {
+      grants.payment_intents = saved
+    }
+  })
+
+  it('detects and scrubs exactly what redactVendorSecrets redacts (JS-vs-Postgres parity)', async () => {
+    for (const [sample, dirty] of SECRET_SAMPLES) {
+      const { rows } = await db.query<{ dirty: boolean; scrubbed: string; clean_after: boolean }>(
+        `SELECT ${unredactedSecretCondition('$1::text')} AS dirty,
+                ${redactedExpression('$1::text')} AS scrubbed,
+                ${unredactedSecretCondition(redactedExpression('$1::text'))} AS clean_after`,
+        [sample],
+      )
+      expect(rows[0].dirty, sample).toBe(dirty)
+      expect(rows[0].scrubbed, sample).toBe(redactVendorSecrets(sample))
+      expect(rows[0].clean_after, sample).toBe(false)
+      // A dirty sample is one the JS writer would have changed.
+      if (dirty) expect(redactVendorSecrets(sample), sample).not.toBe(sample)
+    }
+  })
+
+  it('the scrub clears a refusal, touching only the rows that hold a secret', async () => {
+    const { rows: users } = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`ops-scrub-${Date.now()}@test.example`],
+    )
+    const { rows: agents } = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name, status) VALUES ($1, 'a', 'active') RETURNING id`,
+      [users[0].id],
+    )
+    const leak = 'HTTP request failed. URL: https://rpc.example/v2/84532?apikey=LEAKED_SECRET_123'
+    await db.query(
+      `INSERT INTO agent_passports (agent_id, chain_id, status, last_error, revocation_last_error) VALUES ($1, 84532, 'failed', $2, 'plain reason')`,
+      [agents[0].id, leak],
+    )
+    await db.query(
+      `INSERT INTO outbound_txs (chain_id, submitter, to_address, data, value_atomic, status, error)
+       VALUES (84532, 'sweep', $1, '0x', '0', 'failed', 'nonce too low')`,
+      ['0x' + '11'.repeat(20)],
+    )
+    await expect(applyScript()).rejects.toThrow(/unredacted vendor secret/)
+    await db.query(buildOpsScrubSql({ schema: SCHEMA }))
+    await db.query(buildOpsScrubSql({ schema: SCHEMA })) // idempotent
+    const { rows } = await db.query<{ last_error: string; revocation_last_error: string }>(
+      `SELECT last_error, revocation_last_error FROM agent_passports WHERE agent_id = $1`,
+      [agents[0].id],
+    )
+    expect(rows[0]).toEqual({ last_error: redactVendorSecrets(leak), revocation_last_error: 'plain reason' })
+    const { rows: txs } = await db.query<{ error: string }>(`SELECT error FROM outbound_txs`)
+    expect(txs.map((t) => t.error)).toEqual(['nonce too low'])
+    await applyScript()
+    expect(await grantedColumns()).toEqual(ALLOWLIST)
+  })
+
+  it('refuses while the role can CREATE in the schema, and revokes a direct CREATE grant', async () => {
+    await db.query(`GRANT CREATE ON SCHEMA "${SCHEMA}" TO "${ROLE}"`)
+    await applyScript()
+    const { rows } = await db.query<{ ok: boolean }>(`SELECT has_schema_privilege($1, $2, 'CREATE') AS ok`, [ROLE, SCHEMA])
+    expect(rows[0].ok).toBe(false)
+    await db.query(`GRANT CREATE ON SCHEMA "${SCHEMA}" TO PUBLIC`)
+    try {
+      await expect(applyScript()).rejects.toThrow(/can still CREATE in schema/)
+    } finally {
+      await db.query(`REVOKE CREATE ON SCHEMA "${SCHEMA}" FROM PUBLIC`)
+    }
+  })
+
+  it('the pool self-check passes the role and refuses the main login, for good', async () => {
+    // SET LOCAL ROLE does not apply the role's settings; the transaction sets what a login would get.
+    await asRole(async (c) => {
+      await c.query('SET LOCAL default_transaction_read_only = on')
+      expect(await opsReadRoleProblems(c)).toEqual([])
+    })
+    expect(await opsReadRoleProblems(db)).toEqual(
+      expect.arrayContaining(['can read users.password_hash', 'can read payment_intents.signature', 'can write users']),
+    )
+    let reported = 0
+    const guarded = guardOpsReadExecutor(db, () => reported++)
+    await expect(guarded.query('SELECT 1')).rejects.toBeInstanceOf(OpsReadRoleUnsafeError)
+    await expect(guarded.query('SELECT 1')).rejects.toBeInstanceOf(OpsReadRoleUnsafeError)
+    expect(reported).toBe(1)
+  })
+
+  it('a self-check that could not run is retried, not remembered', async () => {
+    let calls = 0
+    const flaky = {
+      async query() {
+        calls++
+        if (calls === 1) throw new Error('connection refused')
+        if (calls === 2) {
+          return {
+            rows: [{ reads_password_hash: false, reads_signature: false, writes_users: false, creates_in_schema: false, read_only: true }],
+            rowCount: 1,
+          }
+        }
+        return { rows: [{ ok: 1 }], rowCount: 1 }
+      },
+    }
+    const guarded = guardOpsReadExecutor(flaky as never)
+    await expect(guarded.query('SELECT 1')).rejects.toThrow('connection refused')
+    await expect(guarded.query('SELECT 1')).resolves.toMatchObject({ rows: [{ ok: 1 }] })
   })
 
   it('cannot read a withheld column or table', async () => {

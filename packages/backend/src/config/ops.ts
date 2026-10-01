@@ -148,19 +148,37 @@ export function parseOpsConfig(
   }
 }
 
+/** The login user a Postgres URL names, or '' when it names none or does not parse. */
+function postgresUrlUser(url: string): string {
+  try {
+    return decodeURIComponent(new URL(url).username)
+  } catch {
+    return ''
+  }
+}
+
 /**
  * Parse `OPS_DATABASE_URL` (#3510): the read-only role's login. Unset is the
- * quiet "ops data off" state. Equal to `DATABASE_URL` refuses the boot — that
- * login can read every column the read-only role exists to withhold.
+ * quiet "ops data off" state. It refuses the boot when it names no user, or
+ * the same user as `DATABASE_URL` — whatever the host, scheme or query
+ * string, that login can read every column the read-only role exists to
+ * withhold. (The pool also checks the role's privileges on first use —
+ * `infra/repositories/ops-read-role.ts`.)
  */
 export function parseOpsDatabaseUrl(raw: string | undefined | null, databaseUrl: string): string {
   const value = (raw ?? '').trim()
   if (value === '') return ''
-  if (value === databaseUrl.trim()) {
+  const refuse = (why: string): never => {
     throw new Error(
-      'OPS_DATABASE_URL is equal to DATABASE_URL. Refusing to start: the ops console must read ' +
-        'through the read-only role (scripts/ops-readonly-role.ts), never the main login.',
+      `${why} Refusing to start: the ops console must read through the read-only role ` +
+        '(docs/operations/ops-readonly-role.md), never the main login.',
     )
+  }
+  if (value === databaseUrl.trim()) refuse('OPS_DATABASE_URL is equal to DATABASE_URL.')
+  const opsUser = postgresUrlUser(value)
+  if (opsUser === '') refuse('OPS_DATABASE_URL names no login user (or does not parse as a URL).')
+  if (opsUser === postgresUrlUser(databaseUrl.trim())) {
+    refuse(`OPS_DATABASE_URL logs in as ${JSON.stringify(opsUser)}, the same user as DATABASE_URL.`)
   }
   return value
 }

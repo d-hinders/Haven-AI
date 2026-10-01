@@ -110,4 +110,20 @@ describe('parseOpsDatabaseUrl (#3510)', () => {
     expect(() => parseOpsDatabaseUrl(MAIN, MAIN)).toThrow(/OPS_DATABASE_URL is equal to DATABASE_URL/)
     expect(() => parseOpsDatabaseUrl(` ${MAIN} `, MAIN)).toThrow(/OPS_DATABASE_URL is equal to DATABASE_URL/)
   })
+
+  it('refuses the main login through another host, scheme or query string', () => {
+    for (const sameUser of [
+      'postgresql://haven:pw@db.internal:5432/haven',
+      'postgres://haven:pw@public-proxy.example:31337/haven',
+      'postgres://haven:pw@db.internal:5432/haven?sslmode=require',
+      'postgres://hav%65n:pw@db.internal:5432/haven',
+    ]) {
+      expect(() => parseOpsDatabaseUrl(sameUser, MAIN)).toThrow(/the same user as DATABASE_URL/)
+    }
+  })
+
+  it('refuses a URL that names no user, or does not parse', () => {
+    expect(() => parseOpsDatabaseUrl('postgres://db.internal:5432/haven', MAIN)).toThrow(/names no login user/)
+    expect(() => parseOpsDatabaseUrl('not a url', MAIN)).toThrow(/names no login user/)
+  })
 })

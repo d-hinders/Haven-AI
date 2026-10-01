@@ -3,7 +3,8 @@
  * the database. Viem/bundler errors echo the full request URL — which for
  * hosted bundlers EMBEDS THE API KEY (`?apikey=…`). Found live during the
  * #738 exhaustion test: the sponsorship decline leaked the key into the 502
- * `details`. Every session-rail error surface must pass through this.
+ * `details`. Every provider-error surface (API responses and stored failure
+ * text) must pass through this.
  *
  * Lives in `domain/` (pure, no imports) since #3510 so the repository layer
  * can apply it at the write boundary (`markOutboundTxFailed`); it is

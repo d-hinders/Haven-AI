@@ -19,6 +19,7 @@ import { eitherAuth } from '../catalog.js'
 import type { OpsConfig } from '../../config/ops.js'
 import type { OpsAccessLogEntry } from '../../infra/repositories/ops-access-log.js'
 import { signOpsToken, verifyOpsState, verifyOpsToken } from '../../modules/ops/tokens.js'
+import { OpsReadRoleUnsafeError } from '../../infra/repositories/ops-read-role.js'
 import opsRoutes, { OPS_CALLBACK_PATH, type OpsRoutesOptions } from '../ops.js'
 
 const ORIGIN = 'https://ops.example.com'
@@ -368,9 +369,27 @@ describe('ops console — an ops token is refused on every customer route', () =
   })
 })
 
-describe('ops console — POST /ops/reveal without a read-only database', () => {
-  it('is off (404) until #3510 provides the read-only role', async () => {
+describe('ops console — POST /ops/reveal without a usable read-only database', () => {
+  it('is off (404) while no read-only executor is configured (OPS_DATABASE_URL unset)', async () => {
     const { app, audits } = await build({ readDb: null })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/ops/reveal',
+      headers: { authorization: `Bearer ${tokenFor(111)}` },
+      payload: { target_type: 'user', target_id: '00000000-0000-4000-8000-000000000000', field: 'email' },
+    })
+    expect(res.statusCode).toBe(404)
+    expect(audits).toEqual([])
+    await app.close()
+  })
+
+  it('is off (404), audit-free, when the login fails the read-only self-check', async () => {
+    const unsafe = {
+      query: async () => {
+        throw new OpsReadRoleUnsafeError(['can read users.password_hash'])
+      },
+    }
+    const { app, audits } = await build({ readDb: unsafe })
     const res = await app.inject({
       method: 'POST',
       url: '/ops/reveal',

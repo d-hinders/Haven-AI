@@ -92,11 +92,10 @@
  *   Restore to list      archived_at set                          the isArchived branch
  *
  * **The argument for NOT doing this was real, and it is the reason each of the
- * five is proven separately below.** All five carry class strings
- * BYTE-IDENTICAL to a captured sibling — every one is `ring-brand/80` or
- * `ring-danger/80` on a `text-xs` link, in this same row, on this same surface
- * — so the marginal *rendered* information looked small. But "the same class
- * string therefore the same pixels" is an argument, not a measurement, and this
+ * five is proven separately below.** The four footer controls carry class
+ * strings byte-identical to a captured sibling; the name link instead paints
+ * the shared card ring. The marginal *rendered* information could look small,
+ * but "the same class string therefore the same pixels" is an argument, not a measurement, and this
  * repo keeps paying the difference: #1818 is a class string that compiled to
  * nothing, and this file's own first-draft assertion accepted `outline: 2px
  * solid transparent` as an indicator. A capture nobody can redden is decoration;
@@ -136,7 +135,7 @@
  * ── Tab traversal, and why the count is never hard-coded ─────────────────────
  *
  * The driver is real keyboard `Tab`, because that is the path the user whose
- * bug this is actually takes. **All ten controls are reachable by
+ * bug this is actually takes. **All nine controls are reachable by
  * traversal**, so the `.focus()` fallback the issue allows is never used and
  * nothing is silently substituted. A control reachable by script and not by tab
  * order would itself be a WCAG 2.4.3 finding, so the two are not
@@ -500,7 +499,7 @@ function shadowPaints(boxShadow: string) {
  *
  *  - focus actually landed on this node;
  *  - `:focus-visible` matches — the ring's own CSS condition. Focus alone is not
- *    enough; `:focus-visible` is what all ten indicators are gated on;
+ *    enough; `:focus-visible` is what all nine indicators are gated on;
  *  - the computed style PAINTS something — i.e. the class string compiled to a
  *    visible indicator rather than merely being present in source. This is the
  *    gap the structural guard cannot see at all: `focus-ring.test.ts` reads
@@ -749,6 +748,7 @@ test('agent card stretched link: body pointer opens the agent while action contr
 
     const card = page.getByTestId('agent-card')
     const budgetLabel = card.getByText('Agent budget')
+    await budgetLabel.scrollIntoViewIfNeeded()
     const bodyBox = await budgetLabel.boundingBox()
     if (!bodyBox) throw new Error('the agent-card body point has no rendered box')
     await page.evaluate(() => {
@@ -786,7 +786,7 @@ test.describe('driven focus-state visual regression', () => {
     await seedAuthenticatedSession(page)
   })
 
-  // ── Sidebar kebab user menu — 3 of #1831's 11 ─────────────────────────────
+  // ── Sidebar kebab user menu — three current indicators ────────────────────
   //
   // Captured on `/design-system` rather than on `/agents`, so the sidebar's
   // pixel evidence stays on one route — the same route #1820's resting-state
@@ -824,7 +824,7 @@ test.describe('driven focus-state visual regression', () => {
     })
   }
 
-  // ── AgentCard action row — 3 of #1831's 11 ────────────────────────────────
+  // ── AgentCard action row — the live Pause control ─────────────────────────
   //
   // On `/agents`, because `AgentCard` renders nowhere else — it is NOT on
   // `/design-system`, which is why the blocking visual gate has never seen it
@@ -885,14 +885,14 @@ test.describe('driven focus-state visual regression', () => {
     await expect(target).toHaveCount(1)
     await tabToTarget(page, target, 'AgentCard name link')
     await expect(target).toBeFocused()
-    await expect(card).toHaveCSS('outline-style', 'none')
+    await expect(card).toHaveCSS('outline-width', '0px')
     const ring = await card.evaluate((el) => getComputedStyle(el).boxShadow)
     expect(ring, 'the focused name link did not paint the shared card ring').not.toBe('none')
 
     await expect(card).toHaveScreenshot('focus-agentcard-name-link-desktop.png', SNAPSHOT_OPTIONS)
   })
 
-  // ── AgentCard's other four footer branches — the remaining 5 of 11 (#1873) ─
+  // ── AgentCard's other four footer branches — four more controls (#1873) ─
   //
   // One seeded agent per test, one control per test, one capture per test. The
   // `rowControls` field is the branch assertion: it is what says the fixture
@@ -974,7 +974,7 @@ test.describe('driven focus-state visual regression', () => {
       rowControls: ['Restore Archived agent to the list'],
       tone: 'brand',
       label: 'Restore to list',
-      // The only control of the ten that is not on screen at load.
+      // The only control of the nine that is not on screen at load.
       behindRemovedDisclosure: true,
     },
   ] as const

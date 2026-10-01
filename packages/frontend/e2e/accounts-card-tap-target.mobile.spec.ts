@@ -529,7 +529,10 @@ test('/accounts: a real pointer press on card body activates and opens the accou
 
   const activeAccountBefore = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
   const card = page.getByTestId('account-card').filter({ hasText: ACTION_CARD })
-  const bodyText = card.getByText(/agent(?:s)?$/).first()
+  // Use the token row rather than the footer: at 390px the fixed bottom nav
+  // can overlap the footer after scrolling, which would test that nav instead
+  // of the stretched card link.
+  const bodyText = card.getByText('USDC', { exact: true }).first()
   const box = await bodyText.boundingBox()
   if (!box) throw new Error('the account-card body point has no rendered box')
   await page.evaluate(() => {

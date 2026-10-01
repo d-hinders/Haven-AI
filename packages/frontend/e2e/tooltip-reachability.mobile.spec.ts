@@ -26,7 +26,7 @@
  *   elaboration trigger, so its tap should open the tooltip without affecting
  *   card navigation.
  *
- * ## The composite-card trigger changed in #2043
+ * ## The card trigger changed in #2043 and #3550
  *
  * It used to be the `not recorded` label and its 169-character explanation.
  * **That tooltip is gone**: the copy was essential rather than elaboration —
@@ -35,14 +35,10 @@
  * the wrong home for it. It is visible text above the agent list now (#2043,
  * following #2017), and the card shows the bare label.
  *
- * The ancestry rule still has a live instance in the same card, and the test
- * moves onto it: the RECORDED name's `MCP servers: … and …` tooltip, which
- * #2043 kept precisely because it elaborates a value already on screen next
- * to a `CopyButton` that is its sibling, not its child. So this file goes on
- * proving the rule at the call site that motivated it.
- *
- * The second test is the one that would go red if the ancestry rule were
- * dropped for a simpler "always toggle", which is the tempting version.
+ * The RECORDED name's `MCP servers: … and …` tooltip remains because it
+ * elaborates a value already on screen next to a sibling `CopyButton`. #3550
+ * made that tooltip standalone, so this file now proves its own keyboard and
+ * touch reachability without relying on composite-card ancestry.
  */
 import { expect, test } from '@playwright/test'
 import {

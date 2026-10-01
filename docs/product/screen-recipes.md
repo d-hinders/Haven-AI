@@ -14,6 +14,7 @@ covers:
   - packages/frontend/src/components/haven/**
   - packages/frontend/src/components/transactions/TransactionsTable.tsx
   - packages/frontend/src/components/ui/Input.tsx
+  - packages/ui/**
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx

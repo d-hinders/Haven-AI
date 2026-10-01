@@ -196,7 +196,7 @@ describe('the fan-out the issue specifies', () => {
     const full = PROPAGATION_RULES.find((r) => r.when.includes('full'))
     assert.deepEqual(
       [...full.then].sort(),
-      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'qa_agent', 'sdk', 'signer'],
+      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'qa_agent', 'sdk', 'signer', 'ui'],
     )
   })
 

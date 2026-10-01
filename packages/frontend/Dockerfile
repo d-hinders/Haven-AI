@@ -6,14 +6,18 @@ WORKDIR /app
 # Install dependencies
 COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages/core/package.json ./packages/core/
+COPY packages/ui/package.json ./packages/ui/
 COPY packages/frontend/package.json ./packages/frontend/
 
-RUN npm ci --workspace=packages/frontend --workspace=packages/core --include-workspace-root
+RUN npm ci --workspace=packages/frontend --workspace=packages/core --workspace=packages/ui --include-workspace-root
 
 # Build the Next.js app
 COPY packages/core ./packages/core
 RUN npm run build -w packages/core
 
+# The shared design system the frontend compiles through transpilePackages
+# (#3508) — without it the image breaks silently at build time.
+COPY packages/ui ./packages/ui
 COPY packages/frontend ./packages/frontend
 
 # The four product docs the frontend serves as Markdown under /docs/ (#2532).

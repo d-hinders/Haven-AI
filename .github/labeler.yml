@@ -6,6 +6,7 @@
 "area:frontend":
   - changed-files:
       - any-glob-to-any-file: "packages/frontend/**"
+      - any-glob-to-any-file: "packages/ui/**"
 
 "area:backend":
   - changed-files:

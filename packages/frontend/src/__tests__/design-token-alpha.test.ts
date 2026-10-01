@@ -22,13 +22,16 @@ import { describe, expect, it } from 'vitest'
  */
 
 const FRONTEND = resolve(__dirname, '../..')
-const css = readFileSync(join(FRONTEND, 'src/app/globals.css'), 'utf8')
+// The palette blocks moved to @haven_ai/ui (#3508): the tokens now live in
+// packages/ui/src/tokens.css, imported by the app layout before globals.css.
+const UI = resolve(FRONTEND, '..')
+const css = readFileSync(join(UI, 'ui', 'src', 'tokens.css'), 'utf8')
 // Comments are stripped ONCE, up front, with offsets preserved: the palette
 // block's documentation (#2927) quotes the block selectors in prose, and a
 // selector quoted in a comment must never be found instead of the real one.
 const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const tailwindConfig = require(join(FRONTEND, 'tailwind.config.js'))
+const tailwindConfig = require(join(UI, 'ui', 'tailwind.preset.js'))
 
 /**
  * Booting Tailwind is a real compile, not a string match — a few seconds each
@@ -165,11 +168,11 @@ describe('the Tailwind colour theme is alpha-capable (#1708)', () => {
     }
   })
 
-  it('every channel token the theme references is declared in globals.css', () => {
+  it('every channel token the theme references is declared in tokens.css', () => {
     for (const [path, value] of themeColorEntries()) {
       const ref = value.match(/var\((--v2-[a-z0-9-]+-rgb)\)/)
       expect(ref, `colors.${path} does not read a --v2-*-rgb channel token`).not.toBeNull()
-      expect(css, `${ref![1]} (colors.${path}) is not declared in globals.css`).toContain(
+      expect(css, `${ref![1]} (colors.${path}) is not declared in tokens.css`).toContain(
         `${ref![1]}:`,
       )
     }

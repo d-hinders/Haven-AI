@@ -11,11 +11,11 @@ import { describe, expect, it } from 'vitest'
  * fill, and the tinted surfaces.
  */
 
-const css = readFileSync(resolve(__dirname, '../app/globals.css'), 'utf8')
+const css = readFileSync(resolve(__dirname, '../../../ui/src/tokens.css'), 'utf8')
 
 function token(name: string): string {
   const match = css.match(new RegExp(`--v2-${name}:\\s*(#[0-9a-fA-F]{6})`))
-  if (!match) throw new Error(`token --v2-${name} not found in globals.css`)
+  if (!match) throw new Error(`token --v2-${name} not found in tokens.css`)
   return match[1]
 }
 

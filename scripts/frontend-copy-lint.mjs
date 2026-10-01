@@ -80,6 +80,9 @@ const BASELINE_PATH = join(REPO_ROOT, 'packages', 'frontend', 'copy-lint-baselin
 const SCAN_DIRS = [
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'app'),
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'components'),
+  // The shared design system (#3508): the primitives moved here still render
+  // product copy, so their strings stay linted after the move.
+  join(REPO_ROOT, 'packages', 'ui', 'src'),
 ]
 
 // Individual prose-bearing files OUTSIDE those directories (#2317). The bar is

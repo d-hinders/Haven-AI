@@ -1,7 +1,7 @@
 // The package-to-job routing matrix (#1623, epic #1621).
 //
 // One row per routing decision the CI change classifier makes, with the FULL
-// expected output — all thirteen flags, not just the one that turns true. This is a
+// expected output — all fourteen flags, not just the one that turns true. This is a
 // characterization fixture: it is written to describe what routing does today,
 // before #1624/#1625 make the rule data declarative and #1626 starts enforcing
 // completeness. Refactors are supposed to leave it untouched. A row that has to
@@ -37,7 +37,7 @@ export const RETAINED = 'retained'
  * its expectation from the code under test cannot fail when that code is wrong,
  * which is the one thing a characterization table must not do.
  */
-const ALL = ['code', 'frontend', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'core', 'qa_agent', 'full']
+const ALL = ['code', 'frontend', 'ui', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'core', 'qa_agent', 'full']
 
 /**
  * @typedef {object} RoutingCase
@@ -64,7 +64,7 @@ export const ROUTING_MATRIX = [
       'Same, for the docs/ tree. The docs-quality gates cover these on their own workflow. ' +
       'Re-pointed here from agent-passport.md by #3346, which made the served docs a real ' +
       'exception; this row is also the CONTROL the same issue asks for — another docs/**/*.md ' +
-      'must keep returning all thirteen flags false.',
+      'must keep returning all fourteen flags false.',
   },
   {
     files: ['docs/product/account-recovery.md'],
@@ -162,6 +162,12 @@ export const ROUTING_MATRIX = [
   },
 
   // ─── One workspace, one job ────────────────────────────────────────────────
+  {
+    files: ['packages/ui/src/Button.tsx'],
+    expect: ['code', 'frontend', 'ui'],
+    kind: CONTRACT,
+    why: 'The shared design system (#3508): a ui-only diff runs the ui job for the moved primitive suites, and the frontend fans back in because its package-dependencies entry declares ui — the frontend suite covers the re-export shims, so a ui-only change must never skip it.',
+  },
   {
     files: ['packages/frontend/src/app/page.tsx'],
     expect: ['code', 'frontend'],
@@ -703,7 +709,7 @@ export const ROUTING_MATRIX = [
     files: [],
     expect: [],
     kind: CONTRACT,
-    why: 'An empty diff routes nothing — and must still emit all thirteen flags rather than an empty object.',
+    why: 'An empty diff routes nothing — and must still emit all fourteen flags rather than an empty object.',
   },
   {
     files: ['', '   ', 'packages/cli/src/index.ts'],

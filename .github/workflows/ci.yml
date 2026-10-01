@@ -1103,4 +1103,9 @@ jobs:
             exit 1
           fi
 
+          if [ "${{ needs.changes.outputs.ui }}" = "true" ] && [ "${{ needs.ui_checks.result }}" != "success" ]; then
+            echo "UI checks result: ${{ needs.ui_checks.result }}"
+            exit 1
+          fi
+
           echo "Required package checks passed. Browser smoke, when applicable, runs as a separate check."

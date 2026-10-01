@@ -10127,6 +10127,17 @@ export const openapiSpec = {
            * row and omits it — a brand-new agent cannot have stranded funds.
            */
           has_stranded_funds: { type: 'boolean' },
+          /**
+           * #3542: how many of this agent's delegations are LIVE — status
+           * `pending`, `active` or `replaced`, the same set revoke-all targets
+           * and the archive / account-delete guards refuse on. `replaced` rows
+           * count because they stay enabled on-chain until their Stop userop
+           * lands. Derived by the list and detail reads, so it is NOT
+           * required: the creation response omits it (a brand-new agent holds
+           * none). Zero means archive and account removal are not blocked by
+           * delegations.
+           */
+          live_delegation_count: { type: 'integer', minimum: 0 },
         },
         additionalProperties: true,
       },

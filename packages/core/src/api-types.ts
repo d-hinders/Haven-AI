@@ -4249,6 +4249,7 @@ export type components = {
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
+            live_delegation_count?: number;
         } & {
             [key: string]: unknown;
         };

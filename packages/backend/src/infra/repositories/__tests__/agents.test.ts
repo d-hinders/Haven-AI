@@ -355,6 +355,55 @@ describeDb('agents archive (#1401, real DB)', () => {
     )
   }
 
+  // #3542: `replaced` is live — the edit flow leaves the superseded row enabled
+  // on-chain until its Stop userop lands (#3343), exactly what revoke-all targets.
+  it('REFUSES to archive a revoked agent holding only a replaced delegation, and archives once it is revoked (#3542)', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    await seedDelegation(agentId, 'replaced')
+
+    expect(await agentHasLiveDelegations(agentId)).toBe(true)
+    expect(await archiveAgent(agentId, userId)).toBeNull()
+
+    await db.query(`UPDATE agent_delegations SET status = 'revoked' WHERE agent_id = $1`, [agentId])
+
+    expect(await agentHasLiveDelegations(agentId)).toBe(false)
+    expect(await archiveAgent(agentId, userId)).not.toBeNull()
+  })
+
+  it('live_delegation_count counts pending + active + replaced (not revoked) on the list and single reads (#3542)', async () => {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`live-count-u${++seq}-${Date.now()}@test.example`],
+    )
+    const userId = user.rows[0].id
+    const account = await db.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
+       VALUES ($1, $2, 'Delegation account', true, 'delegator_hybrid') RETURNING id`,
+      [userId, `0x${(++seq).toString(16).padStart(40, '0')}`],
+    )
+    const seedHybridAgent = async (name: string): Promise<string> => {
+      const agent = await db.query<{ id: string }>(
+        `INSERT INTO agents (user_id, account_id, name, status) VALUES ($1, $2, $3, 'active') RETURNING id`,
+        [userId, account.rows[0].id, name],
+      )
+      return agent.rows[0].id
+    }
+    const busy = await seedHybridAgent('Busy')
+    const idle = await seedHybridAgent('Idle')
+    for (const status of ['pending', 'active', 'replaced', 'revoked']) {
+      await seedDelegation(busy, status)
+    }
+
+    const single = await findAgentForUserAllStatuses(busy, userId)
+    expect(single?.live_delegation_count).toBe(3)
+
+    // One batched read: every agent carries its own count, and an agent with
+    // no delegation rows reads 0 (a number, never null).
+    const list = await listAgentsForUserAllStatuses(userId)
+    const counts = Object.fromEntries(list.map((a) => [a.id, a.live_delegation_count]))
+    expect(counts).toEqual({ [busy]: 3, [idle]: 0 })
+  })
+
   it.each(['pending', 'active'])(
     'REFUSES to archive a revoked agent that still holds a %s delegation (#1436)',
     async (delegationStatus) => {

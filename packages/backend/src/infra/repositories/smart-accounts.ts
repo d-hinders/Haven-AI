@@ -27,6 +27,7 @@
 
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
+import { LIVE_DELEGATION_STATUSES_SQL } from './delegation-budgets.js'
 
 export type { Executor }
 
@@ -299,12 +300,14 @@ export const LOCK_AGENTS_FOR_ACCOUNT_SQL = `SELECT id FROM agents
        WHERE account_id = $1 AND user_id = $2
        FOR UPDATE`
 
+// "Live" = pending, active AND replaced (#3542) — the revoke-all target set; a
+// `replaced` row is still enabled on-chain until its Stop userop lands.
 export const HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL = `SELECT EXISTS (
          SELECT 1
          FROM agent_delegations ad
          JOIN agents a ON a.id = ad.agent_id
          WHERE a.account_id = $1 AND a.user_id = $2
-           AND ad.status IN ('pending', 'active')
+           AND ad.status IN ${LIVE_DELEGATION_STATUSES_SQL}
        ) AS live`
 
 export const HAS_OPEN_SWEEPS_FOR_ACCOUNT_SQL = `SELECT EXISTS (

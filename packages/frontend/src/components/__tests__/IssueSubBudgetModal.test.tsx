@@ -13,6 +13,9 @@ vi.mock('@/hooks/useAgents', () => ({
       { id: 'agent-b', name: 'Scout', status: 'active', delegate_address: '0x' + '22'.repeat(20), account_id: 'acc-1' },
       { id: 'agent-c', name: 'Elsewhere', status: 'active', delegate_address: '0x' + '33'.repeat(20), account_id: 'acc-2' },
       { id: 'agent-d', name: 'Retired', status: 'revoked', delegate_address: '0x' + '44'.repeat(20), account_id: 'acc-1' },
+      { id: 'agent-e', name: 'Shelved', status: 'active', archived_at: '2026-09-01T00:00:00Z', delegate_address: '0x' + '55'.repeat(20), account_id: 'acc-1' },
+      { id: 'agent-f', name: 'Waiting', status: 'pending_approval', delegate_address: '0x' + '66'.repeat(20), account_id: 'acc-1' },
+      { id: 'agent-g', name: 'Resting', status: 'paused', archived_at: null, delegate_address: '0x' + '77'.repeat(20), account_id: 'acc-1' },
     ],
   }),
 }))
@@ -53,7 +56,7 @@ describe('IssueSubBudgetModal (#3506)', () => {
     renderModal()
     expect(screen.getByTestId('sub-budget-ceiling').textContent).toMatch(/Atlas.s budget is 50 USDC per week/)
     const options = Array.from(screen.getByLabelText('Agent to share with').querySelectorAll('option')).map((o) => o.textContent)
-    expect(options).toEqual(['Choose an agent', 'Scout'])
+    expect(options).toEqual(['Choose an agent', 'Scout', 'Resting'])
   })
 
   it('validates before calling the API', async () => {

@@ -110,6 +110,10 @@ export function subBudgetRefusalCopy(
       return `${delegatingName} has already shared most of this budget with other agents. Lower the amount, or stop another sub-budget first.`
     case 'no_delegation_for_target':
       return `${delegatingName} has no active budget for this token and recipient. Set a budget first, then share part of it.`
+    case 'issuer_retired':
+      return `${delegatingName} has been revoked or removed, so it can't share its budget any more.`
+    case 'sub_agent_retired':
+      return `${subAgentName} has been revoked or removed, or isn't active yet, so it can't receive a budget. Pick another agent.`
     case 'not_delegation_rail':
       return `${subAgentName} isn't ready to receive a budget yet. Finish connecting it, then try again.`
     default:

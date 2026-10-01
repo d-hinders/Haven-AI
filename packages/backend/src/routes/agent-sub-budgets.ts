@@ -60,6 +60,28 @@ import {
   serializeClosePreparedUserOp,
 } from '../modules/sub-budgets/index.js'
 
+/**
+ * #3553: the issuing agent may not carve new sub-budget authority while it is
+ * revoked or archived — including the half-revoked state (credential revoked,
+ * budget delegation still live on-chain). `paused` is deliberately allowed, as
+ * on the budget-delegation routes. Deliberately NOT the delegation routes'
+ * REVOKED_AGENT_REFUSAL: that text says the agent "cannot receive", and here
+ * the agent is the one giving. The gate lives in the two issuance-side routes,
+ * never in `loadOwnedDelegationAgent` — DELETE and the reads must still reach a
+ * revoked agent.
+ */
+export const SUB_BUDGET_ISSUER_RETIRED_CODE = 'issuer_retired'
+export const SUB_BUDGET_ISSUER_RETIRED_REFUSAL =
+  'This agent is revoked or archived and cannot issue new sub-budgets'
+/** #3553: only an `active` or `paused`, un-archived agent may receive a sub-budget. */
+export const SUB_BUDGET_SUB_AGENT_RETIRED_CODE = 'sub_agent_retired'
+export const SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL =
+  'A revoked, archived or pending-approval agent cannot receive a sub-budget'
+
+function isRetired(a: { status: string; archived_at: Date | string | null }): boolean {
+  return a.status === 'revoked' || a.archived_at != null
+}
+
 function safeDetails(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -105,6 +127,13 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent || !agent.delegate_address) return reply.code(404).send({ error: 'Agent not found' })
+    // #3553: lifecycle gate BEFORE body validation, as the delegation build route does.
+    if (isRetired(agent)) {
+      return reply.code(409).send({
+        error: SUB_BUDGET_ISSUER_RETIRED_REFUSAL,
+        error_code: SUB_BUDGET_ISSUER_RETIRED_CODE,
+      })
+    }
 
     const body = request.body ?? {}
     const { sub_agent_id, period_amount_atomic, expires_at, recipient_address, label } = body
@@ -140,6 +169,12 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     const subAgent = await findAgentForUserAllStatuses(sub_agent_id, sub)
     if (!subAgent) {
       return reply.code(404).send({ error: 'Sub-agent not found in this account' })
+    }
+    if (isRetired(subAgent) || (subAgent.status !== 'active' && subAgent.status !== 'paused')) {
+      return reply.code(409).send({
+        error: SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
+        error_code: SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+      })
     }
     if (subAgent.delegate_address == null) {
       return reply.code(409).send({
@@ -298,6 +333,14 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent || !agent.delegate_address) return reply.code(404).send({ error: 'Agent not found' })
+    // #3553: a pending row seeded while the agent was live must not open after
+    // it is revoked or archived (a pre-revocation signature is a live path).
+    if (isRetired(agent)) {
+      return reply.code(409).send({
+        error: SUB_BUDGET_ISSUER_RETIRED_REFUSAL,
+        error_code: SUB_BUDGET_ISSUER_RETIRED_CODE,
+      })
+    }
     const { signature } = request.body ?? {}
     if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
       return reply.code(400).send({ error: 'A hex signature is required' })

@@ -28,7 +28,9 @@ import {
  */
 
 const FRONTEND_ROOT = path.resolve(__dirname, '../../..')
-const GLOBALS_CSS = readFileSync(path.join(FRONTEND_ROOT, 'src/app/globals.css'), 'utf8')
+// The manifest colours are the v2 palette tokens, which moved to
+// @haven_ai/ui (#3508): tokens.css lives in packages/ui/src.
+const GLOBALS_CSS = readFileSync(path.join(FRONTEND_ROOT, '../ui/src/tokens.css'), 'utf8')
 
 /** The `:root` (light palette) block of globals.css, comments stripped. */
 function rootBlock(): string {

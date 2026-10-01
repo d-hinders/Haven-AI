@@ -10,6 +10,7 @@ covers:
   - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
+  - packages/ui/**
   - packages/frontend/src/components/AuthenticatedShell.tsx
   - packages/frontend/e2e/safe-area-insets.mobile.spec.ts
   - packages/frontend/src/components/ui/Toast.tsx

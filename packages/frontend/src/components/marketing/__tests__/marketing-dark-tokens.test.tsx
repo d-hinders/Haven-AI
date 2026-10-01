@@ -29,7 +29,9 @@ import { FlowCard } from '../FlowCard'
  */
 
 const FRONTEND = resolve(__dirname, '../../../..')
-const css = readFileSync(join(FRONTEND, 'src/app/globals.css'), 'utf8')
+// The marketing-canvas tokens moved to @haven_ai/ui (#3508): tokens.css lives
+// in packages/ui/src, imported by the app layout before globals.css.
+const css = readFileSync(resolve(FRONTEND, '../ui/src/tokens.css'), 'utf8')
 
 /** The `{ … }` body of the first block whose selector contains `opener`. */
 function blockBody(opener: string): string {

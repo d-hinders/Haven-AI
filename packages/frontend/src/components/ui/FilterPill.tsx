@@ -1,34 +1,8 @@
-import type { ReactNode } from 'react'
-
 /**
- * Segment pill for a filter row — active/inactive toggle button, shared
- * across every list surface that filters by a small set of options
- * (category, verification source, network). Moved here from
- * `CatalogPanel.tsx` (#3079, epic #3077) on its second surface — the
- * marketplace grid needed the exact same pill the old catalog page had, and
- * a second hand-rolled copy is the pattern-absorption trigger (epic #904).
+ * Re-export shim (#3508). `FilterPill` moved to `@haven_ai/ui`
+ * (`packages/ui/src/FilterPill.tsx`) as part of the shared ops-console design
+ * system; the primitives the ops console consumes moved to the shared package. This shim keeps every existing
+ * `@/components/ui/FilterPill` import working. New code imports the package
+ * directly.
  */
-export function FilterPill({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      // `min-h-11` below `sm`: a 44px tap target on a phone; the desktop pill keeps its 24px height.
-      className={`min-h-11 rounded-full px-3 py-1 text-xs font-medium transition-colors sm:min-h-0 ${
-        active
-          ? 'bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)]'
-          : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)] hover:bg-[var(--v2-border)]'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
+export * from '@haven_ai/ui/FilterPill'

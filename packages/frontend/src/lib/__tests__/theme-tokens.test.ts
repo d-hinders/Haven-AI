@@ -28,7 +28,9 @@ import { THEME_TOKENS, CONTRAST_PAIRS, contrastTable } from '../theme-tokens'
  * tokens with `-rgb` twins, plus the 19 twin-less whole-value colours.
  */
 
-const css = readFileSync(resolve(__dirname, '../../app/globals.css'), 'utf8')
+// The palette moved to @haven_ai/ui (#3508): tokens.css lives in
+// packages/ui/src, imported by the app layout before globals.css.
+const css = readFileSync(resolve(__dirname, '../../../../ui/src/tokens.css'), 'utf8')
 
 /** blocksFromCss is untyped .mjs; this is its real shape. */
 function cssBlocks(): Record<string, Record<string, string>> {

@@ -121,8 +121,13 @@ export default function EditAgentModal({
     setOrgChoice(agent.organization_id ?? '')
   }, [agent.description, agent.labels, agent.name, agent.organization_id])
 
+  // Reset on the closed → open edge only (#3537). `resetForm` changes identity
+  // whenever the parent's 10s agent poll hands us a fresh `agent.labels`
+  // array, so keying the reset on it wiped in-progress edits mid-typing.
+  const wasOpenRef = useRef(false)
   useEffect(() => {
-    if (open) resetForm()
+    if (open && !wasOpenRef.current) resetForm()
+    wasOpenRef.current = open
   }, [open, resetForm])
 
   const handleClose = useCallback(() => {

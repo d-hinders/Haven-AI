@@ -212,4 +212,74 @@ describe('EditAgentModal', () => {
     expect(screen.getByRole('button', { name: 'Review changes' })).toBeDisabled()
     expect(screen.queryByTestId('review-organization')).not.toBeInTheDocument()
   })
+
+  // ── Background agent poll (#3537) ──────────────────────────────────────────
+  // The detail page re-fetches its agents every 10s, handing the open modal a
+  // NEW `agent` object (and a new `labels` array) carrying the same data. That
+  // must not reset the form.
+  function renderControlled(agent: Agent = AGENT) {
+    const props = { onClose: vi.fn(), onUpdated: vi.fn() }
+    const view = render(<EditAgentModal open agent={agent} {...props} />)
+    const rerenderWith = (next: { open?: boolean; agent?: Agent }) =>
+      view.rerender(
+        <EditAgentModal open={next.open ?? true} agent={next.agent ?? agent} {...props} />,
+      )
+    return { rerenderWith }
+  }
+  const polled = (): Agent => ({ ...AGENT, labels: [...AGENT.labels] })
+
+  it('keeps typed edits when a poll re-renders the open modal with an identical agent', async () => {
+    const { rerenderWith } = renderControlled()
+    await vi.waitFor(() => expect(screen.getByRole('option', { name: 'Acme' })).toBeInTheDocument())
+    await vi.waitFor(() => expect(screen.getByRole('checkbox', { name: 'prod' })).not.toBeChecked())
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'Dinner plans' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'prod' }))
+    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'org-1' } })
+
+    rerenderWith({ agent: polled() })
+
+    expect(screen.getByLabelText('Agent name')).toHaveValue('Meals')
+    expect(screen.getByLabelText(/Description/)).toHaveValue('Dinner plans')
+    expect(screen.getByRole('checkbox', { name: 'prod' })).toBeChecked()
+    expect(screen.getByLabelText('Organization')).toHaveValue('org-1')
+  })
+
+  it('stays on the review step across a poll', () => {
+    const { rerenderWith } = renderControlled()
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    expect(screen.getByRole('button', { name: 'Save details' })).toBeInTheDocument()
+
+    rerenderWith({ agent: polled() })
+
+    expect(screen.getByRole('button', { name: 'Save details' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Agent name')).not.toBeInTheDocument()
+  })
+
+  it('keeps the "Update failed" view across a poll', async () => {
+    mockPut.mockRejectedValueOnce(new Error('boom'))
+    const { rerenderWith } = renderControlled()
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save details' }))
+    await vi.waitFor(() => expect(screen.getByText('Update failed')).toBeInTheDocument())
+
+    rerenderWith({ agent: polled() })
+
+    expect(screen.getByText('Update failed')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  it('discards unsaved edits on close and re-prefills from the current agent on reopen', () => {
+    const { rerenderWith } = renderControlled()
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+
+    rerenderWith({ open: false })
+    rerenderWith({ open: true, agent: { ...AGENT, name: 'Renamed elsewhere' } })
+
+    expect(screen.getByLabelText('Agent name')).toHaveValue('Renamed elsewhere')
+    expect(screen.queryByRole('button', { name: 'Save details' })).not.toBeInTheDocument()
+  })
 })

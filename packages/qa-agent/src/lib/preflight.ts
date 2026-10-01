@@ -230,11 +230,15 @@ export async function checkDelegateResidual(
  * across the seven settling 0.001-USDC merchant legs (including #2159);
  * 0.006 USDC stranded in `x402-erc7710-fresh-agent`; and 0.004 USDC net in
  * `delegation-lifecycle` (0.006 funded less its 0.002 return). The sweep leg
- * temporarily spends 0.001 USDC but returns it to this treasury. Below the
- * 0.027-USDC total the run CANNOT succeed — keep this named derivation true
- * whenever a scenario's standing-treasury debit changes.
+ * temporarily spends 0.001 USDC but returns it to this treasury. The #3505
+ * legs add 0.004 USDC net in `sub-budget-redemption` (0.006 funded less the
+ * two 0.001 payments it returns to this treasury) and 0.003 USDC in
+ * `merchant-locked-budget` (funded to the throwaway, one purchase paid to the
+ * merchant, the rest stranded); `task-budget-lifecycle` funds nothing. Below
+ * the 0.034-USDC total the run CANNOT succeed — keep this named derivation
+ * true whenever a scenario's standing-treasury debit changes.
  */
-export const TREASURY_RUN_COST_ATOMIC = 27_000n
+export const TREASURY_RUN_COST_ATOMIC = 34_000n
 
 /** The typical single leg's spend (0.001 USDC), for stating headroom in work. */
 const PER_LEG_ATOMIC = 1_000n

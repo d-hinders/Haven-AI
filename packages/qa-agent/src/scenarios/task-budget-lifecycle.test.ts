@@ -16,7 +16,7 @@ const API = 'https://api.example'
 const TD = { domain: {}, types: { X: [] }, message: {} }
 const ctx = { cfg: { apiUrl: API, paymentTo: '0x' + '55'.repeat(20) } } as ScenarioContext
 
-type Options = { closeContextStatus?: number; closeHash?: boolean; disabled?: boolean }
+type Options = { openContextStatus?: number; closeContextStatus?: number; closeHash?: boolean; disabled?: boolean }
 
 function fakeApi(options: Options = {}) {
   let taskContextReads = 0
@@ -41,6 +41,9 @@ function fakeApi(options: Options = {}) {
     })
     if (path === '/task-budgets/tb-1/sign-context') {
       taskContextReads += 1
+      if (taskContextReads === 1 && options.openContextStatus) {
+        return out(options.openContextStatus, { error: 'open context exploded' })
+      }
       if (taskContextReads === 2 && options.closeContextStatus) {
         return out(options.closeContextStatus, { error: 'Do not know how to serialize a BigInt' })
       }
@@ -76,6 +79,11 @@ describe('task-budget lifecycle', () => {
     const result = await taskBudgetLifecycle.run(ctx)
     expect(result.pass).toBe(false)
     expect(result.detail).toMatch(/close sign-context failed \(500\)/)
+  })
+
+  it('fails when the open sign-context read errors', async () => {
+    fakeApi({ openContextStatus: 500 })
+    expect((await taskBudgetLifecycle.run(ctx)).detail).toMatch(/open sign-context failed \(500\)/)
   })
 
   it('fails without a close tx hash or without an on-chain disable', async () => {

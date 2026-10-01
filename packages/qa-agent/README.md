@@ -101,6 +101,19 @@ The delegation-rail legs are the majority of the suite and are documented, with
 their env requirements and skip conditions, in the canonical table in
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
 
+**Budget-authority legs (#3505).** Three legs, each on a throwaway identity
+whose agents are revoked on every exit (#3459), and none of which may skip:
+`task-budget-lifecycle` (open and close signed from `GET /task-budgets/:id/sign-context`,
+never the inline `POST /close` bytes), `sub-budget-redemption` (A→B grant
+redeemed; an amount above both child links but within A's root is refused 403
+`delegation_budget_exceeded` since #3519, and a 502 is a failure naming both
+causes) and `merchant-locked-budget` (a `merchant_slug`-pinned budget is spent
+before the open one, read by delegation hash). They need
+`QA_DELEGATION_AGENT_API_KEY` / `QA_DELEGATION_DELEGATE_PRIVATE_KEY` as a
+funding source (the task leg needs nothing), and the merchant leg also
+`QA_DEMO_MERCHANT_URL`. Each leg's assertions are mutation-pinned by unit tests
+with scripted fetches, because the legs themselves only run against deployed dev.
+
 > **Infra dependency:** `within-budget-settle` moves real testnet USDC. On the
 > delegation rail the redemption is a **sponsored UserOp**, so the dependency is
 > the bundler/paymaster (`DELEGATION_RAIL_*`), not the relayer's gas balance —

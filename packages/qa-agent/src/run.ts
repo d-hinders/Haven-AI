@@ -26,6 +26,9 @@ import { x402Erc7710Hosted } from './scenarios/x402-erc7710-hosted.js'
 import { x402HostedMcpSigner } from './scenarios/x402-hosted-mcp-signer.js'
 import { x402CatalogGuidedPurchase } from './scenarios/x402-catalog-guided-purchase.js'
 import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
+import { taskBudgetLifecycle } from './scenarios/task-budget-lifecycle.js'
+import { subBudgetRedemption } from './scenarios/sub-budget-redemption.js'
+import { merchantLockedBudget } from './scenarios/merchant-locked-budget.js'
 import { thrownErrorDetail } from './lib/thrown-error-detail.js'
 import { runPreflight, formatPreflight } from './lib/preflight.js'
 import { formatRunReport, type ScenarioOutcome } from './lib/run-report.js'
@@ -107,6 +110,30 @@ import { formatRunReport, type ScenarioOutcome } from './lib/run-report.js'
 // Runs immediately after `x402-hosted-mcp-signer` for the same reason: a
 // guided-path failure is diagnosed against a topology the sibling leg has
 // already shown to be healthy.
+// The three budget-authority legs (#3505) run last, each on its own throwaway
+// identity, and NONE may skip on a data condition: a skipped leg reads as
+// coverage (#1044), so with `QA_REQUIRE_ALL_LEGS=1` a missing config is a
+// failure and a merchant that stops qualifying is a failure with its cause.
+//
+// `task-budget-lifecycle` opens and closes a task budget signing ONLY from
+// `GET /task-budgets/:id/sign-context` — the re-servable bytes (#3491), not the
+// inline typed data `POST /close` also returns, which is the path that passed
+// on the pre-#3491 500. Needs no funding, so it goes first of the three: a
+// failure there is about the endpoint, not about money.
+//
+// `sub-budget-redemption` (A -> B grant) is funded from the standing identity
+// and proves B redeems the signed chain, that an amount above both child links
+// (equal by construction) but within A's root is refused 403
+// `delegation_budget_exceeded` with `remaining_atomic` read by hash (#3519; a
+// 502 is a FAILURE: the pre-check failed open and the enforcer caught it), and
+// that the grant closes through `GET /sub-budgets/:id/sign-context`. After the
+// task leg because it adds a second agent and a payment to the same shape.
+//
+// `merchant-locked-budget` is last: it buys a settling product from
+// `haven-demo-store` by erc7710 against both a pinned and an open budget, so a
+// failure is diagnosed against erc7710 settlement the earlier legs have
+// already shown healthy. It asserts the exact USDC Transfer and, by delegation
+// hash, that the PINNED budget dropped and the open one did not.
 const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetRefused,
@@ -135,6 +162,9 @@ const SCENARIOS: Scenario[] = [
   x402Erc7710Hosted,
   x402CatalogGuidedPurchase,
   delegationLifecycle,
+  taskBudgetLifecycle,
+  subBudgetRedemption,
+  merchantLockedBudget,
 ]
 
 async function main(): Promise<void> {

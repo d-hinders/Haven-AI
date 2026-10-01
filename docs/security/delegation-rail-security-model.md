@@ -2118,7 +2118,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > the EIP-3009 FUNDING leg (treasury → delegate), not a merchant settlement.
 > That is still the SAME fact `delegationReplay`'s own confirmed+tx_hash
 > branch already answers its stored 200 for, on every settlement scheme, so
-> the bypass activates on a lookup the redemption path already trusted — no
+> the bypass activates on a lookup the authorize path already trusted — no
 > new trust is extended. No signature, key, delegation graph, caveat
 > enforcer or on-chain redemption path changes: the endpoint remains
 > read/decide-only, and the on-chain ERC20PeriodTransferEnforcer stays the

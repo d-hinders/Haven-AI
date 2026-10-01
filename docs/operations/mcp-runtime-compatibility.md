@@ -863,10 +863,12 @@ last-verified: "2026-10-01"
 >
 > - A merchant settlement VERIFIED on-chain (`merchant_settlement_recorded`)
 >   → a DONE state with `settled: true`.
-> - A merchant leg REPORTED but not yet verified (`delivered`,
->   `merchant_leg_reported` on the wire) → ALSO a done state (nothing left to
->   sign or pay) but `settled: false` — `settled: true` means a VERIFIED
->   on-chain settlement, never merely "the merchant answered".
+> - A merchant leg REPORTED but not yet verified (`delivered` on the status
+>   wire, the `merchant_leg_reported` column) → ALSO a done state (nothing
+>   left to sign or pay) but `settled: false`. In this answer, `settled: true`
+>   means a VERIFIED on-chain settlement, never merely "the merchant
+>   answered"; the answer carries `merchant_leg_reported` so the two done
+>   shapes stay distinguishable.
 > - Neither → the #2290 funded-awaiting-merchant remedy, but ONLY when the
 >   re-read status's own `next_action` is one of the two real producers
 >   (`retry_original_x402_request`, `sweep_stranded_funds`) — review round 1

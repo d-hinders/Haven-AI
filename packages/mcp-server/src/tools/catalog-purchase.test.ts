@@ -1559,6 +1559,96 @@ describe('#3527 — settled EIP-3009 replay', () => {
       expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
     })
 
+    it('haven_prepare_catalog_purchase: a VERIFIED merchant settlement with NO reported leg is a done state, settled true, merchant_leg_reported false (#3527 review round 2)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_verified_only', status: 'confirmed', tx_hash: '0x' + 'f6'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_verified_only/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_verified_only',
+            status: 'confirmed',
+            next_action: 'none',
+            tx_hash: '0x' + 'f6'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            // Verified on-chain through a reported settlement hash, with no
+            // merchant-response evidence row: delivered is absent.
+            merchant_settlement_recorded: true,
+            message: 'The payment is confirmed.',
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-verified-only-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_verified_only',
+        settlement_scheme: 'eip3009',
+        settled: true,
+        merchant_leg_reported: false,
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f6'.repeat(32),
+        next_action: 'none',
+      })
+      expect(res.data.settlement_tx_hash).toBeNull()
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
+    it('haven_prepare_catalog_purchase: a merchant-rejected funded payment forwards sweep_stranded_funds (#3527 review round 2)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_stranded', status: 'confirmed', tx_hash: '0x' + 'f7'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_stranded/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_stranded',
+            status: 'confirmed',
+            next_action: 'sweep_stranded_funds',
+            tx_hash: '0x' + 'f7'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            message: 'The merchant rejected the payment; the funds are stranded on the delegate. Sweep them back.',
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-stranded-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_stranded',
+        settlement_scheme: 'eip3009',
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f7'.repeat(32),
+        next_action: 'sweep_stranded_funds',
+        merchant_leg_reported: false,
+      })
+      expect(res.data.settled).toBeUndefined()
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
     it('haven_prepare_catalog_purchase: INSIDE the merchant-report grace window with no evidence answers check_status_later — never a done state and never a stale "none" (#3527 review round 1 B1)', async () => {
       stubFetch({
         'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },

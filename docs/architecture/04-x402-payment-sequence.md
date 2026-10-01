@@ -861,7 +861,7 @@ Sequence:
    the same bypass extends to a settled EIP-3009 replay (confirmed funding
    leg); step 9's `createX402Intent` call then reaches its own confirmed
    state, answered either as the `eip3009ConfirmedReplayResponse` done state
-   (funding_tx_hash set, settlement_tx_hash only when verified) or, with no
+   (funding_tx_hash set, settlement_tx_hash always null; `settled: true` only when the merchant settlement is verified) or, with no
    merchant-leg evidence yet, the funded-awaiting-merchant / check-status-later
    answer — see the compat note's #3527 entry for the exact split.
 

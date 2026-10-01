@@ -39,7 +39,7 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 function transactionTable(): HTMLTableElement | null {
   return (
     Array.from(document.querySelectorAll('table')).find(
-      (t) => t.getClientRects().length > 0 && t.querySelector('tbody tr p[title]') !== null,
+      (t) => t.getClientRects().length > 0 && t.querySelector('tbody tr :is(p[title], button[data-row-select])') !== null,
     ) ?? null
   )
 }
@@ -64,7 +64,7 @@ async function readShape(page: import('@playwright/test').Page): Promise<Shape> 
   return page.evaluate(() => {
     const visible = (el: Element) => el.getClientRects().length > 0
     const table = Array.from(document.querySelectorAll('table')).find(
-      (t) => t.getClientRects().length > 0 && t.querySelector('tbody tr p[title]') !== null,
+      (t) => t.getClientRects().length > 0 && t.querySelector('tbody tr :is(p[title], button[data-row-select])') !== null,
     )
     if (!table) return { columns: ['NO TABLE'], bodyCells: -1, containerWidth: -1 }
     const headRow = table.querySelector('thead tr')
@@ -94,7 +94,7 @@ async function readShape(page: import('@playwright/test').Page): Promise<Shape> 
 async function setContainerWidth(page: import('@playwright/test').Page, px: number) {
   await page.evaluate((width) => {
     const table = Array.from(document.querySelectorAll('table')).find(
-      (t) => t.getClientRects().length > 0 && t.querySelector('tbody tr p[title]') !== null,
+      (t) => t.getClientRects().length > 0 && t.querySelector('tbody tr :is(p[title], button[data-row-select])') !== null,
     )
     const container = table?.parentElement
     if (!container || !container.className.includes('container-type')) {

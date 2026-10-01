@@ -65,6 +65,7 @@ describe('buildHostedMcpServer', () => {
         'haven_sweep_delegate',
         'haven_open_task_budget',
         'haven_close_task_budget',
+        'haven_get_task_budget',
       ].sort(),
     )
 

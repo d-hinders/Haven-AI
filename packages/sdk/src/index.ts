@@ -139,6 +139,7 @@ export type {
   HavenAllowance,
   HavenAllowanceSummary,
   HavenBalanceCoverage,
+  BudgetPrecheckResult,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
   HavenListScope,

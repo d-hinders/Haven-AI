@@ -286,6 +286,24 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * shrink-only from here.
  */
 /**
+ * **Re-derived — round 14, #3518 (2026-10-01).** A new hosted tool joins the
+ * surface — `haven_get_task_budget`, the read-by-id a close refusal's
+ * "re-check the budget's status" points at — and two descriptions grow to
+ * name the new visibility fields: `haven_get_agent`'s rows now carry their
+ * lifecycle `status` + `isExpired` (a closing budget must be visible AS
+ * closing, not vanish), and `haven_get_allowances` names `delegationHash` /
+ * `recipientAddress` (null = open) / `merchantId` / `reservedHavenAtomic` —
+ * the scope fields that let an agent holding two budgets for one token name
+ * the merchant-locked one BEFORE paying, and the Haven-side reservation
+ * figure reported beside (never folded into) the on-chain remaining. The
+ * clauses state the fields and their degraded read and nothing else — the
+ * same field-naming obligation rounds 9/10 recorded for additive response
+ * fields; no overclaim remains to trim. Measured on this tree: 25,716 UTF-8
+ * bytes across 27 tools; the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin is HELD without moving: 25,716 / 27 =
+ * 952.44 sits BELOW round 13's 957.62 ceiling — the new tool's lean
+ * description plus the additive clauses land under it.
+ *
  * **Re-derived — round 14, #3506 (agent-completes sub-budgets).** The agent
  * can now complete a sub-budget itself, which needs two additive facts an
  * agent only learns from `tools/list`: `haven_get_agent` carries
@@ -322,13 +340,30 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * shrink-only from here. The mean pin moves too: 25,227 / 26 = 970.2692
  * sits above both round-14 pins, and the same rule applies — re-derived at
  * the measured mean, shrink-only from here.
+ *
+ * **Re-derived — round 16, #3518 ∪ (#3506 ∪ #3529) integration tree
+ * (2026-10-01 merge).** The two round-14 branches meet here on disjoint
+ * descriptions: #3518's round-14 grew FROM the same round-13 base and joins
+ * the union with its new hosted tool (`haven_get_task_budget`, 26 → 27) plus
+ * the visibility clauses on `haven_get_agent` / `haven_get_allowances`,
+ * while dev's round-15 union carries #3506 + #3529's additions on the other
+ * descriptions. The three-way union re-measures at 26,045 UTF-8 bytes across
+ * 27 tools, measured on the merged tree (not derived arithmetically — the
+ * sentence-level unions on `haven_get_agent` overlap both branches), so the
+ * absolute pin moves to that exact value, shrink-only from here. The mean
+ * pin: 26,045 / 27 = 964.6296…, pinned at the two-decimal ceiling (964.63)
+ * — below round 15's 970.27 because the 27th tool joins the denominator,
+ * and the stricter of the two holds; shrink-only still applies.
+ *
+ * **Shrunk — round 17, #3518 review.** The `haven_get_task_budget` and
+ * `haven_get_agent` descriptions stopped claiming the agent read lists every
+ * task budget (it lists live rows only). Measured 26,029 bytes / 27 tools;
+ * both pins ratchet down to the measured values.
  */
-const MAX_TOTAL_BYTES = 25_227
-// Mean pin: re-derived — round 15, #3506 ∪ #3529 union (block above):
-// 25,227 / 26 = 970.2692, pinned at the two-decimal ceiling (970.27).
-// Round 13's 957.62 and both round-14 pins cannot hold while this tree
-// exceeds them. Shrink-only from here.
-const MAX_MEAN_BYTES = 970.27
+const MAX_TOTAL_BYTES = 26_029
+// Mean pin: round 17 (block above): 26,029 / 27 = 964.0370…, pinned at the
+// two-decimal ceiling (964.04). Shrink-only from here.
+const MAX_MEAN_BYTES = 964.04
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

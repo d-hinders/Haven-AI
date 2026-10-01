@@ -50,6 +50,7 @@ const AGENT_KEY_HASH = createHash('sha256').update(AGENT_KEY).digest('hex')
 const CHAIN = 84532 // Base Sepolia — the registry names USDC there
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'.toLowerCase() // the 84532 registry's USDC
 const RESOURCE_URL = 'https://merchant.example/3054-coffee'
+const precheckMerchant = '0x' + 'ee'.repeat(20) // precheckBody()'s default merchantTo
 
 let seq = 0
 
@@ -295,7 +296,24 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
     expect(res.statusCode).toBe(200)
     expectMatchesSpec('POST', '/machine-payments/budget-precheck', res.json())
-    expect(res.json()).toEqual({ sufficient: true, remaining_atomic: '5000000', remaining_is_from_chain: false })
+    // #3518: the success body now also NAMES the budget that answers — the
+    // single open row this fixture seeds, with its scope (null pin/merchant).
+    expect(res.json()).toEqual({
+      sufficient: true,
+      remaining_atomic: '5000000',
+      remaining_is_from_chain: false,
+      budget_id: res.json().budget_id,
+      budget_delegation_hash: res.json().budget_delegation_hash,
+      budget_recipient_address: null,
+      budget_merchant_id: null,
+    })
+    // The named row is a REAL active delegation of this agent, not a stub.
+    const named = await db.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM agent_delegations
+        WHERE id = $1 AND agent_id = (SELECT id FROM agents WHERE api_key_hash = $2)`,
+      [res.json().budget_id, AGENT_KEY_HASH],
+    )
+    expect(named.rows[0].n).toBe('1')
     // `remaining_is_from_chain: false` = the #1145 OPTIMISTIC fallback (no
     // delegation json to read): a real sufficient answer, warning-grade
     // provenance only — never a refusal.
@@ -794,5 +812,144 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
       expect(await refusalRows(agentId)).toHaveLength(1)
     })
     expect(userId).toBeTruthy()
+  })
+
+  // ── #3518: the compare runs the PAYMENT's own selection, not first-match ──
+
+  /**
+   * The issue's observed fixture: an OPEN budget (created FIRST) and a
+   * merchant-locked budget for the same token. The pinned one pays; the
+   * compare must therefore describe IT — the first-match rule reported the
+   * open row's remaining and refused (or allowed) the wrong purchase.
+   */
+  async function seedOpenThenPinned(
+    agentId: string,
+    openBudget: string,
+    pinnedBudget: string,
+  ): Promise<{ openId: string; pinnedId: string; pinnedHash: string }> {
+    const openId = await seedActiveDelegation(agentId, openBudget)
+    const pinnedHash = `0x${String(++seq).padStart(64, '3')}`
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds,
+          start_date, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 1, 'active', $7, 604800, 0, 99999999999)
+       RETURNING id`,
+      [agentId, CHAIN, USDC, precheckMerchant, pinnedHash, JSON.stringify({ kind: 'test-fixture' }), pinnedBudget],
+    )
+    return { openId, pinnedId: rows[0].id, pinnedHash }
+  }
+
+  it('an open budget created FIRST beside a merchant-pinned one: a sufficient pinned purchase passes and names the PINNED budget (#3518)', async () => {
+    // Refused today before this fix: first token match described the open
+    // 0.001 budget while the pinned 0.005 budget pays.
+    const { agentId } = await seedDelegationAgent()
+    const { pinnedId, pinnedHash } = await seedOpenThenPinned(agentId, '1000', '5000000000000')
+
+    const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
+    expect(res.statusCode).toBe(200)
+    expectMatchesSpec('POST', '/machine-payments/budget-precheck', res.json())
+    const body = res.json()
+    // The remaining figure is the PINNED budget's, not the open row's 1000.
+    expect(body.remaining_atomic).toBe('5000000000000')
+    expect(body.sufficient).toBe(true)
+    // The success body names the budget that pays.
+    expect(body.budget_id).toBe(pinnedId)
+    expect(body.budget_delegation_hash).toBe(pinnedHash)
+    expect(body.budget_recipient_address).toBe(precheckMerchant)
+    expect(body.budget_merchant_id).toBeNull()
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await refusalRows(agentId)).toHaveLength(0)
+  })
+
+  it('the inverse hazard: a LARGE open budget beside a SMALL pin for this payee is REFUSED on the pin (#3518)', async () => {
+    // Passed today before this fix: first match compared against the large
+    // open budget while the pinned payment would draw on the small pin.
+    const { agentId } = await seedDelegationAgent()
+    await seedOpenThenPinned(agentId, '5000000', '100') // open 5.00, pin 0.0001
+
+    const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
+    expect(res.statusCode).toBe(403)
+    const body = res.json()
+    expect(body.error_code).toBe('delegation_budget_exceeded')
+    // The compare ran against the PINNED budget's remaining — and the refusal
+    // names that budget, so the ledger row and the report describe what pays.
+    expect(body.remaining_atomic).toBe('100')
+    expect(body.budget_recipient_address).toBe(precheckMerchant)
+    expect(body.budget_merchant_id).toBeNull()
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
+  it('a quote with NO merchantTo falls back to the OPEN budget — the pinned rows are ineligible (#3518)', async () => {
+    const { agentId } = await seedDelegationAgent()
+    await seedOpenThenPinned(agentId, '3000000', '9999999')
+
+    const body = precheckBody()
+    delete (body as Record<string, unknown>).merchantTo
+    const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: body })
+    expect(res.statusCode).toBe(200)
+    const json = res.json()
+    expect(json.sufficient).toBe(true)
+    // The OPEN budget answers (its remaining), never a pinned row.
+    expect(json.remaining_atomic).toBe('3000000')
+    expect(json.budget_recipient_address).toBeNull()
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await refusalRows(agentId)).toHaveLength(0)
+  })
+
+  it('a payee that matches NO pin and no open budget… still answers the open budget when one exists (#3518)', async () => {
+    const { agentId } = await seedDelegationAgent()
+    await seedOpenThenPinned(agentId, '3000000', '5000000')
+    const stranger = '0x' + 'ff'.repeat(20)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ merchantTo: stranger }),
+    })
+    // The open budget covers every recipient, so a stranger pays from it —
+    // the compare describes the OPEN row (3.00), not the pin (5.00).
+    expect(res.statusCode).toBe(200)
+    expect(res.json().remaining_atomic).toBe('3000000')
+    expect(res.json().budget_recipient_address).toBeNull()
+  })
+  it('ONLY merchant-locked budgets and NO merchantTo: 409 budget_requires_recipient naming the pins — never a budget refusal, nothing recorded (#3518 review)', async () => {
+    // Before the review fix this answered 403 delegation_budget_exceeded
+    // "remaining 0 … ask the owner to raise the budget" and ledgered a
+    // refusal while the agent held a funded 9.99 USDC pin.
+    const { agentId } = await seedDelegationAgent()
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds,
+          start_date, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 1, 'active', '9990000', 604800, 0, 99999999999)`,
+      [agentId, CHAIN, USDC, precheckMerchant, `0x${String(++seq).padStart(64, '4')}`, JSON.stringify({ kind: 'test-fixture' })],
+    )
+
+    const body = precheckBody()
+    delete (body as Record<string, unknown>).merchantTo
+    const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: body })
+    expect(res.statusCode).toBe(409)
+    const json = res.json()
+    expect(json.error_code).toBe('budget_requires_recipient')
+    expect(json.next_action).toBe('retry_with_explicit_context')
+    expect(json.budget_recipient_addresses).toEqual([precheckMerchant.toLowerCase()])
+    expect(json.remaining_atomic).toBeUndefined()
+
+    // The same check naming the payee answers from the pin.
+    const named = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
+    expect(named.statusCode).toBe(200)
+    expect(named.json().remaining_atomic).toBe('9990000')
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await refusalRows(agentId)).toHaveLength(0)
   })
 })

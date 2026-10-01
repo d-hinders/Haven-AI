@@ -1219,6 +1219,18 @@ const agentPaymentStatus = {
         'on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the ' +
         'confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown.',
     },
+    // #3518: WHICH budget metered this payment — recorded at authorize
+    // (migration 053), the settle summary's join key for its allowance
+    // block. Omitted on the legacy rail and on rows predating migration
+    // 053, matching the handler's omit-when-absent honesty rule.
+    budget_delegation_hash: {
+      type: 'string',
+      pattern: '^0x[0-9a-fA-F]{64}$',
+      description:
+        'The budget delegation that metered this payment (#1059), recorded at authorize. The settle ' +
+        'summary keys its allowance rows on this — the budget that PAID, never a re-derived ' +
+        '(token, payee) first match. Omitted on the legacy rail and on intents predating migration 053.',
+    },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
     fee: {
@@ -6168,14 +6180,14 @@ export const openapiSpec = {
         operationId: 'listTaskBudgets',
         summary: 'List task budgets for the authenticated agent.',
         description:
-          "Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.",
+          "Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — closing rows always, pending and open rows while not expired; closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.",
         security: [{ AgentApiKey: [] }],
         parameters: [
           {
             name: 'status',
             in: 'query',
             required: false,
-            schema: { type: 'string', enum: ['open', 'all'] },
+            schema: { type: 'string', enum: ['open', 'live', 'all'] },
           },
         ],
         responses: {
@@ -7143,6 +7155,15 @@ export const openapiSpec = {
               '"fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
               'amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / ' +
               'merchant_address when the request carried them.',
+          },
+          '409': {
+            ...errorResponse,
+            description:
+              '#3518: the request named no merchantTo, the agent has no open budget for the token, ' +
+              'and it holds live merchant-locked budgets for it. Not a refusal — nothing is recorded ' +
+              'in payment_refusals. Carries error_code "budget_requires_recipient", next_action ' +
+              '"retry_with_explicit_context" and budget_recipient_addresses (the pins, lowercase); ' +
+              'repeat the check with merchantTo set to the payee.',
           },
           '410': {
             ...errorResponse,
@@ -10879,6 +10900,31 @@ export const openapiSpec = {
                 // number, side by side, both previously bare strings.
                 configured_amount: allowanceHumanAmount,
                 reset_period_min: { type: 'integer' },
+                // #3518: the budget's identity and SCOPE, so an agent can
+                // name the merchant-locked budget before paying.
+                delegation_hash: {
+                  type: 'string',
+                  pattern: '^0x[0-9a-fA-F]{64}$',
+                  description:
+                    '#3518: this budget delegation\'s hash — the identifier a payment authorization records as budget_delegation_hash and the key `reserved_haven_atomic` sums children under.',
+                },
+                recipient_address: {
+                  type: ['string', 'null'],
+                  pattern: '^0x[0-9a-f]{40}$',
+                  description:
+                    '#3518: the recipient pin — null for an open budget; a recipient-scoped budget pays ONLY this address (a payment\'s selection prefers the pin matching its payee).',
+                },
+                merchant_id: {
+                  type: ['string', 'null'],
+                  format: 'uuid',
+                  description:
+                    '#3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.',
+                },
+                reserved_haven_atomic: {
+                  type: 'string',
+                  description:
+                    '#3518: Haven-side reservation — the sum of this budget\'s OPEN, unexpired task- and sub-budget children\'s caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort).',
+                },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],
@@ -10937,9 +10983,12 @@ export const openapiSpec = {
           merchantTo: {
             type: 'string',
             description:
-              'Advisory for the ordinary compare: the merchant payTo address from the selected ' +
-              'option, carried onto the refusal row; it does not scope THAT compare — the budget ' +
-              'is per-token and the enforcer is the gate on recipients. #3492: when `idempotencyKey` ' +
+              'The merchant payTo address from the selected option, carried onto the refusal row. ' +
+              '#3518: it scopes the compare the way the payment selects its budget — a ' +
+              'recipient-pinned budget for this payee wins, a pin to another payee is excluded, ' +
+              'and the open budget covers the rest. Absent: only the open budget is eligible; when ' +
+              'the agent holds only merchant-locked budgets for the token the answer is 409 ' +
+              'budget_requires_recipient (nothing recorded), never a budget refusal. #3492: when `idempotencyKey` ' +
               'is also present, this field additionally scopes the settled-replay match below — a ' +
               'replay answer requires it to equal the stored row\'s payee.',
           },
@@ -10989,6 +11038,30 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          budget_id: {
+            type: 'string',
+            format: 'uuid',
+            description:
+              '#3518: the budget row the remaining figure describes — the payment-selection mirror\'s winner (recipient match for merchantTo, else the open budget), not the first per-token row. Absent when no row matched.',
+          },
+          budget_delegation_hash: {
+            type: 'string',
+            pattern: '^0x[0-9a-fA-F]{64}$',
+            description:
+              '#3518: the selected budget\'s delegation hash — the same identifier a payment authorization records as budget_delegation_hash, so a caller can verify report and payment name the same budget.',
+          },
+          budget_recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description:
+              '#3518: the selected budget\'s recipient pin — null for an open budget, the merchant payee for a pinned/merchant-locked one.',
+          },
+          budget_merchant_id: {
+            type: ['string', 'null'],
+            format: 'uuid',
+            description:
+              '#3518: the merchant the selected budget was issued for (#3331), null for every other budget.',
           },
           replay: {
             type: 'boolean',
@@ -11044,6 +11117,12 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          budget_recipient_addresses: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              '#3518: present only when budget_remaining_atomic is "0" because the agent has no OPEN budget for the token but holds live merchant-locked budgets — their recipients, lowercase. Those budgets pay only these addresses; haven_get_allowances reports their remaining figures.',
           },
         },
         additionalProperties: false,

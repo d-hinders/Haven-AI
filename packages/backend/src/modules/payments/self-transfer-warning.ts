@@ -1,3 +1,9 @@
+// Lives in modules/payments, NOT domain/: it reads the owner directory
+// through the repositories aggregate, and domain/ is PURE — no I/O of any
+// kind (docs/architecture/10-module-boundaries.md; execution-rail.ts is the
+// recorded precedent for a module kept out of domain/ for exactly this).
+// The mapping itself is pure and unchanged; the repository read it wraps is
+// proven in infra/repositories/__tests__/smart-accounts.test.ts.
 /**
  * #3528 — the self-transfer prepare hint. When a payment's recipient is one of
  * the owner's OWN Haven account addresses, the prepare response carries an
@@ -18,7 +24,7 @@
  *   "never paid this address" bookkeeping — the owner's own account is the
  *   one case a live run flagged (#3328).
  */
-import { listOwnerAddressesForUser } from '../infra/repositories/smart-accounts.js'
+import { listOwnerAddressesForUser } from '../../infra/repositories/smart-accounts.js'
 
 /**
  * The warning code as it rides the prepare wire (snake_case, like every

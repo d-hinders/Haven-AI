@@ -1,4 +1,6 @@
-// db-mock-exempt: pure mapping helper (no DB) — the repository read it wraps is proven in infra/repositories/__tests__/smart-accounts.test.ts on the real-DB harness
+// Lives beside its module in modules/payments. The repository read is proven
+// in infra/repositories/__tests__/smart-accounts.test.ts on the real-DB
+// harness; this file stubs the repository and proves the MAPPING contract:
 /**
  * #3528 — the self-transfer prepare hint's mapping contract:
  *
@@ -13,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { mockListOwnerAddresses } = vi.hoisted(() => ({ mockListOwnerAddresses: vi.fn() }))
 
-vi.mock('../../infra/repositories/smart-accounts.js', () => ({
+vi.mock('../../../infra/repositories/smart-accounts.js', () => ({
   listOwnerAddressesForUser: (...a: unknown[]) => mockListOwnerAddresses(...a),
 }))
 
@@ -22,7 +24,7 @@ import {
   SELF_TRANSFER_WARNING_MESSAGE,
   isSelfTransferRecipient,
   selfTransferWarning,
-} from '../self-transfer.js'
+} from '../self-transfer-warning.js'
 
 const OWNER = '22222222-2222-2222-2222-222222222222'
 // The owner's primary Haven account (a smart-account address)…

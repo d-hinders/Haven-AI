@@ -35,7 +35,7 @@ import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
 // #3528: the additive self-transfer hint on both prepare responses.
-import { selfTransferWarning } from '../../domain/self-transfer.js'
+import { selfTransferWarning } from '../payments/index.js'
 import { classifyRevertForLedger, isTransferCapRevert } from '../payments/refusal-ledger.js'
 import { refuse } from '../payments/refuse.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'

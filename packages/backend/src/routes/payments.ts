@@ -30,7 +30,7 @@ import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { classifyRevertForLedger, isPeriodBudgetRevert, isTransferCapRevert, refuse } from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // #3528: the additive self-transfer hint on the prepare response.
-import { selfTransferWarning } from '../domain/self-transfer.js'
+import { selfTransferWarning } from '../modules/payments/index.js'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).

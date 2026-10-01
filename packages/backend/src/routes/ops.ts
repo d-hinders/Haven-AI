@@ -32,33 +32,22 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { isOpsConfigured, type OpsConfig } from '../config/ops.js'
 import { authRateLimit, opsRevealRateLimit } from '../middleware/rate-limit.js'
 import { createOpsAuth, opsOperatorOf } from '../middleware/ops-auth.js'
-import { signOpsState, signOpsToken, verifyOpsState } from '../modules/ops/tokens.js'
 import {
   exchangeGithubCode,
   fetchGithubUser,
   githubAuthorizeUrl,
+  signOpsState,
+  signOpsToken,
+  verifyOpsState,
+  type FetchLike,
   type GithubUser,
-} from '../modules/ops/github.js'
+} from '../modules/ops/index.js'
 import { insertOpsAccessLog, type OpsAccessLogEntry } from '../infra/repositories/ops-access-log.js'
+import { isOpsRevealField, readOpsRevealField } from '../infra/repositories/ops-reveal.js'
 import type { Executor } from '../infra/transaction.js'
 
 /** Where GitHub sends the browser back; must match the OAuth App's redirect URI. */
 export const OPS_CALLBACK_PATH = '/ops/auth/github/callback'
-
-/**
- * The closed set of fields `POST /ops/reveal` can return, and the read that
- * returns each one. Anything not listed here is refused by the spec's enums
- * and again here. The data slices (#3512–#3514) add entries as their pages
- * show new masked fields.
- */
-export const OPS_REVEAL_FIELDS = {
-  user: {
-    email: 'SELECT email AS value FROM users WHERE id = $1',
-    name: 'SELECT name AS value FROM users WHERE id = $1',
-  },
-} as const satisfies Record<string, Record<string, string>>
-
-type RevealTarget = keyof typeof OPS_REVEAL_FIELDS
 
 export interface OpsRoutesOptions {
   ops: OpsConfig
@@ -67,7 +56,7 @@ export interface OpsRoutesOptions {
   readDb?: Executor | null
   /** Audit writer; defaults to the main-pool insert. A test seam, never a way to skip the write. */
   audit?: (entry: OpsAccessLogEntry) => Promise<void>
-  fetchImpl?: typeof fetch
+  fetchImpl?: FetchLike
   now?: () => number
 }
 
@@ -207,12 +196,12 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
       // Data reads need the read-only role (#3510); without it this is a data route that is off.
       if (!readDb) return reply.callNotFound()
       const { target_type: targetType, target_id: targetId, field } = request.body
-      const fields = OPS_REVEAL_FIELDS[targetType as RevealTarget] as Record<string, string> | undefined
-      const sql = fields?.[field]
-      if (!sql) return reply.code(400).send({ error: 'That field cannot be revealed' })
+      if (!isOpsRevealField(targetType, field)) {
+        return reply.code(400).send({ error: 'That field cannot be revealed' })
+      }
 
-      const { rows } = await readDb.query<{ value: string | null }>(sql, [targetId])
-      if (rows.length === 0) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
+      const row = await readOpsRevealField(readDb, targetType, field, targetId)
+      if (!row) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
 
       const operator = opsOperatorOf(request)
       const ok = await recordOrRefuse(request, reply, {
@@ -228,7 +217,7 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
         target_type: targetType,
         target_id: targetId,
         field,
-        value: rows[0].value,
+        value: row.value,
       })
     },
   )

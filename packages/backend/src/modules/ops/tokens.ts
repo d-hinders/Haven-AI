@@ -12,8 +12,8 @@
  * - the short-lived **OAuth state**, which carries the return origin and the
  *   ops app's nonce through GitHub's redirect so the callback can trust them.
  *
- * Verification is a standalone `fast-jwt` verifier, not a second
- * `request.jwtVerify(`: the backend keeps exactly one dashboard JWT door
+ * Verification is a standalone `fast-jwt` verifier, not a second call to the
+ * request's JWT-verify decorator: the backend keeps exactly one dashboard JWT door
  * (`middleware/__tests__/auth-purpose.test.ts`). The verifier pins the
  * algorithm, audience and issuer, and requires every claim it relies on.
  */

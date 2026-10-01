@@ -104,6 +104,11 @@ deployed that way today.
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public and carries only status, timestamp, and database health; `/health/ops` is operator-only).
+  The ops console's backend routes (`/ops/*`, #3509, epic #3507) answer 404
+  on any backend that does not set all six `OPS_*` variables documented in
+  [`.env.dev.example`](../../.env.dev.example); a partly-configured backend is
+  the same as an unconfigured one. Setting them on a deployed service is an
+  operator step tracked on the epic's promotion checklist.
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
@@ -468,7 +473,9 @@ Isolation rules that are non-negotiable for a payments product:
   auth, one uuid path parameter, no body) and the PUT (owner auth) were both
   added to `enforcedModules` in their first commit; the request schema comes
   from the OpenAPI spec, so a body that is not exactly
-  `{ tax_declaration_enabled: boolean }` is refused before the handler. The
+  `{ tax_declaration_enabled: boolean }` is refused before the handler. #3509's
+  `routes/ops.ts` did the same; its plugin answers 404 from an `onRequest`
+  hook when the ops console is unconfigured, so validation never runs there. The
   `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are

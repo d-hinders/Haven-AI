@@ -12,6 +12,9 @@ export const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
 export const GITHUB_USER_URL = 'https://api.github.com/user'
 export const GITHUB_TIMEOUT_MS = 15_000
 
+/** The `fetch` shape the OAuth calls use — injectable so tests can record GitHub. */
+export type FetchLike = typeof fetch
+
 export interface GithubUser {
   id: number
   login: string
@@ -39,7 +42,7 @@ export function githubAuthorizeUrl(params: { clientId: string; redirectUri: stri
 /** Exchange an authorization code for an access token. */
 export async function exchangeGithubCode(
   params: { clientId: string; clientSecret: string; code: string; redirectUri: string },
-  fetchImpl: typeof fetch,
+  fetchImpl: FetchLike,
 ): Promise<string> {
   let res: Response
   try {
@@ -68,7 +71,7 @@ export async function exchangeGithubCode(
 }
 
 /** Read the signed-in GitHub user. */
-export async function fetchGithubUser(accessToken: string, fetchImpl: typeof fetch): Promise<GithubUser> {
+export async function fetchGithubUser(accessToken: string, fetchImpl: FetchLike): Promise<GithubUser> {
   let res: Response
   try {
     res = await fetchImpl(GITHUB_USER_URL, {

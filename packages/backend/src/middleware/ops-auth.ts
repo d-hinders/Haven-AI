@@ -12,7 +12,7 @@
  */
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import type { OpsConfig } from '../config/ops.js'
-import { verifyOpsToken, type OpsOperator } from '../modules/ops/tokens.js'
+import { verifyOpsToken, type OpsOperator } from '../modules/ops/index.js'
 
 export const OPS_UNAUTHORIZED_BODY = {
   error: 'Unauthorized',

@@ -17814,7 +17814,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description On-chain execution failed after this route claimed the intent for submission; the intent is already `failed`. The body carries a typed `error_code` (`signature_rejected`, `task_budget_exceeded`, `delegation_budget_exceeded`, or `onchain_execution_failed`) and a bounded, redacted `message` — never the full bundler/viem failure. See the typed codes above for the remedy each names; none of them means retry this `payment_id`. */
+            /** @description On-chain execution failed after this route claimed the intent for submission; the intent is already `failed`. The body carries one of six typed `error_code` values: `submission_outcome_unknown` (the UserOp may have landed — poll status, do NOT pay again), `signature_rejected` (AA24 — update the signer, then pay again), `account_validation_failed` (a different AA2x code, not a signer cause — pay again), `task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 answers, no `message` field), or `onchain_execution_failed` (pay again). The four non-budget codes carry `message` (a short remedy) and `details` (the bounded, redacted bundler/viem text, capped at 300 characters plus an ellipsis, or `null`) — never the full failure dump. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -17823,7 +17823,7 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        details?: string | null;
                     } & {
                         [key: string]: unknown;
                     };

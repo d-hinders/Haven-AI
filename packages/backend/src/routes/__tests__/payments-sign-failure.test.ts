@@ -8,9 +8,11 @@
  * #3494 — `POST /payments/:id/sign`'s failure catch: a typed `error_code`
  * and cause class on the 502, instead of one untyped "On-chain execution
  * failed" for everything a bundler can throw after the route already
- * claimed the intent. Four cause classes, in the order the route checks
- * them: AA2x signature/validation, a task-budget transfer-cap revert, a
- * period-budget revert, and the generic fallback.
+ * claimed the intent. Review round 1 split and extended the classes; in the
+ * order the route checks them: `SubmittedUserOpFailedError` (submission
+ * outcome unknown — checked FIRST, double-pay risk: B1), AA24 signature
+ * rejection, every other AA2x account-validation failure, a task-budget
+ * transfer-cap revert, a period-budget revert, and the generic fallback.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -47,6 +49,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 import { serializeUserOp } from '../../rails/execution-rail.js'
+import { SubmittedUserOpFailedError } from '../../rails/delegation-rail.js'
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -160,6 +163,41 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     })
   }
 
+  it('submission outcome unknown (B1, double-pay risk): error_code submission_outcome_unknown, checked before every other cause', async () => {
+    primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new SubmittedUserOpFailedError(
+        'redemption UserOp 0xabc was sent but its receipt could not be confirmed: timeout',
+        '0xabc',
+      ),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.status).toBe('failed')
+    expect(body.error_code).toBe('submission_outcome_unknown')
+    expect(body.payment_id).toBe(PAYMENT_ID)
+    // The remedy is "check status", never "create a new payment" — the
+    // whole point of this cause class is that a new payment risks a double
+    // pay if the first one landed.
+    expect(body.message).toMatch(/do not create a new payment/i)
+    expect(body.message).not.toMatch(/update the signer/i)
+  })
+
+  it('submission outcome unknown also fires when the bundler reports the op included but reverted (no enforcer text to classify against)', async () => {
+    primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new SubmittedUserOpFailedError('redemption UserOp 0xabc included but reverted', '0xabc'),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBe('submission_outcome_unknown')
+  })
+
   it('AA2x signature rejection: error_code signature_rejected, remedy names a NEW payment', async () => {
     primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
     delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
@@ -178,8 +216,26 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     expect(body.details.length).toBeLessThanOrEqual(300 + 1)
   })
 
-  it('task-budget transfer-cap revert, confirmed by a fresh enforcer read: error_code task_budget_exceeded', async () => {
-    const taskBudgetRow = {
+  it('other AA2x (AA25): error_code account_validation_failed, never names the signer', async () => {
+    primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new Error('UserOperation reverted during simulation: AA25 invalid account nonce'),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.status).toBe('failed')
+    expect(body.error_code).toBe('account_validation_failed')
+    expect(body.message).toMatch(/new payment/i)
+    expect(body.message).not.toMatch(/signer/i)
+    // The on-chain AA code is still visible, bounded, in details.
+    expect(body.details).toMatch(/AA25/)
+  })
+
+  function taskBudgetRow(overrides: Record<string, unknown> = {}) {
+    return {
       id: TASK_BUDGET_ID,
       agent_id: AGENT.id,
       chain_id: AGENT.chain_id,
@@ -198,13 +254,17 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
       updated_at: '2026-01-01T00:00:00.000Z',
       opened_at: '2026-01-01T00:00:00.000Z',
       closed_at: null,
+      ...overrides,
     }
+  }
+
+  it('task-budget transfer-cap revert, confirmed by a fresh enforcer read: error_code task_budget_exceeded', async () => {
     primeDb(
       AUTH,
       intentById(intentRow({ task_budget_id: TASK_BUDGET_ID })),
       CLAIM_OK,
       FAIL_WRITE,
-      [/FROM agent_task_budgets/, () => ({ rows: [taskBudgetRow] })],
+      [/FROM agent_task_budgets/, () => ({ rows: [taskBudgetRow()] })],
     )
     // Fully spent: remainingAtomic = 0 < amountAtomic (100000).
     mockReadSpent.mockResolvedValueOnce(100000n)
@@ -221,6 +281,72 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     expect(body.task_budget_id).toBe(TASK_BUDGET_ID)
     expect(body.remaining_atomic).toBe('0')
     expect(body.max_atomic).toBe('100000')
+    // #3494 review round 1 (N2): the failure is booked on the intent row
+    // (the FAIL_WRITE route matched), and NO payment_refusals row is
+    // written — `refuse(..., null)` never attempts the write.
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_refusals/.test(String(c[0])))).toBe(false)
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(true)
+  })
+
+  // #3494 review round 1 (N2): `=== 'exceeded'` must be the exact predicate —
+  // a looser `!== 'fits'` would silently fold `unreadable` into the typed
+  // 403/502, which is wrong: an unreadable chain means the revert is NOT
+  // confirmed, and the honest answer is the generic fallback.
+  it("task-budget cap check outcome 'fits' (a race the chain resolved in the agent's favour) falls through to the generic answer, not task_budget_exceeded", async () => {
+    primeDb(
+      AUTH,
+      intentById(intentRow({ task_budget_id: TASK_BUDGET_ID })),
+      CLAIM_OK,
+      FAIL_WRITE,
+      [/FROM agent_task_budgets/, () => ({ rows: [taskBudgetRow()] })],
+    )
+    // Nothing spent yet: remainingAtomic = 100000 >= amountAtomic (100000) — fits.
+    mockReadSpent.mockResolvedValueOnce(0n)
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new Error(hexRevert('ERC20TransferAmountEnforcer:allowance-exceeded')),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBe('onchain_execution_failed')
+  })
+
+  it("task-budget cap check outcome 'unreadable' (the chain read failed) falls through to the generic answer, not task_budget_exceeded", async () => {
+    primeDb(
+      AUTH,
+      intentById(intentRow({ task_budget_id: TASK_BUDGET_ID })),
+      CLAIM_OK,
+      FAIL_WRITE,
+      [/FROM agent_task_budgets/, () => ({ rows: [taskBudgetRow()] })],
+    )
+    mockReadSpent.mockRejectedValueOnce(new Error('rpc unavailable'))
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new Error(hexRevert('ERC20TransferAmountEnforcer:allowance-exceeded')),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBe('onchain_execution_failed')
+  })
+
+  it('a DB failure while re-reading the task budget falls through to the generic answer, never a 500 (S2)', async () => {
+    primeDb(
+      AUTH,
+      intentById(intentRow({ task_budget_id: TASK_BUDGET_ID })),
+      CLAIM_OK,
+      FAIL_WRITE,
+      [/FROM agent_task_budgets/, () => { throw new Error('connection reset') }],
+    )
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new Error(hexRevert('ERC20TransferAmountEnforcer:allowance-exceeded')),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBe('onchain_execution_failed')
   })
 
   it('period-budget revert, confirmed by a fresh delegation read: error_code delegation_budget_exceeded', async () => {
@@ -252,6 +378,83 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     expect(body.remaining_atomic).toBe('40000')
     expect(body.shortfall_atomic).toBe('60000')
     expect(body.next_action).toBe('fund_account_or_raise_allowance')
+    // #3494 review round 1 (S2): matches the create-time body, which also
+    // carries `asset`.
+    expect(body.asset).toBe(USDC)
+  })
+
+  it('a DB failure while re-reading the budget delegation falls through to the generic answer, never a 500 (S2)', async () => {
+    primeDb(
+      AUTH,
+      intentById(intentRow({ budget_delegation_hash: BUDGET_DELEGATION_HASH })),
+      CLAIM_OK,
+      FAIL_WRITE,
+      [/FROM agent_delegations/, () => { throw new Error('connection reset') }],
+    )
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new Error(hexRevert('ERC20PeriodTransferEnforcer:transfer-amount-exceeded')),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBe('onchain_execution_failed')
+  })
+
+  it('a chain read failure while re-reading the budget delegation falls through to the generic answer', async () => {
+    const delegationRow = {
+      delegation_hash: BUDGET_DELEGATION_HASH,
+      delegation_json: '{}',
+      recipient_address: null,
+      budget_atomic: '1000000',
+    }
+    primeDb(
+      AUTH,
+      intentById(intentRow({ budget_delegation_hash: BUDGET_DELEGATION_HASH })),
+      CLAIM_OK,
+      FAIL_WRITE,
+      [/FROM agent_delegations/, () => ({ rows: [delegationRow] })],
+    )
+    mockReadRemaining.mockRejectedValueOnce(new Error('rpc unavailable'))
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new Error(hexRevert('ERC20PeriodTransferEnforcer:transfer-amount-exceeded')),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBe('onchain_execution_failed')
+  })
+
+  it('an x402/EIP-3009 funding-leg intent reports its own rail on a period-budget revert, never a hardcoded direct', async () => {
+    const delegationRow = {
+      delegation_hash: BUDGET_DELEGATION_HASH,
+      delegation_json: '{}',
+      recipient_address: null,
+      budget_atomic: '1000000',
+    }
+    primeDb(
+      AUTH,
+      intentById(intentRow({
+        budget_delegation_hash: BUDGET_DELEGATION_HASH,
+        payment_rail: 'x402',
+        source: 'x402',
+      })),
+      CLAIM_OK,
+      FAIL_WRITE,
+      [/FROM agent_delegations/, () => ({ rows: [delegationRow] })],
+    )
+    mockReadRemaining.mockResolvedValueOnce({ remainingAtomic: '40000', fromChain: true })
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new Error(hexRevert('ERC20PeriodTransferEnforcer:transfer-amount-exceeded')),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error_code).toBe('delegation_budget_exceeded')
+    expect(body.rail).toBe('x402')
   })
 
   it('everything else: error_code onchain_execution_failed, bounded message replaces the old unbounded details', async () => {
@@ -269,6 +472,9 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     expect(body.message.length).toBeLessThanOrEqual(301)
     expect(body.details.length).toBeLessThanOrEqual(301)
     expect(longDump.length).toBeGreaterThan(400)
+    // #3494 review round 1 (N2): booked on the intent row, no ledger row.
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(true)
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_refusals/.test(String(c[0])))).toBe(false)
   })
 
   it('GET /payments/:id bounds error_message at the read — never the full stored dump', async () => {

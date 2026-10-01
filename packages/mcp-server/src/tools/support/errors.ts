@@ -203,6 +203,16 @@ const SIGNATURE_REJECTED_OMITTED_REASON =
   'the account rejected this signature during on-chain validation; retrying this payment_id cannot succeed — update the signer, then create a NEW payment, after telling the user'
 
 /**
+ * #3494 review round 1 (S1): every OTHER ERC-4337 AA2x validation failure —
+ * a real `validateUserOp` rejection, but NOT evidence the signature itself
+ * is wrong (AA24 alone is `signature_rejected` above). Deliberately never
+ * names the signer: the remedy is a new payment, not a signer update.
+ */
+const ACCOUNT_VALIDATION_FAILED_ERROR_CODE = 'account_validation_failed'
+const ACCOUNT_VALIDATION_FAILED_OMITTED_REASON =
+  'the account rejected this payment during on-chain validation (not a signature cause); retrying this payment_id cannot succeed — create a new payment, after telling the user'
+
+/**
  * #3494: the backend's `error_code` for every other `POST /payments/:id/sign`
  * on-chain/bundler failure — the one case this route cannot classify as a
  * signature or a budget cause. Still a failed intent, so still stop-and-tell,
@@ -212,6 +222,18 @@ const SIGNATURE_REJECTED_OMITTED_REASON =
 const ONCHAIN_EXECUTION_FAILED_ERROR_CODE = 'onchain_execution_failed'
 const ONCHAIN_EXECUTION_FAILED_OMITTED_REASON =
   'this payment_id already failed on-chain and cannot be retried; tell the user what the message says, and create a new payment if they still want to pay'
+
+/**
+ * #3494 review round 1 (B1, double-pay risk): the backend's `error_code`
+ * when `sendUserOperation` resolved but the outcome after that could not be
+ * confirmed (the receipt wait errored/timed out, or the bundler reports the
+ * op included but reverted) — the UserOp MAY have landed. Unlike every other
+ * sign-failure code, the remedy here is NOT "create a new payment": doing
+ * that before the outcome is known risks paying twice. `check_status_later`
+ * is the one next_action across this whole route's failure family that
+ * polls instead of telling the agent to act.
+ */
+const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
 
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
@@ -356,6 +378,54 @@ export function normalizeError(err: unknown): ToolFailure {
   // these mean the intent is ALREADY FAILED — `failSubmittedIntent` booked it
   // on the row before the response was sent — so "retry once" is never the
   // right next step whatever caused it.
+  // #3494 review round 1 (B1, double-pay risk): checked BEFORE every other
+  // sign-failure branch — this is the one case where "create a new payment"
+  // is the WRONG instruction, because the submitted UserOp may have landed.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE
+  ) {
+    // The backend's `payment_id` is this route's own path parameter — it is
+    // ALWAYS present on this error_code's body (`routes/payments.ts`'s
+    // `POST /:id/sign` always knows `id`), so `check_status_later` always
+    // names `haven_get_payment_status`; a payment-id-less variant of this
+    // branch would violate decision 9's rule that an action with a default
+    // tool always names one.
+    const body = err.body as { payment_id: string }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'haven_get_payment_status',
+      nextArguments: { payment_id: body.payment_id },
+    })
+    return {
+      success: false,
+      code: 'SUBMISSION_OUTCOME_UNKNOWN',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: body.payment_id,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === ACCOUNT_VALIDATION_FAILED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: ACCOUNT_VALIDATION_FAILED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'ACCOUNT_VALIDATION_FAILED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
   if (
     err instanceof HavenApiError &&
     (err.body as { error_code?: string } | undefined)?.error_code === SIGNATURE_REJECTED_ERROR_CODE

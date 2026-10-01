@@ -166,21 +166,31 @@ export function isTransferCapRevert(err: unknown): boolean {
 }
 
 /**
- * #3494: the ERC-4337 AA2x family — a signature or account-validation
- * failure inside `validateUserOp` itself (`AA24 signature error` is the one
- * seen live; AA20/AA21/AA22/AA23/AA25/AA26 are the same validation phase for
- * a different reason). Like the caveat reverts above there is no typed error
- * to switch on: the bundler/EntryPoint relays it as plain text in the revert
- * reason, so this is a text match, not a code match. Unlike a budget revert,
- * there is nothing to re-read and no "fits now" outcome — the signature
- * itself is what the account rejected, so this payment cannot be resubmitted
- * with a better-timed retry. The caller's remedy is a NEW payment, signed by
- * a signer the account will accept.
+ * #3494 review round 1 (S1): `AA24 signature error` is the ONE ERC-4337 AA2x
+ * code this backend can attribute to the signer — the EntryPoint's own
+ * validation found the signature itself wrong. Every OTHER AA2x code
+ * (AA20 account not deployed, AA21 didn't pay prefund, AA22 expired or not
+ * due, AA23 validateUserOp reverted for a reason that is not the signature,
+ * AA25 invalid account nonce, AA26 over verificationGasLimit) is a real
+ * validation failure but NOT evidence the signer is wrong — naming the
+ * signer there would send an agent chasing a signer bug that is not there.
+ * Like the caveat reverts above there is no typed error to switch on: the
+ * bundler/EntryPoint relays it as plain text in the revert reason, so this
+ * is a text match, not a code match. Unlike a budget revert, there is
+ * nothing to re-read and no "fits now" outcome either way — the remedy for
+ * both is a NEW payment, never a resubmit of this payment_id.
  */
-const ACCOUNT_VALIDATION_REVERT_PATTERN = /\bAA2[0-9]\b/
+const SIGNATURE_REJECTED_REVERT_PATTERN = /\bAA24\b/
+/** #3494 review round 1 (S1): the rest of the AA2x family — see the doc above. */
+const ACCOUNT_VALIDATION_FAILED_REVERT_PATTERN = /\bAA(?:20|21|22|23|25|26)\b/
 
-export function isAccountValidationRevert(err: unknown): boolean {
-  return ACCOUNT_VALIDATION_REVERT_PATTERN.test(flattenErrorText(err))
+export function isSignatureRejectedRevert(err: unknown): boolean {
+  return SIGNATURE_REJECTED_REVERT_PATTERN.test(flattenErrorText(err))
+}
+
+/** True for an AA2x validation failure OTHER than AA24 (see `isSignatureRejectedRevert`). */
+export function isAccountValidationFailedRevert(err: unknown): boolean {
+  return ACCOUNT_VALIDATION_FAILED_REVERT_PATTERN.test(flattenErrorText(err))
 }
 
 /**

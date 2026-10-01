@@ -976,30 +976,59 @@ const railUnavailableResponse = {
  * this route relays (a direct payment, or the EIP-3009 funding leg named in
  * `POST /x402/authorize`'s `sign_data.instructions`). The intent is already
  * `failed` by the time this is sent (`failSubmittedIntent` books it first):
- * there is nothing left to retry on this `payment_id` whatever the cause, so
- * `message` is bounded and redacted, never a full viem/bundler dump, and
- * differs by `error_code`:
- * - `signature_rejected` — the account rejected the signature during
- *   on-chain validation (ERC-4337 AA2x, most often `AA24 signature error`).
- *   Update the signer and sign a NEW payment; this `payment_id` cannot be
- *   resubmitted.
+ * there is nothing left to retry on this `payment_id` whatever the cause.
+ * Six `error_code` values, in the order the route checks them:
+ * - `submission_outcome_unknown` — `sendUserOperation` resolved but the
+ *   receipt wait errored/timed out, or the bundler reports the op included
+ *   but reverted: the UserOp MAY have landed. Do NOT create a new payment —
+ *   poll this `payment_id`'s status first, and only pay again once status
+ *   confirms this one did not settle.
+ * - `signature_rejected` — the account rejected the UserOperation signature
+ *   during on-chain validation (ERC-4337 `AA24 signature error`). Update the
+ *   signer and sign a NEW payment; this `payment_id` cannot be resubmitted.
+ * - `account_validation_failed` — a different ERC-4337 AA2x validation
+ *   failure (AA20/AA21/AA22/AA23/AA25/AA26) — a real rejection, but not
+ *   evidence the signature itself is wrong, so this code never names the
+ *   signer. Create a new payment.
  * - `task_budget_exceeded` / `delegation_budget_exceeded` — a budget revert
  *   caught at submit (a payment that raced past the create-time pre-check,
  *   or whose pre-check read failed open), re-confirmed from the enforcer's
- *   own current figure. Same shape the create-time 403 answers
- *   (`task_budget_id`/`remaining_atomic`/`max_atomic`, or
- *   `remaining_atomic`/`shortfall_atomic`/`phase`/`next_action`/`rail`).
+ *   own current figure. Same body shape the create-time 403 answers —
+ *   `task_budget_id`/`remaining_atomic`/`max_atomic`, or
+ *   `remaining_atomic`/`shortfall_atomic`/`phase`/`next_action`/`rail`/`asset`
+ *   — and like the create-time 403, carries no `message` field.
  * - `onchain_execution_failed` — any other on-chain/bundler failure this
- *   route cannot classify more precisely.
+ *   route cannot classify more precisely. Create a new payment.
+ *
+ * The four non-budget codes above carry `message` (a short, fixed remedy
+ * sentence) and `details` — the underlying bundler/viem failure text,
+ * already scrubbed of vendor secrets and capped at 300 characters plus an
+ * ellipsis if longer, never the full dump. `details` is `null` when nothing
+ * was recorded.
  */
 const signFailureResponse = {
   ...errorResponse,
+  content: {
+    'application/json': {
+      schema: {
+        ...errorResponse.content['application/json'].schema,
+        properties: {
+          ...errorResponse.content['application/json'].schema.properties,
+          details: { type: ['string', 'null'] },
+        },
+      },
+    },
+  },
   description:
     'On-chain execution failed after this route claimed the intent for submission; the intent is ' +
-    'already `failed`. The body carries a typed `error_code` (`signature_rejected`, ' +
-    '`task_budget_exceeded`, `delegation_budget_exceeded`, or `onchain_execution_failed`) and a ' +
-    'bounded, redacted `message` — never the full bundler/viem failure. See the typed codes above ' +
-    'for the remedy each names; none of them means retry this `payment_id`.',
+    'already `failed`. The body carries one of six typed `error_code` values: ' +
+    '`submission_outcome_unknown` (the UserOp may have landed — poll status, do NOT pay again), ' +
+    '`signature_rejected` (AA24 — update the signer, then pay again), ' +
+    '`account_validation_failed` (a different AA2x code, not a signer cause — pay again), ' +
+    '`task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 ' +
+    'answers, no `message` field), or `onchain_execution_failed` (pay again). The four non-budget ' +
+    'codes carry `message` (a short remedy) and `details` (the bounded, redacted bundler/viem text, ' +
+    'capped at 300 characters plus an ellipsis, or `null`) — never the full failure dump.',
 } as const
 
 /**

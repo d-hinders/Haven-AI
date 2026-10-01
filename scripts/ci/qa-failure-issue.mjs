@@ -108,9 +108,9 @@ const HARNESS = [/\bis not a function\b|\bis not defined\b|Cannot (read|set) pro
 // modules/x402/delegation-authorize.ts), however the leg relays it — direct,
 // SDK or hosted MCP. Only that body: Haven's other limiters are deliberately
 // NOT matched. `moneyPathRateLimit`'s 429 (`Rate limit exceeded, retry in 1
-// minute`, serialized with `"error":"Too Many Requests"`) lands in `provider`,
-// and a `RelayerBudgetExceededError` relayed as `failed (429)` lands in
-// `haven` — both pinned by test. A loose /Rate limit exceeded/ would pull the
+// minute`) and a `RelayerBudgetExceededError` land in `haven` when relayed as
+// `failed (429)`, and in `unclassified` when the status is lost (SDK, sweep
+// scenario) — pinned by test. A loose /Rate limit exceeded/ would pull the
 // first one in here.
 const RATE_LIMIT = [/Rate limit exceeded: max \d+ x402 payments per hour/]
 // The harness's own Haven API client reports `<step> failed (<status>)`. A 4xx
@@ -321,8 +321,7 @@ export function buildBody({ trigger, runUrl, when, classification = null }) {
     'Triage it by class: `docs/operations/agent-qa.md` → Troubleshooting → *Classify the',
     'failure*. A recurring `provider` class is a finding for the provider; `rate_limit` is the',
     'harness out-running Haven\'s own x402 cap (space out hand dispatches), never a product',
-    'defect; an `unclassified`',
-    'one needs reading, and a real regression gets its own bug report under',
+    'defect; an `unclassified` one needs reading, and a real regression gets its own bug report under',
     '`docs/bug-reports/`. Close this issue once a run is green; the next failure reopens it.',
   ].join('\n')
 }

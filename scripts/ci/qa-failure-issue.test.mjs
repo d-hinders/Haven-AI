@@ -579,19 +579,24 @@ describe('qa-failure-issue: rate_limit class (#3541)', () => {
   })
 
   test("Haven's other limiters are excluded, and where each lands is pinned", () => {
-    // moneyPathRateLimit (60/min) as @fastify/rate-limit serializes it: the
-    // "Too Many Requests" error name makes it `provider` — a known misclass,
-    // documented in agent-qa.md, not this class.
-    const moneyPath = '• x402-erc7710-settle … FAIL — authorize failed (429): {"statusCode":429,"code":"FST_ERR_RATE_LIMITED","error":"Too Many Requests","message":"Rate limit exceeded, retry in 1 minute"}'
-    assert.equal(classifyLog(moneyPath).runClass, 'provider')
-    // RelayerBudgetExceededError: through the harness's own Haven client
-    // (POST /payments answers 429 with the message as `error`) it is `haven`;
-    // through the sweep scenario's own wording it carries no status, so it is
-    // `unclassified`. Neither is this class.
-    const RELAYER = 'Relayer budget exceeded: more than 20 sweep operations in 60 minutes. This protects the shared gas sponsor — wait and retry, or contact Haven if this is organic volume.'
-    const viaClient = `• direct-payment … FAIL — submit failed (429): {"payment_id":"p1","status":"pending_signature","error":"${RELAYER}"}`
+    // moneyPathRateLimit (60/min): @fastify/rate-limit throws
+    // `Rate limit exceeded, retry in 1 minute` with statusCode 429, and Haven's
+    // httpErrorHandler sends `{ error: message, statusCode }`. Through the
+    // harness's own client that is a `failed (429)` → `haven`; through the
+    // SDK the status is gone → `unclassified`. Never this class.
+    const moneyPathClient = '• x402-erc7710-settle … FAIL — authorize failed (429): {"error":"Rate limit exceeded, retry in 1 minute","statusCode":429}'
+    assert.equal(classifyLog(moneyPathClient).runClass, 'haven')
+    const moneyPathSdk = '• x402-erc7710-sdk … FAIL — settleX402Erc7710 failed: Rate limit exceeded, retry in 1 minute'
+    assert.equal(classifyLog(moneyPathSdk).runClass, 'unclassified')
+    // RelayerBudgetExceededError: the authorize route's hybrid_deploy refusal
+    // (delegation-authorize.ts, 429 `{ error: err.message }`) through the
+    // client is `haven`; the sweep scenario's own wording carries no status,
+    // so it is `unclassified`.
+    const deploy = 'Relayer budget exceeded: more than 10 hybrid_deploy operations in 1440 minutes. This protects the shared gas sponsor — wait and retry, or contact Haven if this is organic volume.'
+    const viaClient = `• x402-erc7710-settle … FAIL — authorize failed (429): {"error":"${deploy}"}`
     assert.equal(classifyLog(viaClient).runClass, 'haven')
-    const viaSweep = `• x402-delegation-3009-sweep … FAIL — gasless sweep submit failed (delegate held 0.5 USDC before, 0.5 after): ${RELAYER}`
+    const sweep = 'Relayer budget exceeded: more than 30 sweep operations in 60 minutes. This protects the shared gas sponsor — wait and retry, or contact Haven if this is organic volume.'
+    const viaSweep = `• x402-delegation-3009-sweep … FAIL — gasless sweep submit failed (delegate held 0.5 USDC before, 0.5 after): ${sweep}`
     assert.equal(classifyLog(viaSweep).runClass, 'unclassified')
   })
 

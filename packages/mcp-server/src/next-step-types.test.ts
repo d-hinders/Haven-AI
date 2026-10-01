@@ -49,16 +49,17 @@ const nullId: HostedHandoff = { nextTool: 'haven_get_payment_status', nextArgume
 // @ts-expect-error nextTool is required on the full guidance input too
 const fullOmitted = () => buildAgentGuidance({ nextAction: AgentPaymentNextAction.None, safeToContinue: true, reason: 'r', summary: SUMMARY })
 
-// #3329 round-2 N1 — haven_sign is EXACTLY ONE of payment_id / task_budget_id.
+// #3329 round-2 N1 — haven_sign is EXACTLY ONE of payment_id / task_budget_id
+// (/ sub_budget_id since #3506).
 // Positive control: the task-budget alternative compiles.
 const okTaskBudget: HostedHandoff = { nextTool: 'haven_sign', nextArguments: { task_budget_id: 'tb_1' } }
 
 // Twin 7 — neither field: {} matches neither alternative.
-// @ts-expect-error haven_sign requires payment_id or task_budget_id
+// @ts-expect-error haven_sign requires one of payment_id, task_budget_id or sub_budget_id
 const signNeither: HostedHandoff = { nextTool: 'haven_sign', nextArguments: {} }
 
 // Twin 8 — both fields: the exact pair the signer itself refuses.
-// @ts-expect-error haven_sign takes exactly one of payment_id or task_budget_id, never both
+// @ts-expect-error haven_sign takes exactly one of payment_id, task_budget_id or sub_budget_id, never two
 const signBoth: HostedHandoff = { nextTool: 'haven_sign', nextArguments: { payment_id: 'pay_1', task_budget_id: 'tb_1' } }
 
 describe('typed next-step handoff (#3101)', () => {

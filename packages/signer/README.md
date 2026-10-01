@@ -65,7 +65,7 @@ It exposes four stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign one payment, or (#3329) one task-budget open/close. Preferred form is `{ payment_id }` alone for a payment, or `{ task_budget_id }` alone (mutually exclusive with `payment_id`) for a task-budget open/close — the signer fetches the exact payload itself either way. Signs only Haven-prepared payloads (#3272, #3281, #3329): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account EITHER directly OR through a self-delegated task-budget child under it (the two-link `[task child, budget]` chain), or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }`, `{ signature, x402_binding }`, or `{ signature, task_budget_id, purpose }` |
+| `haven_sign` | Sign one payment, or (#3329) one task-budget open/close, or (#3330, #3506) one sub-budget open/close. Preferred form is `{ payment_id }` alone for a payment, `{ task_budget_id }` alone for a task-budget open/close, or `{ sub_budget_id }` alone for a sub-budget this agent delegates (its own parent-child and the grant to another agent of the same account) — exactly one of the three; the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272, #3281, #3329): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account EITHER directly OR through a self-delegated task-budget child under it (the two-link `[task child, budget]` chain), or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }`, `{ signature, x402_binding }`, `{ signature, task_budget_id, purpose }`, or `{ signature, sub_budget_id, purpose }` (then `haven_submit` with that id) |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
@@ -74,8 +74,9 @@ The `initialize` handshake advertises which binding versions this signer
 understands, under `capabilities.experimental['haven/signer-compatibility']`
 and in the MCP `instructions` string. Both are **derived** from
 `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS` in
-`src/core.ts` and `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS` in
-`src/sign-context.ts` (#3271) — the same constants the signing path enforces — so this README
+`src/core.ts` and `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS` (#3271),
+`SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` (#3329) and
+`SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS` (#3506) in `src/sign-context.ts` — the same constants the signing path enforces — so this README
 deliberately does not restate the numbers. Read them from the handshake, or
 from those constants.
 

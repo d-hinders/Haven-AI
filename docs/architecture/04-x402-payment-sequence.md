@@ -9,6 +9,9 @@ covers:
   - packages/backend/src/modules/x402/**
   - packages/backend/src/modules/task-budgets/**
   - packages/backend/src/routes/task-budgets.ts
+  - packages/backend/src/routes/agent-sub-budgets.ts
+  - packages/backend/src/routes/sub-budgets.ts
+  - packages/backend/src/modules/sub-budgets/**
   - packages/sdk/src/task-budget-guards.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
@@ -58,7 +61,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-24"
+last-verified: "2026-10-01"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -2143,8 +2146,9 @@ its own budget delegation (the parent-child), then grants it to agent B's
 delegate account (the grant). Both children are `erc20PeriodTransfer`-scoped
 with the SAME periodDuration and startDate as the parent — a slice of the same
 window, never a different clock — and are issued owner-governed (the owner
-co-signs each sub-budget; A's delegate key only signs within the
-owner-approved envelope, decision log 2026-09-27). The chain agent B redeems
+issues each sub-budget; A's delegate key only signs within the
+owner-approved envelope, decision log 2026-09-27; A submits its own
+signatures, decision log 2026-10-01). The chain agent B redeems
 is three links, leaf first:
 
 ```
@@ -2168,8 +2172,7 @@ itself redeems `[grant, parent-child, budget]` (three links).
 1. `POST /agents/:id/sub-budgets` (the OWNER, from the dashboard's issue flow
    or the API) issues `{ sub_agent_id, period_amount_atomic, expires_at,
    recipient_address?, label? }` for agent B. There is no period input: the
-   child inherits the parent's period window. The dashboard converts the human
-   amount to atomic. The API
+   child inherits the parent's period window. The API
    decodes the parent budget delegation and refuses a child wider than the
    parent in amount, expiry or recipient BEFORE signing
    (`sub_budget_wider_than_parent`), and both rows are stored `pending`
@@ -2211,8 +2214,9 @@ itself redeems `[grant, parent-child, budget]` (three links).
 - *Two-party flow:* owner-governed issuance (the owner picks B, amount,
   expiry, pin; the API refuses wider-than-parent pre-sign), then A's delegate
   key signs both already-built children within that owner-approved envelope
-  and the owner relays each signature (`POST /agents/:id/sub-budgets/:id/sign`,
-  decision log 2026-09-27).
+  and A submits each signature itself (`haven_submit { sub_budget_id }`; the
+  owner relay `POST /agents/:id/sub-budgets/:id/sign` stays optional, decision
+  log 2026-10-01, superseding the relay half of 2026-09-27).
 - *A's rekey:* A's rekey revokes A's budget delegation, so B's child dies with
   it — surfaced, not hidden: the parent-child's chain root stops resolving
   active by hash and B's payments answer the structured 409 above, and the

@@ -117,6 +117,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
+    // #3506: EDITED, scope = the haven_sign table row ({ sub_budget_id } form and
+    // its result shape) and the handshake-derivation sentence (task + sub-budget
+    // sign-context constants), verified against consent.ts, capabilities.ts and
+    // tools.ts. Nothing else re-verified. Prior:
     // #2515: EDITED, scope = the one connector command example. `@alpha` became
     // `<channel>`, with the sentence beside it still naming `@alpha` as what
     // production hands out. Same reason as the connect README: this file ships in
@@ -189,13 +193,16 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3173: new § "Startup, CLI options and the consent screen" verified
     // against cli-args.ts, consent.ts, server.ts, core.ts (lazy x402) and the
     // measured numbers in the PR; nothing else re-verified.
-    'last-verified': '2026-09-20',
+    'last-verified': '2026-10-01',
   },
   {
     doc: 'packages/mcp/README.md',
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp/src/**'],
+    // #3506: EDITED, scope = the haven_submit bullet (sub_budget_id and
+    // pendingSubBudgetSignatures[]), verified against src/tools.ts. Nothing else
+    // re-verified. Prior:
     // #2366 (part 1): EDITED — one new subsection under § Tools recording the
     // `idempotencyKey` -> `idempotency_key` deprecation window. This is a
     // published package's landing page and the argument is the replay contract
@@ -217,7 +224,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // SDK's own LLM tool schemas and REST /x402/authorize still spell it
     // `idempotencyKey`). Written against `packages/mcp/src/tools.ts` on this
     // branch. Rest of the README NOT re-verified.
-    'last-verified': '2026-09-12',
+    'last-verified': '2026-10-01',
   },
   {
     doc: 'packages/connect/README.md',
@@ -335,6 +342,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp-server/src/**'],
+    // #3506: EDITED, scope = the haven_submit table row (POST /sub-budgets/:id/submit
+    // with sub_budget_id, exactly one id), verified against
+    // tools/state-direct-recovery.ts. Nothing else re-verified. Prior:
     // #2330: re-verified and EDITED (the two merchant-header mentions only).
     // The sequence diagram and the signer paragraph both named X-PAYMENT alone
     // while the hosted server has relayed both wire names since #2289. Scope:
@@ -360,7 +370,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // `createHostedHavenClient` still throws on a delegate key; the Run
     // endpoints are as written (`POST /v1` Bearer-authenticated, `GET
     // /healthz` unauthenticated per http.ts).
-    'last-verified': '2026-09-30',
+    'last-verified': '2026-10-01',
   },
   {
     // The #1992 file. Its prose is mostly about BACKEND behaviour — which

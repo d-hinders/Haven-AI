@@ -415,6 +415,16 @@ export async function selectActiveDelegationByHash(
 }
 
 /**
+ * THE definition of a "live" delegation: every status the chain has not
+ * confirmed dead (#3542). One SQL tuple, shared by the revoke-all target list
+ * below, the `live_delegation_count` read on GET /agents, the archive guard and
+ * the account-delete guard — so the four cannot drift apart. A guard that
+ * ignored `replaced` would let an agent be archived, or its account deleted,
+ * while an old key's delegation was still enabled on-chain.
+ */
+export const LIVE_DELEGATION_STATUSES_SQL = `('pending', 'active', 'replaced')`
+
+/**
  * #1400: everything the batch revocation must kill — pending AND active
  * (a pending grant is still a signed delegation that could activate).
  *
@@ -428,7 +438,7 @@ export async function selectActiveDelegationByHash(
  */
 export const LIST_NON_REVOKED_DELEGATIONS_FOR_AGENT_SQL = `SELECT delegation_hash, delegation_json, status
        FROM agent_delegations
-       WHERE agent_id = $1 AND status IN ('pending', 'active', 'replaced')
+       WHERE agent_id = $1 AND status IN ${LIVE_DELEGATION_STATUSES_SQL}
        ORDER BY created_at ASC`
 
 export async function listNonRevokedDelegationsForAgent(

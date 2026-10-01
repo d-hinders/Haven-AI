@@ -199,6 +199,13 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
           sum + Number(cur === 'usd' ? a.spent_usd : cur === 'eur' ? a.spent_eur : a.spent_sek),
         0,
       )
+      // #3540 inclusion rule. The repository returns every delegation-rail
+      // agent the tenant owns; the table lists an agent when it is not
+      // revoked (its budget column still informs at zero activity), when it
+      // had activity in range (`refusals` covers `refusal_attempts`), or when
+      // it is revoked yet still holds an active delegation — revoking flips
+      // only `agents.status`, so that agent can still spend, and
+      // `totals.budget_bands` already counts it.
       const agents = perAgentSpend.map((a) => {
         const refusalAgg = refusalsCurrentByAgent.find((r) => r.agent_id === a.agent_id)
         const spent = Number(cur === 'usd' ? a.spent_usd : cur === 'eur' ? a.spent_eur : a.spent_sek)
@@ -227,7 +234,9 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
             : null,
           last_payment_at: a.last_payment_at,
         }
-      })
+      }).filter(
+        (row) => row.status !== 'revoked' || row.payments > 0 || row.refusals > 0 || row.budgets.length > 0,
+      )
 
       // ── merchants[] (top 10) ─────────────────────────────────────────────
       const merchants = topMerchants.map((m) => ({

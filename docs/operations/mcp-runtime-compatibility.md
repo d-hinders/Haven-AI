@@ -1038,6 +1038,34 @@ last-verified: "2026-10-01"
 > from the #2807 contracts module, and the version-skew and consent-hash
 > contracts do not move because the registered tool-NAME set does not.
 >
+> **Recent re-verification (#3506, sub-budgets user-completable):** both
+> runtimes' `haven_submit` accept `sub_budget_id` (exactly one of
+> `payment_id`, `task_budget_id` or `sub_budget_id`, plus `signature`). This
+> completes the signer's existing `haven_sign { sub_budget_id }` →
+> `haven_submit { sub_budget_id, signature }` handoff, which the hosted schema
+> used to reject. The call goes through the SDK's new `submitSubBudget` to
+> `POST /sub-budgets/:id/submit`. An opened row whose tree sibling is still
+> pending names `haven_sign { sub_budget_id }` for the sibling. `haven_get_agent`'s
+> response grew `pendingSubBudgetSignatures[]`. It is additive: the rows this
+> agent must sign (the opens of an owner-issued sub-budget, or a `closing` row
+> after an owner close), each with its `haven_sign` step. It reads
+> `GET /sub-budgets?status=awaiting_signature`, and an older backend answer
+> fails soft to `[]`. A stale sub-budget close (`close_needs_reprepare`) is
+> recovered inside `haven_submit`, which re-prepares through
+> `POST /sub-budgets/:id/close` and names `haven_sign` (or reports `closed`);
+> `close_outcome_unconfirmed` asks to repeat the call later. No close tool is
+> added. `next-step-signer-parity.test.ts` now pins both
+> `haven_submit` handoffs (`SIGNER_HOSTED_HANDOFF_SHAPES`
+> `'haven_submit#task_budget'` and `'haven_submit#sub_budget'`). The signer's
+> `initialize` block gains `sub_budget_sign_context_versions` (additive) and
+> its consent text names sub-budget signing. **Consent hash unchanged:**
+> `SIGNER_CONSENT_SURFACE_VERSION` stays 2 (owner decision, copy-only), so no
+> re-consent. No tool was added, removed or renamed, the strict/permissive
+> split is untouched, and the version-skew contract does not move. A signer
+> older than 0.7.0 cannot sign `sub_budget_id` at all; that is unchanged, and
+> it needs no new notice. Nothing else in this document was re-verified in
+> this pass.
+>
 > **Recent re-verification (#3330, sub-agent budgets):** the local runtime
 > gained one new flow-keyed signable and one additive response field. The
 > signer's `haven_sign` accepts `sub_budget_id` (an agent-issued sub-budget's
@@ -1305,6 +1333,28 @@ last-verified: "2026-10-01"
 > older-backend response reads as absent/unknown and the tool falls back to
 > its pre-existing "no tool follows" answer — the safe side, since erc7710
 > and unrecorded-scheme payments already default there.
+>
+> **Re-verified (#3529, 2026-10-01):** a refused evidence report whose backend
+> relayed a refusal `reason` — the #3475 evidence 409/503 contract, emitted
+> only by the eip3009 settlement seam — is its own arm, keyed on the REASON's
+> PRESENCE and never on payment status (on eip3009 "confirmed" means the
+> FUNDING leg, so a status-keyed code would also fire on ordinary, correct
+> refusals of mismatched hashes). New response code
+> `SETTLEMENT_NOT_RECORDED` with the backend's sentence relayed verbatim as
+> the additive `refusal_reason`: what Haven knows is that the payment's
+> funding leg is confirmed and unchanged, and THIS hash was not accepted as
+> its settlement — the old transfer-shape claim is gone from this arm, and
+> `next_tool` stays `haven_get_payment_status`. A reasonless refusal (a plain
+> mismatch, a foreign payment id, a validation refusal, or a pre-#3475
+> backend) keeps `DELIVERED_UNSETTLED` with wording honest for every case
+> that reaches it — including a confirmed payment behind an older backend —
+> never claiming a confirmed funding it cannot know. The backend negative
+> pins (a `payment_not_confirmed` 409 and the erc7710 seam's
+> `settlement_unverified` 409 carry NO `reason`) are the other half of the
+> contract: the discriminator cannot collapse. The shared description's
+> nextActionGuidance names the new code (round 14 of the #1591 census),
+> and the #3475 Not-filed item "a refusal on an already-confirmed payment
+> still classifies as DELIVERED_UNSETTLED" closes with this.
 >
 > **Recent re-verification (#2968):** the response vocabulary is completed at
 > the agent-facing surface, additively. `deliverMerchantPayment` now collapses
@@ -2182,7 +2232,10 @@ says there is nothing to preserve; `--replace` does not probe — only once the
 runtime install actually completed — a failed install skips it and the outcome
 says so), and the owner still revokes on the Haven
 agent page. The revoke route is owner-authenticated; the connector holds agent
-keys only.
+keys only. Since #3542 the dashboard's revoke of a superseded agent also ends
+its budget with one owner signature (`revoke-all`); a revoke that stops at the
+credential leaves the agent marked "budget still active" with a Finish revoking
+action. Nothing the connector sends or does changes.
 
 `runtime_config_unreadable` is the exception, and the only one of the six that
 reaches the dashboard (`runtimeStatusHelper`; the routing is pinned by

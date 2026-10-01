@@ -55,16 +55,45 @@ describe('hosted signer handoffs parse under the signer\'s own schemas (#3101)',
  * declares must be one the hosted tool declares.
  */
 describe('the signer\'s declared hosted handoffs parse under the hosted schemas (#3103)', () => {
-  for (const [tool, shape] of Object.entries(SIGNER_HOSTED_HANDOFF_SHAPES)) {
-    it(`${tool}: declared by the signer, accepted by the hosted server strictly`, async () => {
+  /**
+   * #3506: a valid sample per declared key, by what the key IS. The old
+   * sampler filled every key with 'pay_1', which a `signature` regex refuses
+   * and which would have hidden a hosted schema that is wrong about an id's
+   * shape. A signature is `0x` + hex, an `*_id` is a UUID-shaped string, and
+   * anything else keeps the plain placeholder.
+   */
+  const sampleFor = (key: string): string =>
+    key === 'signature'
+      ? `0x${'ab'.repeat(65)}`
+      : key.endsWith('_id')
+        ? '0b1f6c1e-3d52-4c5b-9a3e-7c2a5f0e1d44'
+        : 'pay_1'
+  // An entry may name a hosted tool with a `#variant` suffix when one tool
+  // takes several argument shapes (`haven_submit#sub_budget`): the part before
+  // the `#` is the hosted tool the entry is checked against.
+  for (const [entry, shape] of Object.entries(SIGNER_HOSTED_HANDOFF_SHAPES)) {
+    const tool = entry.split('#')[0]
+    it(`${entry}: declared by the signer, accepted by the hosted server strictly`, async () => {
       const { toolSchemas } = await import('./tools/contracts.js')
       const hosted = toolSchemas[tool as keyof typeof toolSchemas]
       expect(hosted, tool).toBeDefined()
       for (const key of Object.keys(shape)) expect(Object.keys(hosted), `${tool}.${key}`).toContain(key)
-      const sample = Object.fromEntries(Object.keys(shape).map((k) => [k, 'pay_1']))
-      expect(z.object(hosted).strict().safeParse(sample).success).toBe(true)
+      const sample = Object.fromEntries(Object.keys(shape).map((k) => [k, sampleFor(k)]))
+      // The sample has to be a valid handoff under the signer's own shape too, or it proves nothing about the hosted side.
+      expect(z.object(shape as z.ZodRawShape).strict().safeParse(sample).success, `${entry}: sample under the signer's own shape`).toBe(true)
+      const parsed = z.object(hosted).strict().safeParse(sample)
+      expect(parsed.success, `${entry}: ${JSON.stringify(sample)} under hosted ${tool}`).toBe(true)
     })
   }
+
+  it('declares BOTH haven_submit budget handoffs the signer emits (task_budget_id and sub_budget_id)', () => {
+    const submitShapes = Object.entries(SIGNER_HOSTED_HANDOFF_SHAPES)
+      .filter(([entry]) => entry.split('#')[0] === 'haven_submit')
+      .map(([, shape]) => Object.keys(shape).sort())
+    expect(submitShapes).toEqual(
+      expect.arrayContaining([['signature', 'task_budget_id'], ['signature', 'sub_budget_id']]),
+    )
+  })
 })
 
 /**

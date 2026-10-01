@@ -457,7 +457,7 @@ describeDb('openOutboundRecord (#1556)', () => {
   // ── #2769: the same provider also refuses eth_sendRawTransaction ─────────
   // The post-deploy run of #3320 (qa-dev 36150884607) got past the nonce and
   // failed at the broadcast with the same flashblocks body. The signed bytes
-  // then go through the configured second provider (Alchemy on dev).
+  // then go through the configured second provider (`RPC_URL_BASE*_FALLBACK`).
   function broadcastRefusingChain(onBroadcast: () => never = () => { throw pendingRefusal() }) {
     const fallbackSends: string[] = []
     let fallbackHash: (raw: string) => Promise<string> = async (raw) => {

@@ -379,7 +379,11 @@ Two limits are deliberate:
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:
 `ARCHIVE_AGENT_SQL` requires `status='revoked'` **and** `NOT EXISTS` any
-`pending`/`active` row in `agent_delegations`, in one statement. Revoking flips
+live row in `agent_delegations`, in one statement. Since #3542 "live" is
+`pending`, `active` **and** `replaced` — one shared set
+(`LIVE_DELEGATION_STATUSES_SQL`) with the `revoke-all` target list, the
+account-delete guard and the `live_delegation_count` on agent reads — because a
+`replaced` row stays redeemable until its own disable lands. Revoking flips
 only the agent's status — it never touches delegations — so revoke+archive
 through the API (bypassing the dashboard's revoke-all-first ordering) cannot
 file a delegation agent under Removed while its budget stays redeemable
@@ -2105,3 +2109,57 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > and the on-chain ERC20PeriodTransferEnforcer stays the real gate the
 > pre-check only mirrors. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.
+>
+> **Re-verified unchanged (#3506, 2026-10-01, sub-budgets user-completable):**
+> the agent now submits its own sub-budget signatures. `haven_submit` accepts
+> `sub_budget_id` on both MCP runtimes through the SDK's `submitSubBudget`,
+> to the existing agent route `POST /sub-budgets/:id/submit`. That route
+> already verified, before this change, that the signature recovers the
+> DELEGATING agent's delegate key over the exact bytes Haven built, and only
+> then opens a `pending` row. The owner's `POST /agents/:id/sub-budgets/:id/sign`
+> relay is untouched and stays as an optional path. The decision log's new
+> 2026-10-01 line records that the relay was transport, not governance;
+> issuance stays owner-only and still refuses a child wider than A's budget
+> before anything is signed. Agent A discovers its pending sign targets with
+> `GET /sub-budgets?status=awaiting_signature`, scoped to the rows it
+> delegates. Expired `pending` rows are omitted, and `closing` rows stay
+> listed. The dashboard issues with the owner JWT, as the owner API already
+> did. The signer's consent summary and `initialize` block now name
+> sub-budget signing and its sign-context versions. That is copy only:
+> `SIGNER_CONSENT_SURFACE_VERSION` stays 2, and a test pins the consent hash.
+> No signature, key role, delegation shape, caveat, allowlist or redemption
+> guard in this document moves. The three-link allowlist and the narrowing
+> gate run unchanged. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
+> **#3542 (2026-10-01).** Re-verified unchanged except the archive guard
+> above. The archive guard and the account-delete guard
+> (`HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`) now count `replaced` rows as live,
+> so an agent holding only a still-enabled `replaced` delegation can neither be
+> filed under Removed nor orphaned by deleting its account from Haven. Agent
+> reads carry `live_delegation_count`, and the dashboard uses it: the
+> replaced-agents card revokes the credential and then asks for the owner's
+> `revoke-all` signature, the Remove dialog decides the signature from the
+> loaded delegation list rather than `agents.status`, and an agent that is
+> revoked or archived with live delegations is marked with a Finish revoking
+> action. Haven still signs nothing; ending a budget is still only the owner's
+> `revoke-all`. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
+> **#3553 (2026-10-01).** Sub-budget issuance (`POST /agents/:id/sub-budgets`)
+> and the owner's signature relay (`POST /agents/:id/sub-budgets/:sub/sign`)
+> now refuse a revoked or archived issuing agent with 409 `issuer_retired`,
+> before the handler's body checks, and issuance refuses a revoked, archived or
+> `pending_approval` receiving agent with 409 `sub_agent_retired`. Opening a
+> grant row is refused with the same code when its receiving agent is retired,
+> in both the owner relay and the agent's `POST /sub-budgets/:id/submit` (the
+> row stays pending; close submits are never gated). A
+> half-revoked issuer could previously have new sub-budgets carved from its
+> still-active budget, and the relay would open a `pending` row with a
+> signature made before revocation. The issuer gate sits in the two owner
+> routes and the grant gate in `isGrantReceiverRetired` (called from the relay
+> and the agent submit); neither is in `loadOwnedDelegationAgent`, so
+> authority-reducing routes keep serving retired agents. `paused` passes, as on the delegation routes. The narrowing
+> gate and the relay's signer check are unchanged. The rest of this document
+> was not re-read for it, and `last-verified` is not bumped.
+

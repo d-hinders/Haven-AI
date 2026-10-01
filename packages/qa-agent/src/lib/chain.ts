@@ -156,6 +156,62 @@ export async function proveUsdcTransfer(
   }
 }
 
+/** The minimal log + height surface {@link proveUsdcTransferSince} reads. */
+export interface LogReader {
+  getBlockNumber(): Promise<number>
+  getLogs(filter: { address: string; topics: Array<string | null>; fromBlock: number; toBlock: string }): Promise<
+    Array<{ data: string; transactionHash: string }>
+  >
+}
+
+/**
+ * Prove an exact USDC `Transfer(from -> to, amount)` was emitted at or after
+ * `fromBlock`, read from the observer's logs (#3505). For settlements whose tx
+ * hash the merchant does not hand back (an erc7710 redemption is submitted by
+ * the merchant's facilitator), the chain is still the evidence: a throwaway
+ * treasury has exactly one reason to pay this payee. Polled to a deadline for
+ * the same observer-lag reason as {@link waitForReceipt}.
+ */
+export async function proveUsdcTransferSince(
+  expected: { from: string; to: string; amount: bigint },
+  {
+    fromBlock,
+    timeoutMs,
+    intervalMs = 3_000,
+    provider = observerProvider(),
+  }: { fromBlock: number; timeoutMs: number; intervalMs?: number; provider?: LogReader },
+): Promise<{ ok: true; txHash: string } | { ok: false; error: string }> {
+  const deadline = Date.now() + timeoutMs
+  const pad = (address: string) => ethers.zeroPadValue(address, 32)
+  let last = 'no read yet'
+  for (;;) {
+    try {
+      const logs = await provider.getLogs({
+        address: SEPOLIA_USDC,
+        topics: [TRANSFER_TOPIC, pad(expected.from), pad(expected.to)],
+        fromBlock,
+        toBlock: 'latest',
+      })
+      const hit = logs.find((log) => BigInt(log.data) === expected.amount)
+      if (hit) return { ok: true, txHash: hit.transactionHash }
+      last = logs.length
+        ? `${logs.length} Transfer(s) from that payer to that payee, none of exactly ${expected.amount}`
+        : 'no Transfer from that payer to that payee'
+    } catch (err) {
+      last = `getLogs failed: ${(err as Error)?.message ?? err}`
+    }
+    if (Date.now() >= deadline) {
+      return {
+        ok: false,
+        error:
+          `no USDC Transfer ${expected.from}→${expected.to} of ${expected.amount} since block ${fromBlock} ` +
+          `on the observer after ${Math.round(timeoutMs / 1000)}s (${last}; observer: ${describeObserverRpc()})`,
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+}
+
 /** One read of `DelegationManager.disabledDelegations(hash)` at `latest` on the observer. */
 export function readDisabled(hash: string): Promise<boolean> {
   return new ethers.Contract(DELEGATION_MANAGER_BASE_SEPOLIA, DISABLED_DELEGATIONS_ABI, observerProvider()).disabledDelegations(hash, {

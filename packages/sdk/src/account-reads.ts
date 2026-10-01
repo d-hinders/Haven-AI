@@ -8,6 +8,8 @@ import type {
   HavenAllowanceSummary,
   HavenBalanceCoverage,
   HavenPaymentReceipt,
+  HavenPendingSubBudgetSignature,
+  HavenSubBudget,
   HavenTaskBudget,
   HavenTaskBudgetSummary,
   PaymentStatusResult,
@@ -16,6 +18,7 @@ import type {
   RawHavenAllowanceSummary,
   RawHavenBalanceCoverage,
   RawHavenPaymentReceiptsResponse,
+  RawSubBudget,
   RawTaskBudget,
   HavenPaymentReceiptsPage,
 } from './types.js'
@@ -116,6 +119,47 @@ export function mapTaskBudget(raw: RawTaskBudget): HavenTaskBudget {
   }
 }
 
+/** #3506: `RawSubBudget` (snake_case wire) → `HavenSubBudget` (camelCase). */
+export function mapSubBudget(raw: RawSubBudget): HavenSubBudget {
+  return {
+    id: raw.id,
+    agentId: raw.agent_id,
+    parentAgentId: raw.parent_agent_id,
+    parentSubBudgetId: raw.parent_sub_budget_id,
+    chainId: raw.chain_id,
+    tokenAddress: raw.token_address,
+    recipientAddress: raw.recipient_address,
+    parentDelegationHash: raw.parent_delegation_hash,
+    delegationHash: raw.delegation_hash,
+    label: raw.label,
+    periodAmountAtomic: raw.period_amount_atomic,
+    status: raw.status,
+    expiresAt: raw.expires_at,
+    isExpired: raw.is_expired,
+    createdAt: raw.created_at,
+    openedAt: raw.opened_at,
+    closedAt: raw.closed_at,
+    closeTxHash: raw.close_tx_hash,
+  }
+}
+
+/** #3506: a sub-budget row owed a signature → the condensed row `getAgentSummary()` carries. */
+function summarizePendingSubBudget(row: HavenSubBudget): HavenPendingSubBudgetSignature {
+  const isParentChild = row.parentSubBudgetId === null
+  return {
+    subBudgetId: row.id,
+    parentSubBudgetId: row.parentSubBudgetId,
+    purpose: row.status === 'closing' ? 'close' : 'open',
+    what: isParentChild ? 'parent-child' : 'grant',
+    subAgentId: isParentChild ? null : row.agentId,
+    tokenAddress: row.tokenAddress,
+    recipientAddress: row.recipientAddress,
+    periodAmountAtomic: row.periodAmountAtomic,
+    expiresAt: row.expiresAt,
+    isExpired: row.isExpired,
+  }
+}
+
 /** #3329: `HavenTaskBudget` → the condensed row `getAgentSummary()` carries. */
 function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummary {
   const token = resolveTokenFromAddress(taskBudget.tokenAddress)
@@ -197,10 +241,13 @@ export class AccountReads {
   }
 
   async getAgentSummary(): Promise<HavenAgentSummary> {
-    const [agent, allowanceSummary, taskBudgets] = await Promise.all([
+    const [agent, allowanceSummary, taskBudgets, pendingSubBudgetSignatures] = await Promise.all([
       this.getAgent(),
       this.getAllowances(),
       this.listTaskBudgetsSummary(),
+      // #3506: fails SOFT in the summary (the owner-issued sign targets are
+      // additive, never the reason the whole bootstrap fails).
+      this.listPendingSubBudgetSignatures().catch((): HavenPendingSubBudgetSignature[] => []),
     ])
     // #3128: every field here is the HavenAllowance's own (or, for the display
     // string, derived by the same function `getAllowances` used), so the two
@@ -218,7 +265,7 @@ export class AccountReads {
       }
     })
     const readiness = deriveReadiness(agent.status, allowances)
-    return { ...agent, readiness, spend_authority_readiness: readiness, allowances, taskBudgets }
+    return { ...agent, readiness, spend_authority_readiness: readiness, allowances, taskBudgets, pendingSubBudgetSignatures }
   }
 
   /**
@@ -280,6 +327,24 @@ export class AccountReads {
       // never let it fail the agent summary this feeds.
       return []
     }
+  }
+
+  /**
+   * #3506: `GET /sub-budgets?status=awaiting_signature` — the sub-budget rows
+   * THIS agent (as the delegating agent) must still sign, mapped to the
+   * condensed summary rows. A transport error THROWS here (a caller that
+   * reasons from "nothing is pending" must be able to tell that from "the
+   * read failed"); `getAgentSummary()` wraps it soft, like the task-budget
+   * read (#3093), so an old backend's 404 never fails the bootstrap. A
+   * missing or non-array body is `[]`.
+   */
+  async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]> {
+    const raw = await this.transport.get<{ sub_budgets?: RawSubBudget[] } | null | undefined>(
+      '/sub-budgets?status=awaiting_signature',
+    )
+    const rows = raw?.sub_budgets
+    if (!Array.isArray(rows)) return []
+    return rows.map((row) => summarizePendingSubBudget(mapSubBudget(row)))
   }
 
   async getAllowances(): Promise<HavenAllowanceSummary> {

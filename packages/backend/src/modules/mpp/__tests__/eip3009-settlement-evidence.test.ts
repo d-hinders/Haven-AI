@@ -103,6 +103,10 @@ async function seedFunded(seed: {
   expiresOffsetSec?: number
   amountRaw?: string
   merchant?: string
+  /** Default 'confirmed' (the funded shape). 'submitted' seeds an UNfunded one. */
+  status?: string
+  /** The stored funding tx_hash; `null` seeds a hash-less (erc7710-shaped) row. */
+  txHash?: string | null
 }): Promise<{ id: string; funding: string }> {
   const funding = fundingHash()
   const result = await db.query<{ id: string }>(
@@ -112,9 +116,9 @@ async function seedFunded(seed: {
         status, tx_hash, confirmed_at, expires_at, source, payment_rail, execution_rail, machine_metadata,
         x402_resource_url, payment_resource_url, merchant_address, x402_merchant_address)
      VALUES ($1, $2, $3, 84532, 'USDC', $4, $5, $6, '0.001', $5, 0, $7,
-             'confirmed', $8, NOW() + ($9 * interval '1 second'), NOW() + ($13 * interval '1 second'),
-             'x402', 'x402', 'delegation', $10::jsonb,
-             $11, $11, $12, $12)
+             $13, $14, NOW() + ($8 * interval '1 second'), NOW() + ($12 * interval '1 second'),
+             'x402', 'x402', 'delegation', $9::jsonb,
+             $10, $10, $11, $11)
      RETURNING id`,
     [
       seed.agentId,
@@ -124,12 +128,13 @@ async function seedFunded(seed: {
       DELEGATE,
       seed.amountRaw ?? AMOUNT_RAW,
       `0x${String(++seq).padStart(64, 'c')}`.slice(0, 66),
-      funding,
       seed.confirmedOffsetSec ?? 0,
       JSON.stringify({ settlement_scheme: seed.scheme ?? 'eip3009' }),
       RESOURCE,
       seed.merchant ?? MERCHANT,
       seed.expiresOffsetSec ?? 600,
+      seed.status ?? 'confirmed',
+      seed.txHash === undefined ? funding : seed.txHash,
     ],
   )
   return { id: result.rows[0].id, funding }
@@ -399,6 +404,45 @@ describeDb('eip3009 merchant settlement report → evidence (#3475)', () => {
       const body = result.body as { error: string; reason: string }
       expect(body.reason).toMatch(/already recorded for another payment/)
       expect(body.error).not.toMatch(/not confirmed/)
+    })
+
+    // #3529: the hosted tool classifies on the REASON's PRESENCE — a
+    // reason-bearing 409 can only come from the eip3009 settlement seam, which
+    // fires on a payment whose funding is confirmed. These two pins are the
+    // other half of that contract: the ordinary refusals the
+    // DELIVERED_UNSETTLED wording was written for must never gain a reason,
+    // or the discriminator collapses and a reasonless classification would
+    // claim a confirmed funding it cannot know.
+    it('a payment_not_confirmed 409 carries NO reason — the discriminator the hosted tool keys on', async () => {
+      const { agentId, userId } = await seedAgent()
+      const { id, funding } = await seedFunded({ agentId, userId, status: 'submitted' })
+
+      const result = await attachEvidenceHandler(agentId, { paymentId: id, rail: 'x402', txHash: funding })
+
+      expect(result.statusCode).toBe(409)
+      const body = result.body as { error: string; reason?: string }
+      expect(body.error).toMatch(/requires a confirmed payment/)
+      expect(body).not.toHaveProperty('reason')
+    })
+
+    it('a plain (non-eip3009-seam) settlement_unverified 409 carries NO reason', async () => {
+      // The erc7710 seam's refusal is a plain `Error` (not a
+      // SettlementReportRefusal): a submitted, hash-less erc7710 intent whose
+      // reported transaction does not verify. The body must stay reason-free
+      // even though the verifier HAS a reason internally — the relay is bound
+      // to the eip3009 seam's refusal shape, and widening it would hand the
+      // reasonless DELIVERED_UNSETTLED arm's wording a confirmed-funding claim
+      // it cannot make.
+      getTransactionReceipt.mockResolvedValue(goodReceipt({ from: TREASURY, to: OTHER }))
+      const { agentId, userId } = await seedAgent()
+      const { id } = await seedFunded({ agentId, userId, scheme: 'erc7710', status: 'submitted', txHash: null })
+
+      const result = await attachEvidenceHandler(agentId, { paymentId: id, rail: 'x402', txHash: SETTLE_A })
+
+      expect(result.statusCode).toBe(409)
+      const body = result.body as { error: string; reason?: string }
+      expect(body.error).toMatch(/settlement transaction does not match this payment on-chain/)
+      expect(body).not.toHaveProperty('reason')
     })
   })
 

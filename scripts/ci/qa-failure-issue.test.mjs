@@ -444,7 +444,7 @@ describe('qa-failure-issue: failure classes (#3337)', () => {
     assert.equal(classifyLog(MASKED_502).runClass, 'unclassified')
     // A merchant's 402 relayed through a hosted-tool refusal is not Haven's 4xx.
     assert.equal(classifyLog(MERCHANT_402).runClass, 'unclassified')
-    assert.deepEqual(CLASSES, ['provider', 'preflight', 'harness', 'haven', 'unclassified'])
+    assert.deepEqual(CLASSES, ['provider', 'preflight', 'harness', 'rate_limit', 'haven', 'unclassified'])
   })
 
   test('the signature shows the evidence even when it sits past character 200 of the line', () => {
@@ -543,5 +543,66 @@ describe('qa-failure-issue: failure classes (#3337)', () => {
     assert.equal(result.status, 0, result.stderr)
     const edit = sub(calls, 'issue', 'edit')[0]
     assert.match(edit[edit.indexOf('--body') + 1], /`unclassified` — no harness log/)
+  })
+})
+
+// #3541: Haven's own per-agent x402 hourly cap. The six phrasings are verbatim
+// FAIL lines from run 36840685285 attempt 1, which #2769 recorded as
+// "mixed — haven ×1, unclassified ×9".
+describe('qa-failure-issue: rate_limit class (#3541)', () => {
+  const CAP = 'Rate limit exceeded: max 100 x402 payments per hour'
+  const PHRASINGS = {
+    'authorize failed (429)': `• x402-erc7710-settle … FAIL — authorize failed (429): {"error":"${CAP}","retry_after_seconds":60}`,
+    'SDK settleX402Erc7710': `• x402-erc7710-sdk … FAIL — settleX402Erc7710 failed: ${CAP}`,
+    'hosted API_ERROR': `• x402-hosted-mcp-signer … FAIL — hosted haven_pay_mcp_tool refused: API_ERROR — haven_pay_mcp_tool failed (API_ERROR): ${CAP}`,
+    'bare FAIL (3009 / sweep)': `• x402-delegation-3009-sweep … FAIL — ${CAP}`,
+    '(HTTP 429: …) control leg': `• x402-over-budget-rejected … FAIL — control: a within-budget 3009 authorize was NOT offered as signable (HTTP 429: ${CAP}) — a refusal below would prove nothing`,
+    '(HTTP 429): {…} grace-resume': `• x402-delegation-3009-grace-resume … FAIL — authorize did not return a delegation-rail funding payload (HTTP 429): {"error":"${CAP}","retry_after_seconds":60}`,
+  }
+
+  for (const [name, line] of Object.entries(PHRASINGS)) {
+    test(`classes the ${name} phrasing as rate_limit`, () => {
+      const r = classifyLog(line)
+      assert.equal(r.runClass, 'rate_limit')
+      assert.match(r.legs[0].signature, /Rate limit exceeded: max 100 x402 payments per hour/)
+    })
+  }
+
+  test('the whole attempt is one rate_limit run, not "mixed — haven ×1, unclassified ×9"', () => {
+    const r = classifyLog(Object.values(PHRASINGS).join('\n'))
+    assert.equal(r.runClass, 'rate_limit')
+    assert.equal(r.legs.length, 6)
+  })
+
+  test('takes precedence over haven: the "failed (429)" phrasing is not a product signal', () => {
+    assert.equal(classifyLog(PHRASINGS['authorize failed (429)']).runClass, 'rate_limit')
+  })
+
+  test("Haven's other limiters are excluded, and where each lands is pinned", () => {
+    // moneyPathRateLimit (60/min): @fastify/rate-limit throws
+    // `Rate limit exceeded, retry in 1 minute` with statusCode 429, and Haven's
+    // httpErrorHandler sends `{ error: message, statusCode }`. Through the
+    // harness's own client that is a `failed (429)` → `haven`; through the
+    // SDK the status is gone → `unclassified`. Never this class.
+    const moneyPathClient = '• x402-erc7710-settle … FAIL — authorize failed (429): {"error":"Rate limit exceeded, retry in 1 minute","statusCode":429}'
+    assert.equal(classifyLog(moneyPathClient).runClass, 'haven')
+    const moneyPathSdk = '• x402-erc7710-sdk … FAIL — settleX402Erc7710 failed: Rate limit exceeded, retry in 1 minute'
+    assert.equal(classifyLog(moneyPathSdk).runClass, 'unclassified')
+    // RelayerBudgetExceededError: the authorize route's hybrid_deploy refusal
+    // (delegation-authorize.ts, 429 `{ error: err.message }`) through the
+    // client is `haven`; the sweep scenario's own wording carries no status,
+    // so it is `unclassified`.
+    const deploy = 'Relayer budget exceeded: more than 10 hybrid_deploy operations in 1440 minutes. This protects the shared gas sponsor — wait and retry, or contact Haven if this is organic volume.'
+    const viaClient = `• x402-erc7710-settle … FAIL — authorize failed (429): {"error":"${deploy}"}`
+    assert.equal(classifyLog(viaClient).runClass, 'haven')
+    const sweep = 'Relayer budget exceeded: more than 30 sweep operations in 60 minutes. This protects the shared gas sponsor — wait and retry, or contact Haven if this is organic volume.'
+    const viaSweep = `• x402-delegation-3009-sweep … FAIL — gasless sweep submit failed (delegate held 0.5 USDC before, 0.5 after): ${sweep}`
+    assert.equal(classifyLog(viaSweep).runClass, 'unclassified')
+  })
+
+  test('the body names the class and its remedy', () => {
+    const body = buildBody({ trigger: 'workflow_dispatch', runUrl: 'https://example.invalid/run', when: 'now', classification: classifyLog(PHRASINGS['bare FAIL (3009 / sweep)']) })
+    assert.match(body, /`rate_limit`/)
+    assert.match(body, /space out hand dispatches/)
   })
 })

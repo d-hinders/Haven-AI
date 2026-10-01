@@ -119,7 +119,7 @@ Environment variable form:
 - `haven_list_receipts`
 - `haven_open_task_budget` (#3329)
 - `haven_close_task_budget` (#3329)
-- `haven_submit` (#3329 — relays a local signer signature by `task_budget_id`; a `payment_id` is refused on this runtime, which signs and submits payments inline)
+- `haven_submit` (#3329 — relays a local signer signature by `task_budget_id`, or (#3506) by `sub_budget_id` for a sub-budget this agent delegates (listed in `haven_get_agent`'s `pendingSubBudgetSignatures[]`); a `payment_id` is refused on this runtime, which signs and submits payments inline)
 
 ### `idempotencyKey` is removed — send `idempotency_key`
 

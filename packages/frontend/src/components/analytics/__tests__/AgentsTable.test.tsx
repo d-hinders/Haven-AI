@@ -75,7 +75,7 @@ describe('AgentsTable — the desktop table', () => {
     ])
   })
 
-  it('renders one row per agent that spent, in the order the endpoint sent them', () => {
+  it('renders one row per agent the endpoint lists, in the order it sent them', () => {
     // The endpoint ranks by spend; the table inherits that ranking. Choosing a
     // second order here would be a second answer to "which agent spent most".
     const { container } = mount()

@@ -126,6 +126,59 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
     expect(post).toHaveBeenCalledTimes(1)
   })
 
+  // #3529: the backend relays a refusal `reason` on the evidence 409/503 body
+  // (modules/mpp/evidence.ts) — but only on the eip3009 settlement-report
+  // refusal. The SDK carries it verbatim on the refused outcome, and the
+  // hosted tool keys its classification on the PRESENCE of it. These pins are
+  // that contract in both directions: with the body, carried; without (a
+  // plain 409, or a pre-#3475 backend), absent — never empty, never guessed.
+  it('a 409 body with a reason carries it verbatim on the refused outcome', async () => {
+    const body = {
+      error: 'The reported settlement transaction was not recorded for this payment — ' +
+        'the payment is unchanged',
+      reason: 'This payment already has a different verified settlement transaction recorded',
+    }
+    const post = vi
+      .fn()
+      .mockRejectedValue(new HavenApiError(body.error, 409, body))
+    const { completion } = completionWith(post)
+
+    await expect(report(completion)).resolves.toEqual({
+      outcome: 'refused',
+      statusCode: 409,
+      reason: body.reason,
+    })
+    expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it('a plain 409 with no reason in the body leaves reason absent, not empty', async () => {
+    const post = vi
+      .fn()
+      .mockRejectedValue(new HavenApiError('settlement_unverified', 409, { error: 'settlement_unverified' }))
+    const { completion } = completionWith(post)
+
+    await expect(report(completion)).resolves.toEqual({ outcome: 'refused', statusCode: 409 })
+    expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it('a reason on a 503 exhaustion does NOT reach the retryable outcome (it keys on status, not reason)', async () => {
+    const body = { error: 'could not verify yet', reason: 'Transaction 0xabc is not mined on chain 84532' }
+    const post = vi.fn().mockRejectedValue(new HavenApiError(body.error, 503, body))
+    const { completion } = completionWith(post)
+
+    await expect(report(completion)).resolves.toEqual({ outcome: 'retryable', statusCode: 503 })
+    expect(post).toHaveBeenCalledTimes(4)
+  })
+
+  it('a non-string reason in the body is dropped, not carried', async () => {
+    const post = vi
+      .fn()
+      .mockRejectedValue(new HavenApiError('refused', 409, { error: 'refused', reason: 42 }))
+    const { completion } = completionWith(post)
+
+    await expect(report(completion)).resolves.toEqual({ outcome: 'refused', statusCode: 409 })
+  })
+
   it('POSITIVE CONTROL: a first-attempt success posts exactly once and waits for nothing', async () => {
     const post = vi.fn().mockResolvedValue({ ok: true })
     const { completion, sleep } = completionWith(post)

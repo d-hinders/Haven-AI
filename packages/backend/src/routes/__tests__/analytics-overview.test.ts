@@ -444,4 +444,85 @@ describe('GET /analytics/overview', () => {
     expect(body.merchants).toEqual([])
     expect(body.balance_by_day).toEqual([])
   })
+
+  // #3540: which agents `agents[]` lists. The repository returns every
+  // delegation-rail agent the tenant owns; the route keeps a row when the
+  // agent is not revoked, had activity in range, or still holds an active
+  // delegation.
+  describe('agents[] inclusion rule (#3540)', () => {
+    const ROW_UUID = '5a0b2d3f-8c4e-4b21-8d66-3f9e7c1b2a45'
+
+    function perAgentRow(status: string, payments: string) {
+      const spent = payments === '0' ? '0.00' : '10.00'
+      return {
+        agent_id: ROW_UUID,
+        name: `agent-${status}`,
+        status,
+        spent_usd: spent,
+        spent_eur: spent,
+        spent_sek: spent,
+        payments,
+        last_payment_at: payments === '0' ? null : '2030-06-01T12:00:00.000Z',
+      }
+    }
+
+    function withRow(status: string, payments: string) {
+      mockListPerAgentSpendForUser.mockResolvedValue([perAgentRow(status, payments)])
+    }
+
+    async function listedIds(): Promise<string[]> {
+      const res = await call('/analytics/overview?range=30d', token)
+      expect(res.statusCode).toBe(200)
+      return (res.json().agents as Array<{ id: string }>).map((a) => a.id)
+    }
+
+    it('omits a revoked agent with no payments, no refusals and no active delegation in range', async () => {
+      withRow('revoked', '0')
+      expect(await listedIds()).toEqual([])
+    })
+
+    it('keeps a revoked agent with a confirmed payment in range', async () => {
+      withRow('revoked', '1')
+      expect(await listedIds()).toEqual([ROW_UUID])
+    })
+
+    it('keeps a revoked agent with a refusal and no payments in range', async () => {
+      withRow('revoked', '0')
+      // Keyed on the window, not call order: only the current window (ending
+      // now) carries the refusal; the previous window ends a range earlier.
+      mockAggregateRefusalsForUserByAgent.mockImplementation(
+        async (_user: string, range: { toInclusive: string }) =>
+          Date.parse(range.toInclusive) > Date.now() - 60_000
+            ? [{ agent_id: ROW_UUID, refusals: 1, attempts: 1, by_reason: { budget_exceeded: 1 } }]
+            : [],
+      )
+      expect(await listedIds()).toEqual([ROW_UUID])
+    })
+
+    it('keeps a revoked agent with no activity that still holds an active delegation (revoke flips status only)', async () => {
+      withRow('revoked', '0')
+      mockListActiveDelegationsForUser.mockResolvedValue([
+        {
+          id: 'd-revoked',
+          agent_id: ROW_UUID,
+          chain_id: 84532,
+          token_address: `0x${'a'.repeat(40)}`,
+          recipient_address: null,
+          delegation_json: '{}',
+          budget_atomic: '1000000',
+          period_seconds: 86400,
+          start_date: String(Math.floor(Date.now() / 1000) - 3600),
+        },
+      ])
+      expect(await listedIds()).toEqual([ROW_UUID])
+    })
+
+    it.each(['active', 'paused', 'pending_approval'])(
+      'keeps a %s agent with no activity and no budget',
+      async (status) => {
+        withRow(status, '0')
+        expect(await listedIds()).toEqual([ROW_UUID])
+      },
+    )
+  })
 })

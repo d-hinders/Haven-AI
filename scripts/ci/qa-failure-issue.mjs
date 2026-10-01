@@ -55,6 +55,9 @@ export const ISSUE_TITLE = 'qa-dev money-flow failing'
 //   preflight     the harness stopped before any leg ran (a resource floor)
 //   harness       the harness itself threw (a JS runtime error's message, or
 //                 the run-level `✗ harness crashed:` line)
+//   rate_limit    Haven's OWN per-agent x402 hourly cap (#3541) — the
+//                 harness out-ran a limiter working as designed, by its own
+//                 volume (back-to-back hand dispatches on one QA identity)
 //   haven         Haven's API answered a 4xx to a request the leg expected to
 //                 succeed (`<step> failed (4xx)` on the FAIL line itself)
 //   unclassified  no signature — including the backend's masked 502 ("Could
@@ -73,7 +76,7 @@ export const ISSUE_TITLE = 'qa-dev money-flow failing'
 // `…failed.\\n\\nStatus: 429` inside a relayed 502 body); `-32016` / `over rate limit` and `RPC Request
 // failed` from #2449's triage. A recurring `provider` class is a finding for
 // the provider, not something a re-dispatch clears.
-export const CLASSES = ['provider', 'preflight', 'harness', 'haven', 'unclassified']
+export const CLASSES = ['provider', 'preflight', 'harness', 'rate_limit', 'haven', 'unclassified']
 
 const PROVIDER = [
   /-32016|over rate limit/i,
@@ -101,6 +104,15 @@ const PROVIDER = [
 // run.ts), so match the MESSAGE shapes a JS runtime error has — a quoted
 // "TypeError" in a relayed body is someone else's error.
 const HARNESS = [/\bis not a function\b|\bis not defined\b|Cannot (read|set) properties of (undefined|null)/]
+// #3541: the body of the x402 cap (`agentHourlyX402CapExceeded`,
+// modules/x402/delegation-authorize.ts), however the leg relays it — direct,
+// SDK or hosted MCP. Only that body: Haven's other limiters are deliberately
+// NOT matched. `moneyPathRateLimit`'s 429 (`Rate limit exceeded, retry in 1
+// minute`) and a `RelayerBudgetExceededError` land in `haven` when relayed as
+// `failed (429)`, and in `unclassified` when the status is lost (SDK, sweep
+// scenario) — pinned by test. A loose /Rate limit exceeded/ would pull the
+// first one in here.
+const RATE_LIMIT = [/Rate limit exceeded: max \d+ x402 payments per hour/]
 // The harness's own Haven API client reports `<step> failed (<status>)`. A 4xx
 // relayed from a MERCHANT (`(HTTP 402)` inside a hosted-tool refusal) is not Haven's.
 const HAVEN = [/^• \S+ … FAIL — [^(]*\bfailed \(4\d\d\)/]
@@ -189,7 +201,9 @@ export function scrubLine(text, max = 240) {
 
 /** Class and signature for one failing leg: its FAIL line plus continuation lines. */
 export function classifyLeg(lines) {
-  for (const [cls, patterns] of [['provider', PROVIDER], ['harness', HARNESS], ['haven', HAVEN]]) {
+  // rate_limit first: its body is specific, and its `failed (429)` phrasing
+  // would otherwise class it `haven` (a product signal it is not).
+  for (const [cls, patterns] of [['rate_limit', RATE_LIMIT], ['provider', PROVIDER], ['harness', HARNESS], ['haven', HAVEN]]) {
     const hit = firstMatch(lines, patterns)
     if (!hit) continue
     const found = excerpt(hit.line, hit.index)
@@ -305,8 +319,9 @@ export function buildBody({ trigger, runUrl, when, classification = null }) {
     '',
     'This blocks the dev → main freshness gate (#578) until a green run exists.',
     'Triage it by class: `docs/operations/agent-qa.md` → Troubleshooting → *Classify the',
-    'failure*. A recurring `provider` class is a finding for the provider; an `unclassified`',
-    'one needs reading, and a real regression gets its own bug report under',
+    'failure*. A recurring `provider` class is a finding for the provider; `rate_limit` is the',
+    'harness out-running Haven\'s own x402 cap (space out hand dispatches), never a product',
+    'defect; an `unclassified` one needs reading, and a real regression gets its own bug report under',
     '`docs/bug-reports/`. Close this issue once a run is green; the next failure reopens it.',
   ].join('\n')
 }

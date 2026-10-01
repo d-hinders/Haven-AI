@@ -136,7 +136,7 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
           return { success: true }
         }
         return reply.code(409).send({
-          error: 'Cannot unlink this Haven wallet while an agent has a pending or active budget delegation or recovery is in progress',
+          error: 'Cannot unlink this Haven wallet while an agent has a live (pending, active or replaced) budget delegation or recovery is in progress',
         })
       }
 

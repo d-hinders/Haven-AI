@@ -180,8 +180,9 @@ describe('checkMerchantSettlement', () => {
 describe('TREASURY_RUN_COST_ATOMIC', () => {
   it('includes the funded-but-undelivered crash/resume leg', () => {
     // 0.010 direct settle + seven 0.001 settling merchant legs (including
-    // #2159) + 0.006 fresh-agent funding + 0.004 lifecycle net funding.
-    expect(TREASURY_RUN_COST_ATOMIC).toBe(27_000n)
+    // #2159) + 0.006 fresh-agent funding + 0.004 lifecycle net funding
+    // + 0.004 sub-budget net funding + 0.003 merchant-locked funding (#3505).
+    expect(TREASURY_RUN_COST_ATOMIC).toBe(34_000n)
   })
 })
 

@@ -227,6 +227,7 @@ describe('agent info helpers', () => {
         isResetPending: false,
       }],
       taskBudgets: [],
+      pendingSubBudgetSignatures: [], // #3506
     })
   })
 

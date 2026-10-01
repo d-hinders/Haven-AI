@@ -20,6 +20,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import opsRoutes from '../routes/ops.js'
+import { opsRevealRateLimit, opsSearchRateLimit } from '../middleware/rate-limit.js'
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..')
 const ENTRY = join(SRC, 'routes', 'ops.ts')
@@ -99,6 +100,34 @@ describe('ops console invariants (#3509)', () => {
     expect(routes).toEqual(expect.arrayContaining(['GET /ops/me', 'POST /ops/reveal']))
     const writes = routes.filter((r) => !/^(GET|HEAD) /.test(r) && r !== 'POST /ops/reveal')
     expect(writes, 'an ops route other than reveal accepts a write method').toEqual([])
+    await app.close()
+  })
+
+  it('search and reveal are rate-limited in separate buckets (#3512)', async () => {
+    const app = Fastify({ logger: false })
+    const limits = new Map<string, unknown>()
+    app.addHook('onRoute', (route) => {
+      const methods = Array.isArray(route.method) ? route.method : [route.method]
+      for (const method of methods) limits.set(`${method} ${route.url}`, (route.config as { rateLimit?: unknown } | undefined)?.rateLimit)
+    })
+    await app.register(opsRoutes, {
+      prefix: '/ops',
+      ops: {
+        githubClientId: '',
+        githubClientSecret: '',
+        jwtSecret: '',
+        allowedGithubIds: [],
+        redirectOrigins: [],
+        publicOrigin: '',
+      },
+      trustProxyHops: 0,
+    })
+    await app.ready()
+    // The bucket separation itself is proven against real Postgres in
+    // middleware/__tests__/rate-limit-plugin-integration.test.ts; this pins
+    // the wiring, so /search cannot drift back onto reveal's limiter.
+    expect(limits.get('GET /ops/search')).toBe(opsSearchRateLimit.rateLimit)
+    expect(limits.get('POST /ops/reveal')).toBe(opsRevealRateLimit.rateLimit)
     await app.close()
   })
 })

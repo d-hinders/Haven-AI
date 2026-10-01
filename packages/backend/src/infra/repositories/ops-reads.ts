@@ -1,9 +1,10 @@
 /**
  * Ops console data reads (#3512, epic #3507). Convention: `README.md` in this
- * directory — with two deliberate exceptions, stated here. The README's rule
- * is per-user scoping: these reads are CROSS-TENANT BY DESIGN. They
- * exist so a founder can look at any customer's account without signing in
- * as them.
+ * directory — with two deliberate exceptions. These reads are CROSS-TENANT
+ * BY DESIGN (the README's rule is per-user scoping): they exist so a founder
+ * can look at any customer's account without signing in as them. And the
+ * executor is a required argument rather than defaulting to `pool` (the
+ * README's rule 2; see the first bullet below).
  *
  * Three rules make that safe, and every function below keeps them:
  * - **The executor is a required argument, never defaulted to the main

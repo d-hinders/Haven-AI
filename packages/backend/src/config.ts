@@ -5,7 +5,7 @@
  */
 import dotenv from 'dotenv'
 import { parseBooleanFlag } from './config/boolean-flag.js'
-import { parseOpsConfig } from './config/ops.js'
+import { parseOpsConfig, parseOpsDatabaseUrl } from './config/ops.js'
 import path from 'path'
 
 const envPaths = [
@@ -375,6 +375,9 @@ export const config = {
     },
     process.env.JWT_SECRET ?? '',
   ),
+  // #3510: the ops console's read-only role login. Unset → ops data routes 404
+  // (no fallback); a URL naming no user, or the DATABASE_URL user, refuses the boot.
+  opsDatabaseUrl: parseOpsDatabaseUrl(process.env.OPS_DATABASE_URL, process.env.DATABASE_URL ?? ''),
 
   // Chain-specific RPC URLs
   rpcUrlBase: warnPublicBaseMainnetRpc(process.env.RPC_URL_BASE),

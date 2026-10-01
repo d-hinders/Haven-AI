@@ -44,6 +44,7 @@ import {
 } from '../modules/ops/index.js'
 import { insertOpsAccessLog, type OpsAccessLogEntry } from '../infra/repositories/ops-access-log.js'
 import { isOpsRevealField, readOpsRevealField } from '../infra/repositories/ops-reveal.js'
+import { OpsReadRoleUnsafeError } from '../infra/repositories/ops-read-role.js'
 import type { Executor } from '../infra/transaction.js'
 
 /** Where GitHub sends the browser back; must match the OAuth App's redirect URI. */
@@ -200,7 +201,14 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
         return reply.code(400).send({ error: 'That field cannot be revealed' })
       }
 
-      const row = await readOpsRevealField(readDb, targetType, field, targetId)
+      let row: Awaited<ReturnType<typeof readOpsRevealField>>
+      try {
+        row = await readOpsRevealField(readDb, targetType, field, targetId)
+      } catch (err) {
+        // The login failed the read-only self-check: data reads are off, as if unset.
+        if (err instanceof OpsReadRoleUnsafeError) return reply.callNotFound()
+        throw err
+      }
       if (!row) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
 
       const operator = opsOperatorOf(request)

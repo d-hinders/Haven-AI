@@ -108,7 +108,9 @@ deployed that way today.
   on any backend that does not set all six `OPS_*` variables documented in
   [`.env.dev.example`](../../.env.dev.example); a partly-configured backend is
   the same as an unconfigured one. Setting them on a deployed service is an
-  operator step tracked on the epic's promotion checklist.
+  operator step tracked on the epic's promotion checklist. The data routes
+  also need `OPS_DATABASE_URL`, the read-only role's login — see
+  [`ops-readonly-role.md`](ops-readonly-role.md).
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).

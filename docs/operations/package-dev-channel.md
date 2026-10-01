@@ -294,6 +294,12 @@ and the `release` skill.
 > not bumped. Scope of this note: the config claims — nothing else in this
 > document was re-verified.
 >
+> **Re-verification (#3510):** coupled for the same reason. The only change to
+> `packages/backend/src/config.ts` adds one field, `opsDatabaseUrl` (parsed by
+> `parseOpsDatabaseUrl` in `config/ops.ts`) and its comment, plus its import.
+> `connectorChannel` / `parseConnectorChannel` and `requestValidationMode` have
+> no diff. `last-verified` is not bumped; nothing else here was re-verified.
+>
 > **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
 > is in this doc's `covers:`. The only edit there is a comment: the sentence
 > saying the public release documents "will read" the table became "read", now

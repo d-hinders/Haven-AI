@@ -15,8 +15,10 @@ import type { Executor, QueryRow } from '../transaction.js'
 /**
  * One boolean per question, aliased by what it detects. Generated from
  * `OPS_NEVER_GRANT`, so the list and the check cannot drift. Write access is
- * asked of EVERY table in the login's schema; a NULL schema (empty
- * search_path) counts as able to create — fail closed.
+ * asked of EVERY table in the login's schema. With an empty search_path the
+ * unqualified column checks error, so the self-check cannot run and every ops
+ * read fails (retried, never remembered); the `coalesce` only guards a NULL
+ * `current_schema()` the column checks did not already catch.
  */
 export const OPS_READ_ROLE_SELF_CHECK_SQL = `SELECT ${[
   ...Object.keys(OPS_NEVER_GRANT).map((qualified) => {

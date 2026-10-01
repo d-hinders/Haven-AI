@@ -114,7 +114,7 @@ const boundary: ClientBoundary = {
     // child delegation ([settlement, task, budget]) instead of the agent's budget delegation
     // directly. Forwarded to X402Erc7710.prepare unchanged; the erc7710 authorize body carries it
     // as the same camelCase `taskBudgetId` wire key `/x402` uses everywhere else.
-    "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; subBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; warnings?: AgentPaymentWarning[]; }>",
+    "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; subBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
     "async quoteMcpX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async quoteX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",
@@ -549,7 +549,6 @@ describe('HavenClient structural boundary', () => {
       'isSweepableChain',
       'isTaskChildTypedData', // #3329
       'isZeroSettlementTxHash', // #2970
-      'mapRawWarnings', // #3528: raw prepare-response warnings → typed AgentPaymentWarning (MCP surfaces merge it into their own envelope)
       'normalizePaymentRequired',
       'packedUserOperationHash', // #3271
       'parseNextTool', // #3101

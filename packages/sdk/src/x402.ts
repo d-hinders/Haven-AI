@@ -12,7 +12,7 @@
 
 import { createHash } from 'node:crypto'
 import { recoverTypedDataAddress } from 'viem'
-import type { X402ExpectedContext, X402PaymentRequired, X402PaymentOption, AgentPaymentWarning, AgentPaymentWarningCode } from './types.js'
+import type { X402ExpectedContext, X402PaymentRequired, X402PaymentOption } from './types.js'
 import type { PaymentRequirements } from 'x402/types'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
 import { buildSweepTypedData } from './sweep.js'
@@ -705,29 +705,6 @@ export function x402AuthorizationAmount(option: X402PaymentOption): string {
     throw new Error('Invalid x402 amount: must be a positive decimal atomic amount')
   }
   return amount
-}
-
-/**
- * #3528: map a prepare response's raw `warnings` array onto the typed
- * `AgentPaymentWarning` shape. Verbatim pass-through per entry (code +
- * message); `undefined` when the backend sent none — the field stays
- * ABSENT, never an empty array, so a stranger's prepare is unchanged on the
- * wire. Unknown codes are relayed as-is: warnings are advisory by contract
- * (#1308), so a newer backend may add one an older SDK must not swallow.
- */
-export function mapRawWarnings(
-  raw: Array<{ code: string; message: string }> | undefined,
-): AgentPaymentWarning[] | undefined {
-  if (!Array.isArray(raw) || raw.length === 0) return undefined
-  return raw
-    .filter(
-      (w): w is { code: string; message: string } =>
-        !!w && typeof w === 'object' && typeof w.code === 'string' && typeof w.message === 'string',
-    )
-    .map((w) => ({
-      code: w.code as AgentPaymentWarningCode,
-      message: w.message,
-    }))
 }
 
 /**

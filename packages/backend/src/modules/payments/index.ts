@@ -16,6 +16,3 @@ export * from './refuse.js'
 // The direct (non-x402) byte-free sign-context handoff (#3271). Exports are
 // disjoint from the four re-exports above (checked when this was added).
 export * from './direct-sign-context.js'
-// The additive, warning-grade self-transfer prepare hint (#3528). Exports are
-// disjoint from the five re-exports above (checked when this was added).
-export * from './self-transfer-warning.js'

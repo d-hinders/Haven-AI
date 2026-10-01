@@ -207,10 +207,6 @@ export {
   // that carry no token address (the consent seed path). Null outside the
   // registry — callers fall back to an explicit atomic label.
   resolveTokenBySymbol,
-  // #3528: raw prepare-response `warnings` → typed `AgentPaymentWarning`,
-  // absent-preserving. Exported for the MCP surfaces that merge the hint
-  // into their own warning envelope.
-  mapRawWarnings,
 } from './x402.js'
 
 export {

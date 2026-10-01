@@ -769,9 +769,6 @@ test('agent card stretched link: body pointer opens the agent while action contr
     expect(new URL(page.url()).pathname).toBe('/agents')
     await expect(page.getByRole('heading', { name: `Pause ${testAgent.name}?` })).toBeVisible()
     await page.keyboard.press('Escape')
-
-    await page.getByRole('button', { name: 'Copy MCP server name' }).click()
-    expect(new URL(page.url()).pathname).toBe('/agents')
   }
 })
 

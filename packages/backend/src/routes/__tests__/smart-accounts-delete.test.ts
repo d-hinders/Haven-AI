@@ -134,7 +134,7 @@ describe('DELETE /user/accounts/:safeId', () => {
     })
 
     expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/pending or active budget delegation/)
+    expect(response.json().error).toMatch(/live \(pending, active or replaced\) budget delegation/)
     const sqls = mockClientQuery.mock.calls.map(([sql]) => String(sql))
     expect(sqls.some((sql) => /UPDATE\s+agents\s+SET\s+account_id\s*=\s*NULL/i.test(sql))).toBe(false)
     expect(sqls.some((sql) => /DELETE\s+FROM\s+smart_accounts/i.test(sql))).toBe(false)

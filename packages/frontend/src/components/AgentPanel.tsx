@@ -17,6 +17,7 @@ import OrganizationsManagerModal from './OrganizationsManagerModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
+import { isHalfRevoked } from '@/lib/half-revoked'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
@@ -60,6 +61,18 @@ export default function AgentPanel() {
     [panel.organizations],
   )
   const allFacets = useMemo(() => [...BUILT_IN_FACETS, ...orgFacets], [orgFacets])
+  // #3542: removed agents whose budget delegation is still live. Same predicate
+  // as the cards, so the toggle and the marker inside it cannot disagree.
+  const removedHalfRevokedCount = useMemo(
+    () => removedAgents.filter(isHalfRevoked).length,
+    [removedAgents],
+  )
+  // After Finish revoking lands, the server's own count is the truth — refetch
+  // quietly (no skeleton) so the marker and the toggle warning clear in place.
+  const handleBudgetEnded = useCallback(
+    () => void refetchAgents({ silent: true }),
+    [refetchAgents],
+  )
   const listFilters = useAgentListFilters(visibleAgents, allFacets)
 
   // The tree's selected row IS the organization facet's selection (one
@@ -423,6 +436,7 @@ export default function AgentPanel() {
                     onArchive={panel.handleArchive}
                     onRestore={panel.handleRestore}
                     onMoveToOrganization={panel.handleAgentMoved}
+                    onBudgetEnded={handleBudgetEnded}
                     busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                     chainId={agentChainId}
                     organizations={panel.organizations}
@@ -449,6 +463,14 @@ export default function AgentPanel() {
                 />
                 Removed
                 <span className="text-[var(--v2-ink-3)] v2-tabular">({removedAgents.length})</span>
+                {/* #3542: a collapsed group must not hide an agent whose budget
+                    is still redeemable on-chain. Nothing extra when none is. */}
+                {removedHalfRevokedCount > 0 && (
+                  <span className="text-[var(--v2-warning)]">
+                    · {removedHalfRevokedCount}{' '}
+                    {removedHalfRevokedCount === 1 ? 'still has' : 'still have'} an active budget
+                  </span>
+                )}
               </button>
             </div>
           )}
@@ -471,6 +493,7 @@ export default function AgentPanel() {
                 onArchive={panel.handleArchive}
                 onRestore={panel.handleRestore}
                 onMoveToOrganization={panel.handleAgentMoved}
+                onBudgetEnded={handleBudgetEnded}
                 busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                 chainId={agent.account_chain_id ?? chainId}
                 organizations={panel.organizations}

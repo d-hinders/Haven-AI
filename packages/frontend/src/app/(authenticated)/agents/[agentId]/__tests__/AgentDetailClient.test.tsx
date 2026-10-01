@@ -2,8 +2,9 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { budgetCardTokens } = vi.hoisted(() => ({
+const { budgetCardTokens, budgetCardRetired } = vi.hoisted(() => ({
   budgetCardTokens: [] as Array<Array<{ address: string; symbol: string; decimals: number }>>,
+  budgetCardRetired: [] as Array<string | undefined>,
 }))
 
 const {
@@ -20,9 +21,37 @@ const {
   mockUseAgentPassport: vi.fn(),
 }))
 
+const { mockRouterPush } = vi.hoisted(() => ({ mockRouterPush: vi.fn() }))
+
 // #1402: the component navigates to /agents after a completed remove.
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: mockRouterPush, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+}))
+
+// The dialog's own sequence is proven in RemoveAgentDialog.test.tsx. Here only
+// what the PAGE wires into it matters (#3542): which mode it opens in, what it
+// does when the budget ends, and whether it navigates.
+vi.mock('@/components/agent-panel/RemoveAgentDialog', () => ({
+  RemoveAgentDialog: ({
+    mode,
+    onArchive,
+    onBudgetEnded,
+    onClose,
+  }: {
+    mode?: string
+    onArchive: () => Promise<void>
+    onBudgetEnded?: () => void
+    onClose: () => void
+  }) => (
+    <div data-testid="remove-agent-dialog" data-mode={mode ?? 'remove'}>
+      <button type="button" onClick={() => { onBudgetEnded?.(); onClose() }}>
+        stub: budget ended
+      </button>
+      <button type="button" onClick={() => void onArchive()}>
+        stub: archive
+      </button>
+    </div>
+  ),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -71,8 +100,9 @@ vi.mock('@/components/EditAgentModal', () => ({
 vi.mock('@/components/DelegationBudgetCard', () => ({
   // #2473: records the token options it was handed, so the first-budget
   // regression can be asserted without rendering the real card.
-  default: (props: { tokens: Array<{ address: string; symbol: string; decimals: number }> }) => {
+  default: (props: { tokens: Array<{ address: string; symbol: string; decimals: number }>; retired?: string }) => {
     budgetCardTokens.push(props.tokens)
+    budgetCardRetired.push(props.retired)
     return <div>DelegationBudgetCard</div>
   },
   DELEGATION_BUDGET_CARD_ID: 'delegation-budget-card',
@@ -113,6 +143,7 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
 }))
 
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
+import { HALF_REVOKED_TITLE } from '@/lib/half-revoked'
 import AgentDetailClient from '../AgentDetailClient'
 
 const SAFE = {
@@ -733,11 +764,109 @@ describe('AgentDetailClient last-activity metadata', () => {
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
       revokeAgent: vi.fn(),
-      archiveAgent: vi.fn(),
+      archiveAgent: vi.fn().mockResolvedValue(undefined),
       unarchiveAgent: vi.fn(),
+      markBudgetEnded: vi.fn(),
       refetch: vi.fn(),
     })
   }
+
+  /**
+   * #3542 (D): "Revoked" on this page is only half true while a budget
+   * delegation is still redeemable on-chain. The callout sits above the budget
+   * card and carries the one action that ends it.
+   */
+  describe('half-revoked callout (#3542)', () => {
+    const MARKER = HALF_REVOKED_TITLE
+
+    beforeEach(() => {
+      mockRouterPush.mockClear()
+    })
+
+    it('revoked + live budget: callout with Finish revoking, above the budget card', () => {
+      mockAgentWith({ status: 'revoked', live_delegation_count: 1 })
+      render(<AgentDetailClient agentId="agent-1" />)
+      const callout = screen.getByTestId('half-revoked-callout')
+      expect(callout).toHaveTextContent(MARKER)
+      expect(screen.getByRole('button', { name: 'Finish revoking' })).toBeInTheDocument()
+      const budgetCard = screen.getByText('DelegationBudgetCard')
+      expect(
+        callout.compareDocumentPosition(budgetCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      // The rules footer no longer implies access fully ended.
+      expect(screen.queryByText('This agent no longer has access through Haven.')).not.toBeInTheDocument()
+      expect(screen.getByText(/credential is revoked, but its budget is still active/i)).toBeInTheDocument()
+    })
+
+    it('revoked + count 0: unchanged — no callout, the old footer line stands', () => {
+      mockAgentWith({ status: 'revoked', live_delegation_count: 0 })
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(screen.queryByTestId('half-revoked-callout')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Finish revoking' })).not.toBeInTheDocument()
+      expect(screen.getByText('This agent no longer has access through Haven.')).toBeInTheDocument()
+    })
+
+    it('an active agent with live budgets shows no callout', () => {
+      mockAgentWith({ status: 'active', live_delegation_count: 2 })
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(screen.queryByTestId('half-revoked-callout')).not.toBeInTheDocument()
+    })
+
+    it('archived + live budget: callout and Finish revoking, alongside Restore', () => {
+      mockAgentWith({
+        status: 'revoked',
+        archived_at: '2026-06-01T00:00:00Z',
+        live_delegation_count: 1,
+      })
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(screen.getByTestId('half-revoked-callout')).toHaveTextContent(MARKER)
+      expect(screen.getByRole('button', { name: 'Finish revoking' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
+    })
+
+    it('an unlinked agent gets the callout and NO action', () => {
+      mockAgentWith({ status: 'revoked', account_id: null, live_delegation_count: 1 })
+      render(<AgentDetailClient agentId="agent-1" />)
+      const callout = screen.getByTestId('half-revoked-callout')
+      expect(callout).toHaveTextContent(MARKER)
+      expect(callout).toHaveTextContent(/cannot end it from here/i)
+      expect(screen.queryByRole('button', { name: 'Finish revoking' })).not.toBeInTheDocument()
+    })
+
+    it('Finish revoking opens the dialog in finish mode; ending the budget clears the marker and keeps the user on the page', () => {
+      mockAgentWith({ status: 'revoked', live_delegation_count: 1 })
+      const markBudgetEnded = vi.fn()
+      mockUseAgents.mockReturnValue({ ...mockUseAgents(), markBudgetEnded })
+      render(<AgentDetailClient agentId="agent-1" />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Finish revoking' }))
+      expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('finish')
+
+      fireEvent.click(screen.getByRole('button', { name: 'stub: budget ended' }))
+      expect(markBudgetEnded).toHaveBeenCalledWith('agent-1')
+      // Finish mode never navigates: the page is where the marker clears.
+      expect(mockRouterPush).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('remove-agent-dialog')).not.toBeInTheDocument()
+    })
+
+    it('finish mode wires NO archive that navigates, even if the dialog invoked it', async () => {
+      mockAgentWith({ status: 'revoked', live_delegation_count: 1 })
+      render(<AgentDetailClient agentId="agent-1" />)
+      fireEvent.click(screen.getByRole('button', { name: 'Finish revoking' }))
+      fireEvent.click(screen.getByRole('button', { name: 'stub: archive' }))
+      await Promise.resolve()
+      expect(mockRouterPush).not.toHaveBeenCalled()
+    })
+
+    it('plain Remove still lands on /agents after archiving (#1402, unchanged)', async () => {
+      mockAgentWith({})
+      render(<AgentDetailClient agentId="agent-1" />)
+      fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+      expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('remove')
+      fireEvent.click(screen.getByRole('button', { name: 'stub: archive' }))
+      await vi.waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith('/agents'))
+    })
+  })
 
   it('shows Remove agent for an operational delegation agent, never Restore (#1402)', () => {
     mockAgentWith({})
@@ -778,6 +907,42 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Unlink agent' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
+  })
+
+  // #3549: every page-level "Update/Add budget" scrolls to the card; on a
+  // removed agent the card offers no form, so none of them may render. Same
+  // gate a revoked agent already had.
+  // The archived-but-not-revoked shape is the one ARCHIVE_AGENT_SQL allows
+  // besides revoked: an UNLINKED agent (account_id NULL) with no live budget.
+  // A delegator-account agent can only be archived once revoked.
+  it('an archived agent offers no Update budget or Add budget entry point (#3549)', () => {
+    mockAgentWith({ account_id: null, status: 'active', archived_at: '2026-06-01T00:00:00Z' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('button', { name: 'Update budget' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add budget' })).not.toBeInTheDocument()
+  })
+
+  it('the same agent un-archived still offers Update budget (#3549 control)', () => {
+    mockAgentWith({ account_id: null, status: 'active', archived_at: null })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getAllByRole('button', { name: /Update budget|Add budget/ }).length).toBeGreaterThan(0)
+  })
+
+  // #3549: the card hides set/edit/issue-sub-budget for a retired agent — the
+  // page must tell it which agents are retired, or the gate never engages.
+  it.each([
+    ['an active agent', { status: 'active', archived_at: null }, undefined],
+    ['a revoked agent', { status: 'revoked', archived_at: null }, 'revoked'],
+    ['a paused agent', { status: 'paused', archived_at: null }, undefined],
+    ['a pending_approval agent', { status: 'pending_approval', archived_at: null }, undefined],
+    ['an archived unlinked agent', { account_id: null, status: 'active', archived_at: '2026-06-01T00:00:00Z' }, 'archived'],
+    ['a revoked and archived agent', { status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }, 'revoked'],
+  ])('hands the budget card retired=%s state (#3549)', (_label, overrides, expected) => {
+    budgetCardRetired.length = 0
+    mockAgentWith(overrides)
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(budgetCardRetired.length).toBeGreaterThan(0)
+    expect(budgetCardRetired.at(-1)).toBe(expected)
   })
 
   it('double-clicking Restore fires unarchive ONCE — pendingAction guards it (#1402)', async () => {

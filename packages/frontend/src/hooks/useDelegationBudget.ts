@@ -586,7 +586,7 @@ export function useDelegationBudget(
     [agentId, reload, signer, signers, signingPath],
   )
 
-  // #1402/#1400: ONE signature kills every pending/active budget. Mirrors
+  // #1402/#1400: ONE signature kills every live (pending/active/replaced) budget. Mirrors
   // `revoke` exactly; the 409 'Nothing to revoke' is SUCCESS here — it means
   // step 1 of the remove flow is already satisfied (never granted, or a
   // prior partial remove already killed the budgets), so a retry can finish
@@ -647,6 +647,10 @@ export function useDelegationBudget(
     revokeAll,
     busy,
     ready: signingPath !== null,
+    // #3542 review: `ready` reads false while the signer set is still loading,
+    // which is not the same as "this device cannot sign". Callers that act on
+    // `!ready` (the replaced-agents card) wait on this first.
+    signersLoading: signers === null && !signersError,
     reload,
     budgetsError,
     signersError,

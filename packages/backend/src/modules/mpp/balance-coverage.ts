@@ -55,7 +55,11 @@ import {
   allowanceModuleRailRetired,
 } from '../../rails/execution-rail.js'
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
-import { listDelegationJsonByIds } from '../../infra/repositories/delegation-budgets.js'
+import {
+  listDelegationJsonByIds,
+  liveRecipientPins,
+  selectBudgetForPaymentReport,
+} from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { getChainClient } from '../../infra/chain/index.js'
 import { toCanonicalAddress } from '../transactions/index.js'
@@ -116,12 +120,35 @@ export async function handleBalanceCoverage(
   const tokenAddress = query.token
 
   // The SAME derivation the allowances read runs (comment there for the
-  // #1090/#1145 provenance), chain-scoped like that read. One budget per
-  // agent is enforced upstream (agent-connection-setups); the token match
-  // below stays explicit rather than relying on that invariant.
+  // #1090/#1145 provenance), chain-scoped like that read. #3518: "one budget
+  // per agent is enforced upstream" is no longer true — a holder can carry
+  // an open AND a recipient-pinned (or merchant-locked) grant for the same
+  // token, so the token match below runs the payment's OWN selection
+  // (`selectBudgetForPaymentReport`, the mirror of
+  // `SELECT_DELEGATION_FOR_PAYMENT_SQL`): a pinned budget for the checked
+  // `to` wins, an open budget covers everything else, and the reported
+  // `budget_remaining_atomic` describes the budget that would PAY, not the
+  // first row created. No `to` in the query (this route never carries one —
+  // the amount is the only variable) means the open budget answers, the
+  // same no-guess fallback the precheck uses.
   const all = (await deriveDelegationBudgets([agent.id])).get(agent.id) ?? []
   const budgets = all.filter((b) => b.chain_id === agent.chain_id)
-  const match = budgets.find((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase())
+  const nowSec = Math.floor(Date.now() / 1000)
+  const tokenBudgets = budgets.filter((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase())
+  const match = selectBudgetForPaymentReport(
+    tokenBudgets,
+    null,
+    nowSec,
+    (b) => Number(b.expires_at),
+    (b) => Number(b.start_date),
+    (b) => b.created_at.getTime(),
+  )
+  // #3518 review: with no open budget, a "0" remaining must not read as "no
+  // budget" when merchant-locked budgets exist — name their recipients so the
+  // figure is not contradicted by haven_get_allowances.
+  const recipientLocked = match
+    ? []
+    : liveRecipientPins(tokenBudgets, nowSec, (b) => Number(b.expires_at), (b) => Number(b.start_date))
 
   // The AUTHORITY figure (permitted), from the same read GET /allowances
   // reports: enforcer-derived when the delegation json is readable, the
@@ -177,6 +204,7 @@ export async function handleBalanceCoverage(
       // only when a budget row matched (the no-row case read nothing from
       // anywhere, so there is no provenance to state).
       ...(budgetFromChain !== null ? { budget_remaining_is_from_chain: budgetFromChain } : {}),
+      ...(recipientLocked.length > 0 ? { budget_recipient_addresses: recipientLocked } : {}),
     },
   }
 }

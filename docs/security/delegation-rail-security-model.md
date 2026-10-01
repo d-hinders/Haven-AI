@@ -62,7 +62,7 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/issuance.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-01"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -379,7 +379,11 @@ Two limits are deliberate:
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:
 `ARCHIVE_AGENT_SQL` requires `status='revoked'` **and** `NOT EXISTS` any
-`pending`/`active` row in `agent_delegations`, in one statement. Revoking flips
+live row in `agent_delegations`, in one statement. Since #3542 "live" is
+`pending`, `active` **and** `replaced` — one shared set
+(`LIVE_DELEGATION_STATUSES_SQL`) with the `revoke-all` target list, the
+account-delete guard and the `live_delegation_count` on agent reads — because a
+`replaced` row stays redeemable until its own disable lands. Revoking flips
 only the agent's status — it never touches delegations — so revoke+archive
 through the API (bypassing the dashboard's revoke-all-first ordering) cannot
 file a delegation agent under Removed while its budget stays redeemable
@@ -1145,6 +1149,26 @@ proving on-chain state (the on-chain `CannotRemoveLastSigner` guard is the
 hard backstop). And a provisioning-time EOA owner is **not signature-verified**
 — the floor counts enrolled signers, it cannot prove each is usable (the zero
 address, which provably is NOT a signer, is rejected at every entry point).
+
+> **Re-verified #3518 (2026-10-01):** this PR adds a READ-ONLY export to
+> `infra/repositories/delegation-budgets.ts` — `selectBudgetForPaymentReport`,
+> the report-side mirror of the payment's own `SELECT_DELEGATION_FOR_PAYMENT_SQL`
+> (same recipient match, live window and ordering, over rows the derived view
+> already read). It writes nothing, activates nothing, retires nothing, and is
+> called only from the budget precheck's compare and the balance-coverage
+> report — both of which previously picked the FIRST per-token row, a
+> selection that could disagree with the enforcer about which caveat-bounded
+> grant a payment draws on. The change moves that off-chain opinion; the
+> on-chain gate is unchanged: spend remains bounded by the caveat stack
+> (`MultiTokenPeriodEnforcer` + allowed recipients + `Timestamp`), redemption
+> still requires the delegate key's signature, and the activation/replace
+> transaction this section pins (#1061/#2411/#2415) is untouched. Selection
+> opinion is not authority: no grant is created, widened, or redeemed by
+> choosing differently which existing owner-signed row a REPORT cites. The
+> same round adds read-only columns to `listActiveDelegations`' projection
+> (`delegation_hash`, `recipient_address`, `merchant_id`, the window, the
+> creation timestamp) — visibility fields for which budget a row is, with no
+> writer. Perimeter unchanged.
 
 The dashboard now delivers the recovery recommendation after funding, and both
 two-to-one signer-removal paths require an explicit consequence confirmation.
@@ -2107,3 +2131,35 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > guard in this document moves. The three-link allowlist and the narrowing
 > gate run unchanged. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
+
+> **#3542 (2026-10-01).** Re-verified unchanged except the archive guard
+> above. The archive guard and the account-delete guard
+> (`HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`) now count `replaced` rows as live,
+> so an agent holding only a still-enabled `replaced` delegation can neither be
+> filed under Removed nor orphaned by deleting its account from Haven. Agent
+> reads carry `live_delegation_count`, and the dashboard uses it: the
+> replaced-agents card revokes the credential and then asks for the owner's
+> `revoke-all` signature, the Remove dialog decides the signature from the
+> loaded delegation list rather than `agents.status`, and an agent that is
+> revoked or archived with live delegations is marked with a Finish revoking
+> action. Haven still signs nothing; ending a budget is still only the owner's
+> `revoke-all`. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
+> **#3553 (2026-10-01).** Sub-budget issuance (`POST /agents/:id/sub-budgets`)
+> and the owner's signature relay (`POST /agents/:id/sub-budgets/:sub/sign`)
+> now refuse a revoked or archived issuing agent with 409 `issuer_retired`,
+> before the handler's body checks, and issuance refuses a revoked, archived or
+> `pending_approval` receiving agent with 409 `sub_agent_retired`. Opening a
+> grant row is refused with the same code when its receiving agent is retired,
+> in both the owner relay and the agent's `POST /sub-budgets/:id/submit` (the
+> row stays pending; close submits are never gated). A
+> half-revoked issuer could previously have new sub-budgets carved from its
+> still-active budget, and the relay would open a `pending` row with a
+> signature made before revocation. The issuer gate sits in the two owner
+> routes and the grant gate in `isGrantReceiverRetired` (called from the relay
+> and the agent submit); neither is in `loadOwnedDelegationAgent`, so
+> authority-reducing routes keep serving retired agents. `paused` passes, as on the delegation routes. The narrowing
+> gate and the relay's signer check are unchanged. The rest of this document
+> was not re-read for it, and `last-verified` is not bumped.
+

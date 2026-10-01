@@ -210,6 +210,31 @@ describeDb('GET /machine-payments/balance-coverage (#3126)', () => {
     expect(res.json().covered).toBe(true)
   })
 
+  it('#3518 review: ONLY merchant-locked budgets for the token — "0" carries their recipients, never a bare "no budget"', async () => {
+    const { agentId } = await seedDelegationAgent()
+    const pin = '0x' + '5a'.repeat(20)
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash, delegation_json, version, status,
+          budget_atomic, period_seconds, start_date, expires_at)
+       VALUES ($1, $2, $3, $4, $5, '{}', 1, 'active', '9990000', 604800, 0, 99999999999)`,
+      [agentId, CHAIN, USDC, pin, `0x${String(++seq).padStart(64, '6')}`],
+    )
+    mockGetTokenBalance.mockResolvedValue(3_000_000n)
+
+    const res = await app.inject({ method: 'GET', url: coverageUrl(USDC, '1000000'), headers })
+    expect(res.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/machine-payments/balance-coverage', res.json())
+    expect(res.json().budget_remaining_atomic).toBe('0')
+    expect(res.json().budget_recipient_addresses).toEqual([pin])
+
+    // An OPEN budget answers as before, with no recipient list.
+    await seedActiveDelegation(agentId, '5000000')
+    const withOpen = await app.inject({ method: 'GET', url: coverageUrl(USDC, '1000000'), headers })
+    expect(withOpen.json().budget_remaining_atomic).toBe('5000000')
+    expect(withOpen.json()).not.toHaveProperty('budget_recipient_addresses')
+  })
+
   it('a malformed amount_atomic is a 400 before any read', async () => {
     await seedDelegationAgent()
 

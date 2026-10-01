@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useState, useMemo, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { getExplorerUrl } from '@/lib/chains'
 import { timeAgo } from '@/lib/format'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
@@ -348,15 +348,15 @@ export default function TransactionsTable({
                 className={`transition-colors hover:bg-[var(--v2-table-row-hover)]${selectable ? ' cursor-pointer' : ''}`}
                 {...(selectable
                   ? {
-                      role: 'button' as const,
-                      tabIndex: 0,
-                      'aria-label': `View details for ${transactionTitle(tx)}`,
-                      onClick: () => onSelect?.(tx),
-                      onKeyDown: (e: ReactKeyboardEvent<HTMLTableRowElement>) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          onSelect?.(tx)
-                        }
+                      // Mouse convenience only (#3554): the row is a native
+                      // `row`, and the accessible path is the title button in
+                      // the activity cell. Focus moves to that button first so
+                      // the drawer's focus trap returns focus to it on close.
+                      onClick: (e: ReactMouseEvent<HTMLTableRowElement>) => {
+                        e.currentTarget
+                          .querySelector<HTMLButtonElement>('button[data-row-select]')
+                          ?.focus()
+                        onSelect?.(tx)
                       },
                     }
                   : {})}
@@ -396,18 +396,38 @@ export default function TransactionsTable({
                         instead of competing with it for a ~141px line — a
                         failed row used to ellipsise all the way down to
                         "Age…" next to its Failed badge. `title` carries the
-                        untruncated string for the two `variant="card"` call
-                        sites (agent detail, account detail) that render
-                        non-selectable rows: on `/transactions` the row is a
-                        button whose `aria-label` already holds it, but there
-                        the truncation would otherwise be unrecoverable. */}
+                        untruncated string wherever truncation would
+                        otherwise be unrecoverable. On selectable rows
+                        (`/transactions`) the title IS the row's real
+                        `<button>` (#3554) and carries the layout and the
+                        truncation itself; the badge and explorer links are
+                        its siblings, never descendants. The two
+                        `variant="card"` call sites (agent detail, account
+                        detail) render non-selectable rows and keep a plain
+                        `<p title>`. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <p
-                        className="w-full break-words text-sm font-medium text-[var(--v2-ink)] md:min-w-0 md:flex-1 md:truncate"
-                        title={transactionTitle(tx)}
-                      >
-                        {transactionTitle(tx)}
-                      </p>
+                      {selectable ? (
+                        <button
+                          type="button"
+                          data-row-select=""
+                          aria-label={`View details for ${transactionTitle(tx)}`}
+                          title={transactionTitle(tx)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onSelect?.(tx)
+                          }}
+                          className="block w-full cursor-pointer appearance-none break-words rounded-sm border-0 bg-transparent p-0 text-left text-sm font-medium text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 md:min-w-0 md:flex-1 md:truncate"
+                        >
+                          {transactionTitle(tx)}
+                        </button>
+                      ) : (
+                        <p
+                          className="w-full break-words text-sm font-medium text-[var(--v2-ink)] md:min-w-0 md:flex-1 md:truncate"
+                          title={transactionTitle(tx)}
+                        >
+                          {transactionTitle(tx)}
+                        </p>
+                      )}
                       {statusBadge ? (
                         <StatusBadge tone={statusBadge.tone}>{statusBadge.label}</StatusBadge>
                       ) : tx.isError ? (

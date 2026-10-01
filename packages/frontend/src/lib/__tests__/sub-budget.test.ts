@@ -65,7 +65,11 @@ describe('subBudgetRefusalCopy (#3506)', () => {
     expect(copy('sub_budget_exceeds_remaining', undefined, 409)).toMatch(/already shared most of this budget/)
     expect(copy('no_delegation_for_target', undefined, 403)).toMatch(/no active budget/)
     expect(copy('not_delegation_rail', undefined, 409)).toMatch(/Scout isn't ready/)
+    expect(copy('issuer_retired', undefined, 409)).toMatch(/Atlas has been revoked or removed/)
+    expect(copy('sub_agent_retired', undefined, 409)).toMatch(/Scout has been revoked or removed/)
     expect(subBudgetRefusalCopy({ status: 404, body: {} }, 'Atlas', 'Scout')).toMatch(/could not find Scout/)
+    // An unknown code on a 409 still reads as the generic refusal.
+    expect(copy('something_new', undefined, 409)).toMatch(/could not issue this sub-budget/)
   })
 
   it('never leaks codes or engineering words', () => {
@@ -77,6 +81,8 @@ describe('subBudgetRefusalCopy (#3506)', () => {
       ['sub_budget_exceeds_remaining', undefined],
       ['no_delegation_for_target', undefined],
       ['not_delegation_rail', undefined],
+      ['issuer_retired', undefined],
+      ['sub_agent_retired', undefined],
       [undefined, undefined],
     ] as const) {
       expect(copy(c, r)).not.toMatch(/delegat|caveat|_|\bcode\b/i)

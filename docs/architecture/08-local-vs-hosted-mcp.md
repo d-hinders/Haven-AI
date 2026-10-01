@@ -75,7 +75,8 @@ never carries the key.
 The same boundary decides **who retires a superseded agent** (#2561). A
 connector run on a machine that already holds agents leaves those agents alive
 with their own keys, and it reports their ids so the DASHBOARD can offer the
-owner a one-click revoke. The connector never revokes: `POST /agents/:id/revoke`
+owner a revoke that also ends the agent's budget with one owner signature
+(#3542). The connector never revokes: `POST /agents/:id/revoke`
 is owner-authenticated and the connector holds only agent API keys, so an agent
 credential retiring a sibling agent would be the "agent editing its own
 authority" that the re-key routes (#1694) already refuse. Nothing is automatic

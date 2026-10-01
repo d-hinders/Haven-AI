@@ -2125,3 +2125,17 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > action. Haven still signs nothing; ending a budget is still only the owner's
 > `revoke-all`. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
+
+> **#3553 (2026-10-01).** Sub-budget issuance (`POST /agents/:id/sub-budgets`)
+> and the owner's signature relay (`POST /agents/:id/sub-budgets/:sub/sign`)
+> now refuse a revoked or archived issuing agent with 409 `issuer_retired`,
+> before body validation, and issuance refuses a revoked, archived or
+> `pending_approval` receiving agent with 409 `sub_agent_retired`. A
+> half-revoked issuer could previously have new sub-budgets carved from its
+> still-active budget, and the relay would open a `pending` row with a
+> signature made before revocation. The gate sits in the two routes, not in
+> `loadOwnedDelegationAgent`, so authority-reducing routes keep serving
+> retired agents. `paused` passes, as on the delegation routes. The narrowing
+> gate and the relay's signer check are unchanged. The rest of this document
+> was not re-read for it, and `last-verified` is not bumped.
+

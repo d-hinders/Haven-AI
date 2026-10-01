@@ -46,6 +46,13 @@ interface Props {
    * remount.
    */
   onBudgetChange?: () => void
+  /**
+   * #3549: the agent is revoked or archived. Its card stays read-only plus
+   * Stop — nothing that GRANTS authority (set, edit, issue a sub-budget) is
+   * offered to an agent being retired; ending what is left is all that remains.
+   * The backend refuses build/activate for a revoked agent anyway.
+   */
+  retired?: 'revoked' | 'archived'
 }
 
 /**
@@ -60,7 +67,7 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
   { label: 'per month', seconds: 2_592_000 },
 ]
 
-export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange }: Props) {
+export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange, retired }: Props) {
   const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
     useDelegationBudget(agentId, chainId)
   // #3329: read separately from the period budgets above — a failed fetch
@@ -111,7 +118,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   const [prefill, setPrefill] = useState<{ hash: string; periodSeconds: number } | null>(null)
 
   useEffect(() => {
-    if (!grantHash || budgets === null || prefill) return
+    // #3549: a retired agent's card has no grant form to fill — leave the
+    // URL as it is rather than tidying away a link nothing consumed.
+    if (retired || !grantHash || budgets === null || prefill) return
     const row = budgets.find((b) => b.delegation_hash === grantHash && b.status === 'pending')
     if (!row) return
     const t = tokens.find((x) => x.address.toLowerCase() === row.token_address.toLowerCase())
@@ -130,7 +139,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
     } catch {
       // A URL that stays untidy is not worth a thrown render.
     }
-  }, [grantHash, budgets, tokens, agentId, prefill])
+  }, [retired, grantHash, budgets, tokens, agentId, prefill])
 
   // The period picker offers the day/week/month rhythm; a prefilled build may
   // carry any period the CLI chose (an hour, a minute-floor of 60s), so the
@@ -226,14 +235,16 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   // #3506: a sub-budget is carved from a LIVE budget — the entry point exists
   // only when this agent has an active, unexpired one (the card itself renders
   // only on the delegation rail). The modal offers a picker when several qualify.
-  const subBudgetParents = eligibleSubBudgetParents(budgets, Math.floor(Date.now() / 1000))
+  const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets, Math.floor(Date.now() / 1000))
 
   return (
     <Card hover={false} className="mt-6 p-5 md:p-6">
       <div>
         <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent budgets</h2>
         <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-          Set how much this agent can spend each period. The budget refills itself — no monthly signing.
+          {retired
+            ? 'What this agent can still spend each period.'
+            : 'Set how much this agent can spend each period. The budget refills itself — no monthly signing.'}
         </p>
       </div>
 
@@ -262,7 +273,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           </div>
         ) : active.length === 0 ? (
           <p className="py-3 text-sm text-[var(--v2-ink-muted)]">
-            No budget yet — set one below and your agent can start paying within it.
+            {retired ? 'No active budget.' : 'No budget yet — set one below and your agent can start paying within it.'}
           </p>
         ) : (
           active.map((b) => (
@@ -272,7 +283,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
               tokens={tokens}
               openTaskBudgets={openTaskBudgets}
               onRevoke={handleRevoke}
-              onEdit={setEditing}
+              onEdit={retired ? undefined : setEditing}
               busy={busy}
               ready={ready}
             />
@@ -291,7 +302,13 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         </div>
       ) : null}
 
-      {tokens.length > 0 ? (
+      {retired ? (
+        <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
+          {retired === 'revoked'
+            ? 'This agent is revoked, so its budgets can only be stopped — not set, raised or shared.'
+            : 'This agent is removed, so its budgets can only be stopped. Restore it to the list to set or raise one.'}
+        </p>
+      ) : tokens.length > 0 ? (
         <div className="mt-4 space-y-2">
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
@@ -405,7 +422,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
       {/* #3166: edit-in-place for one active budget. Kept mounted here — the
           modal owns its own `enabled: open` hook instance, so idle cost is one
           closed portal. */}
-      {editing ? (
+      {editing && !retired ? (
         <EditBudgetModal
           open={editing !== null}
           onClose={handleEditClosed}
@@ -434,8 +451,8 @@ function BudgetRow({
   /** Open, unexpired task budgets across the agent (#3329) — filtered to this row's parent below. */
   openTaskBudgets: TaskBudget[]
   onRevoke: (hash: string) => void
-  /** Opens the edit-in-place flow (#3166) for THIS row. */
-  onEdit: (budget: DelegationBudget) => void
+  /** Opens the edit-in-place flow (#3166) for THIS row; absent on a retired agent (#3549). */
+  onEdit?: (budget: DelegationBudget) => void
   busy: boolean
   ready: boolean
 }) {
@@ -477,15 +494,17 @@ function BudgetRow({
           lifecycle action is busy, exactly like Stop, and requires a
           reachable signer like every affordance that asks for one. */}
       <div className="flex shrink-0 items-center gap-1">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onEdit(budget)}
-          disabled={busy || !ready}
-          aria-label={`Edit budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
-        >
-          Edit
-        </Button>
+        {onEdit ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onEdit(budget)}
+            disabled={busy || !ready}
+            aria-label={`Edit budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
+          >
+            Edit
+          </Button>
+        ) : null}
         <Button size="sm" variant="ghost" onClick={() => onRevoke(budget.delegation_hash)} disabled={busy || !ready}>
           Stop
         </Button>

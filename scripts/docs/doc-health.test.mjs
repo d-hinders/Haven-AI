@@ -158,6 +158,7 @@ test('generatedAt: a zone-less time or free text is refused; a date or zoned tim
   const run = (generatedAt) => buildDocHealth({ docs: [], packageDocs: [], generatedAt })
   assert.throws(() => run('October 1, 2026'), /ISO date/)
   assert.throws(() => run('2026-10-01T00:00:00'), /ISO date/)
+  assert.throws(() => run('2026-02-31'), /not a real date/)
   assert.equal(run('2026-10-01').generatedAt, '2026-10-01T00:00:00.000Z')
   assert.equal(run('2026-10-01T02:00:00+02:00').generatedAt, '2026-10-01T00:00:00.000Z')
 })

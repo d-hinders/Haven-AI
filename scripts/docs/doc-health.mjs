@@ -79,21 +79,25 @@ export function docEntry(path, fm, generatedAt) {
   return { path, owner, status, lastVerified, flags }
 }
 
+// A date, or a date-time with an explicit zone: a zone-less time parses as
+// LOCAL time, so the day count would depend on the machine running it.
+const ISO_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2}))?$/
+
 /**
  * The report from already-read inputs. Pure, so tests feed it fixtures.
  *
  * @param {{ docs: Array<{ path: string, raw: string }>, packageDocs: Array<{ doc: string, owner?: string, status?: string, covers?: string[], 'last-verified'?: string }>, generatedAt: string }} input
  */
-// A date, or a date-time with an explicit zone: a zone-less time parses as
-// LOCAL time, so the day count would depend on the machine running it.
-const ISO_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2}))?$/
-
 export function buildDocHealth({ docs, packageDocs, generatedAt: given }) {
   if (!ISO_RE.test(given) || Number.isNaN(Date.parse(given))) {
     throw new Error(`generatedAt must be an ISO date or a date-time with Z or an offset: ${given}`)
   }
   // Normalised, so the report always carries one ISO shape.
   const generatedAt = new Date(given).toISOString()
+  // A date-only value that rolls over (2026-02-31 → March 3) is refused.
+  if (given.length === 10 && !generatedAt.startsWith(given)) {
+    throw new Error(`generatedAt is not a real date: ${given}`)
+  }
   const entries = []
   for (const { path, raw } of docs) {
     if (isArchived(path)) continue

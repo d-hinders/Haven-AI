@@ -23,6 +23,7 @@ const boundary: ClientBoundary = {
   publicMethods: [
     'authorizeX402',
     'clientUpdate', // #3303
+    'closeSubBudget', // #3506
     'closeTaskBudget', // #3329
     'completeX402MerchantCall',
     'createIntent',
@@ -46,6 +47,7 @@ const boundary: ClientBoundary = {
     'getTaskBudget', // #3329
     'getTaskBudgetSignContext', // #3329
     'getX402MerchantCallContext',
+    'listPendingSubBudgetSignatures', // #3506
     'listReceipts',
     'listReceiptsPage', // #3128
     'listTaskBudgets', // #3329
@@ -66,6 +68,7 @@ const boundary: ClientBoundary = {
     'submitCatalogEntry',
     'submitSignature',
     'submitSweep',
+    'submitSubBudget', // #3506
     'submitTaskBudget', // #3329
     'submitX402Erc7710',
     'sweepDelegate',
@@ -74,6 +77,7 @@ const boundary: ClientBoundary = {
   ],
   publicMembers: [
     "async authorizeX402(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Receipt>",
+    "async closeSubBudget(id: string): Promise<CloseSubBudgetResult>",
     "async closeTaskBudget(id: string): Promise<CloseTaskBudgetResult>",
     "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; }>",
     "async createIntent(request: PaymentRequest): Promise<PaymentIntent>",
@@ -97,6 +101,7 @@ const boundary: ClientBoundary = {
     "async getTaskBudget(id: string): Promise<HavenTaskBudget>",
     "async getTaskBudgetSignContext(id: string): Promise<TaskBudgetSignContext>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
+    "async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",
     "async listReceiptsPage(options: { limit?: number; cursor?: string; compact?: boolean; } = {}): Promise<HavenPaymentReceiptsPage>", // #3423 compact
     "async listTaskBudgets(options: { status?: 'open' | 'all'; } = {}): Promise<HavenTaskBudget[]>",
@@ -120,6 +125,7 @@ const boundary: ClientBoundary = {
     "async submitCatalogEntry(resourceUrl: string, options: { website?: string; } = {}): Promise<HavenCatalogSubmission>",
     "async submitSignature(paymentId: string, signature: string): Promise<{ status: string; txHash?: string; }>",
     "async submitSweep(authorization: SweepAuthorization, signature: string): Promise<SweepSubmitResponse>",
+    "async submitSubBudget(id: string, signature: string): Promise<SubmitSubBudgetResult>",
     "async submitTaskBudget(id: string, signature: string): Promise<SubmitTaskBudgetResult>",
     "async submitX402Erc7710(paymentId: string, signature: string): Promise<string>",
     "async sweepDelegate(): Promise<SweepResult>",

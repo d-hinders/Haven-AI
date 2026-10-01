@@ -150,8 +150,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
   // #3329: the success-side counterpart — a task budget's signer hand-off,
   // which is not a payment and so cannot go through buildAgentGuidance's
-  // AgentPaymentSummary (see SINGLE_SLICE_RETAINED for why it stays shared).
-  taskBudgetNextStep: { module: 'guidance', slices: ['s3329'] },
+  // AgentPaymentSummary. #3506: a sub-budget row's hand-off (haven_get_agent's
+  // pending rows, haven_submit's sub_budget_id result) uses it from s2809 too.
+  taskBudgetNextStep: { module: 'guidance', slices: ['s2809', 's3329'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -336,13 +337,6 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
   resolveResumeState:
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
-  // s3329 (#3329 task budgets):
-  taskBudgetNextStep:
-    'Only tools/task-budgets.ts calls it today, but it is DELIBERATE, not "until the capability moves ' +
-    'it": it is the general success-side counterpart of refusalNextStep (same builder, same target ' +
-    'map, same compile-time twins) for any future non-payment next step, and forking it into one ' +
-    "capability would mean a second slice needing it copies refusalNextStep's own pattern rather than " +
-    'importing the general one — the exact drift #2808 exists to prevent.',
 }
 
 /**
@@ -1187,9 +1181,10 @@ describe('shared fixture (test-support/hosted-mcp.ts)', () => {
     await handlers().haven_get_agent({})
     const calls = recordedCalls()
     // getAgentSummary reads the agent, its allowances, AND its open task
-    // budgets (#3329: GET /task-budgets?status=open, three GETs total —
-    // the third fails soft to [] when unstubbed, per the #3093 rule).
-    expect(calls).toHaveLength(3)
+    // budgets (#3329: GET /task-budgets?status=open) and, since #3506, the
+    // sub-budget rows awaiting its signature (GET /sub-budgets?status=awaiting_signature)
+    // — four GETs total, the last two failing soft to [] when unstubbed (#3093).
+    expect(calls).toHaveLength(4)
     const agentCall = calls.find((c) => c.url.endsWith('/machine-payments/agent'))!
     expect(agentCall.method).toBe('GET')
     expect(agentCall.headers).toBeDefined()

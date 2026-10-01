@@ -1038,6 +1038,34 @@ last-verified: "2026-10-01"
 > from the #2807 contracts module, and the version-skew and consent-hash
 > contracts do not move because the registered tool-NAME set does not.
 >
+> **Recent re-verification (#3506, sub-budgets user-completable):** both
+> runtimes' `haven_submit` accept `sub_budget_id` (exactly one of
+> `payment_id`, `task_budget_id` or `sub_budget_id`, plus `signature`). This
+> completes the signer's existing `haven_sign { sub_budget_id }` →
+> `haven_submit { sub_budget_id, signature }` handoff, which the hosted schema
+> used to reject. The call goes through the SDK's new `submitSubBudget` to
+> `POST /sub-budgets/:id/submit`. An opened row whose tree sibling is still
+> pending names `haven_sign { sub_budget_id }` for the sibling. `haven_get_agent`'s
+> response grew `pendingSubBudgetSignatures[]`. It is additive: the rows this
+> agent must sign (the opens of an owner-issued sub-budget, or a `closing` row
+> after an owner close), each with its `haven_sign` step. It reads
+> `GET /sub-budgets?status=awaiting_signature`, and an older backend answer
+> fails soft to `[]`. A stale sub-budget close (`close_needs_reprepare`) is
+> recovered inside `haven_submit`, which re-prepares through
+> `POST /sub-budgets/:id/close` and names `haven_sign` (or reports `closed`);
+> `close_outcome_unconfirmed` asks to repeat the call later. No close tool is
+> added. `next-step-signer-parity.test.ts` now pins both
+> `haven_submit` handoffs (`SIGNER_HOSTED_HANDOFF_SHAPES`
+> `'haven_submit#task_budget'` and `'haven_submit#sub_budget'`). The signer's
+> `initialize` block gains `sub_budget_sign_context_versions` (additive) and
+> its consent text names sub-budget signing. **Consent hash unchanged:**
+> `SIGNER_CONSENT_SURFACE_VERSION` stays 2 (owner decision, copy-only), so no
+> re-consent. No tool was added, removed or renamed, the strict/permissive
+> split is untouched, and the version-skew contract does not move. A signer
+> older than 0.7.0 cannot sign `sub_budget_id` at all; that is unchanged, and
+> it needs no new notice. Nothing else in this document was re-verified in
+> this pass.
+>
 > **Recent re-verification (#3330, sub-agent budgets):** the local runtime
 > gained one new flow-keyed signable and one additive response field. The
 > signer's `haven_sign` accepts `sub_budget_id` (an agent-issued sub-budget's

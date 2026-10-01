@@ -17,6 +17,13 @@ import { z } from 'zod'
  */
 export const SIGNER_HOSTED_HANDOFF_SHAPES = {
   haven_get_payment_status: { payment_id: z.string().min(1) },
+  // #3506: `haven_sign` hands a signed budget row to the hosted `haven_submit`
+  // (`signTaskBudget` / `signSubBudget` in tools.ts emit exactly these
+  // `next_arguments`). One hosted tool, two argument shapes, so each shape is
+  // its own entry keyed `<hosted tool>#<variant>`; the parity test reads the
+  // part before `#` as the hosted tool it checks the entry against.
+  'haven_submit#task_budget': { task_budget_id: z.string().min(1), signature: z.string().regex(/^0x[0-9a-fA-F]+$/) },
+  'haven_submit#sub_budget': { sub_budget_id: z.string().min(1), signature: z.string().regex(/^0x[0-9a-fA-F]+$/) },
 } as const satisfies Record<string, z.ZodRawShape>
 
 function target<S extends z.ZodRawShape>(shape: S): NextStepTarget<z.input<z.ZodObject<S>>> {

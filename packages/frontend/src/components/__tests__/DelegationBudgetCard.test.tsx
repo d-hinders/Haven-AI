@@ -96,6 +96,25 @@ describe('DelegationBudgetCard (#833)', () => {
     expect(screen.getByText(/to 0xf0f0/)).toBeTruthy()
   })
 
+  it('offers Issue sub-budget only when the agent has an active budget (#3506)', async () => {
+    mockGet.mockReturnValue([])
+    const { unmount } = render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    unmount()
+
+    // A pending (not yet active) budget is not something to slice either.
+    mockGet.mockReturnValue([budget({ status: 'pending' })])
+    const second = render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    second.unmount()
+
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText('Issue sub-budget')).toBeTruthy())
+  })
+
   it('grant: one Set-budget action calls grant with parsed atomic amount + period', async () => {
     mockGet.mockReturnValue([])
     mockGrant.mockResolvedValue({ ok: true })

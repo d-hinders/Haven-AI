@@ -14,6 +14,7 @@ import {
   findOpenGrantsForAgent,
   findOpenParentChildByHash,
   insertPendingSubBudget,
+  listAwaitingSignatureForDelegatingAgent,
   listForAgent,
   listForOwner,
   markClosed,
@@ -260,6 +261,52 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     const grants = await findOpenGrantsForAgent(b.agentId)
     expect(grants).toHaveLength(1)
     expect(grants[0].is_expired).toBe(true)
+  })
+
+  it('#3506 listAwaitingSignatureForDelegatingAgent: pending/closing rows for the DELEGATING agent only, parent-child first, never the sub-agent', async () => {
+    const a = await seedAgent('delegating-a')
+    const b = await seedAgent('sub-b')
+    const other = await seedAgent('other')
+    const { parentChild, grant } = await seedTree(a, b)
+    const now = Math.floor(Date.now() / 1000)
+
+    // Both pending rows are A's to sign — parent-child first, then the grant.
+    const awaiting = await listAwaitingSignatureForDelegatingAgent(a.agentId, now)
+    expect(awaiting.map((r) => r.id)).toEqual([parentChild.id, grant.id])
+
+    // The sub-agent B holds the grant but never signs it: nothing awaits B.
+    expect(await listAwaitingSignatureForDelegatingAgent(b.agentId, now)).toEqual([])
+    expect(await listAwaitingSignatureForDelegatingAgent(other.agentId, now)).toEqual([])
+
+    // A row leaves the list once its signature lands (open).
+    await markOpen(parentChild.id, a.agentId, JSON.stringify({ signed: true }))
+    expect((await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).map((r) => r.id)).toEqual([grant.id])
+    await markOpen(grant.id, a.agentId, JSON.stringify({ signed: true }))
+    expect(await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).toEqual([])
+
+    // A close owed (closing) puts the row back.
+    await markClosing(grant.id, a.agentId, JSON.stringify({ userOp: true }))
+    expect((await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).map((r) => r.id)).toEqual([grant.id])
+
+    // A closed row is never listed.
+    await markClosed(grant.id, a.agentId, null)
+    expect(await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).toEqual([])
+  })
+
+  it('#3506 listAwaitingSignatureForDelegatingAgent omits a pending row past its expiry but keeps a closing one', async () => {
+    const a = await seedAgent('delegating-a')
+    const b = await seedAgent('sub-b')
+    const { parentChild, grant } = await seedTree(a, b, { expiresAt: Math.floor(Date.now() / 1000) - 10 })
+    const now = Math.floor(Date.now() / 1000)
+
+    // Pending and already expired: signing would open a dead child.
+    expect(await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).toEqual([])
+
+    // Closing stays listed regardless of expiry: its stored disable op is the thing to sign.
+    await markOpen(parentChild.id, a.agentId, JSON.stringify({ signed: true }))
+    await markClosing(parentChild.id, a.agentId, JSON.stringify({ userOp: true }))
+    expect((await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).map((r) => r.id)).toEqual([parentChild.id])
+    expect(grant.status).toBe('pending')
   })
 
   it('listForAgent scopes status; listForOwner joins through the owning user', async () => {

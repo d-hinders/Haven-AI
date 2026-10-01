@@ -2085,3 +2085,25 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > and the on-chain ERC20PeriodTransferEnforcer stays the real gate the
 > pre-check only mirrors. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.
+>
+> **Re-verified unchanged (#3506, 2026-10-01, sub-budgets user-completable):**
+> the agent now submits its own sub-budget signatures. `haven_submit` accepts
+> `sub_budget_id` on both MCP runtimes through the SDK's `submitSubBudget`,
+> to the existing agent route `POST /sub-budgets/:id/submit`. That route
+> already verified, before this change, that the signature recovers the
+> DELEGATING agent's delegate key over the exact bytes Haven built, and only
+> then opens a `pending` row. The owner's `POST /agents/:id/sub-budgets/:id/sign`
+> relay is untouched and stays as an optional path. The decision log's new
+> 2026-10-01 line records that the relay was transport, not governance;
+> issuance stays owner-only and still refuses a child wider than A's budget
+> before anything is signed. Agent A discovers its pending sign targets with
+> `GET /sub-budgets?status=awaiting_signature`, scoped to the rows it
+> delegates. Expired `pending` rows are omitted, and `closing` rows stay
+> listed. The dashboard issues with the owner JWT, as the owner API already
+> did. The signer's consent summary and `initialize` block now name
+> sub-budget signing and its sign-context versions. That is copy only:
+> `SIGNER_CONSENT_SURFACE_VERSION` stays 2, and a test pins the consent hash.
+> No signature, key role, delegation shape, caveat, allowlist or redemption
+> guard in this document moves. The three-link allowlist and the narrowing
+> gate run unchanged. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.

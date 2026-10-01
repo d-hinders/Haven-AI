@@ -41,7 +41,13 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { runTool, HostedToolError } from './support/errors.js'
-import { buildAgentGuidance, catchSettledResettle, paymentStatusHandoff, refusalNextStep } from './support/guidance.js'
+import {
+  buildAgentGuidance,
+  catchSettledResettle,
+  paymentStatusHandoff,
+  refusalNextStep,
+  taskBudgetNextStep,
+} from './support/guidance.js'
 import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
@@ -272,11 +278,43 @@ async function respondToNoSignDataReplay(
   }
 }
 
+/**
+ * #3506: the hand-off for a sub-budget row that still needs the DELEGATING
+ * agent's signature: the signer's `haven_sign` with `sub_budget_id` (it
+ * fetches the signing context itself), then `haven_submit` with the same id.
+ * Used on `haven_get_agent`'s pending rows and after a submit that opened one
+ * row of a tree whose other row is still pending.
+ */
+function subBudgetSignHandoff(subBudgetId: string) {
+  return taskBudgetNextStep({
+    nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+    nextTool: 'haven_sign',
+    nextArguments: { sub_budget_id: subBudgetId },
+    reason:
+      'Sign with the local signer tool named above, passing sub_budget_id EXACTLY as given — it ' +
+      'fetches the signing context itself. Then relay the signature with haven_submit, passing ' +
+      'sub_budget_id (not payment_id).',
+  })
+}
+
 export function createStateDirectRecoveryHandlers(
   haven: HavenClient,
 ): HostedToolHandlers<StateDirectRecoveryToolName> {
   return {
-    haven_get_agent: async () => runTool(async () => haven.getAgentSummary()),
+    haven_get_agent: async () =>
+      runTool(async () => {
+        const summary = await haven.getAgentSummary()
+        // #3506: each owner-issued sub-budget row awaiting THIS agent's
+        // signature names its own next step (haven_sign { sub_budget_id }).
+        if (!Array.isArray(summary.pendingSubBudgetSignatures)) return summary
+        return {
+          ...summary,
+          pendingSubBudgetSignatures: summary.pendingSubBudgetSignatures.map((row) => ({
+            ...row,
+            ...subBudgetSignHandoff(row.subBudgetId),
+          })),
+        }
+      }),
 
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
 
@@ -635,24 +673,151 @@ export function createStateDirectRecoveryHandlers(
     haven_submit: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_submit', input)
-        // #3329: exactly one of payment_id / task_budget_id selects what this
-        // relays — a structured parse error, before anything is contacted,
-        // rather than an ambiguous guess at which record the signature is for.
+        // #3329 / #3506: exactly one of payment_id / task_budget_id /
+        // sub_budget_id selects what this relays — a structured parse error,
+        // before anything is contacted, rather than an ambiguous guess at
+        // which record the signature is for.
         const hasPaymentId = typeof args.payment_id === 'string' && args.payment_id.length > 0
         const hasTaskBudgetId = typeof args.task_budget_id === 'string' && args.task_budget_id.length > 0
-        if (hasPaymentId === hasTaskBudgetId) {
+        const hasSubBudgetId = typeof args.sub_budget_id === 'string' && args.sub_budget_id.length > 0
+        if ([hasPaymentId, hasTaskBudgetId, hasSubBudgetId].filter(Boolean).length !== 1) {
           throw new HostedToolError({
             code: 'INVALID_INPUT',
             message:
-              'haven_submit takes exactly one of payment_id or task_budget_id — never both, never ' +
-              'neither. Nothing was relayed.',
+              'haven_submit takes exactly one of payment_id, task_budget_id or sub_budget_id — never ' +
+              'two, never none. Nothing was relayed.',
             statusCode: 400,
             nextStep: refusalNextStep({
               nextAction: AgentPaymentNextAction.StopAndTellUser,
               nextTool: null,
-              nextToolOmittedReason: 'the caller has to resend with exactly one of the two ids',
+              nextToolOmittedReason: 'the caller has to resend with exactly one of the three ids',
             }),
           })
+        }
+        if (hasSubBudgetId) {
+          // #3506: the DELEGATING agent's signature for a sub-budget row — it
+          // opens a pending row, or relays a signed close. The owner relay
+          // (/agents/:id/sub-budgets/:sub/sign) is no longer required.
+          const subBudgetId = args.sub_budget_id as string
+          let result: Awaited<ReturnType<HavenClient['submitSubBudget']>>
+          try {
+            result = await haven.submitSubBudget(subBudgetId, args.signature)
+          } catch (err) {
+            // A close can answer 409 close_needs_reprepare (the stored
+            // disable UserOp is stale) or 502 close_outcome_unconfirmed (it
+            // was sent; the chain has not finalised). There is no close
+            // tool, so this handler does the recovery the backend names:
+            // closeSubBudget (idempotent in effect, authority-reducing)
+            // reports `closed` if the disable finalised, else prepares a
+            // fresh op for haven_sign; the unconfirmed case says to retry
+            // this same call later.
+            const code =
+              err instanceof HavenApiError ? (err.body as { error_code?: string } | undefined)?.error_code : undefined
+            if (code === 'close_needs_reprepare') {
+              const fresh = await haven.closeSubBudget(subBudgetId)
+              if (fresh.status === 'closed') {
+                return {
+                  sub_budget: fresh.subBudget,
+                  status: 'closed',
+                  ...taskBudgetNextStep({
+                    nextAction: AgentPaymentNextAction.None,
+                    nextTool: null,
+                    nextToolOmittedReason:
+                      'the sub-budget is closed on-chain; nothing further to sign or submit for it',
+                    reason: 'The sub-budget is closed.',
+                  }),
+                }
+              }
+              throw new HostedToolError({
+                code: 'CLOSE_NEEDS_REPREPARE',
+                message:
+                  'The stored close operation for this sub-budget was stale, so nothing was relayed. Haven ' +
+                  'prepared a fresh one: sign it with haven_sign, then call haven_submit again with the new signature.',
+                statusCode: 409,
+                nextStep: refusalNextStep({
+                  nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                  nextTool: 'haven_sign',
+                  nextArguments: { sub_budget_id: subBudgetId },
+                }),
+              })
+            }
+            if (code === 'close_outcome_unconfirmed') {
+              throw new HostedToolError({
+                code: 'CLOSE_OUTCOME_UNCONFIRMED',
+                message:
+                  'The close operation was sent but its outcome is not confirmed yet (on Base that can take tens ' +
+                  'of minutes). Wait, then call haven_submit again with the same arguments: it reports closed ' +
+                  'once the chain has finalised the disable, or prepares a fresh operation to sign if the ' +
+                  'earlier one did not land.',
+                statusCode: 502,
+                nextStep: refusalNextStep({
+                  nextAction: AgentPaymentNextAction.CheckStatusLater,
+                  nextTool: 'haven_submit',
+                  nextArguments: { sub_budget_id: subBudgetId, signature: args.signature },
+                }),
+              })
+            }
+            throw err
+          }
+          const submitted = {
+            sub_budget: result.subBudget,
+            status: result.status,
+            ...(result.closeTxHash !== undefined ? { close_tx_hash: result.closeTxHash } : {}),
+          }
+          if (result.status === 'closed') {
+            return {
+              ...submitted,
+              ...taskBudgetNextStep({
+                nextAction: AgentPaymentNextAction.None,
+                nextTool: null,
+                nextToolOmittedReason:
+                  'the sub-budget is closed on-chain; nothing further to sign or submit for it',
+                reason: 'The sub-budget is closed.',
+              }),
+            }
+          }
+          // Opened: if the tree's other row is still pending, signing it is
+          // next (the grant stays unusable until BOTH rows are open).
+          let pending: Awaited<ReturnType<HavenClient['listPendingSubBudgetSignatures']>> | null
+          try {
+            pending = await haven.listPendingSubBudgetSignatures()
+          } catch {
+            pending = null
+          }
+          if (pending === null) {
+            return {
+              ...submitted,
+              ...taskBudgetNextStep({
+                nextAction: AgentPaymentNextAction.CheckStatusLater,
+                nextTool: 'haven_get_agent',
+                nextArguments: {},
+                reason:
+                  'This sub-budget row is open, but Haven could not say whether its tree has another row ' +
+                  'awaiting your signature. Call haven_get_agent and sign any pendingSubBudgetSignatures row.',
+              }),
+            }
+          }
+          const tree = result.subBudget.parentSubBudgetId ?? result.subBudget.id
+          const sibling = pending.find(
+            (row) =>
+              row.purpose === 'open' &&
+              row.subBudgetId !== result.subBudget.id &&
+              (row.parentSubBudgetId ?? row.subBudgetId) === tree,
+          )
+          if (sibling) {
+            return { ...submitted, ...subBudgetSignHandoff(sibling.subBudgetId) }
+          }
+          return {
+            ...submitted,
+            ...taskBudgetNextStep({
+              nextAction: AgentPaymentNextAction.None,
+              nextTool: null,
+              nextToolOmittedReason:
+                'no other row of this sub-budget awaits your signature, so the sub-budget is fully open ' +
+                'and the sub-agent can spend through its grant',
+              reason: 'The sub-budget is open.',
+            }),
+          }
         }
         if (hasTaskBudgetId) {
           const result = await haven.submitTaskBudget(args.task_budget_id, args.signature)

@@ -17,6 +17,7 @@ import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
 import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import EditBudgetModal from './EditBudgetModal'
+import IssueSubBudgetModal from './IssueSubBudgetModal'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
@@ -67,7 +68,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   const { taskBudgets } = useTaskBudgets(agentId)
   // #3330: the parent→child sub-budget trees this agent ISSUES, read the
   // same defensive way — `trees` stays `null` (nothing rendered) on failure.
-  const { trees: subBudgetTrees } = useSubBudgetTrees(agentId)
+  const { trees: subBudgetTrees, reload: reloadSubBudgets } = useSubBudgetTrees(agentId)
+  // #3506: the issue-sub-budget modal's open flag.
+  const [issuingSubBudget, setIssuingSubBudget] = useState(false)
   const openTaskBudgets = useMemo(() => {
     const nowSec = Math.floor(Date.now() / 1000)
     return (taskBudgets ?? []).filter((t) => t.status === 'open' && !t.is_expired && t.expires_at > nowSec)
@@ -219,6 +222,11 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   // shape `signersError` already uses below, rather than collapsing the whole
   // card and taking the grant form with it.
   const active = (budgets ?? []).filter((b) => b.status === 'active')
+  // #3506: a sub-budget is carved from a LIVE budget — the entry point exists
+  // only when this agent has an active, unexpired one (the card itself renders
+  // only on the delegation rail). The first such budget is the ceiling shown.
+  const subBudgetParent =
+    active.find((b) => b.expires_at > Math.floor(Date.now() / 1000) && !b.merchant_slug) ?? null
 
   return (
     <Card hover={false} className="mt-6 p-5 md:p-6">
@@ -271,6 +279,17 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           ))
         )}
       </Card.Section>
+
+      {subBudgetParent && !budgetsError ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-[var(--v2-ink-muted)]">
+            Share part of this budget with another of your agents.
+          </p>
+          <Button size="sm" variant="ghost" onClick={() => setIssuingSubBudget(true)}>
+            Issue sub-budget
+          </Button>
+        </div>
+      ) : null}
 
       {tokens.length > 0 ? (
         <div className="mt-4 space-y-2">
@@ -370,6 +389,17 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
             <SubBudgetTreeRow key={tree.parent_child_sub_budget.id} tree={tree} tokens={tokens} />
           ))}
         </Card.Section>
+      ) : null}
+
+      {subBudgetParent && issuingSubBudget ? (
+        <IssueSubBudgetModal
+          open
+          onClose={() => setIssuingSubBudget(false)}
+          agentId={agentId}
+          budget={subBudgetParent}
+          tokens={tokens}
+          onIssued={() => void reloadSubBudgets()}
+        />
       ) : null}
 
       {/* #3166: edit-in-place for one active budget. Kept mounted here — the
@@ -503,6 +533,7 @@ function SubBudgetTreeRow({ tree, tokens }: { tree: SubBudgetTree; tokens: Token
     parent.expires_at > nowSec ? `ends ${timeUntil(parent.expires_at * 1000)}` : 'ended',
   ]
   if (parent.recipient_address) parentParts.push(`to ${truncateAddress(parent.recipient_address)}`)
+  if (parent.status === 'pending') parentParts.push('waiting for signature')
   return (
     <div className="py-3">
       <Row density="flush" title={parent.label || 'Sub-agent budget'} subtitle={parentParts.join(' · ')} />
@@ -526,6 +557,8 @@ function SubBudgetGrantRow({ grant, tokens }: { grant: SubBudgetTree['grants'][n
     `up to ${amount} ${t?.symbol ?? ''}`.trim(),
     grant.expires_at > nowSec ? `ends ${timeUntil(grant.expires_at * 1000)}` : 'ended',
   ]
+  // #3506: a freshly issued slice is pending until the sharing agent signs.
+  if (grant.status === 'pending') parts.push('waiting for signature')
   if (grant.recipient_address) parts.push(`to ${truncateAddress(grant.recipient_address)}`)
   return (
     <div className="py-2">

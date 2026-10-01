@@ -95,6 +95,9 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     // absent from the raw payload (older backend, or any non-failed status)
     // stays absent here.
     ...(raw.failure_reason !== undefined ? { failureReason: raw.failure_reason } : {}),
+    // #3518: which budget metered this payment — absent from the raw
+    // payload (older backend) stays absent here.
+    ...(raw.budget_delegation_hash !== undefined ? { budgetDelegationHash: raw.budget_delegation_hash } : {}),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

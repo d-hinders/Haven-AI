@@ -15,8 +15,8 @@
  * - Approver membership truth is ON-CHAIN (`getOwners()`); the
  *   `safe_approver_metadata` table only decorates owners with a label + type.
  *   Nothing here grants or removes an owner.
- * - Deleting a Safe must not orphan an agent with a pending or active budget
- *   delegation or an in-flight sweep; the transaction locks bound agent rows
+ * - Deleting a Safe must not orphan an agent with a live (pending/active/
+ *   replaced) budget delegation or an in-flight sweep; the transaction locks bound agent rows
  *   before checking this.
  * - The legacy `users.account_address` column mirrors the default Safe; every
  *   default-pointer change keeps it in sync.
@@ -27,6 +27,7 @@
 
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
+import { LIVE_DELEGATION_STATUSES_SQL } from './delegation-budgets.js'
 
 export type { Executor }
 
@@ -299,12 +300,14 @@ export const LOCK_AGENTS_FOR_ACCOUNT_SQL = `SELECT id FROM agents
        WHERE account_id = $1 AND user_id = $2
        FOR UPDATE`
 
+// "Live" = pending, active AND replaced (#3542) — the revoke-all target set; a
+// `replaced` row is still enabled on-chain until its Stop userop lands.
 export const HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL = `SELECT EXISTS (
          SELECT 1
          FROM agent_delegations ad
          JOIN agents a ON a.id = ad.agent_id
          WHERE a.account_id = $1 AND a.user_id = $2
-           AND ad.status IN ('pending', 'active')
+           AND ad.status IN ${LIVE_DELEGATION_STATUSES_SQL}
        ) AS live`
 
 export const HAS_OPEN_SWEEPS_FOR_ACCOUNT_SQL = `SELECT EXISTS (
@@ -464,6 +467,37 @@ export async function findOwnedAccountsWithType(
           chainId,
         ])
   return result.rows
+}
+
+// ── Owner-directory addresses the user's own accounts answer to (#3528) ─────
+
+/**
+ * Every address one of the user's OWN delegation-rail Haven accounts answers
+ * to: each account's smart-account address plus its current EOA owner (an
+ * ownership TRANSFER moved it on-chain; NULL until then, and UNION drops it).
+ * One statement so the prepare path pays one round-trip for the whole set.
+ * Scoped exactly like the lists above — `delegator_hybrid` only, `user_id`
+ * required — a retired-rail row answers nothing here, matching every payment
+ * read (`DELEGATION_RAIL_ONLY`). The caller matches case-insensitively.
+ */
+export const LIST_OWNER_ADDRESSES_FOR_USER_SQL = `SELECT account_address AS addr FROM smart_accounts
+      WHERE user_id = $1 AND account_type = 'delegator_hybrid'
+      UNION
+      SELECT owner_address FROM smart_accounts
+      WHERE user_id = $1 AND account_type = 'delegator_hybrid'`
+
+/**
+ * The addresses a payment recipient is compared against for the #3528
+ * self-transfer hint. Deduplicated by UNION; an account_address or
+ * owner_address that is NULL simply contributes nothing. `userId` is REQUIRED
+ * — the tenant scope, same as every list in this aggregate.
+ */
+export async function listOwnerAddressesForUser(
+  userId: string,
+  db: Executor = pool,
+): Promise<string[]> {
+  const result = await db.query<{ addr: string }>(LIST_OWNER_ADDRESSES_FOR_USER_SQL, [userId])
+  return result.rows.map((row) => row.addr)
 }
 
 // ── Execution-rail resolution (moved from rails/execution-rail.ts, #999) ────

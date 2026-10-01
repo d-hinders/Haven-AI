@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import pool from '../../../db.js'
+import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   FIND_OLDEST_ACCOUNT_FOR_USER_SQL,
   HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL,
@@ -10,6 +12,7 @@ import {
   CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL,
   DELETE_USER_ACCOUNT_SQL,
   LIST_ACCOUNTS_FOR_USER_SQL,
+  LIST_OWNER_ADDRESSES_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_ACCOUNT_SQL,
   SET_ACCOUNT_DEFAULT_SQL,
   RENAME_ACCOUNT_FOR_USER_SQL,
@@ -18,6 +21,7 @@ import {
   findOwnedAccountAddress,
   findOwnedAccountDefaultFlag,
   listAccountsForUser,
+  listOwnerAddressesForUser,
   renameAccountForUser,
   setDefaultAccountForUser,
   type Executor,
@@ -50,6 +54,10 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     ]) {
       expect(sql).toMatch(/user_id = \$\d/)
     }
+    // #3528: the owner-directory address read — the self-transfer hint's
+    // lookup — scopes the same way, on BOTH arms of its UNION.
+    expect(LIST_OWNER_ADDRESSES_FOR_USER_SQL.match(/user_id = \$1/g)?.length).toBe(2)
+    expect(LIST_OWNER_ADDRESSES_FOR_USER_SQL).toMatch(/account_type = 'delegator_hybrid'/g)
     // The legacy mirror UPDATE is scoped by the users PK, which IS the tenant.
     expect(SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL).toMatch(/WHERE id = \$2/)
   })
@@ -58,6 +66,13 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     const db = tenantExecutor({ id: 'safe-1' })
     expect(await listAccountsForUser(ATTACKER, db)).toEqual([])
     expect(await listAccountsForUser(OWNER, db)).toHaveLength(1)
+  })
+
+  it('listOwnerAddressesForUser (#3528): scoped to the caller; rows map to plain address strings', async () => {
+    const query = vi.fn(async () => ({ rows: [{ addr: '0xAbc' }, { addr: '0xDef' }] }))
+    const db = { query } as unknown as Executor
+    expect(await listOwnerAddressesForUser(OWNER, db)).toEqual(['0xAbc', '0xDef'])
+    expect(query).toHaveBeenCalledWith(LIST_OWNER_ADDRESSES_FOR_USER_SQL, [OWNER])
   })
 
   // `findSafeIdByAddressAndChain` (import duplicate detection),
@@ -218,5 +233,74 @@ describe('transaction functions keep their statement order and scope', () => {
       HAS_OPEN_SWEEPS_FOR_ACCOUNT_SQL,
       HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL,
     ])
+  })
+})
+
+/**
+ * #3542 real-DB proof: the account-delete guard refuses on the SAME live set
+ * revoke-all targets — pending, active AND replaced. A `replaced` row is still
+ * enabled on-chain until its Stop userop lands (#3343), so deleting the account
+ * under it would orphan an agent whose old key can still redeem.
+ */
+describeDb('deleteAccountForUser live-delegation guard (#3542, real DB)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  let seq = 0
+  async function seedAccountWithAgent(): Promise<{ userId: string; accountId: string; agentId: string }> {
+    const user = await pool.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`acct-guard-u${++seq}-${Date.now()}@test.example`],
+    )
+    const userId = user.rows[0].id
+    const account = await pool.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
+       VALUES ($1, $2, 'Delegation account', false, 'delegator_hybrid') RETURNING id`,
+      [userId, `0x${(++seq).toString(16).padStart(40, '0')}`],
+    )
+    const agent = await pool.query<{ id: string }>(
+      `INSERT INTO agents (user_id, account_id, name, status) VALUES ($1, $2, 'Guarded', 'revoked') RETURNING id`,
+      [userId, account.rows[0].id],
+    )
+    return { userId, accountId: account.rows[0].id, agentId: agent.rows[0].id }
+  }
+
+  async function seedDelegation(agentId: string, status: string): Promise<void> {
+    await pool.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, delegation_hash, delegation_json, version, token_address,
+          status, budget_atomic, period_seconds, start_date, expires_at)
+       VALUES ($1, 84532, $2, '{}', 1, '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+               $3, '1000000', 86400, 0, 0)`,
+      [agentId, `0x${(++seq).toString(16).padStart(2, '0').repeat(32)}`, status],
+    )
+  }
+
+  it.each(['pending', 'active', 'replaced'])(
+    'refuses to delete an account whose agent holds a %s delegation',
+    async (status) => {
+      const { userId, accountId, agentId } = await seedAccountWithAgent()
+      await seedDelegation(agentId, status)
+
+      expect(await deleteAccountForUser(accountId, userId, false)).toBe(false)
+      const kept = await pool.query(`SELECT id FROM smart_accounts WHERE id = $1`, [accountId])
+      expect(kept.rows).toHaveLength(1)
+    },
+  )
+
+  it('deletes the account once the replaced delegation is revoked', async () => {
+    const { userId, accountId, agentId } = await seedAccountWithAgent()
+    await seedDelegation(agentId, 'replaced')
+    expect(await deleteAccountForUser(accountId, userId, false)).toBe(false)
+
+    await pool.query(`UPDATE agent_delegations SET status = 'revoked' WHERE agent_id = $1`, [agentId])
+
+    expect(await deleteAccountForUser(accountId, userId, false)).toBe(true)
+    const gone = await pool.query(`SELECT id FROM smart_accounts WHERE id = $1`, [accountId])
+    expect(gone.rows).toHaveLength(0)
   })
 })

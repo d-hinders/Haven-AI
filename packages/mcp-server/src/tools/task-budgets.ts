@@ -69,6 +69,7 @@ function taskBudgetSignHandoff(taskBudgetId: string) {
 export const TASK_BUDGET_TOOLS = [
   'haven_open_task_budget',
   'haven_close_task_budget',
+  'haven_get_task_budget',
 ] as const satisfies readonly HostedToolName[]
 
 export type TaskBudgetToolName = (typeof TASK_BUDGET_TOOLS)[number]
@@ -163,6 +164,18 @@ export function createTaskBudgetHandlers(haven: HavenClient): HostedToolHandlers
           sign_data: result.signData,
           ...taskBudgetSignHandoff(args.task_budget_id as string),
         }
+      }),
+
+    // #3518: read ONE task budget by id — the status check a close/submit
+    // refusal's "re-check the budget's status" points at. Keyless like both
+    // siblings: the SDK relays `GET /task-budgets/:id` (the backend route
+    // answers any status, `findForAgent` is scoped to this agent), and a
+    // 404 carries the backend's own message through `runTool`.
+    haven_get_task_budget: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_get_task_budget', input)
+        const taskBudget = await haven.getTaskBudget(args.task_budget_id as string)
+        return { task_budget: taskBudget }
       }),
   }
 }

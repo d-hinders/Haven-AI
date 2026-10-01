@@ -17,6 +17,68 @@ import { useAgents } from '@/hooks/useAgents'
 
 const mockApiGet = api.get as unknown as ReturnType<typeof vi.fn>
 
+describe('useAgents half-revoked bookkeeping (#3542)', () => {
+  const mockApiPost = api.post as unknown as ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    mockApiGet.mockClear()
+    mockApiPost.mockReset()
+  })
+
+  async function mountWith(agent: Record<string, unknown>) {
+    mockApiGet.mockResolvedValueOnce({ agents: [agent] })
+    const hook = renderHook(() => useAgents())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    return hook
+  }
+
+  it('revoking or archiving does NOT clear the live-budget count — only ending the budget does', async () => {
+    const { result } = await mountWith({
+      id: 'a1',
+      name: 'First',
+      status: 'active',
+      live_delegation_count: 2,
+    })
+    mockApiPost.mockResolvedValueOnce({})
+    await act(async () => {
+      await result.current.revokeAgent('a1')
+    })
+    mockApiPost.mockResolvedValueOnce({ archived_at: '2026-06-01T00:00:00Z' })
+    await act(async () => {
+      await result.current.archiveAgent('a1')
+    })
+    expect(result.current.agents[0]).toMatchObject({
+      status: 'revoked',
+      archived_at: '2026-06-01T00:00:00Z',
+      live_delegation_count: 2,
+    })
+
+    act(() => {
+      result.current.markBudgetEnded('a1')
+    })
+    expect(result.current.agents[0]!.live_delegation_count).toBe(0)
+  })
+
+  it('markBudgetEnded touches only the named agent', async () => {
+    mockApiGet.mockResolvedValueOnce({
+      agents: [
+        { id: 'a1', name: 'First', live_delegation_count: 1 },
+        { id: 'a2', name: 'Second', live_delegation_count: 1 },
+      ],
+    })
+    const { result } = renderHook(() => useAgents())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => {
+      result.current.markBudgetEnded('a2')
+    })
+    expect(result.current.agents.map((a) => a.live_delegation_count)).toEqual([1, 0])
+  })
+})
+
 describe('useAgents visible-only polling (#2732)', () => {
   beforeEach(() => {
     mockApiGet.mockClear()

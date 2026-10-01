@@ -1069,6 +1069,11 @@ function statusFromRow(
       // `isFundedX402AwaitingMerchantLeg` already performs, surfaced so a
       // caller does not have to re-derive it from `machine_metadata`.
       settlement_scheme: narrowSettlementScheme(settlementSchemeOf(payment.machine_metadata)),
+      // #3518: WHICH budget metered this payment, recorded at authorize —
+      // the settle summary joins its allowance rows on this instead of
+      // re-deriving a (token, payee) selection whose winner can move
+      // between pay and settle. Null on the legacy rail and pre-053 rows.
+      ...(payment.budget_delegation_hash ? { budget_delegation_hash: payment.budget_delegation_hash } : {}),
       ...(hasVerifiedMerchantSettlement(payment.machine_metadata)
         ? { merchant_settlement_recorded: true as const }
         : {}),

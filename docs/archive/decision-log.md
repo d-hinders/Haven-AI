@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-10-01 | Sub-agent budgets: the delegating agent submits its own sub-budget signatures; the owner relay is optional, not required | #3506, epic #3328 |
 | 2026-09-27 | Sub-agent budgets: sub-budget issuance is owner-governed; the delegating agent's delegate key only signs within the owner-approved envelope | #3330, epic #3328 |
 | 2026-09-26 | Promotions merge behind by the owner; the post-promotion sync-back is dropped | PR #3325 |
 | 2026-09-25 | Request validation enforces by default; `off`/`shadow` are global kill switches, `enforcedModules` is the per-module rollback | #3032, #3028, #3223 |
@@ -54,6 +55,35 @@ named where they belong below.
 | — | Historical: POC scope and phased roadmap | — |
 
 ---
+
+## 2026-10-01 — sub-agent budgets: the agent submits its own signatures; the owner relay is optional (#3506)
+
+The 2026-09-27 entry below stands: issuance is owner-governed, and A's delegate
+key only signs within the owner-approved envelope. What it also said, that the
+owner relays each signature (`POST /agents/:id/sub-budgets/:id/sign`), was the
+transport, not the governance. The governance step is the owner's issuance: it
+decodes A's own budget delegation and refuses a child wider than it in amount,
+expiry or recipient before anything is signed, and the children are built
+server-side, so A's key can only sign the bytes Haven built inside that
+envelope. Making the owner carry the resulting signature added no check —
+`POST /sub-budgets/:id/submit` (A's own route) already verifies the signature
+recovers A's delegate key over those exact bytes before opening a row.
+
+So the owner relay is dropped from the flow: the owner issues from the
+dashboard (JWT only, no passkey — Haven builds the rows), agent A discovers its
+pending sign targets, signs each row with `haven_sign { sub_budget_id }` and
+submits it with `haven_submit { sub_budget_id, signature }`. The owner route
+stays as an optional relay, not deleted: #3505's qa-dev leg relays through it,
+and nothing it accepts is wider than what A's own route accepts. Threat model
+confirmed by the owner on #3506 (2026-10-01): a compromised owner session can
+grant a sub-budget, the same residual as granting any budget today.
+
+No agent-side sub-budget close tool is added. A stale or unconfirmed close is
+recovered inside `haven_submit { sub_budget_id }`: it re-prepares through
+`POST /sub-budgets/:id/close`, which checks the chain first, and names
+`haven_sign` for the fresh operation (or reports `closed`). An owner-initiated
+close surfaces in `haven_get_agent`'s `pendingSubBudgetSignatures` as a row to
+sign. That closes the agent's dead ends without new tool surface.
 
 ## 2026-09-27 — sub-agent budgets: issuance is owner-governed; the delegate key only signs (#3330)
 

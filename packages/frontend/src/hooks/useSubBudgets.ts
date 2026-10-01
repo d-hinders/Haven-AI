@@ -2,13 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import type { ApiSchema } from '@haven_ai/core'
+import type { ApiOperations, ApiSchema } from '@haven_ai/core'
 
 /** Wire shape of one sub-budget row (#3330): `components.schemas.SubBudget` in `openapi/spec.ts`. */
 export type SubBudget = ApiSchema<'SubBudget'>
 
 /** One parent→child tree (#3330): A's parent-child narrowing with its grants nested — `components.schemas.SubBudgetTree` in `openapi/spec.ts`. */
 export type SubBudgetTree = ApiSchema<'SubBudgetTree'>
+
+/** Request body of `POST /agents/:id/sub-budgets` (#3506): the spec's `issueAgentSubBudget`. Atomic amount, unix-seconds expiry. */
+export type IssueSubBudgetInput =
+  ApiOperations['issueAgentSubBudget']['requestBody']['content']['application/json']
+
+/** The 201 body: two PENDING rows the delegating agent still has to sign. */
+export type IssueSubBudgetResponse =
+  ApiOperations['issueAgentSubBudget']['responses']['201']['content']['application/json']
+
+/** Owner JWT only — Haven builds both rows server-side; no passkey prompt, no on-chain step. */
+export function issueSubBudget(agentId: string, input: IssueSubBudgetInput) {
+  return api.post<IssueSubBudgetResponse>(`/agents/${agentId}/sub-budgets`, input)
+}
 
 /**
  * The owner-facing read of the sub-budget trees an agent ISSUES (#3330,

@@ -16,7 +16,9 @@ function escapeRe(value: string): string {
 }
 
 vi.mock('../RemoveAgentDialog', () => ({
-  RemoveAgentDialog: () => <div data-testid="remove-agent-dialog" />,
+  RemoveAgentDialog: ({ mode }: { mode?: string }) => (
+    <div data-testid="remove-agent-dialog" data-mode={mode ?? 'remove'} />
+  ),
 }))
 
 const { AgentCard } = await import('../AgentCard')
@@ -343,6 +345,100 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(screen.queryByTestId('remove-agent-dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Research agent' }))
     expect(screen.getByTestId('remove-agent-dialog')).toBeTruthy()
+  })
+})
+
+/**
+ * #3542 (D): "revoked" is only half true while a budget delegation is still
+ * redeemable on-chain. The card must say so and offer the one action that ends
+ * it, for revoked AND archived agents — and say nothing new when the count is 0.
+ */
+describe('AgentCard half-revoked marker (#3542)', () => {
+  const ARCHIVED = '2026-06-01T00:00:00Z'
+  const MARKER = /its budget is still active on.chain/i
+
+  it('revoked + live budget: warning marker replaces "Network access already revoked", with Finish revoking', () => {
+    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }))
+    expect(screen.getByText(MARKER)).toBeTruthy()
+    expect(screen.queryByText('Network access already revoked')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeTruthy()
+    // Remove stays: it runs the same budget-first sequence.
+    expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
+  })
+
+  it('revoked + count 0 (or absent): unchanged — no marker, no Finish revoking', () => {
+    for (const live of [0, undefined]) {
+      const { unmount } = render(
+        <AgentCard
+          agent={agentFixture({ status: 'revoked', live_delegation_count: live })}
+          onViewDetails={vi.fn()}
+          onPause={vi.fn()}
+          onResume={vi.fn()}
+          onRevokeCredential={vi.fn()}
+          onArchive={vi.fn()}
+          onRestore={vi.fn()}
+          onMoveToOrganization={vi.fn()}
+          busyAction={null}
+        />,
+      )
+      expect(screen.queryByText(MARKER)).toBeNull()
+      expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
+      expect(screen.getByText('Network access already revoked')).toBeTruthy()
+      unmount()
+    }
+  })
+
+  it('an active agent with live budgets is NOT half-revoked', () => {
+    renderCard(agentFixture({ status: 'active', live_delegation_count: 2 }))
+    expect(screen.queryByText(MARKER)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
+  })
+
+  it('archived + live budget: marker and Finish revoking sit beside Restore, and the restore promise is not repeated', () => {
+    renderCard(
+      agentFixture({ status: 'revoked', archived_at: ARCHIVED, live_delegation_count: 1 }),
+    )
+    expect(screen.getByText(MARKER)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Restore Research agent to the list' })).toBeTruthy()
+    // "restoring never re-enables spending" would read as the budget being dead.
+    expect(screen.queryByText(/restoring never re-enables spending/i)).toBeNull()
+    expect(screen.getByText(/restoring to the list does not end its budget/i)).toBeTruthy()
+  })
+
+  it('archived + count 0: unchanged', () => {
+    renderCard(agentFixture({ status: 'revoked', archived_at: ARCHIVED, live_delegation_count: 0 }))
+    expect(screen.queryByText(MARKER)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
+    expect(screen.getByText(/restoring never re-enables spending/i)).toBeTruthy()
+  })
+
+  it('Finish revoking opens the dialog in finish mode (not remove mode)', () => {
+    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }))
+    fireEvent.click(screen.getByRole('button', { name: 'Finish revoking Research agent' }))
+    expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('finish')
+  })
+
+  it('an unlinked agent gets the marker and NO action', () => {
+    renderCard(
+      agentFixture({ status: 'revoked', account_id: null, live_delegation_count: 1 }),
+    )
+    expect(screen.getByText(MARKER)).toBeTruthy()
+    expect(screen.getByText(/cannot end it from here/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
+
+    // Archived and unlinked: same.
+    renderCard(
+      agentFixture({
+        id: 'agent-2',
+        name: 'Other agent',
+        status: 'revoked',
+        archived_at: ARCHIVED,
+        account_id: null,
+        live_delegation_count: 1,
+      }),
+    )
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
   })
 })
 

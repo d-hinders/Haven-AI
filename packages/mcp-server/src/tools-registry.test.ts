@@ -79,6 +79,8 @@ const PINNED_TOOL_NAMES: readonly HostedToolName[] = [
   // #3329:
   'haven_open_task_budget',
   'haven_close_task_budget',
+  // #3518: the read-by-id a close refusal's "re-check the budget's status" points at.
+  'haven_get_task_budget',
 ]
 
 /** A complete synthetic registry for the injectable detection-logic tests. */

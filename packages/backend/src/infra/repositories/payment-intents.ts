@@ -694,6 +694,7 @@ export const FIND_INTENT_STATUS_ROW_SQL = `SELECT pi.id, pi.chain_id, pi.token_s
             -- and the direct rail's own idempotency key — neither was selected before,
             -- so a failed/direct row's status answered with no cause and no key.
             pi.error_message, pi.send_idempotency_key,
+            pi.budget_delegation_hash,
             (mpre.id IS NOT NULL) AS funded_but_unsettled,
             EXISTS (SELECT 1 FROM machine_payment_evidence mpe
                     WHERE mpe.payment_intent_id = pi.id
@@ -738,6 +739,14 @@ export interface PaymentIntentStatusRow {
   confirmed_at: string | null
   /** #2970: authorize time — the origin of an erc7710 intent's settlement window. */
   created_at: string
+  /**
+   * #3518: the budget delegation that METERED this payment — recorded at
+   * authorize (migration 053), the settle summary's authoritative answer to
+   * "which budget paid" (never re-derived from token+payee, whose window
+   * and selection can move between pay and settle). Null on the legacy
+   * rail and on rows predating migration 053.
+   */
+  budget_delegation_hash: string | null
   /** True when an open merchant_retry_rejected_after_payment reconciliation event exists. */
   funded_but_unsettled: boolean
   /**

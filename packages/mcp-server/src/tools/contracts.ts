@@ -73,6 +73,7 @@ export type HostedToolName =
   | 'haven_submit_catalog_entry'
   | 'haven_open_task_budget'
   | 'haven_close_task_budget'
+  | 'haven_get_task_budget'
 
 /**
  * #2282: the hosted MCP tool boundary spells arguments in **snake_case**
@@ -233,11 +234,15 @@ export const toolSchemas = {
     include_signing_payload: z.boolean().optional(),
   },
   haven_submit: {
-    // #3329: exactly one of payment_id / task_budget_id — never both, never
-    // neither. Amount, recipient, expiry and (for a task budget) the parent
-    // budget it draws from all come from the stored record either way.
+    // #3329 / #3506: exactly one of payment_id / task_budget_id /
+    // sub_budget_id — never two, never none. Amount, recipient, expiry and
+    // (for a task or sub-budget) the parent budget it draws from all come from
+    // the stored record either way.
     payment_id: z.string().min(1).optional(),
     task_budget_id: z.string().min(1).optional(),
+    // #3506: the delegating agent's signature for a sub-budget row (the
+    // signer's haven_sign names this key in next_arguments).
+    sub_budget_id: z.string().min(1).optional(),
     signature: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
@@ -261,6 +266,12 @@ export const toolSchemas = {
     token: z.string().optional(),
   },
   haven_close_task_budget: {
+    task_budget_id: z.string().min(1),
+  },
+  // #3518: read ONE task budget by id — the status check a close refusal's
+  // "re-check the budget's status" points at, including pending/closing
+  // rows the agent summary now lists with `status`.
+  haven_get_task_budget: {
     task_budget_id: z.string().min(1),
   },
   haven_pay_mcp_tool: {
@@ -739,9 +750,9 @@ export const STRICT_INPUT_TOOLS = {
   // from the stored intent. A stripped key here means relaying a signature for
   // a different question than the caller asked.
   haven_submit:
-    'Amount, recipient and rail come from the stored payment intent (or, for a task budget, ' +
-    'from the stored task budget record); this tool takes only which payment or which task ' +
-    'budget, which signature, and (optionally) which settlement scheme that signature is for.',
+    'Amount, recipient and rail come from the stored payment intent (or, for a task or sub-budget, ' +
+    'from the stored budget record); this tool takes only which payment, task budget or sub-budget, ' +
+    'which signature, and (optionally) which settlement scheme that signature is for.',
   // #1307: merchant_url / tool_name / arguments / mcp_transport are OPTIONAL
   // because Haven rehydrates the stored MCP call context from payment_id, and
   // it relays the funding signature: this one moves money before it delivers.
@@ -776,24 +787,24 @@ export const STRICT_INPUT_TOOLS = {
     'The local MCP (@haven_ai/mcp) used to spell it idempotencyKey — carrying that spelling ' +
     'here used to be dropped in silence, and the payment then reached POST /payments with no ' +
     'idempotency_key at all, so the replay contract never engaged and a retry spent twice. ' +
-    '@haven_ai/mcp now refuses idempotencyKey itself (#3411); it takes idempotency_key.',
+    '@haven_ai/mcp now refuses idempotencyKey itself; it takes idempotency_key.',
   haven_pay_mcp_tool:
     'This is the HOSTED surface, which spells the key idempotency_key (snake_case). ' +
     'The local MCP (@haven_ai/mcp) used to spell it idempotencyKey — carrying that spelling ' +
     'here used to be dropped in silence, and the SDK then fell back to a key DERIVED from the ' +
     "merchant quote inside a 5-minute bucket, so the caller's own replay scope was " +
     'silently replaced by a different one rather than merely lost. @haven_ai/mcp now refuses ' +
-    'idempotencyKey itself (#3411); it takes idempotency_key.',
+    'idempotencyKey itself; it takes idempotency_key.',
   haven_quote_x402:
-    'This is the HOSTED surface. It takes url, method, headers and body (#2366 added body, so ' +
+    'This is the HOSTED surface. It takes url, method, headers and body (body was added so ' +
     'a body-bearing POST paywall is quoted with the body the caller means to pay for). The ' +
     'local MCP (@haven_ai/mcp) additionally takes idempotency_key, which the hosted quote ' +
     'has no use for — carrying it here used to be dropped in silence. haven_discover_tools ' +
-    'hands you resource_url; this tool spells that argument url (#3100).',
+    'hands you resource_url; this tool spells that argument url.',
   haven_pay_x402_quote:
     'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
     '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotency_key — it used to ' +
-    'take idempotencyKey, but now refuses that spelling itself (#3411). Passing quote already ' +
+    'take idempotencyKey, but now refuses that spelling itself. Passing quote already ' +
     'failed loudly here, because payment_required is required — it is idempotencyKey that was ' +
     'dropped in silence before that, replacing the caller\'s replay scope with a key derived ' +
     'from the quote. Pass payment_required (the paymentRequired field of a haven_quote_x402 ' +
@@ -878,6 +889,9 @@ export const STRICT_INPUT_TOOLS = {
     'rather than dropped.',
   haven_close_task_budget:
     'This tool declares task_budget_id only; which budget closes is never inferred from ' +
+    'anything else, so an undeclared key is refused rather than dropped.',
+  haven_get_task_budget:
+    'This tool declares task_budget_id only; which budget is read is never inferred from ' +
     'anything else, so an undeclared key is refused rather than dropped.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
@@ -1006,8 +1020,8 @@ const SUBMIT_DESCRIPTION = [
   'When the quote reported settlement_scheme "erc7710", pass settlement_scheme: "erc7710" here:',
   'the signature is the settlement child, not a funding authorization, and the response returns',
   'payment_header for you to retry the merchant with — no funding tx, no header to build locally.',
-  'For a task budget (haven_open_task_budget / haven_close_task_budget), pass task_budget_id',
-  'INSTEAD of payment_id — exactly one, never both. Returns { task_budget, status }.',
+  'For a task budget pass task_budget_id, for a sub-budget (haven_get_agent pendingSubBudgetSignatures[])',
+  'sub_budget_id, INSTEAD of payment_id — exactly one id. Returns { task_budget | sub_budget, status }.',
 ].join(' ')
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -1213,6 +1227,16 @@ const CLOSE_TASK_BUDGET_DESCRIPTION = [
   'recovery route if the signer predates task budgets.',
 ].join(' ')
 
+// #3518: the status check a close refusal's "re-check the budget's status"
+// names — reads ONE task budget by id, any status (pending/closing rows
+// included; haven_get_agent lists them with their status too).
+const GET_TASK_BUDGET_DESCRIPTION = [
+  'Read one task budget by id, any status.',
+  'Returns { task_budget } with status (pending | open | closing | closed), isExpired, maxDisplay, recipientAddress, label and expiresAt —',
+  'the check to run after a close or submit refusal says to re-check the budget\'s status.',
+  'haven_get_agent lists live task budgets only; this reads any one, closed or expired included.',
+].join(' ')
+
 const CHECK_FUNDS_DESCRIPTION = [
   sharedDescriptions.checkFunds.summary + '.',
   'Pass the token address or allowance symbol and ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic).',
@@ -1255,6 +1279,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
   haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
   haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
+  haven_get_task_budget: GET_TASK_BUDGET_DESCRIPTION,
 }
 
 export interface ToolSuccess<T> {

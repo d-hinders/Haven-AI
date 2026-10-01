@@ -23,7 +23,8 @@ export function orderAgentsForDisplay(agents: AnalyticsAgentRow[]): AnalyticsAge
  * Series index per agent that APPEARS in `by_day` — the agents the chart
  * plots — numbered in the display order. An agent with no bar gets no
  * colour: the swatch beside its name would match nothing on the chart, and
- * a roster of every delegation-rail agent the tenant owns would run past the
+ * the endpoint's roster (every non-revoked agent, plus revoked ones with
+ * activity or a live budget — #3540) would run past the
  * six series tokens (`seriesColor` wraps at six) while the chart itself
  * carries only the spenders.
  */

@@ -3347,29 +3347,6 @@ own release, with the hosted `signer_compatibility.check`/`fallback` prose
 covering every currently-published signer in the meantime — no gate upgrades
 an existing install.
 
-> **Re-verified (#3528, 2026-10-01):** the prepare responses behind
-> `haven_send` / `haven_pay` (`POST /payments`) and the hosted x402 prepare
-> surfaces (the plain-HTTP quote tools and the direct-settlement recovery
-> result) can now carry the backend's additive, WARNING-GRADE self-transfer
-> hint: when the recipient is one of the owner's own Haven accounts (code
-> `SELF_TRANSFER`), the backend puts one `warnings` entry on the prepare
-> body, the SDK maps it verbatim per entry (`mapRawWarnings`, absent — never
-> an empty array — when the backend sent none), and the hosted tools merge it
-> into the `warnings` envelope their results already emit
-> (`buildAgentGuidance`'s array, the same one the allowance and quote
-> warnings ride). A stranger's address maps to nothing and every result reads
-> exactly as before. Advisory only: `safe_to_continue`, `next_tool` /
-> `next_arguments`, and every refusal shape are untouched — the hint never
-> blocks and never replaces a refusal (a self-transfer is legitimate, and the
-> on-chain authority for the send is unchanged either way). Skew, both
-> directions: an older backend never sets `warnings` on these bodies, so
-> `mapRawWarnings(undefined)` is absent and today's shapes hold; a
-> newer-backend hint read by an older SDK is an unmapped JSON field the old
-> SDK ignores — warnings are advisory by contract (#1308), so nothing
-> misbehaves in either direction. The wire shape of what an agent signs is
-> unchanged. `last-verified` is not re-stamped (it already reads 2026-10-01):
-> this block is the scope.
-
 ## Task-budget signing handoff and old-signer recovery (#3419, 2026-09-28)
 
 The hosted `haven_open_task_budget` / `haven_close_task_budget` results that

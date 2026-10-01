@@ -258,9 +258,11 @@ Isolation rules that are non-negotiable for a payments product:
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
   chain 100 is dead per above), `RPC_URL_BASE_SEPOLIA` → **Base Sepolia**
   (chain 84532, the chain dev's accounts and the money-flow harness use).
-  `RPC_URL_BASE` is Base **mainnet** (8453): dev reads it only for the mainnet
-  merchants the marketplace grid lists, so point it at mainnet only if a test
-  genuinely needs mainnet state.
+  `RPC_URL_BASE` always names a Base **mainnet** (8453) endpoint, on dev too:
+  dev reads it every hour for the relayer balance monitor's 8453 entry (the
+  same relayer key serves both chains) and for any other chain-8453 read.
+  Unset, it falls back to the public mainnet node with a boot warning; a
+  Sepolia URL there is a mismatch that reports a Sepolia balance as 8453.
 - **Two Base Sepolia RPCs, and they must stay two** (#2511). The backend
   WRITES through `RPC_URL_BASE_SEPOLIA`; the QA harness OBSERVES through
   `QA_RPC_URL_BASE_SEPOLIA` (a GitHub Actions **secret**, since a provider URL
@@ -284,16 +286,25 @@ Isolation rules that are non-negotiable for a payments product:
 
   **The dev arrangement since 2026-10-01 (#3489, #3456):**
 
-  | Variable (`@haven/backend` / dev) | Provider | Burst of 20 |
-  |---|---|---|
-  | `RPC_URL_BASE_SEPOLIA` (primary) | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap) |
-  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | Infura, free Core plan | 20/20 rate-limited (2026-09-29 and 2026-09-30) — a fallback only, never admitted as a primary |
-  | `QA_RPC_URL_BASE_SEPOLIA` (GitHub secret, the QA observer) | Alchemy, a separate QA-observer app | not probed; first run after the swap passed 14/14 on attempt 1 |
+  | Variable | Where | Provider | Burst of 20 |
+  |---|---|---|---|
+  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) |
+  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) |
+  | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed |
 
-  Infura was the primary from 2026-09-28 and failed the burst even after
-  epic #3457 cut Haven's own usage, so the limit is the free plan's per-second
-  cap. Every Alchemy app draws on one account-wide monthly compute-unit
-  allowance, prod's app included: a burn alert from Alchemy reopens #3489.
+  **Two owner-accepted exceptions to the probe rule above** (2026-10-01):
+  - **The fallback fails the burst.** Infura's free plan is kept as a
+    fallback only, never admitted as a primary
+    ([#3489](https://github.com/d-hinders/Haven-AI/issues/3489)). It failed
+    even after epic #3457 cut Haven's own usage, so the limit is the plan's
+    per-second cap. Prod's `RPC_URL_BASE_FALLBACK` is the same Infura key and
+    is presumed to fail the bar too; it was not probed separately
+    ([#3456](https://github.com/d-hinders/Haven-AI/issues/3456)).
+  - **The QA observer was not probed.** It moved to a new Alchemy app; the
+    first money-flow run after the move passed 14/14 on attempt 1.
+
+  Every Alchemy app draws on one account-wide monthly compute-unit allowance,
+  prod's app included. An Alchemy burn-alert email reopens #3489.
 
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over

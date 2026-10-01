@@ -110,8 +110,8 @@ export async function getRelayerFeeOverrides(
  * every call made within about 10 ms into ONE request of up to 100 calls.
  * dRPC's free plan, the dev primary from 2026-09-24 to 2026-09-28, refused
  * any batch over three and returned code 31 on every item ("Batch of more than
- * 3 requests are not allowed on free plan"). Whether a read landed in a large batch depended
- * on what else fired in the same 10 ms. As a result, dashboard balances
+ * 3 requests are not allowed on free plan"). Whether a read landed in a large
+ * batch depended on what else fired in the same 10 ms. As a result, dashboard balances
  * flickered to zero, and sweep relays and account deploys failed
  * intermittently (#2769). Providers bill per call either way, so batching
  * saved only round trips.

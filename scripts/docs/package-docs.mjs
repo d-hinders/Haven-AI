@@ -118,8 +118,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     status: 'current',
     covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
     // #3506: EDITED, scope = the haven_sign table row ({ sub_budget_id } form,
-    // its result shape, and the "Signs only" list now naming the sub-budget
-    // child and the task/sub-budget close UserOps) and the handshake-derivation sentence (task + sub-budget
+    // its result shape, and the "Signs only" list now naming the task-budget
+    // child, the sub-budget child and the task/sub-budget close UserOps) and the handshake-derivation sentence (task + sub-budget
     // sign-context constants), verified against consent.ts, capabilities.ts and
     // tools.ts. Nothing else re-verified. Prior:
     // #2515: EDITED, scope = the one connector command example. `@alpha` became

@@ -2175,7 +2175,8 @@ itself redeems `[grant, parent-child, budget]` (three links).
    defaults to the chain's USDC). There is no period input: the child inherits
    the parent's period window. The parent is A's active budget delegation for
    that token, selected the way a payment selects one — recipient-pinned
-   first, else open. The API
+   first (matched against the requested recipient, else A's treasury), else
+   open. The API
    decodes the parent budget delegation and refuses a child wider than the
    parent in amount, expiry or recipient BEFORE signing
    (`sub_budget_wider_than_parent`), and both rows are stored `pending`

@@ -90,13 +90,15 @@ export default function IssueSubBudgetModal({ open, onClose, agentId, budgets, t
   const decimals = token?.decimals ?? 6
   const symbol = token?.symbol ?? ''
 
-  // Same account, a different agent, not retired, and able to hold a budget.
+  // Same account, a different agent, and able to hold a budget — the server's
+  // rule (#3553): only an active or paused, un-archived agent may receive.
   const candidates = useMemo(
     () =>
       agents.filter(
         (a) =>
           a.id !== agentId &&
-          a.status !== 'revoked' &&
+          (a.status === 'active' || a.status === 'paused') &&
+          !a.archived_at &&
           a.delegate_address != null &&
           (delegating?.account_id == null || a.account_id == null || a.account_id === delegating.account_id),
       ),

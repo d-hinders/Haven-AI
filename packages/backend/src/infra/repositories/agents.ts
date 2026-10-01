@@ -108,6 +108,8 @@ export interface DelegationAgentRow {
   chain_id: number
   treasury_address: string | null
   account_type: string | null
+  /** #3553: lets the sub-budget issuance gate refuse an archived issuer. */
+  archived_at: Date | string | null
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────
@@ -124,11 +126,27 @@ export async function loadOwnedDelegationAgent(
 ): Promise<DelegationAgentRow | null> {
   const result = await db.query<DelegationAgentRow>(
     `SELECT a.id AS agent_id, a.status, a.delegate_address, us.chain_id,
-            us.account_address AS treasury_address, us.account_type
+            us.account_address AS treasury_address, us.account_type, a.archived_at
      FROM agents a
      LEFT JOIN smart_accounts us ON us.id = a.account_id
      WHERE a.id = $1 AND a.user_id = $2`,
     [agentId, userId],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
+ * #3553: lifecycle-only read by agent id (no owner scope — the caller already
+ * holds a row whose ownership it verified). Used to refuse opening a sub-budget
+ * grant whose receiving agent has since been retired.
+ */
+export async function findAgentLifecycleById(
+  agentId: string,
+  db: Executor = pool,
+): Promise<{ status: string; archived_at: Date | string | null } | null> {
+  const result = await db.query<{ status: string; archived_at: Date | string | null }>(
+    `SELECT status, archived_at FROM agents WHERE id = $1`,
+    [agentId],
   )
   return result.rows[0] ?? null
 }

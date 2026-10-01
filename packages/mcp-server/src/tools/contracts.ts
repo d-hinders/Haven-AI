@@ -233,11 +233,15 @@ export const toolSchemas = {
     include_signing_payload: z.boolean().optional(),
   },
   haven_submit: {
-    // #3329: exactly one of payment_id / task_budget_id — never both, never
-    // neither. Amount, recipient, expiry and (for a task budget) the parent
-    // budget it draws from all come from the stored record either way.
+    // #3329 / #3506: exactly one of payment_id / task_budget_id /
+    // sub_budget_id — never two, never none. Amount, recipient, expiry and
+    // (for a task or sub-budget) the parent budget it draws from all come from
+    // the stored record either way.
     payment_id: z.string().min(1).optional(),
     task_budget_id: z.string().min(1).optional(),
+    // #3506: the delegating agent's signature for a sub-budget row (the
+    // signer's haven_sign names this key in next_arguments).
+    sub_budget_id: z.string().min(1).optional(),
     signature: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
@@ -739,9 +743,9 @@ export const STRICT_INPUT_TOOLS = {
   // from the stored intent. A stripped key here means relaying a signature for
   // a different question than the caller asked.
   haven_submit:
-    'Amount, recipient and rail come from the stored payment intent (or, for a task budget, ' +
-    'from the stored task budget record); this tool takes only which payment or which task ' +
-    'budget, which signature, and (optionally) which settlement scheme that signature is for.',
+    'Amount, recipient and rail come from the stored payment intent (or, for a task or sub-budget, ' +
+    'from the stored budget record); this tool takes only which payment, task budget or sub-budget, ' +
+    'which signature, and (optionally) which settlement scheme that signature is for.',
   // #1307: merchant_url / tool_name / arguments / mcp_transport are OPTIONAL
   // because Haven rehydrates the stored MCP call context from payment_id, and
   // it relays the funding signature: this one moves money before it delivers.
@@ -1006,8 +1010,8 @@ const SUBMIT_DESCRIPTION = [
   'When the quote reported settlement_scheme "erc7710", pass settlement_scheme: "erc7710" here:',
   'the signature is the settlement child, not a funding authorization, and the response returns',
   'payment_header for you to retry the merchant with — no funding tx, no header to build locally.',
-  'For a task budget (haven_open_task_budget / haven_close_task_budget), pass task_budget_id',
-  'INSTEAD of payment_id — exactly one, never both. Returns { task_budget, status }.',
+  'For a task budget pass task_budget_id, for a sub-budget (haven_get_agent pendingSubBudgetSignatures[])',
+  'sub_budget_id, INSTEAD of payment_id — exactly one id. Returns { task_budget | sub_budget, status }.',
 ].join(' ')
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({

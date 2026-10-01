@@ -269,12 +269,26 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * 24,898 / 26 = 957.6154 sits above round 12's 944.12, and the same rule
  * applies — re-derived at the measured mean, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 24_898
-// Mean pin: re-derived — round 13, #3501 union with #3495 (block above):
-// 24,898 / 26 = 957.6154, pinned at the two-decimal ceiling (957.62).
-// Round 12's 944.12 cannot hold while this tree exceeds it. Shrink-only
-// from here.
-const MAX_MEAN_BYTES = 957.62
+/**
+ * **Re-derived — round 14, #3506 (agent-completes sub-budgets).** The agent
+ * can now complete a sub-budget itself, which needs two additive facts an
+ * agent only learns from `tools/list`: `haven_get_agent` carries
+ * `pendingSubBudgetSignatures[]` (the rows awaiting ITS signature, each with
+ * its `haven_sign` next step), and `haven_submit` accepts `sub_budget_id`
+ * beside `payment_id` / `task_budget_id` (exactly one). +144 UTF-8 bytes
+ * across those two descriptions, compressed to one clause each (the field
+ * name and where the id goes; the response carries the rest as next-step
+ * fields) — the same field-naming obligation rounds 9/10/13 recorded for
+ * additive response fields and a new accepted argument. Same tool count (26).
+ * 24,898 + 144 = 25,042, measured, so the absolute pin moves to that exact
+ * value, shrink-only from here; the mean moves with it (25,042 / 26 =
+ * 963.1538…, pinned at the two-decimal ceiling).
+ */
+const MAX_TOTAL_BYTES = 25_042
+// Mean pin: re-derived — round 14, #3506 (block above): 25,042 / 26 =
+// 963.1538, pinned at the two-decimal ceiling (963.16). Round 13's 957.62
+// cannot hold while this tree exceeds it. Shrink-only from here.
+const MAX_MEAN_BYTES = 963.16
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

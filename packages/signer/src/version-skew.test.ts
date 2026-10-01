@@ -24,7 +24,11 @@ import {
   SIGNER_CAPABILITY_KEY,
   type SignerCompatibility,
 } from './capabilities.js'
-import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS, SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
+import {
+  SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS,
+  SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS,
+  SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS,
+} from './sign-context.js'
 import { buildSignerMcpServer } from './server.js'
 import { createToolHandlers } from './tools.js'
 
@@ -545,7 +549,17 @@ describe('signer advertises its supported versions at handshake (#1155)', () => 
       sweep_binding_versions: [...SUPPORTED_SWEEP_BINDING_VERSIONS],
       direct_sign_context_versions: [...SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS],
       task_sign_context_versions: [...SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS],
+      sub_budget_sign_context_versions: [...SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS],
     })
+  })
+
+  it('#3506: states the sub-budget sign-context versions in the instructions', async () => {
+    const { instructions } = await handshake()
+    const compatibility = signerCompatibility()
+    expect(compatibility.sub_budget_sign_context_versions).toEqual([...SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS])
+    expect(instructions).toContain(
+      `sub-budget sign-context versions supported: ${compatibility.sub_budget_sign_context_versions.join(', ')}`,
+    )
   })
 
   it('#3329: states the task-budget sign-context versions in the instructions', async () => {

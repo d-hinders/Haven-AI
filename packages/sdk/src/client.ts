@@ -16,6 +16,7 @@ import {
 } from './direct-payment-guard.js'
 import type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 import type {
+  BudgetPrecheckResult,
   HavenClientConfig,
   PaymentRequest,
   PaymentIntent,
@@ -71,6 +72,11 @@ import type {
   RawSubmitTaskBudgetResponse,
   RawCloseTaskBudgetResponse,
   RawTaskBudgetSignContext,
+  SubmitSubBudgetResult,
+  CloseSubBudgetResult,
+  HavenPendingSubBudgetSignature,
+  RawSubmitSubBudgetResponse,
+  RawCloseSubBudgetResponse,
 } from './types.js'
 import {
   AgentPaymentNextAction,
@@ -87,6 +93,7 @@ import {
 } from './types.js'
 import {
   buildX402IdempotencyKey,
+  mapRawWarnings,
   parsePaymentRequiredResponse,
   resolveTokenFromAddress,
   selectStandardPaymentOption,
@@ -119,7 +126,7 @@ import {
   mcpSettlementFromToolResult,
   mcpToolResultOf,
 } from './mcp-merchant-transport.js'
-import { AccountReads, mapTaskBudget } from './account-reads.js'
+import { AccountReads, mapSubBudget, mapTaskBudget } from './account-reads.js'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import {
   assertCanResumeX402,
@@ -208,6 +215,16 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
         }
       : {}),
   }
+}
+
+// #3528: the spread form of the raw→typed warnings map — `undefined` (field
+// absent) when the prepare response carried no warnings, so a stranger's
+// prepare is byte-identical to today's.
+function mapRawWarningsSpread(
+  raw: Array<{ code: string; message: string }> | undefined,
+): { warnings?: AgentPaymentWarning[] } {
+  const mapped = mapRawWarnings(raw)
+  return mapped ? { warnings: mapped } : {}
 }
 
 export class HavenClient {
@@ -411,6 +428,9 @@ export class HavenClient {
       status: 'pending_signature',
       expiresAt: raw.expires_at,
       signData: raw.sign_data,
+      // #3528: the additive self-transfer hint, relayed verbatim (absent
+      // when the recipient is a stranger's address).
+      ...mapRawWarningsSpread(raw.warnings),
     }
   }
 
@@ -534,6 +554,9 @@ export class HavenClient {
       // re-derives this digest a second time from the payload it actually signs.
       expectedTypedDataHash: x402TypedDataDigest(raw.sign_data.typed_data),
       fundingTo,
+      // #3528: the additive self-transfer hint, relayed verbatim (absent when
+      // the recipient is a stranger's address).
+      ...mapRawWarningsSpread(raw.warnings),
     }
   }
 
@@ -806,6 +829,11 @@ export class HavenClient {
    * degrade-to-warning path and the ledger row would still land while the
    * purchase proceeded.
    *
+   * #3518: without `merchantTo`, an agent whose budgets for the token are all
+   * merchant-locked gets 409 `budget_requires_recipient` (thrown, nothing
+   * recorded) naming the pins in `budget_recipient_addresses` — repeat the
+   * check with `merchantTo`.
+   *
    * camelCase body like the route family; the response mirrors the wire
    * (`sufficient`, `remaining_atomic`). `resourceUrl` is the merchant
    * resource being bought — the ledger dedupe window's discriminating
@@ -826,13 +854,8 @@ export class HavenClient {
      * spec. Omitted: unchanged behavior.
      */
     idempotencyKey?: string
-  }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; replay?: boolean }> {
-    return this.post<{
-      sufficient: boolean
-      remaining_atomic: string
-      remaining_is_from_chain?: boolean
-      replay?: boolean
-    }>('/machine-payments/budget-precheck', {
+  }): Promise<BudgetPrecheckResult> {
+    return this.post<BudgetPrecheckResult>('/machine-payments/budget-precheck', {
       chainId: input.chainId,
       token: input.token,
       amountAtomic: input.amountAtomic,
@@ -1133,6 +1156,54 @@ export class HavenClient {
     return {
       taskBudget: mapTaskBudget(raw.task_budget),
       status: raw.status,
+      ...(raw.sign_data ? { signData: raw.sign_data } : {}),
+      ...(raw.next_action ? { nextAction: raw.next_action } : {}),
+    }
+  }
+
+  // ── Sub-budgets (#3330, agent-completes since #3506) ─────────────────
+
+  /**
+   * Submit the DELEGATING agent's signature for a sub-budget row: opens a
+   * `pending` row (the signature is over the child delegation the backend
+   * built — sign it with `haven_sign` and `sub_budget_id`) or relays the
+   * signed close of a `closing` row. The owner issues a sub-budget; this is
+   * how the agent completes it — no owner relay is needed. Returns
+   * `status: 'open'` or `'closed'`.
+   */
+  async submitSubBudget(id: string, signature: string): Promise<SubmitSubBudgetResult> {
+    const raw = await this.post<RawSubmitSubBudgetResponse>(
+      `/sub-budgets/${encodeURIComponent(id)}/submit`,
+      { signature },
+    )
+    return {
+      subBudget: mapSubBudget(raw.sub_budget),
+      status: raw.status,
+      ...(raw.close_tx_hash ? { closeTxHash: raw.close_tx_hash } : {}),
+    }
+  }
+
+  /**
+   * The sub-budget rows THIS agent must still sign as the delegating agent
+   * (pending an open signature, or closing a close signature) — the same
+   * list `getAgentSummary().pendingSubBudgetSignatures` carries, but a
+   * transport failure throws instead of reading as an empty list.
+   */
+  async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]> {
+    return this.accountReads.listPendingSubBudgetSignatures()
+  }
+
+  /**
+   * Close a sub-budget row (delegating agent only). A `pending` or expired row
+   * closes immediately; a live child returns `signData` for the on-chain
+   * revocation — sign it (`haven_sign` with `sub_budget_id`) and call
+   * `submitSubBudget`.
+   */
+  async closeSubBudget(id: string): Promise<CloseSubBudgetResult> {
+    const raw = await this.post<RawCloseSubBudgetResponse>(`/sub-budgets/${encodeURIComponent(id)}/close`, {})
+    return {
+      subBudget: mapSubBudget(raw.sub_budget),
+      ...(raw.status ? { status: raw.status } : {}),
       ...(raw.sign_data ? { signData: raw.sign_data } : {}),
       ...(raw.next_action ? { nextAction: raw.next_action } : {}),
     }
@@ -1446,6 +1517,12 @@ export class HavenClient {
     paymentId: string
     signData: SignData
     settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>
+    /**
+     * #3528: the additive, WARNING-GRADE prepare hints. Present only when the
+     * recipient is one of the owner's own Haven accounts; advisory — never
+     * blocks, never replaces a refusal.
+     */
+    warnings?: AgentPaymentWarning[]
   }> {
     return this.erc7710.prepare(paymentRequired, options)
   }

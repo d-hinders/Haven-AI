@@ -15,6 +15,22 @@ export interface ActiveDelegationRow {
   token_address: string
   budget_atomic: string
   period_seconds: number
+  /**
+   * #3518: the row's own identity and scope, so every consumer can tell
+   * WHICH budget it is looking at and who it is pinned to — the selection
+   * rule a payment runs (`SELECT_DELEGATION_FOR_PAYMENT_SQL`) is per-hash
+   * and recipient-scoped, so a per-token first-match report can describe a
+   * budget that did not pay. `recipient_address` is the pin (null = open),
+   * `merchant_id` the #3331 merchant lock (never set without a pin).
+   */
+  delegation_hash: string
+  recipient_address: string | null
+  merchant_id: string | null
+  /** Unix-second BIGINTs (node-postgres decodes them as strings) — the #1698 live window the payment selection filters on. */
+  start_date: string
+  expires_at: string
+  /** Row creation (node-postgres decodes timestamptz to Date) — the payment rule's FINAL tie-break (`created_at DESC`). */
+  created_at: Date
 }
 
 /**
@@ -43,8 +59,15 @@ export async function listActiveDelegations(
   agentIds: string[],
 ): Promise<ActiveDelegationRow[]> {
   if (agentIds.length === 0) return []
+  // #3518: `delegation_hash` / `recipient_address` / `merchant_id` join the
+  // select — the derived budget view carries each budget's identity and
+  // scope (recipient pin, merchant lock) beside its amount, so every reader
+  // can tell WHICH budget a row describes. The dashboard-facing narrow
+  // projection (`deriveDelegationAllowances`) still strips to its frozen
+  // six fields, so nothing leaks onto that wire.
   const result = await pool.query<ActiveDelegationRow>(
-    `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds
+    `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds,
+            delegation_hash, recipient_address, merchant_id, start_date, expires_at, created_at
      FROM agent_delegations
      WHERE agent_id = ANY($1) AND status = 'active'
      ORDER BY created_at ASC`,
@@ -275,6 +298,103 @@ export async function selectDelegationForPayment(
   return result.rows[0] ?? null
 }
 
+// ── Budget REPORT selection (#3518) ──────────────────────────────────────────
+
+/**
+ * #3518: the SAME selection a payment runs (`SELECT_DELEGATION_FOR_PAYMENT_SQL`
+ * above), as a REPORT-side lookup: it takes the LIST of budgets the derived
+ * view already read (never a second DB round trip) and answers which one pays
+ * the `toAddress` — a recipient-pinned budget for that recipient wins, a pin
+ * to a different recipient is excluded, and among the remaining (the pinned
+ * match plus the open budget) the soonest-expiring active row wins, exactly
+ * the payment rule's `ORDER BY (recipient_address IS NULL), expires_at ASC,
+ * created_at DESC`.
+ *
+ * Deliberately NOT a re-derivation of the window: the DB-side predicate sees
+ * the DATABASE clock, while this function compares against a `nowSec` the
+ * CALLER passes — and callers that already hold live budgets can pass their
+ * own clock. A row whose window has moved since the view read it can be
+ * picked by the payment path seconds later anyway; the report names the row
+ * by `delegation_hash`, so a consumer can always re-derive its liveness
+ * exactly. The compare inputs that matter (remaining, sufficiency) always
+ * describe the row this function returns.
+ *
+ * `toAddress: null` is the NO-MERCHANT-TO fallback (#3518's stated answer):
+ * the quote did not name a payee, so only the OPEN budget is eligible — the
+ * recipient-pinned rows are for specific recipients and a pinless quote
+ * cannot claim one. That mirrors the payment rule (a pin to anyone wins over
+ * the open row only when the recipient matches) with the pin side removed.
+ */
+export function selectBudgetForPaymentReport<
+  T extends {
+    id: string
+    recipient_address: string | null
+  },
+>(
+  budgets: T[],
+  toAddress: string | null,
+  nowSec: number,
+  expiresAtOf: (b: T) => number,
+  startAtOf: (b: T) => number,
+  createdAtOf?: (b: T) => number | string,
+): T | null {
+  const now = BigInt(nowSec)
+  const pinned = toAddress
+    ? budgets.filter(
+        (b) => b.recipient_address != null && b.recipient_address.toLowerCase() === toAddress.toLowerCase(),
+      )
+    : []
+  const open = budgets.filter((b) => b.recipient_address == null)
+  const candidates = [...pinned, ...open].filter((b) => expiresAtOf(b) > now && startAtOf(b) <= now)
+  if (candidates.length === 0) return null
+  // A pinned match ALWAYS sorts before an open budget; ties inside each
+  // group resolve soonest-expiry first, then NEWEST-created first — the
+  // payment rule's `created_at DESC` (the last ORDER BY key). The sort is
+  // explicit on `createdAtOf`, NOT an accidental byproduct of input order:
+  // a caller feeding rows in `created_at ASC` order would otherwise win the
+  // tie for the OLDER row (a stable sort keeps the earlier one first), which
+  // is the opposite of the rule this mirror exists to copy. Callers that
+  // cannot supply a creation timestamp pass the default (a constant), which
+  // makes the tie-break neutral — acceptable only where no two rows of one
+  // group can share an expiry.
+  return (
+    candidates
+      .map((b) => ({
+        b,
+        pinned: b.recipient_address != null ? 0 : 1,
+        exp: expiresAtOf(b),
+        created: Number(createdAtOf?.(b) ?? 0) || 0,
+      }))
+      .sort((a, z) => {
+        if (a.pinned !== z.pinned) return a.pinned - z.pinned
+        if (a.exp !== z.exp) return a.exp < z.exp ? -1 : 1
+        return z.created - a.created
+      })
+      .map((entry) => entry.b)[0] ?? null
+  )
+}
+
+/**
+ * #3518 review: the recipients of the LIVE recipient-pinned budgets among
+ * `budgets` (inside the start/expiry window), lowercased, unique, sorted.
+ * Callers that select with no payee (`toAddress` null) use it to tell
+ * "no budget for this token" apart from "only merchant-locked budgets, and
+ * the question named no merchant" — the second is not an exhausted budget,
+ * and must never be reported (or ledgered) as one.
+ */
+export function liveRecipientPins<T extends { recipient_address: string | null }>(
+  budgets: T[],
+  nowSec: number,
+  expiresAtOf: (b: T) => number,
+  startAtOf: (b: T) => number,
+): string[] {
+  const now = BigInt(nowSec)
+  const pins = budgets
+    .filter((b) => b.recipient_address != null && expiresAtOf(b) > now && startAtOf(b) <= now)
+    .map((b) => (b.recipient_address as string).toLowerCase())
+  return [...new Set(pins)].sort()
+}
+
 /**
  * #3329 review finding E: the delegation a TASK BUDGET names as its parent
  * (`agent_task_budgets.parent_delegation_hash`), by its OWN identity — never
@@ -316,6 +436,16 @@ export async function selectActiveDelegationByHash(
 }
 
 /**
+ * THE definition of a "live" delegation: every status the chain has not
+ * confirmed dead (#3542). One SQL tuple, shared by the revoke-all target list
+ * below, the `live_delegation_count` read on GET /agents, the archive guard and
+ * the account-delete guard — so the four cannot drift apart. A guard that
+ * ignored `replaced` would let an agent be archived, or its account deleted,
+ * while an old key's delegation was still enabled on-chain.
+ */
+export const LIVE_DELEGATION_STATUSES_SQL = `('pending', 'active', 'replaced')`
+
+/**
  * #1400: everything the batch revocation must kill — pending AND active
  * (a pending grant is still a signed delegation that could activate).
  *
@@ -329,7 +459,7 @@ export async function selectActiveDelegationByHash(
  */
 export const LIST_NON_REVOKED_DELEGATIONS_FOR_AGENT_SQL = `SELECT delegation_hash, delegation_json, status
        FROM agent_delegations
-       WHERE agent_id = $1 AND status IN ('pending', 'active', 'replaced')
+       WHERE agent_id = $1 AND status IN ${LIVE_DELEGATION_STATUSES_SQL}
        ORDER BY created_at ASC`
 
 export async function listNonRevokedDelegationsForAgent(

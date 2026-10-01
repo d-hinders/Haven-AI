@@ -107,6 +107,10 @@ const GUARDED_FILES = [
   // listed here (haven-reviewer, #2809 round 3).
   'packages/mcp-server/src/tools/catalog-purchase.ts',
   'packages/mcp-server/src/tools/plain-http-x402.ts',
+  // #3497 item 4: the delegation-rail allowance block moved here from the
+  // plain-HTTP capability — its warning strings are the budget-visibility
+  // prose an agent reads beside a payment, so it is guarded like the rest.
+  'packages/mcp-server/src/tools/support/allowance-block.ts',
   'packages/mcp-server/src/tools/contracts.ts',
   'packages/mcp-server/src/tools/parsing.ts',
   'packages/mcp-server/src/tools/registry.ts',

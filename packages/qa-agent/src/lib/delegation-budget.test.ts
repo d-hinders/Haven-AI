@@ -7,15 +7,42 @@
  * Added on a `haven-reviewer` finding: three branches were reachable only
  * indirectly through the scenario tests and two were not exercised anywhere.
  */
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import type { HavenApi } from './haven-api.js'
-import { overBudgetAmount, readOnchainBudget } from './delegation-budget.js'
+
+const { mockHashDelegation, mockAvailableAmount } = vi.hoisted(() => ({
+  mockHashDelegation: vi.fn(),
+  mockAvailableAmount: vi.fn(),
+}))
+
+vi.mock('@metamask/smart-accounts-kit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@metamask/smart-accounts-kit')>()),
+  createCaveatEnforcerClient: () => ({
+    getErc20PeriodTransferEnforcerAvailableAmount: mockAvailableAmount,
+  }),
+  getSmartAccountsEnvironment: () => ({}),
+}))
+vi.mock('@metamask/smart-accounts-kit/utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@metamask/smart-accounts-kit/utils')>()),
+  hashDelegation: mockHashDelegation,
+}))
+
+import {
+  overBudgetAmount,
+  readOnchainBudget,
+  readOnchainDelegationBudget,
+} from './delegation-budget.js'
 
 const api = (status: number, data: unknown): HavenApi =>
   ({ getAllowances: async () => ({ ok: status < 400, status, data }) }) as unknown as HavenApi
 
 const row = (onchain: unknown) => ({
   allowances: [{ token_symbol: 'USDC', configured_amount: '1.00', onchain }],
+})
+
+beforeEach(() => {
+  mockHashDelegation.mockReset()
+  mockAvailableAmount.mockReset()
 })
 
 describe('readOnchainBudget', () => {
@@ -113,5 +140,40 @@ describe('overBudgetAmount', () => {
       const implicit = await readOnchainBudget(fallback)
       expect(implicit).toEqual(explicit)
     })
+  })
+})
+
+describe('readOnchainDelegationBudget', () => {
+  const hash = `0x${'12'.repeat(32)}`
+  const delegation = { delegate: `0x${'34'.repeat(20)}` }
+
+  it('returns the live remainder for the exact requested hash', async () => {
+    mockHashDelegation.mockReturnValue(hash)
+    mockAvailableAmount.mockResolvedValue({ availableAmount: 777n })
+
+    await expect(readOnchainDelegationBudget(84_532, hash, delegation, '1000')).resolves.toEqual({
+      remaining: 777n,
+      configured: '1000',
+    })
+    expect(mockAvailableAmount).toHaveBeenCalledWith({ delegation })
+  })
+
+  it('refuses bytes that do not bind to the requested hash', async () => {
+    mockHashDelegation.mockReturnValue(`0x${'56'.repeat(32)}`)
+
+    const result = await readOnchainDelegationBudget(84_532, hash, delegation, '1000')
+
+    expect(result).toHaveProperty('error')
+    expect((result as { error: string }).error).toMatch(/not the requested/)
+    expect(mockAvailableAmount).not.toHaveBeenCalled()
+  })
+
+  it('fails closed as evidence when the live enforcer read fails', async () => {
+    mockHashDelegation.mockReturnValue(hash)
+    mockAvailableAmount.mockRejectedValue(new Error('observer unavailable'))
+
+    const result = await readOnchainDelegationBudget(84_532, hash, delegation, '1000')
+
+    expect((result as { error: string }).error).toMatch(/observer unavailable/)
   })
 })

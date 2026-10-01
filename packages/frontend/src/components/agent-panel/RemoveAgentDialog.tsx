@@ -5,10 +5,14 @@ import type { Agent } from '@/hooks/useAgents'
 import { useDelegationBudget } from '@/hooks/useDelegationBudget'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { isHalfRevoked } from '@/lib/half-revoked'
 import Link from 'next/link'
 import ConfirmDialog from '../ConfirmDialog'
 import { ApprovalRequiredBanner } from '../haven/ApprovalRequiredBanner'
 import { InlineAlert } from '../ui/InlineAlert'
+
+/** Delegation rows `revoke-all` targets — the same set the backend counts as live. */
+const LIVE_DELEGATION_STATUSES: ReadonlySet<string> = new Set(['pending', 'active', 'replaced'])
 
 /**
  * #1402: "Remove agent" — ONE action with three effects, in an order that is
@@ -28,28 +32,57 @@ import { InlineAlert } from '../ui/InlineAlert'
  *
  * The delegate-balance warning (#1403) is information, never a gate: a slow
  * or failing read degrades to no warning, and Remove stays available.
+ *
+ * #3542: the signature is decided from the agent's LIVE delegations, never from
+ * `agent.status`. `POST /agents/:id/revoke` only flips the status — a revoked
+ * (or archived) agent can still hold a redeemable budget, and skipping the
+ * signature for it archived nothing and 409'd. `allowances` is no substitute: it
+ * is projected from ACTIVE rows, so an agent whose only row is `replaced` looks
+ * empty there and is still live. The dialog reads its own delegation list.
+ *
+ * `mode="finish"` is the half-revoked follow-up (#3542 D): the agent is already
+ * revoked or archived and only the budget remains. It ends that budget, stops a
+ * credential that is somehow still live, and never moves the agent between
+ * lists or navigates anywhere.
  */
 export function RemoveAgentDialog({
   agent,
   chainId = DEFAULT_CHAIN_ID,
+  mode = 'remove',
   onRevokeCredential,
   onArchive,
+  onBudgetEnded,
   onClose,
 }: {
   agent: Agent
   chainId?: number
+  mode?: 'remove' | 'finish'
+  /** Called once the agent's budget is known to be ended (signed, or already none). */
+  onBudgetEnded?: () => void
   /** POST /agents/:id/revoke via the caller's state (kills the API key). */
   onRevokeCredential: () => Promise<void>
   /** POST /agents/:id/archive via the caller's state (files under Removed). */
   onArchive: () => Promise<void>
   onClose: () => void
 }) {
-  const { revokeAll, ready, busy } = useDelegationBudget(agent.id, chainId)
+  const { revokeAll, ready, busy, budgets, budgetsError } = useDelegationBudget(agent.id, chainId)
   const { balance, hasRecoverableUsdc } = useDelegateBalance(agent.id)
   const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed' | 'too_many'>('confirm')
   const [error, setError] = useState<string | null>(null)
 
-  const needsSignature = agent.status !== 'revoked'
+  const finish = mode === 'finish'
+  // Still loading: no verdict yet, so neither "sign" nor "already ended" is claimed.
+  const budgetsLoading = budgets === null && !budgetsError
+  // A failed read is unknown, not empty: stay on the signing path — `revokeAll`
+  // treats the server's "nothing to revoke" as success without a signature.
+  const hasLiveBudget =
+    budgets === null || budgets.some((b) => LIVE_DELEGATION_STATUSES.has(b.status))
+  // An unlinked agent's account is gone, and `revoke-all` refuses it. Do not
+  // gate removing an already-revoked one behind a signature that can never be
+  // collected; the card still marks its budget as one Haven cannot end here.
+  const cannotEndBudgetHere = agent.account_id == null && agent.status === 'revoked'
+  const needsSignature = hasLiveBudget && !cannotEndBudgetHere
+  const budgetAlreadyEnded = budgets !== null && !hasLiveBudget
 
   async function handleRemove() {
     setError(null)
@@ -62,13 +95,24 @@ export function RemoveAgentDialog({
         setPhase(result.reason === 'too_many' ? 'too_many' : 'confirm')
         setError(
           result.reason === 'cancelled'
-            ? 'The signature was cancelled — the agent was not removed and can still spend within its budget.'
+            ? finish
+              ? 'The signature was cancelled — this agent’s budget is still active.'
+              : 'The signature was cancelled — the agent was not removed and can still spend within its budget.'
             : result.reason === 'too_many'
               ? null // the state line below carries the actionable version
-              : 'The budget could not be stopped — the agent was not removed and can still spend within its budget.',
+              : finish
+                ? 'The budget could not be stopped — it is still active.'
+                : 'The budget could not be stopped — the agent was not removed and can still spend within its budget.',
         )
         return
       }
+    }
+    // The budget is ended (signed now, or the list proved none was live). The
+    // caller is told only AFTER the filing steps settle, whichever way they go:
+    // a refetch fired earlier could land after the revoke/archive patches and
+    // put stale status back on the card.
+    const announceBudgetEnded = () => {
+      if (!cannotEndBudgetHere) onBudgetEnded?.()
     }
 
     // Steps 2–3 — the budget is already dead; a failure here only leaves the
@@ -89,9 +133,13 @@ export function RemoveAgentDialog({
           }
         }
       }
-      await onArchive()
+      // Finish never files the agent anywhere: an archived agent already is, and
+      // a revoked one stays where the owner left it for an explicit Remove.
+      if (!finish) await onArchive()
+      announceBudgetEnded()
       onClose()
     } catch {
+      announceBudgetEnded()
       // Deliberately NOT err.message: api.ts throws the backend's raw error
       // string, and this is a destructive-flow dialog — the state line below
       // says what happened and what to do next.
@@ -105,17 +153,44 @@ export function RemoveAgentDialog({
       open
       onCancel={onClose}
       onConfirm={handleRemove}
-      title={`Remove ${agent.name}?`}
+      title={finish ? `Finish revoking ${agent.name}?` : `Remove ${agent.name}?`}
       body={
         <div className="space-y-3">
+          {finish ? (
+            <>
+              <p>
+                {agent.status === 'revoked'
+                  ? 'Haven already stopped this agent’s credential, but its budget is still active.'
+                  : 'This agent is no longer in your list, but its budget is still active.'}
+              </p>
+              <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                <li>
+                  <span className="font-medium text-[var(--v2-ink)]">Its remaining budget ends.</span>{' '}
+                  {budgetsLoading
+                    ? 'Checking which budgets it still holds…'
+                    : budgetAlreadyEnded
+                      ? 'No budget is left to end.'
+                      : 'You sign once and every budget it still holds ends — no matter how many.'}
+                </li>
+                <li>
+                  <span className="font-medium text-[var(--v2-ink)]">Its history stays.</span> Nothing
+                  moves, and you can still open every payment and record.
+                </li>
+              </ul>
+            </>
+          ) : (
           <>
               <p>Removing this agent does three things, in one step:</p>
               <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 <li>
                   <span className="font-medium text-[var(--v2-ink)]">It stops being able to spend.</span>{' '}
-                  {needsSignature
-                    ? 'You sign once and every budget it holds ends — no matter how many.'
-                    : 'Its spending authority is already ended.'}
+                  {budgetsLoading
+                    ? 'Checking which budgets it still holds…'
+                    : needsSignature
+                      ? 'You sign once and every budget it holds ends — no matter how many.'
+                      : cannotEndBudgetHere && isHalfRevoked(agent)
+                        ? 'Haven cannot end its budget from here — it may still be active on the account it was removed from.'
+                        : 'Its spending authority is already ended.'}
                 </li>
                 <li>
                   <span className="font-medium text-[var(--v2-ink)]">Its credential stops working</span>{' '}
@@ -128,6 +203,7 @@ export function RemoveAgentDialog({
                 </li>
               </ul>
           </>
+          )}
           {hasRecoverableUsdc && balance && (
             <ApprovalRequiredBanner
               title="This agent's wallet still holds funds"
@@ -146,7 +222,7 @@ export function RemoveAgentDialog({
           )}
           {needsSignature && !ready && (
             <p className="text-xs text-[var(--v2-ink-3)]">
-              Connect a wallet or use a passkey on this device to remove this agent.
+              Connect a wallet or use a passkey on this device to {finish ? 'end this budget' : 'remove this agent'}.
             </p>
           )}
           {error && (
@@ -154,8 +230,11 @@ export function RemoveAgentDialog({
           )}
           {phase === 'filing_failed' && (
             <InlineAlert>
-              The agent can no longer spend, but it could not be moved to Removed. Choose
-              Finish removal to retry.
+              {finish
+                ? 'The budget has ended, but the credential could not be stopped. Choose Finish revoking to retry.'
+                : cannotEndBudgetHere
+                  ? 'The agent could not be moved to Removed, and its budget may still be active on the account it was removed from.'
+                  : 'The agent can no longer spend, but it could not be moved to Removed. Choose Finish removal to retry.'}
             </InlineAlert>
           )}
           {/* #1437: the backend refuses an oversized batch by naming the
@@ -171,13 +250,17 @@ export function RemoveAgentDialog({
               >
                 agent&apos;s budget card
               </Link>
-              , then remove it. Nothing changed — it can still spend until you do.
+              , then {finish ? 'finish revoking' : 'remove it'}. Nothing changed — it can still spend until you do.
             </InlineAlert>
           )}
         </div>
       }
       confirmLabel={
-        phase === 'filing_failed' ? 'Finish removal' : 'Remove agent'
+        finish
+          ? 'Finish revoking'
+          : phase === 'filing_failed'
+            ? 'Finish removal'
+            : 'Remove agent'
       }
       tone="danger"
       loading={phase === 'working' || busy}

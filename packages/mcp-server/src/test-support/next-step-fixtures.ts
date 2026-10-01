@@ -33,14 +33,18 @@ const HOSTED = (name: string) => ({
  * written as two full call sites — confirmed and still-resolving — rather
  * than one call with a conditional spread, because `lint:next-steps`
  * requires a handoff to be named at the emission's OWN top level; a handoff
- * hidden behind a ternary spread reads as unnamed. #3527 adds TWO more:
- * `eip3009ConfirmedReplayResponse` (`guidance.ts`) is the EIP-3009 twin of
- * `settledReplayResponse` for a confirmed `createX402Intent` replay, and it
- * is two full call sites of its own (merchant-leg verified/reported → done;
- * otherwise → the #2290 remedy), shared by `haven_prepare_catalog_purchase`
- * step 9 and `haven_pay_mcp_tool`'s 3009 branch.
+ * hidden behind a ternary spread reads as unnamed. #3529 adds one: the
+ * reason-bearing evidence-refusal arm — a refused report whose backend
+ * relayed a `reason` (only the eip3009 settlement seam emits one) is its
+ * own emission, keyed on the reason's PRESENCE, never on payment status.
+ * #3527 adds TWO more: `eip3009ConfirmedReplayResponse` (`guidance.ts`) is
+ * the EIP-3009 twin of `settledReplayResponse` for a confirmed
+ * `createX402Intent` replay, and it is two full call sites of its own
+ * (merchant-leg verified/reported → done; otherwise → the #2290 remedy),
+ * shared by `haven_prepare_catalog_purchase` step 9 and
+ * `haven_pay_mcp_tool`'s 3009 branch.
  */
-export const EMISSION_SITE_COUNT = 25
+export const EMISSION_SITE_COUNT = 26
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
  * null-id sites share one helper, the report-outcome accepted site has two
@@ -48,11 +52,12 @@ export const EMISSION_SITE_COUNT = 25
  * follow-up), the missing-settlement-hash success no-op is its own site
  * (#3475 follow-up review round 1, S3), and the no-sign-data replay guard
  * (#3495 review round 1, S5) is two full sites of its own (confirmed / still
- * resolving) — one fixture each, matching the two call sites. #3527 adds two
- * more: `eip3009ConfirmedReplayResponse`'s done-state and
+ * resolving) — one fixture each, matching the two call sites. #3529 adds
+ * one (the reason-bearing evidence-refusal arm). #3527 adds two more:
+ * `eip3009ConfirmedReplayResponse`'s done-state and
  * funded-awaiting-merchant-remedy branches, one fixture each.
  */
-export const EMISSION_FIXTURE_COUNT = 29
+export const EMISSION_FIXTURE_COUNT = 30
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -74,6 +79,10 @@ export const EMISSION_SITES = [
   // never reused for a different fact.
   { site: 'plain-http-x402.ts report outcome accepted, eip3009 unsettled (offer settlement evidence)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
+  // #3529: the reason-bearing evidence refusal is its own arm — keyed on the
+  // relayed reason's PRESENCE (only the eip3009 settlement seam emits one),
+  // never on payment status. Same poll-status handoff as the pending arm.
+  { site: 'paid-mcp-completion.ts report settlement evidence: reason-bearing refusal', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts settle held-hash, can report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) } } },
   { site: 'paid-mcp-completion.ts settle held-hash, cannot report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts settle funding pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
@@ -151,8 +160,8 @@ type Site = {
  * SUCCESS no-op, not a refusal — its fixture moved to `EMISSION_SITES`.
  */
 export const REFUSAL_SITE_COUNT = 40
-/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id XOR refusal) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3500's 1 in normalizeError (the typed task_budget_exceeded 403) + #3504's 1 in normalizeError (the typed delegation_budget_exceeded 403). */
-export const REFUSAL_STEP_CALLS = 49
+/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id/sub_budget_id exactly-one refusal (#3506 widened it to three ids; still one refusalNextStep site)) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3500's 1 in normalizeError (the typed task_budget_exceeded 403) + #3504's 1 in normalizeError (the typed delegation_budget_exceeded 403). + #3506 review S2's 2 (state-direct-recovery.ts haven_submit sub_budget_id: the close_needs_reprepare and close_outcome_unconfirmed recovery refusals). */
+export const REFUSAL_STEP_CALLS = 51
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },

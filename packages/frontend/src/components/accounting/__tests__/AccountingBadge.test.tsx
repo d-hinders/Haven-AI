@@ -9,6 +9,7 @@
  * expresses as an absent key is proven at the surface a user sees.
  */
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
 import { AccountingBadge, providerDisplayName } from '@/components/accounting/AccountingBadge'
@@ -123,19 +124,28 @@ describe('AccountingBadge', () => {
     expect(screen.queryByRole('tooltip')).toBeNull()
   })
 
-  it('does not let a click or Enter reach the row behind it', () => {
+  it('does not let a click reach the row behind it', () => {
     const rowClick = vi.fn()
-    const rowKeyDown = vi.fn()
     renderWithLocale(
-      <div role="button" tabIndex={0} onClick={rowClick} onKeyDown={rowKeyDown}>
+      <div onClick={rowClick}>
+        <AccountingBadge accounting={accounting()} />
+      </div>,
+    )
+    fireEvent.click(screen.getByRole('link'))
+    expect(rowClick).not.toHaveBeenCalled()
+  })
+
+  it('Enter on the link does not reach the row either: it fires a synthetic click that bubbles', async () => {
+    const rowClick = vi.fn()
+    renderWithLocale(
+      <div onClick={rowClick}>
         <AccountingBadge accounting={accounting()} />
       </div>,
     )
     const link = screen.getByRole('link')
-    fireEvent.click(link)
-    fireEvent.keyDown(link, { key: 'Enter' })
+    link.focus()
+    await userEvent.setup().keyboard('{Enter}')
     expect(rowClick).not.toHaveBeenCalled()
-    expect(rowKeyDown).not.toHaveBeenCalled()
   })
 })
 

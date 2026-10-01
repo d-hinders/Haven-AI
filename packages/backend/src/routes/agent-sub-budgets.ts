@@ -12,10 +12,15 @@
  *      recipient — a child wider than the parent is refused BEFORE signing,
  *      400 `sub_budget_wider_than_parent`), both children are built and
  *      stored `pending` (two rows: A's parent-child + B's grant).
- *   2. POST   /agents/:id/sub-budgets/:id/sign — the owner relays A's
- *      signature over the pending children (both sign_contexts were served
- *      to the agent); each row flips `pending`→`open` as its signature
- *      lands. B's grant stays unusable until BOTH rows are open.
+ *   2. The delegating agent (A) signs each pending row and each row flips
+ *      `pending`→`open` as its signature lands (#3506: the agent completes
+ *      this itself — `GET /sub-budgets?status=awaiting_signature` lists its
+ *      rows, `GET /sub-budgets/:id/sign-context` serves the typed data, and
+ *      `POST /sub-budgets/:id/submit` applies the signature). B's grant
+ *      stays unusable until BOTH rows are open.
+ *      POST   /agents/:id/sub-budgets/:id/sign — an OPTIONAL owner relay of
+ *      that same signature, kept for callers that route it through the
+ *      owner session; it applies exactly what the agent's own submit would.
  *   3. GET    /agents/:id/sub-budgets          — flat list (both rows).
  *   4. GET    /agents/:id/sub-budgets/tree     — the parent→child tree.
  *   5. DELETE /agents/:id/sub-budgets/:id      — owner revoke: mirrors
@@ -48,12 +53,33 @@ import {
 } from '../infra/repositories/sub-budgets.js'
 import type { Delegation } from '../rails/delegation-policy.js'
 import {
+  SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+  SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
   buildSubBudgetChildren,
+  isGrantReceiverRetired,
   checkNarrowingRefusal,
   prepareSubBudgetClose,
   recoverSubBudgetChildSigner,
   serializeClosePreparedUserOp,
 } from '../modules/sub-budgets/index.js'
+
+/**
+ * #3553: the issuing agent may not carve new sub-budget authority while it is
+ * revoked or archived — including the half-revoked state (credential revoked,
+ * budget delegation still live on-chain). `paused` is deliberately allowed, as
+ * on the budget-delegation routes. Deliberately NOT the delegation routes'
+ * REVOKED_AGENT_REFUSAL: that text says the agent "cannot receive", and here
+ * the agent is the one giving. The gate lives in the two issuance-side routes,
+ * never in `loadOwnedDelegationAgent` — DELETE and the reads must still reach a
+ * revoked agent.
+ */
+export const SUB_BUDGET_ISSUER_RETIRED_CODE = 'issuer_retired'
+export const SUB_BUDGET_ISSUER_RETIRED_REFUSAL =
+  'This agent is revoked or archived and cannot issue new sub-budgets'
+
+function isRetired(a: { status: string; archived_at: Date | string | null }): boolean {
+  return a.status === 'revoked' || a.archived_at != null
+}
 
 function safeDetails(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -100,6 +126,13 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent || !agent.delegate_address) return reply.code(404).send({ error: 'Agent not found' })
+    // #3553: lifecycle gate BEFORE the handler's body checks, as the delegation build route does.
+    if (isRetired(agent)) {
+      return reply.code(409).send({
+        error: SUB_BUDGET_ISSUER_RETIRED_REFUSAL,
+        error_code: SUB_BUDGET_ISSUER_RETIRED_CODE,
+      })
+    }
 
     const body = request.body ?? {}
     const { sub_agent_id, period_amount_atomic, expires_at, recipient_address, label } = body
@@ -135,6 +168,12 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     const subAgent = await findAgentForUserAllStatuses(sub_agent_id, sub)
     if (!subAgent) {
       return reply.code(404).send({ error: 'Sub-agent not found in this account' })
+    }
+    if (isRetired(subAgent) || (subAgent.status !== 'active' && subAgent.status !== 'paused')) {
+      return reply.code(409).send({
+        error: SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
+        error_code: SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+      })
     }
     if (subAgent.delegate_address == null) {
       return reply.code(409).send({
@@ -270,9 +309,12 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
       parent_child_sub_budget: toWire(parentChildRow, nowSec),
       // Both children are signed by A's delegate key (agent-side); the
       // route that serves each typed data to the agent is the agent's own
-      // sign-context endpoint. The owner relays both signatures via
-      // POST /agents/:id/sub-budgets/:id/sign (row id, one call per row).
-      next_action: 'agent_signs_then_owner_relays',
+      // sign-context endpoint, and the agent submits each signature itself
+      // (POST /sub-budgets/:id/submit, #3506 — haven_sign then haven_submit
+      // with sub_budget_id). The owner may OPTIONALLY relay a signature via
+      // POST /agents/:id/sub-budgets/:id/sign (row id, one call per row);
+      // that route is unchanged and no longer required.
+      next_action: 'agent_signs_then_submits',
       sign_targets: [
         { sub_budget_id: parentChildRow.id, who: 'delegating_agent', what: 'parent-child' },
         { sub_budget_id: grantRow.id, who: 'delegating_agent', what: 'grant' },
@@ -280,7 +322,9 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     })
   })
 
-  // ── POST /agents/:id/sub-budgets/:id/sign — the owner relays A's signature ─
+  // ── POST /agents/:id/sub-budgets/:id/sign — OPTIONAL owner relay of A's signature ─
+  // (#3506: the agent submits its own signature via POST /sub-budgets/:id/submit;
+  // this relay stays working for callers that go through the owner session.)
   app.post<{
     Params: { id: string; sub: string }
     Body: { signature?: string }
@@ -288,6 +332,14 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent || !agent.delegate_address) return reply.code(404).send({ error: 'Agent not found' })
+    // #3553: a pending row seeded while the agent was live must not open after
+    // it is revoked or archived (a pre-revocation signature is a live path).
+    if (isRetired(agent)) {
+      return reply.code(409).send({
+        error: SUB_BUDGET_ISSUER_RETIRED_REFUSAL,
+        error_code: SUB_BUDGET_ISSUER_RETIRED_CODE,
+      })
+    }
     const { signature } = request.body ?? {}
     if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
       return reply.code(400).send({ error: 'A hex signature is required' })
@@ -296,6 +348,13 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     if (!row) return reply.code(404).send({ error: 'Sub-budget not found' })
     if (row.status !== 'pending') {
       return reply.code(409).send({ error: `Sub-budget is '${row.status}' — nothing to sign`, error_code: 'not_pending' })
+    }
+    // #3553: a grant whose receiving agent was retired after issuance must not open.
+    if (await isGrantReceiverRetired(row)) {
+      return reply.code(409).send({
+        error: SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
+        error_code: SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+      })
     }
 
     // The signature is A's delegate key over the child typed data the
@@ -388,7 +447,9 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
       if (!closing) return reply.code(409).send({ error: 'Sub-budget is no longer open' })
       return reply.send({
         sub_budget: toWire(closing, nowSec),
-        next_action: 'agent_signs_close_then_owner_relays',
+        // #3506: the agent signs the close and submits it itself (haven_sign then
+        // haven_submit with sub_budget_id); an owner relay is not required.
+        next_action: 'agent_signs_close_then_submits',
       })
     } catch (err) {
       return reply.code(502).send({ error: 'Could not prepare the sub-budget close', details: String(err) })

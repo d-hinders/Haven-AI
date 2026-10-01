@@ -51,6 +51,7 @@ import {
 } from '@haven_ai/sdk'
 import type { DiscoveryEntry, DiscoveryHint, HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
+import { delegationAllowanceBlock } from './support/allowance-block.js'
 import {
   priceSelectedOption,
   quoteWarnings,
@@ -312,6 +313,19 @@ export function createCatalogPurchaseHandlers(
             // #3417: a replayed key whose payment already settled is a done state,
             // not the transient 500 it used to surface as — answer with the original.
             if ('settledReplay' in prepared) return prepared.settledReplay
+            // #3497 item 4: the same visibility block #3476 gave
+            // `haven_pay_x402_quote`, now on `haven_pay_mcp_tool`'s erc7710
+            // branch too — built from the settlement child's own asset/amount
+            // (the entry the selector chose), through the pure allowances read.
+            // Visibility only: never refuses, and a failed read degrades to
+            // `sufficient: null` with a warning, exactly as on the plain-HTTP
+            // sibling.
+            const allowance = await delegationAllowanceBlock(
+              haven,
+              prefetchedAgent,
+              prepared.settlement.amountAtomic,
+              prepared.settlement.asset,
+            )
             return {
               payment_id: prepared.paymentId,
               settlement_scheme: 'erc7710',
@@ -329,6 +343,7 @@ export function createCatalogPurchaseHandlers(
               amount_atomic: prepared.settlement.amountAtomic,
               amount: priced.amount,
               token: priced.token,
+              ...(allowance.allowance ? { allowance: allowance.allowance } : {}),
               merchant_url: merchantUrl,
               ...(merchantUrl !== args.merchant_url
                 ? { merchant_url_discovered_from: args.merchant_url }
@@ -363,15 +378,18 @@ export function createCatalogPurchaseHandlers(
                   expires_at: undefined,
                   product: args.tool_name,
                 },
-                warnings: quoteWarnings({
-                  capped: cap.kind !== 'none',
-                  // The child's own short expiry is the binding window here,
-                  // not the intent's — no quote-expiry warning applies.
-                  expiresAt: undefined,
-                  ...(merchantUrl !== args.merchant_url
-                    ? { discoveredFrom: args.merchant_url }
-                    : {}),
-                }),
+                warnings: [
+                  ...allowance.warnings,
+                  ...quoteWarnings({
+                    capped: cap.kind !== 'none',
+                    // The child's own short expiry is the binding window here,
+                    // not the intent's — no quote-expiry warning applies.
+                    expiresAt: undefined,
+                    ...(merchantUrl !== args.merchant_url
+                      ? { discoveredFrom: args.merchant_url }
+                      : {}),
+                  }),
+                ],
               }),
             }
           }
@@ -391,6 +409,16 @@ export function createCatalogPurchaseHandlers(
                 ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
               },
             },
+          )
+          // #3497 item 4: the block rides the 3009 shape too. The amount/token
+          // compared are `createX402Intent`'s OWN authorization facts, so the
+          // figure can never describe a different option than the one this
+          // intent funds — same rule as the plain-HTTP sibling's comment.
+          const allowance = await delegationAllowanceBlock(
+            haven,
+            prefetchedAgent,
+            intent.amountAtomic,
+            intent.asset,
           )
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
@@ -412,6 +440,7 @@ export function createCatalogPurchaseHandlers(
             amount_atomic: quote.amountAtomic,
             amount: quote.amount,
             token: quote.token,
+            ...(allowance.allowance ? { allowance: allowance.allowance } : {}),
             // Request details to pass back to haven_complete_mcp_tool after
             // signing. The RESOLVED endpoint (#1271), not the input as given —
             // settle/complete must hit the same URL the 402 came from.
@@ -430,11 +459,11 @@ export function createCatalogPurchaseHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given — the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
                 'none, re-run this tool with the SAME idempotency_key plus ' +
                 'include_signing_payload=true and re-call the signer with its payment_required ' +
-                'added VERBATIM, #1549), then ' +
+                'added VERBATIM), then ' +
                 'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
@@ -448,11 +477,14 @@ export function createCatalogPurchaseHandlers(
                 expires_at: intent.expiresAt,
                 product: args.tool_name,
               },
-              warnings: quoteWarnings({
-                capped: cap.kind !== 'none',
-                expiresAt: intent.expiresAt,
-                ...(merchantUrl !== args.merchant_url ? { discoveredFrom: args.merchant_url } : {}),
-              }),
+              warnings: [
+                ...allowance.warnings,
+                ...quoteWarnings({
+                  capped: cap.kind !== 'none',
+                  expiresAt: intent.expiresAt,
+                  ...(merchantUrl !== args.merchant_url ? { discoveredFrom: args.merchant_url } : {}),
+                }),
+              ],
             }),
           }
         } catch (err) {
@@ -885,9 +917,9 @@ export function createCatalogPurchaseHandlers(
                 reason:
                   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
                   "fetches the settlement child itself and verifies its caveats against Haven's " +
-                  'signed context (#1455) before signing. Then call haven_settle_mcp_tool with ' +
+                  'signed context before signing. Then call haven_settle_mcp_tool with ' +
                   'payment_id and the returned signature — merchant_url/tool_name/arguments are ' +
-                  'OPTIONAL there (#1307): Haven rehydrates them by payment_id. Do NOT pass ' +
+                  'OPTIONAL there: Haven rehydrates them by payment_id. Do NOT pass ' +
                   'payment_header: on this scheme Haven assembles it at settle, so there is ' +
                   'nothing to build locally and no funding transaction to wait for.',
                 summary: {
@@ -968,11 +1000,11 @@ export function createCatalogPurchaseHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given — the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
                 'none, re-run this tool with the SAME idempotency_key plus ' +
                 'include_signing_payload=true and re-call the signer with its payment_required ' +
-                'added VERBATIM, #1549), then ' +
+                'added VERBATIM), then ' +
                 'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',

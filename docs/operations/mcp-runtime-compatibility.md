@@ -99,6 +99,33 @@ last-verified: "2026-10-01"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified #3497 (2026-10-01, agent-surface polish from the 2026-09-30
+> purchase run):** this diff touches files under a covered tree —
+> `packages/mcp-server/src/tools/**` (`catalog-purchase.ts`,
+> `plain-http-x402.ts`, `paid-mcp-completion.ts`, `contracts.ts`,
+> `state-direct-recovery.ts`, `support/signer-compat.ts`, `support/index.ts`,
+> and the new `support/allowance-block.ts`). Three changes, all
+> text-and-summaries: response prose no longer carries internal issue
+> references (guidance `reason`, `signer_compatibility.check`, the
+> strict-input refusal messages, the direct-sign fallback — a signer VERSION
+> is what an agent acts on, pinned by a source scan in
+> `response-prose.test.ts`); `agent_summary.product` on the settled erc7710
+> arms reports the merchant's product name with the tool name as fallback
+> (value change, field and shape unchanged); and the delegation-rail
+> `allowance` block `haven_pay_x402_quote` has carried since #3476 moved
+> VERBATIM to `support/allowance-block.ts` and is now attached to
+> `haven_pay_mcp_tool`'s successful results too — an optional additive field
+> with the same read-only derived-budget shape, never a refusal, the over-budget
+> decision staying with the backend's typed 403 on each settlement leg. No tool
+> is added, renamed or re-shaped on either runtime, no argument or input schema
+> changes, and the version-skew and consent-hash contracts do not move:
+> response payloads are not a skew axis, and the local consent hash covers tool
+> names, not their inputs or responses (`packages/mcp/src/consent.ts`). An
+> older SDK/hosted build that lacks the field is only less informative; a
+> newer one adds visibility the backend already exposes. `last-verified` is
+> not re-stamped: it already reads 2026-10-01 and this block is the scope.
+> Nothing else in this document was re-verified.
+>
 > **Re-verified #3501 (2026-09-30, task budgets report spent/remaining):**
 > this diff touches four files this document covers —
 > `packages/sdk/src/types.ts` (`RawTaskBudget` gains optional
@@ -1038,6 +1065,34 @@ last-verified: "2026-10-01"
 > from the #2807 contracts module, and the version-skew and consent-hash
 > contracts do not move because the registered tool-NAME set does not.
 >
+> **Recent re-verification (#3506, sub-budgets user-completable):** both
+> runtimes' `haven_submit` accept `sub_budget_id` (exactly one of
+> `payment_id`, `task_budget_id` or `sub_budget_id`, plus `signature`). This
+> completes the signer's existing `haven_sign { sub_budget_id }` →
+> `haven_submit { sub_budget_id, signature }` handoff, which the hosted schema
+> used to reject. The call goes through the SDK's new `submitSubBudget` to
+> `POST /sub-budgets/:id/submit`. An opened row whose tree sibling is still
+> pending names `haven_sign { sub_budget_id }` for the sibling. `haven_get_agent`'s
+> response grew `pendingSubBudgetSignatures[]`. It is additive: the rows this
+> agent must sign (the opens of an owner-issued sub-budget, or a `closing` row
+> after an owner close), each with its `haven_sign` step. It reads
+> `GET /sub-budgets?status=awaiting_signature`, and an older backend answer
+> fails soft to `[]`. A stale sub-budget close (`close_needs_reprepare`) is
+> recovered inside `haven_submit`, which re-prepares through
+> `POST /sub-budgets/:id/close` and names `haven_sign` (or reports `closed`);
+> `close_outcome_unconfirmed` asks to repeat the call later. No close tool is
+> added. `next-step-signer-parity.test.ts` now pins both
+> `haven_submit` handoffs (`SIGNER_HOSTED_HANDOFF_SHAPES`
+> `'haven_submit#task_budget'` and `'haven_submit#sub_budget'`). The signer's
+> `initialize` block gains `sub_budget_sign_context_versions` (additive) and
+> its consent text names sub-budget signing. **Consent hash unchanged:**
+> `SIGNER_CONSENT_SURFACE_VERSION` stays 2 (owner decision, copy-only), so no
+> re-consent. No tool was added, removed or renamed, the strict/permissive
+> split is untouched, and the version-skew contract does not move. A signer
+> older than 0.7.0 cannot sign `sub_budget_id` at all; that is unchanged, and
+> it needs no new notice. Nothing else in this document was re-verified in
+> this pass.
+>
 > **Recent re-verification (#3330, sub-agent budgets):** the local runtime
 > gained one new flow-keyed signable and one additive response field. The
 > signer's `haven_sign` accepts `sub_budget_id` (an agent-issued sub-budget's
@@ -1305,6 +1360,28 @@ last-verified: "2026-10-01"
 > older-backend response reads as absent/unknown and the tool falls back to
 > its pre-existing "no tool follows" answer — the safe side, since erc7710
 > and unrecorded-scheme payments already default there.
+>
+> **Re-verified (#3529, 2026-10-01):** a refused evidence report whose backend
+> relayed a refusal `reason` — the #3475 evidence 409/503 contract, emitted
+> only by the eip3009 settlement seam — is its own arm, keyed on the REASON's
+> PRESENCE and never on payment status (on eip3009 "confirmed" means the
+> FUNDING leg, so a status-keyed code would also fire on ordinary, correct
+> refusals of mismatched hashes). New response code
+> `SETTLEMENT_NOT_RECORDED` with the backend's sentence relayed verbatim as
+> the additive `refusal_reason`: what Haven knows is that the payment's
+> funding leg is confirmed and unchanged, and THIS hash was not accepted as
+> its settlement — the old transfer-shape claim is gone from this arm, and
+> `next_tool` stays `haven_get_payment_status`. A reasonless refusal (a plain
+> mismatch, a foreign payment id, a validation refusal, or a pre-#3475
+> backend) keeps `DELIVERED_UNSETTLED` with wording honest for every case
+> that reaches it — including a confirmed payment behind an older backend —
+> never claiming a confirmed funding it cannot know. The backend negative
+> pins (a `payment_not_confirmed` 409 and the erc7710 seam's
+> `settlement_unverified` 409 carry NO `reason`) are the other half of the
+> contract: the discriminator cannot collapse. The shared description's
+> nextActionGuidance names the new code (round 14 of the #1591 census),
+> and the #3475 Not-filed item "a refusal on an already-confirmed payment
+> still classifies as DELIVERED_UNSETTLED" closes with this.
 >
 > **Recent re-verification (#2968):** the response vocabulary is completed at
 > the agent-facing surface, additively. `deliverMerchantPayment` now collapses
@@ -2182,7 +2259,10 @@ says there is nothing to preserve; `--replace` does not probe — only once the
 runtime install actually completed — a failed install skips it and the outcome
 says so), and the owner still revokes on the Haven
 agent page. The revoke route is owner-authenticated; the connector holds agent
-keys only.
+keys only. Since #3542 the dashboard's revoke of a superseded agent also ends
+its budget with one owner signature (`revoke-all`); a revoke that stops at the
+credential leaves the agent marked "budget still active" with a Finish revoking
+action. Nothing the connector sends or does changes.
 
 `runtime_config_unreadable` is the exception, and the only one of the six that
 reaches the dashboard (`runtimeStatusHelper`; the routing is pinned by
@@ -2679,8 +2759,20 @@ hand-off names, is strict, so a `task_budget_id` there is refused with the
 `-32602 unrecognized_keys` envelope below; a **newer signer against an older
 backend** gets a 404 from the sign-context read and refuses with
 `SIGN_CONTEXT_REFUSED`, never a signature. The SDK's `getAgentSummary()` now performs a third read
-(`GET /task-budgets?status=open`) and degrades to an empty `taskBudgets`
+(`GET /task-budgets?status=live`) and degrades to an empty `taskBudgets`
 list on any failure, so an older backend does not break `haven_get_agent`.
+(#3518 re-verification, 2026-10-01: the list reads `status=live` instead of
+`?status=open` — `closing` rows always, unexpired `pending` and `open`
+rows; `closed` and expired rows are omitted — so a budget that is closing
+stays visible AS closing instead of vanishing the moment its close starts,
+while the list stays bounded. An older backend that refuses `status=live`
+is re-asked for `status=all`, filtered the same way client-side; the
+soft-fail degradation is unchanged. Both runtimes also gain
+`haven_get_task_budget { task_budget_id }`, the read-by-id over the
+backend's any-status `GET /task-budgets/:id` — the status check a close
+refusal's "re-check the budget's status" points at; see the re-verification
+block at the end of this document. An older hosted MCP lists no read tool,
+which is the same fail-closed skew as the rows above.)
 
 ### An undeclared argument is refused, not stripped (#2312)
 
@@ -3281,6 +3373,29 @@ result used to carry unconditionally). `@haven_ai/signer`'s
 own release, with the hosted `signer_compatibility.check`/`fallback` prose
 covering every currently-published signer in the meantime — no gate upgrades
 an existing install.
+
+> **Re-verified (#3528, 2026-10-01):** the prepare responses behind
+> `haven_send` / `haven_pay` (`POST /payments`) and the hosted x402 prepare
+> surfaces (the plain-HTTP quote tools and the direct-settlement recovery
+> result) can now carry the backend's additive, WARNING-GRADE self-transfer
+> hint: when the recipient is one of the owner's own Haven accounts (code
+> `SELF_TRANSFER`), the backend puts one `warnings` entry on the prepare
+> body, the SDK maps it verbatim per entry (`mapRawWarnings`, absent — never
+> an empty array — when the backend sent none), and the hosted tools merge it
+> into the `warnings` envelope their results already emit
+> (`buildAgentGuidance`'s array, the same one the allowance and quote
+> warnings ride). A stranger's address maps to nothing and every result reads
+> exactly as before. Advisory only: `safe_to_continue`, `next_tool` /
+> `next_arguments`, and every refusal shape are untouched — the hint never
+> blocks and never replaces a refusal (a self-transfer is legitimate, and the
+> on-chain authority for the send is unchanged either way). Skew, both
+> directions: an older backend never sets `warnings` on these bodies, so
+> `mapRawWarnings(undefined)` is absent and today's shapes hold; a
+> newer-backend hint read by an older SDK is an unmapped JSON field the old
+> SDK ignores — warnings are advisory by contract (#1308), so nothing
+> misbehaves in either direction. The wire shape of what an agent signs is
+> unchanged. `last-verified` is not re-stamped (it already reads 2026-10-01):
+> this block is the scope.
 
 ## Task-budget signing handoff and old-signer recovery (#3419, 2026-09-28)
 
@@ -4421,4 +4536,42 @@ to call next in structured fields, and those fields are typed end to end
 > fixture (the census moves to 40 fixtures and 49 `refusalNextStep` calls).
 > `last-verified` is re-stamped to 2026-10-01: the failure envelope this
 > document's own re-verification trail pins is what changed. Nothing else in
+> this document was re-verified.
+
+> **Re-verification (#3518, 2026-10-01):** the budget-visibility round. The
+> hosted MCP and the local `@haven_ai/mcp` both gain
+> `haven_get_task_budget { task_budget_id }` — the read over the backend's
+> any-status `GET /task-budgets/:id`, i.e. the status check a close
+> refusal's "re-check the budget's status" points at. It returns
+> `{ task_budget }` verbatim (the SDK's typed `HavenTaskBudget`, `status`
+> pending | open | closing | closed, `isExpired`, the #3501 spent/remaining
+> figures on an open row) and a 404 carries the backend's own message
+> through `runTool`; the local schema and wording are byte-parity with the
+> hosted one. The third skew read changes shape:
+> `getAgentSummary()`'s taskBudgets list now reads
+> `GET /task-budgets?status=live` — `closing` rows always, unexpired
+> `pending` and `open` rows; `closed` and expired rows are omitted by the
+> backend, so neither the list nor its per-row on-chain reads grow with
+> history — so the agent summary lists a `closing` budget AS closing (the
+> read that must not vanish while a close submit is in flight) instead of
+> dropping it the moment its close started. Against an older backend that
+> refuses `status=live`, the SDK falls back to `status=all` and applies the
+> same filter client-side. `haven_get_allowances` rows carry
+> `delegationHash` / `recipientAddress` (null = open budget) /
+> `merchantId` (set only on a #3331 merchant-locked budget) /
+> `reservedHavenAtomic` (the sum of the budget's open, unexpired task- and
+> sub-budget children's caps, in atomic units, reported BESIDE
+> `onchain.remaining` and never folded into it — the on-chain figure stays
+> authoritative; "0" covers both no-reservation and a failed sum), additive
+> and undefined against an older backend. The tools' descriptions name the
+> fields; the description payload measures 26,029 bytes across 27 tools
+> (mean 964.04), the pins `description-size.test.ts` holds. Version skew,
+> fail-closed or consent surfaces are unchanged: the local runtime's
+> consent hash moves (a new tool name joins it), the signer's does not; an
+> older hosted MCP lists no read tool and an older local server refuses
+> the undeclared name — the rows above. An older backend's allowance rows
+> omit the four fields and the SDK keeps them absent. `last-verified`
+> stays 2026-10-01: the skew read, the tool set and the hosted/local
+> descriptions are exactly what this document pins, and all three moved in
+> this diff. Scope of this note: those tools and reads. Nothing else in
 > this document was re-verified.

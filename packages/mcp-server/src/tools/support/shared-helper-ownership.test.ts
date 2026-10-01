@@ -73,6 +73,7 @@ import {
 } from '@haven_ai/sdk'
 import * as capPrice from './cap-price.js'
 import * as catalogEntry from './catalog-entry.js'
+import * as allowanceBlock from './allowance-block.js'
 import * as errors from './errors.js'
 import * as guidance from './guidance.js'
 import * as mcpContext from './mcp-context.js'
@@ -155,8 +156,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
   // #3329: the success-side counterpart — a task budget's signer hand-off,
   // which is not a payment and so cannot go through buildAgentGuidance's
-  // AgentPaymentSummary (see SINGLE_SLICE_RETAINED for why it stays shared).
-  taskBudgetNextStep: { module: 'guidance', slices: ['s3329'] },
+  // AgentPaymentSummary. #3506: a sub-budget row's hand-off (haven_get_agent's
+  // pending rows, haven_submit's sub_budget_id result) uses it from s2809 too.
+  taskBudgetNextStep: { module: 'guidance', slices: ['s2809', 's3329'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -201,6 +203,11 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // s2809 handlers (haven_send/haven_pay) — see SINGLE_SLICE_RETAINED for why
   // it still lives in shared support beside delegationSignFields.
   generateDirectIdempotencyKey: { module: 'mcp-context', slices: ['s2809'] },
+  // #3528: the spread form of the backend prepare response's raw warnings.
+  // The s2809 direct-payment results (haven_send/haven_pay) and the s2811
+  // plain-HTTP x402 quote surfaces merge the backend's SELF_TRANSFER hint
+  // into the warnings envelope their results already emit.
+  backendPrepareWarningsSpread: { module: 'mcp-context', slices: ['s2809', 's2811'] },
   // tools/paid-mcp-completion.ts — the #2812 capability module itself now owns
   // its single-slice merchant helpers (the carve-out the #2808 map retained
   // them for has landed, so "until #2812 moves them" is satisfied).
@@ -229,6 +236,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
   // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
   getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
+  // #3497 item 4: the moved block is called from BOTH slices' pay tools —
+  // s2811's haven_pay_x402_quote (both branches) and s2810's
+  // haven_pay_mcp_tool (both branches).
+  delegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
+  // The block's shape type — type-only, mapped for ownership (see TYPE_ONLY_EXPORTS).
+  DelegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
 }
 
 /**
@@ -426,6 +439,11 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'quoteWarnings',
   ],
   'catalog-entry': ['getUsableCatalogMcpEntry'],
+  // #3497 item 4: the delegation-rail allowance block. #3476 built it inside
+  // the plain-HTTP slice and declared it capability-local; wiring the SAME
+  // block into `haven_pay_mcp_tool` (s2810) made it a two-slice helper —
+  // moved VERBATIM, call sites unchanged.
+  'allowance-block': ['delegationAllowanceBlock', 'DelegationAllowanceBlock'],
   errors: [
     'HostedToolError',
     'runTool',
@@ -457,6 +475,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'submitSignatureWithExpiryMapping',
     'submitErc7710WithExpiryMapping',
     'generateDirectIdempotencyKey',
+    'backendPrepareWarningsSpread', // #3528
   ],
   // The #2812 capability module — a single-slice owner, not shared support,
   // but the four helpers it owns are mapped in HELPER_OWNERSHIP like any
@@ -531,7 +550,7 @@ const REGISTRATION_SURFACE_EXPORTS = new Set([
 ])
 
 /** Type-only exports: mapped for ownership, absent at runtime by design. */
-const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext'])
+const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext', 'DelegationAllowanceBlock'])
 
 /**
  * Exact-name exclusion for symbols that appear on a module namespace at
@@ -545,6 +564,7 @@ const MODULE_INTERNAL_SYMBOLS = new Set(['default', 'META_ENV'])
 const SUPPORT_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
   'cap-price': capPrice,
   'catalog-entry': catalogEntry,
+  'allowance-block': allowanceBlock,
   errors,
   guidance,
   'mcp-context': mcpContext,
@@ -1193,9 +1213,10 @@ describe('shared fixture (test-support/hosted-mcp.ts)', () => {
     await handlers().haven_get_agent({})
     const calls = recordedCalls()
     // getAgentSummary reads the agent, its allowances, AND its open task
-    // budgets (#3329: GET /task-budgets?status=open, three GETs total —
-    // the third fails soft to [] when unstubbed, per the #3093 rule).
-    expect(calls).toHaveLength(3)
+    // budgets (#3329: GET /task-budgets?status=open) and, since #3506, the
+    // sub-budget rows awaiting its signature (GET /sub-budgets?status=awaiting_signature)
+    // — four GETs total, the last two failing soft to [] when unstubbed (#3093).
+    expect(calls).toHaveLength(4)
     const agentCall = calls.find((c) => c.url.endsWith('/machine-payments/agent'))!
     expect(agentCall.method).toBe('GET')
     expect(agentCall.headers).toBeDefined()

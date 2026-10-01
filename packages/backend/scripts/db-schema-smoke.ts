@@ -64,6 +64,10 @@ import {
   LIST_LIVE_BROADCAST_NONCES_FROM_SQL,
 } from '../src/infra/repositories/outbound-txs.js'
 import {
+  SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL,
+  SUM_OPEN_RESERVED_FOR_PARENT_SQL,
+} from '../src/infra/repositories/sub-budgets.js'
+import {
   GET_RECORDED_FEE_SQL,
   INSERT_PAYMENT_FEE_SQL,
 } from '../src/infra/repositories/payment-fees.js'
@@ -640,6 +644,18 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'task budgets: sum open-reserved atomic under one parent (#3329)',
     sql: SUM_OPEN_RESERVED_ATOMIC_SQL,
+  },
+  {
+    // #3518 (and the #3330 owner route): the sub-budget sums. The FOR_PARENT
+    // one keys on the parent-child row's own hash; the FOR_BUDGET_DELEGATION
+    // one walks grant → parent-child → the budget delegation's hash, the key
+    // an allowance row carries.
+    name: 'sub budgets: sum open-reserved grants under one parent-child (#3330)',
+    sql: SUM_OPEN_RESERVED_FOR_PARENT_SQL,
+  },
+  {
+    name: 'sub budgets: sum open-reserved grants under one budget delegation (#3518)',
+    sql: SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL,
   },
   {
     name: 'task budgets: mark open (pending only, #3329)',

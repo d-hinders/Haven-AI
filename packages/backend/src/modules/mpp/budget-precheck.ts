@@ -29,10 +29,31 @@
  * row for the token — is insufficient, exactly as the hosted tool's
  * `match ? match.onchain.remaining : '0'` answered. `resourceUrl` is the
  * merchant resource being bought (the dedupe window's discriminating
- * column), never the allowances read's URL. `merchantTo` is advisory
- * metadata for the ledger row; it does not scope the compare — the
- * delegation budget is per-token, and the enforcer is the real gate on
- * recipients.
+ * column), never the allowances read's URL.
+ *
+ * ## #3518: the compare uses the payment's OWN selection
+ *
+ * "The selected option's token" used to mean the FIRST budget row for the
+ * token (`budgets.find(...)`), which is only correct while one budget per
+ * token exists. The payment's own rule is
+ * `SELECT_DELEGATION_FOR_PAYMENT_SQL` (`infra/repositories/
+ * delegation-budgets.ts`): same token, `recipient = $3 OR NULL`, inside the
+ * live `start_date`/`expires_at` window, `ORDER BY (recipient_address IS
+ * NULL), expires_at ASC, created_at DESC` — a recipient-pinned budget for
+ * THAT payee wins, a pin to a different payee is excluded, and the open
+ * budget covers everything else. This is a REFUSAL GATE, not a report: with
+ * an open 0.001 and a pinned 0.005 for the same token, the first-match
+ * compare refused a pinned-merchant purchase the budget had funded (and the
+ * on-chain enforcer would NOT have reverted), and the inverse — a large open
+ * budget beside a small pin — passed a compare against the open row that the
+ * pinned payment would exceed. `selectBudgetForPaymentReport` mirrors that
+ * order over the already-read rows; when `merchantTo` is ABSENT the pinned
+ * rows are ineligible (a pinless quote cannot claim a recipient-scoped
+ * grant) and the open budget answers — the no-guess fallback the issue
+ * states. The selected budget's identity rides the success body as
+ * `budget_delegation_hash` / `budget_id` / `budget_recipient_address`, so
+ * the caller's report and the refusal row describe the budget that pays.
+ * `merchantTo` keeps its #3492 replay role unchanged (below).
  *
  * ## The refusal is a taxonomy 403, the success is a bare boolean
  *
@@ -80,7 +101,11 @@ import {
   allowanceModuleRailRetired,
 } from '../../rails/execution-rail.js'
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
-import { listDelegationJsonByIds } from '../../infra/repositories/delegation-budgets.js'
+import {
+  listDelegationJsonByIds,
+  liveRecipientPins,
+  selectBudgetForPaymentReport,
+} from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { AgentPaymentPhase, AgentPaymentNextAction } from '../../domain/agent-payment-taxonomy.js'
@@ -275,9 +300,51 @@ export async function handleBudgetPrecheck(
 
   // The hosted tool's compare, verbatim in semantics: match on the SELECTED
   // option's token, no match means the budget for this token is zero.
+  // #3518: scope the selection to the QUOTED TOKEN first, then run the
+  // payment's own selection inside it — the recipient match, window and
+  // ordering of `SELECT_DELEGATION_FOR_PAYMENT_SQL`, not the first token
+  // row (see the module comment for why the first match refused and
+  // allowed the wrong payments). `merchantTo` is lowercased once here;
+  // `selectBudgetForPaymentReport` compares case-insensitively and treats
+  // null as "open budget only".
   const amountAtomic = BigInt(amountAtomicString)
   const merchantTo = body.merchantTo ? body.merchantTo.toLowerCase() : null
-  const match = budgets.find((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase())
+  const nowSec = Math.floor(Date.now() / 1000)
+  const tokenBudgets = budgets.filter((b) => b.token_address.toLowerCase() === tokenAddress.toLowerCase())
+  const match = selectBudgetForPaymentReport(
+    tokenBudgets,
+    merchantTo,
+    nowSec,
+    (b) => Number(b.expires_at),
+    (b) => Number(b.start_date),
+    (b) => b.created_at.getTime(),
+  )
+
+  // #3518 review: no payee named, no open budget, but live merchant-locked
+  // budgets for this token. That is an INCOMPLETE question, not an exhausted
+  // budget: answering "remaining 0 — ask the owner to raise the budget" (and
+  // ledgering a delegation_budget_exceeded refusal) misstates why, while the
+  // agent holds a funded pin. Answer 409 naming the pins, write nothing; the
+  // caller repeats the check with merchantTo. A replay of a settled payment
+  // never reaches here (it requires merchantTo).
+  if (!match && merchantTo === null) {
+    const pins = liveRecipientPins(tokenBudgets, nowSec, (b) => Number(b.expires_at), (b) => Number(b.start_date))
+    if (pins.length > 0) {
+      return {
+        statusCode: 409,
+        body: {
+          error:
+            "This agent's budget for this token is locked to specific recipients, and the check named none. " +
+            'Repeat it with merchantTo set to the payee; a payment to any other address has no budget.',
+          error_code: 'budget_requires_recipient',
+          next_action: AgentPaymentNextAction.RetryWithExplicitContext,
+          chain_id: agent.chain_id,
+          asset: tokenAddress,
+          budget_recipient_addresses: pins,
+        },
+      }
+    }
+  }
   const remainingAtomic = match ? (remainingById.get(match.id)?.remainingAtomic ?? match.budget_atomic) : '0'
   const token = tokenView(agent.chain_id, tokenAddress)
   // A budget row's registry-derived symbol wins when it names the same
@@ -299,6 +366,18 @@ export async function handleBudgetPrecheck(
         sufficient: true,
         remaining_atomic: remainingAtomic,
         ...(fromChain !== null ? { remaining_is_from_chain: fromChain } : {}),
+        // #3518: WHICH budget answered — the payment-selection mirror's
+        // winner, so the caller's report (and the hosted tool's allowance
+        // block) can name the budget that pays instead of letting a reader
+        // assume the first per-token row. Absent when no row matched.
+        ...(match
+          ? {
+              budget_id: match.id,
+              budget_delegation_hash: match.delegation_hash,
+              budget_recipient_address: match.recipient_address,
+              budget_merchant_id: match.merchant_id,
+            }
+          : {}),
         // #3492: distinguishes "sufficient because it fit" from "sufficient
         // because this exact payment already settled" — the remaining
         // figure above can be BELOW amountAtomic on this branch (the
@@ -342,6 +421,19 @@ export async function handleBudgetPrecheck(
         shortfall_atomic: shortfallAtomic.toString(),
         resource_url: body.resourceUrl,
         ...(merchantTo ? { merchant_address: merchantTo } : {}),
+        // #3518: the refusal row and body name the budget whose remaining
+        // figure the compare ran against — the payment-selection mirror's
+        // winner. The detail allowlist (086/087) keeps the taxonomy subset
+        // only; these ride the RESPONSE body (and the ledger row's merchant
+        // column via `merchantTo`), not `detail`.
+        ...(match
+          ? {
+              budget_id: match.id,
+              budget_delegation_hash: match.delegation_hash,
+              budget_recipient_address: match.recipient_address,
+              budget_merchant_id: match.merchant_id,
+            }
+          : {}),
       },
     },
     {

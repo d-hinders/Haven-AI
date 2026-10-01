@@ -1712,3 +1712,25 @@ describe('color-scheme capture parity (#2929)', () => {
     })
   })
 })
+
+describe('half-revoked scenario fixture (#3542)', () => {
+  it('serves a revoked and an archived agent, each with a live budget and a matching delegation row', () => {
+    const { api } = scenarioWithApi('half-revoked-agents')
+    const { agents } = api('/agents', 'GET') as unknown as { agents: Array<Record<string, unknown>> }
+    // The shared agent list is extended, never replaced or mutated.
+    expect(agents.slice(0, FIXTURE_AGENTS.length)).toEqual(FIXTURE_AGENTS)
+    const revoked = agents.find((a) => a.id === 'agent-half-revoked')!
+    const removed = agents.find((a) => a.id === 'agent-half-removed')!
+    expect(revoked).toMatchObject({ status: 'revoked', archived_at: null, live_delegation_count: 1 })
+    expect(removed).toMatchObject({ status: 'revoked', live_delegation_count: 1 })
+    expect(removed.archived_at).toEqual(expect.any(String))
+    for (const id of ['agent-half-revoked', 'agent-half-removed']) {
+      const res = fx(`/agents/${id}/delegations`) as unknown as { delegations: Array<{ status: string }> }
+      expect(res.delegations.map((d) => d.status)).toEqual(['active'])
+    }
+  })
+
+  it('leaves the default fixture agents untouched', () => {
+    expect((fx('/agents') as unknown as { agents: unknown[] }).agents).toEqual(FIXTURE_AGENTS)
+  })
+})

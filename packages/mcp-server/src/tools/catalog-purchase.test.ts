@@ -2549,6 +2549,117 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(x402Body()?.amount).toBe(PAYMENT_REQUIRED.accepts[0].maxAmountRequired)
       expect(x402Body()?.amount).not.toBe(PERMIT2_ONLY_ATOMIC)
     })
+
+    // ── #3497 item 4: the allowance block rides BOTH pay branches ────────────
+    // The same visibility #3476 gave haven_pay_x402_quote: `GET
+    // /machine-payments/allowances` (the pure read, never the precheck — that
+    // would book a refusal row for a tool that does not refuse here), built
+    // from the intent/settlement child's OWN authorization facts. The failed
+    // read degrades to sufficient: null with the unavailable warning — never
+    // an error, never a refusal (the on-chain policy remains the spend gate).
+    const PAY_ALLOWANCES = {
+      agent_id: 'agt_1',
+      account_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: 'allowance-1',
+        token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        token_symbol: 'USDC',
+        configured_amount: '5000000',
+        reset_period_min: 60,
+        onchain: {
+          amount: '5000000', spent: '0', remaining: '5000000', effective_spent: '0',
+          reset_time_min: 60, last_reset_min: 0, nonce: 0, is_reset_pending: false,
+          remaining_is_from_chain: true,
+        },
+      }],
+    }
+
+    it('delegation rail, erc7710 branch: the response carries the allowance block from the pure allowances read', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(ERC7710_ONLY_PR)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: CHILD },
+        'GET /machine-payments/allowances': { status: 200, body: PAY_ALLOWANCES },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '3',
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.allowance).toEqual({
+        rail: 'delegation',
+        sufficient: true,
+        remaining_atomic: '5000000',
+        source: 'active_delegations',
+        remainingAtomic: '5000000',
+      })
+      // The pure read — NEVER the precheck, which books a refusal row this
+      // visibility tool must not produce (the #3476 rule, now here too).
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/budget-precheck'))).toEqual([])
+    })
+
+    it('delegation rail, 3009 branch: the same block, compared against the intent authorization', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: CHILD_3009 },
+        'GET /machine-payments/allowances': { status: 200, body: PAY_ALLOWANCES },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '3',
+        }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(res.data.allowance).toEqual({
+        rail: 'delegation',
+        sufficient: true,
+        remaining_atomic: '5000000',
+        source: 'active_delegations',
+        remainingAtomic: '5000000',
+      })
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/budget-precheck'))).toEqual([])
+    })
+
+    it('a failed allowances read degrades to sufficient: null with the unavailable warning — never an error', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: CHILD_3009 },
+        'GET /machine-payments/allowances': { status: 500, body: { error: 'allowance boom' } },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '3',
+        }),
+      )
+      expect(res.data.allowance).toEqual({ rail: 'delegation', sufficient: null, source: 'active_delegations' })
+      const warnings = res.data.warnings as Array<{ code: string }>
+      expect(warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+      // The purchase itself proceeded — the read failure never fails it.
+      expect(res.data.payment_id).toBe(CHILD_3009.payment_id)
+    })
   })
 
   describe('haven_prepare_catalog_purchase', () => {

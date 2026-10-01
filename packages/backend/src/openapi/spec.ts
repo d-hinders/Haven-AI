@@ -1018,6 +1018,30 @@ const accountingFeatureGate404 = {
  * strictly is the right trade: the alternative is widening the contract of
  * the only rail that can pay to accommodate a row that cannot exist.
  */
+/**
+ * #3528 — the prepare-response warning array (additive, WARNING-GRADE).
+ * Present exactly when the recipient of a just-prepared payment is one of the
+ * owner's own Haven accounts. Advisory only: it never blocks, never replaces
+ * a refusal, and no prepare surface refuses on it — the budget delegation's
+ * on-chain caveat enforcers remain the only gate either way.
+ */
+const paymentWarnings = {
+  type: 'array',
+  items: {
+    type: 'object',
+    required: ['code', 'message'],
+    properties: {
+      code: {
+        type: 'string',
+        enum: ['SELF_TRANSFER'],
+        description: 'The recipient is one of the owner\'s own Haven accounts.',
+      },
+      message: { type: 'string' },
+    },
+    additionalProperties: false,
+  },
+} as const
+
 const paymentSignData = {
   type: 'object',
   required: ['hash', 'signature_scheme', 'typed_data', 'components', 'instructions'],
@@ -1218,6 +1242,18 @@ const agentPaymentStatus = {
         'True only when an eip3009 payment\'s merchant settlement transaction is already recorded and ' +
         'on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the ' +
         'confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown.',
+    },
+    // #3518: WHICH budget metered this payment — recorded at authorize
+    // (migration 053), the settle summary's join key for its allowance
+    // block. Omitted on the legacy rail and on rows predating migration
+    // 053, matching the handler's omit-when-absent honesty rule.
+    budget_delegation_hash: {
+      type: 'string',
+      pattern: '^0x[0-9a-fA-F]{64}$',
+      description:
+        'The budget delegation that metered this payment (#1059), recorded at authorize. The settle ' +
+        'summary keys its allowance rows on this — the budget that PAID, never a re-derived ' +
+        '(token, payee) first match. Omitted on the legacy rail and on intents predating migration 053.',
     },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
@@ -2031,7 +2067,7 @@ export const openapiSpec = {
         operationId: 'archiveAgent',
         summary: 'Archive an agent (soft removal — history is kept).',
         description:
-          'Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
+          'Replaces agent deletion (#1401). Delegation agents require status=revoked and no live budget delegations (pending, active or replaced — anything revoke-all would still target) because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -2567,7 +2603,7 @@ export const openapiSpec = {
         operationId: 'issueAgentSubBudget',
         summary: 'Issue a sub-budget: agent A re-delegates a narrower budget to agent B.',
         description:
-          "Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (409 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side (sign-context, then relay each signature via POST /agents/{id}/sub-budgets/{sub}/sign). A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329).",
+          "Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (400 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side: the agent lists its rows (GET /sub-budgets?status=awaiting_signature), fetches each sign-context, and submits each signature itself (POST /sub-budgets/{id}/submit; next_action 'agent_signs_then_submits'). The owner relay via POST /agents/{id}/sub-budgets/{sub}/sign still works but is optional. A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329). Lifecycle gate (#3553), checked before the handler's body checks and writing nothing: 409 issuer_retired when the issuing agent is revoked or archived (including a half-revoked agent whose budget delegation is still live), and 409 sub_agent_retired when the receiving sub-agent is revoked, archived or pending_approval (only active or paused agents may receive); paused agents pass the gate. Opening a grant later is also refused (409 sub_agent_retired, row stays pending) if its receiving agent was retired after issuance, on both the owner relay and the agent submit.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -2704,7 +2740,7 @@ export const openapiSpec = {
         operationId: 'signAgentSubBudget',
         summary: "Relay the delegating agent's signature over one pending sub-budget child.",
         description:
-          "Owner relays step (#3330): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch.",
+          "OPTIONAL owner relay (#3330; since #3506 the agent submits its own signature via POST /sub-budgets/{id}/submit and this relay is not required): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch. Refuses 409 issuer_retired (#3553) when the issuing agent is revoked or archived, leaving the pending row pending; paused agents pass. Also refuses 409 sub_agent_retired when the row is a grant whose receiving agent is revoked, archived or pending_approval; the row stays pending.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { $ref: '#/components/parameters/AgentId' },
@@ -3771,7 +3807,7 @@ export const openapiSpec = {
         operationId: 'unlinkUserAccount',
         summary: 'Unlink an account from the Haven account.',
         description:
-          'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.',
+          'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         responses: {
@@ -5555,6 +5591,8 @@ export const openapiSpec = {
                     },
                     agents: {
                       type: 'array',
+                      description:
+                        "The tenant's delegation-rail agents, unordered. An agent is listed when it is not revoked (even with no activity in range), when it had a confirmed payment or a refusal in range, or when it is revoked but still holds an active budget delegation (revoking flips only the agent's status). A revoked agent with none of these is omitted (#3540).",
                       items: {
                         type: 'object',
                         required: [
@@ -6166,14 +6204,14 @@ export const openapiSpec = {
         operationId: 'listTaskBudgets',
         summary: 'List task budgets for the authenticated agent.',
         description:
-          "Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.",
+          "Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — closing rows always, pending and open rows while not expired; closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.",
         security: [{ AgentApiKey: [] }],
         parameters: [
           {
             name: 'status',
             in: 'query',
             required: false,
-            schema: { type: 'string', enum: ['open', 'all'] },
+            schema: { type: 'string', enum: ['open', 'live', 'all'] },
           },
         ],
         responses: {
@@ -6352,21 +6390,21 @@ export const openapiSpec = {
       get: {
         tags: ['SubBudgets'],
         operationId: 'listSubBudgets',
-        summary: 'List sub-budgets this agent holds (it is the sub-agent).',
+        summary: 'List sub-budgets this agent holds (it is the sub-agent), or owes a signature on (it is the delegating agent).',
         description:
-          "Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.",
+          "Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. status=awaiting_signature (#3506): the DELEGATING side — the rows this agent must still sign, i.e. its own parent-child row and every grant it issued, while pending (an open signature is owed; a pending row past its expiry is omitted) or closing (a close signature is owed), parent-child row first. Each row's id is the sub_budget_id to pass to haven_sign, then haven_submit. The agent's own parent-child narrowings are otherwise read through the delegating side (sign-context/close below) — the default list is what a sub-agent spends through.",
         security: [{ AgentApiKey: [] }],
         parameters: [
           {
             name: 'status',
             in: 'query',
             required: false,
-            schema: { type: 'string', enum: ['open', 'all'] },
+            schema: { type: 'string', enum: ['open', 'all', 'awaiting_signature'] },
           },
         ],
         responses: {
           '200': {
-            description: 'Sub-budgets held by this agent.',
+            description: 'Sub-budgets held by this agent, or owed a signature by it.',
             content: {
               'application/json': {
                 schema: {
@@ -6450,7 +6488,7 @@ export const openapiSpec = {
         operationId: 'submitSubBudget',
         summary: 'Submit the delegating agent signature — opens a pending child, or relays the signed close operation.',
         description:
-          "status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409.",
+          "status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409. A pending grant whose receiving agent was revoked, archived or is pending_approval (retired after issuance, #3553) is refused 409 sub_agent_retired and stays pending; close submits are never gated.",
         security: [{ AgentApiKey: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
         requestBody: {
@@ -7141,6 +7179,15 @@ export const openapiSpec = {
               '"fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
               'amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / ' +
               'merchant_address when the request carried them.',
+          },
+          '409': {
+            ...errorResponse,
+            description:
+              '#3518: the request named no merchantTo, the agent has no open budget for the token, ' +
+              'and it holds live merchant-locked budgets for it. Not a refusal — nothing is recorded ' +
+              'in payment_refusals. Carries error_code "budget_requires_recipient", next_action ' +
+              '"retry_with_explicit_context" and budget_recipient_addresses (the pins, lowercase); ' +
+              'repeat the check with merchantTo set to the payee.',
           },
           '410': {
             ...errorResponse,
@@ -10125,6 +10172,17 @@ export const openapiSpec = {
            * row and omits it — a brand-new agent cannot have stranded funds.
            */
           has_stranded_funds: { type: 'boolean' },
+          /**
+           * #3542: how many of this agent's delegations are LIVE — status
+           * `pending`, `active` or `replaced`, the same set revoke-all targets
+           * and the archive / account-delete guards refuse on. `replaced` rows
+           * count because they stay enabled on-chain until their Stop userop
+           * lands. Derived by the list and detail reads, so it is NOT
+           * required: the creation response omits it (a brand-new agent holds
+           * none). Zero means archive and account removal are not blocked by
+           * delegations.
+           */
+          live_delegation_count: { type: 'integer', minimum: 0 },
         },
         additionalProperties: true,
       },
@@ -10222,8 +10280,15 @@ export const openapiSpec = {
             description:
               '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found, 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch, or (#3500) 403 task_budget_exceeded when the task child\'s ERC20TransferAmountEnforcer shows too little left of its cap (task_budget_id, remaining_atomic, max_atomic, amount_atomic; decided before anything is built, fails open on an unreadable chain). Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
           },
+          sub_budget_id: {
+            type: 'string',
+            minLength: 1,
+            description:
+              '#3330: an OPEN sub-budget another agent in the same account granted THIS agent — the redemption chain becomes [grant, parent-child, budget]. Mutually exclusive with task_budget_id (400 when both). Refused with 404 sub_budget_not_found, 409 sub_budget_not_open/sub_budget_parent_mismatch/sub_budget_token_mismatch/sub_budget_recipient_mismatch, or (#3519) 403 delegation_budget_exceeded when the smallest live remaining across the three links cannot cover the amount (fails open per link on an unreadable read). Part of the idempotency pin, like task_budget_id: a key replayed under a different sub-budget is a 409.',
+          },
         },
-        // #3031: CLOSED. The shipped SDK sends exactly the four fields above
+        // #3031: CLOSED. The shipped SDK sends exactly the fields above (six since
+        // #3329/#3330 added task_budget_id and sub_budget_id)
         // (`createIntent`), and every field the handler used to rung out is
         // declared. An undeclared field used to ride through to the handler,
         // which ignored it — on a route that mints a payment intent that is
@@ -10240,6 +10305,11 @@ export const openapiSpec = {
           payment_id: uuid,
           status: { type: 'string', enum: ['pending_signature'] },
           expires_at: isoDateTime,
+          // #3528: the additive, WARNING-GRADE self-transfer hint. Present
+          // exactly when the recipient is one of the owner's own accounts;
+          // advisory only — it never blocks, never replaces a refusal, and
+          // no prepare surface refuses on it.
+          warnings: paymentWarnings,
           sign_data: paymentSignData,
         },
         additionalProperties: false,
@@ -10522,6 +10592,12 @@ export const openapiSpec = {
             minLength: 1,
             description:
               '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found, 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch, or (#3500) 403 task_budget_exceeded when the task child\'s ERC20TransferAmountEnforcer shows too little left of its cap (task_budget_id, remaining_atomic, max_atomic, amount_atomic; decided before anything is built, fails open on an unreadable chain). Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget.',
+          },
+          subBudgetId: {
+            type: 'string',
+            minLength: 1,
+            description:
+              '#3330: an OPEN sub-budget another agent in the same account granted THIS agent. erc7710: the settlement child is carved under the grant ([settlement, grant, parent-child, budget]). EIP-3009: the funding leg redeems [grant, parent-child, budget] to fund the agent\'s delegate EOA. Mutually exclusive with taskBudgetId (400 when both). Refused with 404 sub_budget_not_found, 409 sub_budget_not_open/sub_budget_parent_mismatch/sub_budget_token_mismatch/sub_budget_recipient_mismatch, or 403 delegation_budget_exceeded. Shared by POST /x402 and POST /x402/authorize.',
           },
         },
         additionalProperties: false,
@@ -10853,6 +10929,31 @@ export const openapiSpec = {
                 // number, side by side, both previously bare strings.
                 configured_amount: allowanceHumanAmount,
                 reset_period_min: { type: 'integer' },
+                // #3518: the budget's identity and SCOPE, so an agent can
+                // name the merchant-locked budget before paying.
+                delegation_hash: {
+                  type: 'string',
+                  pattern: '^0x[0-9a-fA-F]{64}$',
+                  description:
+                    '#3518: this budget delegation\'s hash — the identifier a payment authorization records as budget_delegation_hash and the key `reserved_haven_atomic` sums children under.',
+                },
+                recipient_address: {
+                  type: ['string', 'null'],
+                  pattern: '^0x[0-9a-f]{40}$',
+                  description:
+                    '#3518: the recipient pin — null for an open budget; a recipient-scoped budget pays ONLY this address (a payment\'s selection prefers the pin matching its payee).',
+                },
+                merchant_id: {
+                  type: ['string', 'null'],
+                  format: 'uuid',
+                  description:
+                    '#3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.',
+                },
+                reserved_haven_atomic: {
+                  type: 'string',
+                  description:
+                    '#3518: Haven-side reservation — the sum of this budget\'s OPEN, unexpired task- and sub-budget children\'s caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort).',
+                },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],
@@ -10911,9 +11012,12 @@ export const openapiSpec = {
           merchantTo: {
             type: 'string',
             description:
-              'Advisory for the ordinary compare: the merchant payTo address from the selected ' +
-              'option, carried onto the refusal row; it does not scope THAT compare — the budget ' +
-              'is per-token and the enforcer is the gate on recipients. #3492/#3527: when `idempotencyKey` ' +
+              'The merchant payTo address from the selected option, carried onto the refusal row. ' +
+              '#3518: it scopes the compare the way the payment selects its budget — a ' +
+              'recipient-pinned budget for this payee wins, a pin to another payee is excluded, ' +
+              'and the open budget covers the rest. Absent: only the open budget is eligible; when ' +
+              'the agent holds only merchant-locked budgets for the token the answer is 409 ' +
+              'budget_requires_recipient (nothing recorded), never a budget refusal. #3492/#3527: when `idempotencyKey` ' +
               'is also present, this field additionally scopes the settled-replay match below — a ' +
               'replay answer requires it to equal the stored row\'s payee.',
           },
@@ -10966,6 +11070,30 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          budget_id: {
+            type: 'string',
+            format: 'uuid',
+            description:
+              '#3518: the budget row the remaining figure describes — the payment-selection mirror\'s winner (recipient match for merchantTo, else the open budget), not the first per-token row. Absent when no row matched.',
+          },
+          budget_delegation_hash: {
+            type: 'string',
+            pattern: '^0x[0-9a-fA-F]{64}$',
+            description:
+              '#3518: the selected budget\'s delegation hash — the same identifier a payment authorization records as budget_delegation_hash, so a caller can verify report and payment name the same budget.',
+          },
+          budget_recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description:
+              '#3518: the selected budget\'s recipient pin — null for an open budget, the merchant payee for a pinned/merchant-locked one.',
+          },
+          budget_merchant_id: {
+            type: ['string', 'null'],
+            format: 'uuid',
+            description:
+              '#3518: the merchant the selected budget was issued for (#3331), null for every other budget.',
           },
           replay: {
             type: 'boolean',
@@ -11021,6 +11149,12 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          budget_recipient_addresses: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              '#3518: present only when budget_remaining_atomic is "0" because the agent has no OPEN budget for the token but holds live merchant-locked budgets — their recipients, lowercase. Those budgets pay only these addresses; haven_get_allowances reports their remaining figures.',
           },
         },
         additionalProperties: false,

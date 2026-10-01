@@ -14,12 +14,14 @@ import {
   findOpenGrantsForAgent,
   findOpenParentChildByHash,
   insertPendingSubBudget,
+  listAwaitingSignatureForDelegatingAgent,
   listForAgent,
   listForOwner,
   markClosed,
   markClosing,
   markOpen,
   selectOpenForPayment,
+  sumOpenReservedForBudgetDelegation,
   sumOpenReservedForParent,
   type InsertPendingSubBudgetInput,
 } from '../sub-budgets.js'
@@ -262,6 +264,52 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     expect(grants[0].is_expired).toBe(true)
   })
 
+  it('#3506 listAwaitingSignatureForDelegatingAgent: pending/closing rows for the DELEGATING agent only, parent-child first, never the sub-agent', async () => {
+    const a = await seedAgent('delegating-a')
+    const b = await seedAgent('sub-b')
+    const other = await seedAgent('other')
+    const { parentChild, grant } = await seedTree(a, b)
+    const now = Math.floor(Date.now() / 1000)
+
+    // Both pending rows are A's to sign — parent-child first, then the grant.
+    const awaiting = await listAwaitingSignatureForDelegatingAgent(a.agentId, now)
+    expect(awaiting.map((r) => r.id)).toEqual([parentChild.id, grant.id])
+
+    // The sub-agent B holds the grant but never signs it: nothing awaits B.
+    expect(await listAwaitingSignatureForDelegatingAgent(b.agentId, now)).toEqual([])
+    expect(await listAwaitingSignatureForDelegatingAgent(other.agentId, now)).toEqual([])
+
+    // A row leaves the list once its signature lands (open).
+    await markOpen(parentChild.id, a.agentId, JSON.stringify({ signed: true }))
+    expect((await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).map((r) => r.id)).toEqual([grant.id])
+    await markOpen(grant.id, a.agentId, JSON.stringify({ signed: true }))
+    expect(await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).toEqual([])
+
+    // A close owed (closing) puts the row back.
+    await markClosing(grant.id, a.agentId, JSON.stringify({ userOp: true }))
+    expect((await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).map((r) => r.id)).toEqual([grant.id])
+
+    // A closed row is never listed.
+    await markClosed(grant.id, a.agentId, null)
+    expect(await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).toEqual([])
+  })
+
+  it('#3506 listAwaitingSignatureForDelegatingAgent omits a pending row past its expiry but keeps a closing one', async () => {
+    const a = await seedAgent('delegating-a')
+    const b = await seedAgent('sub-b')
+    const { parentChild, grant } = await seedTree(a, b, { expiresAt: Math.floor(Date.now() / 1000) - 10 })
+    const now = Math.floor(Date.now() / 1000)
+
+    // Pending and already expired: signing would open a dead child.
+    expect(await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).toEqual([])
+
+    // Closing stays listed regardless of expiry: its stored disable op is the thing to sign.
+    await markOpen(parentChild.id, a.agentId, JSON.stringify({ signed: true }))
+    await markClosing(parentChild.id, a.agentId, JSON.stringify({ userOp: true }))
+    expect((await listAwaitingSignatureForDelegatingAgent(a.agentId, now)).map((r) => r.id)).toEqual([parentChild.id])
+    expect(grant.status).toBe('pending')
+  })
+
   it('listForAgent scopes status; listForOwner joins through the owning user', async () => {
     const a = await seedAgent('a')
     const b = await seedAgent('b')
@@ -307,5 +355,33 @@ describeDb('agent_sub_budgets repository (#3330)', () => {
     expect(
       await sumOpenReservedForParent(a.agentId, tree2.parentChild.delegation_hash, Math.floor(Date.now() / 1000)),
     ).toBe(500000n)
+  })
+  it('sumOpenReservedForBudgetDelegation (#3518) sums OPEN grants of every tree under ONE budget hash, agent-scoped', async () => {
+    // The allowance row's reserved_haven_atomic: keyed by the BUDGET
+    // delegation's hash (the parent-child row's parent_delegation_hash), one
+    // level above sumOpenReservedForParent's key.
+    const a = await seedAgent('a')
+    const b = await seedAgent('b')
+    const c = await seedAgent('c')
+    const nowSec = () => Math.floor(Date.now() / 1000)
+    const tree1 = await seedTree(a, b)
+    const tree2 = await seedTree(a, c)
+    const otherBudget = await seedTree(a, b, { parentDelegationHash: `0x${'e'.repeat(64)}` })
+    for (const row of [tree1.parentChild, tree1.grant, tree2.parentChild, otherBudget.parentChild, otherBudget.grant]) {
+      await markOpen(row.id, a.agentId, JSON.stringify({ signed: true }))
+    }
+    // tree2's grant still pending — reserves nothing.
+    expect(await sumOpenReservedForBudgetDelegation(a.agentId, BUDGET_HASH, nowSec())).toBe(500000n)
+
+    await markOpen(tree2.grant.id, a.agentId, JSON.stringify({ signed: true }))
+    expect(await sumOpenReservedForBudgetDelegation(a.agentId, BUDGET_HASH, nowSec())).toBe(1000000n)
+
+    // Another budget's tree, another agent and an unknown hash never count.
+    expect(await sumOpenReservedForBudgetDelegation(a.agentId, `0x${'e'.repeat(64)}`, nowSec())).toBe(500000n)
+    expect(await sumOpenReservedForBudgetDelegation(b.agentId, BUDGET_HASH, nowSec())).toBe(0n)
+    expect(await sumOpenReservedForBudgetDelegation(a.agentId, `0x${'f'.repeat(64)}`, nowSec())).toBe(0n)
+
+    // A grant past its expiry reserves nothing.
+    expect(await sumOpenReservedForBudgetDelegation(a.agentId, BUDGET_HASH, nowSec() + 7200)).toBe(0n)
   })
 })

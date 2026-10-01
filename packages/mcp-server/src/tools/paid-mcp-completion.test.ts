@@ -586,8 +586,10 @@ describe('haven_settle_mcp_tool', () => {
     const data = result.data as Record<string, any>
 
     expect(data.settled).toBe(true)
-    // F1: additive — the pre-existing field stays alongside the new one.
-    expect(data.agent_summary.product).toBe('buy_cloud_storage')
+    // F1: additive — the field stays alongside purchase_summary.
+    // #3497 item 2: it now reads the MERCHANT's product name (the same source
+    // purchase_summary.product reads), not the tool name.
+    expect(data.agent_summary.product).toBe('CloudNest 50GB')
     expect(data.agent_summary.purchase_summary).toBeDefined()
     const summary = data.agent_summary.purchase_summary as Record<string, unknown>
     expect(summary.status).toBe('settled')
@@ -598,6 +600,65 @@ describe('haven_settle_mcp_tool', () => {
     // hash above (both are settlement evidence on this scheme, never funding).
     expect(summary.funding_tx_hash).toBeNull()
     expect(summary.product).toBe('CloudNest 50GB')
+  })
+
+  /**
+   * #3497 item 2, the tool-name fallback: a settled erc7710 response whose
+   * delivered result carries NO product metadata still reports a product —
+   * the tool name that called the merchant — and it agrees with
+   * purchase_summary's own absent product rather than inventing one there.
+   * (F1's twin above pins the merchant-name path; this pins the fallback.)
+   */
+  it('falls back agent_summary.product to the tool name when the settled erc7710 result names no product', async () => {
+    stubFetch({})
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue('HEADER_FROM_HAVEN')
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      // No structuredContent.summary at all — nothing the metadata reader can
+      // lift a product name from.
+      body: { content: [{ type: 'text', text: 'storage unlocked' }] },
+      settlementTxHash: '0x' + 'ab'.repeat(32),
+      evidenceOutcome: { outcome: 'confirmed' },
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: {
+        paymentId: 'pay_7710_fallback',
+        kind: 'payment_intent',
+        rail: 'erc7710',
+        status: 'confirmed',
+        phase: AgentPaymentPhase.PaymentConfirmed,
+        nextAction: AgentPaymentNextAction.None,
+        amount: '500',
+        token: 'USDC',
+        resourceUrl: 'http://merchant.test/mcp',
+        merchantAddress: null,
+        txHash: null,
+        expiresAt: '2026-09-28T12:00:00.000Z',
+        chainId: 84532,
+        message: 'The payment settled.',
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710_fallback',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_cloud_storage',
+        arguments: { tier: '50gb' },
+      }),
+    )
+    const data = result.data as Record<string, any>
+    expect(data.settled).toBe(true)
+    expect(data.agent_summary.product).toBe('buy_cloud_storage')
+    expect((data.agent_summary.purchase_summary as Record<string, unknown>).product).toBeNull()
   })
 
   /**

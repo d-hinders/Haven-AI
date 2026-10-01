@@ -65,6 +65,12 @@ const BASE = account('base1', 'Base account', 8453, true)
 
 const STALE_AS_OF = '2026-09-25T07:55:00.000Z'
 
+function getBaseCard(): HTMLElement {
+  const card = screen.getByRole('link', { name: 'Base account' }).closest('[data-testid="account-card"]')
+  if (!(card instanceof HTMLElement)) throw new Error('Missing Base account card')
+  return card
+}
+
 describe('AccountsOverviewClient — degraded balance reads (#3295)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -96,7 +102,7 @@ describe('AccountsOverviewClient — degraded balance reads (#3295)', () => {
     })
     render(<AccountsOverviewClient />)
 
-    const activeCard = screen.getByLabelText('Base account')
+    const activeCard = getBaseCard()
     // The last-known figure, never an understated zero, never "Unavailable".
     expect(within(activeCard).getByText('$1,234.56')).toBeInTheDocument()
     expect(within(activeCard).getByText(/as of /)).toBeInTheDocument()
@@ -123,7 +129,7 @@ describe('AccountsOverviewClient — degraded balance reads (#3295)', () => {
     })
     render(<AccountsOverviewClient />)
 
-    const activeCard = screen.getByLabelText('Base account')
+    const activeCard = getBaseCard()
     expect(within(activeCard).getByText('Unavailable')).toBeInTheDocument()
     expect(within(activeCard).queryByText(/as of /)).not.toBeInTheDocument()
   })
@@ -141,7 +147,7 @@ describe('AccountsOverviewClient — degraded balance reads (#3295)', () => {
     })
     render(<AccountsOverviewClient />)
 
-    const activeCard = screen.getByLabelText('Base account')
+    const activeCard = getBaseCard()
     expect(within(activeCard).getByText('$500.00')).toBeInTheDocument()
     expect(within(activeCard).queryByText(/as of /)).not.toBeInTheDocument()
     expect(within(activeCard).queryByText('Unavailable')).not.toBeInTheDocument()

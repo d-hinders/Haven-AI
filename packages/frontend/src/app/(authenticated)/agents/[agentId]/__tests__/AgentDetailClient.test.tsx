@@ -2,8 +2,9 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { budgetCardTokens } = vi.hoisted(() => ({
+const { budgetCardTokens, budgetCardRetired } = vi.hoisted(() => ({
   budgetCardTokens: [] as Array<Array<{ address: string; symbol: string; decimals: number }>>,
+  budgetCardRetired: [] as Array<string | undefined>,
 }))
 
 const {
@@ -99,8 +100,9 @@ vi.mock('@/components/EditAgentModal', () => ({
 vi.mock('@/components/DelegationBudgetCard', () => ({
   // #2473: records the token options it was handed, so the first-budget
   // regression can be asserted without rendering the real card.
-  default: (props: { tokens: Array<{ address: string; symbol: string; decimals: number }> }) => {
+  default: (props: { tokens: Array<{ address: string; symbol: string; decimals: number }>; retired?: string }) => {
     budgetCardTokens.push(props.tokens)
+    budgetCardRetired.push(props.retired)
     return <div>DelegationBudgetCard</div>
   },
   DELEGATION_BUDGET_CARD_ID: 'delegation-budget-card',
@@ -905,6 +907,42 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Unlink agent' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
+  })
+
+  // #3549: every page-level "Update/Add budget" scrolls to the card; on a
+  // removed agent the card offers no form, so none of them may render. Same
+  // gate a revoked agent already had.
+  // The archived-but-not-revoked shape is the one ARCHIVE_AGENT_SQL allows
+  // besides revoked: an UNLINKED agent (account_id NULL) with no live budget.
+  // A delegator-account agent can only be archived once revoked.
+  it('an archived agent offers no Update budget or Add budget entry point (#3549)', () => {
+    mockAgentWith({ account_id: null, status: 'active', archived_at: '2026-06-01T00:00:00Z' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('button', { name: 'Update budget' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add budget' })).not.toBeInTheDocument()
+  })
+
+  it('the same agent un-archived still offers Update budget (#3549 control)', () => {
+    mockAgentWith({ account_id: null, status: 'active', archived_at: null })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getAllByRole('button', { name: /Update budget|Add budget/ }).length).toBeGreaterThan(0)
+  })
+
+  // #3549: the card hides set/edit/issue-sub-budget for a retired agent — the
+  // page must tell it which agents are retired, or the gate never engages.
+  it.each([
+    ['an active agent', { status: 'active', archived_at: null }, undefined],
+    ['a revoked agent', { status: 'revoked', archived_at: null }, 'revoked'],
+    ['a paused agent', { status: 'paused', archived_at: null }, undefined],
+    ['a pending_approval agent', { status: 'pending_approval', archived_at: null }, undefined],
+    ['an archived unlinked agent', { account_id: null, status: 'active', archived_at: '2026-06-01T00:00:00Z' }, 'archived'],
+    ['a revoked and archived agent', { status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }, 'revoked'],
+  ])('hands the budget card retired=%s state (#3549)', (_label, overrides, expected) => {
+    budgetCardRetired.length = 0
+    mockAgentWith(overrides)
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(budgetCardRetired.length).toBeGreaterThan(0)
+    expect(budgetCardRetired.at(-1)).toBe(expected)
   })
 
   it('double-clicking Restore fires unarchive ONCE — pendingAction guards it (#1402)', async () => {

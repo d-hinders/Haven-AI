@@ -218,6 +218,21 @@ describe('DelegationBudgetCard (#833)', () => {
     }
   })
 
+  it('?grant= on a retired agent leaves the link alone — there is no form to fill (#3549)', async () => {
+    const restore = withSearch(`?grant=${'0x' + 'cd'.repeat(32)}`)
+    const replaceState = vi.spyOn(window.history, 'replaceState')
+    try {
+      mockGet.mockReturnValue([budget({ delegation_hash: '0x' + 'cd'.repeat(32), status: 'pending' })])
+      render(<DelegationBudgetCard {...PROPS} retired="archived" />)
+      await waitFor(() => expect(screen.getByText('No active budget.')).toBeTruthy())
+      expect(screen.queryByLabelText('Budget amount')).toBeNull()
+      expect(replaceState).not.toHaveBeenCalled()
+    } finally {
+      replaceState.mockRestore()
+      restore()
+    }
+  })
+
   it('?grant= with a recipient pin pre-fills the recipient too (#2539)', async () => {
     const restore = withSearch(`?grant=${'0x' + 'cd'.repeat(32)}`)
     try {
@@ -370,5 +385,64 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
     render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
     expect(screen.queryByText(/reserved for task budgets/)).toBeNull()
+  })
+})
+
+describe('DelegationBudgetCard on a retired agent (#3549)', () => {
+  // Nothing that GRANTS authority is offered to a revoked or removed agent;
+  // reading what is left and ending it (Stop) still are.
+  it.each([
+    ['revoked', /This agent has been revoked, so its budgets can only be stopped/],
+    ['archived', /This agent has been removed, so its budgets can only be stopped/],
+  ] as const)('%s: no Set budget, Edit or Issue sub-budget — one-line reason instead', async (retired, reason) => {
+    // Same fixture, two renders: the controls are THERE on a live agent, so
+    // their absence below is the retired gate and not a fixture that never
+    // rendered them (an Edit / Issue sub-budget needs an active, unexpired row).
+    mockGet.mockReturnValue([budget()])
+    const live = render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText('Issue sub-budget')).toBeTruthy())
+    expect(screen.getByText('Set budget')).toBeTruthy()
+    expect(screen.getByText('Edit')).toBeTruthy()
+    expect(screen.getByLabelText('Period')).toBeTruthy()
+    live.unmount()
+
+    render(<DelegationBudgetCard {...PROPS} retired={retired} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+    expect(screen.getByText(reason)).toBeTruthy()
+    // The whole grant form is gone, not just its button.
+    expect(screen.queryByText('Set budget')).toBeNull()
+    expect(screen.queryByLabelText('Budget amount')).toBeNull()
+    expect(screen.queryByLabelText('Period')).toBeNull()
+    expect(screen.queryByLabelText('Recipient')).toBeNull()
+    expect(screen.queryByText('Edit')).toBeNull()
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.getByText('Stop')).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/delegation|caveat|redemption|userop|permission/i)
+  })
+
+  it.each(['revoked', 'archived'] as const)('%s: Stop stays available and still ends the budget', async (retired) => {
+    mockGet.mockReturnValue([budget()])
+    mockRevoke.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} retired={retired} />)
+    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
+    expect((screen.getByText('Stop').closest('button') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByText('Stop'))
+    await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('0x' + 'ab'.repeat(32)))
+  })
+
+  it('keeps the task-budget list read-only on a retired agent', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: null })])
+    mockTaskBudgets.mockReturnValue([taskBudget({ max_atomic: '2000000' })])
+    render(<DelegationBudgetCard {...PROPS} retired="revoked" />)
+    await waitFor(() => expect(screen.getByText('Task budgets')).toBeTruthy())
+    expect(screen.getByText(/2 USDC reserved for task budgets/)).toBeTruthy()
+  })
+
+  it('with no active budget it never invites the owner to set one', async () => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} retired="revoked" />)
+    await waitFor(() => expect(screen.getByText('No active budget.')).toBeTruthy())
+    expect(document.body.textContent).not.toMatch(/set one below|Set how much|can only be stopped/)
+    expect(screen.queryByText('Set budget')).toBeNull()
   })
 })

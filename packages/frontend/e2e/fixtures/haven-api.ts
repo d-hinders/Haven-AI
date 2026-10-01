@@ -1009,7 +1009,14 @@ export async function serveAgentDetailResponses(
   // #3506: the shared list's other agent is also named "Research agent", so a
   // spec that shows BOTH names side by side (the sub-budget modal) can give
   // it a distinct one. Default unchanged, so no other baseline moves.
-  options: { otherAgentName?: string } = {},
+  options: {
+    otherAgentName?: string
+    // #3549: revoke the researched agent while it still holds its ACTIVE
+    // delegation — the half-revoked state #3542 describes, reachable whenever
+    // a credential is revoked before its budget (`POST /revoke` flips status
+    // only). No archived override: archiving needs no live budget.
+    agentOverrides?: { status?: 'revoked' }
+  } = {},
 ) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -1030,6 +1037,7 @@ export async function serveAgentDetailResponses(
             ...testAgent,
             id: agentId,
             created_at: '2026-05-02T10:00:00.000Z',
+            ...options.agentOverrides,
             allowances: [
               {
                 id: 'dlg-e2e-1',

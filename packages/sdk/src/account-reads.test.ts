@@ -250,6 +250,164 @@ describe('AccountReads', () => {
     })
   })
 
+  // ── #3518: the settle summary reports the budget that PAID ──────────────
+  // The payment status carries `budgetDelegationHash` (recorded at authorize,
+  // migration 053); the allowance row whose `delegationHash` equals it is the
+  // one whose remaining figure is honest. The fixture is the issue's own
+  // two-budget shape — an OPEN allowance created FIRST and a PINNED one for
+  // the same token — so the first token row is deliberately NOT the one that
+  // paid, which is exactly what the old first-match rule reported.
+  const OPEN_BUDGET_HASH = `0x${'aa'.repeat(32)}`
+  const PINNED_BUDGET_HASH = `0x${'bb'.repeat(32)}`
+  const PINNED_MERCHANT = '0x' + 'ee'.repeat(20)
+
+  /** The issue's fixture: open 0.001 created first, pinned 5,000,000 second. */
+  function twoBudgetAllowance() {
+    return {
+      agent_id: 'agent_1', account_address: '0xsafe', delegate_address: '0xdelegate', chain_id: 8453,
+      allowances: [
+        {
+          id: 'allowance_open', token_address: USDC, token_symbol: 'USDC',
+          configured_amount: '1000', reset_period_min: 1440,
+          delegation_hash: OPEN_BUDGET_HASH, recipient_address: null, merchant_id: null,
+          reserved_haven_atomic: '0',
+          onchain: { amount: '1000', spent: '0', remaining: '1000', effective_spent: '0', reset_time_min: 1440, last_reset_min: 0, nonce: 1, is_reset_pending: false },
+        },
+        {
+          id: 'allowance_pinned', token_address: USDC, token_symbol: 'USDC',
+          configured_amount: '5000000000000', reset_period_min: 1440,
+          delegation_hash: PINNED_BUDGET_HASH, recipient_address: PINNED_MERCHANT, merchant_id: null,
+          reserved_haven_atomic: '0',
+          onchain: { amount: '5000000000000', spent: '0', remaining: '5000000000000', effective_spent: '0', reset_time_min: 1440, last_reset_min: 0, nonce: 1, is_reset_pending: false },
+        },
+      ],
+    }
+  }
+
+  function settleReads(payment: Record<string, unknown>) {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent('delegation'))
+      if (path === '/machine-payments/allowances') return json(twoBudgetAllowance())
+      throw new Error(`Unexpected ${path}`)
+    }))
+    return reads(async () => payment as unknown as PaymentStatusResult)
+  }
+
+  it('#3518: the recorded budget_delegation_hash picks the PINNED row — the one that paid, not the first token row', async () => {
+    const service = settleReads({
+      paymentId: 'pay_1', asset: USDC, status: 'settled',
+      budgetDelegationHash: PINNED_BUDGET_HASH,
+    })
+    const summary = await service.getPostPurchaseAllowanceSummary('pay_1')
+    expect(summary.allowance).not.toBeNull()
+    // The pinned budget paid: its remaining (5,000,000,000,000), never the
+    // open row's 1000 that first-match would have named.
+    expect(summary.allowance?.remaining_atomic).toBe('5000000000000')
+    expect(summary.allowance?.tokenAddress).toBe(USDC)
+    expect(summary.warnings).toEqual([])
+  })
+
+  it('#3518: a payment whose recorded hash names its task-budget PARENT still keys on the hash, not the payee', async () => {
+    // A task-budget payment meters its PARENT by hash; the parent here is the
+    // OPEN budget (a task payment matches no pin at all — the case where a
+    // re-derived (token, payee) rule would answer the pinned row).
+    const service = settleReads({
+      paymentId: 'pay_1', asset: USDC, status: 'settled',
+      budgetDelegationHash: OPEN_BUDGET_HASH,
+    })
+    const summary = await service.getPostPurchaseAllowanceSummary('pay_1')
+    expect(summary.allowance?.remaining_atomic).toBe('1000')
+  })
+
+  it('#3518: a status payload from an older backend (no recorded hash) keeps the token first-match fallback', async () => {
+    const service = settleReads({ paymentId: 'pay_1', asset: USDC, status: 'settled' })
+    const summary = await service.getPostPurchaseAllowanceSummary('pay_1')
+    // No paying hash on the wire: the legacy first-match behaviour, kept only
+    // where nothing better exists.
+    expect(summary.allowance?.remaining_atomic).toBe('1000')
+  })
+
+  it('#3518: a hash that matches no listed row still reports the row set it has (never a fabricated figure)', async () => {
+    const service = settleReads({
+      paymentId: 'pay_1', asset: USDC, status: 'settled',
+      budgetDelegationHash: `0x${'cc'.repeat(32)}`,
+    })
+    const summary = await service.getPostPurchaseAllowanceSummary('pay_1')
+    expect(summary.allowance?.remaining_atomic).toBe('1000')
+    expect(summary.warnings).toEqual([])
+  })
+
+  // #3518: the agent read's task-budget list reads `status=all` and filters
+  // client-side — closing rows always ride, closed and expired rows drop —
+  // and every mapped row carries its lifecycle status.
+  it('#3518: a closing or pending task budget rides getAgentSummary with its status; closed and expired rows drop', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent('delegation'))
+      if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') {
+        const row = (id: string, status: string, isExpired: boolean) => ({
+          id, agent_id: 'agent_1', chain_id: 8453, token_address: USDC,
+          recipient_address: null, parent_delegation_hash: `0x${'ab'.repeat(32)}`,
+          delegation_hash: `0x${'cd'.repeat(32)}`, label: id, max_atomic: '1500',
+          status, expires_at: isExpired ? 1000 : 9999999999, is_expired: isExpired,
+          created_at: '2026-09-30T00:00:00.000Z', opened_at: '2026-09-30T00:00:00.000Z',
+          closed_at: status === 'closed' ? '2026-09-30T01:00:00.000Z' : null, close_tx_hash: null,
+        })
+        return json({ task_budgets: [
+          row('tb-pending', 'pending', false),
+          row('tb-open', 'open', false),
+          row('tb-closing-expired', 'closing', true), // closing ALWAYS rides, expired or not
+          row('tb-closed', 'closed', false),          // terminal — drops
+          row('tb-open-expired', 'open', true),       // reserves nothing — drops
+        ] })
+      }
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    const summary = await service.getAgentSummary()
+    expect(summary.taskBudgets.map((row) => row.id)).toEqual(['tb-pending', 'tb-open', 'tb-closing-expired'])
+    expect(summary.taskBudgets.map((row) => row.status)).toEqual(['pending', 'open', 'closing'])
+    expect(summary.taskBudgets.map((row) => row.isExpired)).toEqual([false, false, true])
+  })
+
+  // #3518: the allowance rows carry each budget's SCOPE (the recipient pin,
+  // the merchant lock) and the Haven-side reservation beside the on-chain
+  // figure — the fields that let an agent name the merchant-locked budget
+  // BEFORE paying. Additive: an older backend's rows keep them absent.
+  it('#3518: allowance rows expose delegationHash/recipientAddress/merchantId/reservedHavenAtomic, absent on an older backend', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent('delegation'))
+      if (path === '/machine-payments/allowances') return json(twoBudgetAllowance())
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    const { allowances } = await service.getAllowances()
+    expect(allowances).toHaveLength(2)
+    const [openRow, pinnedRow] = allowances
+    expect(openRow.delegationHash).toBe(OPEN_BUDGET_HASH)
+    expect(openRow.recipientAddress).toBeNull()
+    expect(openRow.merchantId).toBeNull()
+    expect(openRow.reservedHavenAtomic).toBe('0')
+    expect(pinnedRow.delegationHash).toBe(PINNED_BUDGET_HASH)
+    expect(pinnedRow.recipientAddress).toBe(PINNED_MERCHANT)
+
+    // The old shape: no scope fields on the wire → absent, never null-typed.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent('delegation'))
+      if (path === '/machine-payments/allowances') return json(allowance())
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const legacy = await service.getAllowances()
+    expect(legacy.allowances[0].delegationHash).toBeUndefined()
+    expect(legacy.allowances[0].recipientAddress).toBeUndefined()
+    expect(legacy.allowances[0].merchantId).toBeUndefined()
+    expect(legacy.allowances[0].reservedHavenAtomic).toBeUndefined()
+  })
+
   it('maps receipt history without exposing proof headers', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ receipts: [{
       id: 'receipt_1', payment_id: 'pay_1', rail: 'x402', proof_status: 'settled', tx_hash: '0xtx', chain_id: 8453,

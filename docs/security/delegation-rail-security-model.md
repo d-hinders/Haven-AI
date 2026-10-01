@@ -62,7 +62,7 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/issuance.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-01"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1145,6 +1145,26 @@ proving on-chain state (the on-chain `CannotRemoveLastSigner` guard is the
 hard backstop). And a provisioning-time EOA owner is **not signature-verified**
 — the floor counts enrolled signers, it cannot prove each is usable (the zero
 address, which provably is NOT a signer, is rejected at every entry point).
+
+> **Re-verified #3518 (2026-10-01):** this PR adds a READ-ONLY export to
+> `infra/repositories/delegation-budgets.ts` — `selectBudgetForPaymentReport`,
+> the report-side mirror of the payment's own `SELECT_DELEGATION_FOR_PAYMENT_SQL`
+> (same recipient match, live window and ordering, over rows the derived view
+> already read). It writes nothing, activates nothing, retires nothing, and is
+> called only from the budget precheck's compare and the balance-coverage
+> report — both of which previously picked the FIRST per-token row, a
+> selection that could disagree with the enforcer about which caveat-bounded
+> grant a payment draws on. The change moves that off-chain opinion; the
+> on-chain gate is unchanged: spend remains bounded by the caveat stack
+> (`MultiTokenPeriodEnforcer` + allowed recipients + `Timestamp`), redemption
+> still requires the delegate key's signature, and the activation/replace
+> transaction this section pins (#1061/#2411/#2415) is untouched. Selection
+> opinion is not authority: no grant is created, widened, or redeemed by
+> choosing differently which existing owner-signed row a REPORT cites. The
+> same round adds read-only columns to `listActiveDelegations`' projection
+> (`delegation_hash`, `recipient_address`, `merchant_id`, the window, the
+> creation timestamp) — visibility fields for which budget a row is, with no
+> writer. Perimeter unchanged.
 
 The dashboard now delivers the recovery recommendation after funding, and both
 two-to-one signer-removal paths require an explicit consequence confirmation.

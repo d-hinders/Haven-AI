@@ -344,3 +344,77 @@ describe('EditBudgetModal (#3166) — wiring pins', () => {
     ).toMatch(/import EditBudgetModal from '\.\/EditBudgetModal'/)
   })
 })
+
+// #3537: the agent detail page re-renders every 10s on its agent poll, handing
+// the open modal a NEW `tokens` array and a NEW `budget` object carrying the
+// same data. That must not re-prefill the form or drop the step / outcome.
+describe('EditBudgetModal (#3537) — background poll', () => {
+  function renderControlled() {
+    const props = { onClose: vi.fn(), onBudgetChange: vi.fn(), agentId: 'agent-1', chainId: 84532 }
+    const view = render(<EditBudgetModal open tokens={PROPS.tokens} budget={budget()} {...props} />)
+    const rerenderWith = (next: { open?: boolean; budget?: DelegationBudget } = {}) =>
+      view.rerender(
+        <EditBudgetModal
+          open={next.open ?? true}
+          // Fresh identities, identical data — what the poll produces.
+          tokens={PROPS.tokens.map((t) => ({ ...t }))}
+          budget={next.budget ?? budget()}
+          {...props}
+        />,
+      )
+    return { rerenderWith }
+  }
+
+  it('keeps the typed amount, period and recipient across a poll', () => {
+    const { rerenderWith } = renderControlled()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText('Period'), { target: { value: '604800' } })
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: RECIPIENT } })
+
+    rerenderWith()
+
+    expect(screen.getByLabelText('Budget amount')).toHaveValue('10')
+    expect(screen.getByLabelText('Period')).toHaveValue('604800')
+    expect(screen.getByLabelText('Recipient')).toHaveValue(RECIPIENT)
+  })
+
+  it('stays on the review step across a poll', () => {
+    const { rerenderWith } = renderControlled()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeInTheDocument()
+
+    rerenderWith()
+
+    expect(screen.getByRole('button', { name: 'Sign new budget' })).toBeInTheDocument()
+  })
+
+  it('keeps the revoke_unfinished outcome across a poll', async () => {
+    mockEditBudget.mockResolvedValue({
+      ok: false,
+      reason: 'revoke_unfinished',
+      newDelegationHash: '0x' + 'be'.repeat(32),
+    })
+    const { rerenderWith } = renderControlled()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
+    await waitFor(() => expect(screen.getByText(/New budget is live — one step left/)).toBeInTheDocument())
+
+    rerenderWith()
+
+    expect(screen.getByText(/New budget is live — one step left/)).toBeInTheDocument()
+  })
+
+  it('discards unsaved edits on close and re-prefills from the current budget on reopen', () => {
+    const { rerenderWith } = renderControlled()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+
+    rerenderWith({ open: false })
+    rerenderWith({ open: true, budget: budget({ budget_atomic: '7000000' }) })
+
+    expect(screen.getByLabelText('Budget amount')).toHaveValue('7')
+    expect(screen.queryByRole('button', { name: 'Sign new budget' })).not.toBeInTheDocument()
+  })
+})

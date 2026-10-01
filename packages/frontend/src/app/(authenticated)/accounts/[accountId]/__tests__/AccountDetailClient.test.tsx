@@ -379,7 +379,11 @@ describe('AccountDetailClient', () => {
       withAgent({ live_delegation_count: 1 })
       render(<AccountDetailClient />)
 
-      expect(screen.getByText(/Budget still active/)).toBeInTheDocument()
+      // Short enough for 390px, and in warning tone rather than plain grey.
+      const line = screen.getByText('Budget still active on-chain')
+      expect(line.className).toContain('--v2-warning')
+      // The badge no longer paints a live budget in the danger red.
+      expect(screen.getByText('Revoked').className).toContain('--v2-warning')
       expect(screen.queryByText(/Access revoked/)).not.toBeInTheDocument()
       const row = screen.getByRole('link', { name: /Old agent/ })
       expect(row).toHaveAttribute('href', '/agents/agent-9')

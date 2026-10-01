@@ -280,7 +280,7 @@ describe('AgentPanel Removed group and half-revoked agents (#3542)', () => {
     render(<AgentPanel />)
     fireEvent.click(screen.getByRole('button', { name: /Removed\s*\(1\)/ }))
 
-    expect(screen.getByText(/its budget is still active on-chain/i)).toBeVisible()
+    expect(screen.getByText(/its budget is still active on.chain/i)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Finish revoking Old agent' })).toBeVisible()
   })
 
@@ -303,7 +303,7 @@ describe('AgentPanel Removed group and half-revoked agents (#3542)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'stub: budget ended' }))
 
     expect(refetch).toHaveBeenCalledWith({ silent: true })
-    expect(screen.queryByText(/its budget is still active on-chain/i)).toBeNull()
+    expect(screen.queryByText(/its budget is still active on.chain/i)).toBeNull()
     expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
     expect(screen.getByRole('button', { name: /Removed\s*\(1\)/ })).not.toHaveTextContent(/active budget/i)
     // Still archived, still in Removed: finishing moves nothing.
@@ -313,7 +313,7 @@ describe('AgentPanel Removed group and half-revoked agents (#3542)', () => {
   it('a revoked, un-archived agent in the main list gets the marker too', () => {
     setAgents([agent({ status: 'revoked', live_delegation_count: 1 })])
     render(<AgentPanel />)
-    expect(screen.getByText(/its budget is still active on-chain/i)).toBeInTheDocument()
+    expect(screen.getByText(/its budget is still active on.chain/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeInTheDocument()
     // Not archived: no Removed group, so no toggle warning to show.
     expect(screen.queryByRole('button', { name: /Removed/ })).toBeNull()

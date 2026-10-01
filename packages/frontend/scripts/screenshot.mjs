@@ -3179,6 +3179,10 @@ async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
   await shoot(page.locator('main').first(), 'page')
 }
 
+// Staged by the `half-revoked-agents` run: how the superseded card's signer set
+// answers (`ready` | `not-ready` | `loading`). Reset at the top of each run.
+let halfRevokedSignerStage = 'ready'
+
 export const SCENARIOS = {
   'settings-accounting': {
     description:
@@ -3616,16 +3620,95 @@ export const SCENARIOS = {
   'half-revoked-agents': {
     description:
       'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the collapsed Removed toggle carrying its warning, the expanded Removed group, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
-    api(apiPath) {
-      if (apiPath === '/agents') {
+    api(apiPath, method) {
+      if (apiPath === '/agents' && method === 'GET') {
         return {
           agents: [...FIXTURE_AGENTS, ...FIXTURE_HALF_REVOKED_AGENTS],
           organizations: FIXTURE_ORGANIZATIONS,
         }
       }
+      // The Finish revoking dialog mounts the budget hook for the half-revoked
+      // agents, whose signer set must resolve (one enrolled passkey: ready).
+      if (apiPath.startsWith('/agents/agent-half-') && apiPath.endsWith('/account-signers')) {
+        return {
+          account_address: FIXTURE_ACCOUNT.account_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
+          owner_address: null,
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        }
+      }
+      // ── The superseded-agent revoke confirm (#3542 B), reached through the
+      // connect modal's completed setup exactly as `connect-agent-superseded-*`
+      // do. Its signer set is staged by the run: loading (delayed answer),
+      // cannot-sign (no signer at all) and ready (one enrolled passkey).
+      if (apiPath === '/agents/agent-research/account-signers') {
+        if (halfRevokedSignerStage === 'loading') {
+          return delayedHttp(30_000, {
+            account_address: FIXTURE_ACCOUNT.account_address, chain_id: FIXTURE_ACCOUNT.chain_id,
+            owner_address: null, passkeys: [],
+          })
+        }
+        return {
+          account_address: FIXTURE_ACCOUNT.account_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
+          owner_address: null,
+          passkeys: halfRevokedSignerStage === 'not-ready'
+            ? []
+            : [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        }
+      }
+      if (apiPath === '/agents/agent-research/revoke' && method === 'POST') return {}
+      if (apiPath === '/agents/agent-research/delegations/revoke-all' && method === 'POST') {
+        // A prepare the headless browser cannot sign: no WebAuthn here, so the
+        // ceremony fails and the card shows its "key revoked, budget still
+        // active" result — the same screen a cancelled signature produces.
+        return {
+          signature_scheme: 'webauthn_userop',
+          user_operation: {},
+          user_op_hash: '0x' + '9c'.repeat(32),
+          delegation_hashes: ['0x' + '4d'.repeat(32)],
+        }
+      }
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'active',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          setup_prompt: 'Please connect this workspace to Haven.',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-fixture-new',
+          status: 'active',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'New agent', description: null },
+          haven_wallet: {
+            id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.account_address, chain_id: FIXTURE_ACCOUNT.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [{
+            id: 'budget-1', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440,
+          }],
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          install_status: {
+            runtime_mcp_mode: 'local_stdio', local_mcp_configured: true,
+            local_mcp_acknowledged: true, credential_files_written: true,
+            skill_installed: false, restart_required: true,
+            superseded_agent_ids: ['agent-research'],
+          },
+          approval: { status: 'confirmed', safe_tx_hash: null, tx_hash: null },
+        }
+      }
       return undefined
     },
     async run({ page, vp, shoot }) {
+      halfRevokedSignerStage = 'ready'
       // ── /agents: list card, collapsed toggle, expanded Removed group ──────
       await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
@@ -3634,6 +3717,15 @@ export const SCENARIOS = {
       await revokedCard.getByRole('button', { name: 'Finish revoking Legacy research agent' }).waitFor({ timeout: 20_000 })
       await revokedCard.scrollIntoViewIfNeeded()
       await shoot(revokedCard, 'list-card-revoked')
+
+      // Finish mode of the Remove dialog, opened from Finish revoking.
+      await revokedCard.getByRole('button', { name: 'Finish revoking Legacy research agent' }).click()
+      const finishDialog = page.getByRole('dialog', { name: 'Finish revoking Legacy research agent?' })
+      await finishDialog.waitFor({ timeout: 20_000 })
+      await finishDialog.getByText(/You sign once and every budget it still holds ends/).waitFor({ timeout: 20_000 })
+      await shoot(finishDialog, 'finish-dialog')
+      await finishDialog.getByRole('button', { name: 'Cancel' }).click()
+      await finishDialog.waitFor({ state: 'detached', timeout: 20_000 })
 
       // The toggle carries the warning while the group is COLLAPSED — that is
       // the state the owner sees by default, and the whole reason for it.
@@ -3665,6 +3757,52 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
       await page.getByText(/Budget still active/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-summary')
+
+      // ── Superseded-agent revoke confirm: loading, cannot sign, ready, result ──
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const connect = page.getByRole('dialog').first()
+      await connect.getByLabel('Agent name').fill('New agent')
+      await connect.getByRole('button', { name: 'Set agent budget' }).click()
+      await connect.getByPlaceholder('Amount').fill('25')
+      await connect.getByRole('button', { name: 'Review agent budget' }).click()
+      await connect.getByRole('button', { name: 'Create setup prompt' }).click()
+      await connect.getByText(/This setup replaced /).waitFor({ timeout: 30_000 })
+
+      const confirm = page.getByRole('dialog', { name: 'Revoke Research agent?' })
+      const openConfirm = async (stage) => {
+        halfRevokedSignerStage = stage
+        await connect.getByRole('button', { name: 'Revoke Research agent' }).click()
+        await confirm.waitFor({ timeout: 20_000 })
+      }
+      const closeConfirm = async () => {
+        await confirm.getByRole('button', { name: 'Keep it' }).click()
+        await confirm.waitFor({ state: 'detached', timeout: 20_000 })
+      }
+
+      // Signer set still loading: the confirm is busy, and says nothing about signing.
+      await openConfirm('loading')
+      await confirm.getByRole('button', { name: 'Working...' }).waitFor({ timeout: 20_000 })
+      await shoot(confirm, 'superseded-confirm-loading')
+      await closeConfirm()
+
+      // No signer reachable from this device: confirm still available, hint shown.
+      await openConfirm('not-ready')
+      await confirm.getByText(/cannot sign for the account/).waitFor({ timeout: 20_000 })
+      await shoot(confirm, 'superseded-confirm-cannot-sign')
+      await closeConfirm()
+
+      // Normal state: one enrolled passkey.
+      await openConfirm('ready')
+      await confirm.getByRole('button', { name: 'Revoke agent' }).waitFor({ timeout: 20_000 })
+      await shoot(confirm, 'superseded-confirm')
+
+      // Confirm: the credential is revoked, the signature cannot complete, and
+      // the card says which half happened.
+      await confirm.getByRole('button', { name: 'Revoke agent' }).click()
+      await connect.getByText(/Its key is revoked, but its budget is still active/).waitFor({ timeout: 30_000 })
+      await shoot(connect, 'superseded-result-budget-active')
     },
   },
 

@@ -313,6 +313,7 @@ export function SupersededAgentsCard({
                   <Button
                     variant="ghost"
                     size="sm"
+                    className="shrink-0 whitespace-nowrap"
                     aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
                     disabled={busyId !== null}
                     onClick={() => setFinishId(agent.id)}

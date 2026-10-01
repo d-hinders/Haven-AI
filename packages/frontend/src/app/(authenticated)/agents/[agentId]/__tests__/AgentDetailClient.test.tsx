@@ -141,6 +141,7 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
 }))
 
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
+import { HALF_REVOKED_TITLE } from '@/lib/half-revoked'
 import AgentDetailClient from '../AgentDetailClient'
 
 const SAFE = {
@@ -774,7 +775,7 @@ describe('AgentDetailClient last-activity metadata', () => {
    * card and carries the one action that ends it.
    */
   describe('half-revoked callout (#3542)', () => {
-    const MARKER = 'Revoked in Haven — its budget is still active on-chain'
+    const MARKER = HALF_REVOKED_TITLE
 
     beforeEach(() => {
       mockRouterPush.mockClear()

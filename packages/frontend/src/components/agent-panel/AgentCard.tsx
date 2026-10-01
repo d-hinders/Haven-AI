@@ -397,7 +397,7 @@ export function AgentCard({
           rather than this fix. */}
       <div
         data-testid="agent-card-actions"
-        className={`flex flex-wrap lg:flex-nowrap items-center ${isOperational ? 'gap-x-4 gap-y-2 lg:gap-2' : 'gap-2'} pt-3 pb-1 border-t border-[var(--v2-border)]`}
+        className={`flex flex-wrap ${isArchived && halfRevoked ? '' : 'lg:flex-nowrap'} items-center ${isOperational ? 'gap-x-4 gap-y-2 lg:gap-2' : 'gap-2'} pt-3 pb-1 border-t border-[var(--v2-border)]`}
       >
         {/* #3222 re-review S9: below `lg` the row wraps, and a `|` could only
             ever land at a line's start or end — round 3 moved it from one to
@@ -564,14 +564,7 @@ export function AgentCard({
                 destination is the point (`aria-label` says "to the list").
                 Rejected: widening the container — it is the agents grid column,
                 so every card on the page moves to fix one label. */}
-            <button
-              onClick={() => onRestore(agent)}
-              disabled={isBusy}
-              aria-label={`Restore ${agent.name} to the list`}
-              className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
-            >
-              {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
-            </button>
+            {/* #3542: the action that ends the live budget comes first. */}
             {canFinish && (
               <button
                 onClick={() => setFinishModalOpen(true)}
@@ -582,7 +575,19 @@ export function AgentCard({
                 {FINISH_REVOKING_LABEL}
               </button>
             )}
-            <span className="ml-auto text-xs text-[var(--v2-ink-3)]">
+            <button
+              onClick={() => onRestore(agent)}
+              disabled={isBusy}
+              aria-label={`Restore ${agent.name} to the list`}
+              className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
+            >
+              {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
+            </button>
+            {/* Half-revoked: the helper takes its own full-width line under the
+                buttons rather than wrapping beside them. */}
+            <span
+              className={`text-xs text-[var(--v2-ink-3)] ${halfRevoked ? 'basis-full' : 'ml-auto'}`}
+            >
               {halfRevoked
                 ? 'Restoring to the list does not end its budget'
                 : 'History stays readable; restoring never re-enables spending'}

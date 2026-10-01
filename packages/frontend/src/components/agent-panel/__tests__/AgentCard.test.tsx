@@ -355,7 +355,7 @@ describe('AgentCard action-row matrix (#1402)', () => {
  */
 describe('AgentCard half-revoked marker (#3542)', () => {
   const ARCHIVED = '2026-06-01T00:00:00Z'
-  const MARKER = /its budget is still active on-chain/i
+  const MARKER = /its budget is still active on.chain/i
 
   it('revoked + live budget: warning marker replaces "Network access already revoked", with Finish revoking', () => {
     renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }))

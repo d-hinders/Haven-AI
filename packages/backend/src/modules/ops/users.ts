@@ -7,8 +7,9 @@
  * not granted it), `payment_intents.machine_metadata` (it can carry resource
  * URLs and challenge payloads), and every hash, signature and delegation body.
  * `payment_intents.error_message` is returned: it is written through
- * `redactVendorSecrets` (`routes/payments.ts`). Over-budget, wrong-recipient
- * and expired reverts are `payment_refusals` rows, listed separately.
+ * `redactVendorSecrets` (`routes/payments.ts`). Guardrail refusals (budget,
+ * recipient pin, expiry, relayer budget, on-chain revert) are
+ * `payment_refusals` rows, listed separately.
  */
 import type { Executor } from '../../infra/transaction.js'
 import { readOpsUserDetail } from '../../infra/repositories/ops-reads.js'

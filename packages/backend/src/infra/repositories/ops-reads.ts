@@ -1,7 +1,7 @@
 /**
  * Ops console data reads (#3512, epic #3507). Convention: `README.md` in this
- * directory — with one deliberate exception, stated here because the README's
- * rule is per-user scoping: these reads are CROSS-TENANT BY DESIGN. They
+ * directory — with two deliberate exceptions, stated here. The README's rule
+ * is per-user scoping: these reads are CROSS-TENANT BY DESIGN. They
  * exist so a founder can look at any customer's account without signing in
  * as them.
  *

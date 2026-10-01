@@ -144,7 +144,7 @@ describeDb('ops console data reads (#3512)', () => {
     await seedOpsDelegation(a, { status: 'revoked' })
     await seedOpsDelegation(otherAgent)
     for (let i = 0; i < OPS_DETAIL_LIST_LIMIT + 3; i++) await seedOpsIntent(u, a, { error: i === 0 ? 'nonce too low' : null })
-    await seedOpsIntent(other, otherAgent)
+    const otherIntent = await seedOpsIntent(other, otherAgent)
     await seedOpsRefusal(u, a)
     await seedOpsRefusal(other, otherAgent)
 
@@ -159,6 +159,8 @@ describeDb('ops console data reads (#3512)', () => {
     expect(d!.delegations[0]).toMatchObject({ agent_id: a, recipient_address: hexOf(0x77, 20), budget_atomic: '1000000' })
     expect(Object.keys(d!.delegations[0])).not.toContain('delegation_json')
     expect(d!.intents).toHaveLength(OPS_DETAIL_LIST_LIMIT)
+    expect(d!.intents.every((r) => r.agent_id === a)).toBe(true)
+    expect(d!.intents.map((r) => r.id)).not.toContain(otherIntent)
     expect(Object.keys(d!.intents[0])).not.toContain('signature')
     expect(d!.refusals).toHaveLength(1)
     expect(d!.refusals[0]).toMatchObject({ reason: 'delegation_budget_exceeded', source: 'payment' })

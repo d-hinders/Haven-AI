@@ -16,6 +16,7 @@ import rateLimit from '@fastify/rate-limit'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 import { SharedRateLimitStore } from '../shared-rate-limit-store.js'
+import { opsRevealRateLimit, opsSearchRateLimit } from '../rate-limit.js'
 
 /**
  * The production store, with the degradation deadline widened for THIS suite.
@@ -107,6 +108,21 @@ describeDb('rate-limit plugin + SharedRateLimitStore + real Postgres (#1680)', (
     expect(limited.statusCode).toBe(429)
     expect(limited.headers['retry-after']).toBeDefined()
     expect(limited.json()).toMatchObject({ statusCode: 429 })
+    await app.close()
+  })
+
+  it('ops search has its own bucket: a founder who exhausts search can still reveal (#3512)', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(rateLimit, { global: false, keyGenerator: () => `integ:${subject}`, store: PatientStore as never })
+    app.get('/search', { config: opsSearchRateLimit }, async () => ({ ok: true }))
+    app.post('/reveal', { config: opsRevealRateLimit }, async () => ({ ok: true }))
+
+    for (let i = 0; i < opsSearchRateLimit.rateLimit.max; i++) {
+      expect((await app.inject({ method: 'GET', url: '/search' })).statusCode).toBe(200)
+    }
+    expect((await app.inject({ method: 'GET', url: '/search' })).statusCode).toBe(429)
+    // Same credential key; without the search groupId this would be the 62nd hit on one counter.
+    expect((await app.inject({ method: 'POST', url: '/reveal' })).statusCode).toBe(200)
     await app.close()
   })
 

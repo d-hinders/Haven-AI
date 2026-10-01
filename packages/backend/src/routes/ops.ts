@@ -34,7 +34,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { isOpsConfigured, type OpsConfig } from '../config/ops.js'
-import { authRateLimit, opsRevealRateLimit } from '../middleware/rate-limit.js'
+import { authRateLimit, opsRevealRateLimit, opsSearchRateLimit } from '../middleware/rate-limit.js'
 import { createOpsAuth, opsOperatorOf } from '../middleware/ops-auth.js'
 import {
   buildOpsOverview,
@@ -245,7 +245,7 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
   // GET /ops/search?q= — find a customer record by what was pasted.
   app.get<{ Querystring: { q: string } }>(
     '/search',
-    { onRequest: opsAuth, config: opsRevealRateLimit },
+    { onRequest: opsAuth, config: opsSearchRateLimit },
     async (request, reply) => {
       const key = detectOpsSearchKey(request.query.q)
       if ('error' in key) return reply.code(400).headers(NO_STORE).send({ error: key.error })

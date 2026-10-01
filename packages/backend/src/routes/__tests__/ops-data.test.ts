@@ -45,7 +45,7 @@ const OPS: OpsConfig = {
   publicOrigin: API,
 }
 const CUSTOMER_EMAIL = 'ada.lovelace@customer.example'
-const FORBIDDEN_KEY = /password_hash|_token$|_hash$|ciphertext|delegation_json|signature|machine_metadata/
+const FORBIDDEN_KEY = /password_hash|_token$|_hash$|ciphertext|delegation_json|prepared_user_op|signature|machine_metadata|company/
 
 const auth = { authorization: `Bearer ${signOpsToken({ secret: OPS.jwtSecret, issuer: API }, { githubId: 111, login: 'founder' })}` }
 

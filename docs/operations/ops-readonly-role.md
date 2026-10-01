@@ -8,6 +8,7 @@ covers:
   - packages/backend/src/db/ops-read-pool.ts
   - packages/backend/src/config/ops.ts
   - packages/backend/src/routes/ops.ts
+  - packages/backend/src/infra/repositories/ops-reads.ts
   - packages/backend/src/domain/redact-vendor-secrets.ts
 last-verified: "2026-10-01"
 ---

@@ -422,7 +422,7 @@ export type paths = {
         put?: never;
         /**
          * Mark an agent as revoked in Haven.
-         * @description Blocks Haven API access for the agent. Users can also revoke or change Safe module permissions outside Haven; on-chain revocation remains the authority boundary.
+         * @description Blocks Haven API access for the agent. Revoking is permitted from `active`, `paused` and `pending_approval` — nothing re-activates a revoked agent, so the credential cannot return to life (on-chain revocation remains the authority boundary). Revoking also cancels the agent's open connection setup in the same transaction, so a connect flow that has not finished cannot approve a budget for an agent that no longer exists. The agent's `api_key_hash` is kept: sweep recovery for a stranded delegate balance stays available. Users can also revoke or change Safe module permissions outside Haven.
          */
         post: operations["revokeAgent"];
         delete?: never;
@@ -7271,6 +7271,19 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The agent exists and is owned by the caller but cannot be revoked: `error_code` `already_revoked` (nothing to do) or `not_revocable` (the status is outside the revocable set). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "already_revoked" | "not_revocable";
                     };
                 };
             };

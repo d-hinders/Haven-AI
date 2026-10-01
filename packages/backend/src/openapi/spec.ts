@@ -2133,7 +2133,7 @@ export const openapiSpec = {
         operationId: 'revokeAgent',
         summary: 'Mark an agent as revoked in Haven.',
         description:
-          'Blocks Haven API access for the agent. Users can also revoke or change Safe module permissions outside Haven; on-chain revocation remains the authority boundary.',
+          'Blocks Haven API access for the agent. Revoking is permitted from `active`, `paused` and `pending_approval` — nothing re-activates a revoked agent, so the credential cannot return to life (on-chain revocation remains the authority boundary). Revoking also cancels the agent\'s open connection setup in the same transaction, so a connect flow that has not finished cannot approve a budget for an agent that no longer exists. The agent\'s `api_key_hash` is kept: sweep recovery for a stranded delegate balance stays available. Users can also revoke or change Safe module permissions outside Haven.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -2150,6 +2150,26 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
+          // #3544: an owned agent this route will not revoke is a distinct,
+          // typed refusal — `already_revoked` is "done", anything else is a
+          // real failure a caller must surface.
+          '409': {
+            description:
+              'The agent exists and is owned by the caller but cannot be revoked: `error_code` `already_revoked` (nothing to do) or `not_revocable` (the status is outside the revocable set).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code'],
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', enum: ['already_revoked', 'not_revocable'] },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
         },
       },
     },

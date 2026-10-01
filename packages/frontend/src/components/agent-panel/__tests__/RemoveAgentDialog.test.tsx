@@ -10,6 +10,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Agent } from '@/hooks/useAgents'
+// #3544: the dialog tests carry the REAL wire refusal shape — an
+// ApiRequestError with the route's status and error_code body.
+import { ApiRequestError } from '@/lib/api'
 
 const { mockRevokeAll, mockBudgetState, mockBalanceState } = vi.hoisted(() => ({
   mockRevokeAll: vi.fn(),
@@ -490,14 +493,19 @@ describe('RemoveAgentDialog', () => {
     expect(onArchive).not.toHaveBeenCalled()
   })
 
-  it('a credential already revoked in another tab still completes the removal', async () => {
+  it('a credential already revoked in another tab still completes the removal (#1437 stale-status race, real wire shape)', async () => {
     // The stale-status race: revoke-all no-ops (409 → ok), the credential
     // revoke 404s because another tab already did it, and archive — which
-    // WOULD succeed — used to be unreachable behind that failure.
+    // WOULD succeed — used to be unreachable behind that failure. The mock
+    // carries the REAL wire shape now: an ApiRequestError with the route's
+    // status and body (the old mock threw a bare Error('Agent not found'),
+    // a string the backend never sends).
     mockRevokeAll.mockResolvedValue({ ok: true })
     const onArchive = vi.fn().mockResolvedValue(undefined)
     const { onClose } = renderDialog(agentFixture(), {
-      onRevokeCredential: vi.fn().mockRejectedValue(new Error('Agent not found')),
+      onRevokeCredential: vi.fn().mockRejectedValue(
+        new ApiRequestError('Agent not found', 404, { error: 'Agent not found' }),
+      ),
       onArchive,
     })
 
@@ -507,8 +515,75 @@ describe('RemoveAgentDialog', () => {
     expect(screen.queryByText(/could not be moved to Removed/i)).toBeNull()
   })
 
+  it('a 409 already_revoked refusal is step-already-done: archive still runs and the dialog closes', async () => {
+    // #3544: the route answers an owned, already-revoked agent with 409
+    // error_code "already_revoked" — the typed "done" the message matcher
+    // used to guess at.
+    mockRevokeAll.mockResolvedValue({ ok: true })
+    const onArchive = vi.fn().mockResolvedValue(undefined)
+    const { onClose } = renderDialog(agentFixture(), {
+      onRevokeCredential: vi.fn().mockRejectedValue(
+        new ApiRequestError('Agent is already revoked', 409, {
+          error: 'Agent is already revoked',
+          error_code: 'already_revoked',
+        }),
+      ),
+      onArchive,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() => expect(onArchive).toHaveBeenCalled())
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('a not-revocable 409 refusal is a REAL failure: no archive, an error surfaces, and the message is not swallowed', async () => {
+    // The old /not found|already revoked/i match swallowed the route's
+    // all-cases 404 "Agent not found or cannot be revoked" — the bug in
+    // #3544. The typed refusal must reach the user.
+    mockRevokeAll.mockResolvedValue({ ok: true })
+    const onArchive = vi.fn().mockResolvedValue(undefined)
+    const { onClose } = renderDialog(agentFixture(), {
+      onRevokeCredential: vi.fn().mockRejectedValue(
+        new ApiRequestError('Agent cannot be revoked', 409, {
+          error: 'Agent cannot be revoked',
+          error_code: 'not_revocable',
+        }),
+      ),
+      onArchive,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Finish removal' })).toBeTruthy(),
+    )
+    expect(onArchive).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('a pending_approval agent is removed end to end: no live budget, both filing steps run, dialog closes', async () => {
+    // #3544: the issue's repro — a connect-modal agent still awaiting its
+    // first budget. No delegation exists, so revoke-all is never asked for;
+    // the widened revoke 200s; archive files it under Removed.
+    mockBudgetState.budgets = []
+    const order: string[] = []
+    const { onClose } = renderDialog(agentFixture({ status: 'pending_approval' }), {
+      onRevokeCredential: vi.fn(async () => {
+        order.push('credential')
+      }),
+      onArchive: vi.fn(async () => {
+        order.push('archive')
+      }),
+    })
+
+    expect(mockRevokeAll).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(order).toEqual(['credential', 'archive'])
+  })
+
   it('a genuine credential-revoke failure still aborts to filing_failed', async () => {
-    // The escape hatch above must not swallow real errors.
+    // The escape hatch above must not swallow real errors. 500s have no
+    // error_code and no 404 status.
     mockRevokeAll.mockResolvedValue({ ok: true })
     const onArchive = vi.fn().mockResolvedValue(undefined)
     renderDialog(agentFixture(), {

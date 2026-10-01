@@ -231,6 +231,7 @@ describe('EditAgentModal', () => {
   it('keeps typed edits when a poll re-renders the open modal with an identical agent', async () => {
     const { rerenderWith } = renderControlled()
     await vi.waitFor(() => expect(screen.getByRole('option', { name: 'Acme' })).toBeInTheDocument())
+    await vi.waitFor(() => expect(screen.getByRole('checkbox', { name: 'prod' })).not.toBeChecked())
     fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })
     fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'Dinner plans' } })
     fireEvent.click(screen.getByRole('checkbox', { name: 'prod' }))

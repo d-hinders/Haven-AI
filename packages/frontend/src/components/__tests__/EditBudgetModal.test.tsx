@@ -365,15 +365,17 @@ describe('EditBudgetModal (#3537) — background poll', () => {
     return { rerenderWith }
   }
 
-  it('keeps the typed amount and period across a poll', () => {
+  it('keeps the typed amount, period and recipient across a poll', () => {
     const { rerenderWith } = renderControlled()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.change(screen.getByLabelText('Period'), { target: { value: '604800' } })
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: RECIPIENT } })
 
     rerenderWith()
 
     expect(screen.getByLabelText('Budget amount')).toHaveValue('10')
     expect(screen.getByLabelText('Period')).toHaveValue('604800')
+    expect(screen.getByLabelText('Recipient')).toHaveValue(RECIPIENT)
   })
 
   it('stays on the review step across a poll', () => {

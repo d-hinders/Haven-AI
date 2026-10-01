@@ -27,3 +27,16 @@ export {
 } from './github.js'
 
 export { maskEmail, maskHex, maskName, maskSearchTerm } from './masking.js'
+
+export { buildOpsOverview, type OpsOverview } from './overview.js'
+export {
+  detectOpsSearchKey,
+  runOpsSearch,
+  OPS_SEARCH_BUDGET_MS,
+  OPS_SEARCH_MIN_EMAIL_PREFIX,
+  type OpsSearchHit,
+  type OpsSearchKeyType,
+  type OpsSearchLookup,
+  type OpsSearchResult,
+} from './search.js'
+export { buildOpsUserDetail, type OpsUserDetail } from './users.js'

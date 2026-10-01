@@ -626,7 +626,21 @@ export class MerchantCompletion {
         const statusCode = err instanceof HavenApiError ? err.statusCode : undefined
         const retryable = statusCode === EVIDENCE_RETRYABLE_STATUS
         if (!retryable) {
-          return { outcome: 'refused', statusCode: statusCode ?? 0 }
+          // #3529: the backend relays a refusal `reason` on the evidence 409/503
+          // body (modules/mpp/evidence.ts) — but ONLY on the eip3009
+          // settlement-report refusal (`SettlementReportRefusal`): a plain 409
+          // (settlement_unverified from the erc7710 seam, tx_hash_mismatch,
+          // payment_not_confirmed) and every pre-#3475 backend carry none. That
+          // presence IS the discriminator the hosted tool classifies on — a
+          // reason-bearing refusal can only come from a payment whose funding
+          // leg is already confirmed — so it is carried verbatim, and left
+          // absent (not empty) when the body has none.
+          const reason = refusalReasonFromBody(err)
+          return {
+            outcome: 'refused',
+            statusCode: statusCode ?? 0,
+            ...(reason ? { reason } : {}),
+          }
         }
         if (attempt >= EVIDENCE_RETRY_DELAYS_MS.length) {
           return { outcome: 'retryable', statusCode }
@@ -695,11 +709,38 @@ export class MerchantCompletion {
  * unknown payment id, or a transport failure with no HTTP status at all,
  * reported as `statusCode: 0`) — reporting the same hash again will not
  * change the answer.
+ *
+ * #3529: a `refused` outcome whose backend answered the #3475 evidence
+ * contract ALSO carries the backend's own `reason` — the verbatim sentence
+ * `attachEvidenceHandler` put in the 409/503 body. Present only on the
+ * eip3009 settlement-report refusal (`SettlementReportRefusal`); every other
+ * refusal and every pre-#3475 backend leave it absent, which is exactly the
+ * distinction the hosted tool needs: the reason-bearing refusal fires on a
+ * payment whose FUNDING is confirmed, never on one Haven could not confirm.
+ * Consumers must treat presence as the signal and absence as "unknown", not
+ * infer anything from `statusCode` or payment status.
  */
 export type EvidenceReportOutcome =
   | { outcome: 'confirmed' }
   | { outcome: 'retryable'; statusCode: number | undefined }
-  | { outcome: 'refused'; statusCode: number }
+  | { outcome: 'refused'; statusCode: number; reason?: string }
+
+/**
+ * #3529: read the evidence-report refusal reason the backend relayed
+ * (`attachEvidenceHandler`, `modules/mpp/evidence.ts`) off the error the
+ * transport threw. The transport attaches the parsed body to
+ * `HavenApiError.body`, so this is a read, not a re-fetch. A body without a
+ * string `reason` — plain refusals, non-Haven errors, pre-#3475 backends —
+ * answers `undefined`, which keeps `reason` OUT of the outcome instead of
+ * carrying an empty or guessed value.
+ */
+function refusalReasonFromBody(err: unknown): string | undefined {
+  if (!(err instanceof HavenApiError)) return undefined
+  const body: unknown = err.body
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined
+  const reason = (body as Record<string, unknown>).reason
+  return typeof reason === 'string' && reason.length > 0 ? reason : undefined
+}
 
 /**
  * #2970: a hash of the form `0x00…00` is never a real transaction — it is the

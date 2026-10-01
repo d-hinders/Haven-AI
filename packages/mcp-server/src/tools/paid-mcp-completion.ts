@@ -566,6 +566,23 @@ export function classifyErc7710Settlement(
  * DELIVERED_UNSETTLED: a settled no, never a write. `next_tool` is always
  * `haven_get_payment_status` on the two unsettled branches, exactly as the
  * settle/complete gate points there — this tool does not retry itself.
+ *
+ * #3529: a refusal that carries the backend's relayed `reason` is its OWN
+ * arm, keyed on the REASON's presence — never on payment status (on eip3009
+ * "confirmed" means the FUNDING leg, so a status-keyed code would also fire
+ * on ordinary, correct refusals of mismatched hashes). The backend puts a
+ * reason in the evidence 409/503 body only on the eip3009 settlement-report
+ * refusal (`SettlementReportRefusal`), which fires on a payment whose
+ * funding is already confirmed — so this arm says exactly what Haven knows:
+ * the funding leg is confirmed and unchanged, and THIS hash was not accepted
+ * for it. New code `SETTLEMENT_NOT_RECORDED` (it is not "delivered,
+ * unsettled" — the payment's funding is verified; what failed is the
+ * settlement attribution) with the backend's sentence relayed verbatim as
+ * `refusal_reason`. A reasonless refusal keeps `DELIVERED_UNSETTLED` and the
+ * honest-for-every-case wording: that arm can still be reached by a real
+ * mismatch, a foreign payment id, a validation refusal, or an older backend
+ * that never relays a reason, and none of those may claim the funding is
+ * confirmed.
  */
 export function classifySettlementEvidenceReport(
   paymentId: string,
@@ -595,6 +612,34 @@ export function classifySettlementEvidenceReport(
       }),
     }
   }
+  // #3529: the reason-bearing refusal. The reason is the backend's own
+  // sentence, relayed verbatim — the tool never paraphrases it into a verdict
+  // it cannot check (whether the hash was genuinely wrong, or the connected
+  // backend predates the relay, is exactly what the agent must decide by
+  // polling status, which is why next_tool is unchanged).
+  if (outcome.outcome === 'refused' && outcome.reason) {
+    return {
+      payment_id: paymentId,
+      settled: false,
+      code: 'SETTLEMENT_NOT_RECORDED',
+      refusal_reason: outcome.reason,
+      settlement_tx_hash: settlementTxHash,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        nextTool: 'haven_get_payment_status',
+        nextArguments: { payment_id: paymentId },
+        safeToContinue: true,
+        reason:
+          // The relayed reasons never end with punctuation (the verifier's
+          // sentences are period-free), so the period here is always single.
+          'Haven refused this settlement report: ' + outcome.reason + '. The payment itself is ' +
+          'unchanged — its funding leg is confirmed, and this transaction was not accepted as ' +
+          "its settlement. Reporting the same hash again will not change that; poll next_tool for " +
+          "the payment's current state.",
+        summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
+      }),
+    }
+  }
   const pending = outcome.outcome === 'retryable'
   return {
     payment_id: paymentId,
@@ -610,9 +655,10 @@ export function classifySettlementEvidenceReport(
       reason: pending
         ? 'Haven could not yet verify this transaction on-chain — the RPC was unreachable, or ' +
           'the transaction is not mined yet. Report the same hash again shortly, or poll next_tool.'
-        : 'Haven could not verify this transaction against this payment on-chain — it does not ' +
-          "match this payment's transfer shape or window, or the payment could not be found for " +
-          'this agent. Reporting it again will not change that; poll next_tool for the current status.',
+        : 'Haven did not record this settlement hash for this payment. Either the transaction does ' +
+          'not match this payment on-chain, or the payment could not be found for this agent, or ' +
+          'the connected backend does not yet take this kind of settlement report. Reporting it ' +
+          'again will not change that; poll next_tool for the current status.',
       summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
     }),
   }

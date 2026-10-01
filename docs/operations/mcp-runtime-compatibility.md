@@ -1334,6 +1334,28 @@ last-verified: "2026-10-01"
 > its pre-existing "no tool follows" answer — the safe side, since erc7710
 > and unrecorded-scheme payments already default there.
 >
+> **Re-verified (#3529, 2026-10-01):** a refused evidence report whose backend
+> relayed a refusal `reason` — the #3475 evidence 409/503 contract, emitted
+> only by the eip3009 settlement seam — is its own arm, keyed on the REASON's
+> PRESENCE and never on payment status (on eip3009 "confirmed" means the
+> FUNDING leg, so a status-keyed code would also fire on ordinary, correct
+> refusals of mismatched hashes). New response code
+> `SETTLEMENT_NOT_RECORDED` with the backend's sentence relayed verbatim as
+> the additive `refusal_reason`: what Haven knows is that the payment's
+> funding leg is confirmed and unchanged, and THIS hash was not accepted as
+> its settlement — the old transfer-shape claim is gone from this arm, and
+> `next_tool` stays `haven_get_payment_status`. A reasonless refusal (a plain
+> mismatch, a foreign payment id, a validation refusal, or a pre-#3475
+> backend) keeps `DELIVERED_UNSETTLED` with wording honest for every case
+> that reaches it — including a confirmed payment behind an older backend —
+> never claiming a confirmed funding it cannot know. The backend negative
+> pins (a `payment_not_confirmed` 409 and the erc7710 seam's
+> `settlement_unverified` 409 carry NO `reason`) are the other half of the
+> contract: the discriminator cannot collapse. The shared description's
+> nextActionGuidance names the new code (round 14 of the #1591 census),
+> and the #3475 Not-filed item "a refusal on an already-confirmed payment
+> still classifies as DELIVERED_UNSETTLED" closes with this.
+>
 > **Recent re-verification (#2968):** the response vocabulary is completed at
 > the agent-facing surface, additively. `deliverMerchantPayment` now collapses
 > a zero/placeholder `settlementTxHash` (the demo merchant's `ZERO_TX_HASH`

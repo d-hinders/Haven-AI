@@ -1219,6 +1219,18 @@ const agentPaymentStatus = {
         'on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the ' +
         'confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown.',
     },
+    // #3518: WHICH budget metered this payment — recorded at authorize
+    // (migration 053), the settle summary's join key for its allowance
+    // block. Omitted on the legacy rail and on rows predating migration
+    // 053, matching the handler's omit-when-absent honesty rule.
+    budget_delegation_hash: {
+      type: 'string',
+      pattern: '^0x[0-9a-fA-F]{64}$',
+      description:
+        'The budget delegation that metered this payment (#1059), recorded at authorize. The settle ' +
+        'summary keys its allowance rows on this — the budget that PAID, never a re-derived ' +
+        '(token, payee) first match. Omitted on the legacy rail and on intents predating migration 053.',
+    },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
     fee: {
@@ -1321,6 +1333,11 @@ export const openapiSpec = {
       name: 'Webhooks',
       description:
         'Inbound provider callbacks (#3019). Authenticated by a per-connection capability URL token plus the provider HMAC signature — never a session.',
+    },
+    {
+      name: 'Ops',
+      description:
+        'The internal ops console (#3509, epic #3507): founders-only, read-only, GitHub sign-in. Every route answers 404 on a deployment that does not configure it. Nothing here moves funds, signs, or acts as a user.',
     },
   ],
   paths: {
@@ -1609,6 +1626,99 @@ export const openapiSpec = {
           },
           '401': { ...errorResponse, description: 'The operator token is missing or invalid.' },
           '404': { ...errorResponse, description: 'Operator diagnostics are not configured on this deployment.' },
+        },
+      },
+    },
+    // ── Ops console (#3509, epic #3507) ──────────────────────────────────
+    // Founders-only and READ-ONLY. Every /ops/* route answers 404 unless the
+    // deployment configures OPS_*, decided before validation runs.
+    '/ops/auth/github/start': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'startOpsSignIn',
+        summary: 'Begin an ops console sign-in with GitHub.',
+        description:
+          'Redirects the browser to GitHub (no scopes requested) with a signed, 10-minute `state` carrying `return_to` and `nonce`. ' +
+          '`return_to` must exactly equal one of the deployment\'s `OPS_REDIRECT_ORIGINS` (scheme, host and port; no prefix, suffix or wildcard matching). ' +
+          'Returns 404 when the ops console is not configured on this deployment.',
+        security: [],
+        parameters: [
+          { name: 'return_to', in: 'query', required: true, schema: { type: 'string', maxLength: 2048 }, description: 'The ops app origin to return to.' },
+          { name: 'nonce', in: 'query', required: true, schema: { type: 'string', pattern: '^[A-Za-z0-9_-]{16,128}$' }, description: 'The ops app\'s nonce, echoed back in the redirect fragment.' },
+        ],
+        responses: {
+          '302': { description: 'Redirect to GitHub\'s authorize page.' },
+          '400': { ...errorResponse, description: '`return_to` is not an allowed ops origin.' },
+          '404': { ...errorResponse, description: 'The ops console is not configured on this deployment.' },
+          '429': errorResponse,
+        },
+      },
+    },
+    '/ops/auth/github/callback': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'finishOpsSignIn',
+        summary: 'Finish an ops console sign-in (GitHub redirects here).',
+        description:
+          'Verifies the `state` this backend issued, re-checks its origin against `OPS_REDIRECT_ORIGINS`, exchanges the code, reads the GitHub user and discards GitHub\'s token. ' +
+          'An allowlisted numeric GitHub id (with 2FA, when GitHub reports it) is redirected to `<origin>/#token=<ops token>&nonce=<nonce>`; every other outcome to `<origin>/#error=<code>&nonce=<nonce>` ' +
+          '(`not_allowed`, `two_factor_required`, `github_denied`, `github_unavailable`, `missing_code`). Every sign-in that reaches a GitHub identity (allowed, `not_allowed` or `two_factor_required`) is audited first; a failed audit write answers 503 and issues nothing. `github_denied`, `github_unavailable` and `missing_code` have no identity to record.',
+        security: [],
+        parameters: [
+          { name: 'code', in: 'query', schema: { type: 'string', maxLength: 512 }, description: 'Authorization code from GitHub.' },
+          { name: 'state', in: 'query', schema: { type: 'string', maxLength: 4096 }, description: 'The signed state `start` issued.' },
+          { name: 'error', in: 'query', schema: { type: 'string', maxLength: 256 }, description: 'Present when the user declined.' },
+          { name: 'error_description', in: 'query', schema: { type: 'string', maxLength: 2048 } },
+          { name: 'error_uri', in: 'query', schema: { type: 'string', maxLength: 2048 } },
+        ],
+        responses: {
+          '302': { description: 'Redirect back to the ops app with a token or an error code in the fragment.' },
+          '400': { ...errorResponse, description: 'The state is missing, forged, expired, or names an origin no longer allowed.' },
+          '404': { ...errorResponse, description: 'The ops console is not configured on this deployment.' },
+          '429': errorResponse,
+          '503': { ...errorResponse, description: 'The sign-in could not be audited, so nothing was issued.' },
+        },
+      },
+    },
+    '/ops/me': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsSession',
+        summary: 'Read the signed-in ops operator.',
+        security: [{ OpsJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The operator the ops token belongs to.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsSession' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console is not configured on this deployment.' },
+        },
+      },
+    },
+    '/ops/reveal': {
+      post: {
+        tags: ['Ops'],
+        operationId: 'revealOpsField',
+        summary: 'Reveal one masked field of one record, audited.',
+        description:
+          'Accepts only a closed set of `(target_type, field)` pairs and reads through the read-only ops database role. Every reveal writes an audit row before the value is returned; a failed audit write answers 503 with no value. ' +
+          'Returns 404 while the deployment has no read-only ops database configured.',
+        security: [{ OpsJwt: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsRevealRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'The unmasked value.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsRevealResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such record, or the ops console (or its read-only database) is not configured.' },
+          '429': errorResponse,
+          '503': { ...errorResponse, description: 'The reveal could not be audited, so no value was returned.' },
         },
       },
     },
@@ -6168,14 +6278,14 @@ export const openapiSpec = {
         operationId: 'listTaskBudgets',
         summary: 'List task budgets for the authenticated agent.',
         description:
-          "Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.",
+          "Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — closing rows always, pending and open rows while not expired; closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.",
         security: [{ AgentApiKey: [] }],
         parameters: [
           {
             name: 'status',
             in: 'query',
             required: false,
-            schema: { type: 'string', enum: ['open', 'all'] },
+            schema: { type: 'string', enum: ['open', 'live', 'all'] },
           },
         ],
         responses: {
@@ -7143,6 +7253,15 @@ export const openapiSpec = {
               '"fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
               'amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / ' +
               'merchant_address when the request carried them.',
+          },
+          '409': {
+            ...errorResponse,
+            description:
+              '#3518: the request named no merchantTo, the agent has no open budget for the token, ' +
+              'and it holds live merchant-locked budgets for it. Not a refusal — nothing is recorded ' +
+              'in payment_refusals. Carries error_code "budget_requires_recipient", next_action ' +
+              '"retry_with_explicit_context" and budget_recipient_addresses (the pins, lowercase); ' +
+              'repeat the check with merchantTo set to the payee.',
           },
           '410': {
             ...errorResponse,
@@ -8385,6 +8504,12 @@ export const openapiSpec = {
         bearerFormat: 'sk_agent_*',
         description: bearerIdentityDescription,
       },
+      OpsJwt: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Ops console session token (#3509), issued by the GitHub sign-in to an allowlisted founder. Signed with its own secret and refused by every customer route; it is read authority over the ops console only, never payment authority.',
+      },
       DashboardJwt: {
         type: 'http',
         scheme: 'bearer',
@@ -9140,6 +9265,37 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+        },
+        additionalProperties: false,
+      },
+      OpsSession: {
+        type: 'object',
+        required: ['github_id', 'login', 'expires_at'],
+        properties: {
+          github_id: { type: 'string', description: 'Numeric GitHub user id (the allowlist key).' },
+          login: { type: 'string', description: 'GitHub login at sign-in time; display only.' },
+          expires_at: { type: 'string', format: 'date-time' },
+        },
+        additionalProperties: false,
+      },
+      OpsRevealRequest: {
+        type: 'object',
+        required: ['target_type', 'target_id', 'field'],
+        properties: {
+          target_type: { type: 'string', enum: ['user'] },
+          target_id: { type: 'string', pattern: `^${UUID_PATTERN}$` },
+          field: { type: 'string', enum: ['email', 'name'] },
+        },
+        additionalProperties: false,
+      },
+      OpsRevealResponse: {
+        type: 'object',
+        required: ['target_type', 'target_id', 'field', 'value'],
+        properties: {
+          target_type: { type: 'string' },
+          target_id: { type: 'string' },
+          field: { type: 'string' },
+          value: { type: ['string', 'null'] },
         },
         additionalProperties: false,
       },
@@ -10879,6 +11035,31 @@ export const openapiSpec = {
                 // number, side by side, both previously bare strings.
                 configured_amount: allowanceHumanAmount,
                 reset_period_min: { type: 'integer' },
+                // #3518: the budget's identity and SCOPE, so an agent can
+                // name the merchant-locked budget before paying.
+                delegation_hash: {
+                  type: 'string',
+                  pattern: '^0x[0-9a-fA-F]{64}$',
+                  description:
+                    '#3518: this budget delegation\'s hash — the identifier a payment authorization records as budget_delegation_hash and the key `reserved_haven_atomic` sums children under.',
+                },
+                recipient_address: {
+                  type: ['string', 'null'],
+                  pattern: '^0x[0-9a-f]{40}$',
+                  description:
+                    '#3518: the recipient pin — null for an open budget; a recipient-scoped budget pays ONLY this address (a payment\'s selection prefers the pin matching its payee).',
+                },
+                merchant_id: {
+                  type: ['string', 'null'],
+                  format: 'uuid',
+                  description:
+                    '#3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.',
+                },
+                reserved_haven_atomic: {
+                  type: 'string',
+                  description:
+                    '#3518: Haven-side reservation — the sum of this budget\'s OPEN, unexpired task- and sub-budget children\'s caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort).',
+                },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],
@@ -10937,9 +11118,12 @@ export const openapiSpec = {
           merchantTo: {
             type: 'string',
             description:
-              'Advisory for the ordinary compare: the merchant payTo address from the selected ' +
-              'option, carried onto the refusal row; it does not scope THAT compare — the budget ' +
-              'is per-token and the enforcer is the gate on recipients. #3492: when `idempotencyKey` ' +
+              'The merchant payTo address from the selected option, carried onto the refusal row. ' +
+              '#3518: it scopes the compare the way the payment selects its budget — a ' +
+              'recipient-pinned budget for this payee wins, a pin to another payee is excluded, ' +
+              'and the open budget covers the rest. Absent: only the open budget is eligible; when ' +
+              'the agent holds only merchant-locked budgets for the token the answer is 409 ' +
+              'budget_requires_recipient (nothing recorded), never a budget refusal. #3492: when `idempotencyKey` ' +
               'is also present, this field additionally scopes the settled-replay match below — a ' +
               'replay answer requires it to equal the stored row\'s payee.',
           },
@@ -10989,6 +11173,30 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          budget_id: {
+            type: 'string',
+            format: 'uuid',
+            description:
+              '#3518: the budget row the remaining figure describes — the payment-selection mirror\'s winner (recipient match for merchantTo, else the open budget), not the first per-token row. Absent when no row matched.',
+          },
+          budget_delegation_hash: {
+            type: 'string',
+            pattern: '^0x[0-9a-fA-F]{64}$',
+            description:
+              '#3518: the selected budget\'s delegation hash — the same identifier a payment authorization records as budget_delegation_hash, so a caller can verify report and payment name the same budget.',
+          },
+          budget_recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description:
+              '#3518: the selected budget\'s recipient pin — null for an open budget, the merchant payee for a pinned/merchant-locked one.',
+          },
+          budget_merchant_id: {
+            type: ['string', 'null'],
+            format: 'uuid',
+            description:
+              '#3518: the merchant the selected budget was issued for (#3331), null for every other budget.',
           },
           replay: {
             type: 'boolean',
@@ -11044,6 +11252,12 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+          budget_recipient_addresses: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              '#3518: present only when budget_remaining_atomic is "0" because the agent has no OPEN budget for the token but holds live merchant-locked budgets — their recipients, lowercase. Those budgets pay only these addresses; haven_get_allowances reports their remaining figures.',
           },
         },
         additionalProperties: false,

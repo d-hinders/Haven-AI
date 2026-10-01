@@ -473,6 +473,16 @@ describe('machine payment routes', () => {
           token_address: SEPOLIA_USDC,
           budget_atomic: '10000000',
           period_seconds: 86_400,
+          // #3518: the projection now carries the row's identity + scope; this
+          // mocked seed supplies them so the wire shape below pins the FULL
+          // mapping (the real-DB delegation-budgets suite pins the values
+          // end-to-end).
+          delegation_hash: `0x${'dd'.repeat(32)}`,
+          recipient_address: null,
+          merchant_id: null,
+          start_date: '0',
+          expires_at: '99999999999',
+          created_at: new Date('2026-09-30T00:00:00.000Z'),
         }]),
       )
 
@@ -496,6 +506,17 @@ describe('machine payment routes', () => {
           token_symbol: 'USDC',
           configured_amount: '10.00',
           reset_period_min: 1440,
+          // #3518: identity + scope + the Haven-side reservation ride the
+          // delegation-rail wire additively — the seed row's own values (the
+          // mocked pool passes them through verbatim). No pin, no merchant
+          // lock, and no open task/sub-budget children: the pin and merchant
+          // are null and the reservation is '0' (the best-effort sum's zero).
+          // The on-chain block below is unchanged: the reservation is
+          // reported BESIDE it, never folded in.
+          delegation_hash: `0x${'dd'.repeat(32)}`,
+          recipient_address: null,
+          merchant_id: null,
+          reserved_haven_atomic: '0',
           onchain: {
             amount: '10000000',
             spent: '0',

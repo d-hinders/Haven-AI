@@ -104,6 +104,13 @@ deployed that way today.
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public and carries only status, timestamp, and database health; `/health/ops` is operator-only).
+  The ops console's backend routes (`/ops/*`, #3509, epic #3507) answer 404
+  on any backend that does not set all six `OPS_*` variables documented in
+  [`.env.dev.example`](../../.env.dev.example); a partly-configured backend is
+  the same as an unconfigured one. Setting them on a deployed service is an
+  operator step tracked on the epic's promotion checklist. The data routes
+  also need `OPS_DATABASE_URL`, the read-only role's login — see
+  [`ops-readonly-role.md`](ops-readonly-role.md).
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
@@ -239,6 +246,7 @@ Isolation rules that are non-negotiable for a payments product:
 
 - **Separate Postgres** from prod (`DATABASE_URL` points at the dev instance).
 - **Dev-only `JWT_SECRET`** — prevents cross-environment token confusion.
+- **Dev-only `OPS_JWT_SECRET` and GitHub OAuth App** — the ops console (#3509) gets its own dev values, never the prod ones, for the same reason.
 - **`RELAYER_PRIVATE_KEY`** — since the #908 owner decision (2026-07-19) the
   SAME relayer EOA (`0xC825…9D7E`) serves Base mainnet and Base Sepolia,
   funded on both; it is gas-only either way (customer funds are unreachable
@@ -468,7 +476,9 @@ Isolation rules that are non-negotiable for a payments product:
   auth, one uuid path parameter, no body) and the PUT (owner auth) were both
   added to `enforcedModules` in their first commit; the request schema comes
   from the OpenAPI spec, so a body that is not exactly
-  `{ tax_declaration_enabled: boolean }` is refused before the handler. The
+  `{ tax_declaration_enabled: boolean }` is refused before the handler. #3509's
+  `routes/ops.ts` did the same; its plugin answers 404 before validation
+  when the ops console is unconfigured. The
   `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are

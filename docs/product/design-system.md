@@ -1325,6 +1325,16 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Desktop columns: direction icon, Activity, Initiator, From/To, Date, Amount, external link.
 - **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (no dashboard-send path sets it today), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
 - Sticky header on desktop.
+- **A row click is convenience only; the title button is the accessible path
+  (#3554).** On a selectable table the `<tr>` keeps its native `row` role and an
+  `onClick` for the mouse, and the activity cell's title is a real `<button>`
+  ("View details for …") that opens the drawer on click, Enter and Space. The
+  accounting badge and the explorer link are SIBLINGS of that button, never
+  descendants of an element with `role="button"` — an interactive control nested
+  inside another is invalid ARIA. The row handler focuses the button before
+  opening, so the drawer's focus trap returns focus there on close. The links
+  keep a click stop, because Enter on an `<a>` fires a click that would bubble to
+  the row.
 - A narrow container hides secondary columns and keeps icon, activity and
   external link readable. The amount stays readable too, but below `md` it is no
   longer a column: it rides under the title inside the activity cell (#2734).

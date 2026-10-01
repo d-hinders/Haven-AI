@@ -119,6 +119,9 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   // calls the SDK's openTaskBudget.
   haven_open_task_budget: { max_amount_human: '5', ttl_minutes: 60 },
   haven_close_task_budget: { task_budget_id: 'tb_1' },
+  // #3518: the read-by-id handler calls haven.getTaskBudget('tb_1') — the
+  // stubbed Haven answers `{}`, which the loop tolerates downstream.
+  haven_get_task_budget: { task_budget_id: 'tb_1' },
 }
 
 /**
@@ -190,6 +193,9 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   // field neither tool declares.
   haven_open_task_budget: 'max_amount',
   haven_close_task_budget: 'settlement_scheme',
+  // #3518: a spelling the LOCAL MCP reserves for the sign handoff's
+  // payment branch — this read tool takes the id only.
+  haven_get_task_budget: 'signature',
 }
 
 let fetches: string[]
@@ -592,10 +598,11 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
       'haven_submit_catalog_entry',
       'haven_open_task_budget',
       'haven_close_task_budget',
+      'haven_get_task_budget',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(24)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(25)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],

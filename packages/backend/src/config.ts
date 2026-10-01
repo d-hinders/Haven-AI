@@ -5,6 +5,7 @@
  */
 import dotenv from 'dotenv'
 import { parseBooleanFlag } from './config/boolean-flag.js'
+import { parseOpsConfig } from './config/ops.js'
 import path from 'path'
 
 const envPaths = [
@@ -90,7 +91,7 @@ export function parseTrustProxyHops(raw: string | undefined): number {
     // eslint-disable-next-line no-console
     console.warn(
       'TRUST_PROXY_HOPS is not set — treating it as 0: the proxy stays UNTRUSTED and the ' +
-      'per-IP auth rate limits (signup, login, device_start, device_lookup, device_token) stay ' +
+      'per-IP auth rate limits (signup, login, device_start, device_lookup, device_token, ops_auth) stay ' +
       'DISARMED. Set TRUST_PROXY_HOPS to the number of trusted proxy hops in front of this ' +
       'process (Railway terminates in exactly one edge proxy, so that is usually 1) to arm them.',
     )
@@ -112,7 +113,7 @@ export function parseTrustProxyHops(raw: string | undefined): number {
     console.warn(
       `TRUST_PROXY_HOPS is explicitly set to ${JSON.stringify(raw)}, which resolves to 0 — the proxy ` +
       'stays UNTRUSTED and the per-IP auth rate limits (signup, login, device_start, device_lookup, ' +
-      'device_token) stay DISARMED, exactly as if the variable were unset. There is no deployment ' +
+      'device_token, ops_auth) stay DISARMED, exactly as if the variable were unset. There is no deployment ' +
       'where 0 is the intended posture (#2667): set the real hop count (Railway terminates in exactly ' +
       'one edge proxy, so that is usually 1) to arm them, or remove the variable if no proxy fronts ' +
       'this process.',
@@ -358,6 +359,22 @@ export const config = {
   // Optional operator-only health diagnostics. Unset keeps GET /health/ops
   // indistinguishable from a route that does not exist.
   opsToken: process.env.HAVEN_OPS_TOKEN ?? '',
+
+  // Ops console (#3509, epic #3507): founders-only, read-only, GitHub sign-in.
+  // Off unless every variable is set (`isOpsConfigured`); a malformed value, or
+  // an OPS_JWT_SECRET equal to JWT_SECRET or shorter than 32 characters,
+  // refuses the boot. See config/ops.ts.
+  ops: parseOpsConfig(
+    {
+      OPS_GITHUB_CLIENT_ID: process.env.OPS_GITHUB_CLIENT_ID,
+      OPS_GITHUB_CLIENT_SECRET: process.env.OPS_GITHUB_CLIENT_SECRET,
+      OPS_JWT_SECRET: process.env.OPS_JWT_SECRET,
+      OPS_ALLOWED_GITHUB_IDS: process.env.OPS_ALLOWED_GITHUB_IDS,
+      OPS_REDIRECT_ORIGINS: process.env.OPS_REDIRECT_ORIGINS,
+      OPS_PUBLIC_ORIGIN: process.env.OPS_PUBLIC_ORIGIN,
+    },
+    process.env.JWT_SECRET ?? '',
+  ),
 
   // Chain-specific RPC URLs
   rpcUrlBase: warnPublicBaseMainnetRpc(process.env.RPC_URL_BASE),

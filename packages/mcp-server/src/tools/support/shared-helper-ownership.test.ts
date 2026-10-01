@@ -360,13 +360,6 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'Only the #2810 handlers (haven_prepare_catalog_purchase, haven_pay_mcp_tool) call it today, but it is ' +
     'DELIBERATE: it is the EIP-3009 twin of settledReplayResponse/catchSettledReplay and stays beside them ' +
     'in guidance.ts, the same reason catchSettledResettle is not owned by one capability.',
-  // s3329 (#3329 task budgets):
-  taskBudgetNextStep:
-    'Only tools/task-budgets.ts calls it today, but it is DELIBERATE, not "until the capability moves ' +
-    'it": it is the general success-side counterpart of refusalNextStep (same builder, same target ' +
-    'map, same compile-time twins) for any future non-payment next step, and forking it into one ' +
-    "capability would mean a second slice needing it copies refusalNextStep's own pattern rather than " +
-    'importing the general one — the exact drift #2808 exists to prevent.',
 }
 
 /**

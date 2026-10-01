@@ -24,7 +24,9 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
 /**
  * The agents table (#2947, epic #2944 slice C).
  *
- * One row per agent that spent in the range, in the page's display order —
+ * One row per agent the endpoint lists (#3540: every non-revoked agent, plus
+ * a revoked one that had activity in range or still holds a budget), in the
+ * page's display order —
  * spend descending, then id (`lib/analytics-series.ts`): the wire's
  * `agents[]` carries no ORDER BY, so the page sorts once and every section
  * (this table, the spend chart, the merchants roster) inherits that one order
@@ -67,8 +69,8 @@ function StatusCell({ agent }: { agent: AnalyticsAgentRow }) {
     <span className="inline-flex items-center gap-2 min-w-0">
       <span className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</span>
       {/* A revoked agent stays in the table rather than dropping out of it: it
-          still spent money in this range, and hiding the row would hide the
-          spending. The badge is what says the account is closed. */}
+          had activity in this range, or still holds a budget, and hiding the
+          row would hide that. The badge is what says the account is closed. */}
       {revoked && <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>}
     </span>
   )

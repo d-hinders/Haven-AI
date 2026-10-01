@@ -71,6 +71,12 @@ against that delegation's own period — not from a Haven-side running total.
 The tile's headline is the band count ("2 of 3 agents above 75% of their
 period budget"); per-agent detail lives in the agents table.
 
+**Agents table.** It lists every agent that is not revoked, even one with no
+activity in the range, since its budget column still informs. A revoked agent
+is listed only when it had a confirmed payment or a refusal in the range, or
+still holds an active budget (revoking flips only the agent's status, so that
+budget can still be spent and the Budget used tile counts it) (#3540).
+
 **Fees paid to Haven.** What Haven has charged, in the display currency.
 While fee charging is switched off, the tile says so plainly ("No fees yet —
 Haven is not charging fees") rather than rendering a bare 0. The API reports

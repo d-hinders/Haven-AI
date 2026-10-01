@@ -93,8 +93,8 @@ const DIRECT_SIGN_REASON =
   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer fetches the ' +
   "exact bytes by payment_id. If haven_sign refuses that call — carrying fallback: 'typed_data_b64' " +
   '(any code: a transport failure, a malformed body, or a 404 on an older backend), or code ' +
-  "SIGN_CONTEXT_REFUSED with backend_error_code 'sign_context_unavailable' from a signer predating " +
-  '#3271 — nothing was signed either way: re-run this same tool with the SAME idempotency_key ' +
+  "SIGN_CONTEXT_REFUSED with backend_error_code 'sign_context_unavailable' from a signer older " +
+  'than 0.5.0-alpha.1 — nothing was signed either way: re-run this same tool with the SAME idempotency_key ' +
   '(echoed on this result as idempotency_key) plus include_signing_payload: true — repeating the ' +
   'same token/amount/recipient/task_budget_id/sub_budget_id, or it answers 409 — then sign with ' +
   '{ payload_hash, typed_data_b64 } from THAT re-run result, passed through unchanged, then update ' +

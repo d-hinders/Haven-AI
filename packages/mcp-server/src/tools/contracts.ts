@@ -776,24 +776,24 @@ export const STRICT_INPUT_TOOLS = {
     'The local MCP (@haven_ai/mcp) used to spell it idempotencyKey — carrying that spelling ' +
     'here used to be dropped in silence, and the payment then reached POST /payments with no ' +
     'idempotency_key at all, so the replay contract never engaged and a retry spent twice. ' +
-    '@haven_ai/mcp now refuses idempotencyKey itself (#3411); it takes idempotency_key.',
+    '@haven_ai/mcp now refuses idempotencyKey itself; it takes idempotency_key.',
   haven_pay_mcp_tool:
     'This is the HOSTED surface, which spells the key idempotency_key (snake_case). ' +
     'The local MCP (@haven_ai/mcp) used to spell it idempotencyKey — carrying that spelling ' +
     'here used to be dropped in silence, and the SDK then fell back to a key DERIVED from the ' +
     "merchant quote inside a 5-minute bucket, so the caller's own replay scope was " +
     'silently replaced by a different one rather than merely lost. @haven_ai/mcp now refuses ' +
-    'idempotencyKey itself (#3411); it takes idempotency_key.',
+    'idempotencyKey itself; it takes idempotency_key.',
   haven_quote_x402:
-    'This is the HOSTED surface. It takes url, method, headers and body (#2366 added body, so ' +
+    'This is the HOSTED surface. It takes url, method, headers and body (body was added so ' +
     'a body-bearing POST paywall is quoted with the body the caller means to pay for). The ' +
     'local MCP (@haven_ai/mcp) additionally takes idempotency_key, which the hosted quote ' +
     'has no use for — carrying it here used to be dropped in silence. haven_discover_tools ' +
-    'hands you resource_url; this tool spells that argument url (#3100).',
+    'hands you resource_url; this tool spells that argument url.',
   haven_pay_x402_quote:
     'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
     '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotency_key — it used to ' +
-    'take idempotencyKey, but now refuses that spelling itself (#3411). Passing quote already ' +
+    'take idempotencyKey, but now refuses that spelling itself. Passing quote already ' +
     'failed loudly here, because payment_required is required — it is idempotencyKey that was ' +
     'dropped in silence before that, replacing the caller\'s replay scope with a key derived ' +
     'from the quote. Pass payment_required (the paymentRequired field of a haven_quote_x402 ' +

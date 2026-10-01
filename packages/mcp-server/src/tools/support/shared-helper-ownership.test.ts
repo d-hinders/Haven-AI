@@ -73,6 +73,7 @@ import {
 } from '@haven_ai/sdk'
 import * as capPrice from './cap-price.js'
 import * as catalogEntry from './catalog-entry.js'
+import * as allowanceBlock from './allowance-block.js'
 import * as errors from './errors.js'
 import * as guidance from './guidance.js'
 import * as mcpContext from './mcp-context.js'
@@ -223,6 +224,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
   // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
   getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
+  // #3497 item 4: the moved block is called from BOTH slices' pay tools —
+  // s2811's haven_pay_x402_quote (both branches) and s2810's
+  // haven_pay_mcp_tool (both branches).
+  delegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
+  // The block's shape type — type-only, mapped for ownership (see TYPE_ONLY_EXPORTS).
+  DelegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
 }
 
 /**
@@ -408,6 +415,11 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'quoteWarnings',
   ],
   'catalog-entry': ['getUsableCatalogMcpEntry'],
+  // #3497 item 4: the delegation-rail allowance block. #3476 built it inside
+  // the plain-HTTP slice and declared it capability-local; wiring the SAME
+  // block into `haven_pay_mcp_tool` (s2810) made it a two-slice helper —
+  // moved VERBATIM, call sites unchanged.
+  'allowance-block': ['delegationAllowanceBlock', 'DelegationAllowanceBlock'],
   errors: [
     'HostedToolError',
     'runTool',
@@ -512,7 +524,7 @@ const REGISTRATION_SURFACE_EXPORTS = new Set([
 ])
 
 /** Type-only exports: mapped for ownership, absent at runtime by design. */
-const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext'])
+const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext', 'DelegationAllowanceBlock'])
 
 /**
  * Exact-name exclusion for symbols that appear on a module namespace at
@@ -526,6 +538,7 @@ const MODULE_INTERNAL_SYMBOLS = new Set(['default', 'META_ENV'])
 const SUPPORT_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
   'cap-price': capPrice,
   'catalog-entry': catalogEntry,
+  'allowance-block': allowanceBlock,
   errors,
   guidance,
   'mcp-context': mcpContext,

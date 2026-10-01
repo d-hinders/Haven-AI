@@ -96,7 +96,7 @@ export function signerCompatibilityNotice(emittedVersion: number) {
     // enforcement story lives in the tool descriptions and the signer's own
     // structured refusal.
     check:
-      'The signer enforces this version itself (#1547): on its version-mismatch refusal ' +
+      'The signer enforces this version itself: on its version-mismatch refusal ' +
       '(code/supported_versions/fallback), STOP before signing again and update @haven_ai/signer ' +
       `by running \`${hostedConnectorUpgradeCommand()}\`, then the repair line it prints. Never edit the version — it is Haven-signed, ` +
       'so changing it invalidates the signature. Nothing has been spent at this point.',
@@ -168,7 +168,7 @@ export function directSignerCompatibilityNotice() {
       "by payment_id. If haven_sign refuses that call — carrying fallback: 'typed_data_b64' (any " +
       'code: a transport failure, a malformed body, or a 404 on an older backend), or code ' +
       "SIGN_CONTEXT_REFUSED with backend_error_code 'sign_context_unavailable' from a signer " +
-      'predating #3271 — nothing was signed either way: re-run the SAME haven_send / haven_pay ' +
+      'older than 0.5.0-alpha.1 — nothing was signed either way: re-run the SAME haven_send / haven_pay ' +
       'call with the SAME idempotency_key (echoed on its result) plus include_signing_payload: ' +
       'true — repeating the same token/amount/recipient/task_budget_id/sub_budget_id, or it ' +
       'answers 409 — then sign through the relay: call haven_sign with { payload_hash, ' +
@@ -177,7 +177,7 @@ export function directSignerCompatibilityNotice() {
     // pattern on the x402 notice above: prose to read, data to route on.
     fallback:
       "haven_sign refused this call — fallback: 'typed_data_b64' (any code), or " +
-      "SIGN_CONTEXT_REFUSED / sign_context_unavailable from a signer predating #3271 — and signed " +
+      "SIGN_CONTEXT_REFUSED / sign_context_unavailable from a signer older than 0.5.0-alpha.1 — and signed " +
       'nothing either way: re-run the SAME haven_send / haven_pay call with the SAME ' +
       'idempotency_key plus include_signing_payload: true, then call haven_sign again with ' +
       '{ payload_hash, typed_data_b64 } from that re-run result, unchanged, ' +

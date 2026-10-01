@@ -241,7 +241,8 @@ export const toolDescriptions = {
     behavior:
       'Pass payment_id and, when you hold one, settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Omitting settlement_tx_hash succeeds as a no-op — nothing is checked or recorded, and no network call is made. Haven verifies on-chain before recording a hash; a zero, mismatched, or reverted hash is refused. Your own payments only.',
     nextActionGuidance:
-      'code DELIVERED_UNSETTLED: did not verify, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.',
+      'code SETTLEMENT_NOT_RECORDED (refusal_reason present): the payment\'s funding is confirmed and this hash was not accepted for it — do not retry it; refusal_reason carries why, verbatim. ' +
+      'code DELIVERED_UNSETTLED: not verified, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.',
   },
 } as const satisfies Record<string, ToolDescription>
 

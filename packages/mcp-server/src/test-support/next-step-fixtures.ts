@@ -33,9 +33,12 @@ const HOSTED = (name: string) => ({
  * written as two full call sites — confirmed and still-resolving — rather
  * than one call with a conditional spread, because `lint:next-steps`
  * requires a handoff to be named at the emission's OWN top level; a handoff
- * hidden behind a ternary spread reads as unnamed.
+ * hidden behind a ternary spread reads as unnamed. #3529 adds one: the
+ * reason-bearing evidence-refusal arm — a refused report whose backend
+ * relayed a `reason` (only the eip3009 settlement seam emits one) is its
+ * own emission, keyed on the reason's PRESENCE, never on payment status.
  */
-export const EMISSION_SITE_COUNT = 23
+export const EMISSION_SITE_COUNT = 24
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
  * null-id sites share one helper, the report-outcome accepted site has two
@@ -45,7 +48,7 @@ export const EMISSION_SITE_COUNT = 23
  * (#3495 review round 1, S5) is two full sites of its own (confirmed / still
  * resolving) — one fixture each, matching the two call sites.
  */
-export const EMISSION_FIXTURE_COUNT = 27
+export const EMISSION_FIXTURE_COUNT = 28
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -67,6 +70,10 @@ export const EMISSION_SITES = [
   // never reused for a different fact.
   { site: 'plain-http-x402.ts report outcome accepted, eip3009 unsettled (offer settlement evidence)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
+  // #3529: the reason-bearing evidence refusal is its own arm — keyed on the
+  // relayed reason's PRESENCE (only the eip3009 settlement seam emits one),
+  // never on payment status. Same poll-status handoff as the pending arm.
+  { site: 'paid-mcp-completion.ts report settlement evidence: reason-bearing refusal', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts settle held-hash, can report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) } } },
   { site: 'paid-mcp-completion.ts settle held-hash, cannot report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts settle funding pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },

@@ -2081,6 +2081,83 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
     expect(res.data.agent_summary.status).toBe('confirmed')
   })
 
+  // #3529: a refused report whose backend relayed a refusal REASON is its own
+  // classification. The reason is carried verbatim as refusal_reason, and the
+  // wording states the confirmed-funding case truthfully — the payment's
+  // funding leg is confirmed and unchanged; what was refused is THIS hash as
+  // its settlement. Never keyed on payment status (the status below is
+  // `confirmed`, but so is the funding of every eip3009 payment whose
+  // ordinary, correct refusal must keep DELIVERED_UNSETTLED): the key is the
+  // reason's presence, which only the eip3009 settlement seam emits.
+  it('a reason-bearing 409 is SETTLEMENT_NOT_RECORDED with the backend reason verbatim', async () => {
+    const reason = 'This payment already has a different verified settlement transaction recorded'
+    stubReport(
+      {
+        status: 409,
+        body: {
+          error: 'The reported settlement transaction was not recorded for this payment — ' +
+            'the payment is unchanged',
+          reason,
+        },
+      },
+      {
+        status: 200,
+        body: { payment_id: 'pay_7710', kind: 'payment_intent', status: 'confirmed', rail: 'x402' },
+      },
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const res = ok(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: SETTLEMENT_TX,
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('SETTLEMENT_NOT_RECORDED')
+    expect(res.data.refusal_reason).toBe(reason)
+    expect(res.data.retryable).toBeUndefined()
+    expect(res.data.settlement_tx_hash).toBe(SETTLEMENT_TX)
+    expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+    expect(res.data.agent_summary.status).toBe('confirmed')
+    const guidanceReason = res.data.reason as string
+    expect(guidanceReason).toContain(reason)
+    // Truthful about what Haven knows: the funding leg is confirmed and the
+    // payment is unchanged — never the old transfer-shape claim.
+    expect(guidanceReason).toContain('funding leg is confirmed')
+    expect(guidanceReason).not.toMatch(/transfer shape or window/)
+  })
+
+  it('a reasonless 409 keeps DELIVERED_UNSETTLED and carries no refusal_reason', async () => {
+    // The pre-#3475-backend shape: no reason in the body even though the
+    // payment may be confirmed. The wording must stay honest for every case
+    // this arm can still be reached by — a real mismatch, a foreign payment,
+    // a validation refusal, an older backend.
+    stubReport(
+      { status: 409, body: { error: 'The reported settlement transaction does not match this payment on-chain — the payment was not confirmed' } },
+      {
+        status: 200,
+        body: { payment_id: 'pay_7710', kind: 'payment_intent', status: 'confirmed', rail: 'x402' },
+      },
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const res = ok(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: SETTLEMENT_TX,
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+    expect(res.data).not.toHaveProperty('refusal_reason')
+    const guidanceReason = res.data.reason as string
+    expect(guidanceReason).not.toContain('funding leg is confirmed')
+    expect(guidanceReason).toContain('does not yet take this kind of settlement report')
+  })
+
   it(
     'backend 503 (settlement_unobservable, exhausted retries): SETTLEMENT_PENDING, retryable',
     async () => {

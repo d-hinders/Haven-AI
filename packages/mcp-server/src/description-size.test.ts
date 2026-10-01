@@ -268,6 +268,22 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * moves to that exact value, shrink-only from here. The mean pin moves too:
  * 24,898 / 26 = 957.6154 sits above round 12's 944.12, and the same rule
  * applies — re-derived at the measured mean, shrink-only from here.
+ *
+ * **Re-derived — round 14, #3529 (2026-10-01).** The shared
+ * `haven_report_settlement_evidence` nextActionGuidance must name the new
+ * refusal code before an agent meets it: a reason-bearing refusal (the
+ * backend's relayed `reason`, #3475's evidence contract) now answers
+ * `SETTLEMENT_NOT_RECORDED` instead of `DELIVERED_UNSETTLED`, and the
+ * guidance says what that means — funding confirmed, this hash not accepted,
+ * the reason carried verbatim — while the `DELIVERED_UNSETTLED` line is
+ * reworded to the honest-for-every-case form (+185 UTF-8 bytes on that one
+ * description). No overclaim remains to trim: the added lines name the code,
+ * the field, and the do-not-retry, exactly the shape rounds 9/10 recorded
+ * for additive response vocabulary. Measured total 25,083 across the same 26
+ * tools; the absolute pin moves to that exact value, shrink-only from here.
+ * The mean pin moves too: 25,083 / 26 = 964.7308 sits above round 13's
+ * 957.62, and the same rule applies — re-derived at the measured mean,
+ * shrink-only from here.
  */
 /**
  * **Re-derived — round 14, #3506 (agent-completes sub-budgets).** The agent
@@ -283,12 +299,36 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * 24,898 + 144 = 25,042, measured, so the absolute pin moves to that exact
  * value, shrink-only from here; the mean moves with it (25,042 / 26 =
  * 963.1538…, pinned at the two-decimal ceiling).
+ *
+ * **Re-derived — round 14, #3529 (2026-10-01).** The shared
+ * `haven_report_settlement_evidence` nextActionGuidance must name the new
+ * refusal code before an agent meets it: a reason-bearing refusal (the
+ * backend's relayed `reason`, #3475's evidence contract) now answers
+ * `SETTLEMENT_NOT_RECORDED` instead of `DELIVERED_UNSETTLED`, and the
+ * guidance says what that means — funding confirmed, this hash not accepted,
+ * the reason carried verbatim — while the `DELIVERED_UNSETTLED` line is
+ * reworded to the honest-for-every-case form (+185 UTF-8 bytes on that one
+ * description). No overclaim remains to trim: the added lines name the code,
+ * the field, and the do-not-retry, exactly the shape rounds 9/10 recorded
+ * for additive response vocabulary.
+ *
+ * **Re-derived — round 15, #3506 ∪ #3529 union tree (2026-10-01 rebase).**
+ * Both round-14 changes grew from the same round-13 base on disjoint
+ * descriptions: this branch (#3529) grew the shared
+ * `haven_report_settlement_evidence` nextActionGuidance by 185 bytes, while
+ * dev's #3506 added 144 bytes across `haven_get_agent` and `haven_submit`.
+ * The union tree re-measures at 25,227 across the same 26 tools — 25,042 +
+ * 185 = 25,227, exactly — so the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin moves too: 25,227 / 26 = 970.2692
+ * sits above both round-14 pins, and the same rule applies — re-derived at
+ * the measured mean, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 25_042
-// Mean pin: re-derived — round 14, #3506 (block above): 25,042 / 26 =
-// 963.1538, pinned at the two-decimal ceiling (963.16). Round 13's 957.62
-// cannot hold while this tree exceeds it. Shrink-only from here.
-const MAX_MEAN_BYTES = 963.16
+const MAX_TOTAL_BYTES = 25_227
+// Mean pin: re-derived — round 15, #3506 ∪ #3529 union (block above):
+// 25,227 / 26 = 970.2692, pinned at the two-decimal ceiling (970.27).
+// Round 13's 957.62 and both round-14 pins cannot hold while this tree
+// exceeds them. Shrink-only from here.
+const MAX_MEAN_BYTES = 970.27
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

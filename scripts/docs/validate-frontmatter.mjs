@@ -220,8 +220,13 @@ export function parseFrontMatter(raw) {
   return { ok: true, data }
 }
 
-async function main() {
-  const docFiles = (await walk(join(REPO_ROOT, 'docs')))
+/**
+ * The front-matter doc population from a list of `docs/**` paths: Markdown
+ * only, without the CASP changelog shards, plus the root gravity files.
+ * Pure, so a caller (doc-health.mjs, #3511) can apply it to fixture paths.
+ */
+export function docFilesFrom(docsPaths) {
+  const docFiles = docsPaths
     .filter((p) => p.endsWith('.md'))
     // #1366: CASP changelog shards are FRAGMENTS of the parent contract doc
     // (one per-issue verification entry each), not standalone docs — requiring
@@ -230,6 +235,16 @@ async function main() {
     // README.md keeps full front-matter and documents the convention.
     .filter((p) => !(p.startsWith('docs/regulatory/casp-changelog/') && !p.endsWith('README.md')))
   for (const root of ROOT_DOCS) docFiles.push(root)
+  return docFiles
+}
+
+/** Every doc this validator checks: `docs/**` (minus CASP shards) plus `ROOT_DOCS`. */
+export async function listDocFiles() {
+  return docFilesFrom(await walk(join(REPO_ROOT, 'docs')))
+}
+
+async function main() {
+  const docFiles = await listDocFiles()
 
   const allFiles = await walk(REPO_ROOT)
   const errors = []

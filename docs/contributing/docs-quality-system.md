@@ -148,6 +148,7 @@ backend vitest job, so a PR touching no backend surface never runs it.
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**` so engineering docs may say "Safe", "AllowanceModule", "signer") | Advisory |
 | Weekly staleness audit | `scripts/docs/audit-staleness.mjs`, `docs-audit.yml` Mondays 06:00 UTC | Advisory (upserts one tracking issue) |
+| Doc-health JSON for the ops console ([#3511](https://github.com/d-hinders/Haven-AI/issues/3511)) | `scripts/docs/doc-health.mjs [--out <path>] [--generated-at <ISO>]`: per-doc owner, status, `last-verified` and flags (`no-front-matter`, `no-owner`, `empty-covers`, and `unverified-90d`, which is age only and not the commit-based audit above) over the validator's population minus `docs/archive/**`, plus the governed package docs | Report only (the ops app's `prebuild` writes it; never gates) |
 | `haven-doc-reviewer` | [`doc-reviewer.md`](../../.agents/skills/haven-agent-workflow/references/doc-reviewer.md); binds its verdict to the reviewed head via `scripts/ci/review-isolation.mjs` | Advisory (never blocks auto-merge) |
 
 The shrink-only gates share `scripts/lib/ratchet.mjs`, which validates a

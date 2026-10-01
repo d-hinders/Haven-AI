@@ -166,6 +166,34 @@ export function isTransferCapRevert(err: unknown): boolean {
 }
 
 /**
+ * #3494 review round 1 (S1): `AA24 signature error` is the ONE ERC-4337 AA2x
+ * code this backend can attribute to the signer — the EntryPoint's own
+ * validation found the signature itself wrong. Every OTHER AA2x code
+ * (AA20 account not deployed, AA21 didn't pay prefund, AA22 expired or not
+ * due, AA23 validateUserOp reverted for a reason that is not the signature,
+ * AA25 invalid account nonce, AA26 over verificationGasLimit) is a real
+ * validation failure but NOT evidence the signer is wrong — naming the
+ * signer there would send an agent chasing a signer bug that is not there.
+ * Like the caveat reverts above there is no typed error to switch on: the
+ * bundler/EntryPoint relays it as plain text in the revert reason, so this
+ * is a text match, not a code match. Unlike a budget revert, there is
+ * nothing to re-read and no "fits now" outcome either way — the remedy for
+ * both is a NEW payment, never a resubmit of this payment_id.
+ */
+const SIGNATURE_REJECTED_REVERT_PATTERN = /\bAA24\b/
+/** #3494 review round 1 (S1): the rest of the AA2x family — see the doc above. */
+const ACCOUNT_VALIDATION_FAILED_REVERT_PATTERN = /\bAA(?:20|21|22|23|25|26)\b/
+
+export function isSignatureRejectedRevert(err: unknown): boolean {
+  return SIGNATURE_REJECTED_REVERT_PATTERN.test(flattenErrorText(err))
+}
+
+/** True for an AA2x validation failure OTHER than AA24 (see `isSignatureRejectedRevert`). */
+export function isAccountValidationFailedRevert(err: unknown): boolean {
+  return ACCOUNT_VALIDATION_FAILED_REVERT_PATTERN.test(flattenErrorText(err))
+}
+
+/**
  * Flatten an error and its `cause` chain into one searchable string. Caveat
  * reverts arrive wrapped: viem's `EstimateGasExecutionError` carries the
  * contract error as `cause`, and a bundler relays the revert reason inside

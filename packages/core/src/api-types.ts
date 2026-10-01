@@ -4777,6 +4777,8 @@ export type components = {
             settlement_scheme?: ("eip3009" | "erc7710") | null;
             /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
             merchant_settlement_recorded?: boolean;
+            /** @description A bounded, redacted cause for a `failed` payment — the stored error message (already scrubbed of vendor secrets before it was written), capped so a viem/bundler dump never rides this response. Present (possibly `null`, when no message was recorded) only when `status` is `failed`; omitted on every other status. */
+            failure_reason?: string | null;
             /** @description The budget delegation that metered this payment (#1059), recorded at authorize. The settle summary keys its allowance rows on this — the budget that PAID, never a re-derived (token, payee) first match. Omitted on the legacy rail and on intents predating migration 053. */
             budget_delegation_hash?: string;
             fee?: {
@@ -18261,7 +18263,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description On-chain execution failed after this route claimed the intent for submission; the intent is already `failed`. The body carries one of six typed `error_code` values: `submission_outcome_unknown` (the UserOp's receipt wait itself failed — it may have landed; do NOT pay again, check the account's real activity, never this payment_id's own status), `signature_rejected` (AA24 only — update the signer, then pay again), `account_validation_failed` (a different AA2x code, not a signer cause — pay again), `task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 answers — `asset` on `delegation_budget_exceeded` only — neither carries a `message` field), or `onchain_execution_failed` (including a submitted UserOp that executed and reverted — a confirmed, no-funds-moved outcome — pay again). The four non-budget codes carry bounded, redacted `details` (300 characters plus an ellipsis if longer, or `null`); three of the four carry a fixed remedy `message`, while `onchain_execution_failed`'s `message` carries the bounded text itself (or the literal fallback "On-chain execution failed"). */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -18270,7 +18272,9 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        details?: string | null;
+                        /** @description Present only on `error_code: "submission_outcome_unknown"`. */
+                        user_op_hash?: string;
                     } & {
                         [key: string]: unknown;
                     };

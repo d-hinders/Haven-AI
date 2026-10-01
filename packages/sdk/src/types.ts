@@ -2101,6 +2101,12 @@ export interface PaymentStatusResult {
    */
   merchantSettlementRecorded?: boolean
   /**
+   * #3494: a bounded, redacted cause for a `failed` payment — present
+   * (possibly `null`, when no message was recorded) only when `status` is
+   * `'failed'`; absent on every other status.
+   */
+  failureReason?: string | null
+  /**
    * #3518: the budget delegation that METERED this payment, recorded at
    * authorize (migration 053) — the settle summary's authoritative answer
    * to "which budget paid". Absent on the legacy rail and on rows
@@ -2371,6 +2377,8 @@ export interface RawPaymentStatusResult {
    * `delivered`'s own honesty rule.
    */
   merchant_settlement_recorded?: boolean
+  /** #3494: see `PaymentStatusResult.failureReason`'s doc. */
+  failure_reason?: string | null
   /**
    * #3518: the budget delegation that METERED this payment, recorded at
    * authorize (migration 053). The settle summary keys its allowance rows

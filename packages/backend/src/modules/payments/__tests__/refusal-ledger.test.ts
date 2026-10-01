@@ -48,6 +48,8 @@ import {
   decodeErrorStrings,
   isPeriodBudgetRevert,
   isTransferCapRevert,
+  isSignatureRejectedRevert,
+  isAccountValidationFailedRevert,
 } from '../refusal-ledger.js'
 import { EstimateGasExecutionError } from 'viem'
 
@@ -371,5 +373,45 @@ describe('refusal ledger unit contracts', () => {
     const expired = new Error(hexRevert('TimestampEnforcer:expired-delegation'))
     expect(classifyRevertForLedger(expired)).toBe('delegation_expired')
     expect(isPeriodBudgetRevert(expired)).toBe(false)
+  })
+
+  // #3494 review round 1 (S1): AA24 names the signer; every other AA2x code
+  // does not — each gets its own explicit case, not a loop over the family.
+  it('isSignatureRejectedRevert: matches AA24 only, not a budget revert, another AA2x code, or an unrelated error', () => {
+    expect(isSignatureRejectedRevert(new Error('UserOperation reverted during simulation: AA24 signature error'))).toBe(true)
+    // Wrapped as viem does — the text sits in the cause.
+    expect(
+      isSignatureRejectedRevert(
+        new Error('estimate failed', { cause: new Error('AA24 signature error') }),
+      ),
+    ).toBe(true)
+    // AA25 (a different AA2x code) is NOT a signature rejection.
+    expect(isSignatureRejectedRevert(new Error('AA25 invalid account nonce'))).toBe(false)
+    // A budget revert is not a signature revert, and vice versa.
+    const period = new Error(VERBATIM_DEV_PERIOD_REVERT)
+    expect(isSignatureRejectedRevert(period)).toBe(false)
+    expect(isPeriodBudgetRevert(period)).toBe(true)
+    // AA1x/AA3x are a different phase (factory/paymaster) — not this family.
+    expect(isSignatureRejectedRevert(new Error('AA10 sender already constructed'))).toBe(false)
+    expect(isSignatureRejectedRevert(new Error('nothing enforcer-shaped here'))).toBe(false)
+  })
+
+  it('isAccountValidationFailedRevert: matches AA25 (and the rest of the family) but never AA24, a budget revert, or an unrelated error', () => {
+    expect(isAccountValidationFailedRevert(new Error('AA25 invalid account nonce'))).toBe(true)
+    // Wrapped as viem does — the text sits in the cause.
+    expect(
+      isAccountValidationFailedRevert(
+        new Error('estimate failed', { cause: new Error('AA25 invalid account nonce') }),
+      ),
+    ).toBe(true)
+    // AA24 belongs to isSignatureRejectedRevert, never this one.
+    expect(isAccountValidationFailedRevert(new Error('AA24 signature error'))).toBe(false)
+    // A budget revert is not an account-validation failure, and vice versa.
+    const period = new Error(VERBATIM_DEV_PERIOD_REVERT)
+    expect(isAccountValidationFailedRevert(period)).toBe(false)
+    expect(isPeriodBudgetRevert(period)).toBe(true)
+    // AA1x/AA3x are a different phase (factory/paymaster) — not this family.
+    expect(isAccountValidationFailedRevert(new Error('AA10 sender already constructed'))).toBe(false)
+    expect(isAccountValidationFailedRevert(new Error('nothing enforcer-shaped here'))).toBe(false)
   })
 })

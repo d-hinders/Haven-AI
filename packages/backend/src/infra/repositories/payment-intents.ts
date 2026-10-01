@@ -690,6 +690,10 @@ export const FIND_INTENT_STATUS_ROW_SQL = `SELECT pi.id, pi.chain_id, pi.token_s
             pi.source, pi.payment_rail, pi.payment_resource_url, pi.x402_resource_url,
             pi.merchant_address, pi.x402_merchant_address, pi.x402_idempotency_key,
             pi.machine_challenge_id, pi.machine_idempotency_key, pi.machine_metadata,
+            -- #3494: the FAILED cause (bounded+redacted at the read, agent-payment-status.ts)
+            -- and the direct rail's own idempotency key — neither was selected before,
+            -- so a failed/direct row's status answered with no cause and no key.
+            pi.error_message, pi.send_idempotency_key,
             pi.budget_delegation_hash,
             (mpre.id IS NOT NULL) AS funded_but_unsettled,
             EXISTS (SELECT 1 FROM machine_payment_evidence mpe
@@ -727,6 +731,10 @@ export interface PaymentIntentStatusRow {
   machine_challenge_id: string | null
   machine_idempotency_key: string | null
   machine_metadata: unknown
+  /** #3494: pre-redacted at write (`routes/payments.ts`'s `redactVendorSecrets`), bounded at read. */
+  error_message: string | null
+  /** #3494: the direct (non-x402/mpp) rail's own idempotency key. */
+  send_idempotency_key: string | null
   /** When the funding leg confirmed on-chain; null before confirmation. */
   confirmed_at: string | null
   /** #2970: authorize time — the origin of an erc7710 intent's settlement window. */

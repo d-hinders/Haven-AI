@@ -191,6 +191,68 @@ const DELEGATION_BUDGET_EXCEEDED_ERROR_CODE = 'delegation_budget_exceeded'
 const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
   "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
 
+/**
+ * #3494: the backend's `error_code` when the delegate account rejected the
+ * UserOperation signature during on-chain validation (`POST
+ * /payments/:id/sign`, ERC-4337 `AA24 signature error` — the ONE AA2x code
+ * this backend attributes to the signer; see `ACCOUNT_VALIDATION_FAILED`
+ * below for the rest of the family). The intent is already `failed`; this
+ * payment_id has nothing left to resubmit — a NEW payment, signed by a
+ * corrected signer, is the only path.
+ */
+const SIGNATURE_REJECTED_ERROR_CODE = 'signature_rejected'
+const SIGNATURE_REJECTED_OMITTED_REASON =
+  'the account rejected this signature during on-chain validation; retrying this payment_id cannot succeed — update the signer, then create a NEW payment, after telling the user'
+
+/**
+ * #3494 review round 1 (S1): every OTHER ERC-4337 AA2x validation failure —
+ * a real `validateUserOp` rejection, but NOT evidence the signature itself
+ * is wrong (AA24 alone is `signature_rejected` above). Deliberately never
+ * names the signer: the remedy is a new payment, not a signer update.
+ */
+const ACCOUNT_VALIDATION_FAILED_ERROR_CODE = 'account_validation_failed'
+const ACCOUNT_VALIDATION_FAILED_OMITTED_REASON =
+  'the account rejected this payment during on-chain validation (not a signature cause); retrying this payment_id cannot succeed — create a new payment, after telling the user'
+
+/**
+ * #3494: the backend's `error_code` for every other `POST /payments/:id/sign`
+ * on-chain/bundler failure — the one case this route cannot classify as a
+ * signature, account-validation or budget cause, INCLUDING a
+ * `SubmittedUserOpFailedError` whose `reverted` flag is `true` (round 2,
+ * N3): the op executed and reverted is a KNOWN, confirmed outcome (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed), unlike
+ * `SUBMISSION_OUTCOME_UNKNOWN` below. Still a failed intent, so still
+ * stop-and-tell, never the generic 5xx "retry once" below (there is no live
+ * state left on this payment_id for a retry to find).
+ */
+const ONCHAIN_EXECUTION_FAILED_ERROR_CODE = 'onchain_execution_failed'
+const ONCHAIN_EXECUTION_FAILED_OMITTED_REASON =
+  'this payment_id already failed on-chain and cannot be retried; tell the user what the message says, and create a new payment if they still want to pay'
+
+/**
+ * #3494 review round 1 (B1, double-pay risk), round 2 (B1', N3): the
+ * backend's `error_code` when `sendUserOperation` resolved but the receipt
+ * wait itself errored or timed out — `SubmittedUserOpFailedError` with
+ * `reverted: false` (the default) — so the UserOp MAY have landed, and
+ * Haven never learned the outcome. The SAME error class's `reverted: true`
+ * case (the op executed and reverted — a KNOWN outcome, no funds moved)
+ * answers `ONCHAIN_EXECUTION_FAILED` above instead; this code is strictly
+ * the "truly unknown" half.
+ *
+ * Round 2 (B1'): `next_action` is `stop_and_tell_user`, NOT
+ * `check_status_later` — the sign route's `failSubmittedIntent` already
+ * marked this intent `failed` BEFORE this response was built, so
+ * `haven_get_payment_status` on this same payment_id will answer "failed"
+ * immediately and forever. Polling status can never come back "landed";
+ * naming it as the next step would read as a promise this code cannot keep,
+ * and round 1's wording made exactly that promise ("poll status, pay again
+ * once it confirms this one did not settle") — which invites reading the
+ * permanent "failed" answer AS that confirmation, and paying again. The
+ * honest remedy is a human check against the account's REAL activity (not
+ * this payment's own status): Haven's own activity view, or the
+ * UserOperation hash on a block explorer.
+ */
+const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -324,6 +386,106 @@ export function normalizeError(err: unknown): ToolFailure {
       ...(body.shortfall_atomic !== undefined ? { shortfall_atomic: body.shortfall_atomic } : {}),
       ...(body.phase !== undefined ? { phase: body.phase } : {}),
       ...(body.rail !== undefined ? { rail: body.rail } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #3494: `POST /payments/:id/sign` (every rail it relays, including the
+  // EIP-3009 funding leg) now carries a typed `error_code` on its failure
+  // 502, which this generic-5xx-means-retry-once branch predates. Each of the
+  // four typed codes below (and the two budget codes above) means the intent
+  // is ALREADY FAILED —
+  // `failSubmittedIntent` booked it on the row before the response was sent
+  // — so "retry once" is never the right next step whatever caused it.
+  // #3494 review round 1 (B1, double-pay risk), round 2 (B1'): checked
+  // BEFORE every other sign-failure branch — this is the one case where
+  // "create a new payment" is the WRONG instruction, because the submitted
+  // UserOp may have landed. `next_action` is `stop_and_tell_user`, NOT
+  // `check_status_later`: the backend already marked this intent `failed`
+  // before answering, so `haven_get_payment_status` on this same
+  // payment_id would answer "failed" forever and can never confirm the
+  // outcome — naming it would promise a resolution this code cannot
+  // deliver. See the constant's own doc comment for the full reasoning.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE
+  ) {
+    const body = err.body as { payment_id?: string; user_op_hash?: string }
+    const userOpHashClause = body.user_op_hash
+      ? `UserOperation ${body.user_op_hash}`
+      : 'the UserOperation hash'
+    const reason =
+      'The payment was submitted but its on-chain outcome is unknown — it may have moved funds even ' +
+      'though Haven recorded it as failed. Do NOT create a new payment. Tell the user to check the ' +
+      `account's activity in Haven (or ${userOpHashClause} on a block explorer) before paying again.`
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: reason,
+    })
+    return {
+      success: false,
+      code: 'SUBMISSION_OUTCOME_UNKNOWN',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: body.payment_id,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === ACCOUNT_VALIDATION_FAILED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: ACCOUNT_VALIDATION_FAILED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'ACCOUNT_VALIDATION_FAILED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === SIGNATURE_REJECTED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: SIGNATURE_REJECTED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'SIGNATURE_REJECTED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === ONCHAIN_EXECUTION_FAILED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: ONCHAIN_EXECUTION_FAILED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'ONCHAIN_EXECUTION_FAILED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

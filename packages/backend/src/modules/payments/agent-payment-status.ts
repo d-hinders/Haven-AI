@@ -55,6 +55,28 @@ function statusFee(input: {
   }
 }
 
+/**
+ * #3494: the cap every surfaced failure cause shares — the sign route's 502
+ * `message`, this module's `failure_reason`, and `GET /payments/:id`'s
+ * `error_message` (bounded at that route's read, same function). Vendor
+ * secrets are already redacted before a message reaches storage
+ * (`redactVendorSecrets`, `routes/payments.ts`); this is the second,
+ * independent bound — LENGTH — because a viem/bundler failure can carry the
+ * full encoded callData or ABI in its message, and neither redaction nor
+ * truncation alone catches what the other misses.
+ */
+export const FAILURE_MESSAGE_MAX_LENGTH = 300
+
+/** Bound (and trim) a stored or raw failure message; `null` in, `null` out. */
+export function boundFailureMessage(message: string | null | undefined): string | null {
+  if (message == null) return null
+  const trimmed = message.trim()
+  if (!trimmed) return null
+  return trimmed.length > FAILURE_MESSAGE_MAX_LENGTH
+    ? `${trimmed.slice(0, FAILURE_MESSAGE_MAX_LENGTH)}…`
+    : trimmed
+}
+
 export interface AgentPaymentStatus {
   payment_id: string
   kind: AgentPaymentKind
@@ -104,6 +126,15 @@ export interface AgentPaymentStatus {
    * honesty rule.
    */
   merchant_settlement_recorded?: boolean
+  /**
+   * #3494: a bounded, redacted cause for a `failed` payment — the same
+   * `error_message` `failSubmittedIntent` books on the row (already scrubbed
+   * of vendor secrets by `redactVendorSecrets` before it is stored), capped
+   * so a viem/bundler dump never rides a status read. Present (possibly
+   * `null`, when no message was recorded) only when `status === 'failed'`;
+   * omitted on every other status.
+   */
+  failure_reason?: string | null
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
@@ -285,6 +316,8 @@ function railContext(input: {
   idempotencyKey: string | null
   challengeId?: string | null
   machineMetadata: unknown
+  /** #3494: the direct (non-x402/mpp) rail's own key, `payment_intents.send_idempotency_key`. */
+  sendIdempotencyKey?: string | null
 }) {
   const metadata = metadataObject(input.machineMetadata)
 
@@ -329,6 +362,18 @@ function railContext(input: {
     }
 
     return context
+  }
+
+  // #3494: the direct rail persisted no idempotency key of its own in the
+  // railContext object before this — `send_idempotency_key` is a real column
+  // (`routes/payments.ts` writes it from the request body, echoed on
+  // `haven_send`/`haven_pay` since #3524), but `FIND_INTENT_STATUS_ROW_SQL`
+  // did not select it and this function returned `{}` for every direct row.
+  // One flat field, matching the x402/mpp branches' top-level `idempotency_key`
+  // — no nested `direct: {}` block, since the direct rail has no other
+  // rail-specific context to carry alongside it.
+  if (input.rail === AgentPaymentRail.Direct) {
+    return { idempotency_key: nonEmpty(input.sendIdempotencyKey ?? null) }
   }
 
   return {}
@@ -1032,6 +1077,9 @@ function statusFromRow(
       ...(hasVerifiedMerchantSettlement(payment.machine_metadata)
         ? { merchant_settlement_recorded: true as const }
         : {}),
+      // #3494: additive, failed rows only — see the field doc on
+      // `AgentPaymentStatus.failure_reason`.
+      ...(payment.status === 'failed' ? { failure_reason: boundFailureMessage(payment.error_message) } : {}),
       fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
       ...railContext({
         rail,
@@ -1042,6 +1090,7 @@ function statusFromRow(
         idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
         challengeId: payment.machine_challenge_id,
         machineMetadata: payment.machine_metadata,
+        sendIdempotencyKey: payment.send_idempotency_key,
       }),
     },
     {

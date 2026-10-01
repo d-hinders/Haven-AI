@@ -153,10 +153,10 @@
       "note": "Archive (#1401) — the agent moves to Removed; history stays readable. The archived-agent contract."
     }
   },
-  "packages/frontend/src/components/ui/CopyButton.tsx": {
+  "packages/ui/src/CopyButton.tsx": {
     "still-readable": {
       "category": "ui-affordance",
-      "note": "The phrase matches but the referent is the copied value ('still readable and selectable either way'), not an agent record — a UI affordance, not a rail claim."
+      "note": "The phrase matches but the referent is the copied value ('still readable and selectable either way'), not an agent record — a UI affordance, not a rail claim. (#3508 moved the file from packages/frontend/src/components/ui/.)"
     }
   },
   "packages/frontend/src/hooks/useAgents.ts": {

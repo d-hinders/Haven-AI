@@ -1011,10 +1011,11 @@ export async function serveAgentDetailResponses(
   // it a distinct one. Default unchanged, so no other baseline moves.
   options: {
     otherAgentName?: string
-    // #3549: retire the researched agent (revoked and/or archived) while it
-    // still holds its ACTIVE delegation — the half-revoked state #3542
-    // describes, reachable whenever a credential is revoked before its budget.
-    agentOverrides?: { status?: 'revoked'; archived_at?: string }
+    // #3549: revoke the researched agent while it still holds its ACTIVE
+    // delegation — the half-revoked state #3542 describes, reachable whenever
+    // a credential is revoked before its budget (`POST /revoke` flips status
+    // only). No archived override: archiving needs no live budget.
+    agentOverrides?: { status?: 'revoked' }
   } = {},
 ) {
   await page.route('**/api/**', async (route) => {

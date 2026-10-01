@@ -9,13 +9,17 @@
  *
  * ELEMENT-SCOPED to the card's anchor (`#delegation-budget-card`), the same
  * scoping `edit-budget-modal.visual.spec.ts` uses, at the 390 px evidence
- * viewport (`scripts/evidence-viewports.mjs`). Two clips, one per retired
- * state, because their reason lines differ. No dark baseline: the
+ * viewport (`scripts/evidence-viewports.mjs`). One clip, REVOKED: a revoked
+ * agent still holding an active budget is reachable (`POST /revoke` flips
+ * status only). Archived is not pictured: ARCHIVE_AGENT_SQL archives a
+ * delegator-account agent only once it is revoked AND holds no live budget,
+ * so "archived with an active row" cannot exist, and revoked+archived renders
+ * the revoked copy (unit-tested). No dark baseline: the
  * `chromium-desktop-dark` project's `testMatch` (playwright.config.ts) does
  * not include this file.
  *
  * Route and fixtures: `/agents/agent-research` via `serveAgentDetailResponses`
- * with `agentOverrides` retiring the agent; its seeded ACTIVE delegation
+ * with `agentOverrides` revoking the agent; its seeded ACTIVE delegation
  * (250 USDC per week, recipient-pinned) is the row the card still lists.
  * Clock frozen so the page around the card cannot race a capture.
  */
@@ -47,12 +51,7 @@ const STATES = [
   {
     name: 'revoked',
     overrides: { status: 'revoked' as const },
-    reason: /This agent is revoked, so its budgets can only be stopped/,
-  },
-  {
-    name: 'archived',
-    overrides: { archived_at: '2026-09-10T10:00:00.000Z' },
-    reason: /This agent is removed, so its budgets can only be stopped/,
+    reason: /This agent has been revoked, so its budgets can only be stopped/,
   },
 ]
 

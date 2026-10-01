@@ -224,7 +224,7 @@ describe('DelegationBudgetCard (#833)', () => {
     try {
       mockGet.mockReturnValue([budget({ delegation_hash: '0x' + 'cd'.repeat(32), status: 'pending' })])
       render(<DelegationBudgetCard {...PROPS} retired="archived" />)
-      await waitFor(() => expect(screen.getByText(/This agent is removed/)).toBeTruthy())
+      await waitFor(() => expect(screen.getByText('No active budget.')).toBeTruthy())
       expect(screen.queryByLabelText('Budget amount')).toBeNull()
       expect(replaceState).not.toHaveBeenCalled()
     } finally {
@@ -392,8 +392,8 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
   // Nothing that GRANTS authority is offered to a revoked or removed agent;
   // reading what is left and ending it (Stop) still are.
   it.each([
-    ['revoked', /This agent is revoked, so its budgets can only be stopped/],
-    ['archived', /This agent is removed, so its budgets can only be stopped/],
+    ['revoked', /This agent has been revoked, so its budgets can only be stopped/],
+    ['archived', /This agent has been removed, so its budgets can only be stopped/],
   ] as const)('%s: no Set budget, Edit or Issue sub-budget — one-line reason instead', async (retired, reason) => {
     // Same fixture, two renders: the controls are THERE on a live agent, so
     // their absence below is the retired gate and not a fixture that never
@@ -442,6 +442,7 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} retired="revoked" />)
     await waitFor(() => expect(screen.getByText('No active budget.')).toBeTruthy())
-    expect(document.body.textContent).not.toMatch(/set one below|Set how much/)
+    expect(document.body.textContent).not.toMatch(/set one below|Set how much|can only be stopped/)
+    expect(screen.queryByText('Set budget')).toBeNull()
   })
 })

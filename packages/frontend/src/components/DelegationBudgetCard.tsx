@@ -214,16 +214,21 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         <div>
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent budgets</h2>
           <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-            Set how much this agent can spend each period. The budget refills itself — no monthly signing.
+            {retired
+              ? 'What this agent can still spend each period.'
+              : 'Set how much this agent can spend each period. The budget refills itself — no monthly signing.'}
           </p>
         </div>
         <Card.Section divided className="mt-4">
           <div className="py-3"><Skeleton className="h-5 w-48" /></div>
         </Card.Section>
-        <div className="mt-4 space-y-2">
-          <Skeleton className="h-9 w-full" />
-          <Skeleton className="h-9 w-full" />
-        </div>
+        {/* #3549: no form-shaped placeholder for a card that will have no form. */}
+        {retired ? null : (
+          <div className="mt-4 space-y-2">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+        )}
       </Card>
     )
   }
@@ -302,12 +307,17 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         </div>
       ) : null}
 
+      {/* #3549: the reason is shown only beside something to stop — with no
+          active budget, "No active budget." above already says it all and
+          the page's own empty state explains the retired agent. */}
       {retired ? (
-        <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
-          {retired === 'revoked'
-            ? 'This agent is revoked, so its budgets can only be stopped — not set, raised or shared.'
-            : 'This agent is removed, so its budgets can only be stopped. Restore it to the list to set or raise one.'}
-        </p>
+        active.length > 0 && !budgetsError ? (
+          <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
+            {retired === 'revoked'
+              ? 'This agent has been revoked, so its budgets can only be stopped.'
+              : 'This agent has been removed, so its budgets can only be stopped.'}
+          </p>
+        ) : null
       ) : tokens.length > 0 ? (
         <div className="mt-4 space-y-2">
           <div className="flex flex-col gap-2 sm:flex-row">

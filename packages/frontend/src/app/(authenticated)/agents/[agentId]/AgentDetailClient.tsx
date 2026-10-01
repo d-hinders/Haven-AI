@@ -922,7 +922,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 isRevoked
                   ? 'This agent has been revoked and can no longer be edited.'
                   : isArchived
-                    ? 'This agent is removed. Restore it to the list to add a budget.'
+                    ? 'This agent has been removed, so no budget can be added.'
                     : 'Add an agent budget before this agent can make automatic payments.'
               }
               action={!isRetired ? <Button size="sm" onClick={openUpdateBudget}>Add budget</Button> : undefined}

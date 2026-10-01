@@ -63,10 +63,10 @@ async function runTaskBudgetLifecycle(api: string, identity: ThrowawayIdentity):
   // Deliberately ignore POST's inline sign_data. The portable recovery path is
   // the byte-free, re-servable sign-context endpoint (#3491).
   const openContext = await agentCall<{
-    sign_data?: { typed_data?: TypedData }
+    typed_data?: TypedData
     error?: string
   }>(api, identity.agentApiKey, 'GET', `/task-budgets/${id}/sign-context`)
-  const openTypedData = openContext.json.sign_data?.typed_data
+  const openTypedData = openContext.json.typed_data
   if (openContext.status !== 200 || !openTypedData) {
     return fail(`task-budget open sign-context failed (${openContext.status}): ${openContext.json.error ?? ''}`)
   }
@@ -86,10 +86,10 @@ async function runTaskBudgetLifecycle(api: string, identity: ThrowawayIdentity):
   // Ignore close's inline bytes too: stale/restarted clients must recover from
   // GET sign-context, and a 500 here is the pre-#3491 regression.
   const closeContext = await agentCall<{
-    sign_data?: { typed_data?: TypedData }
+    typed_data?: TypedData
     error?: string
   }>(api, identity.agentApiKey, 'GET', `/task-budgets/${id}/sign-context`)
-  const closeTypedData = closeContext.json.sign_data?.typed_data
+  const closeTypedData = closeContext.json.typed_data
   if (closeContext.status !== 200 || !closeTypedData) {
     return fail(`task-budget close sign-context failed (${closeContext.status}): ${closeContext.json.error ?? ''}`)
   }

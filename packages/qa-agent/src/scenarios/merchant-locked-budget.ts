@@ -29,6 +29,7 @@ import { ethers } from 'ethers'
 import {
   BASE_SEPOLIA_CHAIN_ID,
   SEPOLIA_USDC,
+  describeObserverRpc,
   observerProvider,
   proveUsdcTransferSince,
 } from '../lib/chain.js'
@@ -49,7 +50,7 @@ const MERCHANT_SLUG = 'haven-demo-store'
 const BUDGET_ATOMIC = '10000'
 /** Covers one demo-merchant purchase (<= 0.0015) with margin; the rest strands on the throwaway. */
 const FUND_HUMAN = '0.003'
-export const TIMING = { transferWaitMs: 90_000, pollIntervalMs: 3_000 }
+export const TIMING = { transferWaitMs: 90_000, pollIntervalMs: 3_000, deployVisibleWaitMs: 30_000, catchUpBlocks: 2 }
 
 interface FundingTarget {
   chain_id?: number
@@ -196,6 +197,35 @@ async function runMerchantLocked(
   if (auth.status >= 300 || !auth.json.payment_id || signData?.signature_scheme !== 'eip712_delegation' || !signData.typed_data) {
     return fail(`authorize did not return an erc7710 child (${auth.status}): ${JSON.stringify(auth.json).slice(0, 200)}`)
   }
+  // Authorize deployed the counterfactual delegate account on the BACKEND's
+  // node (#1667). The merchant simulates the redemption on ITS node and checks
+  // the child's signature by EIP-1271 only once the account has code there; a
+  // node a block behind answers InvalidEOASignature (0x3db6791c). Poll the
+  // observer for the code (#2445 pattern), then a couple of blocks of margin,
+  // before the paid retry — so a lag fails here, named, not as a merchant error.
+  if (!identity.delegateAccountAddress) {
+    return fail('grant build returned no delegate_account_address — cannot confirm the deploy is visible before the paid retry')
+  }
+  const provider = observerProvider()
+  const deployDeadline = Date.now() + TIMING.deployVisibleWaitMs
+  for (const account of [identity.delegateAccountAddress, identity.accountAddress]) {
+    for (;;) {
+      if ((await provider.getCode(account)) !== '0x') break
+      if (Date.now() >= deployDeadline) {
+        return fail(
+          `authorize returned 200 but the observer node [${describeObserverRpc()}] still reports no code at ${account} ` +
+            `after ${TIMING.deployVisibleWaitMs / 1000}s — the observer node has not caught up with the deploy, so the ` +
+            'paid retry was not sent (a merchant node this far behind would answer InvalidEOASignature, not a payment defect)',
+        )
+      }
+      await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+    }
+  }
+  const startBlock = await provider.getBlockNumber()
+  while ((await provider.getBlockNumber()) < startBlock + TIMING.catchUpBlocks && Date.now() < deployDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+  }
+
   const settle = await api<{ payment_header?: string; error?: string }>(
     base, identity.agentApiKey, 'POST', `/x402/${auth.json.payment_id}/settle`,
     { signature: await signTyped(identity.delegate, signData.typed_data) },

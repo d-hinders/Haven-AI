@@ -16,7 +16,7 @@ const API = 'https://api.example'
 const TD = { domain: {}, types: { X: [] }, message: {} }
 const ctx = { cfg: { apiUrl: API, paymentTo: '0x' + '55'.repeat(20) } } as ScenarioContext
 
-type Options = { openContextStatus?: number; closeContextStatus?: number; closeHash?: boolean; disabled?: boolean }
+type Options = { postShapeContext?: boolean; openContextStatus?: number; closeContextStatus?: number; closeHash?: boolean; disabled?: boolean }
 
 function fakeApi(options: Options = {}) {
   let taskContextReads = 0
@@ -47,7 +47,9 @@ function fakeApi(options: Options = {}) {
       if (taskContextReads === 2 && options.closeContextStatus) {
         return out(options.closeContextStatus, { error: 'Do not know how to serialize a BigInt' })
       }
-      return out(200, { sign_data: { typed_data: TD } })
+      return out(200, options.postShapeContext
+        ? { task_budget_id: 'tb-1', sign_data: { typed_data: TD } }
+        : { task_budget_id: 'tb-1', purpose: 'open', task_sign_context_version: 1, typed_data: TD, expected: {} })
     }
     if (path === '/task-budgets/tb-1/submit' && body?.signature) {
       return taskContextReads === 1
@@ -79,6 +81,13 @@ describe('task-budget lifecycle', () => {
     const result = await taskBudgetLifecycle.run(ctx)
     expect(result.pass).toBe(false)
     expect(result.detail).toMatch(/close sign-context failed \(500\)/)
+  })
+
+  it('does NOT accept the POST shape (sign_data wrapper) from sign-context — the live endpoint is flat', async () => {
+    fakeApi({ postShapeContext: true })
+    const result = await taskBudgetLifecycle.run(ctx)
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/open sign-context failed \(200\)/)
   })
 
   it('fails when the open sign-context read errors', async () => {

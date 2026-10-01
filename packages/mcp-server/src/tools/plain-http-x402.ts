@@ -87,7 +87,11 @@ import {
   type HostedHandoff,
   refusalNextStep,
 } from './support/guidance.js'
-import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
+import {
+  backendPrepareWarningsSpread,
+  buildX402SigningContext,
+  coerceJsonField,
+} from './support/mcp-context.js'
 import {
   isPendingApproval,
   resolveResumeState,
@@ -469,6 +473,9 @@ export function createPlainHttpX402Handlers(
                 },
                 warnings: [
                   ...allowance.warnings,
+                  // #3528: the backend's additive self-transfer hint, relayed
+                  // from the prepare response into the same envelope.
+                  ...backendPrepareWarningsSpread(prepared.warnings).warnings,
                   ...quoteWarnings({
                     capped: cap.kind !== 'none',
                     expiresAt: undefined,
@@ -540,6 +547,9 @@ export function createPlainHttpX402Handlers(
               },
               warnings: [
                 ...allowance.warnings,
+                // #3528: the backend's additive self-transfer hint, relayed
+                // from the prepare response into the same envelope.
+                ...backendPrepareWarningsSpread(intent.warnings).warnings,
                 ...quoteWarnings({
                   capped: cap.kind !== 'none',
                   expiresAt: intent.expiresAt,

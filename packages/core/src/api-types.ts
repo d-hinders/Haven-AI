@@ -4315,6 +4315,14 @@ export type components = {
             status: "pending_signature";
             /** Format: date-time */
             expires_at: string;
+            warnings?: {
+                /**
+                 * @description The recipient is one of the owner's own Haven accounts.
+                 * @enum {string}
+                 */
+                code: "SELF_TRANSFER";
+                message: string;
+            }[];
             sign_data: {
                 /** @description The UserOperation hash. Present for reference and replay-matching — do NOT sign it directly; sign `typed_data`. */
                 hash: string;

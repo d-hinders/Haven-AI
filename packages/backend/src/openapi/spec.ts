@@ -978,33 +978,47 @@ const railUnavailableResponse = {
  * `failed` by the time this is sent (`failSubmittedIntent` books it first):
  * there is nothing left to retry on this `payment_id` whatever the cause.
  * Six `error_code` values, in the order the route checks them:
- * - `submission_outcome_unknown` — `sendUserOperation` resolved but the
- *   receipt wait errored/timed out, or the bundler reports the op included
- *   but reverted: the UserOp MAY have landed. Do NOT create a new payment —
- *   poll this `payment_id`'s status first, and only pay again once status
- *   confirms this one did not settle.
+ * - `submission_outcome_unknown` (review round 2, B1'/N3) — `sendUserOperation`
+ *   resolved but the receipt wait itself errored or timed out: the UserOp MAY
+ *   have landed, and Haven never learned the outcome. Do NOT create a new
+ *   payment — this intent is ALREADY `failed`, so polling this `payment_id`'s
+ *   own status can never confirm it did not settle; check the account's real
+ *   activity (Haven's activity view, or the UserOperation hash on an
+ *   explorer) before paying again. A fixed remedy `message`, plus the
+ *   UserOperation hash in `user_op_hash` and bounded `details`.
  * - `signature_rejected` — the account rejected the UserOperation signature
- *   during on-chain validation (ERC-4337 `AA24 signature error`). Update the
- *   signer and sign a NEW payment; this `payment_id` cannot be resubmitted.
+ *   during on-chain validation (ERC-4337 `AA24 signature error` only).
+ *   Update the signer and sign a NEW payment; this `payment_id` cannot be
+ *   resubmitted. A fixed remedy `message` and bounded `details`.
  * - `account_validation_failed` — a different ERC-4337 AA2x validation
  *   failure (AA20/AA21/AA22/AA23/AA25/AA26) — a real rejection, but not
  *   evidence the signature itself is wrong, so this code never names the
- *   signer. Create a new payment.
+ *   signer. Create a new payment. A fixed remedy `message` and bounded
+ *   `details`.
  * - `task_budget_exceeded` / `delegation_budget_exceeded` — a budget revert
  *   caught at submit (a payment that raced past the create-time pre-check,
  *   or whose pre-check read failed open), re-confirmed from the enforcer's
  *   own current figure. Same body shape the create-time 403 answers —
  *   `task_budget_id`/`remaining_atomic`/`max_atomic`, or
  *   `remaining_atomic`/`shortfall_atomic`/`phase`/`next_action`/`rail`/`asset`
- *   — and like the create-time 403, carries no `message` field.
+ *   (`asset` on `delegation_budget_exceeded` only, matching create time —
+ *   `task_budget_exceeded`'s create-time body never carried it either) — and
+ *   like the create-time 403, neither carries a `message` field.
  * - `onchain_execution_failed` — any other on-chain/bundler failure this
- *   route cannot classify more precisely. Create a new payment.
+ *   route cannot classify more precisely, INCLUDING a submitted UserOp that
+ *   executed and reverted on-chain (a KNOWN, confirmed outcome — no funds
+ *   moved — unlike `submission_outcome_unknown` above). Create a new
+ *   payment. `message` carries the bounded, redacted on-chain/bundler text
+ *   when one was recorded, or the literal "On-chain execution failed"
+ *   otherwise, and `details` carries the same bounded text (or `null`).
  *
- * The four non-budget codes above carry `message` (a short, fixed remedy
- * sentence) and `details` — the underlying bundler/viem failure text,
- * already scrubbed of vendor secrets and capped at 300 characters plus an
- * ellipsis if longer, never the full dump. `details` is `null` when nothing
- * was recorded.
+ * The four non-budget codes above carry `details` — the underlying
+ * bundler/viem failure text, already scrubbed of vendor secrets and capped
+ * at 300 characters plus an ellipsis if longer, never the full dump —
+ * `null` when nothing was recorded. Three of the four (`submission_outcome_unknown`,
+ * `signature_rejected`, `account_validation_failed`) carry a fixed remedy
+ * `message` independent of the on-chain text; `onchain_execution_failed`'s
+ * `message` carries the bounded text itself (or the literal fallback).
  */
 const signFailureResponse = {
   ...errorResponse,
@@ -1015,6 +1029,11 @@ const signFailureResponse = {
         properties: {
           ...errorResponse.content['application/json'].schema.properties,
           details: { type: ['string', 'null'] },
+          user_op_hash: {
+            type: 'string',
+            pattern: '^0x[0-9a-fA-F]{64}$',
+            description: 'Present only on `error_code: "submission_outcome_unknown"`.',
+          },
         },
       },
     },
@@ -1022,13 +1041,17 @@ const signFailureResponse = {
   description:
     'On-chain execution failed after this route claimed the intent for submission; the intent is ' +
     'already `failed`. The body carries one of six typed `error_code` values: ' +
-    '`submission_outcome_unknown` (the UserOp may have landed — poll status, do NOT pay again), ' +
-    '`signature_rejected` (AA24 — update the signer, then pay again), ' +
+    "`submission_outcome_unknown` (the UserOp's receipt wait itself failed — it may have landed; do NOT " +
+    "pay again, check the account's real activity, never this payment_id's own status), " +
+    '`signature_rejected` (AA24 only — update the signer, then pay again), ' +
     '`account_validation_failed` (a different AA2x code, not a signer cause — pay again), ' +
     '`task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 ' +
-    'answers, no `message` field), or `onchain_execution_failed` (pay again). The four non-budget ' +
-    'codes carry `message` (a short remedy) and `details` (the bounded, redacted bundler/viem text, ' +
-    'capped at 300 characters plus an ellipsis, or `null`) — never the full failure dump.',
+    'answers — `asset` on `delegation_budget_exceeded` only — neither carries a `message` field), or ' +
+    '`onchain_execution_failed` (including a submitted UserOp that executed and reverted — a confirmed, ' +
+    'no-funds-moved outcome — pay again). The four non-budget codes carry bounded, redacted `details` ' +
+    '(300 characters plus an ellipsis if longer, or `null`); three of the four carry a fixed remedy ' +
+    '`message`, while `onchain_execution_failed`\'s `message` carries the bounded text itself (or the ' +
+    'literal fallback "On-chain execution failed").',
 } as const
 
 /**

@@ -8,11 +8,14 @@
  * #3494 — `POST /payments/:id/sign`'s failure catch: a typed `error_code`
  * and cause class on the 502, instead of one untyped "On-chain execution
  * failed" for everything a bundler can throw after the route already
- * claimed the intent. Review round 1 split and extended the classes; in the
- * order the route checks them: `SubmittedUserOpFailedError` (submission
- * outcome unknown — checked FIRST, double-pay risk: B1), AA24 signature
- * rejection, every other AA2x account-validation failure, a task-budget
- * transfer-cap revert, a period-budget revert, and the generic fallback.
+ * claimed the intent. Review rounds 1 and 2 split and extended the classes;
+ * in the order the route checks them: `SubmittedUserOpFailedError` with
+ * `reverted: false` (submission outcome unknown — checked FIRST, double-pay
+ * risk: B1/B1'), AA24 signature rejection, every other AA2x
+ * account-validation failure, a task-budget transfer-cap revert, a
+ * period-budget revert, and the generic fallback — which also catches
+ * `SubmittedUserOpFailedError` with `reverted: true` (round 2, N3: the op
+ * executed and reverted is a KNOWN, confirmed outcome, not an unknown one).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -163,12 +166,13 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     })
   }
 
-  it('submission outcome unknown (B1, double-pay risk): error_code submission_outcome_unknown, checked before every other cause', async () => {
+  it('submission outcome unknown (B1/B1′, double-pay risk): the receipt-unconfirmed variant, checked before every other cause', async () => {
     primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
     delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
       new SubmittedUserOpFailedError(
         'redemption UserOp 0xabc was sent but its receipt could not be confirmed: timeout',
         '0xabc',
+        // `reverted` defaults false — the receipt itself never arrived.
       ),
     )
 
@@ -179,26 +183,35 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     expect(body.status).toBe('failed')
     expect(body.error_code).toBe('submission_outcome_unknown')
     expect(body.payment_id).toBe(PAYMENT_ID)
-    // The remedy is "check status", never "create a new payment" — the
-    // whole point of this cause class is that a new payment risks a double
-    // pay if the first one landed.
+    expect(body.user_op_hash).toBe('0xabc')
+    // #3494 review round 2 (B1′): the remedy is "stop and check the
+    // account's real activity" — never "create a new payment" (the double
+    // pay this code exists to prevent) and never a promise that polling
+    // THIS payment_id's status will resolve it (the intent is already
+    // marked failed, so status can never come back "landed").
     expect(body.message).toMatch(/do not create a new payment/i)
+    expect(body.message).toMatch(/0xabc/)
     expect(body.message).not.toMatch(/update the signer/i)
+    expect(body.message).not.toMatch(/poll|status confirms|check status/i)
   })
 
-  it('submission outcome unknown also fires when the bundler reports the op included but reverted (no enforcer text to classify against)', async () => {
+  // #3494 review round 2 (N3): the SAME error class's "included but
+  // reverted" variant is a KNOWN, confirmed outcome (an EVM revert rolls
+  // back every state change — no funds moved), so it must NOT answer
+  // submission_outcome_unknown; it falls through to the generic code.
+  it('an "included but reverted" SubmittedUserOpFailedError (a KNOWN, confirmed outcome) answers onchain_execution_failed, never submission_outcome_unknown', async () => {
     primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
     delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
-      new SubmittedUserOpFailedError('redemption UserOp 0xabc included but reverted', '0xabc'),
+      new SubmittedUserOpFailedError('redemption UserOp 0xabc included but reverted', '0xabc', true),
     )
 
     const res = await sign()
 
     expect(res.statusCode).toBe(502)
-    expect(res.json().error_code).toBe('submission_outcome_unknown')
+    expect(res.json().error_code).toBe('onchain_execution_failed')
   })
 
-  it('AA2x signature rejection: error_code signature_rejected, remedy names a NEW payment', async () => {
+  it('AA24 signature rejection: error_code signature_rejected, remedy names a NEW payment', async () => {
     primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
     delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
       new Error('UserOperation reverted during simulation: AA24 signature error'),

@@ -167,12 +167,12 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     { line: 829, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
     { line: 853, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
     { line: 1152, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 1203, code: 502, ledger: 'skipped' }, // #3494 submission outcome unknown after a post-send failure — allowlisted
-    { line: 1226, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
-    { line: 1252, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
-    { line: 1301, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
-    { line: 1340, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
-    { line: 1394, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    { line: 1218, code: 502, ledger: 'skipped' }, // #3494 submission outcome unknown (receipt-unconfirmed) after a post-send failure — allowlisted
+    { line: 1243, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
+    { line: 1269, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
+    { line: 1318, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 1357, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 1411, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
   ],
 }
 
@@ -213,28 +213,28 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
       reason: '#3416 DelegationRailChainUnavailableError — this deployment has no bundler credential for the chain (configuration), not a guardrail refusal',
     },
     {
-      line: 1203,
-      reason: '#3494 submission-outcome-unknown — deliberately not booked: the failed intent row is the record',
+      line: 1218,
+      reason: '#3494 submission-outcome-unknown (receipt-unconfirmed) — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1226,
+      line: 1243,
       reason: '#3494 AA24 signature rejection — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1252,
+      line: 1269,
       reason: '#3494 other AA2x account-validation failure — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1301,
+      line: 1318,
       reason: '#3494 task-budget transfer-cap revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1340,
+      line: 1357,
       reason: '#3494 period-budget revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1394,
-      reason: 'on-chain execution failed after claim — deliberately not booked: the failed intent row is the record',
+      line: 1411,
+      reason: 'on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — deliberately not booked: the failed intent row is the record',
     },
   ],
 }

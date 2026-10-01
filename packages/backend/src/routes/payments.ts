@@ -1186,30 +1186,47 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         // booked on the intent row, not a policy refusal the ledger owns.
         const boundedMessage = boundFailureMessage(errorMsg)
 
-        // #3494 review round 1 (B1, double-pay risk): `sendUserOperation`
-        // resolving is the one irreversible step — a throw AFTER it (the
-        // receipt wait errored/timed out, or the bundler reports the op
-        // included but reverted) means the op MAY have landed, and a caller
-        // told "this failed, create a new payment" could double-pay if it
-        // did. `SubmittedUserOpFailedError` is thrown ONLY for that
-        // post-send phase (`rails/delegation-rail.ts`'s own doc comment) —
-        // checked before every text-based classification below, since none
-        // of them can safely override "the outcome is unknown". This PR
-        // does not change the pre-existing `failSubmittedIntent` booking
-        // above (the row is marked 'failed' even though the op may have
-        // landed) — that reconciliation gap is a follow-up the captain will
-        // file separately.
-        if (err instanceof SubmittedUserOpFailedError) {
+        // #3494 review round 1 (B1, double-pay risk), round 2 (B1', N3):
+        // `sendUserOperation` resolving is the one irreversible step — a
+        // throw AFTER it means the op MAY have landed. `SubmittedUserOpFailedError`
+        // is thrown ONLY for that post-send phase (`rails/delegation-rail.ts`'s
+        // own doc comment), but it now covers TWO different certainties and
+        // this route must not conflate them (N3):
+        // - `reverted: true` — the receipt arrived and says the op executed
+        //   and reverted. That is a KNOWN outcome (an EVM revert rolls back
+        //   every state change, so no funds moved) — it falls through to the
+        //   generic `onchain_execution_failed` below like any other on-chain
+        //   failure, never `submission_outcome_unknown`.
+        // - `reverted: false` (the default) — the receipt wait itself
+        //   errored or timed out. Haven never learned the outcome. Checked
+        //   before every text-based classification below, since none of
+        //   them can safely override "the outcome is unknown".
+        //
+        // B1' (round 2): this intent is ALREADY marked `failed` by
+        // `failSubmittedIntent` above, so `haven_get_payment_status` will
+        // answer "failed" immediately and forever — polling status can
+        // never come back "landed". The message therefore must NOT promise
+        // that status will resolve it (round 1's wording did, and invited
+        // reading "failed" as confirmation it did not settle, then paying
+        // again — exactly the double pay this code exists to prevent).
+        // The honest answer is: stop, and check the account's real activity
+        // (Haven's own activity view, or the userOpHash on an explorer) —
+        // never this payment_id's own status. This PR does not change the
+        // `failSubmittedIntent` booking itself — that reconciliation gap is
+        // a follow-up the owner will file separately.
+        if (err instanceof SubmittedUserOpFailedError && !err.reverted) {
           return refuse(
             reply.code(502).send({
               payment_id: id,
               status: 'failed',
-              error: 'The payment was submitted but its outcome is not yet known',
+              error: 'The payment was submitted but its on-chain outcome is unknown',
               error_code: 'submission_outcome_unknown',
               message:
-                'The payment was submitted on-chain but Haven could not confirm whether it landed. Do NOT ' +
-                'create a new payment yet — poll this payment_id\'s status first; only start a new payment ' +
-                'once status confirms this one did not settle.',
+                `The payment was submitted (UserOperation ${err.userOpHash}) but Haven could not confirm ` +
+                'whether it landed — it may have moved funds even though Haven recorded it as failed. Do ' +
+                'NOT create a new payment. Check the account\'s activity in Haven, or the UserOperation ' +
+                'hash on a block explorer, before paying again.',
+              user_op_hash: err.userOpHash,
               details: boundedMessage,
             }),
             null,

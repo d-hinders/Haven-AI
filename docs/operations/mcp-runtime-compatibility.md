@@ -4539,65 +4539,94 @@ to call next in structured fields, and those fields are typed end to end
 > document's own re-verification trail pins is what changed. Nothing else in
 > this document was re-verified.
 
-> **Re-verification (#3494, 2026-10-01, updated in review round 1):**
+> **Re-verification (#3494, 2026-10-01, updated in review rounds 1 and 2):**
 > `POST /payments/:id/sign`'s failure catch (every rail the route relays — a
 > direct payment and the EIP-3009 funding leg) now answers its 502 with a
 > typed `error_code`, in the order the route checks them:
-> `submission_outcome_unknown` (B1, double-pay risk — checked FIRST:
-> `sendUserOperation` resolved but the receipt wait errored/timed out, or the
-> bundler reports the op included but reverted, so the UserOp MAY have
-> landed; next_action is `check_status_later` → `haven_get_payment_status`,
-> never "create a new payment"); `signature_rejected` (AA24 only — the one
+> `submission_outcome_unknown` (B1/B1', double-pay risk — checked FIRST):
+> `sendUserOperation` resolved but the receipt wait itself errored or timed
+> out (`SubmittedUserOpFailedError` with `reverted: false`, the default) —
+> the UserOp MAY have landed, and Haven never learned the outcome.
+> `next_action` is `stop_and_tell_user`, NOT `check_status_later` (round 1's
+> mapping — this intent is already marked `failed` by `failSubmittedIntent`
+> BEFORE this response is built, so `haven_get_payment_status` on the same
+> payment_id answers "failed" immediately and forever; naming it as the next
+> step, and round 1's message promising status would "confirm this one did
+> not settle", invited reading that permanent "failed" answer as exactly
+> that confirmation, then paying again — the double pay this code exists to
+> prevent). The reason instead points at the account's REAL activity: Haven's
+> own activity view, or the `user_op_hash` field this code's body now
+> carries, on a block explorer. `signature_rejected` (AA24 only — the one
 > ERC-4337 AA2x code this backend attributes to the signer);
 > `account_validation_failed` (every OTHER AA2x code — AA20/21/22/23/25/26 —
 > a real validation failure that is deliberately NEVER phrased as a signer
 > problem); `task_budget_exceeded` / `delegation_budget_exceeded` (a budget
 > revert caught at submit, re-confirmed from the enforcer's own current
 > figure, same body shape the #3500/#3503 create-time pre-checks already
-> answer — no `message` field on these two, matching create time); and
-> `onchain_execution_failed` for everything else. `normalizeError` gains four
-> new typed branches next to #3416's/#3500's/#3504's: `submission_outcome_unknown`
-> maps to `check_status_later`, the other three to `stop_and_tell_user`. The
-> two budget codes needed no new branch: #3500's and #3504's existing
-> branches key on `error_code` alone, not the route or status code that
-> produced it, so they already apply here unchanged. Also in this diff, on
-> `agent-payment-status.ts` (a covered file): a `failed` intent's status now
-> carries `failure_reason` (a bounded, redacted cause), and a direct
-> intent's own `send_idempotency_key` is now surfaced as `idempotency_key`
-> on status (`railContext` answered `{}` for the direct rail before this).
-> `GET /payments/:id`'s `error_message` is bounded at the same read (300
-> characters plus an ellipsis if longer). Scope of the backend-only vs.
-> hosted-only distinction, restated precisely: no signer or connector version
-> is involved either way. `failureReason`/`idempotencyKey` reach an SDK
-> consumer only from an SDK release carrying `payment-mappers.ts`'s mapper —
-> an OLDER SDK simply omits the field against a NEWER backend; the hosted
-> server always bundles the workspace SDK, so this is a published-SDK-version
-> question only for a direct SDK integrator, never for the hosted path. No
-> key, signature, delegation, caveat or budget changes. What DOES move on the
-> wire, stated exactly rather than as "nothing moves": the sign-route 502's
-> `error` text is reworded per cause, `details` is now bounded (and can be
-> `null`) where it previously carried the raw bundler/viem text unbounded,
+> answer — `asset` on `delegation_budget_exceeded` only, matching create
+> time; neither carries a `message` field); and `onchain_execution_failed`
+> for everything else, INCLUDING (round 2, N3) a `SubmittedUserOpFailedError`
+> with `reverted: true` — the op executed and reverted, a KNOWN, confirmed
+> outcome (an EVM revert rolls back every state change, so no funds moved),
+> strictly distinct from the "truly unknown" case above. `normalizeError`
+> gains four new typed branches next to #3416's/#3500's/#3504's: all four map
+> to `stop_and_tell_user` (the budget two needed no new branch — #3500's and
+> #3504's existing branches key on `error_code` alone, not the route or
+> status code that produced it, so they already apply here unchanged). Also
+> in this diff, on `agent-payment-status.ts` (a covered file): a `failed`
+> intent's status now carries `failure_reason` (a bounded, redacted cause),
+> and a direct intent's own `send_idempotency_key` is now surfaced as
+> `idempotency_key` on status (`railContext` answered `{}` for the direct
+> rail before this). `GET /payments/:id`'s `error_message` is bounded at the
+> same read (300 characters plus an ellipsis if longer).
+>
+> Version-skew precision (round 2, R2-3): `failureReason` and
+> `idempotencyKey` are NOT symmetric. `failureReason` requires an SDK release
+> carrying `payment-mappers.ts`'s mapper — an older SDK against a newer
+> backend simply omits the field. `idempotencyKey` requires ONLY the backend:
+> the mapper already read `idempotency_key` generically before this diff, so
+> any SDK that already shipped surfaces it the moment the backend starts
+> sending it, no SDK release needed. The local `@haven_ai/mcp` (pins
+> `@haven_ai/sdk` `0.7.0-alpha.0`, `packages/mcp/package.json`) therefore
+> gains `failure_reason` only from the release that bumps its pinned SDK to
+> one carrying the mapper, and gains the direct-row `idempotency_key`
+> immediately once the backend ships it; the hosted server always bundles
+> the workspace SDK, so neither question applies to the hosted path.
+>
+> No key, signature, delegation, caveat or budget changes. What DOES move on
+> the wire, stated exactly rather than as "nothing moves": the sign-route
+> 502's `error` text is reworded per cause, `details` is now bounded (and
+> can be `null`) where it previously carried the raw bundler/viem text
+> unbounded, a new `user_op_hash` field appears on `submission_outcome_unknown`,
 > and `GET /payments/:id`'s `error_message` is now truncated past 300
 > characters — every other field and branch is additive. A backend older
 > than this change keeps the old untyped 502 and the un-bounded
-> `error_message`; a hosted server older than this shows the four new codes
-> as the generic 5xx "retry once" step, which is wrong advice on an
-> already-failed intent (worst case for `submission_outcome_unknown` — the
-> old advice is "create a new payment", not "check status") but not a new
-> failure mode (the pre-#3494 behaviour for every sign failure). Pinned by
-> four new refusal fixtures (the census moves to 44 fixtures and 55
-> `refusalNextStep` calls, after #3506's own +2 calls landed alongside this —
-> see `next-step-fixtures.ts`'s own `REFUSAL_SITE_COUNT`/`REFUSAL_STEP_CALLS`,
-> not a number restated here to drift). Mutation-proven, independently: the
-> `submission_outcome_unknown` priority over every other branch; the AA24-vs-
-> every-other-AA2x split; the task-budget cap's `=== 'exceeded'` predicate
-> (also a compile error under a `!== 'fits'` mutation, since `'unreadable'`
-> carries no `remainingAtomic`/`maxAtomic` to read); and the classification
-> try/catch (S2) — a DB/chain failure while re-confirming a revert answers
-> the generic code, never a 500. The status `failure_reason`/`idempotency_key`
-> surfacing and the `GET /payments/:id` bound are mutation-proven on the
-> real-DB harness (`sign-failure-status.test.ts`); the sign-route 502 shape
-> per cause class above is proven and mutation-tested on the ROUTE-level
+> `error_message`. A hosted server older than this shows all six new codes
+> as the generic 5xx branch — "re-call the same tool once with the same
+> arguments" (round 2, R2-2/N4: NOT "create a new payment", which only an
+> agent's own independent decision after abandoning that retry could reach —
+> the retry itself just re-posts the same already-consumed signature to the
+> same `payment_id` and fails the same way again) — which is stale advice on
+> an already-failed intent but not a new failure mode (the pre-#3494
+> behaviour for every sign failure); the real risk of an old hosted server is
+> an agent giving up on the stale retry advice and deciding, on its own, to
+> pay again without ever being told to wait. Pinned by five new refusal
+> fixtures (the exact counts live in `next-step-fixtures.ts`'s own
+> `REFUSAL_SITE_COUNT` / `REFUSAL_STEP_CALLS`, not restated here to drift).
+> Mutation-proven, independently: the `submission_outcome_unknown` priority
+> over every other branch; the `reverted: true` vs `reverted: false` split
+> (round 2, N3); the AA24-vs-every-other-AA2x split; the task-budget cap's
+> `=== 'exceeded'` predicate (also a compile error under a `!== 'fits'`
+> mutation, since `'unreadable'` carries no `remainingAtomic`/`maxAtomic` to
+> read); the classification try/catch (S2) — a DB/chain failure while
+> re-confirming a revert answers the generic code, never a 500; and the
+> hosted `stop_and_tell_user` mapping for `submission_outcome_unknown`
+> (round 2). The status `failure_reason`/`idempotency_key` surfacing is
+> proven AND mutation-tested on the real-DB harness
+> (`sign-failure-status.test.ts`); the sign-route 502 shape per cause class
+> above, AND the `GET /payments/:id` `error_message` bound (round 2, R2-1:
+> an earlier revision of this note wrongly grouped the GET bound with the
+> real-DB claim above), are proven and mutation-tested on the ROUTE-level
 > mocked-DB stub (`payments-sign-failure.test.ts` — `db-mock-exempt`, see
 > that file's own header for why), not the real-DB harness: its claims are
 > about the HANDLER's response shape, not about what Postgres does.

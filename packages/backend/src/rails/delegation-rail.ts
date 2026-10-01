@@ -231,13 +231,25 @@ export interface RedemptionSubmitResult {
  * `AlreadyDisabled`). Thrown only for the post-send phase; `userOpHash` is
  * always known at that point, so callers can check `disabledDelegations`
  * (or transaction status) before deciding what to tell the agent.
+ *
+ * #3494 review round 2 (N3): `reverted` further splits the post-send phase a
+ * caller must not conflate. `reverted: true` means the receipt arrived and
+ * says the op executed and reverted — that is a KNOWN, confirmed outcome
+ * (an EVM revert rolls back every state change, so no funds moved) and a
+ * caller may safely answer "this failed, try again". `reverted: false`
+ * (the default) means the receipt wait itself errored or timed out — Haven
+ * never learned whether the op landed, so a caller must NOT say "this
+ * failed, try again": the right answer is "unknown, check before paying
+ * again".
  */
 export class SubmittedUserOpFailedError extends Error {
   readonly userOpHash: Hex
-  constructor(message: string, userOpHash: Hex) {
+  readonly reverted: boolean
+  constructor(message: string, userOpHash: Hex, reverted = false) {
     super(message)
     this.name = 'SubmittedUserOpFailedError'
     this.userOpHash = userOpHash
+    this.reverted = reverted
   }
 }
 
@@ -456,7 +468,11 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
       )
     }
     if (!receipt.success) {
-      throw new SubmittedUserOpFailedError(`redemption UserOp ${userOpHash} included but reverted`, userOpHash)
+      throw new SubmittedUserOpFailedError(
+        `redemption UserOp ${userOpHash} included but reverted`,
+        userOpHash,
+        true,
+      )
     }
     return {
       txHash: receipt.receipt.transactionHash,

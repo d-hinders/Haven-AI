@@ -1622,13 +1622,15 @@ run consumes test allowance and test USDC.
 `error_code`** (`submission_outcome_unknown`, `signature_rejected`,
 `account_validation_failed`, `task_budget_exceeded`,
 `delegation_budget_exceeded`, or `onchain_execution_failed`) and, on the
-first four, a bounded `details` string — capped at 300 characters plus an
-ellipsis, never the full bundler/viem failure. If the on-chain revert reason
-sits past that cap or outside the bundler's `shortMessage` (viem's own
-summarised field, which `redactVendorSecrets` and the bound both operate
-on), it may be truncated or absent from `details` entirely — read the
-on-chain transaction directly (the explorer, or a raw `eth_call` replay) for
-the full reason, rather than assuming `details` is complete.
+four non-budget codes, a bounded `details` string — capped at 300
+characters plus an ellipsis, never the full bundler/viem failure. The bound
+applies to viem's own FULL `.message` (after `redactVendorSecrets`), not
+just its `shortMessage` summary field — and viem formats that message with
+the request arguments FIRST, then a `Details:` line carrying the on-chain
+revert reason, then `Version:`. The revert reason is therefore often past
+the 300-character cut, truncated or absent from `details` entirely — read
+the on-chain transaction directly (the explorer, or a raw `eth_call`
+replay) for the full reason, rather than assuming `details` is complete.
 
 ### Sweep is skipped after 20 seconds
 

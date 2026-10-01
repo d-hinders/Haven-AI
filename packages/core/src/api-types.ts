@@ -17814,7 +17814,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description On-chain execution failed after this route claimed the intent for submission; the intent is already `failed`. The body carries one of six typed `error_code` values: `submission_outcome_unknown` (the UserOp may have landed — poll status, do NOT pay again), `signature_rejected` (AA24 — update the signer, then pay again), `account_validation_failed` (a different AA2x code, not a signer cause — pay again), `task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 answers, no `message` field), or `onchain_execution_failed` (pay again). The four non-budget codes carry `message` (a short remedy) and `details` (the bounded, redacted bundler/viem text, capped at 300 characters plus an ellipsis, or `null`) — never the full failure dump. */
+            /** @description On-chain execution failed after this route claimed the intent for submission; the intent is already `failed`. The body carries one of six typed `error_code` values: `submission_outcome_unknown` (the UserOp's receipt wait itself failed — it may have landed; do NOT pay again, check the account's real activity, never this payment_id's own status), `signature_rejected` (AA24 only — update the signer, then pay again), `account_validation_failed` (a different AA2x code, not a signer cause — pay again), `task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 answers — `asset` on `delegation_budget_exceeded` only — neither carries a `message` field), or `onchain_execution_failed` (including a submitted UserOp that executed and reverted — a confirmed, no-funds-moved outcome — pay again). The four non-budget codes carry bounded, redacted `details` (300 characters plus an ellipsis if longer, or `null`); three of the four carry a fixed remedy `message`, while `onchain_execution_failed`'s `message` carries the bounded text itself (or the literal fallback "On-chain execution failed"). */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -17824,6 +17824,8 @@ export interface operations {
                         error: string;
                         statusCode?: number;
                         details?: string | null;
+                        /** @description Present only on `error_code: "submission_outcome_unknown"`. */
+                        user_op_hash?: string;
                     } & {
                         [key: string]: unknown;
                     };

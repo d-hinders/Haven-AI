@@ -2136,9 +2136,10 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > row stays pending; close submits are never gated). A
 > half-revoked issuer could previously have new sub-budgets carved from its
 > still-active budget, and the relay would open a `pending` row with a
-> signature made before revocation. The gate sits in the two routes, not in
-> `loadOwnedDelegationAgent`, so authority-reducing routes keep serving
-> retired agents. `paused` passes, as on the delegation routes. The narrowing
+> signature made before revocation. The issuer gate sits in the two owner
+> routes and the grant gate in `isGrantReceiverRetired` (called from the relay
+> and the agent submit); neither is in `loadOwnedDelegationAgent`, so
+> authority-reducing routes keep serving retired agents. `paused` passes, as on the delegation routes. The narrowing
 > gate and the relay's signer check are unchanged. The rest of this document
 > was not re-read for it, and `last-verified` is not bumped.
 

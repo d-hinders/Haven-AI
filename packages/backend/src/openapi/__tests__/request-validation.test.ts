@@ -779,3 +779,51 @@ it('the plugin header keeps the generated-table rationale documented (#3135)', a
   expect(source).toContain('route-modules.generated.ts')
   expect(source).toContain('dist/*.js')
 })
+
+describe('sub-budget payment bodies against the REAL spec and the REAL request ajv (#3330, #3505)', () => {
+  // Found by #3505's qa-dev `sub-budget-redemption` leg on its first live
+  // run (2026-10-01): with request validation enforced (#3404/#3405), agent
+  // B's `POST /payments { sub_budget_id }` answered 400 "Request does not
+  // match the API spec" — `CreatePaymentRequest` and `X402AuthorizeRequest`
+  // were closed (`additionalProperties: false`) and declared the task-budget
+  // field but never the sub-budget one, so NO sub-budget payment could pass
+  // on dev or prod. #3330's route tests bypass the validator, so nothing saw
+  // it. These read the shipped operations out of `openapiSpec` and compile
+  // them with the plugin's own ajv options, as the #3082 test above does.
+  function compileBody(path: string) {
+    const operation = (openapiSpec.paths as Record<string, Record<string, unknown>>)[path].post
+    const schema = requestSchemaForOperation(operation as never)
+    expect(schema?.body, `${path} must declare a request body`).toBeTruthy()
+    const ajv = makeSpecAjv(
+      { ...REQUEST_AJV_OPTIONS, closeObjects: false },
+      openapiSpec.components.schemas as never,
+    )
+    return ajv.compile(schema!.body as never)
+  }
+
+  const PAYMENT = {
+    token: 'USDC',
+    amount: '0.001',
+    to: '0x' + 'ab'.repeat(20),
+    idempotency_key: 'k-1',
+  }
+
+  it('POST /payments accepts sub_budget_id (the field the SDK sends, client.ts createIntent)', () => {
+    expect(compileBody('/payments')({ ...PAYMENT, sub_budget_id: 'sb-1' })).toBe(true)
+  })
+
+  it('POST /payments still accepts task_budget_id, and still refuses an undeclared field', () => {
+    const validate = compileBody('/payments')
+    expect(validate({ ...PAYMENT, task_budget_id: 'tb-1' })).toBe(true)
+    expect(validate({ ...PAYMENT, subBudgetId: 'sb-1' })).toBe(false)
+  })
+
+  it('POST /x402/authorize declares subBudgetId beside taskBudgetId', () => {
+    const operation = (openapiSpec.paths as Record<string, Record<string, unknown>>)['/x402/authorize'].post as Record<string, unknown>
+    const ref = ((operation.requestBody as Record<string, unknown>).content as Record<string, { schema: { $ref: string } }>)['application/json'].schema.$ref
+    const name = ref.split('/').pop()!
+    const props = (openapiSpec.components.schemas as unknown as Record<string, { properties: Record<string, unknown> }>)[name].properties
+    expect(props).toHaveProperty('taskBudgetId')
+    expect(props).toHaveProperty('subBudgetId')
+  })
+})

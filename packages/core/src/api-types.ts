@@ -4304,6 +4304,8 @@ export type components = {
             idempotency_key?: string;
             /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found, 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch, or (#3500) 403 task_budget_exceeded when the task child's ERC20TransferAmountEnforcer shows too little left of its cap (task_budget_id, remaining_atomic, max_atomic, amount_atomic; decided before anything is built, fails open on an unreadable chain). Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             task_budget_id?: string;
+            /** @description #3330: an OPEN sub-budget another agent in the same account granted THIS agent — the redemption chain becomes [grant, parent-child, budget]. Mutually exclusive with task_budget_id (400 when both). Refused with 404 sub_budget_not_found, 409 sub_budget_not_open/sub_budget_parent_mismatch, or (#3519) 403 delegation_budget_exceeded when the smallest live remaining across the three links cannot cover the amount (fails open per link on an unreadable read). */
+            sub_budget_id?: string;
         };
         SignablePaymentIntent: {
             /** Format: uuid */
@@ -4589,6 +4591,8 @@ export type components = {
             };
             /** @description #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget's signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent's delegate EOA. Refused with 404 task_budget_not_found, 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch, or (#3500) 403 task_budget_exceeded when the task child's ERC20TransferAmountEnforcer shows too little left of its cap (task_budget_id, remaining_atomic, max_atomic, amount_atomic; decided before anything is built, fails open on an unreadable chain). Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             taskBudgetId?: string;
+            /** @description #3330: an OPEN sub-budget another agent in the same account granted THIS agent. erc7710: the settlement child is carved under the grant ([settlement, grant, parent-child, budget]). Mutually exclusive with taskBudgetId. Refused with 404 sub_budget_not_found or 409 sub_budget_not_open/sub_budget_parent_mismatch. */
+            subBudgetId?: string;
         };
         X402MerchantCallContext: {
             /** Format: uuid */

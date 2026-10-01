@@ -67,8 +67,15 @@ import { describe, expect, it } from 'vitest'
  */
 
 const FRONTEND = resolve(__dirname, '../..')
+// The palette moved to @haven_ai/ui (#3508): the theme entries this file
+// compiles against now live in the shared preset (the frontend config keeps
+// only content globs), so the harness requires the PRESET — the same wiring
+// focus-ring.test.ts uses. The scan follows the primitives into packages/ui:
+// these classes were guarded while they lived in src/components/ui, and a
+// move must not silently lift them out of an absolute gate.
+const UI = resolve(FRONTEND, '..')
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const tailwindConfig = require(join(FRONTEND, 'tailwind.config.js'))
+const tailwindConfig = require(join(UI, 'ui', 'tailwind.preset.js'))
 
 /** Booting real Tailwind is a real compile; vitest's 5s default would flake. */
 const COMPILE_TIMEOUT = 60_000
@@ -175,11 +182,16 @@ interface Use {
  */
 function uses(): Use[] {
   const out: Use[] = []
-  for (const file of sourceFiles(join(FRONTEND, 'src'))) {
-    const rel = relative(FRONTEND, file)
-    const text = stripComments(readFileSync(file, 'utf8'))
-    for (const m of text.matchAll(UTILITY)) out.push({ base: m[2], file: rel })
-  }
+  // The primitives moved to packages/ui (#3508), so the sweep follows them
+  // (same roots as shadow-token.test.ts): a dead class in the shared package
+  // must fail this guard exactly like one in the app.
+  const roots = [join(FRONTEND, 'src'), join(UI, 'ui', 'src')]
+  for (const root of roots)
+    for (const file of sourceFiles(root)) {
+      const rel = relative(FRONTEND, file)
+      const text = stripComments(readFileSync(file, 'utf8'))
+      for (const m of text.matchAll(UTILITY)) out.push({ base: m[2], file: rel })
+    }
   return out
 }
 

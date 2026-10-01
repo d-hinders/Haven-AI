@@ -128,7 +128,7 @@ async function readMovements(page: import('@playwright/test').Page): Promise<Mov
 async function activityCellWidths(page: import('@playwright/test').Page): Promise<number[]> {
   return page.evaluate(() =>
     Array.from(document.querySelectorAll('tbody tr td'))
-      .filter((td) => td.getClientRects().length > 0 && td.querySelector('p[title]'))
+      .filter((td) => td.getClientRects().length > 0 && td.querySelector('p[title], button[data-row-select]'))
       .map((td) => +td.getBoundingClientRect().width.toFixed(1)),
   )
 }
@@ -263,14 +263,14 @@ test(`${route}: the amount rides under the title below md, and the title stops w
   // 60s the action can never fire first, so a missing selector reports an
   // unattributable "Test timeout of 60000ms exceeded" instead of naming what it
   // waited for — measured twice on a cold `next dev` compile.
-  await page.waitForSelector('tbody tr td p', { timeout: 30_000 })
+  await page.waitForSelector('tbody tr td :is(p, button[data-row-select])', { timeout: 30_000 })
 
   const rows = await page.evaluate(() => {
     const visible = (el: Element) => el.getClientRects().length > 0
     return Array.from(document.querySelectorAll('tbody tr'))
       .filter(visible)
       .map((tr) => {
-        const p = Array.from(tr.querySelectorAll('p')).filter(visible)[0]
+        const p = Array.from(tr.querySelectorAll('p, button[data-row-select]')).filter(visible)[0]
         if (!p) return null
         const range = document.createRange()
         range.selectNodeContents(p)

@@ -148,6 +148,23 @@ export function parseOpsConfig(
   }
 }
 
+/**
+ * Parse `OPS_DATABASE_URL` (#3510): the read-only role's login. Unset is the
+ * quiet "ops data off" state. Equal to `DATABASE_URL` refuses the boot — that
+ * login can read every column the read-only role exists to withhold.
+ */
+export function parseOpsDatabaseUrl(raw: string | undefined | null, databaseUrl: string): string {
+  const value = (raw ?? '').trim()
+  if (value === '') return ''
+  if (value === databaseUrl.trim()) {
+    throw new Error(
+      'OPS_DATABASE_URL is equal to DATABASE_URL. Refusing to start: the ops console must read ' +
+        'through the read-only role (scripts/ops-readonly-role.ts), never the main login.',
+    )
+  }
+  return value
+}
+
 /** True only when every required piece is present; anything less is "ops off". */
 export function isOpsConfigured(cfg: OpsConfig): boolean {
   return (

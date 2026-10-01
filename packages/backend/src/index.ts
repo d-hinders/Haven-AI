@@ -83,6 +83,7 @@ import machinePaymentsReconciliationEventsRoutes from './routes/machine-payments
 import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
 import opsRoutes from './routes/ops.js'
+import { getOpsReadDb } from './infra/ops-db.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'
@@ -378,12 +379,13 @@ registerHealthRoutes(app, {
 })
 
 // Ops console (#3509, epic #3507): founders-only and read-only. Every route
-// answers 404 unless OPS_* is fully configured. `readDb` stays unset until
-// #3510 adds the read-only role, so the console's data routes stay off too.
+// answers 404 unless OPS_* is fully configured, and the data routes also
+// need OPS_DATABASE_URL — the read-only role login (#3510) — or they 404 too.
 await app.register(opsRoutes, {
   prefix: '/ops',
   ops: config.ops,
   trustProxyHops: config.trustProxyHops,
+  readDb: getOpsReadDb(),
 })
 
 // The accounting module's ops events (#2872: `accounting.connection.needs_attention`)

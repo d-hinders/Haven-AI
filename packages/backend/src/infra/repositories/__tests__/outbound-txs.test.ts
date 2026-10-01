@@ -543,4 +543,24 @@ describeDb('findOutboundTxByHash (#1745)', () => {
     await markOutboundTxBroadcast(other.id, { txHash: '0x' + '05'.repeat(32), nonce: 8n })
     expect(await listLiveBroadcastNoncesFrom(CHAIN, 7n)).toEqual([7n, 9n, 900n])
   })
+
+  it('stores failure reasons verbatim, except vendor secrets, which it redacts (#3510)', async () => {
+    // Characterisation: an ordinary reason lands byte-for-byte as before.
+    const plain = await enqueueOutboundTx({ chainId: CHAIN, submitter: 'sweep', toAddress: TO, data: DATA, valueAtomic: 0n })
+    const plainFailed = await markOutboundTxFailed(plain.id, 'pre-broadcast execution reverted: ERC20: transfer amount exceeds balance')
+    expect(plainFailed?.error).toBe('pre-broadcast execution reverted: ERC20: transfer amount exceeds balance')
+
+    // A provider error that echoes a keyed URL never reaches the column — it is
+    // readable by the ops console's read-only role.
+    const keyed = await enqueueOutboundTx({ chainId: CHAIN, submitter: 'sweep', toAddress: TO, data: DATA, valueAtomic: 0n })
+    const keyedFailed = await markOutboundTxFailed(
+      keyed.id,
+      'bump broadcast failed: HTTP request failed. URL: https://api.pimlico.io/v2/84532/rpc?apikey=pim_SECRET123 Details: rate limited',
+    )
+    expect(keyedFailed?.error).toBe(
+      'bump broadcast failed: HTTP request failed. URL: https://api.pimlico.io/v2/84532/rpc?apikey=REDACTED Details: rate limited',
+    )
+    const { rows } = await db.query<{ error: string }>(`SELECT error FROM outbound_txs WHERE id = $1`, [keyed.id])
+    expect(rows[0].error).not.toContain('pim_SECRET123')
+  })
 })

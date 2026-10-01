@@ -4485,6 +4485,8 @@ export type components = {
             settlement_scheme?: ("eip3009" | "erc7710") | null;
             /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
             merchant_settlement_recorded?: boolean;
+            /** @description A bounded, redacted cause for a `failed` payment — the stored error message (already scrubbed of vendor secrets before it was written), capped so a viem/bundler dump never rides this response. Present (possibly `null`, when no message was recorded) only when `status` is `failed`; omitted on every other status. */
+            failure_reason?: string | null;
             fee?: {
                 amount: string;
                 token: string;
@@ -17375,7 +17377,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description On-chain execution failed after this route claimed the intent for submission; the intent is already `failed`. The body carries a typed `error_code` (`signature_rejected`, `task_budget_exceeded`, `delegation_budget_exceeded`, or `onchain_execution_failed`) and a bounded, redacted `message` — never the full bundler/viem failure. See the typed codes above for the remedy each names; none of them means retry this `payment_id`. */
             502: {
                 headers: {
                     [name: string]: unknown;

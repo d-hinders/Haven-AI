@@ -1930,6 +1930,12 @@ export interface PaymentStatusResult {
    * `delivered`'s own honesty rule.
    */
   merchantSettlementRecorded?: boolean
+  /**
+   * #3494: a bounded, redacted cause for a `failed` payment — present
+   * (possibly `null`, when no message was recorded) only when `status` is
+   * `'failed'`; absent on every other status.
+   */
+  failureReason?: string | null
   /** Platform fee surfaced so it's never silently collected (#386). */
   fee?: PaymentFee | null
   amountAtomic?: string | null
@@ -2194,6 +2200,8 @@ export interface RawPaymentStatusResult {
    * `delivered`'s own honesty rule.
    */
   merchant_settlement_recorded?: boolean
+  /** #3494: see `PaymentStatusResult.failureReason`'s doc. */
+  failure_reason?: string | null
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null

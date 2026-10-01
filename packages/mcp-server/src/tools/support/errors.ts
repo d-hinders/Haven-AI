@@ -191,6 +191,28 @@ const DELEGATION_BUDGET_EXCEEDED_ERROR_CODE = 'delegation_budget_exceeded'
 const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
   "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
 
+/**
+ * #3494: the backend's `error_code` when the delegate account rejected the
+ * UserOperation signature during on-chain validation (`POST
+ * /payments/:id/sign`, ERC-4337 AA2x — most often `AA24 signature error`).
+ * The intent is already `failed`; this payment_id has nothing left to
+ * resubmit — a NEW payment, signed by a corrected signer, is the only path.
+ */
+const SIGNATURE_REJECTED_ERROR_CODE = 'signature_rejected'
+const SIGNATURE_REJECTED_OMITTED_REASON =
+  'the account rejected this signature during on-chain validation; retrying this payment_id cannot succeed — update the signer, then create a NEW payment, after telling the user'
+
+/**
+ * #3494: the backend's `error_code` for every other `POST /payments/:id/sign`
+ * on-chain/bundler failure — the one case this route cannot classify as a
+ * signature or a budget cause. Still a failed intent, so still stop-and-tell,
+ * never the generic 5xx "retry once" below (there is no live state left on
+ * this payment_id for a retry to find).
+ */
+const ONCHAIN_EXECUTION_FAILED_ERROR_CODE = 'onchain_execution_failed'
+const ONCHAIN_EXECUTION_FAILED_OMITTED_REASON =
+  'this payment_id already failed on-chain and cannot be retried; tell the user what the message says, and create a new payment if they still want to pay'
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -324,6 +346,50 @@ export function normalizeError(err: unknown): ToolFailure {
       ...(body.shortfall_atomic !== undefined ? { shortfall_atomic: body.shortfall_atomic } : {}),
       ...(body.phase !== undefined ? { phase: body.phase } : {}),
       ...(body.rail !== undefined ? { rail: body.rail } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #3494: `POST /payments/:id/sign` (every rail it relays, including the
+  // EIP-3009 funding leg) now carries a typed `error_code` on its failure
+  // 502, which this generic-5xx-means-retry-once branch predates. Both of
+  // these mean the intent is ALREADY FAILED — `failSubmittedIntent` booked it
+  // on the row before the response was sent — so "retry once" is never the
+  // right next step whatever caused it.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === SIGNATURE_REJECTED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: SIGNATURE_REJECTED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'SIGNATURE_REJECTED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === ONCHAIN_EXECUTION_FAILED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: ONCHAIN_EXECUTION_FAILED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'ONCHAIN_EXECUTION_FAILED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

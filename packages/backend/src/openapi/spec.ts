@@ -972,6 +972,37 @@ const railUnavailableResponse = {
 } as const
 
 /**
+ * #3494: `POST /payments/{id}/sign`'s on-chain/bundler failure — every rail
+ * this route relays (a direct payment, or the EIP-3009 funding leg named in
+ * `POST /x402/authorize`'s `sign_data.instructions`). The intent is already
+ * `failed` by the time this is sent (`failSubmittedIntent` books it first):
+ * there is nothing left to retry on this `payment_id` whatever the cause, so
+ * `message` is bounded and redacted, never a full viem/bundler dump, and
+ * differs by `error_code`:
+ * - `signature_rejected` — the account rejected the signature during
+ *   on-chain validation (ERC-4337 AA2x, most often `AA24 signature error`).
+ *   Update the signer and sign a NEW payment; this `payment_id` cannot be
+ *   resubmitted.
+ * - `task_budget_exceeded` / `delegation_budget_exceeded` — a budget revert
+ *   caught at submit (a payment that raced past the create-time pre-check,
+ *   or whose pre-check read failed open), re-confirmed from the enforcer's
+ *   own current figure. Same shape the create-time 403 answers
+ *   (`task_budget_id`/`remaining_atomic`/`max_atomic`, or
+ *   `remaining_atomic`/`shortfall_atomic`/`phase`/`next_action`/`rail`).
+ * - `onchain_execution_failed` — any other on-chain/bundler failure this
+ *   route cannot classify more precisely.
+ */
+const signFailureResponse = {
+  ...errorResponse,
+  description:
+    'On-chain execution failed after this route claimed the intent for submission; the intent is ' +
+    'already `failed`. The body carries a typed `error_code` (`signature_rejected`, ' +
+    '`task_budget_exceeded`, `delegation_budget_exceeded`, or `onchain_execution_failed`) and a ' +
+    'bounded, redacted `message` — never the full bundler/viem failure. See the typed codes above ' +
+    'for the remedy each names; none of them means retry this `payment_id`.',
+} as const
+
+/**
  * #2918: the accounting connection routes gate on `config.hosted &&
  * config.accountingEnabled` — NOT the account entitlement, which stays the
  * feed's gate (#2861). Same 404 body shape as `requireAccountingFeed`
@@ -1218,6 +1249,15 @@ const agentPaymentStatus = {
         'True only when an eip3009 payment\'s merchant settlement transaction is already recorded and ' +
         'on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the ' +
         'confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown.',
+    },
+    // #3494
+    failure_reason: {
+      type: ['string', 'null'],
+      description:
+        'A bounded, redacted cause for a `failed` payment — the stored error message (already scrubbed of ' +
+        'vendor secrets before it was written), capped so a viem/bundler dump never rides this response. ' +
+        'Present (possibly `null`, when no message was recorded) only when `status` is `failed`; omitted on ' +
+        'every other status.',
     },
     // Present when the fee module quotes a nonzero fee for this rail
     // (`modules/fee/index.ts` — dark today: amount "0", applied false).
@@ -6791,7 +6831,7 @@ export const openapiSpec = {
               'session rail (#834) — or it has expired. A retired-rail intent is refused before ' +
               'the expiry flip, so nothing is written.',
           },
-          '502': errorResponse,
+          '502': signFailureResponse,
         },
       },
     },
@@ -10335,6 +10375,11 @@ export const openapiSpec = {
           to: address,
           tx_hash: { type: ['string', 'null'] },
           explorer_url: { type: ['string', 'null'] },
+          // #3494: bounded (length-capped) at this route's read, same cap as
+          // the sign-route 502's `message` and `AgentPaymentStatus.failure_reason`
+          // — never a raw viem/bundler dump. The underlying stored value is
+          // already scrubbed of vendor secrets (`redactVendorSecrets`) before
+          // this bound is applied.
           error_message: { type: ['string', 'null'] },
           created_at: isoDateTime,
           signed_at: { anyOf: [isoDateTime, { type: 'null' }] },

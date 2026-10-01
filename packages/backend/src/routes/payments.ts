@@ -27,7 +27,14 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../domain/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { classifyRevertForLedger, isPeriodBudgetRevert, isTransferCapRevert, refuse } from '../modules/payments/index.js'
+import {
+  classifyRevertForLedger,
+  isAccountValidationRevert,
+  isPeriodBudgetRevert,
+  isTransferCapRevert,
+  boundFailureMessage,
+  refuse,
+} from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
@@ -1161,15 +1168,145 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         const errorMsg = redactVendorSecrets(err instanceof Error ? err.message : String(err))
         await failSubmittedIntent(errorMsg, id, agent.id)
 
-        // #3053: through the shared choke point; allowlisted without a ledger
-        // row — this is the on-chain/bundler FAILURE answer, booked on the
-        // intent row by failSubmittedIntent above, not a policy refusal.
+        // #3494: a typed `error_code` + cause class on the 502, instead of
+        // one untyped "On-chain execution failed" for everything a bundler
+        // can throw after this route already claimed the intent to
+        // 'submitted'. Unlike the create-time pre-checks (#3500/#3503), this
+        // intent is ALREADY FAILED (booked above) — there is nothing left to
+        // retry on this payment_id whatever the cause, so every branch here
+        // answers 502 (the row read nothing retryable), never the create
+        // route's non-retryable 403; `message` is what differs per cause.
+        // No ledger row either way — the comment this replaced already
+        // established that this is the on-chain/bundler FAILURE answer,
+        // booked on the intent row, not a policy refusal the ledger owns.
+        const boundedMessage = boundFailureMessage(errorMsg)
+
+        // AA2x: the account itself rejected the signature during
+        // `validateUserOp`. There is no live budget or chain state to
+        // re-read — the fix is a new signer, on a NEW payment, never a
+        // resubmit of this payment_id (the signature is already spent:
+        // the intent is 'failed', and `/:id/sign` only ever accepts
+        // 'pending_signature').
+        if (isAccountValidationRevert(err)) {
+          return refuse(
+            reply.code(502).send({
+              payment_id: id,
+              status: 'failed',
+              error: 'The account rejected this signature during on-chain validation',
+              error_code: 'signature_rejected',
+              message:
+                'The delegate account rejected this signature during validation (an AA2x error, most often ' +
+                'AA24 signature error). Update the signer and sign a NEW payment — this payment_id is ' +
+                'already failed and cannot be retried with the same or a corrected signature.',
+              details: boundedMessage,
+            }),
+            null,
+          )
+        }
+
+        // A transfer-cap revert on a task-budget payment is that task
+        // budget's cap, confirmed the same way the create-route catch
+        // confirms it (#3500) — re-read the enforcer's own spent figure
+        // before answering, never on the revert text alone (the same
+        // enforcer also carries a budget delegation's lifetime cap).
+        if (intent.task_budget_id && isTransferCapRevert(err)) {
+          const taskBudgetRow = await findTaskBudgetForAgent(intent.task_budget_id, agent.id)
+          if (taskBudgetRow) {
+            const check = await checkTaskBudgetCap({
+              chainId: intent.chain_id,
+              delegationHash: taskBudgetRow.delegation_hash,
+              maxAtomic: taskBudgetRow.max_atomic,
+              amountAtomic: BigInt(intent.amount_raw ?? '0'),
+            })
+            const tokenConfig = resolveToken(intent.chain_id, intent.token_symbol)
+            if (check.outcome === 'exceeded' && tokenConfig) {
+              return refuse(
+                reply.code(502).send({
+                  payment_id: id,
+                  status: 'failed',
+                  ...taskBudgetExceededBody({
+                    taskBudgetId: taskBudgetRow.id,
+                    tokenSymbol: intent.token_symbol,
+                    amountHuman: intent.amount_human,
+                    amountAtomic: intent.amount_raw ?? '0',
+                    remainingAtomic: check.remainingAtomic.toString(),
+                    remainingHuman: formatTokenAmount(check.remainingAtomic, tokenConfig.decimals),
+                    maxAtomic: check.maxAtomic.toString(),
+                  }),
+                }),
+                null,
+              )
+            }
+          }
+        }
+
+        // The period budget's own revert (#3503) — a payment that raced past
+        // the create-time pre-check, or the pre-check read failed open —
+        // confirmed the same way: a fresh read of the SAME delegation this
+        // intent redeemed (`budget_delegation_hash`), never the revert text
+        // alone.
+        if (isPeriodBudgetRevert(err) && intent.budget_delegation_hash) {
+          const delegationRow = await selectActiveDelegationByHash(agent.id, intent.budget_delegation_hash)
+          if (delegationRow) {
+            const read = await readRemainingBudget(
+              intent.chain_id,
+              delegationRow.delegation_json,
+              intent.amount_raw ?? '0',
+            )
+            if (read.fromChain) {
+              const remainingAtomic = BigInt(read.remainingAtomic)
+              const amountRaw = BigInt(intent.amount_raw ?? '0')
+              const tokenConfig = resolveToken(intent.chain_id, intent.token_symbol)
+              if (remainingAtomic < amountRaw && tokenConfig) {
+                const shortfallAtomic = amountRaw - remainingAtomic
+                return refuse(
+                  reply.code(502).send({
+                    payment_id: id,
+                    status: 'failed',
+                    error:
+                      `This payment of ${intent.amount_human} ${intent.token_symbol} exceeded the agent's ` +
+                      "remaining budget for this period by the time it was signed. There is no approval " +
+                      'queue on the delegation rail — ask the wallet owner to grant or raise the budget in ' +
+                      'Haven, or wait for the period to reset, then sign a NEW payment.',
+                    error_code: 'delegation_budget_exceeded',
+                    phase: AgentPaymentPhase.InsufficientFunds,
+                    next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+                    // This route also relays the EIP-3009 funding leg
+                    // (`POST /x402/authorize` names it in its sign_data
+                    // instructions), so the rail is whichever one this
+                    // intent actually is — never a hardcoded 'direct'.
+                    rail: intent.payment_rail ?? intent.source ?? AgentPaymentRail.Direct,
+                    chain_id: intent.chain_id,
+                    token: intent.token_symbol,
+                    amount: intent.amount_human,
+                    amount_atomic: intent.amount_raw,
+                    remaining: formatTokenAmount(remainingAtomic, tokenConfig.decimals),
+                    remaining_atomic: remainingAtomic.toString(),
+                    shortfall: formatTokenAmount(shortfallAtomic, tokenConfig.decimals),
+                    shortfall_atomic: shortfallAtomic.toString(),
+                    recipient: intent.to_address,
+                  }),
+                  null,
+                )
+              }
+            }
+          }
+        }
+
+        // Everything else: a bundler/transport failure this route cannot
+        // name more precisely. The bounded message replaces the old
+        // unbounded `details` — a viem/bundler error can carry its full
+        // callData or ABI in `.message`, which must never ride a response
+        // wholesale (`redactVendorSecrets` only strips vendor credentials,
+        // not length).
         return refuse(
           reply.code(502).send({
             payment_id: id,
             status: 'failed',
             error: 'On-chain execution failed',
-            details: errorMsg,
+            error_code: 'onchain_execution_failed',
+            message: boundedMessage ?? 'On-chain execution failed',
+            details: boundedMessage,
           }),
           null,
         )
@@ -1276,7 +1413,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       tx_hash: intent.tx_hash,
       explorer_url: intent.tx_hash ? getExplorerUrl(intent.chain_id, 'tx', intent.tx_hash) : null,
       fee: buildResponseFee(intent),
-      error_message: intent.error_message,
+      // #3494: bounded at this read — the stored value is already scrubbed of
+      // vendor secrets (`redactVendorSecrets`, written at `failSubmittedIntent`
+      // time) but not length-capped, and a viem/bundler failure can carry its
+      // full callData or ABI in `.message`.
+      error_message: boundFailureMessage(intent.error_message),
       created_at: intent.created_at,
       signed_at: intent.signed_at,
       submitted_at: intent.submitted_at,

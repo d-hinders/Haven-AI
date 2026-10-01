@@ -4395,3 +4395,42 @@ to call next in structured fields, and those fields are typed end to end
 > `last-verified` is re-stamped to 2026-10-01: the failure envelope this
 > document's own re-verification trail pins is what changed. Nothing else in
 > this document was re-verified.
+
+> **Re-verification (#3494, 2026-10-01):** `POST /payments/:id/sign`'s
+> failure catch (every rail the route relays — a direct payment and the
+> EIP-3009 funding leg) now answers
+> its 502 with a typed `error_code` and a bounded, redacted `message` instead
+> of one untyped "On-chain execution failed". Four cause classes, checked in
+> order: `signature_rejected` (the account rejected the UserOperation
+> signature during on-chain validation — ERC-4337 AA2x, most often `AA24
+> signature error`); `task_budget_exceeded` / `delegation_budget_exceeded` (a
+> budget revert caught at submit — a payment that raced past the create-time
+> pre-check, or whose pre-check read failed open — re-confirmed from the
+> enforcer's own current figure before answering, same shape the #3500/#3503
+> create-time pre-checks already answer); and `onchain_execution_failed` for
+> everything else. `normalizeError` gains two more typed branches next to
+> #3416's/#3500's/#3504's: `signature_rejected` and `onchain_execution_failed`
+> both become `next_action: stop_and_tell_user` (an already-failed intent has
+> nothing left to retry on that `payment_id`), with the signature case naming
+> its own remedy — update the signer, then sign a NEW payment, never resubmit
+> the same `payment_id`. The two budget codes needed no new branch: #3500's
+> and #3504's existing branches key on `error_code` alone, not the route or
+> status code that produced it, so they already apply here unchanged. Also in
+> this diff, on `agent-payment-status.ts` (a covered file): a `failed`
+> intent's status now carries `failure_reason` (the same bounded,
+> redacted cause), and a direct intent's own `send_idempotency_key` is now
+> surfaced as `idempotency_key` on status (`railContext` answered `{}` for
+> the direct rail before this). `GET /payments/:id`'s `error_message` is
+> bounded at the same read. Hosted-only + backend-only mapping: no signer,
+> connector or SDK version is involved, no key, signature, delegation, caveat
+> or budget changes, and no existing field or branch moves — these are
+> additive. A backend older than this change keeps the old untyped 502 and
+> the un-bounded `error_message`; a hosted server older than this shows the
+> two new codes as the generic 5xx "retry once" step, which is wrong advice
+> on an already-failed intent but not a new failure mode (the pre-#3494
+> behaviour for every sign failure). Pinned by two new refusal fixtures (the
+> census moves to 42 fixtures and 51 `refusalNextStep` calls), real-DB backend
+> tests for the sign-route 502 shape per cause class and the status/GET
+> bounding (mutation-proven), and `npm run preflight`. `last-verified` is not
+> re-stamped: this block is the scope. Nothing else in this document was
+> re-verified.

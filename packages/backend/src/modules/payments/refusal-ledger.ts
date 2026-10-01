@@ -166,6 +166,24 @@ export function isTransferCapRevert(err: unknown): boolean {
 }
 
 /**
+ * #3494: the ERC-4337 AA2x family — a signature or account-validation
+ * failure inside `validateUserOp` itself (`AA24 signature error` is the one
+ * seen live; AA20/AA21/AA22/AA23/AA25/AA26 are the same validation phase for
+ * a different reason). Like the caveat reverts above there is no typed error
+ * to switch on: the bundler/EntryPoint relays it as plain text in the revert
+ * reason, so this is a text match, not a code match. Unlike a budget revert,
+ * there is nothing to re-read and no "fits now" outcome — the signature
+ * itself is what the account rejected, so this payment cannot be resubmitted
+ * with a better-timed retry. The caller's remedy is a NEW payment, signed by
+ * a signer the account will accept.
+ */
+const ACCOUNT_VALIDATION_REVERT_PATTERN = /\bAA2[0-9]\b/
+
+export function isAccountValidationRevert(err: unknown): boolean {
+  return ACCOUNT_VALIDATION_REVERT_PATTERN.test(flattenErrorText(err))
+}
+
+/**
  * Flatten an error and its `cause` chain into one searchable string. Caveat
  * reverts arrive wrapped: viem's `EstimateGasExecutionError` carries the
  * contract error as `cause`, and a bundler relays the revert reason inside

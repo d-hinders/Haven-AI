@@ -142,15 +142,25 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // #3503 added two imports (+2) and the period budget pre-check (770)
     // before the UserOp is built, plus its revert fallback (811) inside the
     // prepare catch, shifting every site below by +93 to +102.
-    { line: 608, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — pre-check before the UserOp is built
-    { line: 770, code: 403, ledger: 'row' }, // #3503 period budget exhausted — pre-check before the UserOp is built
-    { line: 793, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
-    { line: 802, code: 403, ledger: 'row' }, // #3500 transfer-cap revert confirmed against the task budget's own spent figure
-    { line: 811, code: 403, ledger: 'row' }, // #3503 period-budget revert confirmed by a fresh remaining-budget read
-    { line: 817, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 841, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 1140, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 1167, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    // #3494 shifted every site below by +7: two imports grew (isAccountValidationRevert,
+    // boundFailureMessage), shifting the pre-check/revert-fallback sites by +7, and added
+    // FOUR new refuse( sites inside the sign route's failure catch (AA2x, task-budget and
+    // period-budget reverts confirmed at submit, and the generic fallback) — all 502,
+    // all routed through refuse(..., null): the catch already books the failure on the
+    // intent row via failSubmittedIntent before classifying, so none of these four is a
+    // policy refusal the ledger owns.
+    { line: 615, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — pre-check before the UserOp is built
+    { line: 777, code: 403, ledger: 'row' }, // #3503 period budget exhausted — pre-check before the UserOp is built
+    { line: 800, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
+    { line: 809, code: 403, ledger: 'row' }, // #3500 transfer-cap revert confirmed against the task budget's own spent figure
+    { line: 818, code: 403, ledger: 'row' }, // #3503 period-budget revert confirmed by a fresh remaining-budget read
+    { line: 824, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
+    { line: 848, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 1147, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 1191, code: 502, ledger: 'skipped' }, // #3494 AA2x signature rejection confirmed at submit — allowlisted
+    { line: 1223, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 1262, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 1302, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
   ],
 }
 
@@ -187,11 +197,23 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
   ],
   'src/routes/payments.ts': [
     {
-      line: 793,
+      line: 800,
       reason: '#3416 DelegationRailChainUnavailableError — this deployment has no bundler credential for the chain (configuration), not a guardrail refusal',
     },
     {
-      line: 1167,
+      line: 1191,
+      reason: '#3494 AA2x — the account rejected the signature during on-chain validation; booked on the intent row by failSubmittedIntent already, not a policy refusal the ledger owns',
+    },
+    {
+      line: 1223,
+      reason: '#3494 task-budget transfer-cap revert confirmed at submit — booked on the intent row by failSubmittedIntent already, not a policy refusal the ledger owns',
+    },
+    {
+      line: 1262,
+      reason: '#3494 period-budget revert confirmed at submit — booked on the intent row by failSubmittedIntent already, not a policy refusal the ledger owns',
+    },
+    {
+      line: 1302,
       reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
     },
   ],

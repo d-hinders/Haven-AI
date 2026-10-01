@@ -48,6 +48,7 @@ import {
   decodeErrorStrings,
   isPeriodBudgetRevert,
   isTransferCapRevert,
+  isAccountValidationRevert,
 } from '../refusal-ledger.js'
 import { EstimateGasExecutionError } from 'viem'
 
@@ -371,5 +372,27 @@ describe('refusal ledger unit contracts', () => {
     const expired = new Error(hexRevert('TimestampEnforcer:expired-delegation'))
     expect(classifyRevertForLedger(expired)).toBe('delegation_expired')
     expect(isPeriodBudgetRevert(expired)).toBe(false)
+  })
+
+  // #3494
+  it('isAccountValidationRevert: matches the ERC-4337 AA2x family, not a budget revert or an unrelated error', () => {
+    expect(isAccountValidationRevert(new Error('UserOperation reverted during simulation: AA24 signature error'))).toBe(true)
+    // Wrapped as viem does — the text sits in the cause.
+    expect(
+      isAccountValidationRevert(
+        new Error('estimate failed', { cause: new Error('AA24 signature error') }),
+      ),
+    ).toBe(true)
+    // The whole AA2x family, not just AA24.
+    for (const code of ['AA20', 'AA21', 'AA22', 'AA23', 'AA25', 'AA26']) {
+      expect(isAccountValidationRevert(new Error(`${code} some reason`))).toBe(true)
+    }
+    // A budget revert is not a signature revert, and vice versa.
+    const period = new Error(VERBATIM_DEV_PERIOD_REVERT)
+    expect(isAccountValidationRevert(period)).toBe(false)
+    expect(isPeriodBudgetRevert(period)).toBe(true)
+    // AA1x/AA3x are a different phase (factory/paymaster) — not this family.
+    expect(isAccountValidationRevert(new Error('AA10 sender already constructed'))).toBe(false)
+    expect(isAccountValidationRevert(new Error('nothing enforcer-shaped here'))).toBe(false)
   })
 })

@@ -139,11 +139,12 @@ function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummar
     tokenAddress: taskBudget.tokenAddress,
     maxAtomic: taskBudget.maxAtomic,
     maxDisplay,
-    // The GET route only enriches OPEN rows, and this summary reads
-    // `?status=open` — so the keys are present whenever the backend
-    // deployed this far. An older backend without them maps to the honest
-    // degraded shape (null figures, false flag), which is also exactly what
-    // a backend whose live read failed reports: "unknown", never optimistic.
+    // The GET route only enriches OPEN rows, and the list the summary feeds
+    // keeps closed/expired rows out (below), so a mapped row is an OPEN one
+    // whenever the backend deployed this far. An older backend without the
+    // figures maps to the honest degraded shape (null figures, false flag),
+    // which is also exactly what a backend whose live read failed reports:
+    // "unknown", never optimistic.
     spentAtomic: taskBudget.spentAtomic ?? null,
     remainingAtomic: taskBudget.remainingAtomic ?? null,
     remainingIsFromChain: taskBudget.remainingIsFromChain ?? false,
@@ -237,6 +238,29 @@ export class AccountReads {
    * there with its status, not vanish the moment its close starts. Every
    * row carries `status` (+ `isExpired`) so the reader distinguishes them;
    * the soft-fail contract is unchanged.
+   *
+   * #3518 boundedness: `status=all` answers EVERY row this agent ever held —
+   * closed and long-expired included (the repository's all-branch has no
+   * window at all), so mapping it verbatim would grow `haven_get_agent`
+   * without bound. The list filters CLIENT-SIDE to the rows an agent can
+   * still act on, and read-by-id (`haven_get_task_budget`) is the any-status
+   * surface for everything else:
+   *
+   * - `closing` ALWAYS stays visible, expired or not — the close submit is
+   *   in flight and the signer's close refusal tells the caller to re-check
+   *   exactly this row's status;
+   * - `closed` rows drop (terminal — `closed_at` names what happened, and
+   *   the read-by-id tool answers any status);
+   * - a non-closing row past its `expires_at` drops (an expired open budget
+   *   reserves nothing and pays nothing) — the backend's `is_expired` is
+   *   derived from the same field, so the filter agrees with what the wire
+   *   would have said;
+   * - `pending` and live `open` rows stay, whatever their expiry.
+   *
+   * A row whose wire carries no `is_expired` is treated as unexpired — the
+   * degraded read errs toward KEEPING rows, never toward hiding one the
+   * agent could still act on. (No deployed backend has that shape: `status`
+   * and `is_expired` landed together in #3329's wire.)
    */
   private async listTaskBudgetsSummary(): Promise<HavenTaskBudgetSummary[]> {
     try {
@@ -245,7 +269,12 @@ export class AccountReads {
       )
       const rows = raw?.task_budgets
       if (!Array.isArray(rows)) return []
-      return rows.map((row) => summarizeTaskBudget(mapTaskBudget(row)))
+      // The boundedness filter (comment above): closing rows always ride;
+      // closed and expired rows drop.
+      return rows
+        .map((row) => mapTaskBudget(row))
+        .filter((tb) => tb.status === 'closing' || (!tb.isExpired && tb.status !== 'closed'))
+        .map((tb) => summarizeTaskBudget(tb))
     } catch {
       // #3093: any transport failure (404, network error, malformed body) —
       // never let it fail the agent summary this feeds.

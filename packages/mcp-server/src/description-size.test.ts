@@ -269,11 +269,28 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * 24,898 / 26 = 957.6154 sits above round 12's 944.12, and the same rule
  * applies — re-derived at the measured mean, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 24_898
-// Mean pin: re-derived — round 13, #3501 union with #3495 (block above):
-// 24,898 / 26 = 957.6154, pinned at the two-decimal ceiling (957.62).
-// Round 12's 944.12 cannot hold while this tree exceeds it. Shrink-only
-// from here.
+/**
+ * **Re-derived — round 14, #3518 (2026-10-01).** A new hosted tool joins the
+ * surface — `haven_get_task_budget`, the read-by-id a close refusal's
+ * "re-check the budget's status" points at — and two descriptions grow to
+ * name the new visibility fields: `haven_get_agent`'s rows now carry their
+ * lifecycle `status` + `isExpired` (a closing budget must be visible AS
+ * closing, not vanish), and `haven_get_allowances` names `delegationHash` /
+ * `recipientAddress` (null = open) / `merchantId` / `reservedHavenAtomic` —
+ * the scope fields that let an agent holding two budgets for one token name
+ * the merchant-locked one BEFORE paying, and the Haven-side reservation
+ * figure reported beside (never folded into) the on-chain remaining. The
+ * clauses state the fields and their degraded read and nothing else — the
+ * same field-naming obligation rounds 9/10 recorded for additive response
+ * fields; no overclaim remains to trim. Measured on this tree: 25,716 UTF-8
+ * bytes across 27 tools; the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin is HELD without moving: 25,716 / 27 =
+ * 952.44 sits BELOW round 13's 957.62 ceiling — the new tool's lean
+ * description plus the additive clauses land under it.
+ */
+const MAX_TOTAL_BYTES = 25_716
+// Mean pin: HELD at round 13's 957.62 — round 14's tree measures 25,716 / 27
+// = 952.44, below the ceiling. Shrink-only from here.
 const MAX_MEAN_BYTES = 957.62
 
 describe('tool description payload (#1591)', () => {

@@ -301,6 +301,7 @@ export async function handleBudgetPrecheck(
     Math.floor(Date.now() / 1000),
     (b) => Number(b.expires_at),
     (b) => Number(b.start_date),
+    (b) => b.created_at.getTime(),
   )
   const remainingAtomic = match ? (remainingById.get(match.id)?.remainingAtomic ?? match.budget_atomic) : '0'
   const token = tokenView(agent.chain_id, tokenAddress)

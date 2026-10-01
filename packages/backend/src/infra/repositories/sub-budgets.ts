@@ -455,3 +455,40 @@ export async function sumOpenReservedForParent(
   ])
   return BigInt(result.rows[0]?.total ?? '0')
 }
+
+/**
+ * #3518: the sub-budget side of an allowance row's `reserved_haven_atomic` —
+ * the sum of `period_amount_atomic` across OPEN, unexpired sub-budget GRANTS
+ * whose whole tree hangs under ONE parent BUDGET delegation. Keyed the only
+ * way that reaches them: a grant's tree is [grant, parent-child, budget], and
+ * the parent-child row's `parent_delegation_hash` is the budget delegation's
+ * hash (`routes/agent-sub-budgets.ts` inserts it that way), while
+ * `SUM_OPEN_RESERVED_FOR_PARENT_SQL` above keys on the parent-child row's OWN
+ * delegation hash — the wrong key one level up. The join walks
+ * grant → parent-child (via `parent_sub_budget_id`) → the budget delegation's
+ * hash, so a caller holding an allowance row can ask "how much do my open
+ * sub-budget grants reserve from THIS budget" with the hash the allowance
+ * row already carries. Agent-scoped like every read here.
+ */
+export const SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL = `SELECT COALESCE(SUM(grant_.period_amount_atomic::numeric), 0)::text AS total
+     FROM agent_sub_budgets grant_
+     JOIN agent_sub_budgets parent_child
+       ON parent_child.id = grant_.parent_sub_budget_id
+     WHERE parent_child.agent_id = $1
+       AND parent_child.parent_sub_budget_id IS NULL
+       AND parent_child.parent_delegation_hash = $2
+       AND grant_.status = 'open' AND grant_.expires_at > $3`
+
+export async function sumOpenReservedForBudgetDelegation(
+  agentId: string,
+  budgetDelegationHash: string,
+  nowSec: number,
+  executor: Executor = pool,
+): Promise<bigint> {
+  const result = await executor.query<{ total: string | null }>(SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL, [
+    agentId,
+    budgetDelegationHash,
+    nowSec,
+  ])
+  return BigInt(result.rows[0]?.total ?? '0')
+}

@@ -21,6 +21,7 @@ import {
   listActiveDelegations,
   listDelegationJsonByIds,
   selectActiveDelegationByHash,
+  selectBudgetForPaymentReport,
   selectDelegationForPayment,
   withDelegationBuildSlotLock,
 } from '../delegation-budgets.js'
@@ -297,6 +298,175 @@ describeDb('selectActiveDelegationByHash (#3329 review finding N5)', () => {
 
     const row = await selectActiveDelegationByHash(agent, hash)
     expect(row?.delegation_hash).toBe(hash)
+  })
+})
+
+/**
+ * #3518: the REPORT selection mirror — the same recipient-match, live-window
+ * and ordering the payment's `SELECT_DELEGATION_FOR_PAYMENT_SQL` runs, over
+ * the rows `listActiveDelegations` already read. The first real-DB fixture is
+ * the issue's own: an OPEN budget created FIRST, then a pinned one — the
+ * reverse of the order every mocked fixture happened to use, which is why the
+ * first-match bug survived.
+ */
+describeDb('selectBudgetForPaymentReport — the payment rule over read rows (#3518)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  const NOW = Math.floor(Date.now() / 1000)
+  const MERCHANT = '0x00000000000000000000000000000000000000bb'
+
+  /** seedDelegation returns the ROW id; the selection compares HASHES. */
+  async function seedAndGetHash(seed: Parameters<typeof seedDelegation>[0]): Promise<string> {
+    const id = await seedDelegation(seed)
+    const { rows } = await db.query<{ delegation_hash: string }>(
+      `SELECT delegation_hash FROM agent_delegations WHERE id = $1`,
+      [id],
+    )
+    return rows[0].delegation_hash
+  }
+
+  /** The projection listActiveDelegations hands the derived view. */
+  function viewRows(agentId: string) {
+    return listActiveDelegations([agentId])
+  }
+
+  function pick(rows: Awaited<ReturnType<typeof viewRows>>, to: string | null) {
+    return selectBudgetForPaymentReport(
+      rows,
+      to,
+      NOW,
+      (b) => Number(b.expires_at),
+      (b) => Number(b.start_date),
+      (b) => b.created_at.getTime(),
+    )
+  }
+
+  it('carries identity, scope and window: hash, recipient pin, merchant, created_at', async () => {
+    const agent = await seedUserAndAgent()
+    const hash = `0x${String(++hashCounter).padStart(64, '0')}`
+    await seedDelegation({ agentId: agent, delegationHash: hash, recipientAddress: MERCHANT })
+
+    const rows = await viewRows(agent)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].delegation_hash).toBe(hash)
+    expect(rows[0].recipient_address).toBe(MERCHANT)
+    expect(rows[0].merchant_id).toBeNull()
+    expect(Number(rows[0].start_date)).toBeLessThanOrEqual(NOW)
+    expect(Number(rows[0].expires_at)).toBeGreaterThan(NOW)
+    expect(rows[0].created_at).toBeInstanceOf(Date)
+  })
+
+  it('a pinned budget for the payee wins over the open budget created FIRST — the observed #3518 fixture', async () => {
+    const agent = await seedUserAndAgent()
+    // The OPEN row first — the created_at ASC list order that made first-match
+    // pick the wrong budget in production (open 0.001, pinned 0.005).
+    const openHash = await seedAndGetHash({ agentId: agent, budgetAtomic: '1000', createdAt: '2026-09-30T20:00:00Z' })
+    const pinnedHash = await seedAndGetHash({
+      agentId: agent,
+      budgetAtomic: '5000000000000',
+      recipientAddress: MERCHANT,
+      createdAt: '2026-09-30T21:00:00Z',
+    })
+
+    const winner = pick(await viewRows(agent), MERCHANT)
+    expect(winner?.delegation_hash).toBe(pinnedHash)
+    expect(winner?.delegation_hash).not.toBe(openHash)
+    // The same rows through the PAYMENT's own rule agree — the mirror and the
+    // gate cannot disagree about who pays.
+    const paying = await selectDelegationForPayment(agent, USDC, MERCHANT)
+    expect(paying?.delegation_hash).toBe(pinnedHash)
+  })
+
+  it('a pin to a DIFFERENT recipient is excluded: the open budget answers', async () => {
+    const agent = await seedUserAndAgent()
+    const otherMerchant = '0x00000000000000000000000000000000000000cc'
+    await seedDelegation({ agentId: agent, recipientAddress: otherMerchant, createdAt: '2026-09-30T20:00:00Z' })
+    const openHash = await seedAndGetHash({ agentId: agent, createdAt: '2026-09-30T21:00:00Z' })
+
+    const winner = pick(await viewRows(agent), MERCHANT)
+    expect(winner?.recipient_address).toBeNull()
+    const paying = await selectDelegationForPayment(agent, USDC, MERCHANT)
+    expect(paying).not.toBeNull()
+    expect(await viewRows(agent)).toHaveLength(2)
+    expect(winner?.delegation_hash).not.toBe(otherMerchant)
+    // And the open row is the winner by elimination of the pinned-other row.
+    const openRow = (await viewRows(agent)).find((r) => r.recipient_address === null)
+    expect(winner?.delegation_hash).toBe(openRow?.delegation_hash)
+  })
+
+  it('no payee in the quote (toAddress null) means the OPEN budget only — the no-guess fallback', async () => {
+    const agent = await seedUserAndAgent()
+    const pinnedHash = await seedAndGetHash({ agentId: agent, recipientAddress: MERCHANT })
+    const openHash = await seedAndGetHash({ agentId: agent })
+
+    const winner = pick(await viewRows(agent), null)
+    expect(winner?.delegation_hash).toBe(openHash)
+    expect(winner?.delegation_hash).not.toBe(pinnedHash)
+  })
+
+  it('a row outside its live window is skipped exactly like the payment rule skips it', async () => {
+    const agent = await seedUserAndAgent()
+    // The soonest-expiring row, but ALREADY EXPIRED — the window predicate
+    // must drop it before the ordering ever sees it.
+    await seedDelegation({ agentId: agent, budgetAtomic: '9999999', expiresAt: NOW - 10 })
+    const liveHash = await seedAndGetHash({ agentId: agent, budgetAtomic: '5' })
+
+    const winner = pick(await viewRows(agent), MERCHANT)
+    expect(winner?.delegation_hash).toBe(liveHash)
+    // The payment rule agrees.
+    const paying = await selectDelegationForPayment(agent, USDC, MERCHANT)
+    expect(paying?.delegation_hash).toBe(liveHash)
+  })
+
+  it('a not-yet-started row is skipped too (start_date <= now)', async () => {
+    const agent = await seedUserAndAgent()
+    await seedDelegation({ agentId: agent, budgetAtomic: '9999999', startDate: NOW + 3600 })
+    const liveHash = await seedAndGetHash({ agentId: agent })
+
+    expect(pick(await viewRows(agent), MERCHANT)?.delegation_hash).toBe(liveHash)
+  })
+
+  it('the FINAL tie-break is created_at DESC — NEWEST wins on an equal expiry, matching the SQL', async () => {
+    const agent = await seedUserAndAgent()
+    // Same token, same recipient, SAME expiry — only created_at differs. The
+    // older row is created FIRST (the list's ASC order), so the SQL's DESC
+    // must promote the newer one; a stable sort over ASC-ordered input would
+    // hand the tie to the OLDER row (the bug this pin exists to keep out).
+    const olderHash = await seedAndGetHash({
+      agentId: agent,
+      recipientAddress: MERCHANT,
+      budgetAtomic: '111',
+      createdAt: '2026-09-30T20:00:00Z',
+    })
+    const newerHash = await seedAndGetHash({
+      agentId: agent,
+      recipientAddress: MERCHANT,
+      budgetAtomic: '222',
+      createdAt: '2026-09-30T22:00:00Z',
+    })
+    const rows = await viewRows(agent)
+    expect(rows.map((r) => r.id)).toHaveLength(2)
+
+    const winner = selectBudgetForPaymentReport(
+      rows,
+      MERCHANT,
+      NOW,
+      () => Number(rows[0].expires_at), // identical expiry by construction
+      (b) => Number(b.start_date),
+      (b) => b.created_at.getTime(),
+    )
+    expect(winner?.delegation_hash).toBe(newerHash)
+    expect(winner?.delegation_hash).not.toBe(olderHash)
+
+    // And the payment's own SQL orders the same two rows the same way.
+    const paying = await selectDelegationForPayment(agent, USDC, MERCHANT)
+    expect(paying?.delegation_hash).toBe(newerHash)
   })
 })
 

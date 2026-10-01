@@ -135,6 +135,7 @@ export async function handleBalanceCoverage(
     Math.floor(Date.now() / 1000),
     (b) => Number(b.expires_at),
     (b) => Number(b.start_date),
+    (b) => b.created_at.getTime(),
   )
 
   // The AUTHORITY figure (permitted), from the same read GET /allowances

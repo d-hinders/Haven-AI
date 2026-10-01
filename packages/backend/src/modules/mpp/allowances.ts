@@ -17,7 +17,7 @@ import {
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
 import { listDelegationJsonByIds } from '../../infra/repositories/delegation-budgets.js'
 import { sumOpenReservedAtomic } from '../../infra/repositories/task-budgets.js'
-import { sumOpenReservedForParent } from '../../infra/repositories/sub-budgets.js'
+import { sumOpenReservedForBudgetDelegation } from '../../infra/repositories/sub-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
@@ -103,20 +103,24 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             fromChain: false,
           }
           // #3518: what the open task- and sub-budgets reserve from THIS
-          // budget — Haven-side bookkeeping, keyed by the budget's
-          // delegation hash (`parent_delegation_hash` on both child kinds),
-          // reported BESIDE the on-chain remaining and never folded into it
-          // (the enforcer's figure stays authoritative; a reservation is
-          // released on close/expire without any chain event). Best-effort
-          // and read-only: a failed sum answers 0 rather than failing the
-          // read, the same soft-degrade the #1145 fallback applies to the
+          // budget — Haven-side bookkeeping, reported BESIDE the on-chain
+          // remaining and never folded into it (the enforcer's figure stays
+          // authoritative; a reservation is released on close/expire without
+          // any chain event). Task budgets key directly on the parent
+          // DELEGATION hash (`parent_delegation_hash`); sub-budget grants key
+          // one tree level down, so their sum walks grant → parent-child →
+          // `parent_delegation_hash` (`sumOpenReservedForBudgetDelegation` —
+          // NOT `sumOpenReservedForParent`, whose key is the parent-child
+          // row's OWN hash and which would answer 0 here). Best-effort and
+          // read-only: a failed sum answers 0 rather than failing the read,
+          // the same soft-degrade the #1145 fallback applies to the
           // remaining figure itself.
           let reservedAtomic = '0'
           try {
             const nowSec = Math.floor(Date.now() / 1000)
             const [taskReserved, subReserved] = await Promise.all([
               sumOpenReservedAtomic(agent.id, b.delegation_hash, nowSec),
-              sumOpenReservedForParent(agent.id, b.delegation_hash, nowSec),
+              sumOpenReservedForBudgetDelegation(agent.id, b.delegation_hash, nowSec),
             ])
             reservedAtomic = (taskReserved + subReserved).toString()
           } catch (error) {

@@ -29,6 +29,8 @@ export interface ActiveDelegationRow {
   /** Unix-second BIGINTs (node-postgres decodes them as strings) — the #1698 live window the payment selection filters on. */
   start_date: string
   expires_at: string
+  /** Row creation (node-postgres decodes timestamptz to Date) — the payment rule's FINAL tie-break (`created_at DESC`). */
+  created_at: Date
 }
 
 /**
@@ -65,7 +67,7 @@ export async function listActiveDelegations(
   // six fields, so nothing leaks onto that wire.
   const result = await pool.query<ActiveDelegationRow>(
     `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds,
-            delegation_hash, recipient_address, merchant_id, start_date, expires_at
+            delegation_hash, recipient_address, merchant_id, start_date, expires_at, created_at
      FROM agent_delegations
      WHERE agent_id = ANY($1) AND status = 'active'
      ORDER BY created_at ASC`,
@@ -328,7 +330,14 @@ export function selectBudgetForPaymentReport<
     id: string
     recipient_address: string | null
   },
->(budgets: T[], toAddress: string | null, nowSec: number, expiresAtOf: (b: T) => number, startAtOf: (b: T) => number): T | null {
+>(
+  budgets: T[],
+  toAddress: string | null,
+  nowSec: number,
+  expiresAtOf: (b: T) => number,
+  startAtOf: (b: T) => number,
+  createdAtOf?: (b: T) => number | string,
+): T | null {
   const now = BigInt(nowSec)
   const pinned = toAddress
     ? budgets.filter(
@@ -339,22 +348,27 @@ export function selectBudgetForPaymentReport<
   const candidates = [...pinned, ...open].filter((b) => expiresAtOf(b) > now && startAtOf(b) <= now)
   if (candidates.length === 0) return null
   // A pinned match ALWAYS sorts before an open budget; ties inside each
-  // group resolve soonest-expiry first, then newest-created (the payment
-  // rule's created_at DESC) — the same total order, on the fields the view
-  // carries. `created_at` is not in the projection, so recency is preserved
-  // by the caller feeding rows in `ORDER BY created_at ASC` order: a stable
-  // sort keeps it as the final tie break, matching the SQL exactly.
+  // group resolve soonest-expiry first, then NEWEST-created first — the
+  // payment rule's `created_at DESC` (the last ORDER BY key). The sort is
+  // explicit on `createdAtOf`, NOT an accidental byproduct of input order:
+  // a caller feeding rows in `created_at ASC` order would otherwise win the
+  // tie for the OLDER row (a stable sort keeps the earlier one first), which
+  // is the opposite of the rule this mirror exists to copy. Callers that
+  // cannot supply a creation timestamp pass the default (a constant), which
+  // makes the tie-break neutral — acceptable only where no two rows of one
+  // group can share an expiry.
   return (
     candidates
-      .map((b, index) => ({ b, index }))
+      .map((b) => ({
+        b,
+        pinned: b.recipient_address != null ? 0 : 1,
+        exp: expiresAtOf(b),
+        created: Number(createdAtOf?.(b) ?? 0) || 0,
+      }))
       .sort((a, z) => {
-        const aPinned = a.b.recipient_address != null ? 0 : 1
-        const zPinned = z.b.recipient_address != null ? 0 : 1
-        if (aPinned !== zPinned) return aPinned - zPinned
-        const aExp = expiresAtOf(a.b)
-        const zExp = expiresAtOf(z.b)
-        if (aExp !== zExp) return aExp < zExp ? -1 : 1
-        return a.index - z.index
+        if (a.pinned !== z.pinned) return a.pinned - z.pinned
+        if (a.exp !== z.exp) return a.exp < z.exp ? -1 : 1
+        return z.created - a.created
       })
       .map((entry) => entry.b)[0] ?? null
   )

@@ -4485,6 +4485,8 @@ export type components = {
             settlement_scheme?: ("eip3009" | "erc7710") | null;
             /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
             merchant_settlement_recorded?: boolean;
+            /** @description The budget delegation that metered this payment (#1059), recorded at authorize. The settle summary keys its allowance rows on this — the budget that PAID, never a re-derived (token, payee) first match. Omitted on the legacy rail and on intents predating migration 053. */
+            budget_delegation_hash?: string;
             fee?: {
                 amount: string;
                 token: string;
@@ -4812,6 +4814,17 @@ export type components = {
                 /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals), whose output is always "0" or <integer>.<2–6 fraction digits> — so this pattern REJECTS an atomic value such as "500" (#2408). "0" is the one value both shapes share. Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
                 configured_amount: string;
                 reset_period_min: number;
+                /** @description #3518: this budget delegation's hash — the identifier a payment authorization records as budget_delegation_hash and the key `reserved_haven_atomic` sums children under. */
+                delegation_hash?: string;
+                /** @description #3518: the recipient pin — null for an open budget; a recipient-scoped budget pays ONLY this address (a payment's selection prefers the pin matching its payee). */
+                recipient_address?: string | null;
+                /**
+                 * Format: uuid
+                 * @description #3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.
+                 */
+                merchant_id?: string | null;
+                /** @description #3518: Haven-side reservation — the sum of this budget's OPEN, unexpired task- and sub-budget children's caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort). */
+                reserved_haven_atomic?: string;
                 onchain: {
                     /** @description The configured period budget in ATOMIC units — the same budget as the sibling `configured_amount`, which states it in whole token units. `spent`, `remaining` and `effective_spent` are atomic too (#2295). */
                     amount: string;
@@ -4853,6 +4866,20 @@ export type components = {
             remaining_atomic: string;
             /** @description #1319 provenance, same semantics as the allowances read's flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
             remaining_is_from_chain?: boolean;
+            /**
+             * Format: uuid
+             * @description #3518: the budget row the remaining figure describes — the payment-selection mirror's winner (recipient match for merchantTo, else the open budget), not the first per-token row. Absent when no row matched.
+             */
+            budget_id?: string;
+            /** @description #3518: the selected budget's delegation hash — the same identifier a payment authorization records as budget_delegation_hash, so a caller can verify report and payment name the same budget. */
+            budget_delegation_hash?: string;
+            /** @description #3518: the selected budget's recipient pin — null for an open budget, the merchant payee for a pinned/merchant-locked one. */
+            budget_recipient_address?: string | null;
+            /**
+             * Format: uuid
+             * @description #3518: the merchant the selected budget was issued for (#3331), null for every other budget.
+             */
+            budget_merchant_id?: string | null;
             /** @description #3492: present and true only when sufficiency was decided because `idempotencyKey` resolved to an already-settled erc7710 replay of this exact quote — NOT because `remaining_atomic` covers `amountAtomic` (it may not, on this branch: the settlement already spent it). Absent on every other sufficient answer. */
             replay?: boolean;
         };

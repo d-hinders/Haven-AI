@@ -82,6 +82,8 @@ export interface DerivedDelegationBudget extends DerivedAllowance {
   /** The #1698 live window (unix-second strings, BIGINT decode) — report-side selection filters on it. */
   start_date: string
   expires_at: string
+  /** The payment rule's FINAL tie-break (`created_at DESC`) — the same Date the row's SELECT carries. */
+  created_at: Date
 }
 
 function tokenView(chainId: number, tokenAddress: string): { symbol: string; decimals: number } {
@@ -128,6 +130,7 @@ export async function deriveDelegationBudgets(
       merchant_id: row.merchant_id,
       start_date: row.start_date,
       expires_at: row.expires_at,
+      created_at: row.created_at,
     })
     derived.set(row.agent_id, existing)
   }

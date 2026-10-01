@@ -2679,8 +2679,19 @@ hand-off names, is strict, so a `task_budget_id` there is refused with the
 `-32602 unrecognized_keys` envelope below; a **newer signer against an older
 backend** gets a 404 from the sign-context read and refuses with
 `SIGN_CONTEXT_REFUSED`, never a signature. The SDK's `getAgentSummary()` now performs a third read
-(`GET /task-budgets?status=open`) and degrades to an empty `taskBudgets`
+(`GET /task-budgets?status=all`) and degrades to an empty `taskBudgets`
 list on any failure, so an older backend does not break `haven_get_agent`.
+(#3518 re-verification, 2026-10-01: the list reads `status=all` instead of
+`?status=open` and the SDK filters what it maps — `closing` rows always
+ride, `closed` and expired rows drop client-side, `pending` rows stay — so a
+budget that is closing stays visible AS closing instead of vanishing the
+moment its close starts, while the list stays bounded; the soft-fail
+degradation is unchanged. Both runtimes also gain
+`haven_get_task_budget { task_budget_id }`, the read-by-id over the
+backend's any-status `GET /task-budgets/:id` — the status check a close
+refusal's "re-check the budget's status" points at; see the re-verification
+block at the end of this document. An older hosted MCP lists no read tool,
+which is the same fail-closed skew as the rows above.)
 
 ### An undeclared argument is refused, not stripped (#2312)
 
@@ -4421,4 +4432,41 @@ to call next in structured fields, and those fields are typed end to end
 > fixture (the census moves to 40 fixtures and 49 `refusalNextStep` calls).
 > `last-verified` is re-stamped to 2026-10-01: the failure envelope this
 > document's own re-verification trail pins is what changed. Nothing else in
+> this document was re-verified.
+
+> **Re-verification (#3518, 2026-10-01):** the budget-visibility round. The
+> hosted MCP and the local `@haven_ai/mcp` both gain
+> `haven_get_task_budget { task_budget_id }` — the read over the backend's
+> any-status `GET /task-budgets/:id`, i.e. the status check a close
+> refusal's "re-check the budget's status" points at. It returns
+> `{ task_budget }` verbatim (the SDK's typed `HavenTaskBudget`, `status`
+> pending | open | closing | closed, `isExpired`, the #3501 spent/remaining
+> figures on an open row) and a 404 carries the backend's own message
+> through `runTool`; the local schema and wording are byte-parity with the
+> hosted one. The third skew read changes shape:
+> `getAgentSummary()`'s taskBudgets list now reads
+> `GET /task-budgets?status=all` and the SDK filters what it maps —
+> `closing` rows always ride, `closed` and expired rows drop client-side,
+> `pending` rows stay — so the agent summary lists a `closing` budget AS
+> closing (the read that must not vanish while a close submit is in
+> flight) instead of dropping it the moment its close started, while the
+> list stays bounded (`status=all` answers every row the agent ever held;
+> the all-branch has no window). `haven_get_allowances` rows carry
+> `delegationHash` / `recipientAddress` (null = open budget) /
+> `merchantId` (set only on a #3331 merchant-locked budget) /
+> `reservedHavenAtomic` (the sum of the budget's open, unexpired task- and
+> sub-budget children's caps, in atomic units, reported BESIDE
+> `onchain.remaining` and never folded into it — the on-chain figure stays
+> authoritative; "0" covers both no-reservation and a failed sum), additive
+> and undefined against an older backend. The tools' descriptions name the
+> fields; the description payload re-measures to 25,716 bytes across 27
+> tools (mean 952.44, under the held 957.62 ceiling). Version skew,
+> fail-closed or consent surfaces are unchanged: the local runtime's
+> consent hash moves (a new tool name joins it), the signer's does not; an
+> older hosted MCP lists no read tool and an older local server refuses
+> the undeclared name — the rows above. An older backend's allowance rows
+> omit the four fields and the SDK keeps them absent. `last-verified`
+> stays 2026-10-01: the skew read, the tool set and the hosted/local
+> descriptions are exactly what this document pins, and all three moved in
+> this diff. Scope of this note: those tools and reads. Nothing else in
 > this document was re-verified.

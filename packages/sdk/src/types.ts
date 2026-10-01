@@ -923,6 +923,122 @@ export interface HavenAgentSummary extends HavenAgent {
    * budgets", not a fetch failure).
    */
   taskBudgets: HavenTaskBudgetSummary[]
+  /**
+   * #3506: the sub-budget rows THIS agent must still sign as the DELEGATING
+   * agent — the owner issued a sub-budget (a parent-child row for this agent
+   * plus a grant to the sub-agent), and each row is `pending` until this
+   * agent's delegate key signs it (or `closing` until it signs the close).
+   * A derived VIEW, populated from `GET /sub-budgets?status=awaiting_signature`;
+   * empty (never throws) against a backend that predates the filter.
+   */
+  pendingSubBudgetSignatures: HavenPendingSubBudgetSignature[]
+}
+
+/**
+ * #3506: one sub-budget row awaiting THIS agent's signature — what
+ * `haven_get_agent` carries per row so the agent can call
+ * `haven_sign { sub_budget_id }` then `haven_submit { sub_budget_id, signature }`.
+ */
+export interface HavenPendingSubBudgetSignature {
+  subBudgetId: string
+  /** The parent-child row a grant hangs under; null on the parent-child row itself (they share a tree). */
+  parentSubBudgetId: string | null
+  /** `open`: sign the child delegation (row is pending). `close`: sign the revocation (row is closing). */
+  purpose: 'open' | 'close'
+  /** `parent-child`: this agent's own narrowing of its budget. `grant`: the slice delegated to the sub-agent. */
+  what: 'parent-child' | 'grant'
+  /** The sub-agent that holds the grant; null on this agent's own parent-child row. */
+  subAgentId: string | null
+  tokenAddress: string
+  recipientAddress: string | null
+  periodAmountAtomic: string
+  expiresAt: number
+  isExpired: boolean
+}
+
+/** #3506: sub-budget lifecycle status, as the wire names it. */
+export type HavenSubBudgetStatus = 'pending' | 'open' | 'closing' | 'closed'
+
+/** #3330: the wire shape of `components.schemas.SubBudget` (snake_case). */
+export interface RawSubBudget {
+  id: string
+  agent_id: string
+  parent_agent_id: string
+  parent_sub_budget_id: string | null
+  chain_id: number
+  token_address: string
+  recipient_address: string | null
+  parent_delegation_hash: string
+  delegation_hash: string
+  label: string | null
+  period_amount_atomic: string
+  status: HavenSubBudgetStatus
+  expires_at: number
+  is_expired: boolean
+  created_at: string
+  opened_at: string | null
+  closed_at: string | null
+  close_tx_hash: string | null
+}
+
+/** #3506: `RawSubBudget`, camelCased — what the SDK sub-budget methods return. */
+export interface HavenSubBudget {
+  id: string
+  agentId: string
+  parentAgentId: string
+  parentSubBudgetId: string | null
+  chainId: number
+  tokenAddress: string
+  recipientAddress: string | null
+  parentDelegationHash: string
+  delegationHash: string
+  label: string | null
+  periodAmountAtomic: string
+  status: HavenSubBudgetStatus
+  expiresAt: number
+  isExpired: boolean
+  createdAt: string
+  openedAt: string | null
+  closedAt: string | null
+  closeTxHash: string | null
+}
+
+/** #3506: `POST /sub-budgets/:id/submit` — opened (from pending) or closed (from closing). */
+export interface SubmitSubBudgetResult {
+  subBudget: HavenSubBudget
+  status: 'open' | 'closed'
+  /** Present only once the close UserOp lands (`status === 'closed'` from `closing`). */
+  closeTxHash?: string
+}
+
+/** #3506: the sign data a live-child close returns (the revocation UserOp's typed data). */
+export interface HavenSubBudgetCloseSignData {
+  signature_scheme: 'eip712_userop'
+  typed_data: Record<string, unknown>
+  user_op_hash: string
+}
+
+/** #3506: `POST /sub-budgets/:id/close`. */
+export interface CloseSubBudgetResult {
+  subBudget: HavenSubBudget
+  /** `closed` on a trivial close (never signed, or already expired); absent when a close signature is pending. */
+  status?: 'closed'
+  /** Present only when the close needed a signature (a live child). */
+  signData?: HavenSubBudgetCloseSignData
+  nextAction?: string
+}
+
+export interface RawSubmitSubBudgetResponse {
+  sub_budget: RawSubBudget
+  status: 'open' | 'closed'
+  close_tx_hash?: string
+}
+
+export interface RawCloseSubBudgetResponse {
+  sub_budget: RawSubBudget
+  status?: 'closed'
+  sign_data?: HavenSubBudgetCloseSignData
+  next_action?: string
 }
 
 /** #3329: task-budget lifecycle status, as the wire names it. */

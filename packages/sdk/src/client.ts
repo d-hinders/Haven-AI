@@ -71,6 +71,11 @@ import type {
   RawSubmitTaskBudgetResponse,
   RawCloseTaskBudgetResponse,
   RawTaskBudgetSignContext,
+  SubmitSubBudgetResult,
+  CloseSubBudgetResult,
+  HavenPendingSubBudgetSignature,
+  RawSubmitSubBudgetResponse,
+  RawCloseSubBudgetResponse,
 } from './types.js'
 import {
   AgentPaymentNextAction,
@@ -119,7 +124,7 @@ import {
   mcpSettlementFromToolResult,
   mcpToolResultOf,
 } from './mcp-merchant-transport.js'
-import { AccountReads, mapTaskBudget } from './account-reads.js'
+import { AccountReads, mapSubBudget, mapTaskBudget } from './account-reads.js'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import {
   assertCanResumeX402,
@@ -1133,6 +1138,54 @@ export class HavenClient {
     return {
       taskBudget: mapTaskBudget(raw.task_budget),
       status: raw.status,
+      ...(raw.sign_data ? { signData: raw.sign_data } : {}),
+      ...(raw.next_action ? { nextAction: raw.next_action } : {}),
+    }
+  }
+
+  // ── Sub-budgets (#3330, agent-completes since #3506) ─────────────────
+
+  /**
+   * Submit the DELEGATING agent's signature for a sub-budget row: opens a
+   * `pending` row (the signature is over the child delegation the backend
+   * built — sign it with `haven_sign` and `sub_budget_id`) or relays the
+   * signed close of a `closing` row. The owner issues a sub-budget; this is
+   * how the agent completes it — no owner relay is needed. Returns
+   * `status: 'open'` or `'closed'`.
+   */
+  async submitSubBudget(id: string, signature: string): Promise<SubmitSubBudgetResult> {
+    const raw = await this.post<RawSubmitSubBudgetResponse>(
+      `/sub-budgets/${encodeURIComponent(id)}/submit`,
+      { signature },
+    )
+    return {
+      subBudget: mapSubBudget(raw.sub_budget),
+      status: raw.status,
+      ...(raw.close_tx_hash ? { closeTxHash: raw.close_tx_hash } : {}),
+    }
+  }
+
+  /**
+   * The sub-budget rows THIS agent must still sign as the delegating agent
+   * (pending an open signature, or closing a close signature) — the same
+   * list `getAgentSummary().pendingSubBudgetSignatures` carries, but a
+   * transport failure throws instead of reading as an empty list.
+   */
+  async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]> {
+    return this.accountReads.listPendingSubBudgetSignatures()
+  }
+
+  /**
+   * Close a sub-budget row (delegating agent only). A `pending` or expired row
+   * closes immediately; a live child returns `signData` for the on-chain
+   * revocation — sign it (`haven_sign` with `sub_budget_id`) and call
+   * `submitSubBudget`.
+   */
+  async closeSubBudget(id: string): Promise<CloseSubBudgetResult> {
+    const raw = await this.post<RawCloseSubBudgetResponse>(`/sub-budgets/${encodeURIComponent(id)}/close`, {})
+    return {
+      subBudget: mapSubBudget(raw.sub_budget),
+      ...(raw.status ? { status: raw.status } : {}),
       ...(raw.sign_data ? { signData: raw.sign_data } : {}),
       ...(raw.next_action ? { nextAction: raw.next_action } : {}),
     }

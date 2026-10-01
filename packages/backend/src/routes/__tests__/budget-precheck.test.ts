@@ -574,6 +574,29 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     expect(await refusalRows(agentId)).toHaveLength(0)
   })
 
+  // #3527 review round 1 (S3): a confirmed row whose settlement_scheme is
+  // UNKNOWN (neither erc7710 nor eip3009) is still refused — the scheme
+  // guard in isSettledX402Replay is a closed set, not "anything confirmed".
+  it('a confirmed keyed row with an UNKNOWN settlement_scheme is still refused — the scheme guard is a closed set', async () => {
+    const { userId, agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '100')
+    await seedX402Intent({ userId, agentId }, 'catalog-unknown-scheme-key-1', {
+      settlementScheme: 'unknown',
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ idempotencyKey: 'catalog-unknown-scheme-key-1' }),
+    })
+    expect(res.statusCode).toBe(403)
+
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
   it('a settled EIP-3009 row whose stored resource differs from the request resourceUrl is still refused (the key collision rule applies to eip3009 too)', async () => {
     const { userId, agentId } = await seedDelegationAgent()
     await seedActiveDelegation(agentId, '100')

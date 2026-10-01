@@ -858,17 +858,39 @@ last-verified: "2026-10-01"
 > is wrong on 3009 (that hash is the FUNDING leg; the merchant leg is a
 > separate, re-read fact). A new helper,
 > `eip3009ConfirmedReplayResponse` (`tools/support/guidance.ts`), re-reads
-> `haven_get_payment_status` and splits: a verified merchant settlement or a
-> reported merchant leg answers a DONE state (`funding_tx_hash` = the row's
-> own hash, `settlement_tx_hash` = the verified hash when the wire carries
-> one, else `null` — `getPaymentStatus` exposes only a verified BOOLEAN
-> today, never the merchant's own settlement hash); neither answers the
-> #2290 funded-awaiting-merchant remedy, forwarding the re-read status's own
-> `next_action`/`message` verbatim rather than re-deriving them, and pointed
-> at `haven_get_payment_status` — never a fresh funding sign. No tool added,
-> renamed or re-shaped; the local stdio runtime is not on this path
-> (`haven_pay_mcp_tool` has no pre-check, same as #3492). Nothing else in
-> this document was re-verified in this pass.
+> `haven_get_payment_status` and splits in three, not two (review round 1
+> S1/B1 corrected the first cut):
+>
+> - A merchant settlement VERIFIED on-chain (`merchant_settlement_recorded`)
+>   → a DONE state with `settled: true`.
+> - A merchant leg REPORTED but not yet verified (`delivered`,
+>   `merchant_leg_reported` on the wire) → ALSO a done state (nothing left to
+>   sign or pay) but `settled: false` — `settled: true` means a VERIFIED
+>   on-chain settlement, never merely "the merchant answered".
+> - Neither → the #2290 funded-awaiting-merchant remedy, but ONLY when the
+>   re-read status's own `next_action` is one of the two real producers
+>   (`retry_original_x402_request`, `sweep_stranded_funds`) — review round 1
+>   B1: `isFundedX402AwaitingMerchantLeg` is false for its OWN first 15
+>   minutes (`MERCHANT_REPORT_GRACE_MIN`), so a status read taken moments
+>   after funding falls through to the plain confirmed mapping
+>   (`next_action: none`, `message: "The payment is confirmed."`) even with
+>   ZERO merchant evidence. Relaying that verbatim would have paired a
+>   `next_tool` with `next_action: none` and no evidence behind it. Any other
+>   action (the in-grace `none`, or a failed re-read) now answers
+>   `check_status_later` instead, pointed at `haven_get_payment_status`, with
+>   an honest reason that says funding confirmed and the merchant's delivery
+>   is not recorded yet.
+>
+> `funding_tx_hash` is the row's own hash on every branch; `settlement_tx_hash`
+> is ALWAYS `null` here — `getPaymentStatus` exposes only a verified BOOLEAN
+> today, never the merchant's own settlement hash, so this never backfills
+> one from the funding hash. No tool added, renamed or re-shaped; the local
+> stdio runtime is not on this path (`haven_pay_mcp_tool` has no pre-check,
+> same as #3492). The eip3009 pre-check's own refusal row also changes shape
+> slightly: its `resource_url` now records the merchant's own declared
+> resource (`paymentRequired.resource.url`) rather than the discovered
+> merchant URL, matching what the stored row carries for this scheme.
+> Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3000):** the hosted server's
 > `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of

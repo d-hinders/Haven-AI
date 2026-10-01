@@ -2110,6 +2110,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > pre-check only mirrors. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.
 >
+> **Re-verified unchanged (#3527, 2026-10-01):** the #3492 bypass above
+> widens from erc7710-only to also accept a settled EIP-3009 row —
+> `precheckBudget`'s doc comment now says "erc7710 OR eip3009", and the
+> backend's settled-row lookup (`isSettledX402Replay`, renamed from
+> `isSettledErc7710Replay`) accepts a `confirmed` row whose `tx_hash` is only
+> the EIP-3009 FUNDING leg (treasury → delegate), not a merchant settlement.
+> That is still the SAME fact `delegationReplay`'s own confirmed+tx_hash
+> branch already answers its stored 200 for, on every settlement scheme, so
+> the bypass activates on a lookup the redemption path already trusted — no
+> new trust is extended. No signature, key, delegation graph, caveat
+> enforcer or on-chain redemption path changes: the endpoint remains
+> read/decide-only, and the on-chain ERC20PeriodTransferEnforcer stays the
+> real gate either bypass only mirrors. The rest of this document was not
+> re-read for it, and `last-verified` is not bumped.
+>
 > **Re-verified unchanged (#3506, 2026-10-01, sub-budgets user-completable):**
 > the agent now submits its own sub-budget signatures. `haven_submit` accepts
 > `sub_budget_id` on both MCP runtimes through the SDK's `submitSubBudget`,

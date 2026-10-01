@@ -147,7 +147,8 @@ function settlementSchemeOf(machineMetadata: unknown): string | null {
  *  - `confirmed` + a `tx_hash` — the payment already moved money; refusing
  *    it as over-budget now would be a false ledger row for a spend that is
  *    done, not pending. On EIP-3009 this `tx_hash` is the FUNDING leg
- *    (treasury → delegate, `x402-authorizations.ts:455-458`), not a merchant
+ *    (treasury → delegate, written by `confirmX402Intent` in
+ *    `infra/repositories/x402-authorizations.ts`), not a merchant
  *    settlement — but it is exactly the fact `delegationReplay`'s confirmed
  *    branch already treats as replayable for this scheme too (#3527), so the
  *    same "money already moved, re-refusing is false" argument applies.
@@ -168,10 +169,11 @@ function settlementSchemeOf(machineMetadata: unknown): string | null {
  *    against whichever value the row's own `x402_resource_url` column stores,
  *    and that storage is already scheme-aware at authorize time — erc7710
  *    persists the caller's `resourceUrl` (`merchantUrl` on the hosted path),
- *    eip3009 persists `paymentRequired.resource.url` (`createX402Intent`,
- *    `client.ts:452-453`) — so the CALLER is responsible for sending the
- *    value that matches what will be stored for the scheme it is replaying
- *    (`catalog-purchase.ts` step 5b, #3527).
+ *    eip3009 persists `paymentRequired.resource.url` — the SDK's
+ *    `createX402Intent` sends that as the `url` field of its `POST /x402`
+ *    body unconditionally, with no caller override — so the CALLER is
+ *    responsible for sending the value that matches what will be stored for
+ *    the scheme it is replaying (`catalog-purchase.ts` step 5b, #3527).
  *  - the SAME token and amount the request asks about, for the same reason.
  */
 function isSettledX402Replay(

@@ -2171,8 +2171,11 @@ itself redeems `[grant, parent-child, budget]` (three links).
 
 1. `POST /agents/:id/sub-budgets` (the OWNER, from the dashboard's issue flow
    or the API) issues `{ sub_agent_id, period_amount_atomic, expires_at,
-   recipient_address?, label? }` for agent B. There is no period input: the
-   child inherits the parent's period window. The API
+   token_address?, recipient_address?, label? }` for agent B (`token_address`
+   defaults to the chain's USDC). There is no period input: the child inherits
+   the parent's period window. The parent is A's active budget delegation for
+   that token, selected the way a payment selects one — recipient-pinned
+   first, else open. The API
    decodes the parent budget delegation and refuses a child wider than the
    parent in amount, expiry or recipient BEFORE signing
    (`sub_budget_wider_than_parent`), and both rows are stored `pending`

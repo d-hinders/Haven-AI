@@ -52,6 +52,14 @@ export interface ThrowawayIdentity {
    */
   delegateAccountAddress: string | null
   grantHash: string
+  /** The signed grant's delegation message, retained for direct observer reads. */
+  grantDelegation: Record<string, unknown>
+  /**
+   * Create another agent on the same throwaway Haven account. The new id is
+   * registered for cleanup before this returns, so a later scenario failure
+   * cannot leak it (#3505/#3459).
+   */
+  createAdditionalAgent(label: string): Promise<ThrowawayAdditionalAgent | { error: string }>
   /** Build + owner-sign + activate a replacement grant in the same slot. */
   grantAndActivate(): Promise<{ hash: string } | { error: string }>
   /**
@@ -59,6 +67,12 @@ export interface ThrowawayIdentity {
    * resolves to a warning naming the agent id when the revoke did not land.
    */
   revoke(): Promise<string | null>
+}
+
+export interface ThrowawayAdditionalAgent {
+  delegate: ethers.HDNodeWallet
+  agentId: string
+  agentApiKey: string
 }
 
 /** Provisioning failed; `cleanupWarning` is set when the half-built agent could not be revoked. */
@@ -161,6 +175,7 @@ export async function provisionThrowawayIdentity(
   )
   const safe = me.json.accounts?.find((s) => s.account_type === 'delegator_hybrid')
   if (!safe) return { error: 'provisioned account missing from /auth/me' }
+  const accountId = safe.id
 
   // #2020 retired the per-token `allowances` mirror: POST /agents now REFUSES a
   // non-empty array rather than silently dropping it. The budget this throwaway
@@ -168,7 +183,7 @@ export async function provisionThrowawayIdentity(
   // there is nothing to send here.
   const agentRes = await userCall<{ id?: string; api_key?: string; error?: string }>(
     'POST', '/agents', token,
-    { name: `QA ${options.label} agent`, delegate_address: delegate.address, account_id: safe.id },
+    { name: `QA ${options.label} agent`, delegate_address: delegate.address, account_id: accountId },
   )
   const agentId = agentRes.json.id
   const agentApiKey = agentRes.json.api_key
@@ -177,6 +192,33 @@ export async function provisionThrowawayIdentity(
   }
 
   let delegateAccountAddress: string | null = null
+  let grantDelegation: Record<string, unknown> = {}
+  const trackedAgentIds = [agentId]
+
+  async function createAdditionalAgent(
+    label: string,
+  ): Promise<ThrowawayAdditionalAgent | { error: string }> {
+    const additionalDelegate = ethers.Wallet.createRandom()
+    const created = await userCall<{ id?: string; api_key?: string; error?: string }>(
+      'POST', '/agents', token!,
+      {
+        name: `QA ${options.label} ${label} agent`,
+        delegate_address: additionalDelegate.address,
+        account_id: accountId,
+      },
+    )
+    if (created.json.id) trackedAgentIds.push(created.json.id)
+    if (!created.json.id || !created.json.api_key) {
+      return {
+        error: `throwaway ${label} agent creation failed (${created.status}): ${created.json.error ?? ''}`,
+      }
+    }
+    return {
+      delegate: additionalDelegate,
+      agentId: created.json.id,
+      agentApiKey: created.json.api_key,
+    }
+  }
 
   async function grantAndActivate(): Promise<{ hash: string } | { error: string }> {
     const built = await userCall<{
@@ -191,6 +233,7 @@ export async function provisionThrowawayIdentity(
     if (!built.json.delegation_hash || !built.json.signing_payload) {
       return { error: `grant build failed (${built.status}): ${built.json.error ?? ''}` }
     }
+    grantDelegation = built.json.signing_payload.message
     if (built.json.delegate_account_address) {
       delegateAccountAddress = built.json.delegate_account_address
     }
@@ -214,14 +257,23 @@ export async function provisionThrowawayIdentity(
     owner,
     delegate,
     token,
-    accountId: safe.id,
+    accountId,
     accountAddress: safe.account_address,
     agentId,
     agentApiKey,
     delegateAccountAddress,
     grantHash: grant.hash,
+    grantDelegation,
+    createAdditionalAgent,
     grantAndActivate,
-    revoke: () => revokeThrowawayAgent(apiUrl, token, agentId),
+    revoke: async () => {
+      const warnings = (
+        await Promise.all(
+          [...trackedAgentIds].reverse().map((id) => revokeThrowawayAgent(apiUrl, token, id)),
+        )
+      ).filter((warning): warning is string => warning !== null)
+      return warnings.length > 0 ? warnings.join('; ') : null
+    },
   }
 }
 
@@ -236,10 +288,22 @@ export async function payViaDelegation(
   delegateKey: string,
   to: string,
   human: string,
-): Promise<{ ok: true; status: number; tx?: string } | { ok: false; status: number; error: string }> {
+  options: { taskBudgetId?: string; subBudgetId?: string } = {},
+): Promise<
+  | { ok: true; status: number; tx?: string }
+  | { ok: false; status: number; error: string; data: Record<string, unknown> }
+> {
   const headers = { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }
   const auth = await fetch(`${apiUrl}/payments`, {
-    method: 'POST', headers, body: JSON.stringify({ token: 'USDC', amount: human, to }),
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      token: 'USDC',
+      amount: human,
+      to,
+      ...(options.taskBudgetId ? { task_budget_id: options.taskBudgetId } : {}),
+      ...(options.subBudgetId ? { sub_budget_id: options.subBudgetId } : {}),
+    }),
   })
   const intent = (await auth.json().catch(() => ({}))) as {
     payment_id?: string
@@ -247,13 +311,25 @@ export async function payViaDelegation(
     error?: string
   }
   if (!auth.ok || !intent.payment_id || !intent.sign_data?.typed_data) {
-    return { ok: false, status: auth.status, error: intent.error ?? `authorize ${auth.status}` }
+    return {
+      ok: false,
+      status: auth.status,
+      error: intent.error ?? `authorize ${auth.status}`,
+      data: intent as Record<string, unknown>,
+    }
   }
   const signature = await signUserOpTypedDataForDelegation(delegateKey, intent.sign_data.typed_data as never)
   const submit = await fetch(`${apiUrl}/payments/${intent.payment_id}/sign`, {
     method: 'POST', headers, body: JSON.stringify({ signature }),
   })
   const done = (await submit.json().catch(() => ({}))) as { tx_hash?: string; status?: string; error?: string }
-  if (!submit.ok) return { ok: false, status: submit.status, error: done.error ?? `sign ${submit.status}` }
+  if (!submit.ok) {
+    return {
+      ok: false,
+      status: submit.status,
+      error: done.error ?? `sign ${submit.status}`,
+      data: done as Record<string, unknown>,
+    }
+  }
   return { ok: true, status: submit.status, tx: done.tx_hash }
 }

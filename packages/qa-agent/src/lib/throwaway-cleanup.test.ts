@@ -25,11 +25,14 @@ interface FakeOpts {
   activate?: () => Response
   /** Answer for the agent revoke. */
   revoke?: () => Response
+  /** Optional per-agent creation response (1 = primary, 2 = additional). */
+  agent?: (index: number) => Response
 }
 
 /** Scripted API for the whole provisioning sequence; records every call. */
 function installFake(opts: FakeOpts = {}) {
   const calls: Array<{ method: string; path: string; auth: string | null }> = []
+  let agentCreates = 0
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
     const path = String(input).replace(API, '')
     const headers = (init?.headers ?? {}) as Record<string, string>
@@ -39,12 +42,15 @@ function installFake(opts: FakeOpts = {}) {
     if (path === '/auth/me') {
       return json({ accounts: [{ id: 'safe-1', account_address: '0x' + '11'.repeat(20), account_type: 'delegator_hybrid' }] })
     }
-    if (path === '/agents') return json({ id: 'agent-1', api_key: 'sk-test' }, 201)
+    if (path === '/agents') {
+      agentCreates += 1
+      return opts.agent?.(agentCreates) ?? json({ id: `agent-${agentCreates}`, api_key: `sk-test-${agentCreates}` }, 201)
+    }
     if (path.endsWith('/delegations/build')) {
       return opts.build?.() ?? json({ delegation_hash: '0xhash1', signing_payload: TD }, 201)
     }
     if (path.endsWith('/activate')) return opts.activate?.() ?? json({ activated: true })
-    if (path === '/agents/agent-1/revoke') {
+    if (/^\/agents\/agent-\d+\/revoke$/.test(path)) {
       // Fastify's contract (review of #3459): a JSON content type with an
       // empty body is refused before the route runs — FST_ERR_CTP_EMPTY_JSON_BODY.
       const ct = headers['content-type'] ?? ''
@@ -56,7 +62,8 @@ function installFake(opts: FakeOpts = {}) {
     throw new Error(`unexpected request: ${init?.method ?? 'GET'} ${path}`)
   }))
   const revokes = () => calls.filter((c) => c.path === '/agents/agent-1/revoke')
-  return { calls, revokes }
+  const allRevokes = () => calls.filter((c) => /^\/agents\/agent-\d+\/revoke$/.test(c.path))
+  return { calls, revokes, allRevokes }
 }
 
 beforeEach(() => vi.unstubAllGlobals())
@@ -101,6 +108,39 @@ describe('withThrowawayIdentity — the scenario ends three ways', () => {
     })
     expect(revokesSeenByLeg).toBe(0)
     expect(api.revokes()).toHaveLength(1)
+  })
+
+  it('registers an additional agent immediately and revokes both on exit', async () => {
+    const api = installFake()
+    const result = await withThrowawayIdentity(API, OPTIONS, async (identity) => {
+      const second = await identity.createAdditionalAgent('sub-agent')
+      expect(second).toMatchObject({ agentId: 'agent-2', agentApiKey: 'sk-test-2' })
+      return pass('two agents')
+    })
+    expect(result).toEqual(pass('two agents'))
+    expect(api.allRevokes().map((call) => call.path)).toEqual([
+      '/agents/agent-2/revoke',
+      '/agents/agent-1/revoke',
+    ])
+  })
+
+  it('revokes an additional agent whose response omitted the api key', async () => {
+    const api = installFake({
+      agent: (index) =>
+        index === 1
+          ? json({ id: 'agent-1', api_key: 'sk-test-1' }, 201)
+          : json({ id: 'agent-2', error: 'credential generation failed' }, 500),
+    })
+    const result = await withThrowawayIdentity(API, OPTIONS, async (identity) => {
+      const second = await identity.createAdditionalAgent('sub-agent')
+      return 'error' in second ? fail(second.error) : pass('unexpected')
+    })
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/credential generation failed/)
+    expect(api.allRevokes().map((call) => call.path)).toEqual([
+      '/agents/agent-2/revoke',
+      '/agents/agent-1/revoke',
+    ])
   })
 })
 
@@ -155,7 +195,7 @@ describe('a failed revoke never changes the verdict', () => {
         const result = await withThrowawayIdentity(API, OPTIONS, async () => leg())
         expect(result.pass).toBe(expected.pass)
         expect(result.detail).toBe(expected.detail)
-        expect(result.cleanupWarning).toMatch(/agent-1 was NOT revoked/)
+        expect(result.cleanupWarning).toMatch(/agent-\d+ was NOT revoked/)
       }
     })
   }

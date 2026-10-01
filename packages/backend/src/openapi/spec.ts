@@ -1018,6 +1018,30 @@ const accountingFeatureGate404 = {
  * strictly is the right trade: the alternative is widening the contract of
  * the only rail that can pay to accommodate a row that cannot exist.
  */
+/**
+ * #3528 — the prepare-response warning array (additive, WARNING-GRADE).
+ * Present exactly when the recipient of a just-prepared payment is one of the
+ * owner's own Haven accounts. Advisory only: it never blocks, never replaces
+ * a refusal, and no prepare surface refuses on it — the budget delegation's
+ * on-chain caveat enforcers remain the only gate either way.
+ */
+const paymentWarnings = {
+  type: 'array',
+  items: {
+    type: 'object',
+    required: ['code', 'message'],
+    properties: {
+      code: {
+        type: 'string',
+        enum: ['SELF_TRANSFER'],
+        description: 'The recipient is one of the owner\'s own Haven accounts.',
+      },
+      message: { type: 'string' },
+    },
+    additionalProperties: false,
+  },
+} as const
+
 const paymentSignData = {
   type: 'object',
   required: ['hash', 'signature_scheme', 'typed_data', 'components', 'instructions'],
@@ -10260,6 +10284,11 @@ export const openapiSpec = {
           payment_id: uuid,
           status: { type: 'string', enum: ['pending_signature'] },
           expires_at: isoDateTime,
+          // #3528: the additive, WARNING-GRADE self-transfer hint. Present
+          // exactly when the recipient is one of the owner's own accounts;
+          // advisory only — it never blocks, never replaces a refusal, and
+          // no prepare surface refuses on it.
+          warnings: paymentWarnings,
           sign_data: paymentSignData,
         },
         additionalProperties: false,

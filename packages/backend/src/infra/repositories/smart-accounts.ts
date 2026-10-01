@@ -469,6 +469,37 @@ export async function findOwnedAccountsWithType(
   return result.rows
 }
 
+// ── Owner-directory addresses the user's own accounts answer to (#3528) ─────
+
+/**
+ * Every address one of the user's OWN delegation-rail Haven accounts answers
+ * to: each account's smart-account address plus its current EOA owner (an
+ * ownership TRANSFER moved it on-chain; NULL until then, and UNION drops it).
+ * One statement so the prepare path pays one round-trip for the whole set.
+ * Scoped exactly like the lists above — `delegator_hybrid` only, `user_id`
+ * required — a retired-rail row answers nothing here, matching every payment
+ * read (`DELEGATION_RAIL_ONLY`). The caller matches case-insensitively.
+ */
+export const LIST_OWNER_ADDRESSES_FOR_USER_SQL = `SELECT account_address AS addr FROM smart_accounts
+      WHERE user_id = $1 AND account_type = 'delegator_hybrid'
+      UNION
+      SELECT owner_address FROM smart_accounts
+      WHERE user_id = $1 AND account_type = 'delegator_hybrid'`
+
+/**
+ * The addresses a payment recipient is compared against for the #3528
+ * self-transfer hint. Deduplicated by UNION; an account_address or
+ * owner_address that is NULL simply contributes nothing. `userId` is REQUIRED
+ * — the tenant scope, same as every list in this aggregate.
+ */
+export async function listOwnerAddressesForUser(
+  userId: string,
+  db: Executor = pool,
+): Promise<string[]> {
+  const result = await db.query<{ addr: string }>(LIST_OWNER_ADDRESSES_FOR_USER_SQL, [userId])
+  return result.rows.map((row) => row.addr)
+}
+
 // ── Execution-rail resolution (moved from rails/execution-rail.ts, #999) ────
 
 /**

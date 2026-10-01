@@ -197,6 +197,31 @@ up.
 
 ## 3. Delegation custody semantics (#828's contract)
 
+> **Re-verified #3528 (self-transfer prepare hint):** this diff touched three
+> files in this document's coverage list (`infra/repositories/smart-accounts.ts`,
+> `sdk/src/client.ts`, `sdk/src/x402-erc7710.ts`) by pure addition, none of it
+> authority-bearing. The repository gains ONE read,
+> `listOwnerAddressesForUser`: a `UNION` over `smart_accounts` selecting each
+> `delegator_hybrid` account's `account_address` plus its current
+> `owner_address`, scoped `WHERE user_id = $1` on BOTH arms (the same tenant
+> scope and rail filter every list in this aggregate already carries), with
+> the pool as the executor default — a SELECT that grants nothing, signs
+> nothing, and touches no chain state, feeding only the new prepare warning.
+> The SDK changes are type-and-relay: `PaymentIntent` / `X402Intent` /
+> `prepareX402Erc7710` gain an OPTIONAL `warnings` array mapped verbatim from
+> the backend's prepare body (absent — never empty — when the backend sent
+> none). Nothing about who signs, what may be spent, or when revocation bites
+> changed: the hint is advisory telemetry compared case-insensitively against
+> addresses the backend already owns in the owner directory, it deliberately
+> fails OPEN (a degraded read warns on nothing), and the budget delegation's
+> on-chain caveat enforcers remain the only gate on a self-transfer exactly as
+> before — `safe_to_continue`, the refusal paths and the signing wire format
+> are untouched. Every predicate, tenant scope, authority check and signing
+> path this document describes is unchanged. Scope of this note: that one new
+> read and the two SDK relay surfaces. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped (it already reads
+> 2026-09-30 from an earlier change).
+
 > **Re-verified #2929 (dark-mode epic #2925, slice 3/3):** the dark-token sweep
 > touched two files in this document's coverage list, `DelegationSendModal.tsx`
 > and `WalletButton.tsx`. Both edits are presentation-only, verified against the

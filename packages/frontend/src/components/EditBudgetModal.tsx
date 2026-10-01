@@ -148,9 +148,14 @@ export default function EditBudgetModal({
 
   // Prefill every time the modal opens (also re-prefills after a close/reopen
   // on a REFRESHED budget row — the card reloads between opens, so a stale
-  // amount must not survive).
+  // amount must not survive). Only on the closed → open edge (#3537): `budget`
+  // and `token` change identity on every agent poll, and re-running on that
+  // wiped the typed amount, the review step and the outcome screen.
+  const wasOpenRef = useRef(false)
   useEffect(() => {
-    if (!open) return
+    const opening = open && !wasOpenRef.current
+    wasOpenRef.current = open
+    if (!opening) return
     setStep('form')
     setOutcome(null)
     setPeriod(budget.period_seconds)

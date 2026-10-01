@@ -146,6 +146,8 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // success response's additive self-transfer warning block, then #3560
     // REVERTED #3528 entirely — net zero shift from that round-trip, so the
     // pins below are the #3503 baseline numbers again.
+    // #3565 removed one line between the 429 site and the sign-route catch,
+    // shifting the six #3494 sign-catch sites below by −1.
     // #3494 added imports for isAccountValidationRevert/boundFailureMessage
     // and SIX new refuse( sites inside the sign route's failure catch
     // (submission-outcome-unknown, signature-rejected, account-validation-
@@ -167,12 +169,12 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     { line: 829, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
     { line: 853, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
     { line: 1152, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 1218, code: 502, ledger: 'skipped' }, // #3494 submission outcome unknown (receipt-unconfirmed) after a post-send failure — allowlisted
-    { line: 1243, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
-    { line: 1269, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
-    { line: 1318, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
-    { line: 1357, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
-    { line: 1411, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
+    { line: 1217, code: 502, ledger: 'skipped' }, // #3494 submission outcome unknown (receipt-unconfirmed) after a post-send failure — allowlisted
+    { line: 1242, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
+    { line: 1268, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
+    { line: 1317, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 1356, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 1410, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
   ],
 }
 
@@ -213,27 +215,27 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
       reason: '#3416 DelegationRailChainUnavailableError — this deployment has no bundler credential for the chain (configuration), not a guardrail refusal',
     },
     {
-      line: 1218,
+      line: 1217,
       reason: '#3494 submission-outcome-unknown (receipt-unconfirmed) — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1243,
+      line: 1242,
       reason: '#3494 AA24 signature rejection — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1269,
+      line: 1268,
       reason: '#3494 other AA2x account-validation failure — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1318,
+      line: 1317,
       reason: '#3494 task-budget transfer-cap revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1357,
+      line: 1356,
       reason: '#3494 period-budget revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1411,
+      line: 1410,
       reason: 'on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — deliberately not booked: the failed intent row is the record',
     },
   ],

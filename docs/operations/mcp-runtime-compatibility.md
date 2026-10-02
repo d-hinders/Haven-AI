@@ -76,6 +76,17 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3515 (2026-10-02, the ops console scaffold):** this diff
+> touches `.github/workflows/ci.yml`, a covered file. The change adds gate
+> steps (design lint, wire-type ratchet) to the NEW `ops_checks` job for the
+> `@haven/ops` scaffold (#3515) and its surface routing; no covered runtime
+> code moved. No tool is added, renamed or re-shaped on either runtime, no
+> argument or input schema changes, and the version-skew and consent-hash
+> contracts do not move: a CI job's steps are not a skew axis. The client
+> releases table, upgrade hints, publish flow and package resolution are
+> untouched. `last-verified` is bumped to 2026-10-02 for this note.
+> Nothing else in this document was re-verified.
+
 > **Re-verified #3564 (2026-10-02):** this diff touches
 > `packages/mcp-server/src/tools/support/errors.ts` and
 > `packages/sdk/src/types.ts` / `payment-mappers.ts` — all covered trees.

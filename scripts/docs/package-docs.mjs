@@ -377,6 +377,23 @@ export const GOVERNED_PACKAGE_DOCS = [
     'last-verified': '2026-10-01',
   },
   {
+    // The private operations console (#3515). Its README documents the env
+    // registry, the sign-in handoff contract and the token-storage rules —
+    // prose whose claims the source can drift out from under, so it is a
+    // contract like the other private-package READMEs.
+    doc: 'packages/ops/README.md',
+    owner: '@d-hinders',
+    status: 'current',
+    covers: [
+      'packages/ops/src/**',
+      'packages/ops/next.config.ts',
+      'packages/ops/package.json',
+    ],
+    // Registered at the scaffold's own build (#3515); the coupling gate's
+    // first implicated PR re-reads the body and bumps this date.
+    'last-verified': '2026-10-02',
+  },
+  {
     // The #1992 file. Its prose is mostly about BACKEND behaviour — which
     // payment routes refuse what, on which rail — so pinning it to its own
     // `src/**` alone would have missed the exact drift that motivated #2088.

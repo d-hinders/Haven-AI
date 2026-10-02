@@ -10,6 +10,7 @@ import rateLimit from '@fastify/rate-limit'
 import { rateLimitKeyFor } from './middleware/rate-limit.js'
 import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware/shared-rate-limit-store.js'
 import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
+import { probeDatabase } from './infra/repositories/health-probe.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
 import { lastDelegateBalanceReport } from './infra/delegate-balance-report-store.js'
@@ -403,7 +404,7 @@ await app.register(opsRoutes, {
   onchainReaders: getOpsReadDb() ? opsOnchainReaders : null,
   healthDiagnostics: getOpsReadDb()
     ? () => buildHealthOpsPayload({
-        checkDatabase: () => pool.query('SELECT 1'),
+        checkDatabase: () => probeDatabase(),
         getRelayerStatus: getRelayerBalanceStatus,
         getPassportStatus: passportReadiness,
         trustProxyHops: config.trustProxyHops,

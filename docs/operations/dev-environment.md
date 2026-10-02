@@ -32,6 +32,17 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3574 (2026-10-02):** `playwright.config.ts`'s dark-project
+> `testMatch` gains `home.visual.spec.ts` — the redesigned home page joins the
+> pixel gate with the same seed-before-navigation dark convention the other
+> specs use (its spec reads `testInfo.project.name`; the light desktop/mobile
+> shots ride the chromium-desktop project's viewport loop). No environment
+> variable this document describes changes name, meaning, surface, or where it
+> is set: the gate section above already covers the site-preview variable and
+> the e2e/visual build surfaces, unchanged by this slice. No route file is
+> added or moved. Nothing else in this file's coverage was touched; this note
+> and the `last-verified` date are the only edits.
+
 > **Re-verified #3564 (2026-10-02):** `index.ts` gains one more
 > leader-gated background tick beside the settlement sweep — the submission
 > reconciler (`modules/payments/submission-reconciler.ts`, lock key

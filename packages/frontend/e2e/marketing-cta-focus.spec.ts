@@ -81,15 +81,14 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 const BAND_CTAS = [
   {
     route: '/',
-    heading: 'Ready to put your agents to work?',
+    // The redesigned home's closing band (gate-on build; #3574). The legacy
+    // band this table pinned was "Ready to put your agents to work?" — that
+    // page still renders in production, and per epic #3572's e2e rule the
+    // legacy page's production render carries no e2e coverage from this
+    // slice until #3579 switches the sites over.
+    heading: 'Give your agent a budget.',
     name: 'Create your account',
     variant: 'solid',
-  },
-  {
-    route: '/',
-    heading: 'Ready to put your agents to work?',
-    name: 'Read the technical overview',
-    variant: 'translucent',
   },
 ] as const
 

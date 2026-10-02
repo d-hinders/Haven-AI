@@ -302,6 +302,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/users/{id}/onchain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The chain's view of one customer's accounts, next to the database's.
+         * @description Per smart account: whether code exists on-chain (deployed vs counterfactual, best-effort — a lagging RPC node can report a deployed account as having no code), and per ACTIVE stored delegation whether the DelegationManager reports it disabled on-chain and the period enforcer's remaining budget. A failed budget read renders 'unavailable', never a remaining figure. Accounts that are not delegation-rail rows (legacy_safe), on a chain this environment does not serve, or on a chain without pinned delegation contracts are listed with their reason and are NEVER read on-chain — zero RPC calls for them. Addresses are masked; delegation hashes and bodies are never returned. Reads through the read-only ops database role; the chain reads are batched per chain and cached per (chain, user) for 60 s with single-flight. Writes one audit row before answering. The signer set is DB-only in v1 (no on-chain signer-set reader exists). Returns 404 for an unknown user, while the deployment has no read-only ops database or no chain readers configured.
+         */
+        get: operations["getOpsUserOnchain"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/reveal": {
         parameters: {
             query?: never;
@@ -4058,6 +4078,73 @@ export type components = {
                 created_at: string | null;
             }[];
         };
+        OpsOnchainDelegation: {
+            /** @description The ACTIVE stored delegation period budget, atomic units. */
+            budget_atomic: string;
+            /**
+             * @description Whether the DelegationManager reports the delegation disabled. 'unknown': the cached read-set does not cover it yet; 'unavailable': the read failed.
+             * @enum {string}
+             */
+            onchain: "enabled" | "disabled" | "unknown" | "unavailable";
+            /**
+             * @description 'from_chain': budget_remaining_atomic is the enforcer's answer. A failed read renders 'unavailable' — never the fallback figure.
+             * @enum {string}
+             */
+            budget_status: "from_chain" | "unknown" | "unavailable";
+            /** @description The enforcer's remaining period budget; null unless budget_status is 'from_chain'. */
+            budget_remaining_atomic: string | null;
+        };
+        OpsOnchainAccount: {
+            /** Format: uuid */
+            account_id: string;
+            chain_id: number;
+            /** @description Masked. */
+            account_address: string;
+            /** @enum {string} */
+            account_type: "delegator_hybrid";
+            execution_rail: string;
+            name: string;
+            db: {
+                active_delegations: {
+                    budget_atomic: string;
+                }[];
+            };
+            chain: {
+                /**
+                 * @description Best-effort: a lagging RPC node can report a deployed account as having no code.
+                 * @enum {string}
+                 */
+                deploy_status: "deployed" | "counterfactual" | "unknown" | "unavailable";
+                /** @description Same order as db.active_delegations — position identifies the delegation. */
+                delegations: components["schemas"]["OpsOnchainDelegation"][];
+            };
+            flags: {
+                /** @description No on-chain code while an active delegation is stored. Best-effort; may be a lagging node. */
+                counterfactual_with_active_delegation: boolean;
+                /** @description The DelegationManager reports a delegation disabled that the DB still holds as active. */
+                delegation_disabled_onchain_active_in_db: boolean;
+            };
+        };
+        OpsOnchainNotServedAccount: {
+            /** Format: uuid */
+            account_id: string;
+            chain_id: number;
+            /** @description Masked. */
+            account_address: string;
+            account_type: string;
+            execution_rail: string;
+            /** @enum {string} */
+            status: "not_served";
+            /** @enum {string} */
+            reason: "legacy_safe" | "chain_not_served" | "chain_not_pinned";
+        };
+        OpsOnchainView: {
+            /** Format: uuid */
+            user_id: string;
+            accounts: (components["schemas"]["OpsOnchainAccount"] | components["schemas"]["OpsOnchainNotServedAccount"])[];
+            /** Format: date-time */
+            generated_at: string;
+        };
         OpsRevealRequest: {
             /** @enum {string} */
             target_type: "user";
@@ -6691,6 +6778,88 @@ export interface operations {
                 };
             };
             /** @description No such user, or the ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsUserOnchain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The masked DB-vs-chain view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsOnchainView"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such user, or the ops console (its read-only database or its chain readers) is not configured. */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -360,6 +360,10 @@ export default defineConfig({
         '**/add-funds-modal.visual.spec.ts',
         '**/demo.visual.spec.ts',
         '**/releases.visual.spec.ts',
+        // #3574: the redesigned home joins with three desktop baselines
+        // (light desktop, light mobile, dark desktop) — the first content
+        // page of the new site with its own pixel gate.
+        '**/home.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

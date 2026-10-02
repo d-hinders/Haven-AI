@@ -316,6 +316,22 @@ describe('the hooks are actually wired into the app', () => {
     expect(page).toContain('href="/llms.txt"')
   })
 
+  it('the redesigned home carries the same agent sentence, emitted not pasted (#3574)', async () => {
+    // The legacy pin above reads SOURCE, which cannot see what the gate-on
+    // branch actually emits: the sentence could sit only in the legacy hero
+    // while the new page went out without it. This one imports the new
+    // section tree and asserts over its RENDERED text, the same posture
+    // `app/__tests__/new-home.test.tsx` argues for in its header. It keeps
+    // the legacy assertion above unchanged, as the slice requires.
+    // createElement, not JSX: this file is .ts.
+    const { createElement } = await import('react')
+    const { render } = await import('@testing-library/react')
+    const { NewSiteHome } = await import('@/components/marketing/site/home/HomeSections')
+    const { container } = render(createElement(NewSiteHome))
+    expect(container.textContent).toContain('If you are an AI agent reading this for your user')
+    expect(container.querySelector('a[href="/llms.txt"]')).not.toBeNull()
+  })
+
   it('the footer links to the agent entry point', () => {
     const footer = read('src/components/marketing/SiteFooter.tsx')
     expect(footer).toContain('For agents')

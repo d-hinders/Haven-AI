@@ -9,6 +9,8 @@ import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { FlowCard } from '@/components/marketing/FlowCard'
 import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 import { TrailingArrow } from '@/components/marketing/TrailingArrow'
+import { isNewSiteVisible } from '@/lib/site-gate'
+import { NewSiteHome } from '@/components/marketing/site/home/HomeSections'
 
 const INTEGRATIONS = ['Base', 'x402', 'Stripe MPP', 'USDC']
 
@@ -94,7 +96,20 @@ const DIFFERENTIATORS = [
   },
 ]
 
+/**
+ * The landing page (#3574, epic #3572).
+ *
+ * The redesigned public site's gate branch (#3573): wherever
+ * `isNewSiteVisible()` is on — outside production, and in the CI e2e build —
+ * `/` renders `NewSiteHome`. With the gate off (production until slice 7)
+ * the legacy page below renders, byte-for-byte as it did before the epic:
+ * it is frozen except for this gate branch.
+ */
 export default function Home() {
+  if (isNewSiteVisible()) {
+    return <NewSiteHome />
+  }
+
   return (
     <>
       <SiteHeader />

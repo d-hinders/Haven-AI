@@ -91,6 +91,16 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     // carried through even when `null` (a real, known answer).
     ...(raw.settlement_scheme !== undefined ? { settlementScheme: raw.settlement_scheme } : {}),
     ...(raw.merchant_settlement_recorded === true ? { merchantSettlementRecorded: true as const } : {}),
+    // #3494: additive, mirrors the backend's own `status === 'failed'` gate —
+    // absent from the raw payload (older backend, or any non-failed status)
+    // stays absent here.
+    ...(raw.failure_reason !== undefined ? { failureReason: raw.failure_reason } : {}),
+    // #3518: which budget metered this payment — absent from the raw
+    // payload (older backend) stays absent here.
+    ...(raw.budget_delegation_hash !== undefined ? { budgetDelegationHash: raw.budget_delegation_hash } : {}),
+    // #3564: additive outcome-pending visibility — absent from the raw
+    // payload (older backend) stays absent here.
+    ...(raw.submission_outcome_pending === true ? { submissionOutcomePending: true as const } : {}),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

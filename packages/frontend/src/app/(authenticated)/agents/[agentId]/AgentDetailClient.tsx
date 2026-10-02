@@ -387,6 +387,11 @@ export default function AgentDetailClient({ agentId }: Props) {
   const isPaused = agent?.status === 'paused'
   const isRevoked = agent?.status === 'revoked'
   const isArchived = Boolean(agent?.archived_at)
+  // #3549: revoked OR removed — no budget can be granted, raised or shared;
+  // every "Update/Add budget" entry point scrolls to a card that no longer
+  // offers one. Keyed on exactly these two states, never on "not active":
+  // a pending_approval agent's FIRST grant is what activates it.
+  const isRetired = isRevoked || isArchived
 
   if (loading) {
     return (
@@ -563,7 +568,9 @@ export default function AgentDetailClient({ agentId }: Props) {
                   <DropdownMenuItem onSelect={() => setLabelsManagerOpen(true)}>
                     Manage labels
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={openUpdateBudget}>Update budget</DropdownMenuItem>
+                  {!isRetired ? (
+                    <DropdownMenuItem onSelect={openUpdateBudget}>Update budget</DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
                     Payment credentials
@@ -693,6 +700,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             chainId={chainId}
             tokens={budgetTokenOptions}
             onBudgetChange={refetch}
+            retired={isRevoked ? 'revoked' : isArchived ? 'archived' : undefined}
           />
         </div>
       </div>
@@ -891,7 +899,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                       : 'Pause the agent or remove its budget if you need to stop access.'}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {!isRevoked ? (
+                  {!isRetired ? (
                     <Button
                       onClick={openUpdateBudget}
                       disabled={pendingAction !== null}
@@ -949,8 +957,14 @@ export default function AgentDetailClient({ agentId }: Props) {
           {budgetLines.length === 0 ? (
             <EmptyState
               title="No agent budget set"
-              body={isRevoked ? 'This agent has been revoked and can no longer be edited.' : 'Add an agent budget before this agent can make automatic payments.'}
-              action={!isRevoked ? <Button size="sm" onClick={openUpdateBudget}>Add budget</Button> : undefined}
+              body={
+                isRevoked
+                  ? 'This agent has been revoked and can no longer be edited.'
+                  : isArchived
+                    ? 'This agent has been removed, so no budget can be added.'
+                    : 'Add an agent budget before this agent can make automatic payments.'
+              }
+              action={!isRetired ? <Button size="sm" onClick={openUpdateBudget}>Add budget</Button> : undefined}
             />
           ) : null}
 

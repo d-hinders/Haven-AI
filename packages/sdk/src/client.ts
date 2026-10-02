@@ -16,6 +16,7 @@ import {
 } from './direct-payment-guard.js'
 import type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 import type {
+  BudgetPrecheckResult,
   HavenClientConfig,
   PaymentRequest,
   PaymentIntent,
@@ -811,6 +812,11 @@ export class HavenClient {
    * degrade-to-warning path and the ledger row would still land while the
    * purchase proceeded.
    *
+   * #3518: without `merchantTo`, an agent whose budgets for the token are all
+   * merchant-locked gets 409 `budget_requires_recipient` (thrown, nothing
+   * recorded) naming the pins in `budget_recipient_addresses` — repeat the
+   * check with `merchantTo`.
+   *
    * camelCase body like the route family; the response mirrors the wire
    * (`sufficient`, `remaining_atomic`). `resourceUrl` is the merchant
    * resource being bought — the ledger dedupe window's discriminating
@@ -823,21 +829,16 @@ export class HavenClient {
     merchantTo?: string
     resourceUrl?: string
     /**
-     * #3492: the x402 idempotency key of the quote this pre-check describes.
-     * When it resolves to an already-settled erc7710 replay of the SAME
-     * quote, the response answers sufficient (with `replay: true`) instead
-     * of comparing against the now-lower remaining budget — see
-     * `BudgetPrecheckRequest.idempotencyKey` in the OpenAPI spec. Omitted:
-     * unchanged behavior.
+     * #3492/#3527: the x402 idempotency key of the quote this pre-check
+     * describes. When it resolves to an already-settled erc7710 OR eip3009
+     * replay of the SAME quote, the response answers sufficient (with
+     * `replay: true`) instead of comparing against the now-lower remaining
+     * budget — see `BudgetPrecheckRequest.idempotencyKey` in the OpenAPI
+     * spec. Omitted: unchanged behavior.
      */
     idempotencyKey?: string
-  }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; replay?: boolean }> {
-    return this.post<{
-      sufficient: boolean
-      remaining_atomic: string
-      remaining_is_from_chain?: boolean
-      replay?: boolean
-    }>('/machine-payments/budget-precheck', {
+  }): Promise<BudgetPrecheckResult> {
+    return this.post<BudgetPrecheckResult>('/machine-payments/budget-precheck', {
       chainId: input.chainId,
       token: input.token,
       amountAtomic: input.amountAtomic,

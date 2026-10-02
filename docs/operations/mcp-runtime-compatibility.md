@@ -73,8 +73,41 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-01"
+last-verified: "2026-10-02"
 ---
+
+> **Re-verified #3515 (2026-10-02, the ops console scaffold):** this diff
+> touches `.github/workflows/ci.yml`, a covered file. The change adds gate
+> steps (design lint, wire-type ratchet) to the NEW `ops_checks` job for the
+> `@haven/ops` scaffold (#3515) and its surface routing; no covered runtime
+> code moved. No tool is added, renamed or re-shaped on either runtime, no
+> argument or input schema changes, and the version-skew and consent-hash
+> contracts do not move: a CI job's steps are not a skew axis. The client
+> releases table, upgrade hints, publish flow and package resolution are
+> untouched. `last-verified` is bumped to 2026-10-02 for this note.
+> Nothing else in this document was re-verified.
+
+> **Re-verified #3564 (2026-10-02):** this diff touches
+> `packages/mcp-server/src/tools/support/errors.ts` and
+> `packages/sdk/src/types.ts` / `payment-mappers.ts` — all covered trees.
+> #3494's `SUBMISSION_OUTCOME_UNKNOWN` mapping moves from a
+> `stop_and_tell_user` (the intent was already `failed`, so polling this
+> payment_id's own status could never confirm the outcome) to the poll the
+> re-booked backend now permits: with the 502 body's `payment_id` the step
+> names `haven_get_payment_status` (`next_action: check_status_later` — the
+> intent is booked outcome-pending, so the status read IS the source of
+> truth, and it becomes the real terminal state once the backend's
+> submission reconciler resolves the row from the chain); without a
+> `payment_id` to poll, the step stays `stop_and_tell_user`, saying why no
+> new payment may be created. No tool added, renamed or re-shaped; the
+> runtime manifest, connector channel, dist-tag and consent-hash contracts
+> are untouched, and the failure shape rides the same refusal-wire fields
+> the #3104 parity walk already parses. Additive SDK surface:
+> `submissionOutcomePending` on the status result — absent on every other
+> row, never `false`, matching `delivered`'s honesty rule — so an older
+> backend stays wire-compatible. `last-verified` is bumped to 2026-10-02
+> for this note: the hosted refusal mapping for this code is part of this
+> document's guidance surfaces, and its `next_action` moved.
 
 > **Re-verified #3496 (2026-09-30, the tombstone tell moves ahead of the
 > identity stat):** this diff touches `packages/connect/src/doctor.ts` (and its
@@ -805,18 +838,10 @@ last-verified: "2026-10-01"
 > replay: true }` WITHOUT calling `refuse()` — skipping the write, not
 > faking the remaining figure (`remaining_atomic` still reports the true,
 > now-lower number). Any other row shape — no row, a `pending_signature`
-> child, a key collision on a different payee/resource/token/amount, a
-> task/sub-budget-scoped row, or a settled EIP-3009 row
-> (`settlement_scheme: 'eip3009'`) — falls through to today's compare
-> unchanged, including its refusal branch. EIP-3009 is deliberately OUT of
-> scope for this fix, not because `delegationReplay`'s own authorize-side
-> replay would refuse it — it would not: its confirmed+tx_hash branch
-> (`replay.ts:89-110`) answers its stored 200 for ANY settlement scheme, so
-> a settled 3009 replay never reaches a second authorize either. A settled
-> 3009 replay hitting this pre-check still gets the SAME false over-budget
-> refusal and ledger row this issue fixes for erc7710 — known, left as a
-> follow-up, because its funding leg is a separate budget-metered hop (the
-> bridge, #946) this endpoint cannot yet tell has already settled.
+> child, a key collision on a different payee/resource/token/amount, or a
+> task/sub-budget-scoped row — falls through to today's compare unchanged,
+> including its refusal branch. (At the time of this pass a settled EIP-3009
+> row was also deliberately out of scope here; #3527 below closed that gap.)
 > `haven_prepare_catalog_purchase`'s step 5b forwards `args.idempotency_key`
 > onto the pre-check call; `haven_pay_mcp_tool` is unaffected — it never had
 > this bug, because its authorize call runs the replay lookup BEFORE its own
@@ -841,6 +866,65 @@ last-verified: "2026-10-01"
 > failure, just for a different reason. An older MCP against the new
 > backend never sends the field and gets today's (occasionally
 > over-refusing) behavior. Deploy order is backend → hosted MCP either way.
+> Nothing else in this document was re-verified in this pass.
+>
+> **Re-verified #3527:** the #3492 gap above is closed. `isSettledX402Replay`
+> (renamed from `isSettledErc7710Replay`) now accepts a settled EIP-3009 row
+> on the SAME rule — `confirmed` + `tx_hash` is that scheme's FUNDING leg
+> (treasury → delegate), the same fact `delegationReplay`'s own
+> confirmed+tx_hash branch already treats as replayable for every scheme, so
+> the pre-check's prior refusal was always false there too. The resource
+> match is unchanged (it compares the request's `resourceUrl` against
+> whichever value the row's own `x402_resource_url` column stores), but the
+> CALLER now sends the right value per scheme:
+> `haven_prepare_catalog_purchase` step 5b forwards `merchantUrl` on the
+> erc7710 branch (unchanged) and `paymentRequired.resource.url` — the exact
+> field `createX402Intent` persists for a 3009 row — on the 3009 branch, and
+> forwards the EFFECTIVE idempotency key
+> (`args.idempotency_key ?? quote.idempotencyKey`, the same key step 9
+> authorizes with) rather than the explicit key only. On the hosted side, a
+> confirmed EIP-3009 replay reaching `createX402Intent`'s own state-error
+> path (`haven_prepare_catalog_purchase` step 9, `haven_pay_mcp_tool`'s 3009
+> branch) used to surface as a bare `API_ERROR` — `settledReplayResponse`
+> could not be reused as-is, because it hardcodes `settlement_scheme:
+> 'erc7710'` and reports its replayed `tx_hash` as the SETTLEMENT hash, which
+> is wrong on 3009 (that hash is the FUNDING leg; the merchant leg is a
+> separate, re-read fact). A new helper,
+> `eip3009ConfirmedReplayResponse` (`tools/support/guidance.ts`), re-reads
+> `haven_get_payment_status` and splits in three, not two (review round 1
+> S1/B1 corrected the first cut):
+>
+> - A merchant settlement VERIFIED on-chain (`merchant_settlement_recorded`)
+>   → a DONE state with `settled: true`.
+> - A merchant leg REPORTED but not yet verified (`delivered` on the status
+>   wire, the `merchant_leg_reported` column) → ALSO a done state (nothing
+>   left to sign or pay) but `settled: false`. In this answer, `settled: true`
+>   means a VERIFIED on-chain settlement, never merely "the merchant
+>   answered"; the answer carries `merchant_leg_reported` so the two done
+>   shapes stay distinguishable.
+> - Neither → the #2290 funded-awaiting-merchant remedy, but ONLY when the
+>   re-read status's own `next_action` is one of the two real producers
+>   (`retry_original_x402_request`, `sweep_stranded_funds`) — review round 1
+>   B1: `isFundedX402AwaitingMerchantLeg` is false for its OWN first 15
+>   minutes (`MERCHANT_REPORT_GRACE_MIN`), so a status read taken moments
+>   after funding falls through to the plain confirmed mapping
+>   (`next_action: none`, `message: "The payment is confirmed."`) even with
+>   ZERO merchant evidence. Relaying that verbatim would have paired a
+>   `next_tool` with `next_action: none` and no evidence behind it. Any other
+>   action (the in-grace `none`, or a failed re-read) now answers
+>   `check_status_later` instead, pointed at `haven_get_payment_status`, with
+>   an honest reason that says funding confirmed and the merchant's delivery
+>   is not recorded yet.
+>
+> `funding_tx_hash` is the row's own hash on every branch; `settlement_tx_hash`
+> is ALWAYS `null` here — `getPaymentStatus` exposes only a verified BOOLEAN
+> today, never the merchant's own settlement hash, so this never backfills
+> one from the funding hash. No tool added, renamed or re-shaped; the local
+> stdio runtime is not on this path (`haven_pay_mcp_tool` has no pre-check,
+> same as #3492). The eip3009 pre-check's own refusal row also changes shape
+> slightly: its `resource_url` now records the merchant's own declared
+> resource (`paymentRequired.resource.url`) rather than the discovered
+> merchant URL, matching what the stored row carries for this scheme.
 > Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3000):** the hosted server's
@@ -2235,7 +2319,15 @@ agent page. The revoke route is owner-authenticated; the connector holds agent
 keys only. Since #3542 the dashboard's revoke of a superseded agent also ends
 its budget with one owner signature (`revoke-all`); a revoke that stops at the
 credential leaves the agent marked "budget still active" with a Finish revoking
-action. Nothing the connector sends or does changes.
+action. Since #3544 the same revoke also retires a connect-modal agent still
+`pending_approval` — the owner can cleanly Remove an agent whose connect flow
+never finished instead of leaving it dangling — and the revoke transaction
+cancels the agent's open connection setup, so a connector half-way through that
+setup can no longer carry its `budget-approval` to an approved budget for a
+revoked agent; the approval answers the route's typed refusal instead (404, or
+409 with an `error_code`: `already_revoked` is "done", anything else is a real
+refusal). Installed CLIs are unaffected: 404 and 409 map to the same exit
+class. Nothing the connector sends or does changes.
 
 `runtime_config_unreadable` is the exception, and the only one of the six that
 reaches the dashboard (`runtimeStatusHelper`; the routing is pinned by
@@ -2732,8 +2824,20 @@ hand-off names, is strict, so a `task_budget_id` there is refused with the
 `-32602 unrecognized_keys` envelope below; a **newer signer against an older
 backend** gets a 404 from the sign-context read and refuses with
 `SIGN_CONTEXT_REFUSED`, never a signature. The SDK's `getAgentSummary()` now performs a third read
-(`GET /task-budgets?status=open`) and degrades to an empty `taskBudgets`
+(`GET /task-budgets?status=live`) and degrades to an empty `taskBudgets`
 list on any failure, so an older backend does not break `haven_get_agent`.
+(#3518 re-verification, 2026-10-01: the list reads `status=live` instead of
+`?status=open` — `closing` rows always, unexpired `pending` and `open`
+rows; `closed` and expired rows are omitted — so a budget that is closing
+stays visible AS closing instead of vanishing the moment its close starts,
+while the list stays bounded. An older backend that refuses `status=live`
+is re-asked for `status=all`, filtered the same way client-side; the
+soft-fail degradation is unchanged. Both runtimes also gain
+`haven_get_task_budget { task_budget_id }`, the read-by-id over the
+backend's any-status `GET /task-budgets/:id` — the status check a close
+refusal's "re-check the budget's status" points at; see the re-verification
+block at the end of this document. An older hosted MCP lists no read tool,
+which is the same fail-closed skew as the rows above.)
 
 ### An undeclared argument is refused, not stripped (#2312)
 
@@ -4474,4 +4578,150 @@ to call next in structured fields, and those fields are typed end to end
 > fixture (the census moves to 40 fixtures and 49 `refusalNextStep` calls).
 > `last-verified` is re-stamped to 2026-10-01: the failure envelope this
 > document's own re-verification trail pins is what changed. Nothing else in
+> this document was re-verified.
+
+> **Re-verification (#3494, 2026-10-01, updated in review rounds 1 and 2):**
+> `POST /payments/:id/sign`'s failure catch (every rail the route relays — a
+> direct payment and the EIP-3009 funding leg) now answers its 502 with a
+> typed `error_code`, in the order the route checks them:
+> `submission_outcome_unknown` (B1/B1', double-pay risk — checked FIRST):
+> `sendUserOperation` resolved but the receipt wait itself errored or timed
+> out (`SubmittedUserOpFailedError` with `reverted: false`, the default) —
+> the UserOp MAY have landed, and Haven never learned the outcome.
+> `next_action` is `stop_and_tell_user`, NOT `check_status_later` (round 1's
+> mapping — this intent is already marked `failed` by `failSubmittedIntent`
+> BEFORE this response is built, so `haven_get_payment_status` on the same
+> payment_id answers "failed" immediately and forever; naming it as the next
+> step, and round 1's message promising status would "confirm this one did
+> not settle", invited reading that permanent "failed" answer as exactly
+> that confirmation, then paying again — the double pay this code exists to
+> prevent). The reason instead points at the account's REAL activity: Haven's
+> own activity view, or the `user_op_hash` field this code's body now
+> carries, on a block explorer. `signature_rejected` (AA24 only — the one
+> ERC-4337 AA2x code this backend attributes to the signer);
+> `account_validation_failed` (every OTHER AA2x code — AA20/21/22/23/25/26 —
+> a real validation failure that is deliberately NEVER phrased as a signer
+> problem); `task_budget_exceeded` / `delegation_budget_exceeded` (a budget
+> revert caught at submit, re-confirmed from the enforcer's own current
+> figure, same body shape the #3500/#3503 create-time pre-checks already
+> answer — `asset` on `delegation_budget_exceeded` only, matching create
+> time; neither carries a `message` field); and `onchain_execution_failed`
+> for everything else, INCLUDING (round 2, N3) a `SubmittedUserOpFailedError`
+> with `reverted: true` — the op executed and reverted, a KNOWN, confirmed
+> outcome (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed),
+> strictly distinct from the "truly unknown" case above. `normalizeError`
+> gains four new typed branches next to #3416's/#3500's/#3504's: all four map
+> to `stop_and_tell_user` (the budget two needed no new branch — #3500's and
+> #3504's existing branches key on `error_code` alone, not the route or
+> status code that produced it, so they already apply here unchanged). Also
+> in this diff, on `agent-payment-status.ts` (a covered file): a `failed`
+> intent's status now carries `failure_reason` (a bounded, redacted cause),
+> and a direct intent's own `send_idempotency_key` is now surfaced as
+> `idempotency_key` on status (`railContext` answered `{}` for the direct
+> rail before this). `GET /payments/:id`'s `error_message` is bounded at the
+> same read (300 characters plus an ellipsis if longer).
+>
+> Version-skew precision (round 2, R2-3): `failureReason` and
+> `idempotencyKey` are NOT symmetric. `failureReason` requires an SDK release
+> carrying `payment-mappers.ts`'s mapper — an older SDK against a newer
+> backend simply omits the field. `idempotencyKey` requires ONLY the backend:
+> the mapper already read `idempotency_key` generically before this diff, so
+> any SDK that already shipped surfaces it the moment the backend starts
+> sending it, no SDK release needed. The local `@haven_ai/mcp` (pins
+> `@haven_ai/sdk` `0.7.0-alpha.0`, `packages/mcp/package.json`) therefore
+> gains `failure_reason` only from the release that bumps its pinned SDK to
+> one carrying the mapper, and gains the direct-row `idempotency_key`
+> immediately once the backend ships it; the hosted server always bundles
+> the workspace SDK, so neither question applies to the hosted path.
+>
+> No key, signature, delegation, caveat or budget changes. What DOES move on
+> the wire, stated exactly rather than as "nothing moves": the sign-route
+> 502's `error` text is reworded per cause, `details` is now bounded (and
+> can be `null`) where it previously carried the raw bundler/viem text
+> unbounded, a new `user_op_hash` field appears on `submission_outcome_unknown`,
+> and `GET /payments/:id`'s `error_message` is now truncated past 300
+> characters — every other field and branch is additive. A backend older
+> than this change keeps the old untyped 502 and the un-bounded
+> `error_message`. A hosted server older than this shows the four new codes
+> (`submission_outcome_unknown`, `signature_rejected`,
+> `account_validation_failed`, `onchain_execution_failed`) as the generic 5xx
+> branch — "re-call the same tool once with the same arguments" (NOT "create
+> a new payment"); the two budget codes already map through the #3500/#3504
+> branches on any hosted server that has them. The retry gets a 409
+> "Payment intent is failed, expected pending_signature", which an old hosted
+> server shows as the generic 4xx stop: it reads as a plain failure, which is
+> exactly the misreading `submission_outcome_unknown` exists to prevent — stale advice on
+> an already-failed intent but not a new failure mode (the pre-#3494
+> behaviour for every sign failure); the real risk of an old hosted server is
+> an agent giving up on the stale retry advice and deciding, on its own, to
+> pay again without ever being told to wait. Pinned by five new refusal
+> fixtures (the exact counts live in `next-step-fixtures.ts`'s own
+> `REFUSAL_SITE_COUNT` / `REFUSAL_STEP_CALLS`, not restated here to drift).
+> Mutation-proven, independently: the `submission_outcome_unknown` priority
+> over every other branch; the `reverted: true` vs `reverted: false` split
+> (round 2, N3); the AA24-vs-every-other-AA2x split; the task-budget cap's
+> `=== 'exceeded'` predicate (also a compile error under a `!== 'fits'`
+> mutation, since `'unreadable'` carries no `remainingAtomic`/`maxAtomic` to
+> read); the classification try/catch (S2) — a DB/chain failure while
+> re-confirming a revert answers the generic code, never a 500; and the
+> hosted `stop_and_tell_user` mapping for `submission_outcome_unknown`
+> (round 2). The status `failure_reason`/`idempotency_key` surfacing is
+> proven AND mutation-tested on the real-DB harness
+> (`sign-failure-status.test.ts`); the sign-route 502 shape per cause class
+> above, AND the `GET /payments/:id` `error_message` bound (round 2, R2-1:
+> an earlier revision of this note wrongly grouped the GET bound with the
+> real-DB claim above), are proven and mutation-tested on the ROUTE-level
+> mocked-DB stub (`payments-sign-failure.test.ts` — `db-mock-exempt`, see
+> that file's own header for why), not the real-DB harness: its claims are
+> about the HANDLER's response shape, not about what Postgres does.
+> `npm run preflight` green. `last-verified` is not re-stamped: this block is
+> the scope. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#3508, 2026-10-01):** the change touches
+> `.github/workflows/ci.yml`, a covered file, but only inside the required
+> package-check aggregator and the surface-job wiring: one new `ui_checks` job
+> (typecheck + the moved primitive suites from `packages/ui`), its entry in the
+> umbrella `needs:` list, and one summary clause pairing
+> `needs.changes.outputs.ui` with `needs.ui_checks.result`. Frontend-adjacent
+> CI plumbing for the shared design-system package: no tool is added, renamed
+> or re-shaped, no description text changes, no schema or argument changes, and
+> the runtime-skew and consent-hash contracts are untouched. `last-verified` is
+> not re-stamped: this note is the scope.
+
+> **Re-verification (#3518, 2026-10-01):** the budget-visibility round. The
+> hosted MCP and the local `@haven_ai/mcp` both gain
+> `haven_get_task_budget { task_budget_id }` — the read over the backend's
+> any-status `GET /task-budgets/:id`, i.e. the status check a close
+> refusal's "re-check the budget's status" points at. It returns
+> `{ task_budget }` verbatim (the SDK's typed `HavenTaskBudget`, `status`
+> pending | open | closing | closed, `isExpired`, the #3501 spent/remaining
+> figures on an open row) and a 404 carries the backend's own message
+> through `runTool`; the local schema and wording are byte-parity with the
+> hosted one. The third skew read changes shape:
+> `getAgentSummary()`'s taskBudgets list now reads
+> `GET /task-budgets?status=live` — `closing` rows always, unexpired
+> `pending` and `open` rows; `closed` and expired rows are omitted by the
+> backend, so neither the list nor its per-row on-chain reads grow with
+> history — so the agent summary lists a `closing` budget AS closing (the
+> read that must not vanish while a close submit is in flight) instead of
+> dropping it the moment its close started. Against an older backend that
+> refuses `status=live`, the SDK falls back to `status=all` and applies the
+> same filter client-side. `haven_get_allowances` rows carry
+> `delegationHash` / `recipientAddress` (null = open budget) /
+> `merchantId` (set only on a #3331 merchant-locked budget) /
+> `reservedHavenAtomic` (the sum of the budget's open, unexpired task- and
+> sub-budget children's caps, in atomic units, reported BESIDE
+> `onchain.remaining` and never folded into it — the on-chain figure stays
+> authoritative; "0" covers both no-reservation and a failed sum), additive
+> and undefined against an older backend. The tools' descriptions name the
+> fields; the description payload measures 26,029 bytes across 27 tools
+> (mean 964.04), the pins `description-size.test.ts` holds. Version skew,
+> fail-closed or consent surfaces are unchanged: the local runtime's
+> consent hash moves (a new tool name joins it), the signer's does not; an
+> older hosted MCP lists no read tool and an older local server refuses
+> the undeclared name — the rows above. An older backend's allowance rows
+> omit the four fields and the SDK keeps them absent. `last-verified`
+> stays 2026-10-01: the skew read, the tool set and the hosted/local
+> descriptions are exactly what this document pins, and all three moved in
+> this diff. Scope of this note: those tools and reads. Nothing else in
 > this document was re-verified.

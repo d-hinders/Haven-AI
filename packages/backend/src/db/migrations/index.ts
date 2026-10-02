@@ -102,6 +102,8 @@ import * as agentSubBudgets from './100_agent_sub_budgets.js'
 import * as merchantPayTo from './101_merchant_pay_to.js'
 import * as delistSkipSettleCatalogRow from './102_delist_skip_settle_catalog_row.js'
 import * as agentTaxDeclarationOptIn from './103_agent_tax_declaration_opt_in.js'
+import * as opsAccessLog from './104_ops_access_log.js'
+import * as submissionReconcileExpressionIndex from './105_submission_reconcile_expression_index.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -263,4 +265,6 @@ export const migrations: Migration[] = [
   merchantPayTo,
   delistSkipSettleCatalogRow,
   agentTaxDeclarationOptIn,
+  opsAccessLog,
+  submissionReconcileExpressionIndex,
 ]

@@ -29,11 +29,13 @@ import { describe, expect, it } from 'vitest'
  */
 
 const root = resolve(__dirname, '..')
-const css = readFileSync(resolve(root, 'app/globals.css'), 'utf8')
+// The layering tokens moved to @haven_ai/ui (#3508): tokens.css lives in
+// packages/ui/src, imported by the app layout before globals.css.
+const css = readFileSync(resolve(root, '../../ui/src/tokens.css'), 'utf8')
 
 function zToken(name: string): number {
   const match = css.match(new RegExp(`--v2-z-${name}:\\s*(\\d+)`))
-  if (!match) throw new Error(`token --v2-z-${name} not found in globals.css`)
+  if (!match) throw new Error(`token --v2-z-${name} not found in tokens.css`)
   return Number(match[1])
 }
 

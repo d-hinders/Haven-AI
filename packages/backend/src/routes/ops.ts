@@ -1,0 +1,402 @@
+/**
+ * Ops console — backend foundation (#3509, epic #3507).
+ *
+ * A founders-only, READ-ONLY window onto this backend. Nothing under `/ops`
+ * moves funds, signs, changes signers or delegations, or acts as a user
+ * (invariant 1, pinned by `__tests__/ops.invariants.test.ts`). This slice
+ * shipped sign-in, the session check and the reveal contract; #3512 adds the
+ * first data reads — `GET /ops/overview`, `GET /ops/search` and
+ * `GET /ops/users/:id` — and #3513–#3514 add the rest.
+ *
+ * Off by default. Whether ops is configured is decided in this plugin's
+ * `onRequest` hook — before request validation, auth and rate limiting — so
+ * an unconfigured backend answers every `/ops/*` request, even a malformed
+ * `POST /ops/reveal`, exactly as it answers a path that does not exist.
+ *
+ * Sign-in (GitHub OAuth, no scopes; the handoff contract is shared with the
+ * ops app, #3515):
+ *   1. The app calls `GET /ops/auth/github/start?return_to=<its origin>&nonce=<n>`.
+ *      `return_to` must EXACTLY equal an `OPS_REDIRECT_ORIGINS` entry.
+ *   2. The backend sends the browser to GitHub with a signed, 10-minute
+ *      `state` carrying that origin and nonce.
+ *   3. `GET /ops/auth/github/callback` verifies the state, re-checks the
+ *      origin, exchanges the code, reads `GET /user`, drops GitHub's token,
+ *      checks the numeric id against the allowlist (and 2FA when GitHub
+ *      reports it), writes the audit row, and redirects to
+ *      `<origin>/#token=<ops token>&nonce=<n>` — or `#error=<code>&nonce=<n>`.
+ *
+ * Every sign-in that reaches a GitHub identity (allowed or refused), every
+ * data read and every reveal writes an `ops_access_log` row through the MAIN
+ * pool before the response is sent; a failed write answers 503 and returns
+ * nothing (invariant 6). Data reads themselves go through `readDb`, the
+ * read-only role (#3510), and answer 404 while it is not configured or its
+ * login fails the privilege self-check.
+ */
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { isOpsConfigured, type OpsConfig } from '../config/ops.js'
+import { deployableChainIds } from '../domain/chains.js'
+import { authRateLimit, opsRevealRateLimit, opsSearchRateLimit } from '../middleware/rate-limit.js'
+import { createOpsAuth, opsOperatorOf } from '../middleware/ops-auth.js'
+import {
+  buildOpsOnchainView,
+  buildOpsOverview,
+  buildOpsUserDetail,
+  buildOpsHealth,
+  detectOpsSearchKey,
+  maskSearchTerm,
+  runOpsSearch,
+  exchangeGithubCode,
+  fetchGithubUser,
+  githubAuthorizeUrl,
+  signOpsState,
+  signOpsToken,
+  verifyOpsState,
+  type FetchLike,
+  type GithubUser,
+  type OpsHealth,
+  type OpsHealthDeps,
+  type OpsOnchainReaders,
+} from '../modules/ops/index.js'
+import { insertOpsAccessLog, type OpsAccessLogEntry } from '../infra/repositories/ops-access-log.js'
+import { isOpsRevealField, readOpsRevealField } from '../infra/repositories/ops-reveal.js'
+import { OpsReadRoleUnsafeError } from '../infra/repositories/ops-read-role.js'
+import type { Executor } from '../infra/transaction.js'
+
+/** Where GitHub sends the browser back; must match the OAuth App's redirect URI. */
+export const OPS_CALLBACK_PATH = '/ops/auth/github/callback'
+
+export interface OpsRoutesOptions {
+  ops: OpsConfig
+  trustProxyHops: number
+  /** Executor for ops DATA reads — the read-only role from #3510. Absent → data routes are off (404). */
+  readDb?: Executor | null
+  /**
+   * Chain readers for `GET /ops/users/:id/onchain` (#3513). The default
+   * implementation (`modules/ops/onchain-readers.ts`) touches `rails/` and
+   * `infra/chain/`, which the ops invariant-1 walk forbids reaching from
+   * this file — so it is injected in `index.ts`, like `readDb`. Null (the
+   * default) leaves the route off (404): a deployment that cannot answer
+   * the chain view must not pretend to.
+   */
+  onchainReaders?: OpsOnchainReaders | null
+  /**
+   * The `GET /health/ops` payload builder for `GET /ops/health` (#3514),
+   * injected for the same invariant-1 reason (`routes/health.ts` reaches
+   * `infra/relayer-balance-monitor.ts`) and wired in `index.ts` so both
+   * routes are served by ONE builder. Null (the default) leaves the route
+   * off (404) like every other ops data read.
+   */
+  healthDiagnostics?: (() => Promise<import('./health-payload-types.js').HealthOpsPayload>) | null
+  /**
+   * The served chains the stuck-lane walk covers (#3514). Defaults to the
+   * deployable set — the chains the bump worker actually scans. Injectable
+   * so tests pin exactly which chains were walked.
+   */
+  servedChains?: () => number[]
+  /**
+   * The delegate balance monitor's last report getter (#3514), injected
+   * alongside `healthDiagnostics` (wired to
+   * `lastDelegateBalanceReport` in `index.ts`). Null (the default) leaves
+   * `/ops/health` off (404): without the getter the payload would have to
+   * lie about the delegate section.
+   */
+  lastDelegateBalanceReport?: (() => import('../domain/delegate-balance.js').DelegateBalanceReport | null) | null
+  /** Audit writer; defaults to the main-pool insert. A test seam, never a way to skip the write. */
+  audit?: (entry: OpsAccessLogEntry) => Promise<void>
+  fetchImpl?: FetchLike
+  now?: () => number
+}
+
+const NO_STORE = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } as const
+
+export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOptions): Promise<void> {
+  const { ops } = opts
+  const configured = isOpsConfigured(ops)
+  // The default writer uses the repository's main-pool default — never the read-only role.
+  const audit = opts.audit ?? ((entry: OpsAccessLogEntry) => insertOpsAccessLog(entry))
+  const fetchImpl = opts.fetchImpl ?? fetch
+  const tokenOpts = () => ({ secret: ops.jwtSecret, issuer: ops.publicOrigin, now: opts.now?.() })
+  const opsAuth = createOpsAuth(ops, opts.now)
+  const redirectUri = `${ops.publicOrigin}${OPS_CALLBACK_PATH}`
+
+  // Invariant 3: unconfigured ⇒ indistinguishable from a missing route,
+  // decided before validation, auth and rate limiting run.
+  app.addHook('onRequest', async (_request, reply) => {
+    if (!configured) return reply.callNotFound()
+  })
+
+  /** Write the audit row, or answer 503 and return false (fail-closed). */
+  async function recordOrRefuse(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    entry: Omit<OpsAccessLogEntry, 'requestId'>,
+  ): Promise<boolean> {
+    try {
+      await audit({ ...entry, requestId: request.id })
+      return true
+    } catch (err) {
+      request.log.error(
+        { errName: err instanceof Error ? err.name : 'non-error', action: entry.action },
+        'ops access could not be recorded; refusing the request',
+      )
+      await reply.code(503).headers(NO_STORE).send({ error: 'Ops access could not be recorded; nothing was returned' })
+      return false
+    }
+  }
+
+  function backToApp(reply: FastifyReply, origin: string, fragment: Record<string, string>) {
+    return reply.code(302).headers(NO_STORE).header('location', `${origin}/#${new URLSearchParams(fragment)}`).send()
+  }
+
+  // GET /ops/auth/github/start — begin a sign-in.
+  app.get<{ Querystring: { return_to: string; nonce: string } }>(
+    '/auth/github/start',
+    { config: authRateLimit(opts.trustProxyHops, 'ops_auth') },
+    async (request, reply) => {
+      const { return_to: returnTo, nonce } = request.query
+      if (!ops.redirectOrigins.includes(returnTo)) {
+        return reply.code(400).send({ error: 'return_to is not an allowed ops origin' })
+      }
+      const state = signOpsState(tokenOpts(), { origin: returnTo, nonce })
+      return reply
+        .code(302)
+        .headers(NO_STORE)
+        .header('location', githubAuthorizeUrl({ clientId: ops.githubClientId, redirectUri, state }))
+        .send()
+    },
+  )
+
+  // GET /ops/auth/github/callback — finish a sign-in.
+  app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
+    '/auth/github/callback',
+    { config: authRateLimit(opts.trustProxyHops, 'ops_auth') },
+    async (request, reply) => {
+      const state = request.query.state ? verifyOpsState(tokenOpts(), request.query.state) : null
+      // The origin is trusted only after the signature AND the current list agree.
+      if (!state || !ops.redirectOrigins.includes(state.origin)) {
+        return reply.code(400).headers(NO_STORE).send({ error: 'Invalid or expired sign-in state' })
+      }
+      const fail = (error: string) => backToApp(reply, state.origin, { error, nonce: state.nonce })
+      if (request.query.error) return fail('github_denied')
+      if (!request.query.code) return fail('missing_code')
+
+      let user: GithubUser
+      try {
+        const accessToken = await exchangeGithubCode(
+          {
+            clientId: ops.githubClientId,
+            clientSecret: ops.githubClientSecret,
+            code: request.query.code,
+            redirectUri,
+          },
+          fetchImpl,
+        )
+        // GitHub's token is used for this one read and then goes out of scope.
+        user = await fetchGithubUser(accessToken, fetchImpl)
+      } catch (err) {
+        request.log.warn({ errName: err instanceof Error ? err.name : 'non-error' }, 'ops sign-in: GitHub step failed')
+        return fail('github_unavailable')
+      }
+
+      const denial = !ops.allowedGithubIds.includes(user.id)
+        ? 'not_allowed'
+        : user.twoFactorAuthentication === false
+          ? 'two_factor_required'
+          : null
+      if (denial) {
+        const ok = await recordOrRefuse(request, reply, {
+          operatorGithubId: user.id,
+          operatorLogin: user.login,
+          action: 'sign_in_denied',
+          detail: denial,
+        })
+        return ok ? fail(denial) : reply
+      }
+
+      const ok = await recordOrRefuse(request, reply, {
+        operatorGithubId: user.id,
+        operatorLogin: user.login,
+        action: 'sign_in',
+      })
+      if (!ok) return reply
+      const token = signOpsToken(tokenOpts(), { githubId: user.id, login: user.login })
+      return backToApp(reply, state.origin, { token, nonce: state.nonce })
+    },
+  )
+
+  // GET /ops/me — who the session belongs to.
+  app.get('/me', { onRequest: opsAuth }, async (request, reply) => {
+    const operator = opsOperatorOf(request)
+    return reply.headers(NO_STORE).send({
+      github_id: operator.githubId,
+      login: operator.login,
+      expires_at: new Date(operator.exp * 1000).toISOString(),
+    })
+  })
+
+  /**
+   * The shared shape of a data read (#3512): off (404) without the read-only
+   * role or when its login fails the self-check; the audit row is written
+   * through the main pool after the read and before anything is sent.
+   */
+  async function dataRead<T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    read: (db: Executor) => Promise<T>,
+    entry: (result: T) => Omit<OpsAccessLogEntry, 'requestId' | 'operatorGithubId' | 'operatorLogin'>,
+  ): Promise<{ result: T } | null> {
+    const readDb = opts.readDb
+    if (!readDb) {
+      await reply.callNotFound()
+      return null
+    }
+    let result: T
+    try {
+      result = await read(readDb)
+    } catch (err) {
+      if (err instanceof OpsReadRoleUnsafeError) {
+        await reply.callNotFound()
+        return null
+      }
+      throw err
+    }
+    const operator = opsOperatorOf(request)
+    const ok = await recordOrRefuse(request, reply, {
+      operatorGithubId: operator.githubId,
+      operatorLogin: operator.login,
+      ...entry(result),
+    })
+    return ok ? { result } : null
+  }
+
+  // GET /ops/overview — platform counts.
+  app.get('/overview', { onRequest: opsAuth }, async (request, reply) => {
+    const done = await dataRead(request, reply, (db) => buildOpsOverview(db, opts.now), () => ({
+      action: 'view',
+      targetType: 'overview',
+    }))
+    if (!done) return reply
+    return reply.headers(NO_STORE).send(done.result)
+  })
+
+  // GET /ops/search?q= — find a customer record by what was pasted.
+  app.get<{ Querystring: { q: string } }>(
+    '/search',
+    { onRequest: opsAuth, config: opsSearchRateLimit },
+    async (request, reply) => {
+      const key = detectOpsSearchKey(request.query.q)
+      if ('error' in key) return reply.code(400).headers(NO_STORE).send({ error: key.error })
+      const done = await dataRead(request, reply, (db) => runOpsSearch(db, key, { now: opts.now }), () => ({
+        action: 'search',
+        targetType: key.keyType,
+        // The masked term only — the raw query may be a customer's email.
+        detail: maskSearchTerm(request.query.q),
+      }))
+      if (!done) return reply
+      return reply.headers(NO_STORE).send(done.result)
+    },
+  )
+
+  // GET /ops/users/:id — one customer's record, masked.
+  app.get<{ Params: { id: string } }>('/users/:id', { onRequest: opsAuth }, async (request, reply) => {
+    const done = await dataRead(request, reply, (db) => buildOpsUserDetail(db, request.params.id), () => ({
+      action: 'view',
+      targetType: 'user',
+      targetId: request.params.id,
+    }))
+    if (!done) return reply
+    if (!done.result) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
+    return reply.headers(NO_STORE).send(done.result)
+  })
+
+  // GET /ops/users/:id/onchain — the chain's view next to the DB's (#3513).
+  // READ-ONLY chain state: the injected readers answer getBytecode,
+  // disabled-delegation and remaining-budget questions and can neither write
+  // state nor sign (invariant 1). Off (404) until `onchainReaders` is wired.
+  app.get<{ Params: { id: string } }>(
+    '/users/:id/onchain',
+    { onRequest: opsAuth },
+    async (request, reply) => {
+      const onchainReaders = opts.onchainReaders
+      if (!onchainReaders) return reply.callNotFound()
+      const done = await dataRead(
+        request,
+        reply,
+        (db) => buildOpsOnchainView(db, request.params.id, { readers: onchainReaders }),
+        () => ({
+          action: 'view',
+          targetType: 'user_onchain',
+          targetId: request.params.id,
+        }),
+      )
+      if (!done) return reply
+      if (!done.result) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
+      return reply.headers(NO_STORE).send(done.result)
+    },
+  )
+
+  // GET /ops/health — the system-health read (#3514): sweepable ERC-7710
+  // intents, stuck revocations, stuck outbound lanes, the delegate balance
+  // monitor's last report, and the `GET /health/ops` diagnostics. READ-ONLY
+  // about the operational world: no RPC call on request (the chain client is
+  // never touched — pinned by ops-health.test.ts with a throwing chain), no
+  // claim, no receipt read. Data reads go through the read-only role; the
+  // audit row goes through the main pool, one per call. Off (404) without
+  // the diagnostics builder, like every other ops data read.
+  app.get('/health', { onRequest: opsAuth }, async (request, reply) => {
+    const buildOpsDiagnostics = opts.healthDiagnostics
+    const lastDelegateBalanceReport = opts.lastDelegateBalanceReport
+    if (!buildOpsDiagnostics || !lastDelegateBalanceReport) return reply.callNotFound()
+    const done = await dataRead(
+      request,
+      reply,
+      (db) => buildOpsHealth(db, { buildOpsDiagnostics, lastDelegateBalanceReport }, opts.servedChains ?? deployableChainIds),
+      () => ({
+        action: 'view',
+        targetType: 'system_health',
+      }),
+    )
+    if (!done) return reply
+    return reply.headers(NO_STORE).send(done.result)
+  })
+  app.post<{ Body: { target_type: string; target_id: string; field: string } }>(
+    '/reveal',
+    { onRequest: opsAuth, config: opsRevealRateLimit },
+    async (request, reply) => {
+      const readDb = opts.readDb
+      // Data reads need the read-only role (#3510); without it this is a data route that is off.
+      if (!readDb) return reply.callNotFound()
+      const { target_type: targetType, target_id: targetId, field } = request.body
+      if (!isOpsRevealField(targetType, field)) {
+        return reply.code(400).send({ error: 'That field cannot be revealed' })
+      }
+
+      let row: Awaited<ReturnType<typeof readOpsRevealField>>
+      try {
+        row = await readOpsRevealField(readDb, targetType, field, targetId)
+      } catch (err) {
+        // The login failed the read-only self-check: data reads are off, as if unset.
+        if (err instanceof OpsReadRoleUnsafeError) return reply.callNotFound()
+        throw err
+      }
+      if (!row) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
+
+      const operator = opsOperatorOf(request)
+      const ok = await recordOrRefuse(request, reply, {
+        operatorGithubId: operator.githubId,
+        operatorLogin: operator.login,
+        action: 'reveal',
+        targetType,
+        targetId,
+        field,
+      })
+      if (!ok) return reply
+      return reply.headers(NO_STORE).send({
+        target_type: targetType,
+        target_id: targetId,
+        field,
+        value: row.value,
+      })
+    },
+  )
+}

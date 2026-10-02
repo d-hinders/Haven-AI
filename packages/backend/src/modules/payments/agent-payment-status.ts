@@ -55,6 +55,28 @@ function statusFee(input: {
   }
 }
 
+/**
+ * #3494: the cap every surfaced failure cause shares — the sign route's 502
+ * `message`, this module's `failure_reason`, and `GET /payments/:id`'s
+ * `error_message` (bounded at that route's read, same function). Vendor
+ * secrets are already redacted before a message reaches storage
+ * (`redactVendorSecrets`, `routes/payments.ts`); this is the second,
+ * independent bound — LENGTH — because a viem/bundler failure can carry the
+ * full encoded callData or ABI in its message, and neither redaction nor
+ * truncation alone catches what the other misses.
+ */
+export const FAILURE_MESSAGE_MAX_LENGTH = 300
+
+/** Bound (and trim) a stored or raw failure message; `null` in, `null` out. */
+export function boundFailureMessage(message: string | null | undefined): string | null {
+  if (message == null) return null
+  const trimmed = message.trim()
+  if (!trimmed) return null
+  return trimmed.length > FAILURE_MESSAGE_MAX_LENGTH
+    ? `${trimmed.slice(0, FAILURE_MESSAGE_MAX_LENGTH)}…`
+    : trimmed
+}
+
 export interface AgentPaymentStatus {
   payment_id: string
   kind: AgentPaymentKind
@@ -104,6 +126,21 @@ export interface AgentPaymentStatus {
    * honesty rule.
    */
   merchant_settlement_recorded?: boolean
+  /**
+   * #3494: a bounded, redacted cause for a `failed` payment — the same
+   * `error_message` `failSubmittedIntent` books on the row (already scrubbed
+   * of vendor secrets by `redactVendorSecrets` before it is stored), capped
+   * so a viem/bundler dump never rides a status read. Present (possibly
+   * `null`, when no message was recorded) only when `status === 'failed'`;
+   * omitted on every other status.
+   */
+  failure_reason?: string | null
+  /**
+   * #3564: `true` only while a payment's submit is receipt-unconfirmed and
+   * not yet reconciled from the chain. Absent on every other row — never
+   * `false` — matching the module's honesty rule for unknown facts.
+   */
+  submission_outcome_pending?: true
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
@@ -285,6 +322,8 @@ function railContext(input: {
   idempotencyKey: string | null
   challengeId?: string | null
   machineMetadata: unknown
+  /** #3494: the direct (non-x402/mpp) rail's own key, `payment_intents.send_idempotency_key`. */
+  sendIdempotencyKey?: string | null
 }) {
   const metadata = metadataObject(input.machineMetadata)
 
@@ -329,6 +368,18 @@ function railContext(input: {
     }
 
     return context
+  }
+
+  // #3494: the direct rail persisted no idempotency key of its own in the
+  // railContext object before this — `send_idempotency_key` is a real column
+  // (`routes/payments.ts` writes it from the request body, echoed on
+  // `haven_send`/`haven_pay` since #3524), but `FIND_INTENT_STATUS_ROW_SQL`
+  // did not select it and this function returned `{}` for every direct row.
+  // One flat field, matching the x402/mpp branches' top-level `idempotency_key`
+  // — no nested `direct: {}` block, since the direct rail has no other
+  // rail-specific context to carry alongside it.
+  if (input.rail === AgentPaymentRail.Direct) {
+    return { idempotency_key: nonEmpty(input.sendIdempotencyKey ?? null) }
   }
 
   return {}
@@ -746,6 +797,24 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
       message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. If you hold the merchant's real settlement transaction hash, report it with haven_report_settlement_evidence. Otherwise, Haven's settlement sweep can still attribute it until shortly after this payment's expiry — poll haven_get_payment_status once more a couple of minutes past that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
     }
   }
+  // #3564: a `submitted` row whose submit was receipt-unconfirmed is
+  // OUTCOME-PENDING, not an ordinary in-flight submit. Same non-terminal
+  // phase and next_action as the ordinary submit state (poll status), but a
+  // message that says what is actually happening — the ordinary text would
+  // read as "everything is fine" when the bundler never answered, and the
+  // #2115 lesson is that this string reaches the agent verbatim. Once the
+  // submission reconciler resolves the row, the status is terminal and the
+  // real state speaks instead.
+  if (payment.status === 'submitted' && payment.submission_outcome === 'unknown' && payment.user_op_hash != null) {
+    return {
+      phase: AgentPaymentPhase.PaymentSubmitted,
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      message:
+        'The payment was submitted but its on-chain outcome is not known yet. ' +
+        'Do not create a new payment for this — check status again later: ' +
+        'Haven reconciles this payment from the chain, and this status becomes the real outcome.',
+    }
+  }
   return paymentIntentState(payment.status)
 }
 
@@ -1024,9 +1093,23 @@ function statusFromRow(
       // `isFundedX402AwaitingMerchantLeg` already performs, surfaced so a
       // caller does not have to re-derive it from `machine_metadata`.
       settlement_scheme: narrowSettlementScheme(settlementSchemeOf(payment.machine_metadata)),
+      // #3518: WHICH budget metered this payment, recorded at authorize —
+      // the settle summary joins its allowance rows on this instead of
+      // re-deriving a (token, payee) selection whose winner can move
+      // between pay and settle. Null on the legacy rail and pre-053 rows.
+      ...(payment.budget_delegation_hash ? { budget_delegation_hash: payment.budget_delegation_hash } : {}),
+      // #3564: additive outcome-pending visibility — present ONLY while a
+      // submit is receipt-unconfirmed and not yet reconciled (the wire rule
+      // everywhere on this object: absent, never `false`).
+      ...(payment.submission_outcome === 'unknown' && payment.user_op_hash != null
+        ? { submission_outcome_pending: true as const }
+        : {}),
       ...(hasVerifiedMerchantSettlement(payment.machine_metadata)
         ? { merchant_settlement_recorded: true as const }
         : {}),
+      // #3494: additive, failed rows only — see the field doc on
+      // `AgentPaymentStatus.failure_reason`.
+      ...(payment.status === 'failed' ? { failure_reason: boundFailureMessage(payment.error_message) } : {}),
       fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
       ...railContext({
         rail,
@@ -1037,6 +1120,7 @@ function statusFromRow(
         idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
         challengeId: payment.machine_challenge_id,
         machineMetadata: payment.machine_metadata,
+        sendIdempotencyKey: payment.send_idempotency_key,
       }),
     },
     {

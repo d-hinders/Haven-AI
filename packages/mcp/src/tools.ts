@@ -50,6 +50,7 @@ export type HavenMcpToolName =
   | 'haven_submit_catalog_entry'
   | 'haven_open_task_budget'
   | 'haven_close_task_budget'
+  | 'haven_get_task_budget'
   | 'haven_submit'
 
 /**
@@ -193,6 +194,12 @@ export const toolSchemas = {
   haven_close_task_budget: {
     task_budget_id: z.string().min(1),
   },
+  // #3518: read ONE task budget by id, any status — the status check a close
+  // refusal's "re-check the budget's status" points at, on the local surface
+  // too (schema and wording parity with the hosted read).
+  haven_get_task_budget: {
+    task_budget_id: z.string().min(1),
+  },
   // #3329 / #3506: relays a signature from the local signer — the open/close
   // signature for a task budget or a sub-budget row, or (schema parity with
   // the hosted surface) a direct-payment signature by payment_id. Exactly one
@@ -233,6 +240,17 @@ const CLOSE_TASK_BUDGET_DESCRIPTION = [
   'same as the pending case.',
 ].join(' ')
 
+// #3518: the status check a close refusal's "re-check the budget's status"
+// names — reads ONE task budget by id, any status (pending/closing rows
+// included; haven_get_agent lists them with their status too). Same wording
+// as the hosted read: the surfaces describe the same behavior.
+const GET_TASK_BUDGET_DESCRIPTION = [
+  'Read one task budget by id, any status.',
+  'Returns { task_budget } with status (pending | open | closing | closed), isExpired, maxDisplay, recipientAddress, label and expiresAt —',
+  'the check to run after a close or submit refusal says to re-check the budget\'s status.',
+  'haven_get_agent lists live task budgets only; this reads any one, closed or expired included.',
+].join(' ')
+
 const SUBMIT_DESCRIPTION = [
   'Relay a signature from the local signer. Pass exactly one of task_budget_id (from',
   'haven_open_task_budget or haven_close_task_budget), sub_budget_id (from haven_get_agent',
@@ -266,6 +284,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
   haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
   haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
+  haven_get_task_budget: GET_TASK_BUDGET_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
 }
 
@@ -838,6 +857,18 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           next_arguments: { task_budget_id: args.task_budget_id },
           signer_compatibility: taskSignerCompatibilityNotice(),
         }
+      })
+    },
+
+    // #3518: read ONE task budget by id, any status — the status check a
+    // close/submit refusal's "re-check the budget's status" points at. The
+    // SDK relays `GET /task-budgets/:id` (the backend route answers any
+    // status) and a 404 carries the backend's own message through runTool.
+    haven_get_task_budget: async (input) => {
+      const args = objectInput('haven_get_task_budget', input)
+      return runTool(async () => {
+        const taskBudget = await haven.getTaskBudget(args.task_budget_id as string)
+        return { task_budget: taskBudget }
       })
     },
 

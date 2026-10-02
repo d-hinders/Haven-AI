@@ -52,7 +52,13 @@ import { fileURLToPath } from 'url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const BASELINE_PATH = path.join(ROOT, 'design-lint-baseline.json')
-const SCAN_DIRS = ['src/app', 'src/components']
+// src/app and src/components are the app's own surfaces. packages/ui/src is
+// where the shared primitives moved (#3508), and packages/ops/src is the
+// private console that consumes them (#3515): the gate follows the code, or
+// the shim PR is the last one that sees the implementations. Both extra dirs
+// are passed through path.relative, so the exemption checks
+// (`file.includes('ui/src/Card.tsx')`) keep working for them.
+const SCAN_DIRS = ['src/app', 'src/components', '../ui/src', '../ops/src']
 const DOC_POINTER = 'See /design-system (Colour tokens · How to use this page).'
 
 // Tailwind palette families — white/black/transparent stay legal.
@@ -127,14 +133,22 @@ export const RULES = [
     // `border-b` is boundary-guarded: it must not match inside `border-black`
     // (a letter follows) but must still match `border-b` and `border-b-2`.
     regex:
-      /(border-b(?![a-zA-Z])[^"'`]*bg-\[var\(--v2-surface\)\]|bg-\[var\(--v2-surface\)\][^"'`]*border-b(?![a-zA-Z]))/g,
-    exempt: (file) => isMarketingSurface(file) || file.includes('components/ui/Card.tsx'),
+      /(border-b(?![a-zA-Z])[^"'"`]*bg-\[var\(--v2-surface\)\]|bg-\[var\(--v2-surface\)\][^"'"`]*border-b(?![a-zA-Z]))/g,
+    // Card moved to packages/ui/src (#3508); both homes are exempt — the
+    // canonical implementation is never self-flagged, wherever it lives.
+    exempt: (file) =>
+      isMarketingSurface(file) ||
+      file.includes('components/ui/Card.tsx') ||
+      file.includes('ui/src/Card.tsx'),
   },
   {
     id: 'raw-table',
     describe: 'raw <table> — use the Table primitive (components/ui/Table)',
     regex: /<table[\s>]/g,
-    exempt: (file) => isMarketingSurface(file) || file.includes('components/ui/Table.tsx'),
+    exempt: (file) =>
+      isMarketingSurface(file) ||
+      file.includes('components/ui/Table.tsx') ||
+      file.includes('ui/src/Table.tsx'),
   },
   {
     id: 'raw-svg',

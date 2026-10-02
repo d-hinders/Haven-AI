@@ -62,7 +62,7 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/issuance.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-01"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -633,6 +633,34 @@ and removal of authority already issued. This is deliberately not a replacement
 for the owner signature or the on-chain caveats, which remain the authority and
 enforcement.
 
+**The credential revoke accepts `pending_approval` (#3544).** The owner's
+`POST /agents/:id/revoke` also retires a connect-modal agent still awaiting its
+first budget: `REVOKE_AGENT_SQL` matches `status IN ('active', 'paused',
+'pending_approval')`. The widen is safe because nothing re-activates a revoked
+agent — an audit of every `UPDATE agents` writing `status = 'active'` found
+exactly three writers (`RESUME_AGENT_SQL`, requiring `paused`;
+`ACTIVATE_AGENT_SQL`, requiring `pending_approval`/`active`; the first-budget
+activation, requiring `pending_approval` behind the locked read
+`lockOwnedNonRevokedDelegationAgent`), and none matches `revoked`. The revoke
+is also where the agent's open connection setup retires: the same transaction
+cancels a setup still in `awaiting_connection`, `connected_local` or
+`awaiting_wallet_approval`, so a connect flow that has not finished cannot
+approve a budget for an agent that no longer exists; a setup that already
+carries an approval transaction hash is left for its existing refusal paths —
+the cancel does not reclassify evidence the setup state machine wrote. The
+setup-side half-apply is closed with it: `applyApprovalState` abandons its
+whole transaction when an intended `ACTIVATE_AGENT_SQL` matched zero rows, so
+an approval can never commit a setup `active` next to a revoked agent. The
+credential's `api_key_hash` is kept, so sweep recovery for a stranded delegate
+balance keeps working (the setup-cancel abort path's own
+`REVOKE_PENDING_AGENT_SQL` still nulls the key inside that flow; the dashboard
+revoke deliberately does not fork toward it, and a regression pin holds the
+difference). Authority only narrows: a `pending_approval` agent has no spend
+authority to begin with, the widened revoke ends the one thing it could become,
+and the refusal contract is typed — 404 for an agent the owner does not have,
+409 `error_code: already_revoked` for "already done", 409 `not_revocable` for
+any other owned-but-unrevocable status.
+
 ## 4. Exit story — design + acceptance test (#832's contract)
 
 **Claim to keep true for the live delegation rail:** *a user can enumerate and
@@ -1149,6 +1177,26 @@ proving on-chain state (the on-chain `CannotRemoveLastSigner` guard is the
 hard backstop). And a provisioning-time EOA owner is **not signature-verified**
 — the floor counts enrolled signers, it cannot prove each is usable (the zero
 address, which provably is NOT a signer, is rejected at every entry point).
+
+> **Re-verified #3518 (2026-10-01):** this PR adds a READ-ONLY export to
+> `infra/repositories/delegation-budgets.ts` — `selectBudgetForPaymentReport`,
+> the report-side mirror of the payment's own `SELECT_DELEGATION_FOR_PAYMENT_SQL`
+> (same recipient match, live window and ordering, over rows the derived view
+> already read). It writes nothing, activates nothing, retires nothing, and is
+> called only from the budget precheck's compare and the balance-coverage
+> report — both of which previously picked the FIRST per-token row, a
+> selection that could disagree with the enforcer about which caveat-bounded
+> grant a payment draws on. The change moves that off-chain opinion; the
+> on-chain gate is unchanged: spend remains bounded by the caveat stack
+> (`MultiTokenPeriodEnforcer` + allowed recipients + `Timestamp`), redemption
+> still requires the delegate key's signature, and the activation/replace
+> transaction this section pins (#1061/#2411/#2415) is untouched. Selection
+> opinion is not authority: no grant is created, widened, or redeemed by
+> choosing differently which existing owner-signed row a REPORT cites. The
+> same round adds read-only columns to `listActiveDelegations`' projection
+> (`delegation_hash`, `recipient_address`, `merchant_id`, the window, the
+> creation timestamp) — visibility fields for which budget a row is, with no
+> writer. Perimeter unchanged.
 
 The dashboard now delivers the recovery recommendation after funding, and both
 two-to-one signer-removal paths require an explicit consequence confirmation.
@@ -2090,6 +2138,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > pre-check only mirrors. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.
 >
+> **Re-verified unchanged (#3527, 2026-10-01):** the #3492 bypass above
+> widens from erc7710-only to also accept a settled EIP-3009 row —
+> `precheckBudget`'s doc comment now says "erc7710 OR eip3009", and the
+> backend's settled-row lookup (`isSettledX402Replay`, renamed from
+> `isSettledErc7710Replay`) accepts a `confirmed` row whose `tx_hash` is only
+> the EIP-3009 FUNDING leg (treasury → delegate), not a merchant settlement.
+> That is still the SAME fact `delegationReplay`'s own confirmed+tx_hash
+> branch already answers its stored 200 for, on every settlement scheme, so
+> the bypass activates on a lookup the authorize path already trusted — no
+> new trust is extended. No signature, key, delegation graph, caveat
+> enforcer or on-chain redemption path changes: the endpoint remains
+> read/decide-only, and the on-chain ERC20PeriodTransferEnforcer stays the
+> real gate either bypass only mirrors. The rest of this document was not
+> re-read for it, and `last-verified` is not bumped.
+>
 > **Re-verified unchanged (#3506, 2026-10-01, sub-budgets user-completable):**
 > the agent now submits its own sub-budget signatures. `haven_submit` accepts
 > `sub_budget_id` on both MCP runtimes through the SDK's `submitSubBudget`,
@@ -2125,3 +2188,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > action. Haven still signs nothing; ending a budget is still only the owner's
 > `revoke-all`. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
+
+> **#3553 (2026-10-01).** Sub-budget issuance (`POST /agents/:id/sub-budgets`)
+> and the owner's signature relay (`POST /agents/:id/sub-budgets/:sub/sign`)
+> now refuse a revoked or archived issuing agent with 409 `issuer_retired`,
+> before the handler's body checks, and issuance refuses a revoked, archived or
+> `pending_approval` receiving agent with 409 `sub_agent_retired`. Opening a
+> grant row is refused with the same code when its receiving agent is retired,
+> in both the owner relay and the agent's `POST /sub-budgets/:id/submit` (the
+> row stays pending; close submits are never gated). A
+> half-revoked issuer could previously have new sub-budgets carved from its
+> still-active budget, and the relay would open a `pending` row with a
+> signature made before revocation. The issuer gate sits in the two owner
+> routes and the grant gate in `isGrantReceiverRetired` (called from the relay
+> and the agent submit); neither is in `loadOwnedDelegationAgent`, so
+> authority-reducing routes keep serving retired agents. `paused` passes, as on the delegation routes. The narrowing
+> gate and the relay's signer check are unchanged. The rest of this document
+> was not re-read for it, and `last-verified` is not bumped.
+

@@ -8,9 +8,11 @@
 import { randomUUID } from 'node:crypto'
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { updateAgentProfile } from '../agents.js'
+import { archiveAgent, revokeAgent, updateAgentProfile } from '../agents.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
+  ACTIVATE_AGENT_SQL,
+  applyApprovalState,
   cancelSetup,
   findSetupByTokenHash,
   findSetupForUser,
@@ -482,4 +484,229 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     expect(updated?.mcp_server_name).toBe('haven-work')
   })
 
+})
+
+// ── #3544: revoke a pending_approval agent; the open setup goes with it ──
+//
+// The issue's acceptance criteria, on the real database: revoke widens to
+// `pending_approval`, nothing flips a revoked agent back to `active`,
+// revoking cancels the agent's open setup, `applyApprovalState` abandons on a
+// zero-row activation, and the credential's `api_key_hash` survives revoke
+// (sweep recovery keeps working). Every test here FAILED on 3739fd3b except
+// the two marked regression pins, which pass there and pin the widening's
+// safety.
+describeDb('revoke accepts pending_approval (#3544, real DB)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  /**
+   * The issue's repro shape: a user, a delegator_hybrid account, and a
+   * connect-modal agent on it with no delegations — `pending_approval`, the
+   * normal starting state (#1130).
+   */
+  async function seedPendingAgentOnDelegatorAccount(): Promise<{
+    userId: string
+    agentId: string
+    apiKeyHash: string
+  }> {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`revoke-pending-${++seq}-${Date.now()}@test.example`],
+    )
+    const account = await db.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, name, chain_id, is_default, account_type)
+       VALUES ($1, $2, 'Delegation account', 84532, true, 'delegator_hybrid') RETURNING id`,
+      [user.rows[0].id, ADDR(String(++seq % 10))],
+    )
+    const apiKeyHash = `k${++seq}`.padEnd(64, '0')
+    const agentId = await inTransaction(async (tx) =>
+      insertPendingAgent(
+        {
+          userId: user.rows[0].id,
+          name: 'Pending connect agent',
+          description: null,
+          delegateAddress: ADDR(`d${seq}`),
+          apiKeyHash,
+          apiKeyPrefix: 'sk_agent_pnd',
+          accountId: account.rows[0].id,
+        },
+        tx,
+      ),
+    )
+    return { userId: user.rows[0].id, agentId, apiKeyHash }
+  }
+
+  /** The owning account's id — setups and the agent must share it. */
+  async function agentAccountId(agentId: string): Promise<string> {
+    const account = await db.query<{ account_id: string }>(
+      `SELECT account_id FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    return account.rows[0].account_id
+  }
+
+  /** A connected_local setup whose agent_id points at the given agent. */
+  async function seedConnectedSetup(agentId: string, userId: string): Promise<string> {
+    const setup = newSetup(userId, await agentAccountId(agentId))
+    await insertSetupWithAllowances(setup, [USDC_ALLOWANCE])
+    await inTransaction(async (tx) => {
+      await markSetupRegistered(
+        {
+          setupId: setup.id,
+          agentId,
+          delegateAddress: ADDR(`d${++seq}r`),
+          proofSignature: '0xproof',
+          apiKeyPrefix: 'sk_agent_pnd',
+          connectorVersion: '1.2.3',
+          runtime: 'node',
+          runMode: null,
+          connectorContext: {},
+          installStatus: {},
+        },
+        tx,
+      )
+    })
+    return setup.id
+  }
+
+  async function agentRow(agentId: string): Promise<{
+    status: string
+    api_key_hash: string | null
+    archived_at: Date | null
+  }> {
+    const row = await db.query<{
+      status: string
+      api_key_hash: string | null
+      archived_at: Date | null
+    }>(`SELECT status, api_key_hash, archived_at FROM agents WHERE id = $1`, [agentId])
+    return row.rows[0]
+  }
+
+  it('revokeAgent succeeds for a pending_approval agent on a delegator_hybrid account, and archiveAgent then succeeds', async () => {
+    const { userId, agentId } = await seedPendingAgentOnDelegatorAccount()
+
+    expect(await revokeAgent(agentId, userId)).toBe(true)
+    const revoked = await agentRow(agentId)
+    expect(revoked.status).toBe('revoked')
+
+    // The second half of the Remove dialog's chain — previously the 409
+    // "Only revoked agents can be archived".
+    expect(await archiveAgent(agentId, userId)).toMatchObject({ id: agentId })
+    expect((await agentRow(agentId)).archived_at).not.toBeNull()
+  })
+
+  it('revoking cancels the agent\u2019s open connection setup, in the revoke transaction', async () => {
+    const { userId, agentId } = await seedPendingAgentOnDelegatorAccount()
+    const setupId = await seedConnectedSetup(agentId, userId)
+    expect((await findSetupForUser(setupId, userId))!.status).toBe('connected_local')
+
+    expect(await revokeAgent(agentId, userId)).toBe(true)
+
+    expect((await findSetupForUser(setupId, userId))!.status).toBe('cancelled')
+    expect((await agentRow(agentId)).status).toBe('revoked')
+  })
+
+  it('a revoke with no setup, and an idempotent re-revoke, both behave', async () => {
+    const { userId, agentId } = await seedPendingAgentOnDelegatorAccount()
+
+    expect(await revokeAgent(agentId, userId)).toBe(true)
+    // No setup existed for this agent; the cancel matched nothing and the
+    // revoke still committed.
+    expect((await agentRow(agentId)).status).toBe('revoked')
+
+    // Already revoked: the agent UPDATE matches nothing, the whole
+    // transaction answers false without touching anything.
+    expect(await revokeAgent(agentId, userId)).toBe(false)
+  })
+
+  it('applyApprovalState abandons when ACTIVATE_AGENT_SQL matches no row — the setup never commits active (failed on 3739fd3b)', async () => {
+    const { userId, agentId } = await seedPendingAgentOnDelegatorAccount()
+    const setupId = await seedConnectedSetup(agentId, userId)
+    // The zero-row frame: an agent revoked OUTSIDE the revoke transaction —
+    // a row written before cancel-on-revoke existed (#3544), or any direct
+    // revocation path. The setup is still open, so every guard passes and
+    // approval proceeds to the activation leg — where the agent UPDATE
+    // matches nothing. Without the guard this transaction COMMITS the setup
+    // `active` next to a revoked agent: exactly the half-apply the invariant
+    // forbids.
+    await db.query(`UPDATE agents SET status = 'revoked' WHERE id = $1`, [agentId])
+
+    const result = await applyApprovalState(
+      { id: setupId, user_id: userId },
+      {
+        status: 'active',
+        approvalStatus: 'confirmed',
+        txHash: null,
+        accountTxHash: null,
+        failureReason: null,
+        activateAgent: true,
+      },
+    )
+    expect(result).toBeNull()
+    // Abandoned: the setup keeps its open state (NOT cancelled — this test
+    // isolates the zero-row guard from the cancel-on-revoke one) and the
+    // agent stays revoked.
+    expect((await findSetupForUser(setupId, userId))!.status).toBe('connected_local')
+    expect((await agentRow(agentId)).status).toBe('revoked')
+  })
+
+  it('applyApprovalState still activates a pending_approval agent when nothing revoked it (guard is narrow)', async () => {
+    const { userId, agentId } = await seedPendingAgentOnDelegatorAccount()
+    const setupId = await seedConnectedSetup(agentId, userId)
+
+    const result = await applyApprovalState(
+      { id: setupId, user_id: userId },
+      {
+        status: 'active',
+        approvalStatus: 'confirmed',
+        txHash: null,
+        accountTxHash: null,
+        failureReason: null,
+        activateAgent: true,
+      },
+    )
+    expect(result).not.toBeNull()
+    expect(result!.status).toBe('active')
+    expect((await agentRow(agentId)).status).toBe('active')
+  })
+
+  it('ACTIVATE_AGENT_SQL and the first-budget activation never flip a revoked agent back to active (regression pin)', async () => {
+    const { userId, agentId } = await seedPendingAgentOnDelegatorAccount()
+    expect(await revokeAgent(agentId, userId)).toBe(true)
+
+    // `ACTIVATE_AGENT_SQL` — the setup path's idempotent safety net.
+    await inTransaction(async (tx) => {
+      await tx.query(ACTIVATE_AGENT_SQL, [agentId, userId])
+    })
+    // The first-budget activation, `routes/agent-delegations.ts:751`.
+    await inTransaction(async (tx) => {
+      await tx.query(
+        `UPDATE agents SET status = 'active', updated_at = NOW()
+         WHERE id = $1 AND status = 'pending_approval'`,
+        [agentId],
+      )
+    })
+    expect((await agentRow(agentId)).status).toBe('revoked')
+  })
+
+  it('revoke keeps api_key_hash and api_key_prefix — sweep recovery survives (regression pin)', async () => {
+    const { userId, agentId, apiKeyHash } = await seedPendingAgentOnDelegatorAccount()
+
+    expect(await revokeAgent(agentId, userId)).toBe(true)
+    const revoked = await agentRow(agentId)
+    expect(revoked.status).toBe('revoked')
+    expect(revoked.api_key_hash).toBe(apiKeyHash)
+    // And it must NOT fork toward REVOKE_PENDING_AGENT_SQL's behaviour
+    // (setup-cancel nulls the key; the dashboard revoke deliberately does not).
+    const key = await db.query<{ api_key_prefix: string | null }>(
+      `SELECT api_key_prefix FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(key.rows[0].api_key_prefix).not.toBeNull()
+  })
 })

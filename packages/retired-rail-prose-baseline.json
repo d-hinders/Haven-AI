@@ -75,7 +75,7 @@
     "remain-readable": 1,
     "stays-readable": 1
   },
-  "packages/frontend/src/components/ui/CopyButton.tsx": {
+  "packages/ui/src/CopyButton.tsx": {
     "still-readable": 1
   },
   "packages/frontend/src/hooks/useAgents.ts": {

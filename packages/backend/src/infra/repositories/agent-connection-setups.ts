@@ -535,6 +535,47 @@ export async function cancelSetup(
   return result.rows.length > 0
 }
 
+/**
+ * Cancel every OPEN setup of one agent, inside the caller's transaction.
+ *
+ * #3544: revoking an agent must also retire its open connection setup — the
+ * owner has revoked the authority the setup exists to grant, and the revoke
+ * transaction is the atomic point where that becomes true. Without this, the
+ * setup hangs in `connected_local`/`awaiting_wallet_approval` indefinitely
+ * (expiry covers only `awaiting_connection`), and its `budget-approval`
+ * answers 409 with the misleading "The agent budget has not been approved
+ * yet".
+ *
+ * The status set mirrors `CANCEL_SETUP_SQL`, and the two NULL predicates with
+ * it: a setup that already carries an approval transaction hash is past the
+ * point cancel covers, so the guard leaves it for the existing refusal paths
+ * rather than reclassifying evidence the setup state machine wrote. Terminal
+ * statuses (`cancelled`, `expired`, `failed`) and the two approval-committed
+ * shapes (`proposed`, `approval_in_progress`) are excluded by the same guard.
+ *
+ * Fire-and-forget by design: a zero count is a fact, not an error — the
+ * agent UPDATE is the revocation, and it matched. A cancelled/terminal setup
+ * row is left exactly as it is (idempotent re-revoke is a no-op here).
+ */
+export const CANCEL_OPEN_SETUPS_FOR_AGENT_SQL = `UPDATE agent_connection_setups
+         SET status = 'cancelled',
+             setup_token_consumed_at = COALESCE(setup_token_consumed_at, NOW()),
+             updated_at = NOW()
+         WHERE agent_id = $1
+           AND user_id = $2
+           AND status IN ('awaiting_connection', 'connected_local', 'awaiting_wallet_approval')
+           AND account_tx_hash IS NULL
+           AND tx_hash IS NULL
+         RETURNING id`
+
+export async function cancelSetupsForAgent(
+  agentId: string,
+  userId: string,
+  tx: Executor,
+): Promise<void> {
+  await tx.query(CANCEL_OPEN_SETUPS_FOR_AGENT_SQL, [agentId, userId])
+}
+
 export const REVOKE_PENDING_AGENT_SQL = `UPDATE agents
              SET status = 'revoked',
                  api_key_hash = NULL,
@@ -562,7 +603,8 @@ export const UPDATE_APPROVAL_STATE_SQL = `UPDATE agent_connection_setups
 export const ACTIVATE_AGENT_SQL = `UPDATE agents
          SET status = 'active',
              updated_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND status IN ('pending_approval', 'active')`
+         WHERE id = $1 AND user_id = $2 AND status IN ('pending_approval', 'active')
+         RETURNING id`
 
 /** Signals "abandon this transaction and answer null" — never leaves this file. */
 class AbandonTransaction extends Error {}
@@ -650,7 +692,18 @@ export async function applyApprovalState(
         input.failureReason,
       ])
       if (input.activateAgent && nextSetup.agent_id) {
-        await tx.query(ACTIVATE_AGENT_SQL, [nextSetup.agent_id, nextSetup.user_id])
+        const activated = await tx.query<{ id: string }>(ACTIVATE_AGENT_SQL, [
+          nextSetup.agent_id,
+          nextSetup.user_id,
+        ])
+        // #3544: an intended activation that matched ZERO rows is a half-apply
+        // in the dangerous direction — the setup would commit `active` next to
+        // an agent the owner already revoked (or that vanished under us), the
+        // one state the threat-model invariant forbids. Abandon the whole
+        // transaction instead: the setup keeps its prior state, the approval
+        // evidence is not consumed, and the caller answers the standard
+        // "state changed" refusal.
+        if (activated.rows.length === 0) throw new AbandonTransaction()
       }
       return nextSetup
     })

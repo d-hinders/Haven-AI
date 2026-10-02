@@ -1,0 +1,8 @@
+/*
+ * The ops console's stylesheet (#3515). The design tokens come from
+ * `@haven_ai/ui/tokens.css` (imported in the root layout); this file exists
+ * so Tailwind's base layers are composed here, exactly as the frontend does.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

@@ -23,6 +23,8 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      ui: ${{ steps.filter.outputs.ui }}
+      ops: ${{ steps.filter.outputs.ops }}
       backend: ${{ steps.filter.outputs.backend }}
       sdk: ${{ steps.filter.outputs.sdk }}
       connect: ${{ steps.filter.outputs.connect }}
@@ -291,6 +293,76 @@ jobs:
 
       - name: Build core
         run: npm run build -w packages/core
+
+  ui_checks:
+    name: UI checks
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check ui
+        run: npm run typecheck -w packages/ui
+
+      - name: Run ui unit tests
+        # The moved primitives' suites (#3508). Until this job existed they ran
+        # only inside the frontend's job; the package has its own now because a
+        # ui-only change routes here, not to the frontend job.
+        run: npm run test -w packages/ui
+
+  ops_checks:
+    name: Ops checks
+    needs: changes
+    if: needs.changes.outputs.ops == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check ops
+        run: npm run typecheck -w packages/ops
+
+      - name: Design-system drift gate
+        # The design lint's scan spans ../ui/src and ../ops/src (#3515), but an
+        # ops-only diff never routes frontend_checks — so the console's own job
+        # runs the same gate, or an ops-side violation ships green.
+        run: npm run design:lint -w packages/frontend
+
+      - name: Wire-type ratchet (#1447)
+        # Same shape: the ratchet's SCAN_DIRS gained packages/ops/src/lib (#3515),
+        # and this is the only job an ops-only diff can run it in.
+        run: |
+          npm run lint:wire-types
+          npm run lint:wire-types:test
+
+      - name: Run ops unit tests
+        # The console scaffold's suites (#3515): the registry parser, the token
+        # store, the nonce-matched fragment handoff, the origin-scoped fetch
+        # wrapper, and the source guard that pins the storage/injection rules.
+        run: npm run test -w packages/ops
+
+      - name: Build ops
+        run: npm run build -w packages/ops
 
   qa_agent_checks:
     name: QA agent checks
@@ -981,7 +1053,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -1072,6 +1144,16 @@ jobs:
 
           if [ "${{ needs.changes.outputs.frontend }}" = "true" ] && [ "${{ needs.frontend_checks.result }}" != "success" ]; then
             echo "Frontend checks result: ${{ needs.frontend_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.ui }}" = "true" ] && [ "${{ needs.ui_checks.result }}" != "success" ]; then
+            echo "UI checks result: ${{ needs.ui_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.ops }}" = "true" ] && [ "${{ needs.ops_checks.result }}" != "success" ]; then
+            echo "Ops checks result: ${{ needs.ops_checks.result }}"
             exit 1
           fi
 

@@ -196,7 +196,7 @@ describe('the fan-out the issue specifies', () => {
     const full = PROPAGATION_RULES.find((r) => r.when.includes('full'))
     assert.deepEqual(
       [...full.then].sort(),
-      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'qa_agent', 'sdk', 'signer'],
+      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'ops', 'qa_agent', 'sdk', 'signer', 'ui'],
     )
   })
 
@@ -237,18 +237,21 @@ describe('the fan-out the issue specifies', () => {
     // @haven_ai/core (#3005), so a CORE change fans out to both. Their own
     // changes still fan out to nothing, which is the leaf property asserted
     // below. mcp_server joined core's dependents in #3419: its
-    // hosted-signer-integration test pins CLIENT_RELEASES.
+    // hosted-signer-integration test pins CLIENT_RELEASES. ops joined in
+    // #3515: the console reads core api-types for /ops/* and its scripts
+    // build core first.
     assert.deepEqual(thenFor('frontend'), [], 'frontend still has no dependents')
     assert.deepEqual(thenFor('backend'), [], 'backend still has no dependents')
-    assert.deepEqual(dependentsOf('core').sort(), ['backend', 'frontend', 'mcp_server'])
+    assert.deepEqual(dependentsOf('core').sort(), ['backend', 'frontend', 'mcp_server', 'ops'])
   })
 
-  test('core fans out to frontend, backend and mcp_server; qa_agent to nothing', () => {
+  test('core fans out to frontend, backend, mcp_server and ops; qa_agent to nothing', () => {
     // core CONSUMES nothing (declares no @haven_ai/* dependency) but is
-    // CONSUMED BY frontend, backend and (since #3419) mcp_server, so a core
-    // change runs exactly those three suites. qa_agent consumes sdk and
-    // signer and is consumed by nobody, so it is a leaf.
-    assert.deepEqual(thenFor('core').sort(), ['backend', 'frontend', 'mcp_server'])
+    // CONSUMED BY frontend, backend, mcp_server (since #3419) and ops (since
+    // #3515 — the console reads core api-types for /ops/*), so a core change
+    // runs exactly those four suites. qa_agent consumes sdk and signer and is
+    // consumed by nobody, so it is a leaf.
+    assert.deepEqual(thenFor('core').sort(), ['backend', 'frontend', 'mcp_server', 'ops'])
     assert.deepEqual(thenFor('qa_agent'), [])
   })
 

@@ -1618,6 +1618,20 @@ Check balances by role:
 Do not repeatedly rerun a money-moving harness while the cause is unknown; each
 run consumes test allowance and test USDC.
 
+**#3494: `POST /payments/:id/sign`'s failure body now carries a typed
+`error_code`** (`submission_outcome_unknown`, `signature_rejected`,
+`account_validation_failed`, `task_budget_exceeded`,
+`delegation_budget_exceeded`, or `onchain_execution_failed`) and, on the
+four non-budget codes, a bounded `details` string — capped at 300
+characters plus an ellipsis, never the full bundler/viem failure. The bound
+applies to viem's own FULL `.message` (after `redactVendorSecrets`), not
+just its `shortMessage` summary field — and viem formats that message as the
+`shortMessage`, then the request arguments, then a `Details:` line carrying the on-chain
+revert reason, then `Version:`. The revert reason is therefore often past
+the 300-character cut, truncated or absent from `details` entirely — read
+the on-chain transaction directly (the explorer, or a raw `eth_call`
+replay) for the full reason, rather than assuming `details` is complete.
+
 ### Sweep is skipped after 20 seconds
 
 The merchant did not produce a visible stranded balance. Confirm its Base

@@ -25,6 +25,9 @@ import pool from '../../db.js'
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { withTransaction, type Executor } from '../transaction.js'
 import { LIVE_DELEGATION_STATUSES_SQL } from './delegation-budgets.js'
+// #3544: the revoke transaction also cancels the agent's open connection
+// setup — same file family, one direction, no cycle (setups never imports us).
+import { cancelSetupsForAgent } from './agent-connection-setups.js'
 
 export type { Executor }
 
@@ -108,6 +111,8 @@ export interface DelegationAgentRow {
   chain_id: number
   treasury_address: string | null
   account_type: string | null
+  /** #3553: lets the sub-budget issuance gate refuse an archived issuer. */
+  archived_at: Date | string | null
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────
@@ -124,11 +129,27 @@ export async function loadOwnedDelegationAgent(
 ): Promise<DelegationAgentRow | null> {
   const result = await db.query<DelegationAgentRow>(
     `SELECT a.id AS agent_id, a.status, a.delegate_address, us.chain_id,
-            us.account_address AS treasury_address, us.account_type
+            us.account_address AS treasury_address, us.account_type, a.archived_at
      FROM agents a
      LEFT JOIN smart_accounts us ON us.id = a.account_id
      WHERE a.id = $1 AND a.user_id = $2`,
     [agentId, userId],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
+ * #3553: lifecycle-only read by agent id (no owner scope — the caller already
+ * holds a row whose ownership it verified). Used to refuse opening a sub-budget
+ * grant whose receiving agent has since been retired.
+ */
+export async function findAgentLifecycleById(
+  agentId: string,
+  db: Executor = pool,
+): Promise<{ status: string; archived_at: Date | string | null } | null> {
+  const result = await db.query<{ status: string; archived_at: Date | string | null }>(
+    `SELECT status, archived_at FROM agents WHERE id = $1`,
+    [agentId],
   )
   return result.rows[0] ?? null
 }
@@ -765,17 +786,42 @@ export async function unarchiveAgent(
   return result.rows.length > 0
 }
 
+// #3544: `pending_approval` joins the set. The invariant that makes widening
+// safe: nothing re-activates a revoked agent. An audit of every `UPDATE
+// agents` writing `status='active'` found exactly three writers —
+// `RESUME_AGENT_SQL` (requires `paused`), `ACTIVATE_AGENT_SQL` (requires
+// `pending_approval`/`active`), and the first-budget activation inside
+// `routes/agent-delegations.ts` (requires `pending_approval`, behind the
+// `lockOwnedNonRevokedDelegationAgent` read) — and none matches `revoked`.
+// `pending_approval` is the normal starting state for every connect-modal
+// agent (#1130), so the owner must be able to retire one cleanly: today the
+// revoke 404s, the Remove dialog's #1437 guard mistakes that 404 for
+// "already done", and archive then 409s — the filing never finishes.
 export const REVOKE_AGENT_SQL = `UPDATE agents SET status = 'revoked', updated_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND status IN ('active', 'paused')
+         WHERE id = $1 AND user_id = $2 AND status IN ('active', 'paused', 'pending_approval')
          RETURNING id`
 
+/**
+ * Revoke the agent AND retire its open connection setup as one unit (#3544).
+ *
+ * Both writes or neither: a revoke that left the setup open would hang it
+ * forever (expiry covers only `awaiting_connection`) with a budget-approval
+ * that 409s misleadingly, and there is no ordering of two separate
+ * transactions that removes that window. A missing/cancelled setup is a
+ * no-op — the cancel's guards decide, and a zero count is a fact, not an
+ * error.
+ */
 export async function revokeAgent(
   agentId: string,
   userId: string,
   db: Executor = pool,
 ): Promise<boolean> {
-  const result = await db.query<{ id: string }>(REVOKE_AGENT_SQL, [agentId, userId])
-  return result.rows.length > 0
+  return withTransaction(db, async (tx) => {
+    const result = await tx.query<{ id: string }>(REVOKE_AGENT_SQL, [agentId, userId])
+    if (result.rows.length === 0) return false
+    await cancelSetupsForAgent(agentId, userId, tx)
+    return true
+  })
 }
 
 export const ROTATE_AGENT_API_KEY_SQL = `UPDATE agents SET api_key_hash = $1, api_key_prefix = $2, updated_at = NOW()

@@ -52,6 +52,8 @@ import { ALLOWLIST as SERVED_DOC_SOURCES } from '../../packages/frontend/scripts
 export const OUTPUT_NAMES = Object.freeze([
   'code',
   'frontend',
+  'ui',
+  'ops',
   'backend',
   'sdk',
   'connect',
@@ -271,6 +273,20 @@ export const SURFACE_RULES = Object.freeze([
   // to name every job it needs — a rule placed here that named fewer jobs than
   // the generic arm would quietly NARROW routing rather than widen it.
   ...ROOT_GUARD_RULES,
+  {
+    // The shared design system (#3508). Above the packages/* catch-all and
+    // beside its siblings: a ui-only change runs the ui job alone (the
+    // frontend fans back in through the dependency table).
+    patterns: ['packages/ui/*'],
+    surfaces: ['code', 'ui'],
+  },
+  {
+    // The private ops console (#3515). Above the packages/* catch-all and
+    // beside its siblings: an ops-only change runs the ops job alone (frontend
+    // and ui fan back in through the dependency table — ops consumes both).
+    patterns: ['packages/ops/*'],
+    surfaces: ['code', 'ops'],
+  },
   { patterns: ['packages/frontend/*'], surfaces: ['code', 'frontend'] },
   { patterns: ['packages/backend/*'], surfaces: ['code', 'backend'] },
   { patterns: ['packages/sdk/*'], surfaces: ['code', 'sdk'] },

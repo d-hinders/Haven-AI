@@ -261,6 +261,14 @@ describe('task budgets API (#3329)', () => {
     expect(res.json().task_budgets).toHaveLength(1)
   })
 
+  it('#3518: GET /?status=live asks the repository for live rows only (closing, or unexpired pending/open)', async () => {
+    mockDb({ list: [taskBudgetRow({ status: 'open' })] })
+    const res = await app.inject({ method: 'GET', url: '/task-budgets?status=live' })
+    expect(res.statusCode).toBe(200)
+    const listSql = mockQuery.mock.calls.map(([sql]) => String(sql)).find((sql) => /FROM agent_task_budgets/.test(sql))
+    expect(listSql).toMatch(/status = 'closing' OR \(status IN \('pending', 'open'\) AND expires_at > \$2\)/)
+  })
+
   it('#3501: GET / enriches an open row with the on-chain spent/remaining, atomic and display', async () => {
     mockDb({ list: [taskBudgetRow({ status: 'open', max_atomic: '1500' })] })
     const res = await app.inject({ method: 'GET', url: '/task-budgets' })
@@ -428,7 +436,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     const row = taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ userOp: true }) })
@@ -451,7 +459,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     mockReadDisabled.mockResolvedValue(new Set())
@@ -473,7 +481,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     mockReadDisabled.mockRejectedValue(new Error('rpc down'))

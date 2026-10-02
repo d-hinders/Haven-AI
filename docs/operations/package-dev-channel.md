@@ -284,6 +284,22 @@ and the `release` skill.
 > reads 2026-09-24 from an earlier change, and this note re-reads only
 > `CONNECTOR_VERSION` and the channel constant's value.
 >
+> **Re-verification (#3509):** coupled because `packages/backend/src/config.ts`
+> is in this doc's `covers:`. The only change there adds one field, `config.ops`
+> (the ops console's settings, parsed by `config/ops.ts`), plus its import, and
+> adds `ops_auth` to the two TRUST_PROXY_HOPS boot-warning strings.
+> `connectorChannel` / `parseConnectorChannel` and `requestValidationMode`, the
+> two `config.ts` claims this document makes, have no diff
+> (`git diff origin/dev -- packages/backend/src/config.ts`). `last-verified` is
+> not bumped. Scope of this note: the config claims — nothing else in this
+> document was re-verified.
+>
+> **Re-verification (#3510):** coupled for the same reason. The only change to
+> `packages/backend/src/config.ts` adds one field, `opsDatabaseUrl` (parsed by
+> `parseOpsDatabaseUrl` in `config/ops.ts`) and its comment, plus its import.
+> `connectorChannel` / `parseConnectorChannel` and `requestValidationMode` have
+> no diff. `last-verified` is not bumped; nothing else here was re-verified.
+>
 > **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
 > is in this doc's `covers:`. The only edit there is a comment: the sentence
 > saying the public release documents "will read" the table became "read", now

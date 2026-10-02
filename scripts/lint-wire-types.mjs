@@ -68,6 +68,10 @@ export const BASELINE_PATH = join(REPO_ROOT, 'packages', 'frontend', 'wire-type-
 export const SCAN_DIRS = [
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'hooks'),
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'types'),
+  // The ops console reads @haven_ai/core api-types for /ops/* (#3515): its
+  // hooks and types belong in the same ratchet as the dashboard's, so a
+  // hand-restated wire shape there cannot silently drift either.
+  join(REPO_ROOT, 'packages', 'ops', 'src', 'lib'),
 ]
 
 /**

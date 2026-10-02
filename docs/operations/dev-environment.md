@@ -28,8 +28,21 @@ covers:
   - packages/backend/src/routes/accounting-webhooks.ts
   - packages/frontend/src/lib/demo-gate.ts
   - packages/frontend/playwright.config.ts
-last-verified: "2026-09-28"
+last-verified: "2026-10-02"
 ---
+
+> **Re-verified #3564 (2026-10-02):** `index.ts` gains one more
+> leader-gated background tick beside the settlement sweep — the submission
+> reconciler (`modules/payments/submission-reconciler.ts`, lock key
+> `submissionReconcile`), every 60 s, `unref`'d like the sweep's own
+> interval. It resolves the direct payments whose sign submit was SENT but
+> whose receipt was never confirmed (the rows #3564 books outcome-pending):
+> one bundler receipt read per candidate row, terminal writes via CAS, and
+> a per-candidate try/catch so one poison row cannot silence the queue. No
+> route file is added or moved, `enforcedModules` is untouched, and the
+> shadow/enforce semantics this document describes are unchanged. Nothing
+> else in this file's coverage was touched; this note and the
+> `last-verified` date are the only edits.
 
 # Dev environment
 
@@ -104,6 +117,25 @@ deployed that way today.
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public and carries only status, timestamp, and database health; `/health/ops` is operator-only).
+  The ops console's backend routes (`/ops/*`, #3509, epic #3507) answer 404
+  on any backend that does not set all six `OPS_*` variables documented in
+  [`.env.dev.example`](../../.env.dev.example); a partly-configured backend is
+  the same as an unconfigured one. Setting them on a deployed service is an
+  operator step tracked on the epic's promotion checklist. The data routes
+  also need `OPS_DATABASE_URL`, the read-only role's login — see
+  [`ops-readonly-role.md`](ops-readonly-role.md). The customer on-chain view
+  (`GET /ops/users/{id}/onchain`, #3513) additionally needs the chain
+  readers, which `index.ts` wires whenever the read-only role is configured;
+  without them that one route answers 404 while the rest of `/ops` works.
+  The system-health read (`GET /ops/health`, #3514) needs no extra
+  configuration: it embeds the same payload the operator-token `/health/ops`
+  serves (built by the same function, wired in `index.ts` whenever the
+  read-only role is configured — without it this route answers 404 like the
+  other data reads) plus monitor-derived problem lists. The delegate-balance
+  section reflects the delegate monitor's last in-memory report, so a
+  replica that does not hold the monitor's leader lock answers
+  `not_available_on_this_replica` instead of figures; there is never a scan
+  on request.
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
@@ -239,6 +271,7 @@ Isolation rules that are non-negotiable for a payments product:
 
 - **Separate Postgres** from prod (`DATABASE_URL` points at the dev instance).
 - **Dev-only `JWT_SECRET`** — prevents cross-environment token confusion.
+- **Dev-only `OPS_JWT_SECRET` and GitHub OAuth App** — the ops console (#3509) gets its own dev values, never the prod ones, for the same reason.
 - **`RELAYER_PRIVATE_KEY`** — since the #908 owner decision (2026-07-19) the
   SAME relayer EOA (`0xC825…9D7E`) serves Base mainnet and Base Sepolia,
   funded on both; it is gas-only either way (customer funds are unreachable
@@ -468,7 +501,11 @@ Isolation rules that are non-negotiable for a payments product:
   auth, one uuid path parameter, no body) and the PUT (owner auth) were both
   added to `enforcedModules` in their first commit; the request schema comes
   from the OpenAPI spec, so a body that is not exactly
-  `{ tax_declaration_enabled: boolean }` is refused before the handler. The
+  `{ tax_declaration_enabled: boolean }` is refused before the handler. #3509's
+  `routes/ops.ts` did the same; its plugin answers 404 before validation
+  when the ops console is unconfigured. #3512's data routes
+  (`GET /ops/overview`, `/ops/search`, `/ops/users/{id}`) joined that module,
+  so they were enforced from their first commit too. The
   `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are

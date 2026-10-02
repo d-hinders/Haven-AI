@@ -282,7 +282,8 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
   // ── GET /task-budgets — list (default: open, not expired) ────────────────
   app.get<{ Querystring: { status?: string } }>('/', async (request, reply) => {
     const agent = request.agent as AgentContext
-    const status = request.query?.status === 'all' ? 'all' : 'open'
+    const requested = request.query?.status
+    const status = requested === 'all' || requested === 'live' ? requested : 'open'
     const nowSec = Math.floor(Date.now() / 1000)
     const rows = await listForAgent(agent.id, { status, nowSec })
     // #3501: every open row is enriched with the live on-chain spent/remaining

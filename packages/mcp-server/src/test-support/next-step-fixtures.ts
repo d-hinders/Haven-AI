@@ -37,8 +37,14 @@ const HOSTED = (name: string) => ({
  * reason-bearing evidence-refusal arm — a refused report whose backend
  * relayed a `reason` (only the eip3009 settlement seam emits one) is its
  * own emission, keyed on the reason's PRESENCE, never on payment status.
+ * #3527 adds TWO more: `eip3009ConfirmedReplayResponse` (`guidance.ts`) is
+ * the EIP-3009 twin of `settledReplayResponse` for a confirmed
+ * `createX402Intent` replay, and it is two full call sites of its own
+ * (merchant-leg verified/reported → done; otherwise → the #2290 remedy),
+ * shared by `haven_prepare_catalog_purchase` step 9 and
+ * `haven_pay_mcp_tool`'s 3009 branch.
  */
-export const EMISSION_SITE_COUNT = 24
+export const EMISSION_SITE_COUNT = 26
 /**
  * Fixtures for those sites: the held-hash site has two branches, the three
  * null-id sites share one helper, the report-outcome accepted site has two
@@ -46,9 +52,12 @@ export const EMISSION_SITE_COUNT = 24
  * follow-up), the missing-settlement-hash success no-op is its own site
  * (#3475 follow-up review round 1, S3), and the no-sign-data replay guard
  * (#3495 review round 1, S5) is two full sites of its own (confirmed / still
- * resolving) — one fixture each, matching the two call sites.
+ * resolving) — one fixture each, matching the two call sites. #3529 adds
+ * one (the reason-bearing evidence-refusal arm). #3527 adds two more:
+ * `eip3009ConfirmedReplayResponse`'s done-state and
+ * funded-awaiting-merchant-remedy branches, one fixture each.
  */
-export const EMISSION_FIXTURE_COUNT = 28
+export const EMISSION_FIXTURE_COUNT = 30
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -97,6 +106,9 @@ export const EMISSION_SITES = [
   // branches: confirmed (no tool follows) and still-resolving (poll status).
   { site: 'state-direct-recovery.ts no-sign-data replay: confirmed (no tool)', action: AgentPaymentNextAction.None, tool: null, reason: 'this idempotency_key already settled; there is nothing left to sign', expect: { next_tool_omitted_reason: 'this idempotency_key already settled; there is nothing left to sign' } },
   { site: 'state-direct-recovery.ts no-sign-data replay: still resolving', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
+  // #3527: guidance.ts's eip3009ConfirmedReplayResponse — the EIP-3009 twin of the erc7710 settled-replay answer, shared by haven_prepare_catalog_purchase step 9 and haven_pay_mcp_tool's 3009 branch.
+  { site: 'guidance.ts eip3009 confirmed replay: merchant leg verified/reported (no tool)', action: AgentPaymentNextAction.None, tool: null, reason: 'this idempotency_key already funded this payment and the merchant leg is recorded; there is nothing left to sign or pay', expect: { next_tool_omitted_reason: 'this idempotency_key already funded this payment and the merchant leg is recorded; there is nothing left to sign or pay' } },
+  { site: 'guidance.ts eip3009 confirmed replay: funded-awaiting-merchant (poll status)', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
 ] as const
 
 
@@ -111,6 +123,18 @@ const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
 /** #3504: pinned verbatim, not imported, so a reworded reason reddens the fixture. */
 const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
   "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
+/** #3494: pinned verbatim, not imported, so a reworded reason reddens the fixture. */
+const SIGNATURE_REJECTED_OMITTED_REASON =
+  'the account rejected this signature during on-chain validation; retrying this payment_id cannot succeed — update the signer, then create a NEW payment, after telling the user'
+/** #3494: pinned verbatim, not imported, so a reworded reason reddens the fixture. */
+const ONCHAIN_EXECUTION_FAILED_OMITTED_REASON =
+  'this payment_id already failed on-chain and cannot be retried; tell the user what the message says, and create a new payment if they still want to pay'
+/** #3494 review round 1 (S1): pinned verbatim, not imported, so a reworded reason reddens the fixture. */
+const ACCOUNT_VALIDATION_FAILED_OMITTED_REASON =
+  'the account rejected this payment during on-chain validation (not a signature cause); retrying this payment_id cannot succeed — create a new payment, after telling the user'
+/** #3564: pinned verbatim, not imported, so a reworded reason reddens the fixture (the no-payment_id arm). */
+const SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON =
+  'the payment was submitted but its on-chain outcome is not known yet, and no payment id is available to poll; do not create a new payment for this — tell the user, who can check the account\'s activity or the userOpHash before paying again'
 const RETRY = 're-call the same tool with the explicit context this message names; no tool can be named until you supply it'
 const STOP = 'the user has to decide before anything is called again'
 const STOP_SUG = 'the user has to decide before anything is called again; suggested_tool names the tool for after that'
@@ -147,9 +171,9 @@ type Site = {
  * #3475 follow-up review round 1 (S3): the missing-settlement-hash case is a
  * SUCCESS no-op, not a refusal — its fixture moved to `EMISSION_SITES`.
  */
-export const REFUSAL_SITE_COUNT = 40
-/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id/sub_budget_id exactly-one refusal (#3506 widened it to three ids; still one refusalNextStep site)) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3500's 1 in normalizeError (the typed task_budget_exceeded 403) + #3504's 1 in normalizeError (the typed delegation_budget_exceeded 403). + #3506 review S2's 2 (state-direct-recovery.ts haven_submit sub_budget_id: the close_needs_reprepare and close_outcome_unconfirmed recovery refusals). */
-export const REFUSAL_STEP_CALLS = 51
+export const REFUSAL_SITE_COUNT = 45
+/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id/sub_budget_id exactly-one refusal (#3506 widened it to three ids; still one refusalNextStep site)) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3500's 1 in normalizeError (the typed task_budget_exceeded 403) + #3504's 1 in normalizeError (the typed delegation_budget_exceeded 403). + #3506 review S2's 2 (state-direct-recovery.ts haven_submit sub_budget_id: the close_needs_reprepare and close_outcome_unconfirmed recovery refusals). + #3494's 2 in normalizeError (the typed signature_rejected and onchain_execution_failed 502s on `POST /payments/:id/sign`) + #3494 review round 1's 1 more in normalizeError (the typed account_validation_failed 502 on the same route). + #3564's 2 in normalizeError (the typed submission_outcome_unknown 502, replacing #3494 round 2's one stop-only arm: the payment_id arm names the status read, the no-id arm stops — no id to poll, so check_status_later's default tool is uncallable). */
+export const REFUSAL_STEP_CALLS = 56
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },
@@ -194,6 +218,16 @@ export const REFUSAL_SITES: Site[] = [
   { site: 'errors.ts normalizeError: task budget exceeded (typed 403)', base: { code: 'TASK_BUDGET_EXCEEDED', message: 'task budget spent', statusCode: 403 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: TASK_BUDGET_EXCEEDED_OMITTED_REASON }, thrown: new HavenApiError('task budget spent', 403, { error_code: 'task_budget_exceeded', task_budget_id: 'tb_1', remaining_atomic: '0' }), expect: { next_action: 'stop_and_tell_user', ...OMIT(TASK_BUDGET_EXCEEDED_OMITTED_REASON) } },
   // #3504: the typed delegation-budget 403 keeps the backend's own fund_account_or_raise_allowance step and figures, not the generic 4xx API_ERROR below.
   { site: 'errors.ts normalizeError: delegation budget exceeded (typed 403)', base: { code: 'DELEGATION_BUDGET_EXCEEDED', message: 'period budget exceeded', statusCode: 403 }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON }, thrown: new HavenApiError('period budget exceeded', 403, { error_code: 'delegation_budget_exceeded', phase: 'insufficient_funds', next_action: 'fund_account_or_raise_allowance', rail: 'x402', remaining_atomic: '500', shortfall_atomic: '500' }), expect: { next_action: 'fund_account_or_raise_allowance', ...OMIT(DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON) } },
+  // #3564: the typed submission_outcome_unknown 502 is a POLL, not the 5xx retry below — the backend books the intent outcome-pending (never failed), so the status read IS the follow-up. With the body's payment_id the step names haven_get_payment_status with the id; without it, the reason says why no new payment may be created and the user checks the account's activity.
+  { site: 'errors.ts normalizeError: submission outcome unknown (typed 502, payment_id known)', base: { code: 'SUBMISSION_OUTCOME_UNKNOWN', message: 'on-chain submission outcome unknown', statusCode: 502 }, step: { nextAction: A.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: 'pay_1' } }, thrown: new HavenApiError('on-chain submission outcome unknown', 502, { error_code: 'submission_outcome_unknown', payment_id: 'pay_1', user_op_hash: '0x' + 'cd'.repeat(32) }), expect: { next_action: 'check_status_later', ...STATUS('pay_1') } },
+  { site: 'errors.ts normalizeError: submission outcome unknown (typed 502, no payment_id)', base: { code: 'SUBMISSION_OUTCOME_UNKNOWN', message: 'on-chain submission outcome unknown', statusCode: 502 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON }, thrown: new HavenApiError('on-chain submission outcome unknown', 502, { error_code: 'submission_outcome_unknown' }), expect: { next_action: 'stop_and_tell_user', ...OMIT(SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON) } },
+  // #3494 review round 1 (S1): the account rejected this PAYMENT during
+  // validation, but not its signature — never names the signer.
+  { site: 'errors.ts normalizeError: account validation failed, not a signature cause (typed 502)', base: { code: 'ACCOUNT_VALIDATION_FAILED', message: 'the account rejected this payment during on-chain validation', statusCode: 502 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: ACCOUNT_VALIDATION_FAILED_OMITTED_REASON }, thrown: new HavenApiError('the account rejected this payment during on-chain validation', 502, { error_code: 'account_validation_failed' }), expect: { next_action: 'stop_and_tell_user', ...OMIT(ACCOUNT_VALIDATION_FAILED_OMITTED_REASON) } },
+  // #3494: the typed signature-rejected 502 (`POST /payments/:id/sign`, AA24 only — see errors.ts's own doc comment) is a stop, naming its own code — not the generic 5xx retry-once branch above.
+  { site: 'errors.ts normalizeError: signature rejected (typed 502)', base: { code: 'SIGNATURE_REJECTED', message: 'the account rejected this signature during on-chain validation', statusCode: 502 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: SIGNATURE_REJECTED_OMITTED_REASON }, thrown: new HavenApiError('the account rejected this signature during on-chain validation', 502, { error_code: 'signature_rejected' }), expect: { next_action: 'stop_and_tell_user', ...OMIT(SIGNATURE_REJECTED_OMITTED_REASON) } },
+  // #3494, review round 2 (N3): every other `POST /payments/:id/sign` on-chain/bundler failure, INCLUDING a SubmittedUserOpFailedError whose op executed and reverted (a KNOWN, confirmed outcome — never submission_outcome_unknown) — still a stop (the intent already failed), not the generic 5xx retry-once branch above.
+  { site: 'errors.ts normalizeError: onchain execution failed (typed 502)', base: { code: 'ONCHAIN_EXECUTION_FAILED', message: 'On-chain execution failed', statusCode: 502 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: ONCHAIN_EXECUTION_FAILED_OMITTED_REASON }, thrown: new HavenApiError('On-chain execution failed', 502, { error_code: 'onchain_execution_failed' }), expect: { next_action: 'stop_and_tell_user', ...OMIT(ONCHAIN_EXECUTION_FAILED_OMITTED_REASON) } },
   { site: 'errors.ts normalizeError: HavenApiError 4xx', base: { code: 'API_ERROR', message: 'refused as made', statusCode: 404 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_API }, thrown: new HavenApiError('refused as made', 404), expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_API) } },
   { site: 'errors.ts normalizeError: HavenError', base: { code: 'CONFIG_ERROR', message: 'cfg broke', statusCode: 500 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_HAVEN }, thrown: new HavenError('cfg broke', 'CONFIG_ERROR', 500), expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_HAVEN) } },
   { site: 'errors.ts normalizeError: UNKNOWN_ERROR (thrown non-Error)', base: { code: 'UNKNOWN_ERROR', message: 'a string failure' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_UNKNOWN }, thrown: 'a string failure', expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP_UNKNOWN) } },

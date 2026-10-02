@@ -76,6 +76,16 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified, follow-up to #3587 (2026-10-02, a step rename):** this diff
+> touches `.github/workflows/ci.yml`, a covered file, in one step NAME and its
+> comment only — the `design_visual` job's dark-scheme step is renamed from
+> `(design system)` to `(chromium-desktop-dark testMatch)`, because it runs
+> seven specs, not one. The job name, the command, the check identity and every
+> ruleset contract are unchanged. No tool, schema, version-skew or consent-hash
+> contract moves; the client releases table, upgrade hints, publish flow and
+> package resolution are untouched. `last-verified` stays 2026-10-02. Nothing
+> else in this document was re-verified.
+
 > **Re-verified #3515 (2026-10-02, the ops console scaffold):** this diff
 > touches `.github/workflows/ci.yml`, a covered file. The change adds gate
 > steps (design lint, wire-type ratchet) to the NEW `ops_checks` job for the

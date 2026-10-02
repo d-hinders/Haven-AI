@@ -10,8 +10,11 @@ import rateLimit from '@fastify/rate-limit'
 import { rateLimitKeyFor } from './middleware/rate-limit.js'
 import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware/shared-rate-limit-store.js'
 import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
+import { probeDatabase } from './infra/repositories/health-probe.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
+import { lastDelegateBalanceReport } from './infra/delegate-balance-report-store.js'
+import { PASSPORT_STUCK_REVOKE_SECONDS } from './infra/passport-stuck-revoke-seconds.js'
 import { reencryptPlaintextSecretsAtBoot } from './modules/accounting/index.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
 import { sendDelegateAlertFromEnv } from './infra/delegate-alert-webhook.js'
@@ -81,9 +84,14 @@ import machinePaymentRoutes from './routes/machine-payments.js'
 // file's header.
 import machinePaymentsReconciliationEventsRoutes from './routes/machine-payments-reconciliation-events.js'
 import openapiRoutes from './routes/openapi.js'
-import { registerHealthRoutes } from './routes/health.js'
+import { registerHealthRoutes, buildHealthOpsPayload } from './routes/health.js'
 import opsRoutes from './routes/ops.js'
 import { getOpsReadDb } from './db/ops-read-pool.js'
+// dep-lint-exempt: composition-root wiring — the REAL chain readers must NOT be re-exported from modules/ops/index.ts: routes/ops.ts imports that entry, and the ops invariant-1 walk (#3509) forbids the ops console's graph from reaching rails/ and infra/chain/, so onchain-readers.ts is reachable ONLY by injection here (#3513), like the #2881 accounting legacy entry.
+// #3513: the REAL ops on-chain readers touch rails/ and infra/chain/, so
+// they are imported here — where the ops invariant-1 walk (rooted at
+// routes/ops.ts) never looks — and injected through the route options.
+import { opsOnchainReaders } from './modules/ops/onchain-readers.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'
@@ -381,11 +389,30 @@ registerHealthRoutes(app, {
 // Ops console (#3509, epic #3507): founders-only and read-only. Every route
 // answers 404 unless OPS_* is fully configured, and the data routes also
 // need OPS_DATABASE_URL — the read-only role login (#3510) — or they 404 too.
+// The on-chain view (#3513) additionally needs the chain readers, injected
+// here because their implementation touches `rails/` and `infra/chain/`,
+// which the ops invariant-1 walk must never reach from `routes/ops.ts`.
+// `/ops/health` (#3514) gets the `/health/ops` payload builder the same way:
+// `routes/health.ts` reaches `infra/relayer-balance-monitor.ts`, which the
+// same walk forbids — while both answers are built by ONE function, so they
+// cannot disagree about what the backend's own diagnostics say.
 await app.register(opsRoutes, {
   prefix: '/ops',
   ops: config.ops,
   trustProxyHops: config.trustProxyHops,
   readDb: getOpsReadDb(),
+  onchainReaders: getOpsReadDb() ? opsOnchainReaders : null,
+  healthDiagnostics: getOpsReadDb()
+    ? () => buildHealthOpsPayload({
+        checkDatabase: () => probeDatabase(),
+        getRelayerStatus: getRelayerBalanceStatus,
+        getPassportStatus: passportReadiness,
+        trustProxyHops: config.trustProxyHops,
+        opsToken: config.opsToken,
+        getAccountingCounters: () => getAccountingOpsCounters(),
+      })
+    : null,
+  lastDelegateBalanceReport: getOpsReadDb() ? lastDelegateBalanceReport : null,
 })
 
 // The accounting module's ops events (#2872: `accounting.connection.needs_attention`)
@@ -600,8 +627,12 @@ const DELEGATE_MONITOR_INTERVAL_MS = 60 * 60 * 1000 // hourly (#714)
 // that to an hour, leaving a revoked agent's attestation live on-chain far
 // longer than the retry policy intends (#973).
 const PASSPORT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
-/** A revoke still unreconciled after this long is an incident, not a retry. */
-const PASSPORT_STUCK_REVOKE_SECONDS = 60 * 60
+/**
+ * A revoke still unreconciled after this long is an incident, not a retry.
+ * The alarm threshold's one definition lives in
+ * `infra/passport-stuck-revoke-seconds.ts` (#3514): `index.ts` and
+ * `/ops/health` read the same constant, so they cannot drift.
+ */
 
 const start = async () => {
   try {
@@ -789,6 +820,33 @@ const start = async () => {
     }
     void runSettlementSweep()
     setInterval(runSettlementSweep, SETTLEMENT_SWEEP_INTERVAL_MS).unref()
+
+    // Submission reconciliation (#3564). A direct payment whose UserOp was
+    // SENT but whose receipt was never confirmed is booked outcome-pending
+    // (`submitted`, never `failed` — the funds may have moved), with the
+    // userOpHash recorded on the row. This tick resolves such a row from the
+    // bundler's receipt index for that hash: landed+succeeded → confirmed
+    // with its tx_hash; landed+reverted → failed with the cause; still not
+    // found inside the bounded window → failed with that cause. A read
+    // failure confirms nothing and writes nothing — the next tick is the
+    // retry, which is what keeps an outage from becoming a wrong terminal
+    // booking.
+    const RECONCILE_INTERVAL_MS = 60_000
+    const runSubmissionReconcile = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.submissionReconcile, async () => {
+          const { runSubmissionReconcileTick } = await import('./modules/payments/index.js')
+          const tick = await runSubmissionReconcileTick(app.log)
+          if (tick.confirmed || tick.failedReverted || tick.failedWindowElapsed) {
+            app.log.info(tick, 'Submission reconcile tick acted')
+          }
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Submission reconcile tick failed')
+      }
+    }
+    void runSubmissionReconcile()
+    setInterval(runSubmissionReconcile, RECONCILE_INTERVAL_MS).unref()
 
     // L0 passport anchor sweep (#972 / #973). Both halves of issuance are
     // fire-and-forget by design — an EAS write must never block agent creation

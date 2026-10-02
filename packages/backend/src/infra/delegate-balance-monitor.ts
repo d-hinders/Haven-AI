@@ -31,44 +31,27 @@ import { config } from '../config.js'
 import { getChain } from '../domain/chains.js'
 import { readTokenBalances } from './chain/batched-token-balances.js'
 import { sendDelegateAlertWebhook } from './delegate-alert-webhook.js'
+import { storeDelegateBalanceReport } from './delegate-balance-report-store.js'
+// The report TYPES live in `domain/delegate-balance.ts` (#3514) — shared with
+// the report store and the ops console, which must not import this monitor
+// (the ops invariant-1 walk forbids the ops graph from reaching
+// `infra/delegate-*`). Re-exported here unchanged so every existing import
+// keeps working.
+export type {
+  DelegateBalanceState,
+  DelegateBalanceFinding,
+  DelegateBalanceReport,
+} from '../domain/delegate-balance.js'
+import type {
+  DelegateBalanceFinding,
+  DelegateBalanceReport,
+  DelegateBalanceState,
+} from '../domain/delegate-balance.js'
 
 const USDC_DECIMALS = 6
 
 /** Payments younger than this mark a funded delegate as in-flight, not lingering. */
 export const IN_FLIGHT_WINDOW_MIN = 15
-
-export type DelegateBalanceState = 'clear' | 'in_flight' | 'dust' | 'lingering'
-
-export interface DelegateBalanceFinding {
-  agentId: string
-  agentName: string
-  delegateAddress: string
-  chainId: number
-  balanceAtomic: bigint
-  state: DelegateBalanceState
-}
-
-export interface DelegateBalanceReport {
-  findings: DelegateBalanceFinding[]
-  /** Sum of all `dust` balances across delegates (atomic USDC). */
-  dustTotalAtomic: bigint
-  /** True when dustTotalAtomic passed the alert threshold. */
-  dustAlert: boolean
-  lingering: DelegateBalanceFinding[]
-  /**
-   * Delegates whose balance could not be read this round (#3458): a failed
-   * chunk or chain now leaves up to a whole chunk unread, so the count is
-   * reported and logged rather than silently shrinking `findings`.
-   */
-  unread: Array<{ agentId: string; chainId: number }>
-  /**
-   * Chains whose reader could not even be set up, with the error (#3458).
-   * Only a configuration fault reaches this (a non-ERC-20 USDC address): a
-   * retry will not fix it, so the reason is carried to the log.
-   */
-  chainErrors: Record<number, string>
-  scannedAt: string
-}
 
 /** The sweep floor in atomic USDC — balances below it are expected dust. */
 export function sweepFloorAtomic(): bigint {
@@ -121,7 +104,6 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
   const delegates = await loadMonitoredDelegates()
   const fresh = await loadAgentsWithFreshPendingPayments(delegates.map((d) => d.agent_id))
   const floor = sweepFloorAtomic()
-
   // #3458: one batched read per chain (Multicall3, sequential chunks) instead
   // of one `eth_call` per delegate — see `infra/chain/batched-token-balances.ts`.
   const holdersByChain = new Map<number, string[]>()
@@ -170,7 +152,7 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
     .filter((f) => f.state === 'dust')
     .reduce((sum, f) => sum + f.balanceAtomic, 0n)
 
-  return {
+  const report: DelegateBalanceReport = {
     findings,
     dustTotalAtomic,
     dustAlert: dustTotalAtomic >= dustAlertThresholdAtomic(),
@@ -179,6 +161,10 @@ export async function scanDelegateBalances(): Promise<DelegateBalanceReport> {
     chainErrors,
     scannedAt: new Date().toISOString(),
   }
+  // #3514: keep the report so `GET /ops/health` can serve it without ever
+  // scanning on request. Written only here, by the monitor's own scan.
+  storeDelegateBalanceReport(report)
+  return report
 }
 
 interface MonitorLogger {

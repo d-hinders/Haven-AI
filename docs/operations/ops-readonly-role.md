@@ -26,8 +26,11 @@ the read-only role from #3510:
 
 What it may read, and the columns it never may, is
 `packages/backend/src/infra/ops-readonly-role.ts`. That file is the single
-source; this page is only the operator steps. The full ops-console runbook,
-`docs/operations/ops-console.md`, lands with #3517 and links here.
+source; this page is only the operator steps. The full ops-console runbook —
+the Vercel project, the OAuth App, the six `OPS_*` variables, the registry
+entry, adding prod, the kill switch and the audit log — is
+[`docs/operations/ops-console.md`](ops-console.md) (#3517); this page is its
+step 4, expanded.
 
 Without `OPS_DATABASE_URL` the console's data routes answer 404, and there is
 no fallback to the main login.
@@ -76,8 +79,9 @@ user in Railway → Postgres → Query.
 
    Before its first read, the pool also asks the database what the login can
    do. If the login can do any of the following, the ops data routes
-   (`GET /ops/overview`, `/ops/search`, `/ops/users/{id}` and
-   `POST /ops/reveal`) answer 404 and the log says `Ops console data reads are OFF: …`:
+   (`GET /ops/overview`, `/ops/search`, `/ops/users/{id}`,
+   `/ops/users/{id}/onchain` and `POST /ops/reveal`) answer 404 and the log
+   says `Ops console data reads are OFF: …`:
    - read any column on the never-grant list (`OPS_NEVER_GRANT`: the
      password, API-key, signature and idempotency-key columns);
    - write any table in its schema;
@@ -118,6 +122,11 @@ Run `ops-scrub.sql`, then run `ops-role.sql` again.
   this login (`OPS_READ_POOL_MAX`). Two replicas plus one console session fit
   the limit of 5. A third replica needs the limit raised in
   `OPS_READONLY_CONNECTION_LIMIT` and the script re-run.
+- **The on-chain view (#3513)** reads `smart_accounts` and `agent_delegations`
+  through this role — `agent_delegations.delegation_json` was granted for
+  exactly its budget reader by owner decision (#3510). The raw hash and JSON
+  never leave the backend: the route returns the chain's answers only, with
+  every address masked.
 
 ## Residual risk: customer-supplied text
 

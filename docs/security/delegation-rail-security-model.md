@@ -62,6 +62,10 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/issuance.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
+  - packages/backend/src/routes/ops.ts
+  - packages/backend/src/modules/ops/**
+  - packages/backend/src/middleware/ops-auth.ts
+  - packages/ops/**
 last-verified: "2026-10-01"
 ---
 
@@ -1351,6 +1355,59 @@ Two properties of the erc7710 settlement leg, corrected in #1061:
   payee-pinned, ≤600 s expiry. Worst case on a leaked child is "the merchant is
   paid without delivering" for that one quoted amount — the leak-analysis table
   in §3 is unchanged, since redeeming still cannot exceed those bounds.
+
+**The ops console is a third read surface, and it holds no rail authority
+(#3507 epic, deploy slice #3517).** `@haven/ops` — a separate app with its
+own Vercel project and runbook
+([`../operations/ops-console.md`](../operations/ops-console.md)) — reaches a
+backend's `/ops/*` routes only. Every route sits behind a bearer-token auth
+hook (`middleware/ops-auth.ts`): an ops JWT minted by that backend's GitHub
+sign-in, HS256-pinned to the ops audience and this backend's issuer (so a
+dashboard JWT, an owner-CLI token or an agent credential never passes), with
+the operator's numeric GitHub id re-checked against the allowlist on every
+request. The surface is read-and-reveal over the read-only Postgres role —
+no route under `/ops` moves funds, signs, redeems, changes a signer,
+delegation or credential, or acts as a user; even `POST /ops/reveal` only
+reads one allowlisted column and records the read first. It is a
+founders-only window, not a delegation-rail participant: no op this document
+guards runs through it, and its authority-relevance ends at what its
+operator may LOOK at. Deploy wiring and the per-environment checklist live
+in the runbook, not here. The app's own browser hardening is an enforcing
+Content-Security-Policy whose scripts are gated on a per-request nonce set
+by its middleware (#3581; the first static form refused Next's own inline
+scripts and the console rendered blank). That is client-side defence for
+the token in `sessionStorage` and moves no authority; the rest of this
+document was not re-read for it, and `last-verified` is not bumped. The
+app's Vercel ignore-build step (#3591; since #3594 a script shared with
+the dashboard's Vercel project, each with its own watch file) decides
+only *when* the console or the dashboard redeploys, from what changed since
+its last deployment; it moves no authority either, and the same scope note
+holds. The console's CI render
+smoke (#3583) only proves, in a browser, that the console renders under that
+CSP and that the CSP refuses an un-nonced inline script; it moves no
+authority, and the same scope note holds.
+
+> **Re-verified #3516 (2026-10-02, console round 3):** the change this note
+> rides touches `packages/ops/**` (plus this doc and a `.gitignore` line) —
+> the console's wire types collapsed
+> onto the generated `ApiSchema<'OpsSystemHealth'>` re-export (#3571 named
+> the response schema), a search-input sizing fix, and the #3585 base
+> update (whose CSP-nonce note above is that change's own, not re-verified
+> here). Re-read against the paragraph above: the client surface is still
+> the seven GET readers plus the one audited `reveal` and the sign-in
+> navigation (`client.test.ts` walks the client's own keys, so a method
+> added anywhere fails before review could miss it); the health page makes
+> no call beyond its single read; and the type collapse changes no wire
+> field — the generated schema carries every key the pages render, pinned
+> by the shrunken mirror test against the generated document itself. The
+> backend files this paragraph's claims rest on (`routes/ops.ts`,
+> `modules/ops/**`, `middleware/ops-auth.ts`, the read-only role grants)
+> are untouched by the diff, so nothing here grants, widens or redeems
+> anything and the no-rail-authority claim holds verbatim. Scope of this
+> re-read: this paragraph and what the console imports and renders — the
+> invariant, custody, redemption and settlement sections were NOT re-read
+> (the diff touches no file that implements them), and `last-verified` is
+> not bumped.
 
 ## 9. Owner CLI sessions — the device-code login (#2526)
 

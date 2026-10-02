@@ -40,3 +40,34 @@ export {
   type OpsSearchResult,
 } from './search.js'
 export { buildOpsUserDetail, type OpsUserDetail } from './users.js'
+export {
+  buildOpsHealth,
+  collectStuckLanesForChain,
+  OPS_HEALTH_LIST_LIMIT,
+  PAST_HORIZON_SECONDS,
+  type OpsDelegateBalanceReport,
+  type OpsDelegateBalances,
+  type OpsEvidenceOrphan,
+  type OpsHealth,
+  type OpsHealthDeps,
+  type OpsSweepableIntent,
+  type OpsStuckLane,
+  type OpsStuckReanchor,
+  type OpsStuckRevocation,
+  type ServedChains,
+  type SweepableWindow,
+} from './health.js'
+export {
+  buildOpsOnchainView,
+  onchainCacheKey,
+  OPS_ONCHAIN_CACHE_TTL_MS,
+  type BuildOpsOnchainViewOptions,
+  type OnchainAccount,
+  type OnchainAccountDelegation,
+  type OnchainBudgetStatus,
+  type OnchainDelegationState,
+  type OnchainDeployStatus,
+  type OnchainNotServedAccount,
+  type OpsOnchainReaders,
+  type OpsOnchainView,
+} from './onchain.js'

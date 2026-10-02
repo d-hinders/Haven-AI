@@ -135,6 +135,12 @@ export interface AgentPaymentStatus {
    * omitted on every other status.
    */
   failure_reason?: string | null
+  /**
+   * #3564: `true` only while a payment's submit is receipt-unconfirmed and
+   * not yet reconciled from the chain. Absent on every other row — never
+   * `false` — matching the module's honesty rule for unknown facts.
+   */
+  submission_outcome_pending?: true
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
@@ -791,6 +797,24 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
       message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. If you hold the merchant's real settlement transaction hash, report it with haven_report_settlement_evidence. Otherwise, Haven's settlement sweep can still attribute it until shortly after this payment's expiry — poll haven_get_payment_status once more a couple of minutes past that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
     }
   }
+  // #3564: a `submitted` row whose submit was receipt-unconfirmed is
+  // OUTCOME-PENDING, not an ordinary in-flight submit. Same non-terminal
+  // phase and next_action as the ordinary submit state (poll status), but a
+  // message that says what is actually happening — the ordinary text would
+  // read as "everything is fine" when the bundler never answered, and the
+  // #2115 lesson is that this string reaches the agent verbatim. Once the
+  // submission reconciler resolves the row, the status is terminal and the
+  // real state speaks instead.
+  if (payment.status === 'submitted' && payment.submission_outcome === 'unknown' && payment.user_op_hash != null) {
+    return {
+      phase: AgentPaymentPhase.PaymentSubmitted,
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      message:
+        'The payment was submitted but its on-chain outcome is not known yet. ' +
+        'Do not create a new payment for this — check status again later: ' +
+        'Haven reconciles this payment from the chain, and this status becomes the real outcome.',
+    }
+  }
   return paymentIntentState(payment.status)
 }
 
@@ -1074,6 +1098,12 @@ function statusFromRow(
       // re-deriving a (token, payee) selection whose winner can move
       // between pay and settle. Null on the legacy rail and pre-053 rows.
       ...(payment.budget_delegation_hash ? { budget_delegation_hash: payment.budget_delegation_hash } : {}),
+      // #3564: additive outcome-pending visibility — present ONLY while a
+      // submit is receipt-unconfirmed and not yet reconciled (the wire rule
+      // everywhere on this object: absent, never `false`).
+      ...(payment.submission_outcome === 'unknown' && payment.user_op_hash != null
+        ? { submission_outcome_pending: true as const }
+        : {}),
       ...(hasVerifiedMerchantSettlement(payment.machine_metadata)
         ? { merchant_settlement_recorded: true as const }
         : {}),

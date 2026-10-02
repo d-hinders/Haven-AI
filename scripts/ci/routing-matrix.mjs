@@ -37,7 +37,7 @@ export const RETAINED = 'retained'
  * its expectation from the code under test cannot fail when that code is wrong,
  * which is the one thing a characterization table must not do.
  */
-const ALL = ['code', 'frontend', 'ui', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'core', 'qa_agent', 'full']
+const ALL = ['code', 'frontend', 'ui', 'ops', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'core', 'qa_agent', 'full']
 
 /**
  * @typedef {object} RoutingCase
@@ -164,9 +164,9 @@ export const ROUTING_MATRIX = [
   // ─── One workspace, one job ────────────────────────────────────────────────
   {
     files: ['packages/ui/src/Button.tsx'],
-    expect: ['code', 'frontend', 'ui'],
+    expect: ['code', 'frontend', 'ui', 'ops'],
     kind: CONTRACT,
-    why: 'The shared design system (#3508): a ui-only diff runs the ui job for the moved primitive suites, and the frontend fans back in because its package-dependencies entry declares ui — the frontend suite covers the re-export shims, so a ui-only change must never skip it.',
+    why: 'The shared design system (#3508): a ui-only diff runs the ui job for the moved primitive suites, and the frontend fans back in because its package-dependencies entry declares ui — the frontend suite covers the re-export shims, so a ui-only change must never skip it. ops joined in #3515 for the same reason: the console consumes the primitives through transpilePackages.',
   },
   {
     files: ['packages/frontend/src/app/page.tsx'],
@@ -206,9 +206,9 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/core/src/chains.ts'],
-    expect: ['code', 'core', 'frontend', 'backend', 'mcp_server'],
+    expect: ['code', 'core', 'frontend', 'ops', 'backend', 'mcp_server'],
     kind: CONTRACT,
-    why: 'The shared kernel got its own job in #3005, and frontend and backend declare @haven_ai/core, so the table fans both out: the suites that consume core run on a core change WITHOUT the full matrix. Until #3005 this routed ALL — over-routing that ran cli and signer suites blind to core. mcp_server joined in #3419: its hosted-signer-integration test pins CLIENT_RELEASES from core, its job runs that test, and its test/typecheck scripts build core first — the same "a dependency that can redden the job is a dependency for routing purposes" rule the table applies to its other devDependencies.',
+    why: 'The shared kernel got its own job in #3005, and frontend and backend declare @haven_ai/core, so the table fans both out: the suites that consume core run on a core change WITHOUT the full matrix. Until #3005 this routed ALL — over-routing that ran cli and signer suites blind to core. mcp_server joined in #3419: its hosted-signer-integration test pins CLIENT_RELEASES from core, its job runs that test, and its test/typecheck scripts build core first — the same "a dependency that can redden the job is a dependency for routing purposes" rule the table applies to its other devDependencies. ops joined in #3515: the console reads core api-types for /ops/* and its scripts build core first.',
   },
   {
     files: ['packages/qa-agent/src/run.ts'],
@@ -546,7 +546,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['scripts/lib/ratchet.mjs'],
-    expect: ['code', 'backend', 'frontend'],
+    expect: ['code', 'backend', 'frontend', 'ops'],
     kind: CONTRACT,
     why:
       'The shared ratchet engine backs NINE gates as of #3131 (eight as of #3104, ' +
@@ -561,22 +561,55 @@ export const ROUTING_MATRIX = [
       'THIRD time until #3131 swept it — and the MCP-CLI vocabulary guard ' +
       '(scripts/ci/vocabulary-divergence.mjs, #3131). All nine share one `updateRefusals`; the count is ' +
       'pinned by scripts/lib/ratchet.test.mjs rather than trusted, because this row has now ' +
-      'been stale three times. Weakening the module must run both surfaces; ' +
-      'routing it to one would leave the other unguarded. Copy lint and design lint are ' +
+      'been stale three times. Weakening the module must run every surface whose gates import it; ' +
+      'routing it to one would leave the others unguarded. ops joined in #3515 (its ops_checks ' +
+      'runs lint:wire-types, whose SCAN_DIRS gained packages/ops/src/lib). Copy lint and design lint are ' +
       'covered regardless (frontend-copy-lint.yml is unconditional, design lint is a blocking ' +
       'frontend job), so this row understates the blast radius rather than overstating it.',
   },
   {
     files: ['scripts/lint-wire-types.mjs'],
-    expect: ['code', 'frontend'],
+    expect: ['code', 'frontend', 'ops'],
     kind: CONTRACT,
-    why: 'The wire-type ratchet (#1447) polices packages/frontend and only the frontend job runs it.',
+    why: 'The wire-type ratchet (#1447) polices packages/frontend AND packages/ops since #3515 (the console reads core api-types for /ops/*), so both gated jobs must run it.',
   },
   {
     files: ['scripts/lint-wire-types.test.mjs'],
-    expect: ['code', 'frontend'],
+    expect: ['code', 'frontend', 'ops'],
     kind: CONTRACT,
     why: 'Its self-test. Widening the exemption regex without running the gate is the failure this prevents.',
+  },
+  {
+    files: ['packages/ops/package.json'],
+    expect: ['code', 'ops'],
+    kind: CONTRACT,
+    why: 'The console scaffold (#3515). A change to what the package builds or declares must run its own job; core and ui fan back in through the dependency table.',
+  },
+  {
+    files: ['packages/ops/next.config.ts'],
+    expect: ['code', 'ops'],
+    kind: CONTRACT,
+    why: 'The static security headers (#3515). Weakening a header must run the suite whose source guard pins the injection/storage rules. The CSP moved to src/middleware.ts in #3581; the row below routes it.',
+  },
+  {
+    files: ['packages/ops/src/middleware.ts', 'packages/ops/src/lib/csp.ts'],
+    expect: ['code', 'ops'],
+    kind: CONTRACT,
+    why: 'The per-request nonce CSP (#3581). A change to it must run ops_checks, whose csp.test.ts pins the policy, the fresh nonce and the single-CSP rule.',
+  },
+  {
+    files: ['.github/package-dependencies.json'],
+    expect: [],
+    kind: RETAINED,
+    why:
+      'Routes nowhere from THIS classifier, exactly like .github/root-guard-ownership.json beside it: both are repo-governance data the classifier itself reads, and editing the fan-out table changes routing for every package without a rule that fires on the edit. Its semantics are checked instead by package-dependencies.test.mjs in the unconditional ci_config_checks job — which is coverage, but only while that job has no surface filter; the same caveat #1624 records for the guard manifest applies here.',
+  },
+  {
+    files: ['scripts/docs/package-docs.mjs'],
+    expect: [],
+    kind: RETAINED,
+    why:
+      'Routes nowhere from THIS classifier, like the governance-data rows above: it IS repo-governance data (the packages/** README boundary, #2088) that docs tooling reads, and no package job runs docs:check — it gates from docs.yml, whose own trigger runs it on every PR regardless of routing. Its manifest semantics are checked by scripts/docs/*.test.mjs in the unconditional docs:test job; if a package job ever starts running a governed-README check, this row is the one that turns wrong.',
   },
   {
     files: ['scripts/ci/visual-baseline-inventory.mjs'],
@@ -636,10 +669,10 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['scripts/lib/lint-escapes.mjs'],
-    expect: ['code', 'frontend'],
+    expect: ['code', 'frontend', 'ops'],
     kind: CONTRACT,
     why:
-      'The shared escape-marker helper: design-lint and the copy lint both import isEscaped from it. The copy lint runs unconditionally (frontend-copy-lint.yml), but design:lint runs inside the gated frontend_checks job, so before #3229 a PR weakening escape recognition skipped the one gated job that consumes it.',
+      'The shared escape-marker helper: design-lint and the copy lint both import isEscaped from it. The copy lint runs unconditionally (frontend-copy-lint.yml), but design:lint runs inside the gated frontend_checks job, so before #3229 a PR weakening escape recognition skipped the one gated job that consumes it. ops joined in #3515: ops_checks runs the same design:lint gate (the scan spans packages/ops/src), so the console job is an owner too.',
   },
 
   // ─── Retained: routes nowhere today, and that is arguable ──────────────────

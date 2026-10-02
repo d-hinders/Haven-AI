@@ -98,6 +98,9 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     // #3518: which budget metered this payment — absent from the raw
     // payload (older backend) stays absent here.
     ...(raw.budget_delegation_hash !== undefined ? { budgetDelegationHash: raw.budget_delegation_hash } : {}),
+    // #3564: additive outcome-pending visibility — absent from the raw
+    // payload (older backend) stays absent here.
+    ...(raw.submission_outcome_pending === true ? { submissionOutcomePending: true as const } : {}),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

@@ -2123,6 +2123,12 @@ export interface PaymentStatusResult {
    * predating migration 053.
    */
   budgetDelegationHash?: string
+  /**
+   * #3564: `true` only while a payment's submit is receipt-unconfirmed and
+   * not yet reconciled from the chain. Absent — never `false` — on every
+   * other row, matching `delivered`'s own honesty rule.
+   */
+  submissionOutcomePending?: true
   /** Platform fee surfaced so it's never silently collected (#386). */
   fee?: PaymentFee | null
   amountAtomic?: string | null
@@ -2404,6 +2410,12 @@ export interface RawPaymentStatusResult {
    * Absent on the legacy rail and pre-053 rows.
    */
   budget_delegation_hash?: string
+  /**
+   * #3564: `true` only while a payment's submit is receipt-unconfirmed and
+   * not yet reconciled from the chain. Absent on every other row — never
+   * `false` — matching `delivered`'s own honesty rule.
+   */
+  submission_outcome_pending?: true
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null

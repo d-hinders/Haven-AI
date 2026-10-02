@@ -715,4 +715,75 @@ describe('POST /payments — the refusal ledger on the direct paths (#2945)', ()
     expect(signOutage.statusCode).toBe(502)
     expect(ledgerAsks()).toHaveLength(0)
   })
+
+  // ── #3564: the submit-failure booking split ──────────────────────────────
+  // The route test owns the HANDLER decision only — which store call the two
+  // error variants trigger and what the response says. What each write does
+  // to the row is proven on the real harness in
+  // modules/payments/__tests__/submission-outcome-reconciliation.test.ts.
+
+  it('#3564: a receipt-unconfirmed submit books OUTCOME-PENDING — never failed — and answers submission_outcome_unknown', async () => {
+    const { SubmittedUserOpFailedError } = await import('../../rails/delegation-rail.js')
+    delegationMocks.submitDelegationPayment.mockRejectedValue(
+      new SubmittedUserOpFailedError(
+        `redemption UserOp ${USER_OP_HASH} was sent but its receipt could not be confirmed: receipt wait timed out`,
+        USER_OP_HASH as `0x${string}`,
+        'receipt_unconfirmed',
+      ),
+    )
+    primeDb(AUTH, intentById(delegationIntentRow()), claim(true))
+
+    const response = await injectSign()
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'submitted',
+      error: 'On-chain submission outcome unknown',
+      error_code: 'submission_outcome_unknown',
+      user_op_hash: USER_OP_HASH,
+    })
+    // #3564 review round 2: the body carries the spec-promised fixed remedy
+    // `message` (do not create a new payment; poll haven_get_payment_status)
+    // and BOUNDED `details` — never the raw redacted error wholesale.
+    const outcomePendingBody = response.json()
+    expect(outcomePendingBody.message).toMatch(/do not create a new payment/i)
+    expect(outcomePendingBody.message).toMatch(/haven_get_payment_status/)
+    expect(typeof outcomePendingBody.details).toBe('string')
+    expect((outcomePendingBody.details as string).length).toBeLessThanOrEqual(301)
+    // The booking write is the outcome-pending one (metadata + CAS on the
+    // open submit); the fail write never runs.
+    expect(mockQuery.mock.calls.some((c) => /jsonb_build_object/.test(String(c[0])))).toBe(true)
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(false)
+    // No refusal row: this is the on-chain answer, booked on the intent row.
+    expect(ledgerAsks()).toHaveLength(0)
+  })
+
+  it('#3564: an included-but-reverted submit still books FAILED', async () => {
+    const { SubmittedUserOpFailedError } = await import('../../rails/delegation-rail.js')
+    delegationMocks.submitDelegationPayment.mockRejectedValue(
+      new SubmittedUserOpFailedError(
+        `redemption UserOp ${USER_OP_HASH} included but reverted`,
+        USER_OP_HASH as `0x${string}`,
+        'included_reverted',
+      ),
+    )
+    primeDb(AUTH, intentById(delegationIntentRow()), claim(true))
+
+    const response = await injectSign()
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'failed',
+      error: 'On-chain execution failed',
+    })
+    // #3494's typed classification (which this variant falls through to)
+    // answers the generic code — never submission_outcome_unknown.
+    expect(response.json().error_code).toBe('onchain_execution_failed')
+    expect(response.json().user_op_hash).toBeUndefined()
+    // The fail write runs; the outcome-pending booking never does.
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(true)
+    expect(mockQuery.mock.calls.some((c) => /jsonb_build_object/.test(String(c[0])))).toBe(false)
+  })
 })

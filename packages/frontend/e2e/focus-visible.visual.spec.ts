@@ -20,8 +20,9 @@
  * sentence points.
  *
  * The indicators are PR #1831's, on `Sidebar`'s kebab user menu and
- * `AgentCard`'s footer action row — eleven when #1831 wrote them, TEN today,
- * since #2258 deleted the card's `Revoke` control (#2687). Until this file they were protected by a
+ * `AgentCard`'s footer action row — eleven when #1831 wrote them, NINE today,
+ * after #2258 deleted `Revoke`, #3168 deleted `Edit`, and #3550 replaced
+ * `Details` with the name-link card ring. Until this file they were protected by a
  * STRUCTURAL guard (`src/__tests__/focus-ring.test.ts`, which reads class
  * strings out of source) and by nothing rendered. A ring that compiles to the
  * wrong colour, is occluded, or sits behind an overlay passed every gate we
@@ -55,13 +56,14 @@
  * #1863 reached six, and said why the other five were out of reach. The
  * inventory was eleven then, ten after #2258 deleted `Revoke`, and is NINE
  * now: #3168 deleted `Edit` with the name/description modal it opened, so the
- * card contributes six controls (#2687 had re-derived seven from the
- * `aria-label`s in `AgentCard.tsx`).
+ * card contributes five footer controls plus the stretched name link. #3550
+ * removed Details from the footer and added the link-focused card capture, so
+ * the total remains nine.
  *
  *   Sidebar kebab popover   Profile · Settings · Log out          3/3  captured
  *   AgentCard action row    Edit · Pause · Revoke                 3/8  captured  (as #1863 measured it)
  *
- * `AgentCard`'s footer NEVER renders all six at once — `isOperational`,
+ * `AgentCard` NEVER renders all six card controls at once — `isOperational`,
  * `isRevoked` and `isArchived` are mutually exclusive, and `canUseWalletActions`
  * split the operational branch further until #3168 deleted it with the Edit
  * modal it guarded (as did `isDelegationAgent`, until #2413 deleted it with the
@@ -73,11 +75,10 @@
  * shared fixture carried no `account_type`, so `railOf` read it as a legacy
  * Safe and the row was Edit · Pause · **Revoke** — the AllowanceModule teardown,
  * on a rail that answers HTTP 410 in production (#1986). The default is now the
- * live delegation rail, where the row is Details · Pause · **Remove** (#1402;
- * #3168 made Details the first control on every operational card and retired
- * Edit). `Revoke` has NO capture here any more, and there is nothing left to
- * seed it with: #2258 deleted the control (the default row below is Details +
- * Pause), #2413 removed the legacy branch that rendered it, and #2459 deleted
+ * live delegation rail, where the card has a name link and the row is Pause ·
+ * **Remove** (#1402; #3550 removed Details). `Revoke` has NO capture here any
+ * more, and there is nothing left to seed it with: #2258 deleted the control,
+ * #2413 removed the legacy branch that rendered it, and #2459 deleted
  * the legacy opt-down itself — `e2e/fixtures/haven-api.ts` records that "a spec
  * that wants a retired-rail page today has nothing to opt down TO".
  *
@@ -85,20 +86,17 @@
  * not capture work. #1873 does it, and all of them are reached.
  *
  *   control              needs                                    rendered by
- *   Details              the default first control; seeded on     every operational card
- *                        a different account_id (the case that
- *                        forked before #3168)
+ *   Agent name link      every card; focus rings the card         every agent card
  *   Resume from pause    status: 'paused'                         the paused branch
  *   Remove (delegation)  account_type: 'delegator_hybrid', active the operational branch
  *   Remove (revoked)     status: 'revoked', not archived          the isRevoked branch
  *   Restore to list      archived_at set                          the isArchived branch
  *
  * **The argument for NOT doing this was real, and it is the reason each of the
- * five is proven separately below.** All five carry class strings
- * BYTE-IDENTICAL to a captured sibling — every one is `ring-brand/80` or
- * `ring-danger/80` on a `text-xs` link, in this same row, on this same surface
- * — so the marginal *rendered* information looked small. But "the same class
- * string therefore the same pixels" is an argument, not a measurement, and this
+ * five is proven separately below.** The four footer controls carry class
+ * strings byte-identical to a captured sibling; the name link instead paints
+ * the shared card ring. The marginal *rendered* information could look small,
+ * but "the same class string therefore the same pixels" is an argument, not a measurement, and this
  * repo keeps paying the difference: #1818 is a class string that compiled to
  * nothing, and this file's own first-draft assertion accepted `outline: 2px
  * solid transparent` as an indicator. A capture nobody can redden is decoration;
@@ -131,14 +129,14 @@
  * **Seeding a state is not the same as rendering the branch**, so every test
  * asserts the row's FULL control set before it captures (`expectRowControls`).
  * `status: 'paused'` reaching the API mock proves nothing about which of
- * `AgentCard`'s five footer branches ran; "this row holds exactly Details,
+ * `AgentCard`'s five footer branches ran; "this row holds exactly Move,
  * Resume from pause, Remove" does. It is also what turns a future branch edit
  * into a named failure instead of a silently re-pointed baseline.
  *
  * ── Tab traversal, and why the count is never hard-coded ─────────────────────
  *
  * The driver is real keyboard `Tab`, because that is the path the user whose
- * bug this is actually takes. **All ten controls are reachable by
+ * bug this is actually takes. **All nine controls are reachable by
  * traversal**, so the `.focus()` fallback the issue allows is never used and
  * nothing is silently substituted. A control reachable by script and not by tab
  * order would itself be a WCAG 2.4.3 finding, so the two are not
@@ -177,7 +175,12 @@
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { mockHavenApi, seedAuthenticatedSession, testAgent } from './fixtures/haven-api'
+import {
+  dismissMobileSidebar,
+  mockHavenApi,
+  seedAuthenticatedSession,
+  testAgent,
+} from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
 // the screenshot script and the resting-state pixel gate so all three render at
@@ -209,7 +212,7 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  * the lesson below is the reusable part; the post-#1909 heights are underneath.
  *
  *   branch              macOS 1280   macOS 390   COMMITTED (Linux 1280)
- *   Details             438 x 37     300 x 37    438 x 37
+ *   Details (retired #3550) 438 x 37 300 x 37    438 x 37
  *   Resume from pause   438 x 37     300 x 37    438 x 37
  *   Remove (delegation) 438 x 37     300 x 37    438 x 37
  *   Remove (revoked)    438 x 37     300 x 37    438 x 37
@@ -497,7 +500,7 @@ function shadowPaints(boxShadow: string) {
  *
  *  - focus actually landed on this node;
  *  - `:focus-visible` matches — the ring's own CSS condition. Focus alone is not
- *    enough; `:focus-visible` is what all ten indicators are gated on;
+ *    enough; `:focus-visible` is what all nine indicators are gated on;
  *  - the computed style PAINTS something — i.e. the class string compiled to a
  *    visible indicator rather than merely being present in source. This is the
  *    gap the structural guard cannot see at all: `focus-ring.test.ts` reads
@@ -732,6 +735,104 @@ async function gotoDesktop(page: Page, path: string) {
   await page.waitForLoadState('networkidle')
 }
 
+for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
+  test(`agent card stretched link (${viewport?.width ?? 'missing'}px): body pointer activates the agent link while action controls do not navigate`, async ({
+    page,
+  }) => {
+    if (!viewport) throw new Error('focus gate: no desktop viewport configured')
+    const agentId = testAgent.id
+    await mockHavenApi(page)
+    await seedAgents(page, [agentState({ mcp_server_name: 'haven-research' })])
+    await seedAuthenticatedSession(page)
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.setViewportSize(viewport)
+    await page.goto('/agents')
+    await dismissMobileSidebar(page)
+
+    const card = page.getByTestId('agent-card').filter({
+      has: page.locator(`a[href="/agents/${agentId}"]`),
+    })
+    await card.scrollIntoViewIfNeeded()
+    await card.getByRole('button', { name: `Pause ${testAgent.name}` }).click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+    await expect(page.getByRole('heading', { name: `Pause ${testAgent.name}?` })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    await card.getByRole('button', { name: `Remove ${testAgent.name}` }).click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+    await expect(page.getByRole('heading', { name: `Remove ${testAgent.name}?` })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    const copyMcpName = card.getByRole('button', { name: 'Copy MCP server name' })
+    await copyMcpName.click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+    await expect(card.getByRole('button', { name: 'MCP server name copied' })).toBeVisible()
+
+    const nameLink = card.getByRole('link', { name: testAgent.name, exact: true })
+    await nameLink.focus()
+    await expect(nameLink).toBeFocused()
+    await page.keyboard.press('Enter')
+    await page.waitForURL(`**/agents/${agentId}`)
+    await page.goBack()
+    await page.waitForURL('**/agents')
+    await dismissMobileSidebar(page)
+    await card.scrollIntoViewIfNeeded()
+
+    const bodyPoint = await card.evaluate((element, agentId) => {
+      const link = element.querySelector<HTMLAnchorElement>(`a[href="/agents/${agentId}"]`)
+      if (!link) throw new Error('the agent-card name link is missing')
+      const cardBox = element.getBoundingClientRect()
+      const linkBox = link.getBoundingClientRect()
+      let best: { x: number; y: number; score: number } | null = null
+      for (let y = cardBox.top + 4; y < cardBox.bottom - 4; y += 4) {
+        for (let x = cardBox.left + 4; x < cardBox.right - 4; x += 4) {
+          const insidePaintedLink =
+            x >= linkBox.left && x <= linkBox.right && y >= linkBox.top && y <= linkBox.bottom
+          const top = document.elementFromPoint(x, y)
+          if (!insidePaintedLink && top && (top === link || link.contains(top))) {
+            const score = Math.min(
+              x - cardBox.left,
+              cardBox.right - x,
+              y - cardBox.top,
+              cardBox.bottom - y,
+            )
+            if (!best || score > best.score) best = { x, y, score }
+          }
+        }
+      }
+      if (best) return { x: best.x, y: best.y }
+      throw new Error('the stretched name link exposes no card-body hit point')
+    }, agentId)
+    await page.evaluate(() => {
+      ;(window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation = 'alive'
+      ;(window as unknown as { __cardClickTarget?: string }).__cardClickTarget = ''
+      document.addEventListener('click', (event) => {
+        const target = event.target as HTMLElement | null
+        ;(window as unknown as { __cardClickTarget?: string }).__cardClickTarget =
+          `${target?.tagName ?? 'null'}:${target?.closest('a')?.getAttribute('href') ?? ''}:${event.defaultPrevented}`
+      }, { once: true })
+    })
+    await page.mouse.move(bodyPoint.x, bodyPoint.y)
+    await expect.poll(() => page.evaluate(({ x, y, agentId }) => {
+      const link = document.querySelector<HTMLAnchorElement>(`a[href="/agents/${agentId}"]`)
+      const top = document.elementFromPoint(x, y)
+      return Boolean(link && top && (top === link || link.contains(top)))
+    }, { ...bodyPoint, agentId })).toBe(true)
+    await page.mouse.click(bodyPoint.x, bodyPoint.y)
+    await expect.poll(() => page.evaluate(
+      () => (window as unknown as { __cardClickTarget?: string }).__cardClickTarget,
+    )).toBe(`A:/agents/${agentId}:true`)
+    await page.waitForURL(`**/agents/${agentId}`)
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation,
+      ),
+      `${viewport.width}px card-body navigation performed a full reload`,
+    ).toBe('alive')
+
+  })
+}
+
 test.describe('driven focus-state visual regression', () => {
   test.skip(
     !VISUAL_SPECS_ENABLED,
@@ -743,7 +844,7 @@ test.describe('driven focus-state visual regression', () => {
     await seedAuthenticatedSession(page)
   })
 
-  // ── Sidebar kebab user menu — 3 of #1831's 11 ─────────────────────────────
+  // ── Sidebar kebab user menu — three current indicators ────────────────────
   //
   // Captured on `/design-system` rather than on `/agents`, so the sidebar's
   // pixel evidence stays on one route — the same route #1820's resting-state
@@ -781,7 +882,7 @@ test.describe('driven focus-state visual regression', () => {
     })
   }
 
-  // ── AgentCard action row — 3 of #1831's 11 ────────────────────────────────
+  // ── AgentCard action row — the live Pause control ─────────────────────────
   //
   // On `/agents`, because `AgentCard` renders nowhere else — it is NOT on
   // `/design-system`, which is why the blocking visual gate has never seen it
@@ -790,9 +891,9 @@ test.describe('driven focus-state visual regression', () => {
   //
   // #2258: `Revoke` was a legacy Safe control and is deleted with the retired
   // agent-management surface. `Pause` stays for live delegation agents;
-  // #3168 retired `Edit` (the card's first action is now "Details", which
-  // navigates to the detail page), so this loop captures Pause only. The
-  // baseline captures the row with the live `Remove` control.
+  // #3550 moved navigation to the stretched name link and removed Details, so
+  // this loop captures Pause only. The baseline captures the row with the live
+  // `Remove` control.
   const rowControls = [
     { slug: 'pause', label: 'Pause', tone: 'brand' },
   ] as const
@@ -834,50 +935,33 @@ test.describe('driven focus-state visual regression', () => {
     })
   }
 
-  // ── AgentCard's other four footer branches — the remaining 5 of 11 (#1873) ─
+  test('agent card name link — focus rings the whole card', async ({ page }) => {
+    await gotoDesktop(page, '/agents')
+
+    const card = page.getByTestId('agent-card')
+    const target = card.getByRole('link', { name: testAgent.name, exact: true })
+    await expect(target).toHaveCount(1)
+    await tabToTarget(page, target, 'AgentCard name link')
+    await expect(target).toBeFocused()
+    const ring = await card.evaluate((el) => getComputedStyle(el).boxShadow)
+    expect(ring, 'the focused name link did not paint the shared card ring').not.toBe('none')
+
+    await expect(card).toHaveScreenshot('focus-agentcard-name-link-desktop.png', SNAPSHOT_OPTIONS)
+  })
+
+  // ── AgentCard's other four footer branches — four more controls (#1873) ─
   //
   // One seeded agent per test, one control per test, one capture per test. The
   // `rowControls` field is the branch assertion: it is what says the fixture
   // reached the intended branch rather than merely carrying the intended field.
   const seededControls = [
     {
-      slug: 'details',
-      // #3168: the `canUseWalletActions` fork is gone, so this branch is no
-      // longer how a second account is reached — but the seed still exercises
-      // an agent on a DIFFERENT account than the active one, which is exactly
-      // the case that used to fork. Its row proves the first control is
-      // "Open details for …" here too, same as every operational card.
-      agent: agentState({
-        id: 'agent-other-safe',
-        name: 'Ledger agent',
-        account_id: 'safe-secondary',
-        account_name: 'Treasury',
-      }),
-      control: 'Open details for Ledger agent',
-      // #2264: `Remove` joins the row. #3168 removed the fork that hid
-      // Details behind `canUseWalletActions` (and nothing else — `Revoke` is
-      // gone since #2258), but Remove is not gated at all: it renders
-      // unconditionally inside `isOperational` (#2413 deleted
-      // `isDelegationAgent`). #3164 adds `Move` between Details and the
-      // pause/resume control on every operational card — four controls.
-      rowControls: [
-        'Open details for Ledger agent',
-        'Move Ledger agent to an organization',
-        'Pause Ledger agent',
-        'Remove Ledger agent',
-      ],
-      tone: 'brand',
-      label: 'Details',
-    },
-    {
       slug: 'resume',
       agent: agentState({ id: 'agent-paused', name: 'Paused agent', status: 'paused' }),
       control: 'Resume Paused agent',
       // #2264: Remove, not Revoke — same rail branch as the row above.
-      // #3168: the first control is now Details, not Edit.
-      // #3164: Move joins every operational row, Details first.
+      // #3164: Move joins every operational row.
       rowControls: [
-        'Open details for Paused agent',
         'Move Paused agent to an organization',
         'Resume Paused agent',
         'Remove Paused agent',
@@ -909,11 +993,8 @@ test.describe('driven focus-state visual regression', () => {
         account_type: 'delegator_hybrid',
       }),
       control: 'Remove Delegation agent',
-      // #3168: the first control is now Details, not Edit — same substitution
-      // as the paused branch above.
-      // #3164: Move joins every operational row, Details first.
+      // #3164: Move joins every operational row.
       rowControls: [
-        'Open details for Delegation agent',
         'Move Delegation agent to an organization',
         'Pause Delegation agent',
         'Remove Delegation agent',
@@ -950,7 +1031,7 @@ test.describe('driven focus-state visual regression', () => {
       rowControls: ['Restore Archived agent to the list'],
       tone: 'brand',
       label: 'Restore to list',
-      // The only control of the ten that is not on screen at load.
+      // The only control of the nine that is not on screen at load.
       behindRemovedDisclosure: true,
     },
   ] as const

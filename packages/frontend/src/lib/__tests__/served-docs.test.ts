@@ -167,9 +167,10 @@ describe('the served paths are advertised', () => {
     // Nothing else guarantees the files exist in a deployment. An npm
     // `prebuild` hook fires for `npm run build` — which is what CI uses — but
     // a deployment whose build command invokes `next build` directly would
-    // skip it and 404 every path above with nothing failing. This repository
-    // has no `vercel.json`, so the deployed command is not knowable from the
-    // tree; invoking from the config makes the answer stop mattering.
+    // skip it and 404 every path above with nothing failing. vercel.json sets
+    // the build command today (#3594), but a dashboard override or a later
+    // edit could change it; invoking from the config makes the answer stop
+    // mattering.
     // Verified by running a bare `next build` against an empty output dir.
     const config = readFileSync(join(FRONTEND, 'next.config.ts'), 'utf8')
     expect(config).toContain("from './scripts/serve-docs.mjs'")

@@ -73,8 +73,61 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-01"
+last-verified: "2026-10-02"
 ---
+
+> **Re-verified #3583 (2026-10-02, the ops render smoke):** this diff touches
+> `.github/workflows/ci.yml`, a covered file, inside the `ops_checks` job
+> only: its build step gains a fixture `NEXT_PUBLIC_OPS_ENVIRONMENTS`, three
+> steps are added (the shared Playwright cache restore, a cache-miss browser
+> install, and `npm run smoke -w packages/ops`), and the job timeout goes
+> from 10 to 15 minutes. No tool, schema, version-skew or consent-hash
+> contract moves; the client releases table, upgrade hints, publish flow and
+> package resolution are untouched. `last-verified` stays 2026-10-02. Nothing
+> else in this document was re-verified.
+
+> **Re-verified, follow-up to #3587 (2026-10-02, a step rename):** this diff
+> touches `.github/workflows/ci.yml`, a covered file, in one step NAME and its
+> comment only — the `design_visual` job's dark-scheme step is renamed from
+> `(design system)` to `(chromium-desktop-dark testMatch)`, because it runs
+> seven specs, not one. The job name, the command, the check identity and every
+> ruleset contract are unchanged. No tool, schema, version-skew or consent-hash
+> contract moves; the client releases table, upgrade hints, publish flow and
+> package resolution are untouched. `last-verified` stays 2026-10-02. Nothing
+> else in this document was re-verified.
+
+> **Re-verified #3515 (2026-10-02, the ops console scaffold):** this diff
+> touches `.github/workflows/ci.yml`, a covered file. The change adds gate
+> steps (design lint, wire-type ratchet) to the NEW `ops_checks` job for the
+> `@haven/ops` scaffold (#3515) and its surface routing; no covered runtime
+> code moved. No tool is added, renamed or re-shaped on either runtime, no
+> argument or input schema changes, and the version-skew and consent-hash
+> contracts do not move: a CI job's steps are not a skew axis. The client
+> releases table, upgrade hints, publish flow and package resolution are
+> untouched. `last-verified` is bumped to 2026-10-02 for this note.
+> Nothing else in this document was re-verified.
+
+> **Re-verified #3564 (2026-10-02):** this diff touches
+> `packages/mcp-server/src/tools/support/errors.ts` and
+> `packages/sdk/src/types.ts` / `payment-mappers.ts` — all covered trees.
+> #3494's `SUBMISSION_OUTCOME_UNKNOWN` mapping moves from a
+> `stop_and_tell_user` (the intent was already `failed`, so polling this
+> payment_id's own status could never confirm the outcome) to the poll the
+> re-booked backend now permits: with the 502 body's `payment_id` the step
+> names `haven_get_payment_status` (`next_action: check_status_later` — the
+> intent is booked outcome-pending, so the status read IS the source of
+> truth, and it becomes the real terminal state once the backend's
+> submission reconciler resolves the row from the chain); without a
+> `payment_id` to poll, the step stays `stop_and_tell_user`, saying why no
+> new payment may be created. No tool added, renamed or re-shaped; the
+> runtime manifest, connector channel, dist-tag and consent-hash contracts
+> are untouched, and the failure shape rides the same refusal-wire fields
+> the #3104 parity walk already parses. Additive SDK surface:
+> `submissionOutcomePending` on the status result — absent on every other
+> row, never `false`, matching `delivered`'s honesty rule — so an older
+> backend stays wire-compatible. `last-verified` is bumped to 2026-10-02
+> for this note: the hosted refusal mapping for this code is part of this
+> document's guidance surfaces, and its `next_action` moved.
 
 > **Re-verified #3496 (2026-09-30, the tombstone tell moves ahead of the
 > identity stat):** this diff touches `packages/connect/src/doctor.ts` (and its
@@ -377,13 +430,16 @@ last-verified: "2026-10-01"
 > one per CI edit, so this section does not accumulate a paragraph every time a
 > step is added.
 >
-> **Re-verified unchanged (#3483):** the change touches `.github/workflows/ci.yml`,
+> **Re-verified unchanged (#3483, and again for #3573):** the change touches `.github/workflows/ci.yml`,
 > a covered file, but only inside the frontend build the design_visual job's
 > baselines come from — one build-time env line
 > (`NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`, a fixed synthetic literal so the Add
 > funds modal's visual baselines render the onramp variant; see
 > `docs/operations/dev-environment.md` § `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`
-> in the Playwright builds). Frontend-only CI wiring: no tool is added, renamed
+> in the Playwright builds; #3573 added one more such line,
+> `NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'`, which turns the redesigned public
+> site's gate on — same document, § `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`).
+> Frontend-only CI wiring: no tool is added, renamed
 > or re-shaped, no description text changes, no schema or argument changes, and
 > the runtime-skew and consent-hash contracts are untouched. `last-verified` is
 > not bumped: this note is the scope.

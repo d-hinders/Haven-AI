@@ -164,18 +164,26 @@ test('--update allows a shrink, while a non-empty first write needs acceptance',
 import { runGuard } from './test-support/guard-cli.mjs'
 
 const HOOK = 'packages/frontend/src/hooks/useThing.ts'
+// Placeholder in the ops scan dir (#3515): since #3230 the gate refuses when
+// ANY SCAN_DIRS entry matches no files, and SCAN_DIRS gained
+// packages/ops/src/lib — so every fixture exercising a DIFFERENT refusal must
+// satisfy the census there too, or that refusal fires first.
+const OPS_PLACEHOLDER = {
+  'packages/ops/src/lib/placeholder.ts': 'export type OpsPlaceholder = { camelCaseOnly: string }\n',
+}
 const snake = (n) =>
   `export type T = {\n` + Array.from({ length: n }, (_, i) => `  api_key_${i}: string`).join('\n') + `\n}\n`
 
 test('CLI: growth past the baseline exits non-zero and names the file', () => {
   const { status, out } = runGuard('lint-wire-types.mjs', {
     also: ['lib/ratchet.mjs'],
-    // Placeholder in the OTHER scan dir: since #3230 the gate refuses when any
-    // SCAN_DIRS entry matches no files, so fixtures exercising other refusals
-    // must satisfy the census for the growth verdict to be what fires.
+    // Placeholders in the OTHER scan dirs: since #3230 the gate refuses when
+    // any SCAN_DIRS entry matches no files, so fixtures exercising other
+    // refusals must satisfy the census for the growth verdict to be what fires.
     files: {
       [HOOK]: snake(3),
       'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+      ...OPS_PLACEHOLDER,
       'packages/frontend/wire-type-baseline.json': '{}',
     },
   })
@@ -192,6 +200,7 @@ test('CLI: a tree with no hand-written shapes exits 0', () => {
     files: {
       'packages/frontend/src/hooks/useThing.ts': 'export type T = { camelCase: string }\n',
       'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+      ...OPS_PLACEHOLDER,
       'packages/frontend/wire-type-baseline.json': '{}',
     },
   })
@@ -205,6 +214,7 @@ test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
     files: {
       [HOOK]: snake(3),
       'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+      ...OPS_PLACEHOLDER,
       'packages/frontend/wire-type-baseline.json': JSON.stringify({ [HOOK]: { PrepareResponse: 1 } }),
     },
   })
@@ -225,6 +235,7 @@ test('CLI: `--update` refuses a brand-new file when the baseline is not empty', 
     files: {
       [HOOK]: snake(1),
       'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+      ...OPS_PLACEHOLDER,
       'packages/frontend/wire-type-baseline.json': JSON.stringify({
         'packages/frontend/src/hooks/other.ts': { PrepareResponse: 1 },
       }),
@@ -240,9 +251,10 @@ test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () 
     also: ['lib/ratchet.mjs'],
     files: {
       [HOOK]: snake(2),
-      // #3230: the census must see both scan dirs, or the zero-scan refusal
+      // #3230: the census must see every scan dir, or the zero-scan refusal
       // fires before the first-run refusal this test exists to pin.
       'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+      ...OPS_PLACEHOLDER,
     },
     readBack: [base],
   }
@@ -263,6 +275,7 @@ test('CLI: a MISSING baseline still writes an empty first scan without --accept-
     files: {
       'packages/frontend/src/hooks/useThing.ts': 'export type T = { camelCase: string }\n',
       'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+      ...OPS_PLACEHOLDER,
     },
     args: ['--update'], readBack: [base],
   })
@@ -279,6 +292,7 @@ test('CLI: a malformed baseline prints one line, not a node:internal banner', ()
     files: {
       [HOOK]: snake(1),
       'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+      ...OPS_PLACEHOLDER,
       'packages/frontend/wire-type-baseline.json': JSON.stringify({ [HOOK]: { T: 'x' } }),
     },
   })
@@ -350,8 +364,7 @@ test('scanAll() counts files actually read on a real tree — not a stub', async
   // is compared against the same reality the gate reads, not against a
   // hand-maintained fixture.
   const { fileCount, readByDir } = await scanAll()
-  const hooksRead = readByDir.get(SCAN_DIRS[0]) ?? 0
-  const typesRead = readByDir.get(SCAN_DIRS[1]) ?? 0
-  assert.ok(hooksRead > 0 && typesRead > 0)
-  assert.equal(fileCount, hooksRead + typesRead)
+  const reads = SCAN_DIRS.map((dir) => readByDir.get(dir) ?? 0)
+  assert.ok(reads.every((n) => n > 0), 'every scan dir matched files in the census')
+  assert.equal(fileCount, reads.reduce((a, b) => a + b, 0))
 })

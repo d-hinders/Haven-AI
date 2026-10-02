@@ -24,6 +24,7 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       frontend: ${{ steps.filter.outputs.frontend }}
       ui: ${{ steps.filter.outputs.ui }}
+      ops: ${{ steps.filter.outputs.ops }}
       backend: ${{ steps.filter.outputs.backend }}
       sdk: ${{ steps.filter.outputs.sdk }}
       connect: ${{ steps.filter.outputs.connect }}
@@ -319,6 +320,81 @@ jobs:
         # only inside the frontend's job; the package has its own now because a
         # ui-only change routes here, not to the frontend job.
         run: npm run test -w packages/ui
+
+  ops_checks:
+    name: Ops checks
+    needs: changes
+    if: needs.changes.outputs.ops == 'true'
+    runs-on: ubuntu-latest
+    # 15, not 10: the render smoke (#3583) adds a Chromium run, plus the
+    # browser download on a Playwright cache miss.
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check ops
+        run: npm run typecheck -w packages/ops
+
+      - name: Design-system drift gate
+        # The design lint's scan spans ../ui/src and ../ops/src (#3515), but an
+        # ops-only diff never routes frontend_checks — so the console's own job
+        # runs the same gate, or an ops-side violation ships green.
+        run: npm run design:lint -w packages/frontend
+
+      - name: Wire-type ratchet (#1447)
+        # Same shape: the ratchet's SCAN_DIRS gained packages/ops/src/lib (#3515),
+        # and this is the only job an ops-only diff can run it in.
+        run: |
+          npm run lint:wire-types
+          npm run lint:wire-types:test
+
+      - name: Run ops unit tests
+        # The console scaffold's suites (#3515): the registry parser, the token
+        # store, the nonce-matched fragment handoff, the origin-scoped fetch
+        # wrapper, and the source guard that pins the storage/injection rules.
+        run: npm run test -w packages/ops
+
+      - name: Build ops
+        # A registry is inlined at build time (NEXT_PUBLIC_*), so the render
+        # smoke below gets the real console rather than its config-error
+        # screen. The origin is a fixture host nothing resolves; the smoke
+        # runs offline and never calls it.
+        env:
+          NEXT_PUBLIC_OPS_ENVIRONMENTS: '{"dev":"https://ops-backend.fixture"}'
+        run: npm run build -w packages/ops
+
+      - name: Restore Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      # Same pair as browser_smoke (#1609): only a cache MISS installs, and
+      # only the install runs apt-get. The key is shared, so a warm frontend
+      # cache serves this job too.
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+        working-directory: packages/ops
+
+      - name: Ops render smoke (#3583)
+        # The console's production build must RENDER under its enforcing CSP:
+        # #3515 shipped a blank page with every unit test green (#3581). Sign-in
+        # renders after hydration with 0 CSP violations, and an un-nonced
+        # inline script is refused. Offline: no browser request leaves the server.
+        run: npm run smoke -w packages/ops
 
   qa_agent_checks:
     name: QA agent checks
@@ -784,6 +860,12 @@ jobs:
           # this literal (grepped the repo: nothing outside these two
           # workflows and the e2e spec references it).
           NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
+          # #3573: the e2e and visual suites run against ONE build with the
+          # redesigned public site's gate on (epic #3572 — src/lib/site-gate.ts).
+          # This build sets no NEXT_PUBLIC_HAVEN_ENV, so it is production-shaped
+          # and the gate would otherwise be off. Build-time (NEXT_PUBLIC_ is
+          # inlined), CI-only: no deployment sets it.
+          NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'
 
       - name: Upload frontend build
         uses: actions/upload-artifact@v4
@@ -977,13 +1059,15 @@ jobs:
 
       # #2929: the dark palette's pixel gate. Separate invocation, same job,
       # same `design_visual` check — the `chromium-desktop-dark` project is
-      # scoped to the design-system spec alone (the other specs have no dark
-      # baselines, and a project that auto-writes missing snapshots is a green
-      # tick about nothing, the #2318 class). Advisory on `dev`, required on
+      # scoped by its `testMatch` in playwright.config.ts to the specs that
+      # have dark baselines (a project that auto-writes missing snapshots is a
+      # green tick about nothing, the #2318 class). Advisory on `dev`, required on
       # `main`, exactly like the light comparison above: same job identity,
       # same ruleset membership, so no ruleset edit is needed for it to gate
-      # promotion.
-      - name: Visual regression — dark scheme (design system)
+      # promotion. The step name points at that `testMatch` rather than
+      # listing specs: the set is several and moves, and a name that
+      # enumerates it drifts into naming one of a set — the #2318 class above.
+      - name: Visual regression — dark scheme (chromium-desktop-dark testMatch)
         run: npm run test:visual:dark -w packages/frontend
         env:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
@@ -1009,7 +1093,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -1105,6 +1189,11 @@ jobs:
 
           if [ "${{ needs.changes.outputs.ui }}" = "true" ] && [ "${{ needs.ui_checks.result }}" != "success" ]; then
             echo "UI checks result: ${{ needs.ui_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.ops }}" = "true" ] && [ "${{ needs.ops_checks.result }}" != "success" ]; then
+            echo "Ops checks result: ${{ needs.ops_checks.result }}"
             exit 1
           fi
 

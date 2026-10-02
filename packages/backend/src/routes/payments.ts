@@ -1,6 +1,7 @@
 import { RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import {
+  bookSubmittedOutcomePending,
   claimIntentForSubmission,
   confirmSubmittedIntent,
   expireOverdueIntent,
@@ -1225,69 +1226,76 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           await releaseSubmittedClaim(intent.id)
           return refused
         }
-        // 6. Failure. Session-rail (bundler) errors echo the request URL,
-        // which embeds the API key — scrub before persisting or responding.
+        // 6. Failure — CLASSIFIED first (#3564). Session-rail (bundler) errors
+        // echo the request URL, which embeds the API key — scrub before
+        // persisting or responding.
         const errorMsg = redactVendorSecrets(err instanceof Error ? err.message : String(err))
-        await failSubmittedIntent(errorMsg, id, agent.id)
-
-        // #3494: a typed `error_code` + cause class on the 502, instead of
-        // one untyped "On-chain execution failed" for everything a bundler
-        // can throw after this route already claimed the intent to
-        // 'submitted'. Unlike the create-time pre-checks (#3500/#3503), this
-        // intent is ALREADY FAILED (booked above) — there is nothing left to
-        // retry on this payment_id whatever the cause, so every branch here
-        // answers 502 (the row read nothing retryable), never the create
-        // route's non-retryable 403; `message` is what differs per cause.
-        // No ledger row either way — the comment this replaced already
-        // established that this is the on-chain/bundler FAILURE answer,
-        // booked on the intent row, not a policy refusal the ledger owns.
+        // Bound ONCE, above every arm (#3564 review round 2): redaction is
+        // not a length bound — a viem/bundler message can still carry full
+        // callData/ABI after scrubbing — and every body that answers
+        // `details` (the outcome-pending one included) must carry the
+        // bounded text, never the raw redacted error.
         const boundedMessage = boundFailureMessage(errorMsg)
-
-        // #3494 review round 1 (B1, double-pay risk), round 2 (B1', N3):
-        // `sendUserOperation` resolving is the one irreversible step — a
-        // throw AFTER it means the op MAY have landed. `SubmittedUserOpFailedError`
-        // is thrown ONLY for that post-send phase (`rails/delegation-rail.ts`'s
-        // own doc comment), but it now covers TWO different certainties and
-        // this route must not conflate them (N3):
-        // - `reverted: true` — the receipt arrived and says the op executed
-        //   and reverted. That is a KNOWN outcome (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed) — it falls through to the
-        //   generic `onchain_execution_failed` below like any other on-chain
-        //   failure, never `submission_outcome_unknown`.
-        // - `reverted: false` (the default) — the receipt wait itself
-        //   errored or timed out. Haven never learned the outcome. Checked
-        //   before every text-based classification below, since none of
-        //   them can safely override "the outcome is unknown".
-        //
-        // B1' (round 2): this intent is ALREADY marked `failed` by
-        // `failSubmittedIntent` above, so `haven_get_payment_status` will
-        // answer "failed" immediately and forever — polling status can
-        // never come back "landed". The message therefore must NOT promise
-        // that status will resolve it (round 1's wording did, and invited
-        // reading "failed" as confirmation it did not settle, then paying
-        // again — exactly the double pay this code exists to prevent).
-        // The honest answer is: stop, and check the account's real activity
-        // (Haven's own activity view, or the userOpHash on an explorer) —
-        // never this payment_id's own status. This PR does not change the
-        // `failSubmittedIntent` booking itself — that reconciliation gap is
-        // a follow-up the owner will file separately.
-        if (err instanceof SubmittedUserOpFailedError && !err.reverted) {
+        // #3564: the receipt-unconfirmed variant of SubmittedUserOpFailedError
+        // means the UserOp was SENT and MAY have landed (the funds may have
+        // moved). Booking that `failed` would record a funds-moved payment as
+        // failed forever, so the row is left `submitted` — status reads
+        // "outcome pending" (phase payment_submitted, next_action
+        // check_status_later) — and the userOpHash is stored for the
+        // submission reconciler (modules/payments/submission-reconciler.ts),
+        // which resolves the row from the bundler's receipt: landed+succeeded
+        // → confirmed with its tx_hash; landed+reverted or never seen within
+        // the bounded window → failed with the cause. The booking is a CAS on
+        // the open submit; if the row is no longer one (a concurrent settle
+        // won, the claim was already resolved), no booking happens and the
+        // generic failure body below still answers THIS call — the row's
+        // truth is whatever won the race.
+        if (err instanceof SubmittedUserOpFailedError && err.outcome === 'receipt_unconfirmed') {
+          await bookSubmittedOutcomePending({ userOpHash: err.userOpHash, intentId: id, agentId: agent.id })
           return refuse(
             reply.code(502).send({
               payment_id: id,
-              status: 'failed',
-              error: 'The payment was submitted but its on-chain outcome is unknown',
+              status: 'submitted',
+              error: 'On-chain submission outcome unknown',
               error_code: 'submission_outcome_unknown',
               message:
-                `The payment was submitted (UserOperation ${err.userOpHash}) but Haven could not confirm ` +
-                'whether it landed — it may have moved funds even though Haven recorded it as failed. Do ' +
-                'NOT create a new payment. Check the account\'s activity in Haven, or the UserOperation ' +
-                'hash on a block explorer, before paying again.',
+                `The payment was submitted (UserOperation ${err.userOpHash}) but its on-chain outcome ` +
+                'is not known yet — it may have moved the funds. Do not create a new payment for this ' +
+                'payment_id: poll haven_get_payment_status for it — Haven reconciles this payment from ' +
+                'the chain, and this status becomes the real outcome.',
               user_op_hash: err.userOpHash,
               details: boundedMessage,
             }),
             null,
           )
         }
+        // Every KNOWN failure — the `included but reverted` variant of
+        // SubmittedUserOpFailedError (the op landed and reverted, so no funds
+        // moved) and every pre-send bundler rejection — is terminal: book
+        // `failed` BEFORE classifying (the classification below describes a
+        // row that is already terminal; nothing here is retryable).
+        await failSubmittedIntent(errorMsg, id, agent.id)
+        // #3494: a typed `error_code` + cause class on the 502, instead of
+        // one untyped "On-chain execution failed" for everything a bundler
+        // can throw after this route already claimed the intent to
+        // 'submitted'. Unlike the create-time pre-checks (#3500/#3503), the
+        // branches below run against an intent ALREADY FAILED (booked above)
+        // — there is nothing left to retry on this payment_id whatever the
+        // cause, so every branch here answers 502 (the row read nothing
+        // retryable), never the create route's non-retryable 403; `message`
+        // is what differs per cause. No ledger row either way — the comment
+        // this replaced already established that this is the
+        // on-chain/bundler FAILURE answer, booked on the intent row, not a
+        // policy refusal the ledger owns.
+        // #3564 composed over this: the outcome-UNKNOWN variant never reaches
+        // here (the booking split above returned first — it books the row
+        // outcome-pending and the submission reconciler, not this route,
+        // resolves it), so `haven_get_payment_status` IS truthful on this
+        // seam now. What remains below classifies the KNOWN failures, and is
+        // still reachable for the pre-send bundler simulation rejections
+        // (AA2x codes) that arrive as generic errors. (`boundedMessage` is
+        // computed above the booking split, so the outcome-pending arm can
+        // bound its `details` too.)
 
         // #3494 review round 1 (S1): AA24 is the one AA2x code this backend
         // can attribute to the signer. There is no live budget or chain

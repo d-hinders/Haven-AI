@@ -9,8 +9,10 @@ Ship exactly one release to production, then stop.
 
 **A release is the outcome users see; a promotion is one step inside it.** The
 promotion (`dev → main`) is the mechanism, and it can fire two independent
-consequences: packages **publish** to npm when a version moved, and the backend,
-hosted MCP and dashboard **deploy** from their branches every time. Keep those
+consequences: packages **publish** to npm when a version moved, and the backend
+and hosted MCP **deploy** from their branches every time, the dashboard whenever
+the promotion changes something it is built from (its Vercel Ignored Build Step,
+`docs/operations/dev-environment.md` § *Which pushes rebuild the frontend*). Keep those
 words apart — release, promotion, publish and deploy are not synonyms, and the
 runbook's own title carries the hierarchy: *"Promoting `dev → main` (production
 release)"*.

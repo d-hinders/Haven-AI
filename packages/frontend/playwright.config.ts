@@ -266,6 +266,11 @@ export default defineConfig({
       // which inlines NEXT_PUBLIC_* from the server process's env on
       // compile. Same fixed synthetic literal as those workflows.
       NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: 'e2e-onramp-app-id-placeholder',
+      // #3573: the redesigned public site's gate (src/lib/site-gate.ts), on
+      // for every e2e run (epic #3572: one e2e build, gate on). Like the
+      // onramp id above, the CI path bakes it in at its build step
+      // (ci.yml / update-visual-baselines.yml); this covers `next dev`.
+      NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1',
     },
   },
   // Both projects GATE on every frontend pull request (#1768). Before that,
@@ -314,13 +319,14 @@ export default defineConfig({
       testIgnore: SUITE_IGNORE,
     },
     {
-      // #2929: the dark palette's pixel gate. Scoped to the specs whose
-      // baselines exist in both schemes — the design-system shell clips and,
-      // since #3038, the `/analytics` report — because the other visual specs
-      // have no dark baselines yet, and a project that silently compared
-      // against (or silently auto-wrote) light baselines would be a green tick
-      // about nothing: exactly the #2318/#1863 failure class this suite keeps
-      // relearning. The specs read `testInfo.project.name` and under this
+      // #2929: the dark palette's pixel gate. Scoped to exactly the specs that
+      // have committed `-dark` baselines — the list is `testMatch` below, not
+      // this comment. A spec joins in the same change that commits its dark
+      // baselines, never before: `snapshotPathTemplate` carries no project
+      // name, so a spec run here without dark baselines would silently compare
+      // against its light ones (or silently auto-write missing ones): a green
+      // tick about nothing, exactly the #2318/#1863 failure class this suite
+      // keeps relearning. The specs read `testInfo.project.name` and under this
       // project captures `<base>-dark.png` and seeds `haven.theme='dark'` in
       // storage BEFORE navigation; the seed is what makes the render
       // deterministic (the app's no-flash bootstrap stamps `data-theme` from
@@ -335,21 +341,26 @@ export default defineConfig({
       // `main`, exactly like the light project.
       name: 'chromium-desktop-dark',
       use: { ...devices['Desktop Chrome'], colorScheme: 'dark' },
-      // #3079: marketplace.visual.spec.ts joins with five desktop `-dark`
-      // baselines (grid, merchant page, coming-soon, test-merchant, not-found).
-      // #3332: settings-company-details.visual.spec.ts joins with two desktop
-      // `-dark` baselines (empty, filled).
-      // #3483: add-funds-modal.visual.spec.ts joins with three desktop
-      // `-dark` baselines (testnet faucet, mainnet onramp, unresolved chain)
-      // — the spec seeds `haven.theme='dark'` itself and skips its mobile
-      // shots under this project (no mobile dark baseline), so only the three
-      // desktop clips ever compare here.
+      // Joined: design-system (#2929), analytics (#3038), marketplace (#3079),
+      // settings-company-details (#3332), add-funds-modal (#3483), demo and
+      // releases (#3573 — the public pages' redesigned header and footer
+      // follow the visitor's theme), how-it-works (#3576 — How it works and
+      // its protocols sub-page), home (#3574 — the redesigned home page).
+      // Baseline counts are not restated here;
+      // `git ls-files` the `__screenshots__` tree for them. add-funds-modal
+      // seeds `haven.theme='dark'` itself and skips its mobile shots under
+      // this project (no mobile dark baseline), so only its desktop clips
+      // compare here.
       testMatch: [
         '**/design-system.visual.spec.ts',
         '**/analytics.visual.spec.ts',
         '**/marketplace.visual.spec.ts',
         '**/settings-company-details.visual.spec.ts',
         '**/add-funds-modal.visual.spec.ts',
+        '**/demo.visual.spec.ts',
+        '**/releases.visual.spec.ts',
+        '**/how-it-works.visual.spec.ts',
+        '**/home.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

@@ -1,0 +1,12 @@
+# What the haven-ops Vercel project is built from (#3594). Read by
+# scripts/vercel/ignore-build.sh, one repo-relative path per line; `#` starts a
+# comment. A change under any of these since the last deployment builds the
+# console. packages/ops/src/__tests__/vercel-ignore-build.test.ts pins the list.
+packages/ops
+packages/ui
+packages/core
+scripts/docs
+tsconfig.base.json
+package.json
+package-lock.json
+.nvmrc

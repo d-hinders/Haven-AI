@@ -264,3 +264,85 @@ export async function readOpsUserDetail(db: Executor, userId: string): Promise<O
     refusals: refusals.rows,
   }
 }
+
+// ── On-chain view (#3513) ────────────────────────────────────────────────
+//
+// `GET /ops/users/:id/onchain` needs the user's smart accounts and, per
+// account, the ACTIVE stored delegations that reference it — the rows the
+// chain view reads against (`delegation_hash` identifies the disabled read,
+// `delegation_json` feeds the budget reader by owner decision #3510; neither
+// value leaves the module — `modules/ops/onchain.ts` masks and drops them).
+// An account row carries NO delegation columns and a delegation row carries
+// no account columns beyond the join key, so the ops role reads exactly its
+// granted columns on both tables.
+
+export const OPS_ONCHAIN_USER_EXISTS_SQL = 'SELECT id FROM users WHERE id = $1'
+
+/** The user's accounts — the rows the on-chain view buckets and, where readable, reads. */
+export const OPS_ONCHAIN_ACCOUNTS_SQL = `SELECT id, chain_id, account_address, account_type, execution_rail, name
+  FROM smart_accounts WHERE user_id = $1 ORDER BY chain_id, created_at`
+
+/**
+ * The user's ACTIVE stored delegations, joined to the delegator account they
+ * are stored under (`agents.account_id` → `smart_accounts.id`). Scoped by
+ * USER id — a scalar uuid, like every other ops read — rather than by an
+ * account-id array, so the #3510 role self-test can run it with its standard
+ * binding.
+ */
+export const OPS_ONCHAIN_DELEGATIONS_SQL = `SELECT sa.id AS account_id, d.chain_id, d.delegation_hash, d.delegation_json, d.budget_atomic
+  FROM agent_delegations d
+  JOIN agents ag ON ag.id = d.agent_id
+  JOIN smart_accounts sa ON sa.id = ag.account_id
+  WHERE sa.user_id = $1 AND d.status = 'active'
+  ORDER BY d.delegation_hash`
+
+export interface OpsOnchainAccountRow {
+  id: string
+  chain_id: number
+  account_address: string
+  account_type: string
+  execution_rail: string
+  name: string
+}
+
+export interface OpsOnchainDelegationRow {
+  account_id: string
+  chain_id: number
+  delegation_hash: string
+  delegation_json: string
+  budget_atomic: string
+}
+
+export interface OpsOnchainRows {
+  accounts: (OpsOnchainAccountRow & { delegations: OpsOnchainDelegationRow[] })[]
+}
+
+/**
+ * The user's accounts with their ACTIVE stored delegations, or `null` when
+ * no user has that id. A user with no accounts returns an empty list. The
+ * delegations under one account are sorted by hash (the SQL's ORDER BY) so
+ * the module's positional chain view is deterministic.
+ */
+export async function readOpsOnchainView(db: Executor, userId: string): Promise<OpsOnchainRows | null> {
+  const exists = await db.query<{ id: string }>(OPS_ONCHAIN_USER_EXISTS_SQL, [userId])
+  if (!exists.rows[0]) return null
+  const accounts = (await db.query<OpsOnchainAccountRow>(OPS_ONCHAIN_ACCOUNTS_SQL, [userId])).rows
+  if (accounts.length === 0) return { accounts: [] }
+  const delegations = (
+    await db.query<OpsOnchainDelegationRow>(OPS_ONCHAIN_DELEGATIONS_SQL, [userId])
+  ).rows
+  const byAccount = new Map<string, OpsOnchainDelegationRow[]>()
+  for (const delegation of delegations) {
+    const list = byAccount.get(delegation.account_id) ?? []
+    list.push(delegation)
+    byAccount.set(delegation.account_id, list)
+  }
+  return {
+    accounts: accounts.map((account) => ({
+      ...account,
+      delegations: (byAccount.get(account.id) ?? []).sort((a, b) =>
+        a.delegation_hash.localeCompare(b.delegation_hash),
+      ),
+    })),
+  }
+}

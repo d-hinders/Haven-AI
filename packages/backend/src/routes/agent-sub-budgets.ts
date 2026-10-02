@@ -62,6 +62,7 @@ import {
   recoverSubBudgetChildSigner,
   serializeClosePreparedUserOp,
 } from '../modules/sub-budgets/index.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 
 /**
  * #3553: the issuing agent may not carve new sub-budget authority while it is
@@ -194,7 +195,7 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
         (recipient_address ?? agent.treasury_address ?? '').toLowerCase(),
       )
     } catch (err) {
-      return reply.code(502).send({ error: 'Could not read the parent budget delegation', details: String(err) })
+      return reply.code(502).send({ error: 'Could not read the parent budget delegation', details: boundedErrorDetails(err) }) // #3609: redacted + bounded
     }
     if (!parentDelegation) {
       return reply.code(403).send({
@@ -365,7 +366,7 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     try {
       signer = await recoverSubBudgetChildSigner(row, agent.chain_id, signature as `0x${string}`)
     } catch (err) {
-      return reply.code(400).send({ error: 'signature_mismatch', details: String(err) })
+      return reply.code(400).send({ error: 'signature_mismatch', details: boundedErrorDetails(err) }) // #3609: redacted + bounded
     }
     if (signer.toLowerCase() !== agent.delegate_address.toLowerCase()) {
       return reply.code(400).send({
@@ -452,7 +453,7 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
         next_action: 'agent_signs_close_then_submits',
       })
     } catch (err) {
-      return reply.code(502).send({ error: 'Could not prepare the sub-budget close', details: String(err) })
+      return reply.code(502).send({ error: 'Could not prepare the sub-budget close', details: boundedErrorDetails(err) }) // #3609: redacted + bounded
     }
   })
 }

@@ -76,6 +76,17 @@ describe('prepareFailureBody (#3609)', () => {
     expect(details).toContain('timeout')
   })
 
+  it('redacts BEFORE bounding: a key-in-path cut at the bound would otherwise leak its prefix', () => {
+    // `redactVendorSecrets` only recognises a path key of 16+ characters. Cut
+    // first, a 32-character key straddling the 300-character bound keeps ~12
+    // characters — too short to be recognised, so they would ride the
+    // response verbatim. Redacted first, the whole key is gone before the cut.
+    const key = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ012345'
+    const prefix = 'x'.repeat(FAILURE_MESSAGE_MAX_LENGTH - 'https://api.pimlico.io/v2/'.length - 12)
+    const details = boundedErrorDetails(new Error(`${prefix}https://api.pimlico.io/v2/${key}/rpc failed`))
+    expect(details).not.toContain('ABCDEFGHIJ')
+  })
+
   it('a revert with no nameable reason is still prepare_reverted, with revert_reason null', () => {
     const err = new EstimateGasExecutionError(new Error('execution reverted') as never, {} as never)
     const body = prepareFailureBody(err, classifyRevertForLedger(err), 'infra')

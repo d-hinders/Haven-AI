@@ -1961,6 +1961,16 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > changes. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
 
+> **Re-verified (#3609, 2026-10-02):** the delegation-rail prepare 502 on
+> `POST /payments` and the x402 EIP-3009 funding leg is typed
+> (`prepare_reverted` / `prepare_failed`) and its `details` are bounded after
+> redaction; four other 502s that shipped the raw viem error (settlement
+> delegation build, delegate deploy, settle payload, budget account deploy)
+> are bounded the same way. A response carries less of the error than before,
+> never more. No authority moves: no signature, key role, delegation, caveat
+> or on-chain surface changes, and the enforcer is still the gate. The rest of
+> this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified (#3423 slice C, 2026-09-29):** the SDK's
 > `listReceiptsPage` (and `haven_list_receipts` on both surfaces) gains an
 > opt-in `compact` that drops three verbatim payload echoes from each

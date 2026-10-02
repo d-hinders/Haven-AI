@@ -418,8 +418,10 @@ sequenceDiagram
 > authorize-time pre-check read the live budget — the fail-open posture is
 > inherited verbatim, so a degraded budget read (`fromChain: false`) or a
 > thrown one proceeds to prepare, where the enforcer's revert still surfaces
-> as the `502` **with no intent row** that this branch used to answer with
-> for every refusal; on erc7710 authorize pre-checks the live remaining
+> as a `502` **with no intent row** — typed `prepare_reverted` with the
+> decoded `revert_reason` and bounded `details` since
+> [#3609](https://github.com/d-hinders/Haven-AI/issues/3609), where this
+> branch used to answer one untyped 502 with the raw error for every refusal; on erc7710 authorize pre-checks the live remaining
 > budget and answers `403 delegation_budget_exceeded`
 > ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)); the legacy rail
 > answers `410` (#1986). None of the three writes anything, and none produces a
@@ -1342,8 +1344,9 @@ The flow is a two-call variant of `/x402/authorize`:
    *when* Haven says no. Previously this branch prepared nothing at authorize —
    unlike `POST /payments` and, at the time, the EIP-3009 shape, which
    estimated a redemption and so surfaced the enforcer's refusal as a `502`
-   with no intent row (the 3009 shape gained the same pre-check in #2706, so
-   today only `POST /payments` reaches the enforcer unconditionally) — so an
+   with no intent row (the 3009 shape gained the same pre-check in #2706 and
+   `POST /payments` in #3503, so no path reaches the enforcer unconditionally
+   any more) — so an
    over-budget erc7710 request came back `201 pending_signature` **with**
    `sign_data`, and the refusal only landed after the agent had signed, settled,
    and retried the merchant. Since [#1450](https://github.com/d-hinders/Haven-AI/issues/1450)

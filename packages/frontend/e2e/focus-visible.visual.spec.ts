@@ -742,7 +742,9 @@ for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
     if (!viewport) throw new Error('focus gate: no desktop viewport configured')
     const agentId = testAgent.id
     await mockHavenApi(page)
+    await seedAgents(page, [agentState({ mcp_server_name: 'haven-research' })])
     await seedAuthenticatedSession(page)
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.setViewportSize(viewport)
     await page.goto('/agents')
     await dismissMobileSidebar(page)
@@ -755,6 +757,26 @@ for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
     expect(new URL(page.url()).pathname).toBe('/agents')
     await expect(page.getByRole('heading', { name: `Pause ${testAgent.name}?` })).toBeVisible()
     await page.keyboard.press('Escape')
+
+    await card.getByRole('button', { name: `Remove ${testAgent.name}` }).click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+    await expect(page.getByRole('heading', { name: `Remove ${testAgent.name}?` })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    const copyMcpName = card.getByRole('button', { name: 'Copy MCP server name' })
+    await copyMcpName.click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+    await expect(card.getByRole('button', { name: 'MCP server name copied' })).toBeVisible()
+
+    const nameLink = card.getByRole('link', { name: testAgent.name, exact: true })
+    await nameLink.focus()
+    await expect(nameLink).toBeFocused()
+    await page.keyboard.press('Enter')
+    await page.waitForURL(`**/agents/${agentId}`)
+    await page.goBack()
+    await page.waitForURL('**/agents')
+    await dismissMobileSidebar(page)
+    await card.scrollIntoViewIfNeeded()
 
     const bodyPoint = await card.evaluate((element, agentId) => {
       const link = element.querySelector<HTMLAnchorElement>(`a[href="/agents/${agentId}"]`)
@@ -800,6 +822,7 @@ for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
     await expect.poll(() => page.evaluate(
       () => (window as unknown as { __cardClickTarget?: string }).__cardClickTarget,
     )).toBe(`A:/agents/${agentId}:true`)
+    await page.waitForURL(`**/agents/${agentId}`)
     expect(
       await page.evaluate(
         () => (window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation,

@@ -550,3 +550,17 @@ test('/accounts: a real pointer press on card body activates and opens the accou
   const activeAccountAfter = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
   expect(activeAccountAfter).not.toBe(activeAccountBefore)
 })
+
+test('/accounts: Enter on the account name link activates and opens the account', async ({ page }) => {
+  await openAccountsWithBothCards(page)
+
+  const activeAccountBefore = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
+  const nameLink = page.getByRole('link', { name: ACTION_CARD, exact: true })
+  await nameLink.focus()
+  await expect(nameLink).toBeFocused()
+  await page.keyboard.press('Enter')
+
+  await page.waitForURL('**/accounts/safe-second')
+  const activeAccountAfter = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
+  expect(activeAccountAfter).not.toBe(activeAccountBefore)
+})

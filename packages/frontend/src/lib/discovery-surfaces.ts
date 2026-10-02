@@ -44,6 +44,21 @@ export const PUBLIC_SURFACES = [
   '/402',
   '/402.md',
   '/for-agents.md',
+  // #3596: the runbook above, also served as small, linked step files — one
+  // skill per step, the pattern `/.well-known/agent-skills/index.json` (kept
+  // OUT of this list on purpose, matching haven.json and the OpenAPI spec
+  // below) lists in full. `AGENT_SKILL_STEPS` (`agent-skill-steps.ts`) is the
+  // generating list; this literal array is pinned against it the same way
+  // every other entry here is pinned against the filesystem.
+  '/agent-skills/what-haven-is.md',
+  '/agent-skills/the-sequence.md',
+  '/agent-skills/budget-changes-later.md',
+  '/agent-skills/hand-off-scripts.md',
+  '/agent-skills/what-you-run.md',
+  '/agent-skills/how-to-verify.md',
+  '/agent-skills/if-you-cannot-open-a-browser.md',
+  '/agent-skills/if-something-breaks.md',
+  '/agent-skills/vocabulary.md',
   '/llms.txt',
   '/llms-full.txt',
   '/docs/account-recovery.md',
@@ -145,6 +160,8 @@ export function buildRobotsTxt(origin: string): string {
 #   /402.md            your agent hit a 402 — how to pay it
 #   /for-agents.md     you are the agent and your user has no account yet
 #   /api/openapi.json  the full OpenAPI 3.1 spec
+#   /.well-known/agent-skills/index.json  the above, indexed one skill per step
+#   /agent-skills/<step>.md               /for-agents.md split into linked steps
 
 User-agent: *
 Allow: /

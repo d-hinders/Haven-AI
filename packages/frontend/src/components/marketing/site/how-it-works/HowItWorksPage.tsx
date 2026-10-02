@@ -166,13 +166,9 @@ export function HowItWorksPage() {
             </SiteCopy>
             <ProductFrame env="Set up with your AI agent" screen="Copy" className="w-full">
               <SiteCode className="-m-4 !text-[12px]">
-                {`I have a Haven account and I am signed in.
-Please set up Haven so you can pay for
-things within a budget I approve.
+                {`I have a Haven account and I am signed in. Please set up Haven so you can pay for things within a budget I approve.
 
-Start by reading /for-agents.md — it is
-written for you and explains which steps
-are mine.
+Start by reading /for-agents.md — it is written for you and explains which steps are mine.
 
 Then run:
 `}

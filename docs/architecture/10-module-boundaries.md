@@ -314,15 +314,11 @@ Re-verified 2026-10-02 (#3597): the module list and rule-6 row both gain
 `modules/feedback/` — the backend half of the CLI feedback channel's secret
 check. It is its own module rather than living in `domain/` (where its CLI
 counterpart's comments might suggest) because it imports `viem/accounts`,
-which `domain-stays-pure` forbids inside `domain/`. That rule IS waivable
-(`UNWAIVABLE_RULES` in `scripts/dep-lint.mjs:39` names only `no-circular` —
-not every absolute-sounding sentence in this doc's own rule-7 table above is
-load-bearing fact, and this one was corrected on review rather than
-repeated): placing the file in `domain/` would have needed its own inline
-`dep-lint-exempt` waiver, and none exists in `domain/` today, so the file
-lives in `modules/feedback/` carrying no waiver rather than in `domain/`
-carrying one. `lint:deps` catches the violation immediately if the file is
-ever moved back without adding that waiver.
+which `domain-stays-pure` forbids inside `domain/`. Mechanically the linter
+would honour an inline waiver on that rule (`UNWAIVABLE_RULES` in
+`scripts/dep-lint.mjs:39` names only `no-circular`), but by the policy above
+`domain-stays-pure` never carries one, so `domain/` was never an option.
+`lint:deps` fails if the file is ever moved into `domain/`.
 
 ## Non-goals
 

@@ -332,9 +332,10 @@ export function receiptDropRateLimit(
  * would collapse into the ONE shared `feedback_user:unknown` bucket — a
  * global rate limit on every user at once, indistinguishable from an outage,
  * caused by a wiring mistake nothing would flag until users started getting
- * 429s. Throwing here fails the single REQUEST that somehow reached this
- * generator unauthenticated, loudly and in isolation, instead of quietly
- * rationing everyone.
+ * 429s. Throwing instead turns that wiring mistake into a loud failure: every
+ * request to the route answers 500 with an error log, and
+ * `feedback-rate-limit.test.ts` catches the reordering in CI before it ships.
+ * A loud outage beats quietly rationing everyone.
  */
 export const feedbackSubmitRateLimit = {
   rateLimit: {

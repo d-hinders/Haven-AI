@@ -55,7 +55,7 @@ describe('POST /feedback behind the real rate-limit plugin (#3597 S-b)', () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     // Real plugin, non-global — the exact wiring `index.ts` uses, minus the
-    // Postgres-backed shared store (the default in-memory LRU is suffient
+    // Postgres-backed shared store (the default in-memory LRU is sufficient
     // for a key-generator/header assertion and needs no database).
     await app.register(rateLimit, { global: false })
     installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/feedback.ts'] })

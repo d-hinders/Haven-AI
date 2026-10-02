@@ -115,10 +115,12 @@ same place it already runs for stored failure text elsewhere in the backend.
   pre-send cap and ajv's `maxLength` count Unicode CODE POINTS, not UTF-16
   units (`[...text].length`, not `text.length` — verified against ajv
   directly: `maxLength: 1` accepts one emoji, which is two UTF-16 units).
-  **Control characters and lone surrogates are worse than printable text,
-  not better:** `JSON.stringify` escapes each one to `\uXXXX` — 6 ASCII
+  **Most C0 control characters and lone surrogates are worse than printable
+  text, not better:** `JSON.stringify` escapes each one to `\uXXXX` — 6 ASCII
   bytes, not the 1-4 UTF-8 bytes printable text costs (verified directly:
-  `JSON.stringify('\u0001')` is `"\u0001"`, 8 bytes for 1 code point). 4000
+  `JSON.stringify('\u0001')` is `"\u0001"`, 8 bytes for 1 code point; `\n`,
+  `\t`, `\r`, `\b` and `\f` take 2-byte short escapes, and DEL and the C1
+  controls are not escaped at all). 4000
   such code points alone would stringify to 24,000+ bytes, over the 16 KB
   `bodyLimit` the CLI's own code-point cap never accounts for — the backend
   refuses that request with Fastify's own `413 Payload Too Large`

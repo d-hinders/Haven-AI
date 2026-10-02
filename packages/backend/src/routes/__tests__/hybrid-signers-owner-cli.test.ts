@@ -111,5 +111,8 @@ describe('GET /accounts/hybrid/:address/signers accepts an owner_cli token (#359
     mockQuery.mockResolvedValueOnce({ rows: [] })
     const res = await get(otherUserOwnerCliToken)
     expect(res.statusCode).toBe(404)
+    // The verified `sub` is what reaches the ownership query — a handler that
+    // ignored the caller (or hard-coded a user) would still 404 above.
+    expect(mockQuery.mock.calls.at(-1)?.[1]?.[0]).toBe('user-2')
   })
 })

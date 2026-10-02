@@ -145,6 +145,10 @@ jobs:
           # comes from) — see the rationale there. CI-only env: no deployment
           # config reads this literal.
           NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
+          # #3573: the redesigned public site's gate on, as in ci.yml's
+          # frontend_checks build (epic #3572: one e2e build, gate on —
+          # src/lib/site-gate.ts). CI-only: no deployment sets it.
+          NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'
 
       - name: Restore Playwright browser cache
         id: playwright-cache
@@ -194,6 +198,9 @@ jobs:
           # so either server path carries the same bundle constant the build
           # above baked in.
           NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
+          # #3573: same reasoning as the onramp id — the gate is a bundle
+          # constant, so either server path must carry it.
+          NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'
 
       # #2929: the dark scheme's baselines regenerate in the SAME dispatch, on
       # the SAME runner image, from the SAME cached browser — the light and
@@ -213,6 +220,9 @@ jobs:
           # compares against the SAME worktree's app, so it needs the same
           # build-time constant present however its server is produced.
           NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
+          # #3573: same reasoning as the onramp id — the gate is a bundle
+          # constant, so either server path must carry it.
+          NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'
 
       # #2218. Runs BEFORE the commit, so a baseline this dispatch did not come
       # for is never pushed in the first place.

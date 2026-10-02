@@ -266,6 +266,11 @@ export default defineConfig({
       // which inlines NEXT_PUBLIC_* from the server process's env on
       // compile. Same fixed synthetic literal as those workflows.
       NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: 'e2e-onramp-app-id-placeholder',
+      // #3573: the redesigned public site's gate (src/lib/site-gate.ts), on
+      // for every e2e run (epic #3572: one e2e build, gate on). Like the
+      // onramp id above, the CI path bakes it in at its build step
+      // (ci.yml / update-visual-baselines.yml); this covers `next dev`.
+      NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1',
     },
   },
   // Both projects GATE on every frontend pull request (#1768). Before that,
@@ -344,12 +349,17 @@ export default defineConfig({
       // — the spec seeds `haven.theme='dark'` itself and skips its mobile
       // shots under this project (no mobile dark baseline), so only the three
       // desktop clips ever compare here.
+      // #3573: demo.visual.spec.ts and releases.visual.spec.ts join with one
+      // desktop `-dark` baseline each — the public pages wear the redesigned
+      // header and footer, which follow the visitor's theme.
       testMatch: [
         '**/design-system.visual.spec.ts',
         '**/analytics.visual.spec.ts',
         '**/marketplace.visual.spec.ts',
         '**/settings-company-details.visual.spec.ts',
         '**/add-funds-modal.visual.spec.ts',
+        '**/demo.visual.spec.ts',
+        '**/releases.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

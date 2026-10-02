@@ -17,7 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
-- **`createIntent()`'s `PaymentIntent` gains `recipient.class` (#3531).** `'previously_paid'` when this agent has a prior CONFIRMED direct payment to the exact recipient address on this chain, `'new_address'` otherwise — advisory only, history-only (this agent's own confirmed payments, nothing about the owner's accounts or contacts), never consulted by signing or policy. Absent against an older backend. Additive; no update needed.
+- **`createIntent()`'s `PaymentIntent` gains `recipient.class` (#3531).** `'previously_paid'` when this agent has any prior CONFIRMED payment (any rail, any token) to the exact recipient address on this chain, `'new_address'` otherwise — advisory only, history-only (this agent's own confirmed payments, nothing about the owner's accounts or contacts), never consulted by signing or policy. Absent against an older backend. Additive; no update needed.
 
 - **`PaymentStatusResult.failureReason` (#3494).** `getPaymentStatus()` now additionally reports a bounded, redacted cause on a `failed` payment — present (possibly `null`, when no message was recorded) only when `status` is `'failed'`, absent on every other status. An older backend simply omits it. Additive; no update needed.
 

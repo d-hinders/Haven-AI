@@ -50,6 +50,15 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
   return { agentId: agent.rows[0].id, userId: user.rows[0].id }
 }
 
+/** A second agent under an EXISTING owner (`userId`) — same owner, sibling agent. */
+async function seedSiblingAgent(userId: string): Promise<{ agentId: string; userId: string }> {
+  const agent = await db.query<{ id: string }>(
+    `INSERT INTO agents (user_id, name) VALUES ($1, 'sibling intents agent') RETURNING id`,
+    [userId],
+  )
+  return { agentId: agent.rows[0].id, userId }
+}
+
 /**
  * A direct delegation-rail transfer intent — the shape `POST /payments` writes.
  *
@@ -548,7 +557,28 @@ describeDb('payment-intents repository (#1223)', () => {
       expect(await hasConfirmedPaymentToRecipient(agentId, 84532, recipient)).toBe(true)
     })
 
-    it('ignores a DIFFERENT token to the same recipient — any token counts', async () => {
+    it('counts a CONFIRMED x402 (machine-rail) payment to the recipient too — the query is rail-agnostic by owner decision', async () => {
+      const { agentId, userId } = await seedAgent()
+      const recipient = '0x00000000000000000000000000000000000402'
+      const machine = await insertMachineIntent(
+        machineInput({ agentId, userId }, { rail: 'x402', payTo: recipient, conflictTarget: 'x402_idempotency_key' }),
+      )
+      expect(machine).not.toBeNull()
+      const claimed = await claimIntentForSubmission(`0xsig-${machine!.id}`, machine!.id, agentId)
+      expect(claimed).toBe(true)
+      const confirmed = await confirmSubmittedIntent({
+        txHash: `0x${String(++seq).padStart(64, 'e')}`.slice(0, 66),
+        intentId: machine!.id,
+        usdValue: null,
+        eurValue: null,
+        sekValue: null,
+        agentId,
+      })
+      expect(confirmed).toBe(true)
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, recipient)).toBe(true)
+    })
+
+    it('counts a different token to the same recipient — any token counts', async () => {
       const { agentId, userId } = await seedAgent()
       const recipient = '0x0000000000000000000000000000000000bbbb'
       await confirmedIntent(agentId, userId, {
@@ -604,12 +634,32 @@ describeDb('payment-intents repository (#1223)', () => {
       expect(await hasConfirmedPaymentToRecipient(ownerAAgent.agentId, 84532, recipient)).toBe(false)
     })
 
+    // #3531 review round 1, B1 (blocking): the two cross-tenant cases above
+    // both also change OWNER between the two agents, so a mutation that
+    // widened the predicate to `user_id = (SELECT user_id FROM agents WHERE
+    // id = $1)` — i.e. owner-scoped rather than agent-scoped — would survive
+    // both of them (agent A's owner never matches agent B's owner in either
+    // case). This is the case that actually exercises the agent/owner
+    // distinction: TWO agents under the SAME owner, one of which paid the
+    // recipient and one of which did not.
+    it('same-owner SIBLING agent: agent B\'s confirmed payment does not make agent A answer previously_paid', async () => {
+      const owner = await seedAgent()
+      const sibling = await seedSiblingAgent(owner.userId)
+      const recipient = '0x0000000000000000000000000000000000beef'
+      await confirmedIntent(sibling.agentId, sibling.userId, { toAddress: recipient })
+      // Agent A (the original seedAgent() agent), same owner as the sibling,
+      // never itself paid this recipient.
+      expect(await hasConfirmedPaymentToRecipient(owner.agentId, 84532, recipient)).toBe(false)
+      // The sibling itself, naturally, answers true.
+      expect(await hasConfirmedPaymentToRecipient(sibling.agentId, 84532, recipient)).toBe(true)
+    })
+
     it('matches exactly, by design — case normalisation is the CALLER\'s job', async () => {
       // `hasConfirmedPaymentToRecipient`'s own doc pins this: the function
       // does no case-folding, `to_address` is written exactly as given, and
       // `routes/payments.ts` is the contract's one caller — it always passes
       // `to.toLowerCase()` (classifyRecipient), which is where the real
-      // case-insensitivity property lives (asserted in payments.test.ts). A
+      // case-insensitivity property lives (asserted in payments-recipient-history.test.ts). A
       // mixed-case lookup against a lower-cased confirmed row is a genuine
       // miss here, pinning that nothing silently folds case underneath it.
       const { agentId, userId } = await seedAgent()

@@ -19,6 +19,7 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
+import { getAddress } from 'viem'
 
 const { mockQuery, mockCompute, mockCreateRail, mockReadRemaining, mockHasConfirmed } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -205,6 +206,21 @@ describe('POST /payments: recipient.class (#3531)', () => {
     expect(mockHasConfirmed).toHaveBeenCalledWith(AGENT.id, AGENT.chain_id, RECIPIENT.toLowerCase())
   })
 
+  it('#3531 review S1: a MIXED-CASE checksummed `to` still reaches the repo lower-cased', async () => {
+    // RECIPIENT above is all-'c' — lower-casing it is a no-op, so the
+    // previous test cannot catch a dropped `.toLowerCase()` in
+    // classifyRecipient. A real EIP-55 checksum of the SAME address mixes
+    // case on purpose; the request names this exact string.
+    const checksummed = getAddress(RECIPIENT)
+    expect(checksummed).not.toBe(RECIPIENT)
+    expect(checksummed.toLowerCase()).toBe(RECIPIENT.toLowerCase())
+
+    mockHasConfirmed.mockResolvedValue(false)
+    const res = await pay({ to: checksummed })
+    expect(res.statusCode).toBe(201)
+    expect(mockHasConfirmed).toHaveBeenCalledWith(AGENT.id, AGENT.chain_id, RECIPIENT.toLowerCase())
+  })
+
   it('carries `previously_paid` when this agent has a confirmed payment to the recipient', async () => {
     mockHasConfirmed.mockResolvedValue(true)
     const res = await pay()
@@ -218,6 +234,18 @@ describe('POST /payments: recipient.class (#3531)', () => {
     expect(res.statusCode).toBe(201)
     expect(prepareRedemption).toHaveBeenCalledTimes(1)
     expect(res.json().status).toBe('pending_signature')
+  })
+
+  it('#3531 review S3: the advisory read throwing never fails the prepare — 201 WITHOUT recipient, intent still created', async () => {
+    mockHasConfirmed.mockRejectedValue(new Error('transient DB blip'))
+    const res = await pay()
+    expect(res.statusCode).toBe(201)
+    expect(prepareRedemption).toHaveBeenCalledTimes(1)
+    expect(res.json().status).toBe('pending_signature')
+    expect(res.json().payment_id).toBeDefined()
+    // Omitted, not sent as null — a caller checking `'recipient' in body`
+    // (as the hosted relay does) must see it genuinely absent.
+    expect('recipient' in res.json()).toBe(false)
   })
 
   it('sign_data is BYTE-IDENTICAL whether the recipient is new_address or previously_paid', async () => {
@@ -254,5 +282,11 @@ describe('POST /payments: recipient.class (#3531)', () => {
     // The replay's own sign_data is still rebuilt from the STORED
     // UserOperation (the #961 discipline), unaffected by the field above.
     expect(JSON.stringify(second.json().sign_data)).toContain('dd'.repeat(20))
+    // #3531 review N1: `recipient` lives at the top level ONLY — the replay's
+    // sign_data must never carry it, on either request.
+    expect(first.json().sign_data.recipient).toBeUndefined()
+    expect(second.json().sign_data.recipient).toBeUndefined()
+    expect(JSON.stringify(first.json().sign_data)).not.toContain('recipient')
+    expect(JSON.stringify(second.json().sign_data)).not.toContain('recipient')
   })
 })

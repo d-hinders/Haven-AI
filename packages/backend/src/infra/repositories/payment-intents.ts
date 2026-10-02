@@ -134,17 +134,21 @@ export const HAS_CONFIRMED_PAYMENT_TO_RECIPIENT_SQL = `SELECT EXISTS (
         ) AS exists`
 
 /**
- * #3531: has THIS agent ever had a confirmed direct-rail payment to this
- * recipient address, on this chain? History-only and agent-scoped by design
- * (owner decision, 2026-10-01) — this is the sole input to the advisory
- * `recipient.class` field on `POST /payments`. It never looks at any other
- * agent's rows (cross-tenant isolation, #3528/#3560's lesson), any other
- * agent belonging to the SAME owner, or any token/own-account/contact table —
- * an agent must not be able to learn anything about the owner's accounts or
- * contacts by probing addresses. Any token counts: the recipient is the
- * address, not the asset paid in it. Chain-scoped because the same address on
- * a different chain is not provably the same party. `toAddress` must already
- * be lower-cased by the caller, matching how `to_address` is written.
+ * #3531: has THIS agent ever had ANY confirmed payment to this recipient
+ * address, on this chain — on any rail (direct, x402, MPP; owner decision,
+ * review round 1: the query is deliberately rail-agnostic, including an
+ * EIP-3009 funding leg whose `to_address` happens to be the agent's own
+ * delegate EOA — harmless, since it is still this agent's own history)?
+ * History-only and agent-scoped by design (owner decision, 2026-10-01) — this
+ * is the sole input to the advisory `recipient.class` field on
+ * `POST /payments`. It never looks at any other agent's rows (cross-tenant
+ * isolation, #3528/#3560's lesson), including another agent belonging to the
+ * SAME owner, or any token/own-account/contact table — an agent must not be
+ * able to learn anything about the owner's accounts or contacts by guessing
+ * addresses. Any token counts: the recipient is the address, not the asset
+ * paid in it. Chain-scoped because the same address on a different chain is
+ * not provably the same party. `toAddress` must already be lower-cased by
+ * the caller, matching how `to_address` is written.
  */
 export async function hasConfirmedPaymentToRecipient(
   agentId: string,

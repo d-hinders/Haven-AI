@@ -2220,9 +2220,9 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > addresses for owner-account membership). It sits at the TOP LEVEL of the
 > response, never inside `sign_data`/`signData` — the one shape `pay()`'s
 > `signForData` call and the signer's binding check act on — and a dedicated
-> backend test pins `sign_data` byte-identical whether the field is present
-> or not, on both classes. No signature, key, delegation graph, caveat
-// enforcer > or on-chain redemption path changes: `client.ts`'s role here is
+> backend test pins `sign_data` byte-identical across both classes. No
+> signature, key, delegation graph, caveat enforcer or on-chain redemption
+> path changes: `client.ts`'s role here is
 > a verbatim copy of a value it neither computes nor validates. The rest of
 > this document was not re-read for it, and `last-verified` is not bumped.
 

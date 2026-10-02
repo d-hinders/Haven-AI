@@ -204,21 +204,32 @@ interface PaymentIntentRow {
 
 /**
  * #3531: advisory `recipient.class` on `POST /payments` — `previously_paid`
- * when THIS agent has a prior CONFIRMED direct-rail payment to this exact
- * recipient address on this chain, `new_address` otherwise. History-only by
- * owner decision (2026-10-01): no `own_account`/`contact`/`catalog_merchant`
- * lookup, so an agent can never probe for the owner's accounts or contacts by
- * guessing addresses — only its own settled payment history, which it already
- * knows. Never affects policy or signing; it is informational for the caller.
+ * when THIS agent has ANY prior CONFIRMED payment to this exact recipient
+ * address on this chain, on ANY rail (direct, x402 or MPP — including an
+ * EIP-3009 funding leg whose `to_address` is the agent's own delegate EOA,
+ * which is harmless: it is still this agent's own history), `new_address`
+ * otherwise. History-only by owner decision (2026-10-01): no
+ * `own_account`/`contact`/`catalog_merchant` lookup, so an agent can never
+ * probe for the owner's accounts or contacts by guessing addresses — only
+ * its own settled payment history, which it already knows. Never affects
+ * policy or signing; it is informational for the caller.
+ *
+ * #3531 review S3: the advisory read must never fail the prepare — a throw
+ * here (a transient DB blip) is swallowed and the field is simply OMITTED,
+ * never a 500 on an otherwise-successful payment.
  */
 type RecipientClass = 'previously_paid' | 'new_address'
 
 async function classifyRecipient(
   agent: Pick<AgentContext, 'id' | 'chain_id'>,
   toAddressLower: string,
-): Promise<{ class: RecipientClass }> {
-  const previouslyPaid = await hasConfirmedPaymentToRecipient(agent.id, agent.chain_id, toAddressLower)
-  return { class: previouslyPaid ? 'previously_paid' : 'new_address' }
+): Promise<{ class: RecipientClass } | undefined> {
+  try {
+    const previouslyPaid = await hasConfirmedPaymentToRecipient(agent.id, agent.chain_id, toAddressLower)
+    return { class: previouslyPaid ? 'previously_paid' : 'new_address' }
+  } catch {
+    return undefined
+  }
 }
 
 /** Resolve a token symbol to its config for a specific chain. */
@@ -352,16 +363,21 @@ async function replayIntentBody(
       pi,
       agent,
     )
+    // #3531: recomputed on every replay (never carried on the row) — it
+    // reads the agent's CURRENT confirmed history, which can only grow
+    // between the original request and a retry, so this is at worst a
+    // same-request-window-consistent read, never a stale one. `undefined`
+    // (read throws, S3) omits the field entirely rather than sending an
+    // empty/null one — same contract as the fresh-201 site below. Lives at
+    // the top level, never inside `sign_data` below, which
+    // `buildDirectSignData` alone builds and which never carries it.
+    const recipientClass = await classifyRecipient(agent, pi.to_address)
     return {
       payment_id: pi.id,
       status: pi.status,
       expires_at: pi.expires_at,
       idempotent_replay: true,
-      // #3531: recomputed on every replay (never carried on the row) — it
-      // reads the agent's CURRENT confirmed history, which can only grow
-      // between the original request and a retry, so this is at worst a
-      // same-request-window-consistent read, never a stale one.
-      recipient: await classifyRecipient(agent, pi.to_address),
+      ...(recipientClass ? { recipient: recipientClass } : {}),
       sign_data: {
         hash,
         signature_scheme,
@@ -380,6 +396,11 @@ async function replayIntentBody(
       },
     }
   }
+  // The legacy/retired-rail replay shape (`execution_rail` unset or not
+  // `delegation`) — unreachable for any new row since the retirement gate
+  // 410s before this lookup runs, kept only for a pre-existing row. #3531
+  // deliberately does NOT add `recipient` here: it is optional on the wire,
+  // and this branch is the retired rail's own shape, never extended.
   return {
     payment_id: pi.id,
     status: pi.status,
@@ -894,6 +915,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       )
     }
 
+    // #3531 review S3: computed BEFORE the insert, so a throw here is caught
+    // by `classifyRecipient` itself (never thrown here) and can never turn an
+    // otherwise-successful payment into a 500 — advisory-only, must not be
+    // allowed to fail the prepare.
+    const recipientClass = await classifyRecipient(agent, to.toLowerCase())
+
     let delegationIntent
     try {
       delegationIntent = await insertDelegationIntent({
@@ -945,9 +972,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       status: delegationIntent.status,
       expires_at: delegationIntent.expires_at,
       // #3531: advisory only, computed from this agent's own confirmed
-      // history — never consulted by the sign_data below or by any
-      // authorization check above.
-      recipient: await classifyRecipient(agent, to.toLowerCase()),
+      // history above, BEFORE the insert — never consulted by the sign_data
+      // below or by any authorization check above, and omitted entirely
+      // (not sent as null) when the read threw.
+      ...(recipientClass ? { recipient: recipientClass } : {}),
       sign_data: {
         hash: authorization.prepared.userOpHash,
         signature_scheme: 'eip712_userop',

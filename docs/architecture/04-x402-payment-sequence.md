@@ -1282,10 +1282,10 @@ now carries the same distinction the confirmation text already made.
 **`recipient.class` (#3531).** A direct `POST /payments` 201 carries a
 top-level, advisory `recipient: { class }` — never inside `sign_data`, which
 the signer validates and which stays byte-identical with or without this
-field. `previously_paid` when the AUTHENTICATED AGENT itself has a prior
-CONFIRMED direct-rail payment to this exact recipient address on this chain
-(any token — the recipient is the address, not the asset); `new_address`
-otherwise. It is history-only by owner decision (2026-10-01): no
+field. `previously_paid` when the AUTHENTICATED AGENT itself has any prior
+CONFIRMED payment to this exact recipient address on this chain — any token
+and any rail (direct, x402 or MPP); `new_address` otherwise. A failure of
+that read omits the field; it never fails the prepare. It is history-only by owner decision (2026-10-01): no
 `own_account`, `contact` or `catalog_merchant` class is computed or returned,
 so an agent cannot learn anything about the owner's accounts or address book
 by probing addresses — the #3528/#3560 lesson (a `SELF_TRANSFER` warning that
@@ -1294,7 +1294,8 @@ another agent's or another owner's confirmed payments, changes no refusal, no
 `safe_to_continue` value, and is recomputed (never carried on the row) on an
 idempotent replay of the same key, so a replay answers the caller's CURRENT
 history rather than a stale snapshot. The hosted `haven_send`/`haven_pay`
-summaries surface it as `recipient_class`; the local `@haven_ai/mcp`
+results carry it as a top-level `recipient_class` (not inside
+`agent_summary`); the local `@haven_ai/mcp`
 `haven_send` does not, because it calls the all-in-one `pay()`, whose
 `PaymentResult` is built from post-confirmation state and carries nothing from
 the intermediate `createIntent()` call this field is computed at.

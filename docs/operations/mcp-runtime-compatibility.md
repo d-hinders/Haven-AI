@@ -152,6 +152,20 @@ last-verified: "2026-10-02"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified #3531 (2026-10-01, advisory recipient history hint on
+> `haven_send`/`haven_pay`):** this diff touches a file under a covered tree —
+> `packages/mcp-server/src/tools/state-direct-recovery.ts`. Additive only: the
+> hosted `haven_send`/`haven_pay` success shape gains an optional top-level
+> `recipient_class` (`previously_paid` | `new_address`), present only when the
+> backend sends `intent.recipient` — an older backend omits it and the field
+> is simply absent, no new required field and no change to
+> `next_action`/`safe_to_continue`/refusal shapes. The local `@haven_ai/mcp`
+> `haven_send` (`packages/mcp/src/tools.ts`) is deliberately NOT changed: it
+> calls the all-in-one `haven.pay()`, whose returned `PaymentResult` is built
+> from post-confirmation state and carries nothing from the intermediate
+> `createIntent()` call this field is computed at — widening `PaymentResult`
+> itself is out of this change's scope.
+>
 > **Re-verified #3497 (2026-10-01, agent-surface polish from the 2026-09-30
 > purchase run):** this diff touches files under a covered tree —
 > `packages/mcp-server/src/tools/**` (`catalog-purchase.ts`,

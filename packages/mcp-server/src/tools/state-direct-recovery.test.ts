@@ -76,6 +76,47 @@ describe('haven_pay', () => {
     expect(result.data.idempotency_key).toMatch(/^direct:[0-9a-f-]{36}$/)
   })
 
+  it('surfaces recipient_class when the backend carries recipient.class (#3531)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+          recipient: { class: 'previously_paid' },
+        },
+      },
+    })
+
+    const result = ok<{ recipient_class?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '12.50', to: '0xabc' }),
+    )
+
+    expect(result.data.recipient_class).toBe('previously_paid')
+  })
+
+  it('omits recipient_class against an older backend that sends no recipient field (#3531)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+        },
+      },
+    })
+
+    const result = ok<{ recipient_class?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '12.50', to: '0xabc' }),
+    )
+
+    expect('recipient_class' in result.data).toBe(false)
+  })
+
   it('two no-key calls with IDENTICAL arguments get two DIFFERENT generated keys and hit the backend twice (#3495 review correction)', async () => {
     // Two genuinely separate payments (two tips, two payouts) of the same
     // amount to the same recipient must never collapse into one: a
@@ -758,6 +799,47 @@ describe('haven_send', () => {
     expect(body.idempotency_key).toBe(result.data.idempotency_key)
     // Custody invariant
     expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
+  })
+
+  it('surfaces recipient_class when the backend carries recipient.class (#3531)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+          recipient: { class: 'new_address' },
+        },
+      },
+    })
+
+    const result = ok<{ recipient_class?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    expect(result.data.recipient_class).toBe('new_address')
+  })
+
+  it('omits recipient_class against an older backend that sends no recipient field (#3531)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+
+    const result = ok<{ recipient_class?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    expect('recipient_class' in result.data).toBe(false)
   })
 
   it('two no-key calls with IDENTICAL arguments get two DIFFERENT generated keys and hit the backend twice (#3495 review correction)', async () => {

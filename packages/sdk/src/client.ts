@@ -417,6 +417,9 @@ export class HavenClient {
       status: 'pending_signature',
       expiresAt: raw.expires_at,
       signData: raw.sign_data,
+      // #3531: advisory, history-only — copied through verbatim, absent
+      // against an older backend that doesn't send it.
+      ...(raw.recipient ? { recipient: raw.recipient } : {}),
     }
   }
 

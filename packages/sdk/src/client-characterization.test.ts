@@ -221,6 +221,42 @@ describe('HavenClient constructor and request boundary characterization', () => 
 })
 
 describe('HavenClient direct-payment facade characterization', () => {
+  // #3531: createIntent() copies four fields off the raw response
+  // (paymentId, status, expiresAt, signData) — this pins that `recipient`,
+  // the fifth, rides through the same way: present when the backend sends
+  // it, absent (not `undefined` explicitly set — genuinely missing from the
+  // object) against an older backend that doesn't.
+  it('createIntent() copies recipient.class through when the backend sends it', async () => {
+    installRoutes({
+      'POST https://haven.test/payments': () =>
+        json({ ...createIntentBody(), recipient: { class: 'previously_paid' } }),
+    })
+    const client = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'https://haven.test' })
+
+    const intent = await client.createIntent({
+      token: 'USDC',
+      amount: '1.25',
+      to: '0x0000000000000000000000000000000000000003',
+    })
+
+    expect(intent.recipient).toEqual({ class: 'previously_paid' })
+  })
+
+  it('createIntent() leaves recipient absent against an older backend that never sends it', async () => {
+    installRoutes({
+      'POST https://haven.test/payments': () => json(createIntentBody()),
+    })
+    const client = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'https://haven.test' })
+
+    const intent = await client.createIntent({
+      token: 'USDC',
+      amount: '1.25',
+      to: '0x0000000000000000000000000000000000000003',
+    })
+
+    expect('recipient' in intent).toBe(false)
+  })
+
   it('refuses pay() without a local delegate key before making a request', async () => {
     const fetchMock = vi.fn(() => {
       throw new Error('pay() must fail before fetch')

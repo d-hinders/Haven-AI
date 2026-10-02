@@ -2263,3 +2263,23 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > gate and the relay's signer check are unchanged. The rest of this document
 > was not re-read for it, and `last-verified` is not bumped.
 
+> **#3531 (2026-10-01).** This diff touches one file in this document's
+> coverage list, `packages/sdk/src/client.ts` — `createIntent()` now also
+> copies an optional `recipient: { class: 'previously_paid' | 'new_address' }`
+> off the raw `POST /payments` response, the same pass-through treatment its
+> existing four fields (`paymentId`, `status`, `expiresAt`, `signData`)
+> already get. The field is advisory and history-only (owner decision,
+> 2026-10-01): computed server-side from the authenticated agent's OWN
+> confirmed `payment_intents` rows to the exact recipient address on the
+> exact chain, never from `own_account`/contact/catalog lookups — the #3528
+> `SELF_TRANSFER` hint this document's own sections never adopted was
+> withdrawn in full for exactly that reason (it let an agent probe guessed
+> addresses for owner-account membership). It sits at the TOP LEVEL of the
+> response, never inside `sign_data`/`signData` — the one shape `pay()`'s
+> `signForData` call and the signer's binding check act on — and a dedicated
+> backend test pins `sign_data` byte-identical across both classes. No
+> signature, key, delegation graph, caveat enforcer or on-chain redemption
+> path changes: `client.ts`'s role here is
+> a verbatim copy of a value it neither computes nor validates. The rest of
+> this document was not re-read for it, and `last-verified` is not bumped.
+

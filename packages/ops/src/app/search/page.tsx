@@ -50,15 +50,21 @@ function SearchForm({
         onSubmit()
       }}
     >
-      <Input
-        aria-label="Search"
-        name="q"
-        placeholder="Email, UUID, address or tx hash"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="max-w-xl flex-1"
-        autoComplete="off"
-      />
+      {/* ui Input renders the caller's className on the NATIVE input inside
+          its own div.relative wrapper — the wrapper is this flex row's child,
+          so the sizing classes must sit HERE (a bare flex-1 on the input is a
+          no-op and the field stays at its intrinsic ~20ch width). The input
+          fills the sized wrapper with its own w-full. */}
+      <div className="min-w-0 flex-1 max-w-xl">
+        <Input
+          aria-label="Search"
+          name="q"
+          placeholder="Email, UUID, address or tx hash"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          autoComplete="off"
+        />
+      </div>
       <Button type="submit" disabled={busy || value.trim() === ''}>
         Search
       </Button>

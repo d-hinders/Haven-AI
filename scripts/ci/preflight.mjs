@@ -706,9 +706,9 @@ export function selectGates(plan, surfaces) {
  * before the push.
  *
  * `working-directory:` is discarded for the same reason it is not read: no gate
- * in the corpus carries one today (the four live uses all sit on an excluded
- * command), and a gate that did would be run from the root. Written down rather
- * than guarded.
+ * in the corpus carries one today (every live use sits on an excluded
+ * command), and a gate that did would be run from the root. Written down
+ * rather than guarded.
  */
 function runGate(gate) {
   const started = Date.now()

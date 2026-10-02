@@ -56,7 +56,11 @@ describe('header entries', () => {
       within(nav)
         .getAllByRole('link')
         .map((a) => [a.textContent, a.getAttribute('href')]),
-    ).toEqual([['How it works', '/how-it-works']])
+    ).toEqual([
+      ['How it works', '/how-it-works'],
+      ['For developers', '/developers'],
+      ['For agents', '/for-agents'],
+    ])
     expect(SITE_NAV.map((item) => item.label)).not.toContain('Security')
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login')
     expect(screen.getByRole('link', { name: /Create your account/ })).toHaveAttribute('href', '/signup')

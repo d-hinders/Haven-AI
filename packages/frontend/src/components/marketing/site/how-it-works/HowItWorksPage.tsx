@@ -39,9 +39,11 @@ import {
  * The one payment walked through in section 4. Scheme-neutral on purpose:
  * under the preferred ERC-7710 scheme the merchant redeems the delegation
  * chain itself, so "Haven relays" and "gas sponsored by Haven" are not true
- * of every payment, and neither is said here. Settlement — and the on-chain
- * budget check with it — happens when the agent RETRIES with the signed
- * payment, in both schemes, so it comes after the retry, not before.
+ * of every payment, and neither is said here. The order shown is the
+ * preferred ERC-7710 scheme's: the merchant redeems, and the chain checks the
+ * budget, when the agent RETRIES with the signed payment. On the EIP-3009
+ * bridge the budget is enforced earlier, at the funding leg before the retry
+ * (`modules/x402/delegation-authorize.ts`), which the lede's wording covers.
  */
 const PAYMENT_STEPS: ReadonlyArray<FlowStep> = [
   { tone: 'neutral', title: 'The agent requests a paid resource', detail: 'GET api.research.example/query' },
@@ -194,7 +196,7 @@ Then run:
               >
                 <SiteLede>
                   Haven checks the price against the budget before the agent signs. The agent signs locally, and the
-                  chain enforces the budget when the payment settles: an over-budget payment reverts, and nothing moves.
+                  chain enforces the budget on-chain: an over-budget payment reverts, and nothing moves.
                 </SiteLede>
                 <p className="mt-3.5 text-[18px]">
                   <SiteTextLink href="/how-it-works/protocols">How the protocols fit</SiteTextLink>

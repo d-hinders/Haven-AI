@@ -124,6 +124,15 @@ describe('How it works', () => {
     expect(text).not.toContain('your own harness')
   })
 
+  it('shows settlement after the retry in the payment walk-through', () => {
+    const { container } = render(<HowItWorksPage />)
+    const steps = Array.from(container.querySelectorAll('ol > li b')).map((b) => b.textContent ?? '')
+    const retry = steps.findIndex((t) => t.startsWith('The agent retries'))
+    const settled = steps.findIndex((t) => t.startsWith('Settled from your account'))
+    expect(retry).toBeGreaterThan(-1)
+    expect(settled).toBeGreaterThan(retry)
+  })
+
   it("shows the runbook's connector command, including --api", () => {
     const { container } = render(<HowItWorksPage />)
     const code = container.querySelector('pre')?.textContent ?? ''
@@ -162,7 +171,7 @@ describe('Protocols', () => {
     expect(text).toMatch(/pinned to one recipient pays by ERC-7710 only/)
   })
 
-  it('shows settlement after the retry, as both schemes do it', () => {
+  it('shows settlement after the retry, as the labelled ERC-7710 path does it', () => {
     const { container } = render(<ProtocolsPage />)
     const steps = Array.from(container.querySelectorAll('ol > li b')).map((b) => b.textContent ?? '')
     const retry = steps.findIndex((t) => t.startsWith('Agent retries'))

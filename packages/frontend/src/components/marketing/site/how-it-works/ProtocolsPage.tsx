@@ -32,6 +32,13 @@ import {
  *    described beyond that.
  */
 
+/**
+ * The preferred ERC-7710 path, and labelled so: the merchant redeems the
+ * delegation chain, and the chain checks the budget, on the agent's retry.
+ * The EIP-3009 bridge meters the budget at its funding leg instead, before the
+ * retry (`modules/x402/delegation-authorize.ts`); the paragraph beside the
+ * flow names it.
+ */
 const X402_STEPS: ReadonlyArray<FlowStep> = [
   { tone: 'neutral', title: 'Agent requests premium research data', detail: 'GET api.research.example/query?q=…' },
   { tone: 'warning', title: 'Server responds 402 Payment Required', detail: '0.05 USDC on Base → 0x4F3e…3bcFc' },
@@ -93,7 +100,7 @@ export function ProtocolsPage() {
                 Either way the money moves from your account and the budget is enforced on-chain.
               </p>
             </SiteCopy>
-            <PaymentFlow label="x402 payment flow" amount="0.05 USDC · Base" steps={X402_STEPS} />
+            <PaymentFlow label="x402 payment flow · ERC-7710" amount="0.05 USDC · Base" steps={X402_STEPS} />
           </SiteSplit>
         </SiteSection>
 

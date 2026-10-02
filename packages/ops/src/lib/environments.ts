@@ -13,8 +13,8 @@
  * not silently run against nothing.
  *
  * Pure module: no window, no process. Callers pass the raw string, so tests
- * cover every branch without environment plumbing, and `next.config.ts`
- * reuses the same parsing for the CSP's connect-src.
+ * cover every branch without environment plumbing, and the middleware's
+ * CSP takes its connect-src from the same parse, via `deploymentRegistry()`.
  */
 
 export const PROD_ENV_KEY = 'prod'

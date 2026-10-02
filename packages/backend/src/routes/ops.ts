@@ -34,12 +34,14 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { isOpsConfigured, type OpsConfig } from '../config/ops.js'
+import { deployableChainIds } from '../domain/chains.js'
 import { authRateLimit, opsRevealRateLimit, opsSearchRateLimit } from '../middleware/rate-limit.js'
 import { createOpsAuth, opsOperatorOf } from '../middleware/ops-auth.js'
 import {
   buildOpsOnchainView,
   buildOpsOverview,
   buildOpsUserDetail,
+  buildOpsHealth,
   detectOpsSearchKey,
   maskSearchTerm,
   runOpsSearch,
@@ -51,6 +53,8 @@ import {
   verifyOpsState,
   type FetchLike,
   type GithubUser,
+  type OpsHealth,
+  type OpsHealthDeps,
   type OpsOnchainReaders,
 } from '../modules/ops/index.js'
 import { insertOpsAccessLog, type OpsAccessLogEntry } from '../infra/repositories/ops-access-log.js'
@@ -75,6 +79,28 @@ export interface OpsRoutesOptions {
    * the chain view must not pretend to.
    */
   onchainReaders?: OpsOnchainReaders | null
+  /**
+   * The `GET /health/ops` payload builder for `GET /ops/health` (#3514),
+   * injected for the same invariant-1 reason (`routes/health.ts` reaches
+   * `infra/relayer-balance-monitor.ts`) and wired in `index.ts` so both
+   * routes are served by ONE builder. Null (the default) leaves the route
+   * off (404) like every other ops data read.
+   */
+  healthDiagnostics?: (() => Promise<import('./health-payload-types.js').HealthOpsPayload>) | null
+  /**
+   * The served chains the stuck-lane walk covers (#3514). Defaults to the
+   * deployable set — the chains the bump worker actually scans. Injectable
+   * so tests pin exactly which chains were walked.
+   */
+  servedChains?: () => number[]
+  /**
+   * The delegate balance monitor's last report getter (#3514), injected
+   * alongside `healthDiagnostics` (wired to
+   * `lastDelegateBalanceReport` in `index.ts`). Null (the default) leaves
+   * `/ops/health` off (404): without the getter the payload would have to
+   * lie about the delegate section.
+   */
+  lastDelegateBalanceReport?: (() => import('../domain/delegate-balance.js').DelegateBalanceReport | null) | null
   /** Audit writer; defaults to the main-pool insert. A test seam, never a way to skip the write. */
   audit?: (entry: OpsAccessLogEntry) => Promise<void>
   fetchImpl?: FetchLike
@@ -309,7 +335,30 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
     },
   )
 
-  // POST /ops/reveal — one unmasked field, audited.
+  // GET /ops/health — the system-health read (#3514): sweepable ERC-7710
+  // intents, stuck revocations, stuck outbound lanes, the delegate balance
+  // monitor's last report, and the `GET /health/ops` diagnostics. READ-ONLY
+  // about the operational world: no RPC call on request (the chain client is
+  // never touched — pinned by ops-health.test.ts with a throwing chain), no
+  // claim, no receipt read. Data reads go through the read-only role; the
+  // audit row goes through the main pool, one per call. Off (404) without
+  // the diagnostics builder, like every other ops data read.
+  app.get('/health', { onRequest: opsAuth }, async (request, reply) => {
+    const buildOpsDiagnostics = opts.healthDiagnostics
+    const lastDelegateBalanceReport = opts.lastDelegateBalanceReport
+    if (!buildOpsDiagnostics || !lastDelegateBalanceReport) return reply.callNotFound()
+    const done = await dataRead(
+      request,
+      reply,
+      (db) => buildOpsHealth(db, { buildOpsDiagnostics, lastDelegateBalanceReport }, opts.servedChains ?? deployableChainIds),
+      () => ({
+        action: 'view',
+        targetType: 'system_health',
+      }),
+    )
+    if (!done) return reply
+    return reply.headers(NO_STORE).send(done.result)
+  })
   app.post<{ Body: { target_type: string; target_id: string; field: string } }>(
     '/reveal',
     { onRequest: opsAuth, config: opsRevealRateLimit },

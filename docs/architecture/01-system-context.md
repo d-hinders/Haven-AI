@@ -25,7 +25,9 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-09-30"
+  - packages/ops/**
+  - packages/backend/src/routes/ops.ts
+last-verified: "2026-10-02"
 ---
 
 # Haven — System Context
@@ -217,6 +219,23 @@ flowchart LR
   relayer configuration over it per chain
   ([core registry](../../packages/core/src/chains.ts),
   [backend chain wiring](../../packages/backend/src/domain/chains.ts)).
+- **The ops console is a read-only trust boundary of its own (epic #3507).**
+  `@haven/ops` is a separate Next.js app deployed as its **own Vercel
+  project** (Production Branch `dev`, runbook:
+  [`../operations/ops-console.md`](../operations/ops-console.md)) that talks
+  to a backend's `/ops/*` surface over bearer-token REST. Its boundary is
+  **founder-only read, no spend authority**: sign-in is a GitHub OAuth
+  identity check against a numeric allowlist (2FA required) minting an 8-hour
+  ops JWT that authenticates nothing but reads; the backend re-checks the id
+  on every request and every read is audited to `ops_access_log` before the
+  response is sent. Nothing under `/ops` moves funds, signs, changes signers
+  or delegations, or acts as a user — data reads go through a dedicated
+  read-only Postgres role (#3510), never the backend's login, and the chain
+  view (#3513) reads public state only. The console appears in the diagram's
+  Haven-operated box but touches no custody edge: it is observation
+  infrastructure, and every authority line in this document runs past it
+  ([ops routes](../../packages/backend/src/routes/ops.ts),
+  [ops app](../../packages/ops/src/app/page.tsx)).
 - Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
   custody claims above were re-checked against the code at this head:
   `middleware/agentAuth.ts` still stores `delegate_address` and the API-key

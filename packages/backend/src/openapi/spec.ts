@@ -972,20 +972,25 @@ const railUnavailableResponse = {
 } as const
 
 /**
- * #3494: `POST /payments/{id}/sign`'s on-chain/bundler failure — every rail
- * this route relays (a direct payment, or the EIP-3009 funding leg named in
- * `POST /x402/authorize`'s `sign_data.instructions`). The intent is already
- * `failed` by the time this is sent (`failSubmittedIntent` books it first):
- * there is nothing left to retry on this `payment_id` whatever the cause.
- * Six `error_code` values, in the order the route checks them:
- * - `submission_outcome_unknown` (review round 2, B1'/N3) — `sendUserOperation`
- *   resolved but the receipt wait itself errored or timed out: the UserOp MAY
- *   have landed, and Haven never learned the outcome. Do NOT create a new
- *   payment — this intent is ALREADY `failed`, so polling this `payment_id`'s
- *   own status can never confirm it did not settle; check the account's real
- *   activity (Haven's activity view, or the UserOperation hash on an
- *   explorer) before paying again. A fixed remedy `message`, plus the
- *   UserOperation hash in `user_op_hash` and bounded `details`.
+ * `POST /payments/{id}/sign`'s typed 502 — #3494's typed failure contract,
+ * composed with #3564's booking split. One status, TWO mutually exclusive
+ * shapes, split by what the route KNOWS about the submit:
+ *
+ * Outcome PENDING — `error_code: "submission_outcome_unknown"`: the
+ * receipt-unconfirmed submit. `sendUserOperation` resolved but the receipt
+ * wait itself errored or timed out, so the UserOp MAY have landed and the
+ * funds may have moved. The intent is NOT failed: the row stays `submitted`
+ * with the userOpHash recorded, and the submission reconciler resolves it
+ * from the bundler's receipt (landed+succeeded → confirmed with its tx_hash;
+ * landed+reverted or never seen within the bounded window → failed with the
+ * cause). `haven_get_payment_status` is the source of truth: it answers
+ * "outcome pending" (next_action check_status_later, do not create a new
+ * payment) while unresolved, then the real terminal state. Body: `status:
+ * "submitted"`, the `user_op_hash`, and bounded `details`.
+ *
+ * KNOWN failure — an already-`failed` intent (`failSubmittedIntent` books it
+ * first): there is nothing left to retry on this `payment_id` whatever the
+ * cause. Five `error_code` values, in the order the route checks them:
  * - `signature_rejected` — the account rejected the UserOperation signature
  *   during on-chain validation (ERC-4337 `AA24 signature error` only).
  *   Update the signer and sign a NEW payment; this `payment_id` cannot be
@@ -1007,18 +1012,19 @@ const railUnavailableResponse = {
  * - `onchain_execution_failed` — any other on-chain/bundler failure this
  *   route cannot classify more precisely, INCLUDING a submitted UserOp that
  *   executed and reverted on-chain (a KNOWN, confirmed outcome — no funds
- *   moved — unlike `submission_outcome_unknown` above). Create a new
- *   payment. `message` carries the bounded, redacted on-chain/bundler text
- *   when one was recorded, or the literal "On-chain execution failed"
- *   otherwise, and `details` carries the same bounded text (or `null`).
+ *   moved). Create a new payment. `message` carries the bounded, redacted
+ *   on-chain/bundler text when one was recorded, or the literal "On-chain
+ *   execution failed" otherwise, and `details` carries the same bounded text
+ *   (or `null`).
  *
- * The four non-budget codes above carry `details` — the underlying
- * bundler/viem failure text, already scrubbed of vendor secrets and capped
- * at 300 characters plus an ellipsis if longer, never the full dump —
- * `null` when nothing was recorded. Three of the four (`submission_outcome_unknown`,
- * `signature_rejected`, `account_validation_failed`) carry a fixed remedy
- * `message` independent of the on-chain text; `onchain_execution_failed`'s
- * `message` carries the bounded text itself (or the literal fallback).
+ * `details` — the underlying bundler/viem failure text, already scrubbed of
+ * vendor secrets and capped at 300 characters plus an ellipsis if longer,
+ * never the full dump — `null` when nothing was recorded — rides the
+ * outcome-pending body and three of the four known-failure non-budget codes
+ * (`signature_rejected`, `account_validation_failed`,
+ * `onchain_execution_failed`), the latter two with a fixed remedy `message`
+ * independent of the on-chain text; `onchain_execution_failed`'s `message`
+ * carries the bounded text itself (or the literal fallback).
  */
 const signFailureResponse = {
   ...errorResponse,
@@ -1039,19 +1045,20 @@ const signFailureResponse = {
     },
   },
   description:
-    'On-chain execution failed after this route claimed the intent for submission; the intent is ' +
-    'already `failed`. The body carries one of six typed `error_code` values: ' +
-    "`submission_outcome_unknown` (the UserOp's receipt wait itself failed — it may have landed; do NOT " +
-    "pay again, check the account's real activity, never this payment_id's own status), " +
-    '`signature_rejected` (AA24 only — update the signer, then pay again), ' +
+    'On-chain submission failed or its outcome is not yet known. TWO mutually exclusive shapes: ' +
+    '`error_code: "submission_outcome_unknown"` — the receipt-unconfirmed submit (#3564): the intent ' +
+    'is NOT failed, it stays submitted with the user_op_hash recorded and Haven reconciles it from the ' +
+    'chain; do not create a new payment — haven_get_payment_status answers the outcome-pending state ' +
+    "(next_action check_status_later) and then the real terminal state. Otherwise the intent is already " +
+    '`failed` (known cause): `signature_rejected` (AA24 only — update the signer, then pay again), ' +
     '`account_validation_failed` (a different AA2x code, not a signer cause — pay again), ' +
     '`task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 ' +
     'answers — `asset` on `delegation_budget_exceeded` only — neither carries a `message` field), or ' +
     '`onchain_execution_failed` (including a submitted UserOp that executed and reverted — a confirmed, ' +
-    'no-funds-moved outcome — pay again). The four non-budget codes carry bounded, redacted `details` ' +
-    '(300 characters plus an ellipsis if longer, or `null`); three of the four carry a fixed remedy ' +
-    '`message`, while `onchain_execution_failed`\'s `message` carries the bounded text itself (or the ' +
-    'literal fallback "On-chain execution failed").',
+    'no-funds-moved outcome — pay again). The non-budget codes carry bounded, redacted `details` ' +
+    '(300 characters plus an ellipsis if longer, or `null`); two known-failure codes and the ' +
+    'outcome-pending body carry a fixed remedy `message`, while `onchain_execution_failed`\'s `message` ' +
+    'carries the bounded text itself (or the literal fallback "On-chain execution failed").',
 } as const
 
 /**
@@ -1284,6 +1291,17 @@ const agentPaymentStatus = {
     // only when a machine_payment_evidence row records the merchant's
     // response; omitted — never false — when the backend does not know.
     delivered: { type: 'boolean', description: 'True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown.' },
+    // #3564: additive outcome-pending visibility, the same honesty rule as
+    // `delivered` — present (true) only while the payment's submit is
+    // receipt-unconfirmed and not yet reconciled from the chain; omitted —
+    // never false — on every other row.
+    submission_outcome_pending: {
+      type: 'boolean',
+      description:
+        'True while the payment was submitted but its on-chain outcome is not known yet (#3564): ' +
+        'do not create a new payment — the status becomes the real outcome once Haven reconciles ' +
+        'it from the chain. Omitted on every other row.',
+    },
     // #3475 follow-up
     settlement_scheme: {
       anyOf: [
@@ -1889,6 +1907,28 @@ export const openapiSpec = {
             description:
               'No such user, or the ops console (its read-only database or its chain readers) is not configured.',
           },
+          '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
+        },
+      },
+    },
+    '/ops/health': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsSystemHealth',
+        summary: 'List the operational problems: sweepable intents, stuck revocations, stuck lanes, delegate balances.',
+        description:
+          'The ops console\u2019s system-health read (#3514). ERC-7710 payment intents the settlement sweeper works on (in its retry window, and past its horizon \u2014 the payments actually lost without an operator, 24 h to 30 days), confirmed payments whose evidence row never landed (#2213), revocations and re-anchors unreconciled past 1 h, broadcast outbound transactions unmined past the bump worker\u2019s stale threshold per served chain, the delegate balance monitor\u2019s last report, and the same payload GET /health/ops serves (built by the same function). ' +
+          'READ-ONLY about the operational world: no RPC call on request, no claim, no receipt read \u2014 a listed lane MAY already be mined. Delegate balances are the monitor\u2019s in-memory last report, never a scan on request; a replica without the monitor leader lock answers not_available_on_this_replica. ' +
+          'Atomic amounts are decimal strings. Every list is capped at 50. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. ' +
+          'Returns 404 while the deployment has no read-only ops database or no diagnostics builder configured.',
+        security: [{ OpsJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The operational problems, and the backend\u2019s own diagnostics.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsSystemHealth' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console (its read-only database or its diagnostics builder) is not configured.' },
           '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
         },
       },
@@ -9482,6 +9522,172 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * `GET /ops/health` (#3514): explicit positive projections only. The
+       * raw `SweepableSettlementRow` carries `machine_metadata` and
+       * `delegation_hash`; the ops projection names nothing like them — the
+       * ops-data forbidden-key walk (`password_hash|_token$|_hash$|…`,
+       * #3512) covers this payload too.
+       */
+      OpsSystemHealth: {
+        type: 'object',
+        required: [
+          'sweepable_intents',
+          'evidence_orphans',
+          'stuck_revocations',
+          'stuck_reanchors',
+          'stuck_lanes',
+          'delegate_balances',
+          'ops_diagnostics',
+          'generated_at',
+        ],
+        properties: {
+          sweepable_intents: {
+            type: 'array',
+            description:
+              'ERC-7710 payment intents the settlement sweeper works on, oldest first, at most 50. ' +
+              'in_window: still inside the recovery window it retries. past_horizon: past 24 h up to 30 days — the sweeper no longer retries these, the payments actually lost without an operator.',
+            items: {
+              type: 'object',
+              required: ['id', 'agent_id', 'chain_id', 'token_symbol', 'amount_human', 'status', 'window', 'age_seconds'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                agent_id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                token_symbol: { type: 'string' },
+                amount_human: { type: 'string' },
+                status: { type: 'string' },
+                window: { type: 'string', enum: ['in_window', 'past_horizon'] },
+                age_seconds: { type: 'integer', minimum: 0 },
+              },
+              additionalProperties: false,
+            },
+          },
+          evidence_orphans: {
+            type: 'array',
+            description:
+              'Confirmed ERC-7710 payments no machine_payment_evidence row references (#2213): settled on-chain, booked nowhere, outside every automated retry path.',
+            items: {
+              type: 'object',
+              required: ['id', 'agent_id', 'chain_id', 'token_symbol', 'amount_human', 'status', 'age_seconds'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                agent_id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                token_symbol: { type: 'string' },
+                amount_human: { type: 'string' },
+                status: { type: 'string' },
+                age_seconds: { type: 'integer', minimum: 0 },
+              },
+              additionalProperties: false,
+            },
+          },
+          stuck_revocations: {
+            type: 'array',
+            description:
+              "Revocations unreconciled past 1 h (#973): Haven's DB says the agent is revoked, the live attestation does not. A merchant reading only the chain still sees the agent as valid.",
+            items: {
+              type: 'object',
+              required: ['agent_id', 'revocation_requested_at', 'revocation_attempts', 'age_seconds'],
+              properties: {
+                agent_id: { type: 'string', format: 'uuid' },
+                revocation_requested_at: { type: ['string', 'null'], format: 'date-time' },
+                revocation_attempts: { type: 'integer' },
+                age_seconds: { type: 'integer', minimum: 0 },
+              },
+              additionalProperties: false,
+            },
+          },
+          stuck_reanchors: {
+            type: 'array',
+            description: 'Re-anchors unreconciled past 1 h (#1699): the live attestation names the retired key.',
+            items: {
+              type: 'object',
+              required: ['agent_id', 'agent_eoa', 'delegate_address', 'revocation_attempts'],
+              properties: {
+                agent_id: { type: 'string', format: 'uuid' },
+                agent_eoa: { type: ['string', 'null'] },
+                delegate_address: { type: ['string', 'null'] },
+                revocation_attempts: { type: 'integer' },
+              },
+              additionalProperties: false,
+            },
+          },
+          stuck_lanes: {
+            type: 'array',
+            description:
+              "Broadcast outbound transactions unmined past the bump worker's stale threshold, per served chain. No receipt is read on this path: a row listed here MAY ALREADY BE MINED — the worker's chain-first tick closes those. id is the unmasked outbound_txs id the operator pastes into ops:cancel-stuck-lane; it links to no user. capped_needs_operator: a rebroadcast-safe submitter's lane at the bump cap — the worker has stopped for good and the lane is the operator's.",
+            items: {
+              type: 'object',
+              required: ['id', 'chain_id', 'submitter', 'nonce', 'age_seconds', 'reason'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                submitter: { type: 'string' },
+                nonce: { type: 'string' },
+                age_seconds: { type: 'integer', minimum: 0 },
+                reason: { type: 'string', enum: ['stale_unmined', 'capped_needs_operator'] },
+              },
+              additionalProperties: false,
+            },
+          },
+          delegate_balances: {
+            oneOf: [
+              {
+                type: 'object',
+                description: "The delegate balance monitor's last scan — kept in memory, never a scan on request.",
+                required: ['available', 'scanned_at', 'report'],
+                properties: {
+                  available: { type: 'boolean', enum: [true] },
+                  scanned_at: isoDateTime,
+                  report: {
+                    type: 'object',
+                    required: ['scanned_delegates', 'unread', 'lingering', 'dust_total_atomic', 'dust_alert', 'chain_errors'],
+                    properties: {
+                      scanned_delegates: { type: 'integer', minimum: 0 },
+                      unread: { type: 'integer', minimum: 0 },
+                      lingering: {
+                        type: 'array',
+                        description: 'Balances at/above the sweep floor with no fresh pending payment — sweepable money on a hot EOA.',
+                        items: {
+                          type: 'object',
+                          required: ['agent_id', 'agent_name', 'delegate_address', 'chain_id', 'balance_atomic'],
+                          properties: {
+                            agent_id: { type: 'string', format: 'uuid' },
+                            agent_name: { type: 'string' },
+                            delegate_address: { type: 'string' },
+                            chain_id: { type: 'integer' },
+                            balance_atomic: { type: 'string' },
+                          },
+                          additionalProperties: false,
+                        },
+                      },
+                      dust_total_atomic: { type: 'string' },
+                      dust_alert: { type: 'boolean' },
+                      chain_errors: { type: 'object', additionalProperties: { type: 'string' } },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                description: 'This replica does not hold the monitor leader lock, so it has no last report. There is never a scan on request.',
+                required: ['available', 'reason'],
+                properties: {
+                  available: { type: 'boolean', enum: [false] },
+                  reason: { type: 'string', enum: ['not_available_on_this_replica'] },
+                },
+                additionalProperties: false,
+              },
+            ],
+          },
+          ops_diagnostics: { $ref: '#/components/schemas/HealthOpsResponse' },
+          generated_at: isoDateTime,
         },
         additionalProperties: false,
       },

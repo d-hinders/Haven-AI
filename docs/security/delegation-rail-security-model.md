@@ -62,6 +62,10 @@ covers:
   - packages/backend/src/modules/passport/revocation.ts
   - packages/backend/src/modules/passport/issuance.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
+  - packages/backend/src/routes/ops.ts
+  - packages/backend/src/modules/ops/**
+  - packages/backend/src/middleware/ops-auth.ts
+  - packages/ops/**
 last-verified: "2026-10-01"
 ---
 
@@ -1351,6 +1355,24 @@ Two properties of the erc7710 settlement leg, corrected in #1061:
   payee-pinned, ≤600 s expiry. Worst case on a leaked child is "the merchant is
   paid without delivering" for that one quoted amount — the leak-analysis table
   in §3 is unchanged, since redeeming still cannot exceed those bounds.
+
+**The ops console is a third read surface, and it holds no rail authority
+(#3507 epic, deploy slice #3517).** `@haven/ops` — a separate app with its
+own Vercel project and runbook
+([`../operations/ops-console.md`](../operations/ops-console.md)) — reaches a
+backend's `/ops/*` routes only. Every route sits behind a bearer-token auth
+hook (`middleware/ops-auth.ts`): an ops JWT minted by that backend's GitHub
+sign-in, HS256-pinned to the ops audience and this backend's issuer (so a
+dashboard JWT, an owner-CLI token or an agent credential never passes), with
+the operator's numeric GitHub id re-checked against the allowlist on every
+request. The surface is read-and-reveal over the read-only Postgres role —
+no route under `/ops` moves funds, signs, redeems, changes a signer,
+delegation or credential, or acts as a user; even `POST /ops/reveal` only
+reads one allowlisted column and records the read first. It is a
+founders-only window, not a delegation-rail participant: no op this document
+guards runs through it, and its authority-relevance ends at what its
+operator may LOOK at. Deploy wiring and the per-environment checklist live
+in the runbook, not here.
 
 ## 9. Owner CLI sessions — the device-code login (#2526)
 

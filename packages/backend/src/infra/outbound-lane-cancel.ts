@@ -119,12 +119,14 @@
  */
 
 import {
-  MAX_BUMPS_PER_NONCE,
-  STALE_BROADCAST_SECONDS,
-  REBROADCAST_SAFE_SUBMITTERS,
   bumpedFees,
   type BumpDeps,
 } from './outbound-bump-worker.js'
+import {
+  MAX_BUMPS_PER_NONCE,
+  REBROADCAST_SAFE_SUBMITTERS,
+  STALE_BROADCAST_SECONDS,
+} from '../domain/outbound-lane-policy.js'
 import { submitRecorded, type SubmitChainDeps } from './outbound-queue.js'
 import type { OutboundTxRow } from './repositories/outbound-txs.js'
 

@@ -182,6 +182,7 @@ import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { observeErc7710Settlement } from './settlement-observed.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../mpp/index.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
+import { SWEEP_MIN_AGE_SECONDS as SWEEP_WINDOW_MIN_AGE, SWEEP_RECOVERY_HORIZON_SECONDS as SWEEP_WINDOW_HORIZON } from '../../domain/x402-sweep-window.js'
 
 /** How often the tick runs. */
 export const SETTLEMENT_SWEEP_INTERVAL_MS = 120_000
@@ -190,8 +191,14 @@ export const SETTLEMENT_SWEEP_INTERVAL_MS = 120_000
  * Grace before a payment becomes a candidate. Long enough that the ordinary
  * agent-reported completion has happened, so the sweep costs nothing on the
  * happy path and only ever pays for payments that really went unreported.
+ *
+ * The sweep window constants live in `domain/x402-sweep-window.ts` (#3514):
+ * this sweeper and the ops console's `GET /ops/health` read the same
+ * definitions — the ops invariant-1 walk forbids the ops graph from
+ * importing THIS module, so the constants must be importable from a module
+ * that carries none of the machinery. Re-exported here unchanged.
  */
-export const SWEEP_MIN_AGE_SECONDS = 90
+export const SWEEP_MIN_AGE_SECONDS = SWEEP_WINDOW_MIN_AGE
 
 /**
  * How far back a payment stays sweepable. NOT the settlement window — see the
@@ -199,7 +206,7 @@ export const SWEEP_MIN_AGE_SECONDS = 90
  * this bounds how long Haven keeps looking. Sized so an RPC outage lasting up
  * to a day is fully recovered rather than turning into permanent invisibility.
  */
-export const SWEEP_RECOVERY_HORIZON_SECONDS = 24 * 60 * 60
+export const SWEEP_RECOVERY_HORIZON_SECONDS = SWEEP_WINDOW_HORIZON
 
 /** Candidates considered per tick, across all chains. */
 export const SWEEP_MAX_CANDIDATES_PER_TICK = 200

@@ -10,12 +10,16 @@
  * failed" for everything a bundler can throw after the route already
  * claimed the intent. Review rounds 1 and 2 split and extended the classes;
  * in the order the route checks them: `SubmittedUserOpFailedError` with
- * `reverted: false` (submission outcome unknown — checked FIRST, double-pay
- * risk: B1/B1'), AA24 signature rejection, every other AA2x
+ * outcome `receipt_unconfirmed` (#3564 — checked FIRST, double-pay risk,
+ * B1/B1': the submit MAY have landed, so the row is booked outcome-PENDING,
+ * never `failed`, and the 502 says to poll `haven_get_payment_status`), then
+ * the route books every KNOWN failure `failed` (`failSubmittedIntent`) and
+ * classifies it: AA24 signature rejection, every other AA2x
  * account-validation failure, a task-budget transfer-cap revert, a
  * period-budget revert, and the generic fallback — which also catches
- * `SubmittedUserOpFailedError` with `reverted: true` (round 2, N3: the op
- * executed and reverted is a KNOWN, confirmed outcome, not an unknown one).
+ * `SubmittedUserOpFailedError` with outcome `included_reverted` (round 2,
+ * N3: the op executed and reverted is a KNOWN, confirmed outcome, not an
+ * unknown one).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -166,13 +170,13 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     })
   }
 
-  it('submission outcome unknown (B1/B1′, double-pay risk): the receipt-unconfirmed variant, checked before every other cause', async () => {
+  it('submission outcome unknown (#3564): the receipt-unconfirmed variant, checked before every other cause — outcome-PENDING, never failed', async () => {
     primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
     delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
       new SubmittedUserOpFailedError(
         'redemption UserOp 0xabc was sent but its receipt could not be confirmed: timeout',
         '0xabc',
-        // `reverted` defaults false — the receipt itself never arrived.
+        'receipt_unconfirmed',
       ),
     )
 
@@ -180,29 +184,76 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
 
     expect(res.statusCode).toBe(502)
     const body = res.json()
-    expect(body.status).toBe('failed')
+    // #3564: the intent is NOT failed — the submit MAY have landed, so the
+    // row stays `submitted` with the userOpHash recorded for the submission
+    // reconciler, and the 502 is a poll instruction, not a failure verdict.
+    expect(body.status).toBe('submitted')
     expect(body.error_code).toBe('submission_outcome_unknown')
     expect(body.payment_id).toBe(PAYMENT_ID)
     expect(body.user_op_hash).toBe('0xabc')
-    // #3494 review round 2 (B1′): the remedy is "stop and check the
-    // account's real activity" — never "create a new payment" (the double
-    // pay this code exists to prevent) and never a promise that polling
-    // THIS payment_id's status will resolve it (the intent is already
-    // marked failed, so status can never come back "landed").
+    expect(body.details).toMatch(/receipt could not be confirmed/)
+    // The remedy: do not create a new payment, poll the status read — which
+    // is truthful now that the row is outcome-pending, not failed.
+    expect(body.error).toMatch(/outcome unknown/i)
+    // #3564 review round 2: the body carries the fixed remedy `message` the
+    // spec prose promises (same contract as the status surface's
+    // do-not-recreate answer) — the wire cannot drift from the prose again.
     expect(body.message).toMatch(/do not create a new payment/i)
-    expect(body.message).toMatch(/0xabc/)
-    expect(body.message).not.toMatch(/update the signer/i)
-    expect(body.message).not.toMatch(/poll|status confirms|check status/i)
+    expect(body.message).toMatch(/haven_get_payment_status/)
+    // ...and `details` is the BOUNDED text (redaction ≠ length): the raw
+    // redacted error never rides the body wholesale.
+    expect(typeof body.details).toBe('string')
+    expect((body.details as string).length).toBeLessThanOrEqual(301)
+    // The booking write issued (machine_metadata gains the user_op_hash),
+    // and failSubmittedIntent was NEVER reached — no terminal booking.
+    expect(mockQuery.mock.calls.some((c) => /user_op_hash/.test(String(c[0])))).toBe(true)
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(false)
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_refusals/.test(String(c[0])))).toBe(false)
   })
 
-  // #3494 review round 2 (N3): the SAME error class's "included but
-  // reverted" variant is a KNOWN, confirmed outcome (an EVM revert rolls
-  // back every state change — no funds moved), so it must NOT answer
-  // submission_outcome_unknown; it falls through to the generic code.
-  it('an "included but reverted" SubmittedUserOpFailedError (a KNOWN, confirmed outcome) answers onchain_execution_failed, never submission_outcome_unknown', async () => {
+  // #3564 review round 2: the outcome-pending body's `details` is the BOUNDED
+  // text — a viem/bundler message can carry its full callData/ABI after
+  // `redactVendorSecrets` scrubbed the credentials, so a >300-char error must
+  // come back as exactly the first 300 characters plus the ellipsis (the
+  // spec prose's "300 characters plus an ellipsis if longer").
+  it('the outcome-pending 502 bounds an oversized redacted error: details = 300 chars + ellipsis, message still the fixed remedy', async () => {
+    const longTail = 'x'.repeat(600)
     primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
     delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
-      new SubmittedUserOpFailedError('redemption UserOp 0xabc included but reverted', '0xabc', true),
+      new SubmittedUserOpFailedError(
+        `redemption UserOp 0xabc was sent but its receipt could not be confirmed: timeout ${longTail}`,
+        '0xabc',
+        'receipt_unconfirmed',
+      ),
+    )
+
+    const res = await sign()
+
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error_code).toBe('submission_outcome_unknown')
+    expect(body.status).toBe('submitted')
+    const details = body.details as string
+    expect(typeof details).toBe('string')
+    expect(details.length).toBe(301) // 300 characters plus the ellipsis
+    expect(details.endsWith('…')).toBe(true)
+    expect(details.startsWith('redemption UserOp 0xabc was sent but its receipt could not be confirmed: timeout ')).toBe(true)
+    expect(details).not.toContain(longTail)
+    // The remedy `message` is fixed prose — it never embeds the on-chain text.
+    expect(body.message).toMatch(/do not create a new payment/i)
+    expect(body.message).toMatch(/haven_get_payment_status/)
+    expect(body.message).not.toMatch(/xxxx/)
+  })
+
+  // #3494 review round 2 (N3), still true under #3564: the SAME error
+  // class's "included but reverted" variant is a KNOWN, confirmed outcome
+  // (an EVM revert rolls back every state change — no funds moved), so it
+  // must NOT answer submission_outcome_unknown; it books `failed` and falls
+  // through to the generic code.
+  it('an "included but reverted" SubmittedUserOpFailedError (a KNOWN, confirmed outcome) books failed and answers onchain_execution_failed, never submission_outcome_unknown', async () => {
+    primeDb(AUTH, intentById(intentRow()), CLAIM_OK, FAIL_WRITE)
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new SubmittedUserOpFailedError('redemption UserOp 0xabc included but reverted', '0xabc', 'included_reverted'),
     )
 
     const res = await sign()

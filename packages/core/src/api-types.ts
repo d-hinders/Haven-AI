@@ -322,6 +322,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the operational problems: sweepable intents, stuck revocations, stuck lanes, delegate balances.
+         * @description The ops console’s system-health read (#3514). ERC-7710 payment intents the settlement sweeper works on (in its retry window, and past its horizon — the payments actually lost without an operator, 24 h to 30 days), confirmed payments whose evidence row never landed (#2213), revocations and re-anchors unreconciled past 1 h, broadcast outbound transactions unmined past the bump worker’s stale threshold per served chain, the delegate balance monitor’s last report, and the same payload GET /health/ops serves (built by the same function). READ-ONLY about the operational world: no RPC call on request, no claim, no receipt read — a listed lane MAY already be mined. Delegate balances are the monitor’s in-memory last report, never a scan on request; a replica without the monitor leader lock answers not_available_on_this_replica. Atomic amounts are decimal strings. Every list is capped at 50. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. Returns 404 while the deployment has no read-only ops database or no diagnostics builder configured.
+         */
+        get: operations["getOpsSystemHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/reveal": {
         parameters: {
             query?: never;
@@ -3939,6 +3959,94 @@ export type components = {
                 latencyMs?: number;
             };
         };
+        OpsSystemHealth: {
+            /** @description ERC-7710 payment intents the settlement sweeper works on, oldest first, at most 50. in_window: still inside the recovery window it retries. past_horizon: past 24 h up to 30 days — the sweeper no longer retries these, the payments actually lost without an operator. */
+            sweepable_intents: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_human: string;
+                status: string;
+                /** @enum {string} */
+                window: "in_window" | "past_horizon";
+                age_seconds: number;
+            }[];
+            /** @description Confirmed ERC-7710 payments no machine_payment_evidence row references (#2213): settled on-chain, booked nowhere, outside every automated retry path. */
+            evidence_orphans: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_human: string;
+                status: string;
+                age_seconds: number;
+            }[];
+            /** @description Revocations unreconciled past 1 h (#973): Haven's DB says the agent is revoked, the live attestation does not. A merchant reading only the chain still sees the agent as valid. */
+            stuck_revocations: {
+                /** Format: uuid */
+                agent_id: string;
+                /** Format: date-time */
+                revocation_requested_at: string | null;
+                revocation_attempts: number;
+                age_seconds: number;
+            }[];
+            /** @description Re-anchors unreconciled past 1 h (#1699): the live attestation names the retired key. */
+            stuck_reanchors: {
+                /** Format: uuid */
+                agent_id: string;
+                agent_eoa: string | null;
+                delegate_address: string | null;
+                revocation_attempts: number;
+            }[];
+            /** @description Broadcast outbound transactions unmined past the bump worker's stale threshold, per served chain. No receipt is read on this path: a row listed here MAY ALREADY BE MINED — the worker's chain-first tick closes those. id is the unmasked outbound_txs id the operator pastes into ops:cancel-stuck-lane; it links to no user. capped_needs_operator: a rebroadcast-safe submitter's lane at the bump cap — the worker has stopped for good and the lane is the operator's. */
+            stuck_lanes: {
+                /** Format: uuid */
+                id: string;
+                chain_id: number;
+                submitter: string;
+                nonce: string;
+                age_seconds: number;
+                /** @enum {string} */
+                reason: "stale_unmined" | "capped_needs_operator";
+            }[];
+            delegate_balances: {
+                /** @enum {boolean} */
+                available: true;
+                /** Format: date-time */
+                scanned_at: string;
+                report: {
+                    scanned_delegates: number;
+                    unread: number;
+                    /** @description Balances at/above the sweep floor with no fresh pending payment — sweepable money on a hot EOA. */
+                    lingering: {
+                        /** Format: uuid */
+                        agent_id: string;
+                        agent_name: string;
+                        delegate_address: string;
+                        chain_id: number;
+                        balance_atomic: string;
+                    }[];
+                    dust_total_atomic: string;
+                    dust_alert: boolean;
+                    chain_errors: {
+                        [key: string]: string;
+                    };
+                };
+            } | {
+                /** @enum {boolean} */
+                available: false;
+                /** @enum {string} */
+                reason: "not_available_on_this_replica";
+            };
+            ops_diagnostics: components["schemas"]["HealthOpsResponse"];
+            /** Format: date-time */
+            generated_at: string;
+        };
         OpsSession: {
             /** @description Numeric GitHub user id (the allowlist key). */
             github_id: string;
@@ -4860,6 +4968,8 @@ export type components = {
             message: string;
             /** @description True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown. */
             delivered?: boolean;
+            /** @description True while the payment was submitted but its on-chain outcome is not known yet (#3564): do not create a new payment — the status becomes the real outcome once Haven reconciles it from the chain. Omitted on every other row. */
+            submission_outcome_pending?: boolean;
             /** @description Which settlement branch this x402 payment runs (#946), from machine_metadata. Null on the legacy rail, on any x402 intent whose scheme metadata predates #946, or any stored value outside this enum. */
             settlement_scheme?: ("eip3009" | "erc7710") | null;
             /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
@@ -6860,6 +6970,71 @@ export interface operations {
                 };
             };
             /** @description No such user, or the ops console (its read-only database or its chain readers) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsSystemHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The operational problems, and the backend’s own diagnostics. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsSystemHealth"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (its read-only database or its diagnostics builder) is not configured. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -18432,7 +18607,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description On-chain execution failed after this route claimed the intent for submission; the intent is already `failed`. The body carries one of six typed `error_code` values: `submission_outcome_unknown` (the UserOp's receipt wait itself failed — it may have landed; do NOT pay again, check the account's real activity, never this payment_id's own status), `signature_rejected` (AA24 only — update the signer, then pay again), `account_validation_failed` (a different AA2x code, not a signer cause — pay again), `task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 answers — `asset` on `delegation_budget_exceeded` only — neither carries a `message` field), or `onchain_execution_failed` (including a submitted UserOp that executed and reverted — a confirmed, no-funds-moved outcome — pay again). The four non-budget codes carry bounded, redacted `details` (300 characters plus an ellipsis if longer, or `null`); three of the four carry a fixed remedy `message`, while `onchain_execution_failed`'s `message` carries the bounded text itself (or the literal fallback "On-chain execution failed"). */
+            /** @description On-chain submission failed or its outcome is not yet known. TWO mutually exclusive shapes: `error_code: "submission_outcome_unknown"` — the receipt-unconfirmed submit (#3564): the intent is NOT failed, it stays submitted with the user_op_hash recorded and Haven reconciles it from the chain; do not create a new payment — haven_get_payment_status answers the outcome-pending state (next_action check_status_later) and then the real terminal state. Otherwise the intent is already `failed` (known cause): `signature_rejected` (AA24 only — update the signer, then pay again), `account_validation_failed` (a different AA2x code, not a signer cause — pay again), `task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 answers — `asset` on `delegation_budget_exceeded` only — neither carries a `message` field), or `onchain_execution_failed` (including a submitted UserOp that executed and reverted — a confirmed, no-funds-moved outcome — pay again). The non-budget codes carry bounded, redacted `details` (300 characters plus an ellipsis if longer, or `null`); two known-failure codes and the outcome-pending body carry a fixed remedy `message`, while `onchain_execution_failed`'s `message` carries the bounded text itself (or the literal fallback "On-chain execution failed"). */
             502: {
                 headers: {
                     [name: string]: unknown;

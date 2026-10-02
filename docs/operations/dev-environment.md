@@ -28,8 +28,21 @@ covers:
   - packages/backend/src/routes/accounting-webhooks.ts
   - packages/frontend/src/lib/demo-gate.ts
   - packages/frontend/playwright.config.ts
-last-verified: "2026-10-01"
+last-verified: "2026-10-02"
 ---
+
+> **Re-verified #3564 (2026-10-02):** `index.ts` gains one more
+> leader-gated background tick beside the settlement sweep — the submission
+> reconciler (`modules/payments/submission-reconciler.ts`, lock key
+> `submissionReconcile`), every 60 s, `unref`'d like the sweep's own
+> interval. It resolves the direct payments whose sign submit was SENT but
+> whose receipt was never confirmed (the rows #3564 books outcome-pending):
+> one bundler receipt read per candidate row, terminal writes via CAS, and
+> a per-candidate try/catch so one poison row cannot silence the queue. No
+> route file is added or moved, `enforcedModules` is untouched, and the
+> shadow/enforce semantics this document describes are unchanged. Nothing
+> else in this file's coverage was touched; this note and the
+> `last-verified` date are the only edits.
 
 # Dev environment
 
@@ -114,6 +127,15 @@ deployed that way today.
   (`GET /ops/users/{id}/onchain`, #3513) additionally needs the chain
   readers, which `index.ts` wires whenever the read-only role is configured;
   without them that one route answers 404 while the rest of `/ops` works.
+  The system-health read (`GET /ops/health`, #3514) needs no extra
+  configuration: it embeds the same payload the operator-token `/health/ops`
+  serves (built by the same function, wired in `index.ts` whenever the
+  read-only role is configured — without it this route answers 404 like the
+  other data reads) plus monitor-derived problem lists. The delegate-balance
+  section reflects the delegate monitor's last in-memory report, so a
+  replica that does not hold the monitor's leader lock answers
+  `not_available_on_this_replica` instead of figures; there is never a scan
+  on request.
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).

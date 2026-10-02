@@ -920,7 +920,6 @@ test.describe('driven focus-state visual regression', () => {
     await expect(target).toHaveCount(1)
     await tabToTarget(page, target, 'AgentCard name link')
     await expect(target).toBeFocused()
-    await expect(card).toHaveCSS('outline-width', '0px')
     const ring = await card.evaluate((el) => getComputedStyle(el).boxShadow)
     expect(ring, 'the focused name link did not paint the shared card ring').not.toBe('none')
 

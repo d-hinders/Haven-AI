@@ -3205,7 +3205,10 @@ export const SCENARIOS = {
       'The sign-in and sign-up cards (#3578) at the states a URL cannot reach: each API error band, the in-flight submit on both pages, sign-up client validation, and the registered banner. Signed out by declaration — an authenticated context would redirect off both pages.',
     signedOut: true,
     api(apiPath, method) {
-      if (apiPath !== '/auth/login' && apiPath !== '/auth/register') return undefined
+      // `/auth/signup`, not `/auth/register` — the endpoint AuthContext's
+      // signup actually posts (api.post('/auth/signup')); a hook keyed on the
+      // wrong path silently serves the fallback fixture instead of the 409.
+      if (apiPath !== '/auth/login' && apiPath !== '/auth/signup') return undefined
       if (method !== 'POST') return undefined
       if (authApiStage === 'error') {
         // Login maps every 4xx to its own generic copy; signup renders the
@@ -3225,7 +3228,14 @@ export const SCENARIOS = {
     async run({ page, vp, shoot }) {
       const gotoAuth = async (route) => {
         setAuthApiStage('normal')
-        await page.goto(`${BASE_URL}${route}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        // `networkidle`, like every other goto in this harness: in dev these
+        // pages load megabytes of wallet-provider chunks, and the form's
+        // submit handler only exists once React hydrates — clicking into a
+        // form reached at `domcontentloaded` swallows the submit silently.
+        // networkidle + a settle grace is what the filled-and-clicked flows
+        // elsewhere in this file (and the e2e twin) rely on.
+        await page.goto(`${BASE_URL}${route}`, { waitUntil: 'networkidle', timeout: 60_000 })
+        await page.waitForTimeout(2_000)
         await page.evaluate(() => document.fonts.ready)
       }
       // The main region carries the ground, the card and the hand-off note;

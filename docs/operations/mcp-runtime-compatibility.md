@@ -73,8 +73,19 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-01"
+last-verified: "2026-10-02"
 ---
+
+> **Re-verified #3515 (2026-10-02, the ops console scaffold):** this diff
+> touches `.github/workflows/ci.yml`, a covered file. The change adds gate
+> steps (design lint, wire-type ratchet) to the NEW `ops_checks` job for the
+> `@haven/ops` scaffold (#3515) and its surface routing; no covered runtime
+> code moved. No tool is added, renamed or re-shaped on either runtime, no
+> argument or input schema changes, and the version-skew and consent-hash
+> contracts do not move: a CI job's steps are not a skew axis. The client
+> releases table, upgrade hints, publish flow and package resolution are
+> untouched. `last-verified` is bumped to 2026-10-02 for this note.
+> Nothing else in this document was re-verified.
 
 > **Re-verified #3496 (2026-09-30, the tombstone tell moves ahead of the
 > identity stat):** this diff touches `packages/connect/src/doctor.ts` (and its

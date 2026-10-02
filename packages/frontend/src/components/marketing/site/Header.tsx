@@ -90,7 +90,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
       {/* The installed-app status-bar band, outside the blurred bar (#2819). */}
       <SafeAreaBand className="bg-transparent" />
       <div className="backdrop-blur">
-        <div className={`${SITE_WRAP} flex h-[60px] items-center justify-between gap-6`}>
+        <div className={`${SITE_WRAP} flex h-[60px] items-center justify-between gap-3 sm:gap-6`}>
           <Link
             href="/"
             className={`flex items-center gap-[9px] rounded-[4px] [font-family:var(--font-site-display)] text-[17px] font-semibold tracking-[-0.01em] ${
@@ -120,7 +120,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
             ))}
           </nav>
 
-          <div className="flex items-center gap-[18px] text-[14px]">
+          <div className="flex items-center gap-3 sm:gap-[18px] text-[14px]">
             <Link
               href="/login"
               className={`inline-block whitespace-nowrap rounded-[4px] transition-colors ${
@@ -133,13 +133,17 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
             </Link>
             <Link
               href="/signup"
-              className={`inline-flex h-9 items-center rounded-md px-3.5 text-[14px] font-medium whitespace-nowrap transition-colors ${
+              className={`inline-flex h-9 items-center rounded-md px-3 sm:px-3.5 text-[14px] font-medium whitespace-nowrap transition-colors ${
                 dark
                   ? `bg-white text-[#0e1230] hover:bg-[#eef2ff] ${FOCUS_ON_DARK}`
                   : `bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)] hover:bg-[var(--v2-brand-strong)] ${FOCUS_ON_LIGHT}`
               }`}
             >
-              Create your account
+              {/* The mockup's row (logo, Sign in, full CTA) is ~330px of content;
+                  a phone's padded row is 272–312px. Below `sm` the CTA takes
+                  the short label so the row fits at 320 without dropping Sign in. */}
+              <span className="sm:hidden">Sign up</span>
+              <span className="hidden sm:inline">Create your account</span>
             </Link>
           </div>
         </div>

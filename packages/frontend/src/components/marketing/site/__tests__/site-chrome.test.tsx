@@ -59,7 +59,7 @@ describe('header entries', () => {
     ).toEqual([['How it works', '/how-it-works']])
     expect(SITE_NAV.map((item) => item.label)).not.toContain('Security')
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login')
-    expect(screen.getByRole('link', { name: 'Create your account' })).toHaveAttribute('href', '/signup')
+    expect(screen.getByRole('link', { name: /Create your account/ })).toHaveAttribute('href', '/signup')
   })
 
   it('keeps the installed-app safe-area band as the header’s first child (#2819)', () => {
@@ -105,7 +105,7 @@ describe('header legibility: four cases', () => {
       expect(header.className).toContain('bg-bg/95')
       const brand = within(header).getByRole('link', { name: 'Haven' })
       expect(brand.className).toContain('text-[var(--v2-ink)]')
-      expect(within(header).getByRole('link', { name: 'Create your account' }).className).toContain(
+      expect(within(header).getByRole('link', { name: /Create your account/ }).className).toContain(
         'bg-[var(--v2-brand)]',
       )
     })
@@ -118,7 +118,7 @@ describe('header legibility: four cases', () => {
       const brand = within(header).getByRole('link', { name: 'Haven' })
       expect(brand.className).toContain('text-white')
       expect(brand.className).not.toContain('var(--v2-ink)')
-      const cta = within(header).getByRole('link', { name: 'Create your account' })
+      const cta = within(header).getByRole('link', { name: /Create your account/ })
       expect(cta.className).toContain('bg-white')
       expect(cta.className).toContain('text-[#0e1230]')
     })

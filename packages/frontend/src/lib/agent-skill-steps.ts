@@ -10,7 +10,7 @@
  * Each step file is a **byte-slice of the runbook at a `## ` boundary** —
  * never separately written prose — so the step files keep the runbook's
  * existing content guards (chain-assertion, dead-host, one-liner parity)
- * meaningful. `STEP_HEADING` is the exact heading line the slice starts at,
+ * meaningful. `heading` is the exact heading line the slice starts at,
  * used both to locate the slice boundary and to detect drift if a heading is
  * reworded without updating this list.
  *

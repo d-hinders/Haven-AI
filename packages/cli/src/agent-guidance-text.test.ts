@@ -80,9 +80,12 @@ describe('haven guide text (#2525)', () => {
     // ("The sequence") and its "as above" pointed at the hand-off scripts
     // section — both read fine as one document and not as an isolated slice,
     // so the three words are now a parenthetical (account, funding, budget)
-    // and the tail clause is dropped rather than left dangling.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10904)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10817)
+    // and the tail clause is dropped rather than left dangling. Review then
+    // found one more: "Budget changes later"'s "the setup above" points at
+    // nothing once that section stands alone, so it now names "The sequence"
+    // (+10 bytes, 10904 -> 10914).
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10914)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10827)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

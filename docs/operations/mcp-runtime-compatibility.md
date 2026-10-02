@@ -78,10 +78,12 @@ last-verified: "2026-10-02"
 
 > **Re-verified #3596 (2026-10-02, the agent-skills index and step files):**
 > this diff touches `packages/sdk/src/agent-guidance.ts`, a covered file —
-> two wording fixes inside `HAVEN_AGENT_RUNBOOK_MD` (step 1's "(below)" named
-> "What you run" instead of trusting proximity; "If you cannot open a
-> browser"'s "Steps 1-3" got a three-word gloss) so the runbook also reads
-> correctly sliced into standalone step files at `/agent-skills/<step>.md`.
+> three cross-reference fixes inside `HAVEN_AGENT_RUNBOOK_MD` (step 1's
+> "(below)" named "What you run" instead of trusting proximity; "If you cannot
+> open a browser"'s "Steps 1-3" got a three-word gloss and lost a trailing
+> ", as above"; "Budget changes later"'s "the setup above" named "The
+> sequence") so no step file at `/agent-skills/<step>.md` points at another
+> section by position; references by step number remain.
 > No sentence constant, tool, schema, version-skew or consent-hash contract
 > moves — the runtime manifest, connector channel, dist-tag and setup-prompt
 > rule sentences are byte-identical to before. `last-verified` stays

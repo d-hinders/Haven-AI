@@ -28,7 +28,7 @@ covers:
   - packages/frontend/src/lib/agent-skill-index.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-10-02"
+last-verified: "2026-09-26"
 ---
 
 # Haven UX Copy Guidelines
@@ -617,16 +617,16 @@ These guidelines are enforced on frontend copy, not just documented. `npm run li
 - Where the lint and this guide disagree, **this guide wins**. Known divergence: the lint rewrites "session key(s)" to "agent credential(s)", which pulls copy toward the very framing "Separate authentication from payment signing" warns against; the correct replacement is "private signing key" per the mapping table.
 
 Re-verified 2026-10-02 (#3596, the agent-skills index and step files): this
-PR touches `packages/sdk/src/agent-guidance.ts` (two wording fixes inside
-`HAVEN_AGENT_RUNBOOK_MD`, so the runbook reads correctly sliced into standalone
-step files) and adds no new agent-facing prose file under `lib/` — the new
+PR touches `packages/sdk/src/agent-guidance.ts` (three cross-reference fixes
+inside `HAVEN_AGENT_RUNBOOK_MD`, so no standalone step file points at another
+section by position) and adds no new agent-facing prose file under `lib/` — the new
 `packages/frontend/src/lib/agent-skill-steps.ts` and `agent-skill-index.ts`
 hold slug/title/description metadata and JSON-builder code, not rendered
 copy, so neither belongs in `SCAN_FILES`. No wording constraint in this guide
-or `casp-risk-guardrails.md` § Product Copy Rules is affected: both edits are
-cross-reference fixes (one dangling "(below)", one "Steps 1-3" that named
-step numbers defined in a different section once split), not changes to what
-the runbook claims. Nothing else in this document was re-verified.
+or `casp-risk-guardrails.md` § Product Copy Rules is affected: all three are
+cross-reference fixes (a dangling "(below)"; a "Steps 1-3 … as above" that
+leaned on two other sections once split; a "the setup above"), not changes to
+what the runbook claims. Nothing else in this document was re-verified.
 
 Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
 enforcement claims above match the code at this head: `npm run lint:copy` /

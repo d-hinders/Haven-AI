@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Regenerate `packages/cli/src/agent-guidance-text.ts` from the canonical
- * runbook in `packages/sdk/src/agent-guidance.ts` (#2523, #2525).
+ * Regenerate `packages/cli/src/agent-guidance-text.ts` — and, since #3596, the
+ * nine step files under `packages/frontend/public/agent-skills/` — from the
+ * canonical runbook in `packages/sdk/src/agent-guidance.ts` (#2523, #2525).
  *
  * Why a generated copy rather than an import (owner decision, 2026-09-04):
  * `@haven_ai/cli` has ZERO runtime dependencies, and `@haven_ai/sdk` pulls
@@ -24,7 +25,7 @@
  * red -- `cli_checks` was skipped, so the stale copy was carried until an
  * unrelated backend PR (#2719) regenerated it.
  *
- * `--check` verifies the FULL-TEXT copies below against this one reader and
+ * `--check` verifies the FULL-TEXT copies and the step-file slices below against this one reader and
  * exits non-zero on drift; `sdk_checks` runs it via
  * `npm run lint:runbook-parity`. Since #2727 `cli_checks` and
  * `frontend_checks` run it too; `sdk_checks` is the one that runs on a change

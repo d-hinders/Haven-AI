@@ -533,7 +533,7 @@ export const EXEMPT_PACKAGE_DOCS = {
       'Agent-readable public artifact, served verbatim at /agent-skills/' +
         slug +
         '.md and listed in /.well-known/agent-skills/index.json (#3596). Same reasoning as the ' +
-        'for-agents.md entry below, one level finer: it is a byte-SLICE of the canonical ' +
+        'for-agents.md entry above, one level finer: it is a byte-SLICE of the canonical ' +
         '`HAVEN_AGENT_RUNBOOK_MD` at a `## ` boundary plus one generated "Next" link, pinned by ' +
         '`agent-skill-steps.test.ts` and by `lint:runbook-parity` (`GENERATED_COPIES` in ' +
         'sync-agent-guidance.mjs), not hand-maintained.',

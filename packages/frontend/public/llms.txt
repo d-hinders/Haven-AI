@@ -36,7 +36,7 @@ Haven connects agents through MCP (hosted, keyless) plus a local signer. Payment
 ## Machine-readable
 
 - [Capability manifest](/.well-known/haven.json): the same environment as JSON — where to sign up, which steps only a human can do, the API and its spec, the connector package this deployment hands out, the chains it serves. Generated, never hand-edited.
-- [Agent-skills index](/.well-known/agent-skills/index.json): this runbook, split into small linked step files, one skill per step — plus the manifest, the OpenAPI spec and the hosted MCP URL in one list.
+- [Agent-skills index](/.well-known/agent-skills/index.json): the onboarding runbook (/for-agents.md), split into small linked step files, one skill per step — plus pointers to the manifest, the OpenAPI spec and the hosted MCP URL.
 
 ## Optional
 

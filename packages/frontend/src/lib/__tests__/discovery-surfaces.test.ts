@@ -131,7 +131,14 @@ describe('robots.txt', () => {
 
   it('names the agent-readable artifacts, so they need no guessing', () => {
     const robots = buildRobotsTxt(ORIGIN)
-    for (const artifact of ['/llms.txt', '/llms-full.txt', '/402.md', '/api/openapi.json']) {
+    for (const artifact of [
+      '/llms.txt',
+      '/llms-full.txt',
+      '/402.md',
+      '/api/openapi.json',
+      '/.well-known/agent-skills/index.json',
+      '/agent-skills/',
+    ]) {
       expect(robots).toContain(artifact)
     }
   })

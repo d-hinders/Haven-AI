@@ -177,7 +177,7 @@ describe('/for-agents.md (#2523)', () => {
     // manifest's own `packages.cli.one_liner`, run as given — so the change
     // needed no raise, and the headroom grew instead.
     //
-    // 10900 -> 11000 for #3596 (the page is 10904 bytes at this commit). The
+    // 10900 -> 11000 for #3596 (the page is 10914 bytes at this commit). The
     // runbook is now also served as linked step files at
     // `/agent-skills/<step>.md`, byte-sliced at `## ` boundaries, so a
     // cross-reference that only made sense beside its neighbour had to be
@@ -185,7 +185,9 @@ describe('/for-agents.md (#2523)', () => {
     // trusting proximity, and "If you cannot open a browser"'s "Steps 1-3"
     // got its own three-word gloss (account, funding, budget) rather than
     // depending on a reader who had just read "## The sequence". Net +34
-    // bytes; the dropped ", as above" trailing clause paid most of it back.
+    // bytes; the dropped ", as above" trailing clause paid 10 bytes of it back.
+    // Review added "Budget changes later"'s "setup above" -> "setup in The
+    // sequence" (+10 bytes).
     expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11000)
   })
 

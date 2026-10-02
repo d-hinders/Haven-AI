@@ -89,7 +89,7 @@ export function Footer() {
         </div>
 
         <div className="mt-10 flex flex-wrap justify-between gap-2.5 border-t border-[var(--v2-border)] pt-5 text-[12.5px]">
-          <span>© {new Date().getFullYear()} Haven</span>
+          <span>© {new Date().getFullYear()} Haven Labs</span>
           <span>Non-custodial smart-account software. Haven never holds funds or keys.</span>
         </div>
       </div>

@@ -55,6 +55,7 @@ Reproduced from the epic. The build follows the right-hand column.
 | `npx @haven_ai/connect` in the home page terminal; snippets without `--api` | Commands in their published, working forms (slices 2, 4, 5) |
 | "Haven relays sign_hash 0x8b2f…" in the protocols flow | The agent signs the typed data; no bare hash is shown (slice 4) |
 | `EXAMPLE-SETUP-TOKEN` on For agents | The runbook's `EXAMPLE-SETUP-TOKEN-NOT-REAL` (slice 5) |
+| "© 2026 Haven" in every page's footer | "© {year} Haven Labs" (decision 16, #3586) |
 
 The epic's owner decisions (navigation, protocols, MPP status, fonts, rollout)
 are on #3572 and are not restated here. How the build implements the design —

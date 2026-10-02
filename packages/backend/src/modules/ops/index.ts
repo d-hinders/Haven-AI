@@ -41,6 +41,23 @@ export {
 } from './search.js'
 export { buildOpsUserDetail, type OpsUserDetail } from './users.js'
 export {
+  buildOpsHealth,
+  collectStuckLanesForChain,
+  OPS_HEALTH_LIST_LIMIT,
+  PAST_HORIZON_SECONDS,
+  type OpsDelegateBalanceReport,
+  type OpsDelegateBalances,
+  type OpsEvidenceOrphan,
+  type OpsHealth,
+  type OpsHealthDeps,
+  type OpsSweepableIntent,
+  type OpsStuckLane,
+  type OpsStuckReanchor,
+  type OpsStuckRevocation,
+  type ServedChains,
+  type SweepableWindow,
+} from './health.js'
+export {
   buildOpsOnchainView,
   onchainCacheKey,
   OPS_ONCHAIN_CACHE_TTL_MS,

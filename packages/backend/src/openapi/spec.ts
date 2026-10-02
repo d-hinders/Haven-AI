@@ -1893,6 +1893,28 @@ export const openapiSpec = {
         },
       },
     },
+    '/ops/health': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsSystemHealth',
+        summary: 'List the operational problems: sweepable intents, stuck revocations, stuck lanes, delegate balances.',
+        description:
+          'The ops console\u2019s system-health read (#3514). ERC-7710 payment intents the settlement sweeper works on (in its retry window, and past its horizon \u2014 the payments actually lost without an operator, 24 h to 30 days), confirmed payments whose evidence row never landed (#2213), revocations and re-anchors unreconciled past 1 h, broadcast outbound transactions unmined past the bump worker\u2019s stale threshold per served chain, the delegate balance monitor\u2019s last report, and the same payload GET /health/ops serves (built by the same function). ' +
+          'READ-ONLY about the operational world: no RPC call on request, no claim, no receipt read \u2014 a listed lane MAY already be mined. Delegate balances are the monitor\u2019s in-memory last report, never a scan on request; a replica without the monitor leader lock answers not_available_on_this_replica. ' +
+          'Atomic amounts are decimal strings. Every list is capped at 50. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. ' +
+          'Returns 404 while the deployment has no read-only ops database or no diagnostics builder configured.',
+        security: [{ OpsJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The operational problems, and the backend\u2019s own diagnostics.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsSystemHealth' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console (its read-only database or its diagnostics builder) is not configured.' },
+          '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
+        },
+      },
+    },
     '/ops/reveal': {
       post: {
         tags: ['Ops'],
@@ -9482,6 +9504,172 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * `GET /ops/health` (#3514): explicit positive projections only. The
+       * raw `SweepableSettlementRow` carries `machine_metadata` and
+       * `delegation_hash`; the ops projection names nothing like them — the
+       * ops-data forbidden-key walk (`password_hash|_token$|_hash$|…`,
+       * #3512) covers this payload too.
+       */
+      OpsSystemHealth: {
+        type: 'object',
+        required: [
+          'sweepable_intents',
+          'evidence_orphans',
+          'stuck_revocations',
+          'stuck_reanchors',
+          'stuck_lanes',
+          'delegate_balances',
+          'ops_diagnostics',
+          'generated_at',
+        ],
+        properties: {
+          sweepable_intents: {
+            type: 'array',
+            description:
+              'ERC-7710 payment intents the settlement sweeper works on, oldest first, at most 50. ' +
+              'in_window: still inside the recovery window it retries. past_horizon: past 24 h up to 30 days — the sweeper no longer retries these, the payments actually lost without an operator.',
+            items: {
+              type: 'object',
+              required: ['id', 'agent_id', 'chain_id', 'token_symbol', 'amount_human', 'status', 'window', 'age_seconds'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                agent_id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                token_symbol: { type: 'string' },
+                amount_human: { type: 'string' },
+                status: { type: 'string' },
+                window: { type: 'string', enum: ['in_window', 'past_horizon'] },
+                age_seconds: { type: 'integer', minimum: 0 },
+              },
+              additionalProperties: false,
+            },
+          },
+          evidence_orphans: {
+            type: 'array',
+            description:
+              'Confirmed ERC-7710 payments no machine_payment_evidence row references (#2213): settled on-chain, booked nowhere, outside every automated retry path.',
+            items: {
+              type: 'object',
+              required: ['id', 'agent_id', 'chain_id', 'token_symbol', 'amount_human', 'status', 'age_seconds'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                agent_id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                token_symbol: { type: 'string' },
+                amount_human: { type: 'string' },
+                status: { type: 'string' },
+                age_seconds: { type: 'integer', minimum: 0 },
+              },
+              additionalProperties: false,
+            },
+          },
+          stuck_revocations: {
+            type: 'array',
+            description:
+              "Revocations unreconciled past 1 h (#973): Haven's DB says the agent is revoked, the live attestation does not. A merchant reading only the chain still sees the agent as valid.",
+            items: {
+              type: 'object',
+              required: ['agent_id', 'revocation_requested_at', 'revocation_attempts', 'age_seconds'],
+              properties: {
+                agent_id: { type: 'string', format: 'uuid' },
+                revocation_requested_at: { type: ['string', 'null'], format: 'date-time' },
+                revocation_attempts: { type: 'integer' },
+                age_seconds: { type: 'integer', minimum: 0 },
+              },
+              additionalProperties: false,
+            },
+          },
+          stuck_reanchors: {
+            type: 'array',
+            description: 'Re-anchors unreconciled past 1 h (#1699): the live attestation names the retired key.',
+            items: {
+              type: 'object',
+              required: ['agent_id', 'agent_eoa', 'delegate_address', 'revocation_attempts'],
+              properties: {
+                agent_id: { type: 'string', format: 'uuid' },
+                agent_eoa: { type: ['string', 'null'] },
+                delegate_address: { type: ['string', 'null'] },
+                revocation_attempts: { type: 'integer' },
+              },
+              additionalProperties: false,
+            },
+          },
+          stuck_lanes: {
+            type: 'array',
+            description:
+              "Broadcast outbound transactions unmined past the bump worker's stale threshold, per served chain. No receipt is read on this path: a row listed here MAY ALREADY BE MINED — the worker's chain-first tick closes those. id is the unmasked outbound_txs id the operator pastes into ops:cancel-stuck-lane; it links to no user. capped_needs_operator: a rebroadcast-safe submitter's lane at the bump cap — the worker has stopped for good and the lane is the operator's.",
+            items: {
+              type: 'object',
+              required: ['id', 'chain_id', 'submitter', 'nonce', 'age_seconds', 'reason'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                chain_id: { type: 'integer' },
+                submitter: { type: 'string' },
+                nonce: { type: 'string' },
+                age_seconds: { type: 'integer', minimum: 0 },
+                reason: { type: 'string', enum: ['stale_unmined', 'capped_needs_operator'] },
+              },
+              additionalProperties: false,
+            },
+          },
+          delegate_balances: {
+            oneOf: [
+              {
+                type: 'object',
+                description: "The delegate balance monitor's last scan — kept in memory, never a scan on request.",
+                required: ['available', 'scanned_at', 'report'],
+                properties: {
+                  available: { type: 'boolean', enum: [true] },
+                  scanned_at: isoDateTime,
+                  report: {
+                    type: 'object',
+                    required: ['scanned_delegates', 'unread', 'lingering', 'dust_total_atomic', 'dust_alert', 'chain_errors'],
+                    properties: {
+                      scanned_delegates: { type: 'integer', minimum: 0 },
+                      unread: { type: 'integer', minimum: 0 },
+                      lingering: {
+                        type: 'array',
+                        description: 'Balances at/above the sweep floor with no fresh pending payment — sweepable money on a hot EOA.',
+                        items: {
+                          type: 'object',
+                          required: ['agent_id', 'agent_name', 'delegate_address', 'chain_id', 'balance_atomic'],
+                          properties: {
+                            agent_id: { type: 'string', format: 'uuid' },
+                            agent_name: { type: 'string' },
+                            delegate_address: { type: 'string' },
+                            chain_id: { type: 'integer' },
+                            balance_atomic: { type: 'string' },
+                          },
+                          additionalProperties: false,
+                        },
+                      },
+                      dust_total_atomic: { type: 'string' },
+                      dust_alert: { type: 'boolean' },
+                      chain_errors: { type: 'object', additionalProperties: { type: 'string' } },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                description: 'This replica does not hold the monitor leader lock, so it has no last report. There is never a scan on request.',
+                required: ['available', 'reason'],
+                properties: {
+                  available: { type: 'boolean', enum: [false] },
+                  reason: { type: 'string', enum: ['not_available_on_this_replica'] },
+                },
+                additionalProperties: false,
+              },
+            ],
+          },
+          ops_diagnostics: { $ref: '#/components/schemas/HealthOpsResponse' },
+          generated_at: isoDateTime,
         },
         additionalProperties: false,
       },

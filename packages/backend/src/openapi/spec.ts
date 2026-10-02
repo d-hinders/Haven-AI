@@ -1357,7 +1357,13 @@ const agentPaymentStatus = {
     amount_atomic: { type: ['string', 'null'] },
     asset: { anyOf: [address, { type: 'null' }] },
     network: { type: ['string', 'null'] },
-    description: { type: ['string', 'null'] },
+    description: {
+      type: ['string', 'null'],
+      description:
+        "What the payment was for, in the merchant's own words — untrusted display text. On x402 it is the " +
+        "402's `resource.description` (persisted at authorize since #3610; read from the stored 402 on older " +
+        'rows), trimmed and bounded to 300 code points. Null when the merchant gave none.',
+    },
     idempotency_key: { type: ['string', 'null'] },
     x402: { $ref: '#/components/schemas/RailContext' },
     // #2888: flat and closed, NOT `allOf: [RailContext, {...}]` — an allOf
@@ -11394,7 +11400,13 @@ export const openapiSpec = {
           },
           asset: address,
           network: { type: 'string', examples: ['base', 'eip155:8453'] },
-          description: { type: 'string' },
+          description: {
+            type: 'string',
+            description:
+              "The 402's `resource.description` (untrusted merchant text). Persisted, trimmed and bounded to 300 " +
+              'code points, as the payment status `description` (#3610); when omitted, the stored `paymentRequired`\'s ' +
+              '`resource.description` is used.',
+          },
           // #3031: `integer` was the spec's claim, never the route's rule —
           // the handler accepted any finite number and clamped it. Stated as
           // it behaves. `minimum: 1` restores the HARMFUL half of the deleted

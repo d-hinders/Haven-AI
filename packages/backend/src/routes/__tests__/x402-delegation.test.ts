@@ -919,6 +919,58 @@ describe('x402 delegation-rail settlement (#830)', () => {
     }))
   })
 
+  it('#3610: persists the merchant description into machine_metadata on BOTH branches, from the body or the stored 402', async () => {
+    // The 402 shape a plain-HTTP merchant sent in the #3610 report (x402 v2
+    // `resource` with url / description / mimeType). Its description must be
+    // what status later reports; before #3610 it was dropped at authorize.
+    const paymentRequired = {
+      x402Version: 2,
+      resource: {
+        url: 'https://merchant.example/api/fact',
+        description: 'Get a random fun fact',
+        mimeType: 'application/json',
+      },
+      accepts: [{ scheme: 'exact', network: 'base', amount: '100000', asset: USDC, payTo: MERCHANT }],
+    }
+    const budgetRow = {
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    }
+    const authorize = async (payload: Record<string, unknown>) => {
+      mockCreateIntent.mockClear()
+      mockSelect.mockResolvedValue(budgetRow)
+      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(payload),
+      })
+      expect(res.statusCode).toBe(201)
+      return (mockCreateIntent.mock.calls.at(-1)?.[0] as { metadata: Record<string, unknown> }).metadata
+    }
+    // payTo = the delegate EOA selects the eip3009 funding leg (#946); a
+    // merchant payTo selects erc7710. Each assertion pins which leg it hit.
+    const funding = { payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }
+
+    // eip3009 leg, description in the body (what the SDK's funding leg sends).
+    const fundingMeta = await authorize({ ...funding, description: '  Get a random fun fact  ' })
+    expect(fundingMeta.settlement_scheme).toBe('eip3009')
+    expect(fundingMeta.description).toBe('Get a random fun fact')
+    // erc7710 leg, no body description: read from the stored 402.
+    const childMeta = await authorize({
+      settlementScheme: 'erc7710',
+      facilitatorAddresses: ['0x' + 'fa'.repeat(20)],
+      paymentRequired,
+    })
+    expect(childMeta.settlement_scheme).toBe('erc7710')
+    expect(childMeta.description).toBe('Get a random fun fact')
+    // Neither source, on either leg: null, never invented.
+    expect((await authorize({})).description).toBeNull()
+    expect((await authorize(funding)).description).toBeNull()
+  })
+
   // #3117: settle echoes the stored challenge's own matching offer, so a
   // caller whose decomposed fields disagree with the challenge it sent has
   // nothing to echo. That must be a 400 HERE, not a 409 at settle — by then

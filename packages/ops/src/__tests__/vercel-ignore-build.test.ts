@@ -21,8 +21,9 @@ let repo: string
  * The environment every git and sh spawn gets: no inherited `GIT_*` (a git
  * hook exports GIT_DIR / GIT_INDEX_FILE, which would point these commands at
  * the HOST repository), no global or system git config, and no VERCEL_* or
- * OPS_* variable unless a test sets one. Same filter as
- * scripts/ci/money-path-classify.test.mjs.
+ * OPS_* variable unless a test sets one. The GIT_* filter is the one
+ * scripts/ci/money-path-classify.test.mjs uses; the config isolation and the
+ * VERCEL_/OPS_ filter are added here.
  */
 function hermeticEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }

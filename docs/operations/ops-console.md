@@ -135,9 +135,10 @@ not live, use Deployments → Create Deployment with the fix's commit on
 **Rebuilding an unchanged commit.** Changing `NEXT_PUBLIC_OPS_ENVIRONMENTS`
 (step 3, or adding `prod` below) needs a rebuild, because Next inlines it at
 build time, but nothing in git changed, so the ignore step skips. Set the
-project environment variable `OPS_FORCE_BUILD` to `1`, redeploy the latest
-`dev` deployment, then delete `OPS_FORCE_BUILD`; left in place it makes
-every push build. Two consequences to verify once, in the dashboards:
+project environment variable `OPS_FORCE_BUILD` to `1` in the **Production**
+scope only, redeploy the latest `dev` deployment, then delete
+`OPS_FORCE_BUILD`; left in place it makes every production push build (and
+in the Preview scope, every preview). Two consequences to verify once, in the dashboards:
 
 - The **frontend** project must still rebuild on `packages/ui` changes —
   it consumes the shared UI package, and the ops project's ignore step does
@@ -188,6 +189,10 @@ Then set on the **ops app in Vercel**, per environment:
 | Production | `{"dev":"https://havenbackend-dev-8b95.up.railway.app"}` — the dev backend. |
 | Preview | The same dev entry, never a `prod` key. |
 
+A change to this value on an existing project takes effect only after a
+rebuild of the console, which the ignore step skips for an unchanged commit:
+see *Rebuilding an unchanged commit* in step 1.
+
 Redeploy the backend after setting the six. It refuses to boot on a
 malformed origin, allowlist entry or short secret rather than degrading —
 fix the value, do not work around the parser.
@@ -233,7 +238,8 @@ second branch:
 2. Add a `prod` entry to the Production scope's
    `NEXT_PUBLIC_OPS_ENVIRONMENTS`: `{"dev":"https://…","prod":"https://…"}`.
    The switcher gains the key, the red banner arms on it, and the console
-   opens on `prod` by default when it is present.
+   opens on `prod` by default when it is present. Then rebuild the console:
+   see *Rebuilding an unchanged commit* in step 1.
 3. Run the read-only role script (step 4) on the prod database.
 4. A founder completes the epic's product-verification walk on the deployed
    URL — sign in, switch environments, open a customer, run one search —

@@ -10,13 +10,35 @@
 # later dev commit was "unrelated" (#3591).
 #
 # It skips ONLY when the previous deployment's commit is in the clone and
-# nothing the console is built from changed since. Anything uncertain builds:
-# a missing variable, a commit the shallow clone lacks, a git error. A wasted
-# build costs one deployment; a wrong skip leaves a stale console.
+# nothing the console is built from changed since. For production, anything
+# uncertain builds: a missing variable, a commit the shallow clone lacks, a
+# git error. A wasted build costs one deployment; a wrong skip leaves a stale
+# console.
+#
+# One exception keeps the daily deployment cap intact: a PREVIEW branch with
+# no earlier deployment (its first push) falls back to the newest commit's own
+# diff, so a frontend-only PR does not build an ops preview. Previews are
+# disposable; a stale production console is the failure this script exists
+# to prevent. An unset VERCEL_ENV counts as production.
+
+# `:(top)` pathspecs: Vercel runs this from the Root Directory (packages/ops),
+# where a relative pathspec would match nothing and always skip.
+console_unchanged() {
+  git diff --quiet "$1" HEAD -- \
+    ':(top)packages/ops' ':(top)packages/ui' ':(top)packages/core' ':(top)scripts/docs'
+}
 
 prev="${VERCEL_GIT_PREVIOUS_SHA:-}"
 
 if [ -z "$prev" ]; then
+  if [ "${VERCEL_ENV:-}" = "preview" ] && git rev-parse -q --verify HEAD^ >/dev/null 2>&1; then
+    if console_unchanged HEAD^; then
+      echo "ops ignore-build: first preview of this branch and its newest commit does not touch the console; skipping."
+      exit 0
+    fi
+    echo "ops ignore-build: first preview of this branch and its newest commit touches the console (or the diff failed); building."
+    exit 1
+  fi
   echo "ops ignore-build: no previous deployment recorded; building."
   exit 1
 fi
@@ -28,8 +50,7 @@ if ! git cat-file -e "${prev}^{commit}" 2>/dev/null; then
   exit 1
 fi
 
-if git diff --quiet "$prev" HEAD -- \
-  ':(top)packages/ops' ':(top)packages/ui' ':(top)packages/core' ':(top)scripts/docs'; then
+if console_unchanged "$prev"; then
   echo "ops ignore-build: nothing the console builds from changed since ${prev}; skipping."
   exit 0
 fi

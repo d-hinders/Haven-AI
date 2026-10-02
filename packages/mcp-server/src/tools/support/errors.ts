@@ -233,6 +233,19 @@ const ONCHAIN_EXECUTION_FAILED_ERROR_CODE = 'onchain_execution_failed'
 const ONCHAIN_EXECUTION_FAILED_OMITTED_REASON =
   'this payment_id already failed on-chain and cannot be retried; tell the user what the message says, and create a new payment if they still want to pay'
 
+/**
+ * #3609: the backend's `error_code` when a delegation-rail PREPARE simulation
+ * REVERTED (`POST /payments`, the x402 EIP-3009 funding leg) — a caveat
+ * enforcer or any other on-chain revert. Deterministic: the same payment
+ * reverts again on every retry, so this is stop-and-tell, never the generic
+ * 5xx "retry once" below. Its sibling `prepare_failed` (not a revert — a
+ * bundler, RPC or transport failure) deliberately has NO branch here: it is
+ * the transient case the generic 5xx step was written for.
+ */
+const PREPARE_REVERTED_ERROR_CODE = 'prepare_reverted'
+const PREPARE_REVERTED_OMITTED_REASON =
+  'the payment reverted during on-chain simulation (see revert_reason); nothing was signed or moved and retrying the same payment reverts again — tell the user the reason; a budget, recipient or expiry caveat is changed by the wallet owner in Haven'
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -448,6 +461,28 @@ export function normalizeError(err: unknown): ToolFailure {
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === PREPARE_REVERTED_ERROR_CODE
+  ) {
+    const body = err.body as { revert_reason?: string | null; refusal_reason?: string }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: PREPARE_REVERTED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'PREPARE_REVERTED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      ...(body.revert_reason !== undefined ? { revert_reason: body.revert_reason } : {}),
+      ...(body.refusal_reason !== undefined ? { refusal_reason: body.refusal_reason } : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

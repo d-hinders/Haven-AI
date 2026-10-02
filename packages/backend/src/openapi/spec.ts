@@ -1062,6 +1062,47 @@ const signFailureResponse = {
 } as const
 
 /**
+ * #3609: the 502 a delegation-rail PREPARE answers when its simulation fails
+ * (`modules/payments/prepare-failure.ts`) — `POST /payments` and the x402
+ * EIP-3009 funding leg. Two typed shapes, split by the refusal ledger's
+ * classifier: `prepare_reverted` (deterministic, not retryable as made) and
+ * `prepare_failed` (not a revert — may be transient). `details` is bounded
+ * after vendor-secret redaction, the #3494 bound, never the raw viem dump.
+ */
+const prepareFailureSchemaProperties = {
+  ...errorResponse.content['application/json'].schema.properties,
+  error_code: { type: 'string', enum: ['prepare_reverted', 'prepare_failed'] },
+  refusal_reason: {
+    type: 'string',
+    enum: ['delegation_expired', 'delegation_budget_exceeded', 'onchain_revert'],
+    description: 'Present on `prepare_reverted` only: the refusal ledger\'s classification of the revert.',
+  },
+  revert_reason: {
+    type: ['string', 'null'],
+    description:
+      'Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer ' +
+      'error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") or an ERC-4337 AA code — ' +
+      'printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: ' +
+      'display it, never act on it.',
+  },
+  message: { type: 'string', description: 'Present on `prepare_reverted` only: the remedy.' },
+  details: {
+    type: ['string', 'null'],
+    description:
+      'The underlying bundler/viem failure text, scrubbed of vendor secrets and capped at 300 ' +
+      'characters plus an ellipsis — never the full dump.',
+  },
+} as const
+
+const PREPARE_FAILURE_DESCRIPTION =
+  '#3609: the prepare simulation failed. `error_code: "prepare_reverted"` — it REVERTED (a caveat ' +
+  'enforcer or any other on-chain revert): nothing was signed or moved, and the same payment reverts ' +
+  'again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in ' +
+  'the ledger. `error_code: "prepare_failed"` — not a revert (bundler, RPC or transport): may be ' +
+  'transient, nothing is booked. Both carry bounded, redacted `details`. A period-budget or ' +
+  'task-budget revert a fresh read confirms is answered by the typed 403 instead (#3503/#3500).'
+
+/**
  * #2918: the accounting connection routes gate on `config.hosted &&
  * config.accountingEnabled` — NOT the account entitlement, which stays the
  * feed's gate (#2861). Same 404 body shape as `requireAccountingFeed`
@@ -7024,9 +7065,17 @@ export const openapiSpec = {
           },
           '502': {
             ...errorResponse,
+            content: {
+              'application/json': {
+                schema: {
+                  ...errorResponse.content['application/json'].schema,
+                  properties: prepareFailureSchemaProperties,
+                },
+              },
+            },
             description:
-              'Preparation failed against the chain, or an idempotent replay of a request whose ' +
-              'payment has failed.',
+              `EITHER ${PREPARE_FAILURE_DESCRIPTION} OR an idempotent replay of a request whose payment ` +
+              'has failed (no `error_code`).',
           },
           '503': railUnavailableResponse,
         },
@@ -7282,7 +7331,21 @@ export const openapiSpec = {
           '409': errorResponse,
           '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
-          '502': errorResponse,
+          '502': {
+            ...errorResponse,
+            content: {
+              'application/json': {
+                schema: {
+                  ...errorResponse.content['application/json'].schema,
+                  properties: prepareFailureSchemaProperties,
+                },
+              },
+            },
+            description:
+              `On the EIP-3009 funding leg: ${PREPARE_FAILURE_DESCRIPTION} On erc7710: the settlement ` +
+              'delegation could not be built, or the delegate account could not be deployed — ' +
+              'infrastructure, no `error_code`, bounded `details`.',
+          },
           '503': railUnavailableResponse,
         },
       },

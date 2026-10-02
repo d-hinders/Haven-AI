@@ -193,6 +193,30 @@ export function isAccountValidationFailedRevert(err: unknown): boolean {
   return ACCOUNT_VALIDATION_FAILED_REVERT_PATTERN.test(flattenErrorText(err))
 }
 
+/** #3609: the longest revert reason a response carries (it is chain text, untrusted). */
+export const REVERT_REASON_MAX_LENGTH = 120
+
+/**
+ * #3609: the short, readable reason a simulation revert names — the first
+ * decoded ABI `Error(string)` (the shape a bundler relays, #3503), else a
+ * plain-text enforcer custom error or ERC-4337 `AA2x` code — or `null` when
+ * the error names none. Printable ASCII only, bounded: it is chain-supplied
+ * text riding a response, never trusted.
+ */
+export function revertReasonOf(err: unknown): string | null {
+  const text = flattenRaw(err, 0)
+  const candidates = [
+    ...decodeErrorStrings(text),
+    ...(text.match(/[A-Z][A-Za-z0-9]*Enforcer:[a-z0-9-]+/) ?? []),
+    ...(text.match(/\bAA[0-9]{2}\b[^\n"]{0,60}/) ?? []),
+  ]
+  for (const raw of candidates) {
+    const clean = raw.replace(/[^\x20-\x7e]/g, '').trim()
+    if (clean) return clean.length > REVERT_REASON_MAX_LENGTH ? `${clean.slice(0, REVERT_REASON_MAX_LENGTH)}…` : clean
+  }
+  return null
+}
+
 /**
  * Flatten an error and its `cause` chain into one searchable string. Caveat
  * reverts arrive wrapped: viem's `EstimateGasExecutionError` carries the

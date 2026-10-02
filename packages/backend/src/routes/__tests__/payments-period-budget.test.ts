@@ -295,9 +295,46 @@ describe('POST /payments: the period budget cannot cover the payment (#3503)', (
     prepareRedemption.mockRejectedValue(PERIOD_REVERT)
     const res = await pay()
     expect(res.statusCode).toBe(502)
-    expect(res.json().error_code).toBeUndefined()
+    // Not the typed budget 403 — the #3609 revert answer, named by the classifier.
+    expect(res.json()).toMatchObject({ error_code: 'prepare_reverted', refusal_reason: 'delegation_budget_exceeded' })
     await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
     expect(refusalRows()[0]![1]).toContain('delegation_budget_exceeded')
+  })
+
+  // #3609: what the prepare catch answers once the typed budget fallbacks
+  // have passed — typed, and never the raw dump.
+  it('#3609: an unconfirmed period revert carrying the live ~6 KB dump answers a bounded prepare_reverted', async () => {
+    mockReadRemaining.mockResolvedValue({ remainingAtomic: '10000', fromChain: true })
+    prepareRedemption.mockRejectedValue(
+      new Error(
+        `${PERIOD_REVERT.message}.\n\nRequest Arguments:\n  callData: 0x5c1c6dcd${'ab'.repeat(2800)}\n  paymasterData: 0x01${'cd'.repeat(80)}`,
+      ),
+    )
+    const res = await pay()
+    expect(res.statusCode).toBe(502)
+    expect(res.json()).toMatchObject({
+      error_code: 'prepare_reverted',
+      refusal_reason: 'delegation_budget_exceeded',
+      revert_reason: 'ERC20PeriodTransferEnforcer:transfer-amount-exceeded',
+    })
+    expect(res.json().details.length).toBeLessThanOrEqual(301)
+    expect(res.body.length).toBeLessThan(1500)
+    expect(res.body).not.toContain('paymasterData')
+    await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
+  })
+
+  it('#3609: a failure that is not a revert answers prepare_failed and books nothing', async () => {
+    mockReadRemaining.mockResolvedValue({ remainingAtomic: '10000', fromChain: true })
+    prepareRedemption.mockRejectedValue(new Error('fetch failed: bundler unreachable (ETIMEDOUT)'))
+    const res = await pay()
+    expect(res.statusCode).toBe(502)
+    expect(res.json()).toEqual({
+      error: 'Delegation-rail authorization failed (bundler or RPC)',
+      error_code: 'prepare_failed',
+      details: 'fetch failed: bundler unreachable (ETIMEDOUT)',
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(refusalRows()).toHaveLength(0)
   })
 
   it('no grant for (token, to): no budget read, the existing no-delegation refusal', async () => {

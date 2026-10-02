@@ -413,7 +413,8 @@ describe('POST /payments: a task budget whose cap cannot cover the payment (#350
     prepareRedemption.mockRejectedValue(new Error('UserOperation reverted during simulation with reason: ERC20TransferAmountEnforcer:allowance-exceeded'))
     const res = await pay()
     expect(res.statusCode).toBe(502)
-    expect(res.json().error_code).toBeUndefined()
+    // Not the typed budget 403 — the #3609 revert answer, named by the classifier.
+    expect(res.json()).toMatchObject({ error_code: 'prepare_reverted', refusal_reason: 'delegation_budget_exceeded' })
     await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
     expect(refusalRows()[0]![1]).toContain('delegation_budget_exceeded')
   })

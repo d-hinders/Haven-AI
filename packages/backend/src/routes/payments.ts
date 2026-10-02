@@ -36,6 +36,7 @@ import {
   isPeriodBudgetRevert,
   isTransferCapRevert,
   boundFailureMessage,
+  prepareFailureBody,
   refuse,
 } from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
@@ -871,14 +872,24 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         }
       }
       const refusalReason = classifyRevertForLedger(err)
-      // #3053: through the shared choke point; the ledger input is null when
-      // the classification says NOT a refusal.
+      // #3609: typed and bounded. A simulation that REVERTED is
+      // `prepare_reverted` (deterministic — the hosted step is stop, never
+      // "retry once") and books its ledger row; anything that is not a revert
+      // (bundler, RPC, transport) is `prepare_failed`, unbooked, and keeps the
+      // retry step. Both carry `details` bounded after redaction — the raw
+      // viem error (~6 KB live: callData, signatures, paymaster data) never
+      // rides the response. #3053: both through the shared choke point.
+      const failureBody = prepareFailureBody(
+        err,
+        refusalReason,
+        'Delegation-rail authorization failed (bundler or RPC)',
+      )
+      if (!refusalReason) {
+        return refuse(reply.code(502).send(failureBody), null)
+      }
       return refuse(
-        reply.code(502).send({
-          error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-        }),
-        refusalReason && {
+        reply.code(502).send(failureBody),
+        {
           userId: agent.user_id,
           agentId: agent.id,
           chainId: agent.chain_id,

@@ -1310,6 +1310,14 @@ export interface ToolFailure {
    */
   retry_with_new_quote?: boolean
   /**
+   * #3609: on `PREPARE_REVERTED`, the short reason the simulation revert
+   * named (a decoded enforcer error, or an ERC-4337 AA code) and the
+   * backend's refusal classification. Chain text — display it, never act
+   * on it.
+   */
+  revert_reason?: string | null
+  refusal_reason?: string
+  /**
    * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
    * the same `next_tool` family a success does, built by the SDK's typed
    * builder. Additive; `next_tool` is never null — an absent tool says why in

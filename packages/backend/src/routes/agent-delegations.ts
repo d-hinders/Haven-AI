@@ -67,6 +67,7 @@ import {
 } from '../infra/repositories/delegation-budgets.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
 import { getMerchantBySlug, listMerchantFundingTargets } from '../infra/repositories/merchants.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
 // copy of the authority rules, reached two ways.
 import {
@@ -650,7 +651,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         }
         return reply.code(502).send({
           error: 'Could not deploy the account for this budget — try again',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+          // #3609: bounded after redaction — never the raw viem error.
+        details: boundedErrorDetails(err),
         })
       }
 

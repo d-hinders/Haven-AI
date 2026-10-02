@@ -12,7 +12,6 @@ import { randomUUID } from 'node:crypto'
 import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } from '../../infra/chain/x402-binding-signer.js'
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
-import { redactVendorSecrets } from '../../rails/execution-rail.js'
 import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../../rails/delegation-rail.js'
 import { selectDelegation, selectDelegationByHash, prepareDelegationPayment } from '../../rails/delegation-authorization.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../../rails/hybrid-provisioning.js'
@@ -36,6 +35,7 @@ import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
 import { classifyRevertForLedger, isTransferCapRevert } from '../payments/refusal-ledger.js'
 import { refuse } from '../payments/refuse.js'
+import { boundedErrorDetails, prepareFailureBody } from '../payments/prepare-failure.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
@@ -587,15 +587,21 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // NOT `payTo` in merchantTo — on this leg payTo is the agent's own
       // funding EOA; the real merchant is the separate field, exactly as the
       // #2706 pre-check writer above books it.
+      // #3609: typed and bounded, exactly as POST /payments answers it
+      // (`prepare-failure.ts`): `prepare_reverted` for a simulation revert
+      // (booked, hosted step stop), `prepare_failed` for anything else
+      // (unbooked, hosted step retry once).
+      const fundingFailureBody = prepareFailureBody(
+        err,
+        fundingRefusalReason,
+        'Delegation-rail funding authorization failed (bundler or RPC)',
+      )
+      if (!fundingRefusalReason) {
+        return refuse({ code: 502, body: fundingFailureBody }, null)
+      }
       return refuse(
+        { code: 502, body: fundingFailureBody },
         {
-          code: 502,
-          body: {
-            error: 'Delegation-rail funding authorization failed (on-chain policy or bundler)',
-            details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-          },
-        },
-        fundingRefusalReason && {
           userId: agent.user_id,
           agentId: agent.id,
           chainId: agent.chain_id,
@@ -1052,7 +1058,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         code: 502,
         body: {
           error: 'Could not build the settlement delegation',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+          // #3609: bounded after redaction — never the raw viem error.
+          details: boundedErrorDetails(err),
         },
       },
       null,
@@ -1093,7 +1100,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         code: 502,
         body: {
           error: 'Could not deploy the delegate account for erc7710 settlement — retry the authorize',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+          // #3609: bounded after redaction — never the raw viem error.
+          details: boundedErrorDetails(err),
         },
       },
       null,

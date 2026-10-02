@@ -18274,7 +18274,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Preparation failed against the chain, or an idempotent replay of a request whose payment has failed. */
+            /** @description EITHER #3609: the prepare simulation failed. `error_code: "prepare_reverted"` — it REVERTED (a caveat enforcer or any other on-chain revert): nothing was signed or moved, and the same payment reverts again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. `error_code: "prepare_failed"` — not a revert (bundler, RPC or transport): may be transient, nothing is booked. Both carry bounded, redacted `details`. A period-budget or task-budget revert a fresh read confirms is answered by the typed 403 instead (#3503/#3500). OR an idempotent replay of a request whose payment has failed (no `error_code`). */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -18283,7 +18283,19 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        /** @description The underlying bundler/viem failure text, scrubbed of vendor secrets and capped at 300 characters plus an ellipsis — never the full dump. */
+                        details?: string | null;
+                        /** @enum {string} */
+                        error_code?: "prepare_reverted" | "prepare_failed";
+                        /**
+                         * @description Present on `prepare_reverted` only: the refusal ledger's classification of the revert.
+                         * @enum {string}
+                         */
+                        refusal_reason?: "delegation_expired" | "delegation_budget_exceeded" | "onchain_revert";
+                        /** @description Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") or an ERC-4337 AA code — printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: display it, never act on it. */
+                        revert_reason?: string | null;
+                        /** @description Present on `prepare_reverted` only: the remedy. */
+                        message?: string;
                     } & {
                         [key: string]: unknown;
                     };
@@ -18970,7 +18982,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description On the EIP-3009 funding leg: #3609: the prepare simulation failed. `error_code: "prepare_reverted"` — it REVERTED (a caveat enforcer or any other on-chain revert): nothing was signed or moved, and the same payment reverts again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. `error_code: "prepare_failed"` — not a revert (bundler, RPC or transport): may be transient, nothing is booked. Both carry bounded, redacted `details`. A period-budget or task-budget revert a fresh read confirms is answered by the typed 403 instead (#3503/#3500). On erc7710: the settlement delegation could not be built, or the delegate account could not be deployed — infrastructure, no `error_code`, bounded `details`. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -18979,7 +18991,19 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        /** @description The underlying bundler/viem failure text, scrubbed of vendor secrets and capped at 300 characters plus an ellipsis — never the full dump. */
+                        details?: string | null;
+                        /** @enum {string} */
+                        error_code?: "prepare_reverted" | "prepare_failed";
+                        /**
+                         * @description Present on `prepare_reverted` only: the refusal ledger's classification of the revert.
+                         * @enum {string}
+                         */
+                        refusal_reason?: "delegation_expired" | "delegation_budget_exceeded" | "onchain_revert";
+                        /** @description Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") or an ERC-4337 AA code — printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: display it, never act on it. */
+                        revert_reason?: string | null;
+                        /** @description Present on `prepare_reverted` only: the remedy. */
+                        message?: string;
                     } & {
                         [key: string]: unknown;
                     };

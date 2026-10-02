@@ -119,42 +119,64 @@ export function ProtocolsPage() {
               subscriptions, orders, checkout. Haven support is next.
             </SideCard>
           </div>
-          <div className="mt-11 overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)]">
-            <div
-              className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-              tabIndex={0}
-              role="region"
-              aria-label="x402 and Stripe MPP compared, scrollable"
-            >
-              <table className="w-full min-w-[640px] border-collapse text-left text-[14.5px]">
-                <caption className="sr-only">x402 and Stripe MPP compared</caption>
-                <thead>
-                  <tr className="bg-[var(--v2-table-header-bg)] text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--v2-table-header-ink)]">
-                    <th scope="col" className="w-[26%] px-5 py-4">
-                      <span className="sr-only">Aspect</span>
+          {/*
+            The comparison. From 640px it is the mockup's table, without the
+            mockup's forced 640px minimum, so its three short columns wrap and
+            nothing scrolls. Below 640px a scrolling table hid the MPP column
+            behind clipped text (design review, #3576), so phones get the same
+            rows stacked: each aspect, then x402, then Stripe MPP. Only one of
+            the two is displayed at a time, so a screen reader meets it once.
+          */}
+          <div className="mt-11 hidden overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] sm:block">
+            <table className="w-full border-collapse text-left text-[14.5px]">
+              <caption className="sr-only">x402 and Stripe MPP compared</caption>
+              <thead>
+                <tr className="bg-[var(--v2-table-header-bg)] text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--v2-table-header-ink)]">
+                  <th scope="col" className="w-[26%] px-5 py-4">
+                    <span className="sr-only">Aspect</span>
+                  </th>
+                  <th scope="col" className="px-5 py-4">
+                    x402
+                  </th>
+                  <th scope="col" className="px-5 py-4">
+                    Stripe MPP
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARISON.map(([aspect, x402, mpp]) => (
+                  <tr key={aspect} className="border-t border-[var(--v2-border)] align-top">
+                    <th scope="row" className="px-5 py-4 font-medium text-[var(--v2-ink-2)]">
+                      {aspect}
                     </th>
-                    <th scope="col" className="px-5 py-4">
-                      x402
-                    </th>
-                    <th scope="col" className="px-5 py-4">
-                      Stripe MPP
-                    </th>
+                    <td className="px-5 py-4 text-[var(--v2-ink)]">{x402}</td>
+                    <td className="px-5 py-4 text-[var(--v2-ink)]">{mpp}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {COMPARISON.map(([aspect, x402, mpp]) => (
-                    <tr key={aspect} className="border-t border-[var(--v2-border)] align-top">
-                      <th scope="row" className="px-5 py-4 font-medium text-[var(--v2-ink-2)]">
-                        {aspect}
-                      </th>
-                      <td className="px-5 py-4 text-[var(--v2-ink)]">{x402}</td>
-                      <td className="px-5 py-4 text-[var(--v2-ink)]">{mpp}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
+          <ul
+            aria-label="x402 and Stripe MPP compared"
+            data-comparison-stacked=""
+            className="mt-11 overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] sm:hidden"
+          >
+            {COMPARISON.map(([aspect, x402, mpp]) => (
+              <li key={aspect} className="border-t border-[var(--v2-border)] px-5 py-4 first:border-t-0">
+                <p className="text-[13px] font-medium text-[var(--v2-ink-2)]">{aspect}</p>
+                <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[14.5px]">
+                  <dt className="text-[12px] font-semibold uppercase tracking-[0.06em] leading-[1.9] text-[var(--v2-ink-3)]">
+                    x402
+                  </dt>
+                  <dd className="text-[var(--v2-ink)]">{x402}</dd>
+                  <dt className="text-[12px] font-semibold uppercase tracking-[0.06em] leading-[1.9] text-[var(--v2-ink-3)]">
+                    Stripe MPP
+                  </dt>
+                  <dd className="text-[var(--v2-ink)]">{mpp}</dd>
+                </dl>
+              </li>
+            ))}
+          </ul>
           <p className="mt-[22px] text-[14px] text-[var(--v2-ink-2)]">
             <b className="text-[var(--v2-ink)]">Rails, not rivals.</b> Haven is buy side only: it refuses, caps and
             accounts for a payment, whichever rail carries it.

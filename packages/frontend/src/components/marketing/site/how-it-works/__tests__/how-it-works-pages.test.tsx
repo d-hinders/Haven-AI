@@ -180,6 +180,24 @@ describe('Protocols', () => {
     expect(settle).toBeGreaterThan(retry)
   })
 
+  it('labels the flow as the ERC-7710 path whose order it shows', () => {
+    const { container } = render(<ProtocolsPage />)
+    expect(container.textContent).toContain('x402 payment flow · ERC-7710')
+  })
+
+  it('stacks the comparison on phones with every aspect and both protocols', () => {
+    const { container } = render(<ProtocolsPage />)
+    const stacked = container.querySelector('[data-comparison-stacked]') as HTMLElement
+    expect(stacked.className.split(/\s+/)).toContain('sm:hidden')
+    const tableWrap = container.querySelector('table')!.parentElement!.className.split(/\s+/)
+    expect(tableWrap).toEqual(expect.arrayContaining(['hidden', 'sm:block']))
+    const items = within(stacked).getAllByRole('listitem')
+    expect(items).toHaveLength(container.querySelectorAll('tbody tr').length)
+    for (const item of items) {
+      expect(Array.from(item.querySelectorAll('dt')).map((dt) => dt.textContent)).toEqual(['x402', 'Stripe MPP'])
+    }
+  })
+
   it('links back to How it works from the breadcrumb', () => {
     render(<ProtocolsPage />)
     const crumb = screen.getByRole('navigation', { name: 'Breadcrumb' })

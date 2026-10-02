@@ -61,7 +61,7 @@ export function SiteHero({
           <nav aria-label="Breadcrumb" className="mb-[18px] text-[13px] text-[rgba(255,255,255,0.6)]">
             <Link
               href={crumb.href}
-              className="rounded-[4px] transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0e1230]"
+              className="rounded-[4px] text-[rgba(255,255,255,0.85)] underline decoration-[rgba(255,255,255,0.4)] underline-offset-[3px] transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0e1230]"
             >
               {crumb.label}
             </Link>

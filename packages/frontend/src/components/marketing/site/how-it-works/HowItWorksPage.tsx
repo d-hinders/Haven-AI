@@ -196,7 +196,7 @@ Then run:
               >
                 <SiteLede>
                   Haven checks the price against the budget before the agent signs. The agent signs locally, and the
-                  chain enforces the budget on-chain: an over-budget payment reverts, and nothing moves.
+                  chain enforces the budget: an over-budget payment reverts, and nothing moves.
                 </SiteLede>
                 <p className="mt-3.5 text-[18px]">
                   <SiteTextLink href="/how-it-works/protocols">How the protocols fit</SiteTextLink>

@@ -393,7 +393,7 @@ jobs:
         # The console's production build must RENDER under its enforcing CSP:
         # #3515 shipped a blank page with every unit test green (#3581). Sign-in
         # renders after hydration with 0 CSP violations, and an un-nonced
-        # inline script is refused. Offline: no request leaves the server.
+        # inline script is refused. Offline: no browser request leaves the server.
         run: npm run smoke -w packages/ops
 
   qa_agent_checks:

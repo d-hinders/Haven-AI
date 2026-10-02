@@ -56,7 +56,8 @@ read those settings from the repo — every one of them is in
   registry origins this deployment offers. Its scripts are gated on a per-request nonce that
   `packages/ops/src/middleware.ts` sets (#3581); a blank page with
   `Refused to execute inline script` in the browser console means that
-  nonce is not reaching Next's scripts.
+  nonce is not reaching Next's scripts. CI's render smoke (#3583) loads the
+  production build in Chromium to catch this before merge.
 
 ## Sign-in and the environment switcher
 

@@ -74,8 +74,10 @@ npm run smoke -w packages/ops
 
 Serves the production build and checks, in Chromium, that the console
 hydrates (the sign-in button appears) with zero CSP violations, and that an
-inline script without the nonce is refused. No request leaves the local
-server. CI runs it in `ops_checks` (#3583), because a blank page under the
+inline script without the nonce is refused. No browser HTTP request or
+WebSocket leaves the local server. CI runs it in `ops_checks` (#3583), because a blank page under the
 CSP once shipped with every unit test green (#3581). Set
 `OPS_SMOKE_CHROMIUM` to a Chromium binary when the machine's preinstalled
-browser is not the one `@playwright/test` expects.
+browser is not the one `@playwright/test` expects. One blind spot: `next
+start` copies middleware response headers onto the request, so dropping the
+middleware's request-header `set` stays green here; `csp.test.ts` guards it.

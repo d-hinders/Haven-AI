@@ -24,9 +24,16 @@
  *    'strict-dynamic' a non-parser-inserted `src` script may be allowed, so a
  *    `src` probe would prove nothing.
  *
- * The browser phase is offline: every request to anything but this server is
- * aborted, and an aborted request fails the run. `npm ci`, the browser install
- * and the build may use the network; this phase may not.
+ * The browser phase is offline: every browser HTTP request and WebSocket to
+ * anything but this server is aborted, and an aborted one fails the run (the
+ * server runs with NEXT_TELEMETRY_DISABLED=1; its own egress is not routed).
+ * `npm ci`, the browser install and the build may use the network; this phase
+ * may not.
+ *
+ * Blind spot: under `next start`, Next's router copies middleware RESPONSE
+ * headers onto the request (resolve-routes.js), so dropping the middleware's
+ * request-header `set` stays green here. Whether Vercel's edge does the same
+ * is unverified; src/__tests__/csp.test.ts is the guard for that line.
  *
  * The build must have a registry inlined (`NEXT_PUBLIC_OPS_ENVIRONMENTS` is
  * build-time); without one the console shows its server-rendered config-error
@@ -56,6 +63,7 @@ function freePort() {
 
 async function waitForServer(base, attempts = 120) {
   for (let i = 0; i < attempts; i++) {
+    if (serverExited) return false
     try {
       const response = await fetch(`${base}/`)
       if (response.status < 500) return true
@@ -74,6 +82,12 @@ async function offline(context, base, escaped) {
     if (url.startsWith(`${base}/`) || url === base) return route.continue()
     escaped.push(url)
     return route.abort('blockedbyclient')
+  })
+  const wsBase = base.replace(/^http/, 'ws')
+  await context.routeWebSocket(/.*/, (ws) => {
+    if (ws.url().startsWith(`${wsBase}/`)) return ws.connectToServer()
+    escaped.push(ws.url())
+    return ws.close()
   })
 }
 
@@ -97,14 +111,23 @@ const port = await freePort()
 const base = `http://127.0.0.1:${port}`
 const server = spawn(NEXT_BIN, ['start', '-p', String(port), '-H', '127.0.0.1'], {
   cwd: ROOT,
+  env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 server.stdout.on('data', (d) => process.stdout.write(`[next] ${d}`))
 server.stderr.on('data', (d) => process.stderr.write(`[next] ${d}`))
+// A server that dies (no build, port taken) ends the wait at once, so the run
+// never polls a stranger on the port for a minute and calls it the console.
+let serverExited = null
+server.once('exit', (code, signal) => {
+  serverExited = `next start exited (code ${code}, signal ${signal})`
+})
 
 let browser
 try {
-  if (!(await waitForServer(base))) throw new Error(`next start never answered on ${base} — is there a build in ${ROOT}/.next?`)
+  if (!(await waitForServer(base))) {
+    throw new Error(serverExited ?? `next start never answered on ${base} — is there a build in ${ROOT}/.next?`)
+  }
   // CI launches the Chromium `npx playwright install` fetched. A machine with
   // a different preinstalled build can point at it instead.
   browser = await chromium.launch({ executablePath: process.env.OPS_SMOKE_CHROMIUM || undefined })
@@ -142,15 +165,16 @@ try {
     const escaped = []
     const context = await browser.newContext()
     await recordViolations(context)
-    // Registered before offline(): Playwright runs the LAST-registered route
-    // first, so the document route below wins for `/` and everything else
-    // still goes through the offline guard.
+    // offline() is registered BEFORE the document route below: Playwright runs
+    // the LAST-registered route first, so the document route wins for `/` and
+    // everything else still goes through the offline guard.
     await offline(context, base, escaped)
     await context.route(`${base}/`, async (route) => {
       const response = await route.fetch()
       const html = await response.text()
       const injected = html.replace('</body>', `<script>window.${INJECTED_FLAG} = 1</script></body>`)
-      if (injected === html) throw new Error('could not inject the probe: the served HTML has no </body>')
+      // A throw here is an uncaught exception that skips `finally`; record it.
+      if (injected === html) fail('could not inject the probe: the served HTML has no </body>')
       await route.fulfill({ response, body: injected })
     })
     const page = await context.newPage()

@@ -29,7 +29,7 @@
     "TWO SHAPES NEITHER HALF SEES, both written down rather than guarded:",
     "",
     "1. A `working-directory:` on a gate step. It is discarded, so the battery",
-    "   would run that gate from the repository root. All four live uses sit on",
+    "   would run that gate from the repository root. All five live uses sit on",
     "   an excluded command, so this is latent.",
     "2. A gate in a local composite action whose IDENTITY is a `with:` input.",
     "   Every rule and every shield entry begins with a LITERAL head, and",

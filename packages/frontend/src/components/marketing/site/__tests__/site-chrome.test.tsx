@@ -6,7 +6,7 @@ import { SiteHeader } from '../../SiteHeader'
 import { SiteFooter } from '../../SiteFooter'
 import { Header, SITE_NAV, crossesDarkSection } from '../Header'
 import { Footer, SITE_FOOTER_COLUMNS } from '../Footer'
-import { SiteSection } from '../SiteSection'
+import { SITE_NAVY, SiteSection } from '../SiteSection'
 import { ProductFrame, FrameControl } from '../ProductFrame'
 
 /**
@@ -122,6 +122,9 @@ describe('header legibility: four cases', () => {
       expect(within(header).getByRole('link', { name: /Create your account/ }).className).toContain(
         'bg-[var(--v2-brand)]',
       )
+      const mark = brand.querySelector('svg')!
+      expect(mark.querySelector('rect')!.getAttribute('class')).toBe('fill-[var(--v2-brand)]')
+      expect(mark.querySelector('path')!.getAttribute('stroke')).toBe('white')
     })
 
     it(`${theme} theme, over a dark section: fixed white ink on a fixed navy ground`, () => {
@@ -135,6 +138,14 @@ describe('header legibility: four cases', () => {
       const cta = within(header).getByRole('link', { name: /Create your account/ })
       expect(cta.className).toContain('bg-white')
       expect(cta.className).toContain('text-[#0e1230]')
+      // The mockup's mark over navy (#3586, site.css:53): a solid white tile,
+      // navy ink, no translucent `inverse` tile.
+      const mark = brand.querySelector('svg')!
+      const tile = mark.querySelector('rect')!.getAttribute('class')!.split(/\s+/)
+      expect(tile).toEqual(['fill-white'])
+      expect(tile).not.toContain('fill-white/20')
+      expect(tile).not.toContain('stroke-white/30')
+      expect(mark.querySelector('path')!.getAttribute('stroke')).toBe(SITE_NAVY)
     })
   }
 
@@ -156,6 +167,15 @@ describe('header legibility: four cases', () => {
     expect(header.className).toContain('bg-transparent')
     expect(header.className).toContain('absolute')
     expect(header.className).not.toContain('sticky')
+  })
+})
+
+describe('footer legal line', () => {
+  it('reads "© <current year> Haven Labs" (owner decision 16, #3586)', () => {
+    render(<Footer />)
+    const footer = document.querySelector('footer')!
+    const line = `© ${new Date().getFullYear()} Haven Labs`
+    expect(within(footer).getByText(line).textContent).toBe(line)
   })
 })
 

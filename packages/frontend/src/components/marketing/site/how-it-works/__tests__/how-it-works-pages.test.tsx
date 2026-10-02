@@ -154,9 +154,21 @@ describe('Protocols', () => {
     expect(container.textContent).not.toMatch(/MPP[^.]*\blive\b/i)
   })
 
-  it('names ERC-7710 as preferred and the EIP-3009 bridge as the fallback', () => {
+  it('names ERC-7710 as preferred and the EIP-3009 bridge as the open-budget fallback', () => {
     const { container } = render(<ProtocolsPage />)
-    expect(container.textContent).toMatch(/prefers the ERC-7710 scheme.*falls back to an EIP-3009 bridge/s)
+    const text = container.textContent ?? ''
+    expect(text).toMatch(/prefers the ERC-7710 scheme.*an agent with an open budget pays through an\s+EIP-3009 bridge/s)
+    // A pinned budget cannot take the bridge (delegation-authorize.ts refuses 3009 for it).
+    expect(text).toMatch(/pinned to one recipient pays by ERC-7710 only/)
+  })
+
+  it('shows settlement after the retry, as both schemes do it', () => {
+    const { container } = render(<ProtocolsPage />)
+    const steps = Array.from(container.querySelectorAll('ol > li b')).map((b) => b.textContent ?? '')
+    const retry = steps.findIndex((t) => t.startsWith('Agent retries'))
+    const settle = steps.findIndex((t) => t.includes('settles'))
+    expect(retry).toBeGreaterThan(-1)
+    expect(settle).toBeGreaterThan(retry)
   })
 
   it('links back to How it works from the breadcrumb', () => {

@@ -39,16 +39,22 @@ import {
  * The one payment walked through in section 4. Scheme-neutral on purpose:
  * under the preferred ERC-7710 scheme the merchant redeems the delegation
  * chain itself, so "Haven relays" and "gas sponsored by Haven" are not true
- * of every payment, and neither is said here.
+ * of every payment, and neither is said here. Settlement — and the on-chain
+ * budget check with it — happens when the agent RETRIES with the signed
+ * payment, in both schemes, so it comes after the retry, not before.
  */
 const PAYMENT_STEPS: ReadonlyArray<FlowStep> = [
   { tone: 'neutral', title: 'The agent requests a paid resource', detail: 'GET api.research.example/query' },
   { tone: 'warning', title: 'The merchant asks for payment', detail: '402 Payment Required · 0.05 USDC on Base' },
   { tone: 'brand', title: "Haven checks it against the agent's budget", detail: '214.00 used of 250.00 · recipient allowed' },
   { tone: 'brand', title: 'The agent signs on its own machine', detail: 'the key never leaves it' },
-  { tone: 'brand', title: 'The budget is enforced on-chain', detail: 'over budget would revert here, nothing moves' },
-  { tone: 'success', title: 'Settled from your account to the merchant', detail: 'tx 0x7a9e…d8e9' },
-  { tone: 'success', title: 'The agent retries with proof and gets the resource', detail: '200 OK · research.json' },
+  { tone: 'brand', title: 'The agent retries with the signed payment', detail: 'the merchant takes it from here' },
+  {
+    tone: 'success',
+    title: 'Settled from your account to the merchant',
+    detail: 'budget enforced on-chain · over budget reverts, nothing moves',
+  },
+  { tone: 'success', title: 'The agent gets the resource', detail: '200 OK · research.json' },
 ]
 
 const SECURITY_CARDS: ReadonlyArray<{ title: string; body: string; link?: { label: string; href: string } }> = [
@@ -191,8 +197,8 @@ Then run:
                 titleId="how-pays"
               >
                 <SiteLede>
-                  Haven checks the price against the budget and refuses anything over it. The agent signs locally, and
-                  the chain enforces the budget again at execution: an over-budget payment reverts, and nothing moves.
+                  Haven checks the price against the budget before the agent signs. The agent signs locally, and the
+                  chain enforces the budget when the payment settles: an over-budget payment reverts, and nothing moves.
                 </SiteLede>
                 <p className="mt-3.5 text-[18px]">
                   <SiteTextLink href="/how-it-works/protocols">How the protocols fit</SiteTextLink>

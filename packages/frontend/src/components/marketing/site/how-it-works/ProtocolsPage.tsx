@@ -38,8 +38,12 @@ const X402_STEPS: ReadonlyArray<FlowStep> = [
   { tone: 'brand', title: 'Agent forwards the challenge to Haven', detail: 'POST /x402/authorize' },
   { tone: 'brand', title: 'Budget checked', detail: 'within period budget · recipient allowed' },
   { tone: 'brand', title: 'Agent signs the payment locally', detail: 'EIP-712 typed data · the key never leaves it' },
-  { tone: 'success', title: 'Settled from your account on Base', detail: 'tx 0x7a9e…d8e9 · budget enforced on-chain' },
-  { tone: 'success', title: 'Agent retries with proof, data delivered', detail: '200 OK · research.json' },
+  { tone: 'brand', title: 'Agent retries with the signed payment', detail: 'X-PAYMENT header' },
+  {
+    tone: 'success',
+    title: 'Merchant settles from your account on Base, data delivered',
+    detail: 'tx 0x7a9e…d8e9 · budget enforced on-chain · 200 OK',
+  },
 ]
 
 const ACTORS = ['Agent', 'Merchant', 'Haven', 'On-chain budget'] as const
@@ -69,8 +73,8 @@ export function ProtocolsPage() {
           <SiteSplit>
             <SiteCopy eyebrow="The flow" title="One payment, four actors." titleId="protocols-flow">
               <SiteLede>
-                A price is named, Haven checks it against the budget, the agent signs locally, the chain enforces the
-                budget as the payment settles, and the merchant delivers.
+                A price is named, Haven checks it against the budget, the agent signs locally and retries, the merchant
+                settles from your account while the chain enforces the budget, and the merchant delivers.
               </SiteLede>
               <ul aria-label="Actors" className="mt-4 flex flex-wrap gap-2">
                 {ACTORS.map((actor) => (
@@ -84,7 +88,8 @@ export function ProtocolsPage() {
               </ul>
               <p className="mt-6 max-w-[56ch] text-[14px] text-[var(--v2-ink-2)]">
                 Haven prefers the ERC-7710 scheme, where the merchant redeems a one-payment delegation drawn from your
-                agent&apos;s budget. Where a merchant does not support it, Haven falls back to an EIP-3009 bridge.
+                agent&apos;s budget. Where a merchant does not support it, an agent with an open budget pays through an
+                EIP-3009 bridge instead; an agent pinned to one recipient pays by ERC-7710 only.
                 Either way the money moves from your account and the budget is enforced on-chain.
               </p>
             </SiteCopy>
@@ -100,7 +105,7 @@ export function ProtocolsPage() {
           <div className="mt-11 grid grid-cols-1 gap-5 min-[820px]:grid-cols-2">
             <SideCard kicker="x402 · live" title="Pay-per-request over HTTP">
               An open standard for paying over HTTP. A server answers with 402 and a price; the client pays and
-              retries with proof. x402 merchants on Base work with Haven today.
+              retries with proof. x402 merchants on Base that take USDC work with Haven today.
             </SideCard>
             <SideCard kicker="Stripe MPP · next" title="Agent-initiated commerce">
               Stripe&apos;s Machine Payments Protocol covers purchases an agent and a merchant coordinate:
@@ -108,7 +113,12 @@ export function ProtocolsPage() {
             </SideCard>
           </div>
           <div className="mt-11 overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)]">
-            <div className="overflow-x-auto">
+            <div
+              className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+              tabIndex={0}
+              role="region"
+              aria-label="x402 and Stripe MPP compared, scrollable"
+            >
               <table className="w-full min-w-[640px] border-collapse text-left text-[14.5px]">
                 <caption className="sr-only">x402 and Stripe MPP compared</caption>
                 <thead>

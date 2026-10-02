@@ -240,12 +240,14 @@ export function FramePill({ children }: { children: ReactNode }) {
 
 /**
  * A code block (mockup `.code`): fixed navy with fixed light ink in both
- * themes, like a terminal. `prompt` marks the `$` the way the mockup does.
+ * themes, like a terminal. `CodePrompt` marks the `$` the way the mockup does.
+ * It wraps rather than scrolls: inside a product frame the body is `inert`,
+ * so a horizontal scroll could never be reached and a long line would clip.
  */
 export function SiteCode({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <pre
-      className={`${SITE_TYPE.mono} overflow-x-auto whitespace-pre bg-[#0e1230] px-3.5 py-3 text-[12px] leading-[1.7] text-[#e6e9ff] ${className}`}
+      className={`${SITE_TYPE.mono} whitespace-pre-wrap break-words bg-[#0e1230] px-3.5 py-3 text-[12px] leading-[1.7] text-[#e6e9ff] ${className}`}
     >
       {children}
     </pre>

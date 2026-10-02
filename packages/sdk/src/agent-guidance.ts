@@ -34,6 +34,14 @@
 export const AGENT_SECRET_HYGIENE_SENTENCE =
   'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.'
 
+/**
+ * What to do when a Haven result carries `client_update`. Shared by the runbook
+ * (onboarding) and the haven-pay skill (every later session), so the rule an
+ * agent meets in both places is one text.
+ */
+export const AGENT_CLIENT_UPDATE_SENTENCE =
+  'If a Haven result carries `client_update`, that client is out of date: run its `upgrade_command` as given, then any repair line it prints, then retry. `required: true` means payments are refused until you do.'
+
 /** Where the signing key is made, and what Haven receives instead of it. */
 export const AGENT_LOCAL_KEY_SENTENCE =
   'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.'
@@ -261,7 +269,7 @@ Nothing here needs you to. Steps 1-3 are links: hand your user the full \`<host>
 
 ## If something breaks
 
-If a Haven result carries \`client_update\`, that client is out of date: run its \`upgrade_command\` as given, then any repair line it prints, then retry. \`required: true\` means payments are refused until you do. What changed: [/releases](/releases).
+${AGENT_CLIENT_UPDATE_SENTENCE} What changed: [/releases](/releases).
 
 ## Vocabulary
 

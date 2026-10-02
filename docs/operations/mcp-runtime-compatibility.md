@@ -76,6 +76,18 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified, skill `client_update` line (2026-10-02, guidance text only):**
+> this diff touches `packages/sdk/src/skill-content.ts`, a covered file. The
+> runbook's `client_update` sentence moves into a shared constant,
+> `AGENT_CLIENT_UPDATE_SENTENCE` in `agent-guidance.ts`, and the haven-pay skill
+> now carries it too. Every runtime still installs the one canonical skill
+> string (§ *Guidance surfaces*), and `/for-agents.md` is byte-unchanged
+> (`lint:runbook-parity` green). No tool, argument, schema, version-skew or
+> consent-hash contract moves; the client releases table, upgrade hints and
+> `upgrade_command` are untouched — the skill only names the existing field.
+> `last-verified` stays 2026-10-02. Nothing else in this document was
+> re-verified.
+
 > **Re-verified, follow-up to #3587 (2026-10-02, a step rename):** this diff
 > touches `.github/workflows/ci.yml`, a covered file, in one step NAME and its
 > comment only — the `design_visual` job's dark-scheme step is renamed from

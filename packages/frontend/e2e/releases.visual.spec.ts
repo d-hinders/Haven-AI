@@ -22,12 +22,15 @@
  * recommended versions, code spans and a surfaced break. The sentinel assertions below fail if the server was
  * started without the variable, instead of capturing live data.
  *
- * Light only, desktop and mobile — a public marketing-shell page with no
- * theme-specific surface of its own. Baselines are Linux-rendered by the
- * *Update visual baselines* dispatch, never locally (frontend playbook §4).
+ * Desktop and mobile in the light theme, plus desktop in the dark theme
+ * (#3573): the page wears the redesigned public header and footer, which
+ * follow the visitor's theme, in the build this harness serves (the site
+ * gate is on there — `src/lib/site-gate.ts`). Baselines are Linux-rendered by
+ * the *Update visual baselines* dispatch, never locally (frontend playbook §4).
  */
 import { expect, test } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
 import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
@@ -48,8 +51,25 @@ const FIXTURE_SIGNER_MIN = '9.3.0-alpha.0'
 test.describe('releases page visual regression', () => {
   test.skip(!VISUAL_SPECS_ENABLED, VISUAL_SKIP_REASON)
 
+  // #3573: the dark project (`chromium-desktop-dark`) runs this spec too.
+  // Under it the theme is seeded BEFORE navigation, so the no-flash bootstrap
+  // stamps `data-theme="dark"` on the first paint; desktop only — there is no
+  // mobile dark baseline.
+  const schemeOf = (testInfo: { project: { name: string } }): 'light' | 'dark' =>
+    testInfo.project.name === 'chromium-desktop-dark' ? 'dark' : 'light'
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    if (schemeOf(testInfo) === 'dark') {
+      await page.addInitScript((themeKey: string) => {
+        window.localStorage.setItem(themeKey, 'dark')
+      }, THEME_STORAGE_KEY)
+    }
+  })
+
   for (const vp of VIEWPORTS) {
-    test(`releases renders pixel-stable (${vp.name})`, async ({ page }) => {
+    test(`releases renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await page.goto('/releases')
 
@@ -90,7 +110,7 @@ test.describe('releases page visual regression', () => {
         viewportDevicePx: vp.height * devicePixelRatio,
       })
 
-      await expect(page).toHaveScreenshot(`releases-${vp.name}.png`, {
+      await expect(page).toHaveScreenshot(`releases-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`, {
         fullPage: true,
         animations: 'disabled',
         caret: 'hide',

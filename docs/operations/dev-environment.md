@@ -13,6 +13,7 @@ covers:
   - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
+  - packages/frontend/src/lib/site-gate.ts
   - packages/backend/src/config.ts
   - packages/backend/src/modules/catalog/marketplace-scope.ts
   - packages/backend/src/routes/merchants.ts
@@ -886,6 +887,39 @@ no `.env*` file, no other workflow, no Docker or hosting config (the literal is
 grep-unique, so the leak check is mechanical), and it is not a secret: the id
 is never rendered, only its PRESENCE gates the card, so a fixed value keeps
 renders deterministic across key rotations.
+
+### `NEXT_PUBLIC_HAVEN_SITE_PREVIEW` — the redesigned public site (#3573)
+
+The redesigned public site (epic #3572) is built in slices behind a build-time
+gate, `isNewSiteVisible()` in `packages/frontend/src/lib/site-gate.ts`. It is
+**on outside production and off in production**: the dev Vercel project sets
+`NEXT_PUBLIC_HAVEN_ENV=dev`, so the dev deployment shows the new site, and
+production, which sets nothing, keeps today's pages until the switch-over slice
+removes the gate. `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1` turns it on in a
+production-shaped build. Every surface that builds or serves the app for the e2e
+and visual suites sets it — the CI builds, the baseline regeneration,
+Playwright's `webServer.env` for `next dev`, and the frontend's built-suite
+scripts, so a local run matches CI.
+**Neither Vercel project sets it, and neither should**: on production it would
+publish the half-built site.
+
+It is build-time on purpose, unlike `HAVEN_DEMO_PAGE_VISIBLE` above. The `/demo`
+gate guards a page that hands out test funds, so it is server-only and read per
+request, and never reaches a client bundle. This gate guards presentation only,
+its readers include client components (the site header, and later `/login` and
+`/signup`), and an inlined constant answers the same on the server and the
+client without making any page dynamic.
+
+**To see the new site locally**, run the frontend with either variable set. A
+local `next dev` with no `.env` sets no environment name and so counts as
+production, with the gate off:
+
+```bash
+NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1 npm run dev -w packages/frontend
+```
+
+`/demo` also needs `HAVEN_DEMO_PAGE_VISIBLE=1` on a local server for the same
+reason.
 
 ## Inspecting the dev environment
 

@@ -1380,7 +1380,9 @@ the token in `sessionStorage` and moves no authority; the rest of this
 document was not re-read for it, and `last-verified` is not bumped. The
 app's Vercel ignore-build step (#3591) decides only *when* the console
 redeploys, from what changed since its last deployment; it moves no
-authority either, and the same scope note holds.
+authority either, and the same scope note holds. Its CI render smoke
+(#3583) only proves in a browser that the console renders under that CSP;
+it moves no authority, and the same scope note holds.
 
 > **Re-verified #3516 (2026-10-02, console round 3):** the change this note
 > rides touches `packages/ops/**` (plus this doc and a `.gitignore` line) —

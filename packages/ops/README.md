@@ -64,3 +64,18 @@ The console works against a local backend (the backend's
 `http://localhost:3000`) and against the dev backend; only origins in the
 registry are offered in the switcher. `POST /ops/reveal` and every data read
 are audited server-side; this app holds no credentials of its own.
+
+## Render smoke
+
+```
+NEXT_PUBLIC_OPS_ENVIRONMENTS='{"dev":"https://ops-backend.fixture"}' npm run build -w packages/ops
+npm run smoke -w packages/ops
+```
+
+Serves the production build and checks, in Chromium, that the console
+hydrates (the sign-in button appears) with zero CSP violations, and that an
+inline script without the nonce is refused. No request leaves the local
+server. CI runs it in `ops_checks` (#3583), because a blank page under the
+CSP once shipped with every unit test green (#3581). Set
+`OPS_SMOKE_CHROMIUM` to a Chromium binary when the machine's preinstalled
+browser is not the one `@playwright/test` expects.

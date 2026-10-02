@@ -22,8 +22,8 @@ const SessionContext = createContext<OpsSession | null>(null)
 
 /**
  * A Storage stand-in for the server render pass. Client components render on
- * the server too — this app has no dynamic APIs, so `/` is prerendered — and
- * `window` does not exist there. The storage is consumed only in effects and
+ * the server too — on every request, since the layout is dynamic for its CSP
+ * nonce (#3581) — and `window` does not exist there. The storage is consumed only in effects and
  * event handlers, which never run in that pass and cannot fire before the
  * client mount, so the hook receives a valid Storage on every render while
  * the real one is only ever read in the browser.

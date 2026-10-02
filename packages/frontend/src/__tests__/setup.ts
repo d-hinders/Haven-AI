@@ -36,6 +36,19 @@ vi.mock('@testing-library/react', async () => {
   }
 })
 
+// `next/font/local` is a build-time transform: outside a Next build its
+// module exports nothing, so a font loader call throws on import. The public
+// site's fonts (#3573, `components/marketing/site/fonts.ts`) are reached from
+// `SiteHeader`, which many suites render, so the loader returns the shape Next
+// would — a class name and a CSS-variable class named after the option.
+vi.mock('next/font/local', () => ({
+  default: (options: { variable?: string } = {}) => ({
+    className: 'font-local',
+    variable: options.variable ? `font-variable-${options.variable.replace(/^--/, '')}` : '',
+    style: { fontFamily: 'local' },
+  }),
+}))
+
 // Mock localStorage
 const localStorageMock = (() => {
   let store: Record<string, string> = {}

@@ -589,7 +589,13 @@ export const ROUTING_MATRIX = [
     files: ['packages/ops/next.config.ts'],
     expect: ['code', 'ops'],
     kind: CONTRACT,
-    why: 'The CSP and security headers (#3515). Weakening a header must run the suite whose source guard pins the injection/storage rules.',
+    why: 'The static security headers (#3515). Weakening a header must run the suite whose source guard pins the injection/storage rules. The CSP moved to src/middleware.ts in #3581; the row below routes it.',
+  },
+  {
+    files: ['packages/ops/src/middleware.ts', 'packages/ops/src/lib/csp.ts'],
+    expect: ['code', 'ops'],
+    kind: CONTRACT,
+    why: 'The per-request nonce CSP (#3581). A change to it must run ops_checks, whose csp.test.ts pins the policy, the fresh nonce and the single-CSP rule.',
   },
   {
     files: ['.github/package-dependencies.json'],

@@ -1513,6 +1513,30 @@ Animated, cycling state machine showing one payment lifecycle (Intent → Policy
 
 3‑column grid on desktop, hairline `gap-px` on `bg-[var(--v2-border)]` parent (faux dividers via background bleed‑through). Number in brand color, title in ink, body in ink‑2.
 
+
+### Public site
+
+The redesigned public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/3572)) is built from the approved mockup in [`docs/product/site-mockup/`](site-mockup/README.md), whose README lists the decided deviations. Its components live in `packages/frontend/src/components/marketing/site/`, beside the legacy marketing components above, which they replace page by page. Until the switch-over slice (#3579), the sections above describe what production renders and this one describes what the new site renders.
+
+**The gate.** `isNewSiteVisible()` (`src/lib/site-gate.ts`) decides at build time which site renders: on outside production, off in production, and on in the CI e2e build through `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`. `SiteHeader` and `SiteFooter` branch on it, so every page that renders them shows the new chrome wherever it is on: `/`, `/how-it-works`, `/protocols`, `/protocols/x402`, `/protocols/mpp`, `/demo` and `/releases`. Only `/demo` and `/releases` have visual baselines in this slice; the others change content in their own slices. It is a pure function over inlined `NEXT_PUBLIC_` values, so it answers the same in server and client components and makes no page dynamic. While it exists, a legacy marketing page or component is not edited except to sit behind it. The variable and how to see the new site locally are in [`dev-environment.md`](../operations/dev-environment.md#next_public_haven_site_preview--the-redesigned-public-site-3573).
+
+**Section grounds (`SiteSection`).** Four, from the mockup:
+
+| Ground | Paint | Theme |
+|---|---|---|
+| `white` | `--v2-bg` | Follows the theme |
+| `tint` | `--v2-surface`, hairline `--v2-border` top and bottom | Follows the theme |
+| `navy` | `#0e1230` | Fixed in both themes, fixed white ink |
+| `indigo` | The closing band: `#4f46e5 → #4338ca` with a violet wash | Fixed in both themes, fixed white ink |
+
+`navy` and `indigo` carry `data-v2-dark-section`, which is what the header reads. A section declares its ink as three local properties (`--site-ink`, `--site-ink-2`, `--site-eyebrow`) that point at theme tokens on a themed ground and are fixed on a fixed one; the type roles read them, so a heading needs no per-ground class. Bands follow the mockup's rhythm: dark bands never touch.
+
+**Type roles (`SITE_TYPE`).** Display type is **Inter Tight** (h1 `clamp(40px, 6vw, 64px)`, h2 `clamp(28px, 3.6vw, 40px)`, h3 17px, all semibold with negative tracking); body stays the app's Inter; the eyebrow is 12px semibold uppercase with wide tracking; the lede is 18px at 1.6 in `ink-2`. Code and amounts use **JetBrains Mono** (`SITE_TYPE.mono`). Both faces load through `next/font` in `site/fonts.ts`, self-hosted, and exist only below an element carrying `SITE_FONT_VARIABLES` — every new-site root does, nothing else may. The authenticated app, `packages/ui` and `packages/ops` render Inter as before.
+
+**Product frame (`ProductFrame`).** A picture of a Haven screen: `Card` at `raised` elevation with a 14px radius, and a `Card.Header` bar holding an environment chip and the screen name. Because it is the product's own surface, it shows the dark UI in the dark theme. Its body is `inert`, and controls inside it are `FrameControl` spans, never buttons or links: a frame illustrates the product, it does not operate it.
+
+**Header and footer.** The header carries only entries whose page exists. It is sticky and in the flow by default (`/demo`, `/releases`); `overlay` is the mockup's form for a page with a navy hero — absolutely positioned, transparent over the hero, and not sticky. Its tone follows what it sits over, never the theme: theme ink on the page's own ground, or fixed white ink on a fixed navy ground over a dark band, where the logo mark becomes a solid white tile with navy ink (`HavenMark tone="onNavy"`, as the mockup draws it). It keeps the installed-app `SafeAreaBand`. The footer's legal line reads "© {year} Haven Labs". It has no `href="#"` and no entry without a destination; Contact, Privacy and Terms return only with their pages.
+
 ---
 
 ## 4. Motion

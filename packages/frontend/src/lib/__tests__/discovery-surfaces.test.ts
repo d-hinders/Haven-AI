@@ -264,6 +264,29 @@ describe('the hooks are actually wired into the app', () => {
     ).toBeGreaterThan(0)
   })
 
+  /**
+   * The redesigned footer's own hook (#3573). The chain test above reads only
+   * the legacy `SiteFooter.tsx` and passes on the layout's hook alone, so the
+   * new footer could lose its "For agents" entry with that test still green.
+   * This one requires the NEW footer's own destination to reach the runbook,
+   * taken from the exported column data that `Footer` renders.
+   */
+  it("the redesigned footer's own 'For agents' hook reaches the runbook (#3573)", async () => {
+    const { SITE_FOOTER_COLUMNS } = await import('@/components/marketing/site/Footer')
+    const RUNBOOK = '/for-agents.md'
+    const forAgents = SITE_FOOTER_COLUMNS.flatMap((column) => column.links).filter(
+      (link) => link.label === 'For agents',
+    )
+    expect(forAgents, 'the new footer has exactly one "For agents" entry').toHaveLength(1)
+    const destination = forAgents[0].href
+    const body = readPublic(destination)
+    expect(body, `${destination} is not a served file under public/`).not.toBeNull()
+    expect(
+      destination === RUNBOOK || body!.includes(RUNBOOK),
+      `the new footer's "For agents" (${destination}) does not reach ${RUNBOOK}`,
+    ).toBe(true)
+  })
+
   it("the 402 surfaces route a new owner through the runbook's signup link (#2619)", () => {
     // 402.md step 1 and both links in 402/index.html used to point at /?src=402
     // — the landing page — while the runbook's "Before signup" script sends the

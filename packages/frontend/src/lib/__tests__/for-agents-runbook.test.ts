@@ -176,7 +176,17 @@ describe('/for-agents.md (#2523)', () => {
     // `npx @haven_ai/cli@@haven_ai/cli@dev`. The command is now the
     // manifest's own `packages.cli.one_liner`, run as given — so the change
     // needed no raise, and the headroom grew instead.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10900)
+    //
+    // 10900 -> 11000 for #3596 (the page is 10904 bytes at this commit). The
+    // runbook is now also served as linked step files at
+    // `/agent-skills/<step>.md`, byte-sliced at `## ` boundaries, so a
+    // cross-reference that only made sense beside its neighbour had to be
+    // reworded: step 1's "(below)" named "## What you run" instead of
+    // trusting proximity, and "If you cannot open a browser"'s "Steps 1-3"
+    // got its own three-word gloss (account, funding, budget) rather than
+    // depending on a reader who had just read "## The sequence". Net +34
+    // bytes; the dropped ", as above" trailing clause paid most of it back.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11000)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

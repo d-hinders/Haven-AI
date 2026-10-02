@@ -76,6 +76,17 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3596 (2026-10-02, the agent-skills index and step files):**
+> this diff touches `packages/sdk/src/agent-guidance.ts`, a covered file —
+> two wording fixes inside `HAVEN_AGENT_RUNBOOK_MD` (step 1's "(below)" named
+> "What you run" instead of trusting proximity; "If you cannot open a
+> browser"'s "Steps 1-3" got a three-word gloss) so the runbook also reads
+> correctly sliced into standalone step files at `/agent-skills/<step>.md`.
+> No sentence constant, tool, schema, version-skew or consent-hash contract
+> moves — the runtime manifest, connector channel, dist-tag and setup-prompt
+> rule sentences are byte-identical to before. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3583 (2026-10-02, the ops render smoke):** this diff touches
 > `.github/workflows/ci.yml`, a covered file, inside the `ops_checks` job
 > only: its build step gains a fixture `NEXT_PUBLIC_OPS_ENVIRONMENTS`, three

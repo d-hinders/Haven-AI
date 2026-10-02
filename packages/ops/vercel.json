@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "installCommand": "npm ci --no-audit --no-fund",
   "buildCommand": "npm run build",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ':(top)packages/ops' ':(top)packages/ui' ':(top)packages/core' ':(top)scripts/docs'",
+  "ignoreCommand": "sh \"$(git rev-parse --show-toplevel)/packages/ops/scripts/vercel-ignore-build.sh\"",
   "headers": [
     {
       "source": "/(.*)",

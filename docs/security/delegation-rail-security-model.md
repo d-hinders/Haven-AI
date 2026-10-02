@@ -1377,7 +1377,10 @@ Content-Security-Policy whose scripts are gated on a per-request nonce set
 by its middleware (#3581; the first static form refused Next's own inline
 scripts and the console rendered blank). That is client-side defence for
 the token in `sessionStorage` and moves no authority; the rest of this
-document was not re-read for it, and `last-verified` is not bumped.
+document was not re-read for it, and `last-verified` is not bumped. The
+app's Vercel ignore-build step (#3591) decides only *when* the console
+redeploys, from what changed since its last deployment; it moves no
+authority either, and the same scope note holds.
 
 ## 9. Owner CLI sessions — the device-code login (#2526)
 

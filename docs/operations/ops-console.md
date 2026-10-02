@@ -119,10 +119,12 @@ repo — record what you actually entered on the issue when you do them.
 
 **Ignored Build Step.** `packages/ops/vercel.json` runs the shared
 `scripts/vercel/ignore-build.sh` (#3594), passing it `OPS_FORCE_BUILD` and
-the paths the console is built from: `packages/ops`, `packages/ui`,
-`packages/core`, `scripts/docs`, `tsconfig.base.json` and the root install
-inputs (`package.json`, `package-lock.json`, `.nvmrc`). The haven-ai-frontend
-project runs the same script with its own list
+the watch file `scripts/vercel/watch/ops.txt`, which lists the paths the
+console is built from: `packages/ops`, `packages/ui`, `packages/core`,
+`scripts/docs`, `tsconfig.base.json` and the root install inputs
+(`package.json`, `package-lock.json`, `.nvmrc`). The list lives in a file so
+the command stays under Vercel's length cap. The haven-ai-frontend project
+runs the same script with its own watch file
 (`docs/operations/dev-environment.md`). The script skips a build only when
 nothing watched changed since the commit this project last **deployed**
 (`VERCEL_GIT_PREVIOUS_SHA`). A production build goes ahead whenever that
@@ -131,9 +133,12 @@ Vercel's shallow clone, or git errors. Any `VERCEL_ENV` other than
 `preview`, including none, counts as production, and so does a preview of
 the `dev` or `main` branch. A preview with no earlier deployment (a PR
 branch's first push) instead compares the branch with its merge base with
-`dev`: it skips only when the clone has that merge base and nothing watched
-changed on the branch, so a frontend-only PR does not spend the daily
-deployment cap on an ops preview, while an ops PR always gets one. The rule
+`dev`. Vercel clones the deployed branch alone, so the script first fetches
+`dev`'s recent history from `origin`; it skips only when that yields a merge
+base and nothing watched changed on the branch, and builds on any failure.
+So a frontend-only PR can skip its ops preview, while an ops PR always gets
+one. Whether the fetch succeeds inside Vercel's build is not yet observed:
+the build log's `vercel ignore-build:` line says which branch the rule took. The rule
 never compares against the newest commit's parent: that form (#3580)
 stranded the #3581 fix, whose own build was lost to the cap, behind later
 frontend-only commits (#3591). If a console change still is not live, use
@@ -148,8 +153,8 @@ scope only, redeploy the latest `dev` deployment, then delete
 in the Preview scope, every preview). Two consequences of the watched list:
 
 - The **frontend** project rebuilds on `packages/ui` changes through its own
-  list in `packages/frontend/vercel.json`, which its test checks against the
-  frontend's real build inputs; the ops list does not decide it.
+  watch file, `scripts/vercel/watch/frontend.txt`, which its test checks
+  against the frontend's real build inputs; the ops list does not decide it.
 - A docs-only change rebuilds the console only when it touches
   `scripts/docs`. (It can still rebuild the frontend, which serves four docs
   from `docs/` — that project's list names them.)

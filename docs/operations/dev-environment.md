@@ -86,9 +86,11 @@ deployed that way today.
 
 - Frontend (Vercel): `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
   — the **branch-tracking preview of `dev`**: a stable hostname that Vercel
-  re-points at the newest `dev` deployment without ever changing. That is the
-  newest `dev` commit *that changed the frontend's inputs*, since a push that
-  changes none of them skips its build ([below](#which-pushes-rebuild-the-frontend)). Verified 2026-08-06: it serves the same build as the immutable
+  re-points at the newest `dev` deployment without ever changing. Since #3594
+  that deployment is of the newest `dev` commit *that changed the frontend's
+  inputs*: a push that changes none of them skips its build
+  ([below](#which-pushes-rebuild-the-frontend)). Verified 2026-08-06, before
+  that change: it serves the same build as the immutable
   deployment of `dev` HEAD, and proxies to the dev backend. Per-PR preview links
   exist alongside it (the PR's Vercel check) and are what you use to test *that
   PR's build* — they are a different domain each time.
@@ -166,22 +168,32 @@ deployed that way today.
 
 `packages/frontend/vercel.json` carries the frontend project's repo-expressible
 Vercel settings (#3594): the framework, the install command, the build command
-and the **Ignored Build Step**. The step runs the shared
-`scripts/vercel/ignore-build.sh` with the paths the frontend is built from:
-`packages/frontend`, `packages/ui`, `packages/core`, `tsconfig.base.json`, the
-root install inputs (`package.json`, `package-lock.json`, `.nvmrc`) and the four
-docs `next.config.ts` serves under `/docs/`. A build is skipped only when none
-of them changed since the commit the project last **deployed**; the rule and
-its edge cases are described once, in
+and the **Ignored Build Step**. Vercel reads it only because the project's
+**Root Directory** is `packages/frontend`; leave the install command, build
+command and Ignored Build Step unset in the dashboard, so the file is the one
+source. The step runs the shared `scripts/vercel/ignore-build.sh` with the
+watch file `scripts/vercel/watch/frontend.txt`, which lists the paths the
+frontend is built from: `packages/frontend`, `packages/ui`, `packages/core`,
+`tsconfig.base.json`, the root install inputs (`package.json`,
+`package-lock.json`, `.nvmrc`) and the docs `next.config.ts` serves under
+`/docs/` (the `ALLOWLIST` in `scripts/serve-docs.mjs`). A build is skipped only
+when none of them changed since the commit the project last **deployed**; the
+rule and its edge cases are described once, in
 [`ops-console.md` § Ignored Build Step](ops-console.md#1-the-vercel-project),
 since the ops project runs the same script. For this project that means:
 
-- A backend-, SDK-, CI- or docs-only push shows `Vercel – haven-ai-frontend`:
-  "Canceled by Ignored Build Step", on a PR and on `dev` alike, and spends none
-  of the daily deployment cap. The `dev` host keeps serving the last build,
-  which is current, because nothing it serves changed.
-- A PR's first preview compares the branch with its merge base with `dev`, so a
-  frontend PR gets a preview even when its newest push is docs-only.
+- A push that changes none of those paths (backend, SDK, CI, or a doc other
+  than the served ones) shows `Vercel – haven-ai-frontend`: "Canceled by
+  Ignored Build Step" and builds nothing, provided the commit the project last
+  deployed is in Vercel's clone; when it is not, the step builds. The `dev`
+  host then keeps serving the last build, which is current, because nothing it
+  serves changed.
+- A PR's first preview compares the branch with its merge base with `dev`,
+  fetching `dev` when Vercel's clone lacks it, so a frontend PR gets a preview
+  even when its newest push is docs-only. If no merge base can be found, the
+  preview builds. Whether that fetch succeeds inside Vercel's build is not yet
+  observed; the build log's `vercel ignore-build:` line says which branch the
+  rule took.
 - A push to `dev` or `main` with no recorded previous deployment always builds.
 - The list is checked against the real build inputs by
   `packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts`; a new

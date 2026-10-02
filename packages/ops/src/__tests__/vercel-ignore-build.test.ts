@@ -33,9 +33,13 @@ afterEach(() => {
 })
 
 describe('ops Vercel ignore step (#3591, #3594)', () => {
-  it('passes the shared script the force variable and the watched list', () => {
-    const { forceVariable, watched } = parseIgnoreCommand(ignoreCommand)
+  it('passes the shared script the force variable and the watch file, and the file lists the console inputs', () => {
+    const { forceVariable, watchFile, watched } = parseIgnoreCommand(ignoreCommand)
     expect(forceVariable).toBe('OPS_FORCE_BUILD')
+    expect(watchFile).toBe('scripts/vercel/watch/ops.txt')
+    // Vercel's project settings cap the ignore command's length; the list lives
+    // in the watch file so the command stays short (#3594 review).
+    expect(ignoreCommand.length).toBeLessThan(256)
     expect(watched).toEqual(
       expect.arrayContaining([
         'packages/ops',
@@ -85,7 +89,19 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
     r.commit('packages/frontend/page.tsx')
     expect(r.run({})).toBe(BUILD)
     expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: '' })).toBe(BUILD)
+    expect(r.run({ VERCEL_ENV: '' })).toBe(BUILD)
+    // Production builds on its own, whatever the branch: not because of the
+    // dev/main exception.
+    expect(r.run({ VERCEL_ENV: 'production' })).toBe(BUILD)
+    expect(r.run({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'feat/x' })).toBe(BUILD)
     expect(r.run({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'main' })).toBe(BUILD)
+  })
+
+  it('builds when the watch file is missing', () => {
+    const deployed = r.commit('packages/frontend/page.tsx')
+    r.git('rm', '-q', 'scripts/vercel/watch/ops.txt')
+    r.git('commit', '-q', '-m', 'drop the watch file')
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(BUILD)
   })
 
   it('builds when the previous deployment is unknown, or garbage', () => {
@@ -126,14 +142,30 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
       expect(r.run(preview())).toBe(BUILD)
     })
 
-    it('builds when the clone has no merge base with dev', () => {
+    it('builds when the clone has no merge base with dev and cannot fetch one (case k)', () => {
       r.git('checkout', '-q', '-b', 'feature')
       r.commit('docs/guide.md')
-      const shallow = r.shallowClone() // depth 1, the branch only: no dev ref
+      const shallow = r.shallowClone() // depth 1, the branch only, no origin: no dev ref
       try {
         expect(r.run(preview(), shallow)).toBe(BUILD)
       } finally {
         rmSync(shallow, { recursive: true, force: true })
+      }
+    })
+
+    it('fetches dev when the clone holds the deployed branch only, as Vercel clones it', () => {
+      r.commit('packages/ops/src/a.ts') // on dev, before the branch
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      const unchanged = r.shallowClone({ withOrigin: true, depth: 3 })
+      r.commit('packages/ops/src/b.ts')
+      const changed = r.shallowClone({ withOrigin: true, depth: 3 })
+      try {
+        expect(r.run(preview(), unchanged)).toBe(SKIP)
+        expect(r.run(preview(), changed)).toBe(BUILD)
+      } finally {
+        rmSync(unchanged, { recursive: true, force: true })
+        rmSync(changed, { recursive: true, force: true })
       }
     })
 

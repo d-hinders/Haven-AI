@@ -1,8 +1,9 @@
 /**
  * The haven-ai-frontend Vercel project's Ignored Build Step (#3594). Two halves:
  *
- *  1. The PATH GUARD. The watched list is read from the `ignoreCommand` in this
- *     package's `vercel.json` (the copy Vercel runs) and checked against what
+ *  1. The PATH GUARD. The watched list is read from the watch file the
+ *     `ignoreCommand` in this package's `vercel.json` names (the copy Vercel
+ *     runs) and checked against what
  *     the build actually reads, each input derived from its own source: the
  *     served docs from `scripts/serve-docs.mjs`'s ALLOWLIST, the workspace
  *     packages from `package.json` and `next.config.ts`. A missing input would
@@ -22,6 +23,7 @@ import {
   makeRepo,
   parseIgnoreCommand,
   readIgnoreCommand,
+  rmSync,
 } from '../../../../../scripts/vercel/ignore-build-harness.mjs'
 
 const FRONTEND = join(__dirname, '..', '..', '..')
@@ -70,10 +72,27 @@ describe('frontend Vercel ignore step — the watched list covers every build in
     }
   })
 
-  it('watches the base tsconfig the core and ui builds extend, and the root install inputs', () => {
-    for (const path of ['tsconfig.base.json', 'package.json', 'package-lock.json', '.nvmrc']) {
+  it('watches every tsconfig the watched packages extend outside themselves', () => {
+    const extended = new Set<string>()
+    for (const pkg of ['frontend', 'core', 'ui']) {
+      const config = JSON.parse(readFileSync(join(FRONTEND, '..', pkg, 'tsconfig.json'), 'utf8'))
+      if (typeof config.extends === 'string' && config.extends.startsWith('../../')) {
+        extended.add(config.extends.slice('../../'.length))
+      }
+    }
+    expect([...extended]).toContain('tsconfig.base.json')
+    for (const path of extended) expect(isWatched(path), path).toBe(true)
+  })
+
+  it('watches the root install inputs', () => {
+    for (const path of ['package.json', 'package-lock.json', '.nvmrc']) {
       expect(isWatched(path), path).toBe(true)
     }
+  })
+
+  it('keeps the ignore command short: Vercel caps its length, so the list lives in the watch file', () => {
+    expect(parseIgnoreCommand(ignoreCommand).watchFile).toBe('scripts/vercel/watch/frontend.txt')
+    expect(ignoreCommand.length).toBeLessThan(256)
   })
 })
 
@@ -118,6 +137,18 @@ describe('frontend Vercel ignore step — the rule (#3594)', () => {
     r.commit('packages/frontend/src/app/page.tsx')
     r.commit('docs/operations/runbook.md')
     expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'feat/x' })).toBe(BUILD)
+  })
+
+  it('production, or a preview with no dev history it can find, builds (case k)', () => {
+    r.git('checkout', '-q', '-b', 'feat/z')
+    r.commit('packages/backend/src/routes/payments.ts')
+    expect(r.run({ VERCEL_ENV: 'production' })).toBe(BUILD)
+    const shallow = r.shallowClone()
+    try {
+      expect(r.run({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'feat/z' }, shallow)).toBe(BUILD)
+    } finally {
+      rmSync(shallow, { recursive: true, force: true })
+    }
   })
 
   it('a backend-only PR spends no deployment on its first preview (case j)', () => {

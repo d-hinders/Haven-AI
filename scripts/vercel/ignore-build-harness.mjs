@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SCRIPT_SOURCE = join(HERE, 'ignore-build.sh')
 const SCRIPT_IN_REPO = 'scripts/vercel/ignore-build.sh'
+const REPO_ROOT = join(HERE, '..', '..')
 
 // The script exits exactly 1 when it decides to build. Asserting 1 (not merely
 // non-zero) tells that apart from a broken wrapper: sh's own 2 or 127.
@@ -26,16 +27,26 @@ export function readIgnoreCommand(projectRoot) {
 }
 
 /**
- * The arguments the command passes to the shared script: the force-variable
- * name and the watched paths. Read from the command itself, so a test of the
- * list tests the copy that runs.
+ * What the command passes to the shared script: the force-variable name and
+ * the watch file, plus the watched paths that file lists. Read from the command
+ * and the file it names, so a test of the list tests the copy that runs.
  */
 export function parseIgnoreCommand(command) {
   const marker = `/${SCRIPT_IN_REPO}"`
   const at = command.indexOf(marker)
   if (at === -1) throw new Error(`ignoreCommand does not invoke ${SCRIPT_IN_REPO}: ${command}`)
-  const [forceVariable, ...watched] = command.slice(at + marker.length).trim().split(/\s+/)
-  return { forceVariable, watched }
+  const args = command.slice(at + marker.length).trim().split(/\s+/)
+  if (args.length !== 2) throw new Error(`ignoreCommand must pass <FORCE_VARIABLE> <watch file>: ${command}`)
+  const [forceVariable, watchFile] = args
+  return { forceVariable, watchFile, watched: readWatchFile(watchFile) }
+}
+
+/** The paths a watch file lists, parsed the way the script parses it. */
+export function readWatchFile(watchFile) {
+  return readFileSync(join(REPO_ROOT, watchFile), 'utf8')
+    .split('\n')
+    .map((line) => line.replace(/#.*/, '').trim())
+    .filter(Boolean)
 }
 
 /**
@@ -74,8 +85,10 @@ export function makeRepo({ project, command }) {
     return git('rev-parse', 'HEAD')
   }
 
-  mkdirSync(join(repo, 'scripts', 'vercel'), { recursive: true })
+  mkdirSync(join(repo, 'scripts', 'vercel', 'watch'), { recursive: true })
   copyFileSync(SCRIPT_SOURCE, join(repo, SCRIPT_IN_REPO))
+  const { watchFile } = parseIgnoreCommand(command)
+  copyFileSync(join(REPO_ROOT, watchFile), join(repo, watchFile))
   // The project's Root Directory must exist in every clone, shallow ones
   // included, so the seed commit carries a file in it.
   commit(`packages/${project}/vercel.json`, '{}')
@@ -90,10 +103,16 @@ export function makeRepo({ project, command }) {
     return spawnSync('sh', ['-c', command], { cwd: join(root, 'packages', project), env: hermeticEnv(env) }).status ?? -1
   }
 
-  /** A shallow (depth 1) clone of the repo, for the missing-commit cases. */
-  const shallowClone = () => {
+  /**
+   * A shallow clone (default depth 1) of the repo's current branch, for the
+   * missing-commit cases. Like Vercel's, it holds that branch only. Unless
+   * `withOrigin` is set the `origin` remote is removed, so the script's fetch
+   * of dev cannot happen either.
+   */
+  const shallowClone = ({ withOrigin = false, depth = 1 } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), `${project}-ignore-shallow-`))
-    execFileSync('git', ['clone', '-q', '--depth', '1', `file://${repo}`, dir], { env: hermeticEnv() })
+    execFileSync('git', ['clone', '-q', '--depth', String(depth), `file://${repo}`, dir], { env: hermeticEnv() })
+    if (!withOrigin) execFileSync('git', ['remote', 'remove', 'origin'], { cwd: dir, env: hermeticEnv() })
     return dir
   }
 

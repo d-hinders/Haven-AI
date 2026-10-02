@@ -135,8 +135,8 @@ export const HAS_CONFIRMED_PAYMENT_TO_RECIPIENT_SQL = `SELECT EXISTS (
 
 /**
  * #3531: has THIS agent ever had ANY confirmed payment to this recipient
- * address, on this chain — on any rail (direct, x402, MPP; owner decision,
- * review round 1: the query is deliberately rail-agnostic, including an
+ * address, on this chain — on any rail (direct, x402, MPP; a build decision
+ * made in review round 1 and recorded on #3531: the query is deliberately rail-agnostic, including an
  * EIP-3009 funding leg whose `to_address` happens to be the agent's own
  * delegate EOA — harmless, since it is still this agent's own history)?
  * History-only and agent-scoped by design (owner decision, 2026-10-01) — this

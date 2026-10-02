@@ -164,7 +164,7 @@ export interface PaymentIntent {
    * #3531: advisory, history-only recipient classification — `previously_paid`
    * when this agent has a prior confirmed payment to this recipient,
    * `new_address` otherwise. Never affects signing or policy. Absent against
-   * an older backend.
+   * an older backend, and when the backend's history read fails.
    */
   recipient?: {
     class: 'previously_paid' | 'new_address'

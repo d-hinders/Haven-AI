@@ -557,7 +557,7 @@ describeDb('payment-intents repository (#1223)', () => {
       expect(await hasConfirmedPaymentToRecipient(agentId, 84532, recipient)).toBe(true)
     })
 
-    it('counts a CONFIRMED x402 (machine-rail) payment to the recipient too — the query is rail-agnostic by owner decision', async () => {
+    it('counts a CONFIRMED x402 (machine-rail) payment to the recipient too — the query is rail-agnostic by design', async () => {
       const { agentId, userId } = await seedAgent()
       const recipient = '0x00000000000000000000000000000000000402'
       const machine = await insertMachineIntent(

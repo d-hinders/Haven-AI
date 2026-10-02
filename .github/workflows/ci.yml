@@ -1032,8 +1032,10 @@ jobs:
       # green tick about nothing, the #2318 class). Advisory on `dev`, required on
       # `main`, exactly like the light comparison above: same job identity,
       # same ruleset membership, so no ruleset edit is needed for it to gate
-      # promotion.
-      - name: Visual regression — dark scheme (design system)
+      # promotion. The step name points at that `testMatch` rather than
+      # listing specs: the set is several and moves, and a name that
+      # enumerates it drifts into naming one of a set — the #2318 class above.
+      - name: Visual regression — dark scheme (chromium-desktop-dark testMatch)
         run: npm run test:visual:dark -w packages/frontend
         env:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder

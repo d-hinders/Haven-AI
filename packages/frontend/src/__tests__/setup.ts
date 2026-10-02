@@ -36,21 +36,18 @@ vi.mock('@testing-library/react', async () => {
   }
 })
 
-// `next/font/google` is a build-time transform: outside a Next build its
+// `next/font/local` is a build-time transform: outside a Next build its
 // module exports nothing, so a font loader call throws on import. The public
 // site's fonts (#3573, `components/marketing/site/fonts.ts`) are reached from
-// `SiteHeader`, which many suites render, so every loader returns the shape
-// Next would — a class name and a CSS-variable class named after the option.
-vi.mock('next/font/google', () => {
-  const loader = (name: string) => (options: { variable?: string } = {}) => ({
-    className: `font-${name}`,
+// `SiteHeader`, which many suites render, so the loader returns the shape Next
+// would — a class name and a CSS-variable class named after the option.
+vi.mock('next/font/local', () => ({
+  default: (options: { variable?: string } = {}) => ({
+    className: 'font-local',
     variable: options.variable ? `font-variable-${options.variable.replace(/^--/, '')}` : '',
-    style: { fontFamily: name },
-  })
-  // Named exports, never a Proxy: a Proxy answers `then`, which makes the
-  // module look like a promise and hangs the import.
-  return { Inter: loader('Inter'), Inter_Tight: loader('Inter_Tight'), JetBrains_Mono: loader('JetBrains_Mono') }
-})
+    style: { fontFamily: 'local' },
+  }),
+}))
 
 // Mock localStorage
 const localStorageMock = (() => {

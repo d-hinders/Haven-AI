@@ -115,9 +115,16 @@ repo — record what you actually entered on the issue when you do them.
    (`haven-ops.vercel.app` if the name is free, otherwise a suffixed or
    added `*.vercel.app` domain). Steps 3 and 5 need that exact origin.
 
-**Ignored Build Step.** `packages/ops/vercel.json` skips builds whose diff
-touches none of `packages/ops`, `packages/ui`, `packages/core`,
-`scripts/docs`. Two consequences to verify once, in the dashboards:
+**Ignored Build Step.** `packages/ops/vercel.json` runs
+`packages/ops/scripts/vercel-ignore-build.sh`. It skips a build only when
+nothing under `packages/ops`, `packages/ui`, `packages/core` or
+`scripts/docs` changed since the commit this project last **deployed**
+(`VERCEL_GIT_PREVIOUS_SHA`). When that commit is unknown, it builds. It
+does not compare against the newest commit's parent: that form (#3580)
+stranded the #3581 fix, whose own build was lost to the daily deployment
+cap, behind later frontend-only commits (#3591). If a console change still
+is not live, use Deployments → Create Deployment from the latest `dev`. Two
+consequences to verify once, in the dashboards:
 
 - The **frontend** project must still rebuild on `packages/ui` changes —
   it consumes the shared UI package, and the ops project's ignore step does

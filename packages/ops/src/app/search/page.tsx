@@ -44,7 +44,7 @@ function SearchForm({
 }) {
   return (
     <form
-      className="flex gap-2"
+      className="flex flex-wrap gap-2"
       onSubmit={(event) => {
         event.preventDefault()
         onSubmit()
@@ -54,8 +54,11 @@ function SearchForm({
           its own div.relative wrapper — the wrapper is this flex row's child,
           so the sizing classes must sit HERE (a bare flex-1 on the input is a
           no-op and the field stays at its intrinsic ~20ch width). The input
-          fills the sized wrapper with its own w-full. */}
-      <div className="min-w-0 flex-1 max-w-xl">
+          fills the sized wrapper with its own w-full. min-w-64 keeps the
+          placeholder ("Email, UUID, address or tx hash", ~270px) unclipped:
+          below that the row wraps and the button drops under a full-width
+          input instead of squeezing the field to a clipped sliver. */}
+      <div className="min-w-64 flex-1 max-w-xl">
         <Input
           aria-label="Search"
           name="q"

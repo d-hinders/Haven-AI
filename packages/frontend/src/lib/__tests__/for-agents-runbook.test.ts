@@ -176,7 +176,11 @@ describe('/for-agents.md (#2523)', () => {
     // `npx @haven_ai/cli@@haven_ai/cli@dev`. The command is now the
     // manifest's own `packages.cli.one_liner`, run as given — so the change
     // needed no raise, and the headroom grew instead.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10900)
+    // 10900 -> 11100 for #3597 (the page is 11082 bytes at this commit): "If
+    // something breaks" gains a second paragraph sending an agent to
+    // `haven feedback submit "<text>"` and repeating the never-a-credential
+    // rule.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11100)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

@@ -1118,3 +1118,15 @@ project owner — collaborators have Viewer access, not env-var write access.
 > (`HAVEN_DEMO_PAGE_VISIBLE`, `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`), the
 > projects and their `testMatch` lists are untouched, so the Playwright-build
 > claims above still hold. This note is the only edit.
+
+> **Re-verified #3597 (2026-10-02):** `index.ts`'s `enforcedModules` grew by
+> exactly one entry — `routes/feedback.ts`, born ENFORCED per the rule above
+> (a genuinely new module, `haven feedback submit`, with no existing caller).
+> The generated map (`route-modules.generated.ts`) was regenerated in the
+> same commit and `lint:request-schemas` stayed green with no baseline bump
+> (the handler's own hand-rolled length/type checks were deleted in favour of
+> the spec's `minLength`/`maxLength`, matching `routes/contacts.ts`'s own
+> split between what the schema enforces and what the handler still checks
+> by hand). The shadow/enforce semantics this document describes are
+> unchanged. Nothing else in this file's coverage was touched; this note and
+> the `last-verified` date are the only edits.

@@ -165,6 +165,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "POST /auth/signup": "routes/auth.ts",
   "POST /catalog/submit": "routes/catalog-submissions.ts",
   "POST /contacts": "routes/contacts.ts",
+  "POST /feedback": "routes/feedback.ts",
   "POST /labels": "routes/labels.ts",
   "POST /machine-payments/authorize": "routes/machine-payments.ts",
   "POST /machine-payments/budget-precheck": "routes/machine-payments.ts",

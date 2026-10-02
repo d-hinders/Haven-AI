@@ -98,6 +98,13 @@ export const LEADER_LOCK_KEYS = {
    * CASes).
    */
   submissionReconcile: 811011,
+  /**
+   * Expired CLI-feedback sweep (#3597). Mirrors `rateLimitSweep`: nothing
+   * else removes expired rows, and a missed tick only leaves dead rows, never
+   * a wrong read, because `findFeedbackById` (and every future reader, e.g.
+   * the ops console's #3602) filters `expires_at > NOW()` itself.
+   */
+  feedbackSweep: 811012,
 } as const
 
 /**

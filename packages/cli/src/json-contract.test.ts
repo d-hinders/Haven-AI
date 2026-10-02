@@ -51,6 +51,9 @@ function harness(over: Partial<RunDeps> = {}) {
       out: (l: string) => out.push(l),
       err: (l: string) => err.push(l),
       env: {},
+      // #3597: keeps `feedback submit`'s local secret check off the real
+      // `~/.haven/agents` on whatever machine runs this suite.
+      credentialsBaseDir: '/nonexistent-haven-cli-test-credentials-dir',
       ...over,
     } as RunDeps,
   }
@@ -78,6 +81,12 @@ function argvFor(command: string): string[] {
     // argv still has to parse, and `--wait` is a boolean flag, no extras needed.
     'wallets funding': ['--safe', 's1'],
     'contacts add': ['Alice', '0xalice'], 'contacts remove': ['c1'],
+    // #3597: clean text — no secret layer refuses this, so this row (like
+    // every other command's) asserts the generic backend-refusal path. The
+    // dedicated 'feedback submit, layer 3' describe block below reuses this
+    // same `refusingApi` harness with a HEX-bearing text to exercise the
+    // fail-closed address read instead.
+    'feedback submit': ['The', 'CLI', 'timed', 'out', 'on', 'wallets', 'funding.'],
     login: ['--email', 'ada@example.com'],
   }
   return [...parts, ...(extras[command] ?? []), '--json']
@@ -110,7 +119,6 @@ describe('--json contract, over every command', () => {
       expect(soleJson(out)).toMatchObject({ ok: true, signed_out: true })
       return
     }
-
     expect(code).toBe(EXIT.refused)
     expect(soleJson(out)).toEqual({
       ok: false,
@@ -172,6 +180,30 @@ describe('--json contract, over every command', () => {
   })
 })
 
+describe('feedback submit, layer 3 fail-closed (#3597)', () => {
+  // The generic refusal-loop row above uses clean text, like every other
+  // command's. This reuses the SAME `refusingApi` harness with a 64-hex
+  // candidate, so `GET /agents` (layer 3's address read) itself throws —
+  // proving the check fails CLOSED (refuses) rather than silently skipping
+  // the one layer that stops a private key reaching Haven.
+  it('refuses with its own message, naming the layer, when the address read fails', async () => {
+    const { deps, out } = harness({ makeApi: () => refusingApi(403, 'Refused by policy') })
+    const code = await run(
+      ['feedback', 'submit', `calldata was 0x${'ab'.repeat(32)}`, '--json'],
+      deps,
+    )
+    expect(code).toBe(EXIT.refused)
+    const body = soleJson(out) as { ok: false; error: { code: string; message: string; hint?: string } }
+    expect(body.ok).toBe(false)
+    expect(body.error.code).toBe('refused')
+    expect(body.error.hint).toContain('layer 3')
+    expect(body.error.message).toMatch(/could not verify/i)
+    // Never the generic backend-refusal message — the address read failed
+    // before `api.post` (the call that would carry the text) was ever made.
+    expect(body.error.message).not.toBe('Refused by policy')
+  })
+})
+
 describe('--json contract, success paths', () => {
   // The refusal table above proves the failure half over every command. This
   // proves the SUCCESS half over the commands that print something other than a
@@ -209,6 +241,7 @@ describe('--json contract, success paths', () => {
     'PUT /user/accounts/s1': {},
     'POST /contacts': { id: 'c1', name: 'Alice', address: '0xalice' },
     'DELETE /contacts/c1': {},
+    'POST /feedback': { id: 'f1', created_at: '2026-10-02T00:00:00.000Z', expires_at: '2026-10-09T00:00:00.000Z' },
   }
   function stubApi(): CliApi {
     const resolve = (method: string, path: string) => {
@@ -244,6 +277,7 @@ describe('--json contract, success paths', () => {
     ['contacts list', ['contacts', 'list']],
     ['contacts add', ['contacts', 'add', 'Alice', '0xalice']],
     ['contacts remove', ['contacts', 'remove', 'c1']],
+    ['feedback submit', ['feedback', 'submit', 'The', 'CLI', 'timed', 'out', 'on', 'wallets', 'funding.']],
   ])('%s: success is one JSON value on stdout', async (_label, argv) => {
     const { deps, out } = harness({ makeApi: () => stubApi() })
     expect(await run([...argv, '--json'], deps)).toBe(EXIT.ok)

@@ -70,8 +70,14 @@ describe('haven guide text (#2525)', () => {
     // `npx @haven_ai/cli@@haven_ai/cli@dev` (the 2026-09-28 cold run, finding
     // 1). The command is now the manifest's own `packages.cli.one_liner`, run
     // as given, so no raise was needed — the budget headroom grew instead.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10870)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10787)
+    //
+    // #3597: +212 bytes / +210 units — "If something breaks" gains a second
+    // paragraph: `haven feedback submit "<text>"` needs `haven login` first,
+    // and the sentence repeats the rule never to put a credential in that
+    // text (the command's own secret check already refuses one, but cannot
+    // catch every shape).
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11082)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10997)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

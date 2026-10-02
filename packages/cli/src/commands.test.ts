@@ -48,6 +48,11 @@ function harness(over: Partial<RunDeps> = {}) {
     out: (l) => out.push(l),
     err: (l) => err.push(l),
     env: {},
+    // #3597: `feedback submit`'s secret check reads this directory. Pointed
+    // at a path that cannot exist so these tests never touch a developer's
+    // real `~/.haven/agents` — `readLocalSecrets` treats a missing directory
+    // exactly like an empty one.
+    credentialsBaseDir: '/nonexistent-haven-cli-test-credentials-dir',
     ...over,
   }
   return { deps, out, err }
@@ -744,6 +749,85 @@ describe('management commands (backend-only)', () => {
     // still echoed verbatim — that half is unchanged.
     expect(await run(['agents', 'list'], deps)).toBe(4)
     expect(err.join('\n')).toContain('Account is locked')
+  })
+})
+
+/**
+ * `haven feedback submit "<text>"` (#3597).
+ *
+ * Layer 2 (secrets this machine holds) and layer 3's address-derivation
+ * detail are unit-tested directly against `secret-check.ts` (with an
+ * injected `baseDir`, so they never touch the real `~/.haven`); this block
+ * proves the command's own wiring — that a refusal from ANY layer calls
+ * `POST /feedback` zero times, that the rejected text never reaches stdout
+ * or stderr, and that a clean submission reaches the backend with the text
+ * joined and intact.
+ */
+describe('feedback submit (#3597)', () => {
+  it('requires text', async () => {
+    const api = fakeApi({})
+    const { deps, err } = harness({ makeApi: () => api })
+    expect(await run(['feedback', 'submit'], deps)).toBe(2)
+    expect(api.calls).toEqual([])
+    expect(err.join('\n')).toMatch(/Usage/)
+  })
+
+  it('joins several unquoted words into one text, like `contacts add`', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['feedback', 'submit', 'The', 'CLI', 'crashed', 'on', 'login.'], deps)).toBe(0)
+    expect(api.calls).toContain('POST /feedback')
+  })
+
+  it('refuses text past the length cap before any network call', async () => {
+    const api = fakeApi({})
+    const { deps, err } = harness({ makeApi: () => api })
+    expect(await run(['feedback', 'submit', 'x'.repeat(4001)], deps)).toBe(2)
+    expect(api.calls).toEqual([])
+    expect(err.join('\n')).toMatch(/4000/)
+  })
+
+  it('layer 1: refuses a labelled secret, calls the API zero times, and never echoes it', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+    const { deps, out, err } = harness({ makeApi: () => api })
+    const secret = 'sk_agent_REALSECRETNEVERSENT'
+
+    const code = await run(['feedback', 'submit', `my key is ${secret}`], deps)
+
+    expect(code).toBe(4) // EXIT.refused
+    expect(api.calls).toEqual([])
+    expect([...out, ...err].join('\n')).not.toContain(secret)
+  })
+
+  it('layer 4: refuses a 12-word BIP-39 run, calls the API zero times, and never echoes it', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+    const { deps, out, err } = harness({ makeApi: () => api })
+    const phrase = 'abandon ability able about above absent absorb abstract absurd abuse access accident'
+
+    const code = await run(['feedback', 'submit', `backup: ${phrase}`], deps)
+
+    expect(code).toBe(4)
+    expect(api.calls).toEqual([])
+    expect([...out, ...err].join('\n')).not.toContain(phrase)
+  })
+
+  it('a clean submission reaches the backend and reports the stored id', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: '2026-10-02T00:00:00.000Z', expires_at: '2026-10-09T00:00:00.000Z' } })
+    const { deps, out } = harness({ makeApi: () => api })
+
+    const code = await run(['feedback', 'submit', 'The', 'wallets', 'funding', 'page', 'was', 'slow.'], deps)
+
+    expect(code).toBe(0)
+    expect(api.calls).toContain('POST /feedback')
+    expect(out.join('\n')).toContain('f1')
+  })
+
+  it('needs a session, with the login hint, before any network call', async () => {
+    const api = fakeApi({})
+    const { deps, err } = harness({ sessionStore: memoryStore(null), makeApi: () => api })
+    expect(await run(['feedback', 'submit', 'hello'], deps)).toBe(3)
+    expect(api.calls).toEqual([])
+    expect(err.join('\n')).toMatch(/login/)
   })
 })
 

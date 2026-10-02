@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm ci --no-audit --no-fund",
+  "buildCommand": "npm run build",
+  "ignoreCommand": "sh \"$(git rev-parse --show-toplevel)/scripts/vercel/ignore-build.sh\" FRONTEND_FORCE_BUILD packages/frontend packages/ui packages/core tsconfig.base.json package.json package-lock.json .nvmrc docs/product/account-recovery.md docs/product/agent-key-rotation.md docs/product/agent-passport.md docs/security/delegation-rail-security-model.md"
+}

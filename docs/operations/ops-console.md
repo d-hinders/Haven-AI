@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/ops/**
+  - scripts/vercel/**
   - packages/backend/src/routes/ops.ts
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
@@ -115,22 +116,27 @@ repo — record what you actually entered on the issue when you do them.
    (`haven-ops.vercel.app` if the name is free, otherwise a suffixed or
    added `*.vercel.app` domain). Steps 3 and 5 need that exact origin.
 
-**Ignored Build Step.** `packages/ops/vercel.json` runs
-`packages/ops/scripts/vercel-ignore-build.sh`. It skips a build only when
-nothing under `packages/ops`, `packages/ui`, `packages/core` or
-`scripts/docs` changed since the commit this project last **deployed**
+**Ignored Build Step.** `packages/ops/vercel.json` runs the shared
+`scripts/vercel/ignore-build.sh` (#3594), passing it `OPS_FORCE_BUILD` and
+the paths the console is built from: `packages/ops`, `packages/ui`,
+`packages/core`, `scripts/docs`, `tsconfig.base.json` and the root install
+inputs (`package.json`, `package-lock.json`, `.nvmrc`). The haven-ai-frontend
+project runs the same script with its own list
+(`docs/operations/dev-environment.md`). The script skips a build only when
+nothing watched changed since the commit this project last **deployed**
 (`VERCEL_GIT_PREVIOUS_SHA`). A production build goes ahead whenever that
-cannot be proven: the variable is unset or empty, the commit is missing
-from Vercel's shallow clone, or git errors. Any `VERCEL_ENV` other than
-`preview`, including none, counts as production. A preview with no earlier
-deployment (a branch's first push) instead checks only its newest commit,
-so a frontend-only PR does not spend the daily deployment cap on an ops
-preview; if that commit has no parent in the clone, the preview builds. The
-rule never compares production against the newest commit's parent: that
-form (#3580) stranded the #3581 fix, whose own build was lost to the cap,
-behind later frontend-only commits (#3591). If a console change still is
-not live, use Deployments → Create Deployment with the fix's commit on
-`dev`.
+cannot be proven: the variable is unset or empty, the commit is missing from
+Vercel's shallow clone, or git errors. Any `VERCEL_ENV` other than
+`preview`, including none, counts as production, and so does a preview of
+the `dev` or `main` branch. A preview with no earlier deployment (a PR
+branch's first push) instead compares the branch with its merge base with
+`dev`: it skips only when the clone has that merge base and nothing watched
+changed on the branch, so a frontend-only PR does not spend the daily
+deployment cap on an ops preview, while an ops PR always gets one. The rule
+never compares against the newest commit's parent: that form (#3580)
+stranded the #3581 fix, whose own build was lost to the cap, behind later
+frontend-only commits (#3591). If a console change still is not live, use
+Deployments → Create Deployment with the fix's commit on `dev`.
 
 **Rebuilding an unchanged commit.** Changing `NEXT_PUBLIC_OPS_ENVIRONMENTS`
 (step 3, or adding `prod` below) needs a rebuild, because Next inlines it at
@@ -138,14 +144,14 @@ build time, but nothing in git changed, so the ignore step skips. Set the
 project environment variable `OPS_FORCE_BUILD` to `1` in the **Production**
 scope only, redeploy the latest `dev` deployment, then delete
 `OPS_FORCE_BUILD`; left in place it makes every production push build (and
-in the Preview scope, every preview). Two consequences to verify once, in the dashboards:
+in the Preview scope, every preview). Two consequences of the watched list:
 
-- The **frontend** project must still rebuild on `packages/ui` changes —
-  it consumes the shared UI package, and the ops project's ignore step does
-  not exempt it. Verify the frontend's own ignore configuration still
-  includes `packages/ui` (or has none at all).
-- A docs-only change rebuilds nothing: the ops project skips it unless it
-  touches `scripts/docs`.
+- The **frontend** project rebuilds on `packages/ui` changes through its own
+  list in `packages/frontend/vercel.json`, which its test checks against the
+  frontend's real build inputs; the ops list does not decide it.
+- A docs-only change rebuilds the console only when it touches
+  `scripts/docs`. (It can still rebuild the frontend, which serves four docs
+  from `docs/` — that project's list names them.)
 
 **Previews cannot sign in, by design.** A per-PR preview's Vercel origin is
 not in any backend's `OPS_REDIRECT_ORIGINS`, so the sign-in round trip

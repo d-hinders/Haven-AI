@@ -1,162 +1,163 @@
 // @vitest-environment node
 /**
- * The ops Vercel project's Ignored Build Step (#3591). Runs the REAL
- * `ignoreCommand` from `vercel.json`, through `sh -c` as Vercel does, inside a
+ * The ops Vercel project's Ignored Build Step (#3591, moved to the shared
+ * `scripts/vercel/ignore-build.sh` by #3594). Runs the REAL `ignoreCommand`
+ * from this package's `vercel.json`, through `sh -c` as Vercel does, inside a
  * throwaway git repo that carries a copy of the script. Exit 0 = Vercel skips
- * the build; anything else = it builds.
+ * the build; anything else = it builds. The frontend project's test
+ * (packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts) runs the
+ * same script with its own list.
  */
-import { execFileSync, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import {
+  BUILD,
+  SKIP,
+  makeRepo,
+  parseIgnoreCommand,
+  readIgnoreCommand,
+  rmSync,
+} from '../../../../scripts/vercel/ignore-build-harness.mjs'
 
 const PACKAGE_ROOT = join(__dirname, '..', '..')
-const SCRIPT = 'packages/ops/scripts/vercel-ignore-build.sh'
-const ignoreCommand: string = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'vercel.json'), 'utf8')).ignoreCommand
+const ignoreCommand: string = readIgnoreCommand(PACKAGE_ROOT)
 
-let repo: string
-
-/**
- * The environment every git and sh spawn gets: no inherited `GIT_*` (a git
- * hook exports GIT_DIR / GIT_INDEX_FILE, which would point these commands at
- * the HOST repository), no global or system git config, and no VERCEL_* or
- * OPS_* variable unless a test sets one. The GIT_* filter is the one
- * scripts/ci/money-path-classify.test.mjs uses; the config isolation and the
- * VERCEL_/OPS_ filter are added here.
- */
-function hermeticEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env }
-  for (const key of Object.keys(env)) {
-    if (/^(GIT_|VERCEL_|OPS_)/.test(key)) delete env[key]
-  }
-  return Object.assign(env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, extra)
-}
-
-function git(...args: string[]): string {
-  return execFileSync('git', args, { cwd: repo, encoding: 'utf8', env: hermeticEnv() }).trim()
-}
-
-/** Write a file and commit it; returns the new commit's SHA. */
-function commit(path: string, content = `${Date.now()}-${Math.random()}`): string {
-  mkdirSync(join(repo, path, '..'), { recursive: true })
-  writeFileSync(join(repo, path), content)
-  git('add', '-A')
-  git('commit', '-q', '-m', `touch ${path}`)
-  return git('rev-parse', 'HEAD')
-}
-
-/** Run the ignore step from the project's Root Directory, as Vercel does. Returns the exit code. */
-function ignoreStep(previousSha: string | undefined, vercelEnv?: string, root = repo, extra: Record<string, string> = {}): number {
-  const vars: Record<string, string> = { ...extra }
-  if (previousSha !== undefined) vars.VERCEL_GIT_PREVIOUS_SHA = previousSha
-  if (vercelEnv !== undefined) vars.VERCEL_ENV = vercelEnv
-  return spawnSync('sh', ['-c', ignoreCommand], { cwd: join(root, 'packages', 'ops'), env: hermeticEnv(vars) }).status ?? -1
-}
-
-// The script exits exactly 1 when it decides to build. Asserting 1 (not merely
-// non-zero) tells that apart from a broken wrapper: sh's own 2 or 127.
-const BUILD = 1
-const SKIP = 0
+let r: ReturnType<typeof makeRepo>
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), 'ops-ignore-'))
-  git('init', '-q', '-b', 'dev')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'test')
-  git('config', 'commit.gpgsign', 'false')
-  mkdirSync(join(repo, 'packages', 'ops', 'scripts'), { recursive: true })
-  copyFileSync(join(PACKAGE_ROOT, 'scripts', 'vercel-ignore-build.sh'), join(repo, SCRIPT))
-  commit('packages/frontend/page.tsx')
+  r = makeRepo({ project: 'ops', command: ignoreCommand })
 })
 
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true })
+  r.cleanup()
 })
 
-describe('ops Vercel ignore step (#3591)', () => {
+describe('ops Vercel ignore step (#3591, #3594)', () => {
+  it('passes the shared script the force variable and the watched list', () => {
+    const { forceVariable, watched } = parseIgnoreCommand(ignoreCommand)
+    expect(forceVariable).toBe('OPS_FORCE_BUILD')
+    expect(watched).toEqual(
+      expect.arrayContaining([
+        'packages/ops',
+        'packages/ui',
+        'packages/core',
+        'scripts/docs',
+        // #3594: core's build reads the base tsconfig, and a lockfile-only
+        // bump of `next` must rebuild the console.
+        'tsconfig.base.json',
+        'package.json',
+        'package-lock.json',
+        '.nvmrc',
+      ]),
+    )
+  })
+
   it('skips when nothing the console builds from changed since the last deployment', () => {
-    const deployed = commit('packages/ops/src/a.ts')
-    commit('packages/frontend/page.tsx')
-    commit('docs/guide.md')
-    expect(ignoreStep(deployed)).toBe(SKIP)
+    const deployed = r.commit('packages/ops/src/a.ts')
+    r.commit('packages/frontend/page.tsx')
+    r.commit('docs/guide.md')
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(SKIP)
   })
 
   it('builds an ops change even when an unrelated commit landed on top (the #3591 bug)', () => {
-    const deployed = commit('packages/frontend/page.tsx')
-    commit('packages/ops/src/middleware.ts') // the fix whose own build was lost
-    commit('packages/frontend/page.tsx') // the newer, unrelated tip of dev
-    expect(ignoreStep(deployed)).toBe(BUILD)
+    const deployed = r.commit('packages/frontend/page.tsx')
+    r.commit('packages/ops/src/middleware.ts') // the fix whose own build was lost
+    r.commit('packages/frontend/page.tsx') // the newer, unrelated tip of dev
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(BUILD)
   })
 
-  it.each(['packages/ops/src/x.ts', 'packages/ui/src/Button.tsx', 'packages/core/src/chains.ts', 'scripts/docs/gen.mjs'])(
-    'builds when %s changed since the last deployment',
-    (path) => {
-      const deployed = commit('packages/frontend/page.tsx')
-      commit(path)
-      expect(ignoreStep(deployed)).toBe(BUILD)
-    },
-  )
+  it.each([
+    'packages/ops/src/x.ts',
+    'packages/ui/src/Button.tsx',
+    'packages/core/src/chains.ts',
+    'scripts/docs/gen.mjs',
+    'tsconfig.base.json',
+    'package.json',
+    'package-lock.json',
+    '.nvmrc',
+  ])('builds when %s changed since the last deployment', (path) => {
+    const deployed = r.commit('packages/frontend/page.tsx')
+    r.commit(path)
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(BUILD)
+  })
 
-  it('builds when no previous deployment is recorded', () => {
-    commit('packages/frontend/page.tsx')
-    expect(ignoreStep(undefined)).toBe(BUILD)
-    expect(ignoreStep('')).toBe(BUILD)
+  it('builds when no previous deployment is recorded, in production or with VERCEL_ENV unset', () => {
+    r.commit('packages/frontend/page.tsx')
+    expect(r.run({})).toBe(BUILD)
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: '' })).toBe(BUILD)
+    expect(r.run({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'main' })).toBe(BUILD)
   })
 
   it('builds when the previous deployment is unknown, or garbage', () => {
-    commit('packages/frontend/page.tsx')
-    expect(ignoreStep('0123456789abcdef0123456789abcdef01234567')).toBe(BUILD)
-    expect(ignoreStep('not-a-sha; exit 0')).toBe(BUILD)
+    r.commit('packages/frontend/page.tsx')
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: '0123456789abcdef0123456789abcdef01234567' })).toBe(BUILD)
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: 'not-a-sha; exit 0' })).toBe(BUILD)
   })
 
   it('builds when the previous deployment is missing from a real shallow clone', () => {
-    const deployed = commit('packages/frontend/page.tsx')
-    commit('docs/a.md')
-    commit('docs/b.md')
-    const shallow = mkdtempSync(join(tmpdir(), 'ops-ignore-shallow-'))
+    const deployed = r.commit('packages/frontend/page.tsx')
+    r.commit('docs/a.md')
+    r.commit('docs/b.md')
+    const shallow = r.shallowClone()
     try {
-      execFileSync('git', ['clone', '-q', '--depth', '1', `file://${repo}`, shallow], { env: hermeticEnv() })
       // Nothing the console builds from changed, yet the deployed commit is
       // not in the clone, so the step cannot prove that, and must build.
-      expect(ignoreStep(deployed, undefined, shallow)).toBe(BUILD)
+      expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed }, shallow)).toBe(BUILD)
     } finally {
       rmSync(shallow, { recursive: true, force: true })
     }
   })
 
-  describe('a first preview (no previous deployment) falls back to the newest commit, to spare the deployment cap', () => {
-    it('skips a preview whose newest commit does not touch the console', () => {
-      commit('packages/ops/src/a.ts')
-      commit('packages/frontend/page.tsx')
-      expect(ignoreStep(undefined, 'preview')).toBe(SKIP)
-      expect(ignoreStep('', 'preview')).toBe(SKIP)
+  describe('a PR branch with no previous deployment compares with its merge base with dev (#3594)', () => {
+    const preview = (ref = 'feature') => ({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: ref })
+
+    it('skips a branch that changed nothing watched', () => {
+      r.commit('packages/ops/src/a.ts') // on dev, before the branch
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('packages/frontend/page.tsx')
+      r.commit('docs/guide.md')
+      expect(r.run(preview())).toBe(SKIP)
     })
 
-    it('builds a preview whose newest commit touches the console', () => {
-      commit('packages/ui/src/Card.tsx')
-      expect(ignoreStep(undefined, 'preview')).toBe(BUILD)
+    it('builds a branch that changed a watched path, even under a newer unrelated commit (the #3591 shape)', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('packages/ui/src/Card.tsx')
+      r.commit('docs/guide.md') // the newest push is docs-only
+      expect(r.run(preview())).toBe(BUILD)
     })
 
-    it('a later preview push uses the previous deployment, not the newest commit', () => {
-      const deployed = commit('packages/frontend/page.tsx')
-      commit('packages/ops/src/a.ts')
-      commit('packages/frontend/page.tsx')
-      expect(ignoreStep(deployed, 'preview')).toBe(BUILD)
+    it('builds when the clone has no merge base with dev', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      const shallow = r.shallowClone() // depth 1, the branch only: no dev ref
+      try {
+        expect(r.run(preview(), shallow)).toBe(BUILD)
+      } finally {
+        rmSync(shallow, { recursive: true, force: true })
+      }
     })
 
-    it('never applies to production, or to an unset VERCEL_ENV', () => {
-      commit('packages/ops/src/a.ts')
-      commit('packages/frontend/page.tsx')
-      expect(ignoreStep(undefined, 'production')).toBe(BUILD)
-      expect(ignoreStep(undefined)).toBe(BUILD)
+    it('never applies to the dev or main branches, whose deployments must never be stale', () => {
+      r.commit('docs/guide.md')
+      expect(r.run(preview('dev'))).toBe(BUILD)
+      expect(r.run(preview('main'))).toBe(BUILD)
+    })
+
+    it('a later preview push uses the previous deployment, not the merge base', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('packages/ops/src/a.ts')
+      const deployed = r.commit('docs/guide.md')
+      r.commit('docs/more.md')
+      expect(r.run({ ...preview(), VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(SKIP)
     })
   })
 
   it('OPS_FORCE_BUILD=1 builds an unchanged commit (an env-only change needs a rebuild)', () => {
-    const deployed = commit('packages/frontend/page.tsx')
-    expect(ignoreStep(deployed)).toBe(SKIP)
-    expect(ignoreStep(deployed, undefined, repo, { OPS_FORCE_BUILD: '1' })).toBe(BUILD)
-    expect(ignoreStep(deployed, undefined, repo, { OPS_FORCE_BUILD: '0' })).toBe(SKIP)
+    const deployed = r.commit('packages/frontend/page.tsx')
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(SKIP)
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, OPS_FORCE_BUILD: '1' })).toBe(BUILD)
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, OPS_FORCE_BUILD: '0' })).toBe(SKIP)
+    // The other project's force variable does not force this one.
+    expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, FRONTEND_FORCE_BUILD: '1' })).toBe(SKIP)
   })
 })

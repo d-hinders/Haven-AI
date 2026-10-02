@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { Inter } from 'next/font/google'
 import '@haven_ai/ui/tokens.css'
 import './globals.css'
 import { deploymentRegistry } from '../lib/deployment'
@@ -7,6 +8,13 @@ import { OpsApp } from '../components/OpsApp'
 // noindex (#3515): a private console must not be crawled. The robots
 // directive rides the layout metadata so every page inherits it; the
 // headers in next.config.ts set `X-Robots-Tag: noindex` on the wire as well.
+// Inter, loaded the way the dashboard loads it (#3584). `next/font` downloads
+// the files at BUILD time and self-hosts them under `/_next/static/media`, so
+// the browser never contacts Google and the CSP's `font-src 'self'` holds.
+// The cost is a build-time fetch: a Google Fonts outage fails `ops_checks`'
+// build, not the deployed page.
+const inter = Inter({ subsets: ['latin'] })
+
 export const metadata: Metadata = {
   title: 'Haven Ops',
   description: 'The Haven operations console.',
@@ -31,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const registry = deploymentRegistry()
   return (
     <html lang="en">
-      <body>
+      <body className={`${inter.className} antialiased`}>
         <OpsApp registry={registry}>{children}</OpsApp>
       </body>
     </html>

@@ -524,7 +524,7 @@ The general point, since it will recur: when a dead style rule comes back to lif
 
 ## 2. Typography
 
-Font: Inter (already loaded via `next/font/google` in `app/layout.tsx`). Optional later: switch headings to Inter Display.
+Font: Inter (already loaded via `next/font/google` in `app/layout.tsx`, in both `packages/frontend` and `packages/ops` (#3584)). Optional later: switch headings to Inter Display.
 
 Authenticated app pages use compact product typography utilities from `globals.css`:
 

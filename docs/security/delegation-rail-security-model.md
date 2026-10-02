@@ -1409,6 +1409,15 @@ authority, and the same scope note holds.
 > (the diff touches no file that implements them), and `last-verified` is
 > not bumped.
 
+> **Re-verified #3584 (2026-10-02, console typography):** the change touches
+> `packages/ops/src/app/layout.tsx` (Inter through `next/font/google`, which
+> self-hosts the font files under `/_next/static/media` at build time, so the
+> CSP's `font-src 'self' data:` is unchanged) and `SignInView.tsx` (the
+> sign-in button's `size="lg"`). No client method, read, reveal, sign-in
+> navigation or backend file changes, so the no-rail-authority claim above
+> holds verbatim. Scope of this re-read: this section only; `last-verified`
+> is not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a

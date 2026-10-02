@@ -41,12 +41,20 @@ export function parseIgnoreCommand(command) {
   return { forceVariable, watchFile, watched: readWatchFile(watchFile) }
 }
 
-/** The paths a watch file lists, parsed the way the script parses it. */
+/**
+ * The paths a watch file lists, parsed the way the script parses it. An entry
+ * containing whitespace is refused: the script word-splits the list, so it
+ * would watch two paths where this parser saw one.
+ */
 export function readWatchFile(watchFile) {
-  return readFileSync(join(REPO_ROOT, watchFile), 'utf8')
+  const entries = readFileSync(join(REPO_ROOT, watchFile), 'utf8')
     .split('\n')
     .map((line) => line.replace(/#.*/, '').trim())
     .filter(Boolean)
+  for (const entry of entries) {
+    if (/\s/.test(entry)) throw new Error(`${watchFile}: entry "${entry}" contains whitespace; the script word-splits the list`)
+  }
+  return entries
 }
 
 /**

@@ -9,7 +9,7 @@ tsconfig.base.json
 package.json
 package-lock.json
 .nvmrc
-# The docs next.config.ts serves under /docs/ (scripts/serve-docs.mjs ALLOWLIST).
+# The docs next.config.ts serves under /docs/ (packages/frontend/scripts/serve-docs.mjs ALLOWLIST).
 docs/product/account-recovery.md
 docs/product/agent-key-rotation.md
 docs/product/agent-passport.md

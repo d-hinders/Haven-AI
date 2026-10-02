@@ -68,7 +68,7 @@ how to configure it. For the branch workflow that feeds it, see
 
 | Service | Platform | Deploys from | Notes |
 |---|---|---|---|
-| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, serving the newest `dev` build — and a push that changes nothing the frontend is built from builds nothing; see [Which pushes rebuild the frontend](#which-pushes-rebuild-the-frontend)). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
+| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, serving the newest `dev` build — and a push that changes nothing the frontend is built from normally builds nothing; see [Which pushes rebuild the frontend](#which-pushes-rebuild-the-frontend)). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend via its own `HAVEN_API_URL`. ⚠️ Was found wired to `main` with a dead upstream on 2026-08-06 — [verify before trusting it](#verifying-a-dev-service-actually-works). |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. Advertises EIP-3009 first by default; the ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
@@ -88,8 +88,8 @@ deployed that way today.
   — the **branch-tracking preview of `dev`**: a stable hostname that Vercel
   re-points at the newest `dev` deployment without ever changing. Since #3594
   that deployment is of the newest `dev` commit *that changed the frontend's
-  inputs*: a push that changes none of them skips its build
-  ([below](#which-pushes-rebuild-the-frontend)). Verified 2026-08-06, before
+  inputs*: a push that changes none of them normally skips its build
+  ([below](#which-pushes-rebuild-the-frontend), including when it builds anyway). Verified 2026-08-06, before
   that change: it serves the same build as the immutable
   deployment of `dev` HEAD, and proxies to the dev backend. Per-PR preview links
   exist alongside it (the PR's Vercel check) and are what you use to test *that
@@ -176,7 +176,7 @@ watch file `scripts/vercel/watch/frontend.txt`, which lists the paths the
 frontend is built from: `packages/frontend`, `packages/ui`, `packages/core`,
 `tsconfig.base.json`, the root install inputs (`package.json`,
 `package-lock.json`, `.nvmrc`) and the docs `next.config.ts` serves under
-`/docs/` (the `ALLOWLIST` in `scripts/serve-docs.mjs`). A build is skipped only
+`/docs/` (the frontend's served-docs `ALLOWLIST`). A build is skipped only
 when none of them changed since the commit the project last **deployed**; the
 rule and its edge cases are described once, in
 [`ops-console.md` § Ignored Build Step](ops-console.md#1-the-vercel-project),

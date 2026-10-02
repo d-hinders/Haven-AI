@@ -8,7 +8,8 @@
 # <FORCE_VARIABLE> names an environment variable that, set to 1, forces one
 # build. <watch file> is a repo-relative file (scripts/vercel/watch/*.txt)
 # listing, one per line, the repo-relative paths the project is built from;
-# `#` starts a comment. The list lives in a file, not in vercel.json, so the
+# `#` starts a comment. Paths may not contain whitespace (the list is
+# word-split); the harness refuses such an entry. The list lives in a file, not in vercel.json, so the
 # ignoreCommand stays short. Each project's test reads the same file.
 #
 # The rule. It compares HEAD with the last commit this project actually
@@ -88,7 +89,8 @@ fi
 
 # The merge base of HEAD with dev, or nothing. Tries the refs the clone has,
 # then one shallow fetch of dev from origin (Vercel clones the deployed branch
-# alone). Any failure yields nothing, and the caller builds.
+# alone), which never prompts and gives up on a stalled connection. Any failure
+# yields nothing, and the caller builds.
 merge_base_with_dev() {
   for candidate in origin/dev dev; do
     if git rev-parse -q --verify "${candidate}^{commit}" >/dev/null 2>&1; then
@@ -96,7 +98,9 @@ merge_base_with_dev() {
     fi
   done
   if git remote get-url origin >/dev/null 2>&1 &&
-    GIT_TERMINAL_PROMPT=0 git fetch -q --no-tags --depth=200 origin "+refs/heads/dev:refs/remotes/origin/dev" >/dev/null 2>&1; then
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=20' \
+      git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
+      fetch -q --no-tags --depth=200 origin "+refs/heads/dev:refs/remotes/origin/dev" >/dev/null 2>&1; then
     git merge-base HEAD origin/dev 2>/dev/null && return 0
   fi
   return 1

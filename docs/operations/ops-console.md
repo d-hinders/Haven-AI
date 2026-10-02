@@ -157,8 +157,8 @@ in the Preview scope, every preview). Two consequences of the watched list:
   watch file, `scripts/vercel/watch/frontend.txt`, which its test checks
   against the frontend's real build inputs; the ops list does not decide it.
 - A docs-only change rebuilds the console only when it touches
-  `scripts/docs`. (It can still rebuild the frontend, which serves four docs
-  from `docs/` — that project's list names them.)
+  `scripts/docs`. (It can still rebuild the frontend, which serves the docs
+  its `serve-docs.mjs` ALLOWLIST names — that project's watch file lists them.)
 
 **Previews cannot sign in, by design.** A per-PR preview's Vercel origin is
 not in any backend's `OPS_REDIRECT_ORIGINS`, so the sign-in round trip

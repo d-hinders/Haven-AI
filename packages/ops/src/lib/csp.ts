@@ -12,11 +12,12 @@
  * `content-security-policy` header and stamps that nonce on its own scripts.
  * `'strict-dynamic'` lets those nonced scripts load the app's chunks;
  * `'self'` is only the fallback for browsers without CSP level 3. There is
- * deliberately no `'unsafe-inline'` and no `'unsafe-eval'`.
+ * deliberately no `'unsafe-inline'`, and no `'unsafe-eval'` in production.
  *
- * `connect-src` is exactly the origins this deployment offers: the caller
- * passes `deploymentRegistry()`'s list, the one the switcher shows, so a
- * preview deployment's policy leaves out the prod origin just as its UI does.
+ * `connect-src` is `'self'` plus exactly the origins this deployment offers:
+ * the caller passes `deploymentRegistry()`'s list, the one the switcher
+ * shows, so a preview deployment's policy leaves out the prod origin just as
+ * its UI does.
  * A config-error registry offers none, giving `connect-src 'self'`: the
  * console cannot talk anywhere, which is what its config-error screen says.
  *

@@ -15,7 +15,8 @@ export const metadata: Metadata = {
 
 // Dynamic rendering (#3581): the middleware's CSP carries a per-request script
 // nonce, and Next stamps it on its scripts only while rendering a request. A
-// prerendered page would bake one nonce into every response.
+// prerendered page is rendered at build time with no request, so its HTML
+// carries no nonce and the browser refuses every script.
 export const dynamic = 'force-dynamic'
 
 export const viewport: Viewport = {

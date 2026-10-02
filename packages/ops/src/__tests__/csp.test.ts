@@ -134,7 +134,7 @@ describe('exactly one CSP source (#3581)', () => {
 describe('the root layout renders per request (#3581)', () => {
   // Measured in a real build: without this export Next prerenders `/` as
   // static, the HTML carries no nonce, and the browser refuses every script
-  // again (blank page, 13 CSP errors). A literal check, because only a
+  // again (a blank page; measured in #3581's PR). A literal check, because only a
   // browser can prove the consequence; the PR records that proof.
   it('layout.tsx exports dynamic = force-dynamic', () => {
     const layout = readFileSync(join(__dirname, '..', 'app', 'layout.tsx'), 'utf8')

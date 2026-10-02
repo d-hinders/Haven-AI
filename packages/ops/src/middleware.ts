@@ -6,7 +6,8 @@
  * request's `content-security-policy` header during render
  * (`getScriptNonceFromHeader`) and stamps that nonce on every script it
  * emits. The root layout opts into dynamic rendering so each response carries
- * its own nonce; a prerendered page would bake one nonce into every response.
+ * its own nonce; a prerendered page is rendered with no request, so its HTML
+ * would carry no nonce at all.
  *
  * The other hardening headers (#3515) stay static in `next.config.ts`; only
  * the CSP lives here, so a response carries exactly one.

@@ -3183,7 +3183,118 @@ async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
 // answers (`ready` | `not-ready` | `loading`). Reset at the top of each run.
 let halfRevokedSignerStage = 'ready'
 
+// The auth pages' API stages (#3578): the redesigned sign-in and sign-up
+// captures need the error band and the in-flight submit, which no URL can
+// reach — both exist only while a login/register round-trip has just failed
+// or is still pending. Staged like the accounting feed above, reset per
+// navigation by the scenario's own `gotoAuth`.
+const AUTH_API_STAGES = { normal: null, error: null, loading: null }
+let authApiStage = 'normal'
+function setAuthApiStage(next) {
+  if (!(next in AUTH_API_STAGES)) {
+    throw new Error(
+      `auth-shell-states: unknown stage "${next}" — expected one of ` + Object.keys(AUTH_API_STAGES).join(', '),
+    )
+  }
+  authApiStage = next
+}
+
 export const SCENARIOS = {
+  'auth-shell-states': {
+    description:
+      'The sign-in and sign-up cards (#3578) at the states a URL cannot reach: each API error band, the in-flight submit on both pages, sign-up client validation, and the registered banner. Signed out by declaration — an authenticated context would redirect off both pages.',
+    signedOut: true,
+    api(apiPath, method) {
+      if (apiPath !== '/auth/login' && apiPath !== '/auth/register') return undefined
+      if (method !== 'POST') return undefined
+      if (authApiStage === 'error') {
+        // Login maps every 4xx to its own generic copy; signup renders the
+        // body's message verbatim — so the 409's error string is the capture.
+        return apiPath === '/auth/login'
+          ? new ScenarioHttpError(401, { error: 'Invalid email or password.' })
+          : new ScenarioHttpError(409, { error: 'An account with this email already exists.' })
+      }
+      if (authApiStage === 'loading') {
+        // Longer than every wait below: the round-trip stays pending until
+        // the next state navigates away, which is what holds the in-flight
+        // screen up long enough to photograph it.
+        return delayedHttp(30_000, { token: 'screenshot-delayed-token', user: FIXTURE_USER })
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      const gotoAuth = async (route) => {
+        setAuthApiStage('normal')
+        await page.goto(`${BASE_URL}${route}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        await page.evaluate(() => document.fonts.ready)
+      }
+      // The main region carries the ground, the card and the hand-off note;
+      // the route captures beside this scenario show the full shell.
+      const main = page.locator('main').first()
+      const shootCard = async (name) => {
+        await main.waitFor({ timeout: 20_000 })
+        await shoot(main, name)
+      }
+      const fillLogin = async () => {
+        await page.getByLabel('Email').fill('ada@haven.test')
+        await page.getByLabel('Password').fill('correct horse battery staple')
+      }
+      const fillSignup = async () => {
+        await page.getByLabel('Name').fill('Ada Lovelace')
+        await page.getByLabel('Email').fill('ada@haven.test')
+        await page.getByLabel('Password', { exact: true }).fill('correct horse battery staple')
+        await page.getByLabel('Confirm password').fill('correct horse battery staple')
+      }
+
+      // ── sign-in: the API error band ──────────────────────────────────────
+      await gotoAuth('/login')
+      setAuthApiStage('error')
+      await fillLogin()
+      await page.getByRole('button', { name: 'Log in', exact: true }).click()
+      await page.getByText('Invalid email or password.').waitFor({ timeout: 20_000 })
+      await shootCard('login-api-error')
+
+      // ── sign-in: in-flight submit ────────────────────────────────────────
+      await gotoAuth('/login')
+      setAuthApiStage('loading')
+      await fillLogin()
+      await page.getByRole('button', { name: 'Log in', exact: true }).click()
+      await page.getByRole('button', { name: 'Logging in...' }).waitFor({ timeout: 20_000 })
+      await shootCard('login-loading')
+
+      // ── sign-in: the registered banner ───────────────────────────────────
+      await gotoAuth('/login?registered=1')
+      await page.getByText('Account created. Log in to continue.').waitFor({ timeout: 20_000 })
+      await shootCard('login-registered')
+
+      // ── sign-up: client validation (email rule + confirm mismatch) ──────
+      await gotoAuth('/signup')
+      await fillSignup()
+      await page.getByLabel('Email').fill('not-an-email')
+      await page.getByLabel('Confirm password').fill('a different passphrase')
+      await page.getByRole('button', { name: 'Create account', exact: true }).click()
+      await page.getByText('Enter a valid email address.').waitFor({ timeout: 20_000 })
+      await page.getByText('Passwords do not match.').waitFor({ timeout: 20_000 })
+      await shootCard('signup-validation')
+
+      // ── sign-up: the API error band ──────────────────────────────────────
+      await gotoAuth('/signup')
+      setAuthApiStage('error')
+      await fillSignup()
+      await page.getByRole('button', { name: 'Create account', exact: true }).click()
+      await page.getByText('An account with this email already exists.').waitFor({ timeout: 20_000 })
+      await shootCard('signup-api-error')
+
+      // ── sign-up: in-flight submit ────────────────────────────────────────
+      await gotoAuth('/signup')
+      setAuthApiStage('loading')
+      await fillSignup()
+      await page.getByRole('button', { name: 'Create account', exact: true }).click()
+      await page.getByRole('button', { name: 'Creating account...' }).waitFor({ timeout: 20_000 })
+      await shootCard('signup-loading')
+    },
+  },
+
   'settings-accounting': {
     description:
       'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the two feed OFF states — Coming soon and self-hosted (#2869)',
@@ -5931,7 +6042,14 @@ async function main() {
         // into the route captures — or across the two sides of a `both` run.
         for (const scenario of scenarios) {
           const label = `scenario:${scenario.name}`
-          const scenarioContext = await newFixtureContext(browser, vp, scenario, { colorScheme: scheme })
+          // A scenario may declare `signedOut: true` (#2825's rule, scenario-
+          // shaped): the auth pages redirect a seeded session to the dashboard,
+          // so their states exist only without the token seed. Same opt-out the
+          // route captures use — no new mechanism, one more caller of it.
+          const scenarioContext = await newFixtureContext(browser, vp, scenario, {
+            colorScheme: scheme,
+            signedOut: scenario.signedOut === true,
+          })
           const scenarioPage = await scenarioContext.newPage()
           scenarioPage.on('console', (msg) => {
             if (msg.type() === 'error') {

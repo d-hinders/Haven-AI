@@ -13,9 +13,14 @@
  */
 import { NextResponse, type NextRequest } from 'next/server'
 import { buildCsp, generateNonce } from './lib/csp'
+import { deploymentRegistry } from './lib/deployment'
 
 export function middleware(request: NextRequest): NextResponse {
-  const csp = buildCsp({ nonce: generateNonce(), registryRaw: process.env.NEXT_PUBLIC_OPS_ENVIRONMENTS })
+  const csp = buildCsp({
+    nonce: generateNonce(),
+    connectOrigins: deploymentRegistry().environments.map((environment) => environment.origin),
+    development: process.env.NODE_ENV === 'development',
+  })
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set('content-security-policy', csp)
   const response = NextResponse.next({ request: { headers: requestHeaders } })

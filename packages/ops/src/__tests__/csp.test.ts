@@ -28,14 +28,14 @@ function directives(csp: string): Map<string, string[]> {
 
 describe('buildCsp', () => {
   it('gates scripts on the nonce, with no unsafe-inline or unsafe-eval', () => {
-    const csp = buildCsp({ nonce: 'abc123==', registryRaw: REGISTRY })
+    const csp = buildCsp({ nonce: 'abc123==', connectOrigins: [DEV] })
     expect(directives(csp).get('script-src')).toEqual(["'self'", "'nonce-abc123=='", "'strict-dynamic'"])
     expect(csp).not.toContain('unsafe-eval')
     expect(directives(csp).get('script-src')).not.toContain("'unsafe-inline'")
   })
 
   it('keeps connect-src to self plus exactly the registry origins, and the #3515 directives', () => {
-    const d = directives(buildCsp({ nonce: 'n', registryRaw: REGISTRY }))
+    const d = directives(buildCsp({ nonce: 'n', connectOrigins: [DEV] }))
     expect(d.get('connect-src')).toEqual(["'self'", DEV])
     expect(d.get('frame-ancestors')).toEqual(["'none'"])
     expect(d.get('object-src')).toEqual(["'none'"])
@@ -44,8 +44,15 @@ describe('buildCsp', () => {
     expect(d.get('default-src')).toEqual(["'self'"])
   })
 
-  it('a registry with no usable origin adds no connect-src origin', () => {
-    expect(directives(buildCsp({ nonce: 'n', registryRaw: undefined })).get('connect-src')).toEqual(["'self'"])
+  it('no offered origin leaves connect-src at self', () => {
+    expect(directives(buildCsp({ nonce: 'n', connectOrigins: [] })).get('connect-src')).toEqual(["'self'"])
+  })
+
+  it("only a development server adds 'unsafe-eval' (next dev evaluates its chunks)", () => {
+    expect(directives(buildCsp({ nonce: 'n', connectOrigins: [], development: true })).get('script-src')).toContain(
+      "'unsafe-eval'",
+    )
+    expect(buildCsp({ nonce: 'n', connectOrigins: [] })).not.toContain('unsafe-eval')
   })
 
   it('generateNonce is base64 of 16 bytes, and Next can read it back', () => {
@@ -53,13 +60,13 @@ describe('buildCsp', () => {
     expect(nonce).toMatch(/^[A-Za-z0-9+/]{22}==$/)
     // Next's own parser (the one app-render calls) must recover it, or Next
     // stamps no nonce and every script is refused again.
-    expect(getScriptNonceFromHeader(buildCsp({ nonce, registryRaw: REGISTRY }))).toBe(nonce)
+    expect(getScriptNonceFromHeader(buildCsp({ nonce, connectOrigins: [DEV] }))).toBe(nonce)
   })
 })
 
 describe('middleware', () => {
-  function run(): { request: string | null; response: string | null } {
-    process.env.NEXT_PUBLIC_OPS_ENVIRONMENTS = REGISTRY
+  function run(registry = REGISTRY): { request: string | null; response: string | null } {
+    process.env.NEXT_PUBLIC_OPS_ENVIRONMENTS = registry
     const res = middleware(new NextRequest('https://ops.example/'))
     // NextResponse.next({ request: { headers } }) encodes the overridden
     // request headers as x-middleware-request-* on the response.
@@ -75,6 +82,20 @@ describe('middleware', () => {
     expect(request).toBe(response)
     expect(response).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/]+=*' 'strict-dynamic'/)
     expect(response).toContain(`connect-src 'self' ${DEV}`)
+  })
+
+  it('on a preview deployment, connect-src leaves out the prod origin, as the switcher does', () => {
+    const prod = 'https://havenbackend-prod.example'
+    const previous = process.env.VERCEL_ENV
+    process.env.VERCEL_ENV = 'preview'
+    try {
+      const csp = run(JSON.stringify({ dev: DEV, prod })).response ?? ''
+      expect(csp).toContain(`connect-src 'self' ${DEV}`)
+      expect(csp).not.toContain(prod)
+    } finally {
+      if (previous === undefined) delete process.env.VERCEL_ENV
+      else process.env.VERCEL_ENV = previous
+    }
   })
 
   it('issues a fresh nonce per request', () => {

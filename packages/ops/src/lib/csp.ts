@@ -14,22 +14,32 @@
  * `'self'` is only the fallback for browsers without CSP level 3. There is
  * deliberately no `'unsafe-inline'` and no `'unsafe-eval'`.
  *
- * `connect-src` is exactly the registry origins (parsed by the same module the
- * app uses, so the header and the switcher cannot disagree). A registry with
- * no usable origin adds none: the console cannot talk anywhere, which is what
- * its config-error screen says.
+ * `connect-src` is exactly the origins this deployment offers: the caller
+ * passes `deploymentRegistry()`'s list, the one the switcher shows, so a
+ * preview deployment's policy leaves out the prod origin just as its UI does.
+ * A config-error registry offers none, giving `connect-src 'self'`: the
+ * console cannot talk anywhere, which is what its config-error screen says.
+ *
+ * `next dev` evaluates its chunks with `eval`, so a development server adds
+ * `'unsafe-eval'`. Production never does.
  */
-import { parseEnvironments } from './environments'
-
-export function buildCsp({ nonce, registryRaw }: { nonce: string; registryRaw: string | undefined }): string {
-  const connectSrc = parseEnvironments(registryRaw).environments.map((environment) => environment.origin)
+export function buildCsp({
+  nonce,
+  connectOrigins,
+  development = false,
+}: {
+  nonce: string
+  connectOrigins: string[]
+  development?: boolean
+}): string {
+  const scriptSrc = ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", ...(development ? ["'unsafe-eval'"] : [])]
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `script-src ${scriptSrc.join(' ')}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self' data:",
-    `connect-src 'self' ${connectSrc.join(' ')}`.trim(),
+    `connect-src 'self' ${connectOrigins.join(' ')}`.trim(),
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

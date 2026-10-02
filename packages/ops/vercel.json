@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "installCommand": "npm ci --no-audit --no-fund",
   "buildCommand": "npm run build",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- packages/ops packages/ui packages/core scripts/docs",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ':(top)packages/ops' ':(top)packages/ui' ':(top)packages/core' ':(top)scripts/docs'",
   "headers": [
     {
       "source": "/(.*)",

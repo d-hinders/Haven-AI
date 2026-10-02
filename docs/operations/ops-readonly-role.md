@@ -26,8 +26,11 @@ the read-only role from #3510:
 
 What it may read, and the columns it never may, is
 `packages/backend/src/infra/ops-readonly-role.ts`. That file is the single
-source; this page is only the operator steps. The full ops-console runbook,
-`docs/operations/ops-console.md`, lands with #3517 and links here.
+source; this page is only the operator steps. The full ops-console runbook —
+the Vercel project, the OAuth App, the six `OPS_*` variables, the registry
+entry, adding prod, the kill switch and the audit log — is
+[`docs/operations/ops-console.md`](ops-console.md) (#3517); this page is its
+step 4, expanded.
 
 Without `OPS_DATABASE_URL` the console's data routes answer 404, and there is
 no fallback to the main login.

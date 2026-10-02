@@ -5,9 +5,6 @@ import './globals.css'
 import { deploymentRegistry } from '../lib/deployment'
 import { OpsApp } from '../components/OpsApp'
 
-// noindex (#3515): a private console must not be crawled. The robots
-// directive rides the layout metadata so every page inherits it; the
-// headers in next.config.ts set `X-Robots-Tag: noindex` on the wire as well.
 // Inter, loaded the way the dashboard loads it (#3584). `next/font` downloads
 // the files at BUILD time and self-hosts them under `/_next/static/media`, so
 // the browser never contacts Google and the CSP's `font-src 'self'` holds.
@@ -15,6 +12,9 @@ import { OpsApp } from '../components/OpsApp'
 // build, not the deployed page.
 const inter = Inter({ subsets: ['latin'] })
 
+// noindex (#3515): a private console must not be crawled. The robots
+// directive rides the layout metadata so every page inherits it; the
+// headers in next.config.ts set `X-Robots-Tag: noindex` on the wire as well.
 export const metadata: Metadata = {
   title: 'Haven Ops',
   description: 'The Haven operations console.',

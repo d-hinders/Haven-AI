@@ -108,6 +108,11 @@ export const OPS_READONLY_GRANTS: Readonly<Record<string, readonly string[]>> = 
   ],
   // Public-key material only (`user_passkeys`, which holds `raw_attestation`, is not granted).
   hybrid_account_passkeys: ['id', 'account_id', 'key_id', 'public_key_x', 'public_key_y', 'label', 'created_at'],
+  // Join key only (#3514): `FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL` reuses
+  // this table in its NOT EXISTS probe — under column-level grants Postgres
+  // denies the subquery entirely, so without it GET /ops/health would 500 on
+  // every call as this role. A new column stays unreadable until listed here.
+  machine_payment_evidence: ['payment_intent_id'],
 }
 
 /**

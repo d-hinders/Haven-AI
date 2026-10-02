@@ -322,6 +322,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the operational problems: sweepable intents, stuck revocations, stuck lanes, delegate balances.
+         * @description The ops console’s system-health read (#3514). ERC-7710 payment intents the settlement sweeper works on (in its retry window, and past its horizon — the payments actually lost without an operator, 24 h to 30 days), confirmed payments whose evidence row never landed (#2213), revocations and re-anchors unreconciled past 1 h, broadcast outbound transactions unmined past the bump worker’s stale threshold per served chain, the delegate balance monitor’s last report, and the same payload GET /health/ops serves (built by the same function). READ-ONLY about the operational world: no RPC call on request, no claim, no receipt read — a listed lane MAY already be mined. Delegate balances are the monitor’s in-memory last report, never a scan on request; a replica without the monitor leader lock answers not_available_on_this_replica. Atomic amounts are decimal strings. Every list is capped at 50. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. Returns 404 while the deployment has no read-only ops database or no diagnostics builder configured.
+         */
+        get: operations["getOpsSystemHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/reveal": {
         parameters: {
             query?: never;
@@ -3939,6 +3959,94 @@ export type components = {
                 latencyMs?: number;
             };
         };
+        OpsSystemHealth: {
+            /** @description ERC-7710 payment intents the settlement sweeper works on, oldest first, at most 50. in_window: still inside the recovery window it retries. past_horizon: past 24 h up to 30 days — the sweeper no longer retries these, the payments actually lost without an operator. */
+            sweepable_intents: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_human: string;
+                status: string;
+                /** @enum {string} */
+                window: "in_window" | "past_horizon";
+                age_seconds: number;
+            }[];
+            /** @description Confirmed ERC-7710 payments no machine_payment_evidence row references (#2213): settled on-chain, booked nowhere, outside every automated retry path. */
+            evidence_orphans: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_human: string;
+                status: string;
+                age_seconds: number;
+            }[];
+            /** @description Revocations unreconciled past 1 h (#973): Haven's DB says the agent is revoked, the live attestation does not. A merchant reading only the chain still sees the agent as valid. */
+            stuck_revocations: {
+                /** Format: uuid */
+                agent_id: string;
+                /** Format: date-time */
+                revocation_requested_at: string | null;
+                revocation_attempts: number;
+                age_seconds: number;
+            }[];
+            /** @description Re-anchors unreconciled past 1 h (#1699): the live attestation names the retired key. */
+            stuck_reanchors: {
+                /** Format: uuid */
+                agent_id: string;
+                agent_eoa: string | null;
+                delegate_address: string | null;
+                revocation_attempts: number;
+            }[];
+            /** @description Broadcast outbound transactions unmined past the bump worker's stale threshold, per served chain. No receipt is read on this path: a row listed here MAY ALREADY BE MINED — the worker's chain-first tick closes those. id is the unmasked outbound_txs id the operator pastes into ops:cancel-stuck-lane; it links to no user. capped_needs_operator: a rebroadcast-safe submitter's lane at the bump cap — the worker has stopped for good and the lane is the operator's. */
+            stuck_lanes: {
+                /** Format: uuid */
+                id: string;
+                chain_id: number;
+                submitter: string;
+                nonce: string;
+                age_seconds: number;
+                /** @enum {string} */
+                reason: "stale_unmined" | "capped_needs_operator";
+            }[];
+            delegate_balances: {
+                /** @enum {boolean} */
+                available: true;
+                /** Format: date-time */
+                scanned_at: string;
+                report: {
+                    scanned_delegates: number;
+                    unread: number;
+                    /** @description Balances at/above the sweep floor with no fresh pending payment — sweepable money on a hot EOA. */
+                    lingering: {
+                        /** Format: uuid */
+                        agent_id: string;
+                        agent_name: string;
+                        delegate_address: string;
+                        chain_id: number;
+                        balance_atomic: string;
+                    }[];
+                    dust_total_atomic: string;
+                    dust_alert: boolean;
+                    chain_errors: {
+                        [key: string]: string;
+                    };
+                };
+            } | {
+                /** @enum {boolean} */
+                available: false;
+                /** @enum {string} */
+                reason: "not_available_on_this_replica";
+            };
+            ops_diagnostics: components["schemas"]["HealthOpsResponse"];
+            /** Format: date-time */
+            generated_at: string;
+        };
         OpsSession: {
             /** @description Numeric GitHub user id (the allowlist key). */
             github_id: string;
@@ -6862,6 +6970,71 @@ export interface operations {
                 };
             };
             /** @description No such user, or the ops console (its read-only database or its chain readers) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsSystemHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The operational problems, and the backend’s own diagnostics. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsSystemHealth"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (its read-only database or its diagnostics builder) is not configured. */
             404: {
                 headers: {
                     [name: string]: unknown;

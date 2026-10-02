@@ -27,9 +27,9 @@ import {
 } from '../ops-readonly-role.js'
 import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
 import { guardOpsReadExecutor, opsReadRoleProblems, OpsReadRoleUnsafeError } from '../repositories/ops-read-role.js'
-import { LIST_UNMINED_OUTBOUND_TXS_SQL } from '../repositories/outbound-txs.js'
-import { FIND_SWEEPABLE_ERC7710_INTENTS_SQL } from '../repositories/x402-authorizations.js'
-import { LIST_STUCK_REVOCATIONS_SQL } from '../repositories/agent-passports.js'
+import { LIST_UNMINED_OUTBOUND_TXS_SQL, COUNT_LANE_ATTEMPTS_AT_NONCE_SQL } from '../repositories/outbound-txs.js'
+import { FIND_SWEEPABLE_ERC7710_INTENTS_SQL, FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL } from '../repositories/x402-authorizations.js'
+import { LIST_STUCK_REVOCATIONS_SQL, LIST_STUCK_REANCHORS_SQL } from '../repositories/agent-passports.js'
 import { OPS_REVEAL_SQL } from '../repositories/ops-reveal.js'
 import * as OPS_READS from '../repositories/ops-reads.js'
 
@@ -334,6 +334,11 @@ describeDb('ops read-only role (#3510)', () => {
       await c.query(LIST_UNMINED_OUTBOUND_TXS_SQL, [84532, 180])
       await c.query(FIND_SWEEPABLE_ERC7710_INTENTS_SQL, [90, 86_400, 50])
       await c.query(LIST_STUCK_REVOCATIONS_SQL, [3600])
+      // #3514: GET /ops/health reuses three more queries; each must run as the
+      // role too. Parameters of the type each statement expects.
+      await c.query(FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL, [90, 86_400, 50])
+      await c.query(LIST_STUCK_REANCHORS_SQL, [3600])
+      await c.query(COUNT_LANE_ATTEMPTS_AT_NONCE_SQL, [84532, '0'])
       await c.query(OPS_REVEAL_SQL.user.email, ['00000000-0000-4000-8000-000000000000'])
       await c.query(OPS_REVEAL_SQL.user.name, ['00000000-0000-4000-8000-000000000000'])
       // #3512: every ops data read runs as the role. Each `*_SQL` export of

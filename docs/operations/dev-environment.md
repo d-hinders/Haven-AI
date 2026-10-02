@@ -898,7 +898,9 @@ production, which sets nothing, keeps today's pages until the switch-over slice
 removes the gate. `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1` turns it on in a
 production-shaped build — the CI build the e2e and visual suites run against
 (`ci.yml`'s frontend_checks build, `update-visual-baselines.yml`'s build and both
-regenerate steps, and `playwright.config.ts`'s `webServer.env` for `next dev`).
+regenerate steps, `playwright.config.ts`'s `webServer.env` for `next dev`, and the
+frontend's built-suite scripts `test:visual:structure`, `test:e2e:gate:built`,
+`test:e2e:desktop:built` and `test:e2e:mobile:built`, so a local run matches CI).
 **Neither Vercel project sets it, and neither should**: on production it would
 publish the half-built site.
 

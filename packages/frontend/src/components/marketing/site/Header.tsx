@@ -123,7 +123,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
           <div className="flex items-center gap-[18px] text-[14px]">
             <Link
               href="/login"
-              className={`hidden sm:inline-block rounded-[4px] transition-colors ${
+              className={`inline-block rounded-[4px] transition-colors ${
                 dark
                   ? `text-[rgba(255,255,255,0.85)] hover:text-white ${FOCUS_ON_DARK}`
                   : `text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] ${FOCUS_ON_LIGHT}`

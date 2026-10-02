@@ -9,8 +9,9 @@ import { SITE_WRAP } from './SiteSection'
  *
  * Every entry has a destination that exists today (epic rule "No dead
  * links"). The mockup's Company column (Contact, Privacy, Terms) is removed
- * until those destinations exist (epic decisions 8 and 9). Protocols, For
- * developers and npm packages join with their pages (#3576, #3577).
+ * until those destinations exist (epic decisions 8 and 9). Protocols joined
+ * with its page (#3576); For developers and npm packages join with theirs
+ * (#3577).
  *
  * `static: true` marks a file served from `public/` or by an API route, not
  * an app route: client-side navigation would 404 it, so it renders as a
@@ -28,6 +29,7 @@ export const SITE_FOOTER_COLUMNS: ReadonlyArray<{
     heading: 'Product',
     links: [
       { label: 'How it works', href: '/how-it-works' },
+      { label: 'Protocols', href: '/how-it-works/protocols' },
       { label: 'Create your account', href: '/signup' },
       { label: 'Sign in', href: '/login' },
     ],

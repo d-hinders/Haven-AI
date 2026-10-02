@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/Button'
 import { Section } from '@/components/marketing/Section'
 import { Card } from '@/components/ui/Card'
 import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
+import { HowItWorksPage } from '@/components/marketing/site/how-it-works/HowItWorksPage'
+import { isNewSiteVisible } from '@/lib/site-gate'
 
 const STEPS = [
   {
@@ -189,6 +191,10 @@ const VISUALS = {
 }
 
 export default function HowItWorks() {
+  // The redesigned page (#3576, epic #3572) renders wherever the build-time
+  // site gate is on; production keeps the page below until the switch-over.
+  if (isNewSiteVisible()) return <HowItWorksPage />
+
   return (
     <>
       <SiteHeader />

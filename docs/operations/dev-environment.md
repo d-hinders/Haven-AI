@@ -903,6 +903,11 @@ scripts, so a local run matches CI.
 **Neither Vercel project sets it, and neither should**: on production it would
 publish the half-built site.
 
+Some new routes exist **only** with the gate on and 404 without it, so a
+production build has no trace of them: `/how-it-works/protocols` (#3576) is
+the first. They join `PUBLIC_SURFACES` with the switch-over slice (#3579),
+not before.
+
 It is build-time on purpose, unlike `HAVEN_DEMO_PAGE_VISIBLE` above. The `/demo`
 gate guards a page that hands out test funds, so it is server-only and read per
 request, and never reaches a client bundle. This gate guards presentation only,

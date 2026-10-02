@@ -352,6 +352,8 @@ export default defineConfig({
       // #3573: demo.visual.spec.ts and releases.visual.spec.ts join with one
       // desktop `-dark` baseline each — the public pages wear the redesigned
       // header and footer, which follow the visitor's theme.
+      // #3576: how-it-works.visual.spec.ts joins with one desktop `-dark`
+      // baseline per page (How it works, its protocols sub-page).
       testMatch: [
         '**/design-system.visual.spec.ts',
         '**/analytics.visual.spec.ts',
@@ -360,6 +362,7 @@ export default defineConfig({
         '**/add-funds-modal.visual.spec.ts',
         '**/demo.visual.spec.ts',
         '**/releases.visual.spec.ts',
+        '**/how-it-works.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

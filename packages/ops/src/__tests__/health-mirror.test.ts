@@ -42,17 +42,58 @@ function source(): string {
   return readFileSync(HEALTH_TS, 'utf8')
 }
 
-/** The `interface X { … }` block's own keys (first nesting level), from the SOURCE. */
+/**
+ * The `interface X { … }` block's own keys (first nesting level), from the
+ * SOURCE.
+ *
+ * A lazy regex over the body (`[\s\S]*?\n}`) cannot do this: it stops at the
+ * FIRST line-level closer, so a nested object key — `OpsDelegateBalanceReport`
+ * carries `lingering: { … }[]` — cuts the block early and sweeps the nested
+ * keys into the list. Instead: anchor on the interface header, then walk the
+ * body tracking brace depth and keep only the lines at the first nesting
+ * level. (Assumption, true for this module: `{`/`}` never appear inside a
+ * string literal on a key line.)
+ */
 function interfaceKeys(name: string): string[] {
   expect(SOURCE_EXISTS, 'health.ts exists once #3514 merges').toBe(true)
-  const match = source().match(new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`))
-  expect(match, `interface ${name} exists in #3514's health.ts`).toBeTruthy()
-  return (match?.[1] ?? '')
-    .split('\n')
+  const text = source()
+  const header = new RegExp(`export interface ${name} \\{`).exec(text)
+  expect(header, `interface ${name} exists in #3514's health.ts`).toBeTruthy()
+  if (!header || header.index === undefined) return []
+  const body = interfaceBody(text, header.index + header[0].length)
+  return topLevelKeys(body)
+}
+
+/** The body text between the interface's opening `{` and its matching closer. */
+function interfaceBody(text: string, start: number): string {
+  let depth = 1
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) return text.slice(start, i)
+    }
+  }
+  throw new Error(`unbalanced braces in interface block at offset ${start}`)
+}
+
+/** Declared keys on the block's first nesting level, in declaration order. */
+function topLevelKeys(body: string): string[] {
+  const topLines: string[] = []
+  let depth = 0
+  for (const line of body.split('\n')) {
+    if (depth === 0) topLines.push(line)
+    for (const ch of line) {
+      if (ch === '{') depth++
+      else if (ch === '}') depth--
+    }
+  }
+  return topLines
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('//') && !line.startsWith('*') && !line.startsWith('/*'))
     .map((line) => {
-      const key = line.match(/^(?:readonly )?([A-Za-z_][A-Za-z0-9_]*)\??:/)
+      const key = line.match(/^(?:readonly )?([A-Za-z_][A-Za-z0-9_]*)\??\s*:/)
       return key?.[1] ?? null
     })
     .filter((key): key is string => key !== null)
@@ -109,8 +150,17 @@ describe('the OpsHealth mirror matches the #3514 module', () => {
     expect(source()).toContain("'not_available_on_this_replica'")
   })
 
+  it('the extractor reads nested-object interfaces at the first level only', () => {
+    if (!SOURCE_EXISTS) return
+    const keys = interfaceKeys('OpsDelegateBalanceReport')
+    // Instrument check: the nested `lingering: { … }[]` body must not leak
+    // its inner keys (agent_id, agent_name, …) into the first-level list.
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(keys).toEqual([...OPS_BALANCE_REPORT_KEYS])
+  })
+
   it('the stuck lane id stays UNMASKED in the source contract (the cancel tool needs it)', () => {
     if (!SOURCE_EXISTS) return
-    expect(source()).toMatch(/id is the UNMASKED `outbound_txs\.id`/)
+    expect(source()).toMatch(/(`id` )?is the UNMASKED `outbound_txs\.id`/)
   })
 })

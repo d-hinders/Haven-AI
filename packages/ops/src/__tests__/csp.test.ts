@@ -66,8 +66,15 @@ describe('buildCsp', () => {
 
 describe('middleware', () => {
   function run(registry = REGISTRY): { request: string | null; response: string | null } {
+    const previous = process.env.NEXT_PUBLIC_OPS_ENVIRONMENTS
     process.env.NEXT_PUBLIC_OPS_ENVIRONMENTS = registry
-    const res = middleware(new NextRequest('https://ops.example/'))
+    let res: ReturnType<typeof middleware>
+    try {
+      res = middleware(new NextRequest('https://ops.example/'))
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_OPS_ENVIRONMENTS
+      else process.env.NEXT_PUBLIC_OPS_ENVIRONMENTS = previous
+    }
     // NextResponse.next({ request: { headers } }) encodes the overridden
     // request headers as x-middleware-request-* on the response.
     return {
@@ -107,6 +114,10 @@ describe('middleware', () => {
   })
 
   it('runs on pages and skips static build assets', () => {
+    // An approximation: Next compiles the matcher through path-to-regexp and
+    // adds the _next/data and .rsc variants. This pins the exclusion list;
+    // the compiled matcher's coverage of RSC and prefetch requests was checked
+    // against a production build in #3581's review.
     const [pattern] = config.matcher
     const re = new RegExp(`^${pattern}$`)
     expect(re.test('/')).toBe(true)

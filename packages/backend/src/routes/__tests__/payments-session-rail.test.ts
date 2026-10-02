@@ -743,6 +743,14 @@ describe('POST /payments — the refusal ledger on the direct paths (#2945)', ()
       error_code: 'submission_outcome_unknown',
       user_op_hash: USER_OP_HASH,
     })
+    // #3564 review round 2: the body carries the spec-promised fixed remedy
+    // `message` (do not create a new payment; poll haven_get_payment_status)
+    // and BOUNDED `details` — never the raw redacted error wholesale.
+    const outcomePendingBody = response.json()
+    expect(outcomePendingBody.message).toMatch(/do not create a new payment/i)
+    expect(outcomePendingBody.message).toMatch(/haven_get_payment_status/)
+    expect(typeof outcomePendingBody.details).toBe('string')
+    expect((outcomePendingBody.details as string).length).toBeLessThanOrEqual(301)
     // The booking write is the outcome-pending one (metadata + CAS on the
     // open submit); the fail write never runs.
     expect(mockQuery.mock.calls.some((c) => /jsonb_build_object/.test(String(c[0])))).toBe(true)

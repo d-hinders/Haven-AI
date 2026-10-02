@@ -1173,6 +1173,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         // echo the request URL, which embeds the API key — scrub before
         // persisting or responding.
         const errorMsg = redactVendorSecrets(err instanceof Error ? err.message : String(err))
+        // Bound ONCE, above every arm (#3564 review round 2): redaction is
+        // not a length bound — a viem/bundler message can still carry full
+        // callData/ABI after scrubbing — and every body that answers
+        // `details` (the outcome-pending one included) must carry the
+        // bounded text, never the raw redacted error.
+        const boundedMessage = boundFailureMessage(errorMsg)
         // #3564: the receipt-unconfirmed variant of SubmittedUserOpFailedError
         // means the UserOp was SENT and MAY have landed (the funds may have
         // moved). Booking that `failed` would record a funds-moved payment as
@@ -1195,8 +1201,13 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
               status: 'submitted',
               error: 'On-chain submission outcome unknown',
               error_code: 'submission_outcome_unknown',
+              message:
+                `The payment was submitted (UserOperation ${err.userOpHash}) but its on-chain outcome ` +
+                'is not known yet — it may have moved the funds. Do not create a new payment for this ' +
+                'payment_id: poll haven_get_payment_status for it — Haven reconciles this payment from ' +
+                'the chain, and this status becomes the real outcome.',
               user_op_hash: err.userOpHash,
-              details: errorMsg,
+              details: boundedMessage,
             }),
             null,
           )
@@ -1225,8 +1236,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         // resolves it), so `haven_get_payment_status` IS truthful on this
         // seam now. What remains below classifies the KNOWN failures, and is
         // still reachable for the pre-send bundler simulation rejections
-        // (AA2x codes) that arrive as generic errors.
-        const boundedMessage = boundFailureMessage(errorMsg)
+        // (AA2x codes) that arrive as generic errors. (`boundedMessage` is
+        // computed above the booking split, so the outcome-pending arm can
+        // bound its `details` too.)
 
         // #3494 review round 1 (S1): AA24 is the one AA2x code this backend
         // can attribute to the signer. There is no live budget or chain

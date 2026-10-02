@@ -1382,7 +1382,10 @@ app's Vercel ignore-build step (#3591; since #3594 a script shared with
 the dashboard's Vercel project, each passing its own path list) decides
 only *when* the console or the dashboard redeploys, from what changed since
 its last deployment; it moves no authority either, and the same scope note
-holds.
+holds. The console's CI render
+smoke (#3583) only proves, in a browser, that the console renders under that
+CSP and that the CSP refuses an un-nonced inline script; it moves no
+authority, and the same scope note holds.
 
 > **Re-verified #3516 (2026-10-02, console round 3):** the change this note
 > rides touches `packages/ops/**` (plus this doc and a `.gitignore` line) —

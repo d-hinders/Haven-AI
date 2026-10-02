@@ -388,6 +388,7 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/ops/src/**',
       'packages/ops/next.config.ts',
       'packages/ops/package.json',
+      'packages/ops/scripts/render-smoke.mjs',
     ],
     // Registered at the scaffold's own build (#3515); the coupling gate's
     // first implicated PR re-reads the body and bumps this date.

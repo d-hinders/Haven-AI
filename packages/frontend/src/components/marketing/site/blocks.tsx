@@ -163,7 +163,7 @@ export function PaymentFlow({
   steps: ReadonlyArray<FlowStep>
 }) {
   return (
-    <div className="w-full overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-[var(--v2-shadow-card)]">
+    <div className="w-full overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-[12.5px] text-[var(--v2-ink-3)]">
         <span>{label}</span>
         <span className={SITE_TYPE.mono}>{amount}</span>

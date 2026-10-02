@@ -37,6 +37,7 @@ import { isOpsConfigured, type OpsConfig } from '../config/ops.js'
 import { authRateLimit, opsRevealRateLimit, opsSearchRateLimit } from '../middleware/rate-limit.js'
 import { createOpsAuth, opsOperatorOf } from '../middleware/ops-auth.js'
 import {
+  buildOpsOnchainView,
   buildOpsOverview,
   buildOpsUserDetail,
   detectOpsSearchKey,
@@ -50,6 +51,7 @@ import {
   verifyOpsState,
   type FetchLike,
   type GithubUser,
+  type OpsOnchainReaders,
 } from '../modules/ops/index.js'
 import { insertOpsAccessLog, type OpsAccessLogEntry } from '../infra/repositories/ops-access-log.js'
 import { isOpsRevealField, readOpsRevealField } from '../infra/repositories/ops-reveal.js'
@@ -64,6 +66,15 @@ export interface OpsRoutesOptions {
   trustProxyHops: number
   /** Executor for ops DATA reads — the read-only role from #3510. Absent → data routes are off (404). */
   readDb?: Executor | null
+  /**
+   * Chain readers for `GET /ops/users/:id/onchain` (#3513). The default
+   * implementation (`modules/ops/onchain-readers.ts`) touches `rails/` and
+   * `infra/chain/`, which the ops invariant-1 walk forbids reaching from
+   * this file — so it is injected in `index.ts`, like `readDb`. Null (the
+   * default) leaves the route off (404): a deployment that cannot answer
+   * the chain view must not pretend to.
+   */
+  onchainReaders?: OpsOnchainReaders | null
   /** Audit writer; defaults to the main-pool insert. A test seam, never a way to skip the write. */
   audit?: (entry: OpsAccessLogEntry) => Promise<void>
   fetchImpl?: FetchLike
@@ -271,6 +282,32 @@ export default async function opsRoutes(app: FastifyInstance, opts: OpsRoutesOpt
     if (!done.result) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
     return reply.headers(NO_STORE).send(done.result)
   })
+
+  // GET /ops/users/:id/onchain — the chain's view next to the DB's (#3513).
+  // READ-ONLY chain state: the injected readers answer getBytecode,
+  // disabled-delegation and remaining-budget questions and can neither write
+  // state nor sign (invariant 1). Off (404) until `onchainReaders` is wired.
+  app.get<{ Params: { id: string } }>(
+    '/users/:id/onchain',
+    { onRequest: opsAuth },
+    async (request, reply) => {
+      const onchainReaders = opts.onchainReaders
+      if (!onchainReaders) return reply.callNotFound()
+      const done = await dataRead(
+        request,
+        reply,
+        (db) => buildOpsOnchainView(db, request.params.id, { readers: onchainReaders }),
+        () => ({
+          action: 'view',
+          targetType: 'user_onchain',
+          targetId: request.params.id,
+        }),
+      )
+      if (!done) return reply
+      if (!done.result) return reply.code(404).headers(NO_STORE).send({ error: 'Not found' })
+      return reply.headers(NO_STORE).send(done.result)
+    },
+  )
 
   // POST /ops/reveal — one unmasked field, audited.
   app.post<{ Body: { target_type: string; target_id: string; field: string } }>(

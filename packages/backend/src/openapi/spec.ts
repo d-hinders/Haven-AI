@@ -1882,6 +1882,35 @@ export const openapiSpec = {
         },
       },
     },
+    '/ops/users/{id}/onchain': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsUserOnchain',
+        summary: "The chain's view of one customer's accounts, next to the database's.",
+        description:
+          "Per smart account: whether code exists on-chain (deployed vs counterfactual, best-effort — a lagging RPC node can report a deployed account as having no code), and per ACTIVE stored delegation whether the DelegationManager reports it disabled on-chain and the period enforcer's remaining budget. A failed budget read renders 'unavailable', never a remaining figure. " +
+          'Accounts that are not delegation-rail rows (legacy_safe), on a chain this environment does not serve, or on a chain without pinned delegation contracts are listed with their reason and are NEVER read on-chain — zero RPC calls for them. ' +
+          'Addresses are masked; delegation hashes and bodies are never returned. Reads through the read-only ops database role; the chain reads are batched per chain and cached per (chain, user) for 60 s with single-flight. ' +
+          'Writes one audit row before answering. The signer set is DB-only in v1 (no on-chain signer-set reader exists). ' +
+          'Returns 404 for an unknown user, while the deployment has no read-only ops database or no chain readers configured.',
+        security: [{ OpsJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The masked DB-vs-chain view.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsOnchainView' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': {
+            ...errorResponse,
+            description:
+              'No such user, or the ops console (its read-only database or its chain readers) is not configured.',
+          },
+          '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
+        },
+      },
+    },
     '/ops/reveal': {
       post: {
         tags: ['Ops'],
@@ -9671,6 +9700,123 @@ export const openapiSpec = {
               additionalProperties: false,
             },
           },
+        },
+        additionalProperties: false,
+      },
+      OpsOnchainDelegation: {
+        type: 'object',
+        required: ['budget_atomic', 'onchain', 'budget_status', 'budget_remaining_atomic'],
+        properties: {
+          budget_atomic: { type: 'string', description: 'The ACTIVE stored delegation period budget, atomic units.' },
+          onchain: {
+            type: 'string',
+            enum: ['enabled', 'disabled', 'unknown', 'unavailable'],
+            description:
+              "Whether the DelegationManager reports the delegation disabled. 'unknown': the cached read-set does not cover it yet; 'unavailable': the read failed.",
+          },
+          budget_status: {
+            type: 'string',
+            enum: ['from_chain', 'unknown', 'unavailable'],
+            description:
+              "'from_chain': budget_remaining_atomic is the enforcer's answer. A failed read renders 'unavailable' — never the fallback figure.",
+          },
+          budget_remaining_atomic: {
+            type: ['string', 'null'],
+            description: "The enforcer's remaining period budget; null unless budget_status is 'from_chain'.",
+          },
+        },
+        additionalProperties: false,
+      },
+      OpsOnchainAccount: {
+        type: 'object',
+        required: ['account_id', 'chain_id', 'account_address', 'account_type', 'execution_rail', 'name', 'db', 'chain', 'flags'],
+        properties: {
+          account_id: { type: 'string', format: 'uuid' },
+          chain_id: { type: 'integer' },
+          account_address: { type: 'string', description: 'Masked.' },
+          account_type: { type: 'string', enum: ['delegator_hybrid'] },
+          execution_rail: { type: 'string' },
+          name: { type: 'string' },
+          db: {
+            type: 'object',
+            required: ['active_delegations'],
+            properties: {
+              active_delegations: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['budget_atomic'],
+                  properties: { budget_atomic: { type: 'string' } },
+                  additionalProperties: false,
+                },
+              },
+            },
+            additionalProperties: false,
+          },
+          chain: {
+            type: 'object',
+            required: ['deploy_status', 'delegations'],
+            properties: {
+              deploy_status: {
+                type: 'string',
+                enum: ['deployed', 'counterfactual', 'unknown', 'unavailable'],
+                description: 'Best-effort: a lagging RPC node can report a deployed account as having no code.',
+              },
+              delegations: {
+                type: 'array',
+                description: "Same order as db.active_delegations — position identifies the delegation.",
+                items: { $ref: '#/components/schemas/OpsOnchainDelegation' },
+              },
+            },
+            additionalProperties: false,
+          },
+          flags: {
+            type: 'object',
+            required: ['counterfactual_with_active_delegation', 'delegation_disabled_onchain_active_in_db'],
+            properties: {
+              counterfactual_with_active_delegation: {
+                type: 'boolean',
+                description: 'No on-chain code while an active delegation is stored. Best-effort; may be a lagging node.',
+              },
+              delegation_disabled_onchain_active_in_db: {
+                type: 'boolean',
+                description: 'The DelegationManager reports a delegation disabled that the DB still holds as active.',
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      OpsOnchainNotServedAccount: {
+        type: 'object',
+        required: ['account_id', 'chain_id', 'account_address', 'account_type', 'execution_rail', 'status', 'reason'],
+        properties: {
+          account_id: { type: 'string', format: 'uuid' },
+          chain_id: { type: 'integer' },
+          account_address: { type: 'string', description: 'Masked.' },
+          account_type: { type: 'string' },
+          execution_rail: { type: 'string' },
+          status: { type: 'string', enum: ['not_served'] },
+          reason: { type: 'string', enum: ['legacy_safe', 'chain_not_served', 'chain_not_pinned'] },
+        },
+        additionalProperties: false,
+      },
+      OpsOnchainView: {
+        type: 'object',
+        required: ['user_id', 'accounts', 'generated_at'],
+        properties: {
+          user_id: { type: 'string', format: 'uuid' },
+          accounts: {
+            type: 'array',
+            items: {
+              oneOf: [
+                { $ref: '#/components/schemas/OpsOnchainAccount' },
+                { $ref: '#/components/schemas/OpsOnchainNotServedAccount' },
+              ],
+            },
+          },
+          generated_at: isoDateTime,
         },
         additionalProperties: false,
       },

@@ -84,6 +84,11 @@ import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
 import opsRoutes from './routes/ops.js'
 import { getOpsReadDb } from './db/ops-read-pool.js'
+// dep-lint-exempt: composition-root wiring — the REAL chain readers must NOT be re-exported from modules/ops/index.ts: routes/ops.ts imports that entry, and the ops invariant-1 walk (#3509) forbids the ops console's graph from reaching rails/ and infra/chain/, so onchain-readers.ts is reachable ONLY by injection here (#3513), like the #2881 accounting legacy entry.
+// #3513: the REAL ops on-chain readers touch rails/ and infra/chain/, so
+// they are imported here — where the ops invariant-1 walk (rooted at
+// routes/ops.ts) never looks — and injected through the route options.
+import { opsOnchainReaders } from './modules/ops/onchain-readers.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'
@@ -381,11 +386,15 @@ registerHealthRoutes(app, {
 // Ops console (#3509, epic #3507): founders-only and read-only. Every route
 // answers 404 unless OPS_* is fully configured, and the data routes also
 // need OPS_DATABASE_URL — the read-only role login (#3510) — or they 404 too.
+// The on-chain view (#3513) additionally needs the chain readers, injected
+// here because their implementation touches `rails/` and `infra/chain/`,
+// which the ops invariant-1 walk must never reach from `routes/ops.ts`.
 await app.register(opsRoutes, {
   prefix: '/ops',
   ops: config.ops,
   trustProxyHops: config.trustProxyHops,
   readDb: getOpsReadDb(),
+  onchainReaders: getOpsReadDb() ? opsOnchainReaders : null,
 })
 
 // The accounting module's ops events (#2872: `accounting.connection.needs_attention`)

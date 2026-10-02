@@ -40,3 +40,17 @@ export {
   type OpsSearchResult,
 } from './search.js'
 export { buildOpsUserDetail, type OpsUserDetail } from './users.js'
+export {
+  buildOpsOnchainView,
+  onchainCacheKey,
+  OPS_ONCHAIN_CACHE_TTL_MS,
+  type BuildOpsOnchainViewOptions,
+  type OnchainAccount,
+  type OnchainAccountDelegation,
+  type OnchainBudgetStatus,
+  type OnchainDelegationState,
+  type OnchainDeployStatus,
+  type OnchainNotServedAccount,
+  type OpsOnchainReaders,
+  type OpsOnchainView,
+} from './onchain.js'

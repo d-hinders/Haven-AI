@@ -123,7 +123,10 @@ deployed that way today.
   the same as an unconfigured one. Setting them on a deployed service is an
   operator step tracked on the epic's promotion checklist. The data routes
   also need `OPS_DATABASE_URL`, the read-only role's login — see
-  [`ops-readonly-role.md`](ops-readonly-role.md).
+  [`ops-readonly-role.md`](ops-readonly-role.md). The customer on-chain view
+  (`GET /ops/users/{id}/onchain`, #3513) additionally needs the chain
+  readers, which `index.ts` wires whenever the read-only role is configured;
+  without them that one route answers 404 while the rest of `/ops` works.
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).

@@ -21,6 +21,8 @@ covers:
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
   - packages/frontend/src/app/protocols/**
+  - packages/frontend/src/app/developers/**
+  - packages/frontend/src/app/for-agents/**
   - packages/frontend/src/app/(authenticated)/design-system/**
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/components/marketing/**

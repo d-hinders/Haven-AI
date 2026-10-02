@@ -24,13 +24,16 @@ afterEach(() => {
 
 /**
  * Every destination these pages may link to, each one an existing route or
- * public file today. `/developers` is absent on purpose: it lands with its
- * page in #3577 (epic rule "Entries land with their page").
+ * public file today. `/developers` joined with its page in #3577 (epic rule
+ * "Entries land with their page").
  */
 const KNOWN_DESTINATIONS = new Set([
   '/',
   '/how-it-works',
   '/how-it-works/protocols',
+  '/developers',
+  '/developers#packages',
+  '/for-agents',
   '/signup',
   '/login',
   '/exit',

@@ -4,18 +4,25 @@ import { Header } from '../Header'
 import { Footer } from '../Footer'
 import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 import { HeroCta } from './HeroCta'
-import { HeroAgentsFrame } from './HeroAgentsFrame'
-import { AccountingFrame } from './AccountingFrame'
-import { PasskeyMiniCard, BudgetMiniCard } from './StepMiniCards'
-import { ConnectorTerminal } from './ConnectorTerminal'
-import { RefusalReceipt } from './RefusalReceipt'
+import { AnimatedHeroFrame } from './AnimatedHeroFrame'
+import { AnimatedAccountingFrame } from './AnimatedAccountingFrame'
+import { AnimatedPasskeyMiniCard, AnimatedBudgetMiniCard, AnimatedConnectorTerminal } from './HowItWorksAnimated'
+import { AnimatedRefusalReceipt } from './AnimatedRefusalReceipt'
 
 /**
  * The redesigned home page's nine sections (mockup
- * `docs/product/site-mockup/index.html`), static, in both themes (#3574).
+ * `docs/product/site-mockup/index.html`), in both themes (#3574), with the
+ * mockup's motion on the four animated regions (#3575).
  *
- * Every region the mockup animates renders its settled state here; slice 3
- * (#3575) adds the motion around these exact components. Headings and body
+ * Every animated region renders its settled state here unless its loop is
+ * running: the controllers (`AnimatedHeroFrame`, `AnimatedPasskeyMiniCard`,
+ * `AnimatedBudgetMiniCard`, `AnimatedConnectorTerminal`,
+ * `AnimatedAccountingFrame`, `AnimatedRefusalReceipt`) pass no state under
+ * reduced motion, out of view, or before their loop starts, so the settled
+ * markup below — slice 2's, in `HeroAgentsFrame`, `StepMiniCards`,
+ * `ConnectorTerminal`, `AccountingFrame`, `RefusalReceipt` — is what renders.
+ * This file stays a server component; only the controllers are client
+ * components. Headings and body
  * copy follow the committed mockup except the epic's decided deviations,
  * each marked where it applies:
  *
@@ -102,7 +109,7 @@ export function HomeHero() {
         </div>
 
         <div aria-hidden="true" className="min-w-0">
-          <HeroAgentsFrame />
+          <AnimatedHeroFrame />
         </div>
       </div>
     </SiteSection>
@@ -174,7 +181,7 @@ export function HomeHowItWorks() {
             One Face ID prompt creates an account only you control. No seed phrase, no credit card.
           </p>
           <div aria-hidden="true" className="mt-2 flex-1">
-            <PasskeyMiniCard />
+            <AnimatedPasskeyMiniCard />
           </div>
         </div>
 
@@ -185,7 +192,7 @@ export function HomeHowItWorks() {
             An amount and a period per agent. It refills itself and can be revoked at any time.
           </p>
           <div aria-hidden="true" className="mt-2 flex-1">
-            <BudgetMiniCard />
+            <AnimatedBudgetMiniCard />
           </div>
         </div>
 
@@ -196,7 +203,7 @@ export function HomeHowItWorks() {
             One command wires in Claude, Codex, Cursor or any other agent harness.
           </p>
           <div className="mt-2 flex-1">
-            <ConnectorTerminal />
+            <AnimatedConnectorTerminal />
           </div>
         </div>
       </div>
@@ -282,7 +289,7 @@ export function HomeAccounting() {
     <SiteSection id="accounting" aria-labelledby="accounting-heading">
       <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <div aria-hidden="true" className="min-w-0">
-          <AccountingFrame />
+          <AnimatedAccountingFrame />
         </div>
         <div>
           <div className={SITE_TYPE.eyebrow}>Accounting</div>
@@ -389,7 +396,7 @@ export function HomeEnforcement() {
         </div>
 
         <div aria-hidden="true">
-          <RefusalReceipt />
+          <AnimatedRefusalReceipt />
         </div>
       </div>
     </SiteSection>

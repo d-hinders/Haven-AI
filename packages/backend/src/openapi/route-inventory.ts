@@ -147,10 +147,20 @@ export async function registeredRouteModules(): Promise<RegisteredRouteModule[]>
   )) {
     fileByIdentifier.set(m[1], `${m[2]}.ts`)
   }
+  // Named imports, ONE binding or several: `import { a, b as c } from ...`.
+  // A list maps every bound name to the file — index.ts imports two names
+  // from routes/health.js (#3514: `registerHealthRoutes` and the shared
+  // `/health/ops` payload builder), and a single-binding pattern there
+  // silently dropped the file, so `GET /health` and `GET /health/ops` fell
+  // out of the generated table while every "not stale" test stayed green:
+  // the committed table and the deriver were blind in the same direction.
   for (const m of indexSource.matchAll(
-    /import\s+\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}\s+from\s+'\.\/routes\/([A-Za-z0-9_-]+)\.js'/g,
+    /import\s+\{([^}]*)\}\s+from\s+'\.\/routes\/([A-Za-z0-9_-]+)\.js'/g,
   )) {
-    fileByIdentifier.set(m[1], `${m[2]}.ts`)
+    for (const binding of m[1].split(',')) {
+      const name = binding.trim().split(/\s+as\s+/).pop()?.trim()
+      if (name) fileByIdentifier.set(name, `${m[2]}.ts`)
+    }
   }
 
   const modules: RegisteredRouteModule[] = []

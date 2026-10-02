@@ -182,7 +182,8 @@ describe('Protocols', () => {
 
   it('labels the flow as the ERC-7710 path whose order it shows', () => {
     const { container } = render(<ProtocolsPage />)
-    expect(container.textContent).toContain('x402 payment flow · ERC-7710')
+    // A non-breaking hyphen keeps the standard's name on one line on phones.
+    expect(container.textContent).toContain('x402 payment flow · ERC\u20117710')
   })
 
   it('stacks the comparison on phones with every aspect and both protocols', () => {

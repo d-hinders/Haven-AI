@@ -100,7 +100,7 @@ export function ProtocolsPage() {
                 Either way the money moves from your account and the budget is enforced on-chain.
               </p>
             </SiteCopy>
-            <PaymentFlow label="x402 payment flow · ERC-7710" amount="0.05 USDC · Base" steps={X402_STEPS} />
+            <PaymentFlow label={'x402 payment flow · ERC\u20117710'} amount="0.05 USDC · Base" steps={X402_STEPS} />
           </SiteSplit>
         </SiteSection>
 

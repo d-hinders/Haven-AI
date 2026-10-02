@@ -97,7 +97,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
               dark ? 'text-white' : 'text-[var(--v2-ink)]'
             } ${dark ? FOCUS_ON_DARK : FOCUS_ON_LIGHT}`}
           >
-            <HavenMark tone={dark ? 'inverse' : 'brand'} className="h-6 w-6" />
+            <HavenMark tone={dark ? 'onNavy' : 'brand'} className="h-6 w-6" />
             Haven
           </Link>
 

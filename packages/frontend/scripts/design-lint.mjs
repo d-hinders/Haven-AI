@@ -53,9 +53,12 @@ import { fileURLToPath } from 'url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const BASELINE_PATH = path.join(ROOT, 'design-lint-baseline.json')
 // src/app and src/components are the app's own surfaces. packages/ui/src is
-// where the shared primitives moved (#3508): the gate follows the code, or
-// the shim PR is the last one that sees the implementations.
-const SCAN_DIRS = ['src/app', 'src/components', '../ui/src']
+// where the shared primitives moved (#3508), and packages/ops/src is the
+// private console that consumes them (#3515): the gate follows the code, or
+// the shim PR is the last one that sees the implementations. Both extra dirs
+// are passed through path.relative, so the exemption checks
+// (`file.includes('ui/src/Card.tsx')`) keep working for them.
+const SCAN_DIRS = ['src/app', 'src/components', '../ui/src', '../ops/src']
 const DOC_POINTER = 'See /design-system (Colour tokens · How to use this page).'
 
 // Tailwind palette families — white/black/transparent stay legal.

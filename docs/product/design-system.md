@@ -1075,7 +1075,7 @@ For entity cards with independent controls, use the **stretched name-link patter
   and any truncating heading statically positioned so neither becomes a clipping or
   containing block for the overlay;
 - buttons, tooltip triggers, copy controls, and native `title` hover targets are siblings
-  raised above the overlay with `relative z-10`;
+  raised above the overlay with `relative z-[var(--v2-z-content)]`;
 - the card ring is driven only by the name link's `:focus-visible` state through the
   shared `has-[a:focus-visible]` rule. Do not use `focus-within`, which would ring the
   card when one of its independent actions receives focus.

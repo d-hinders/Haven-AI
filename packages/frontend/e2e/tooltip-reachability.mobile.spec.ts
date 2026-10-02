@@ -55,7 +55,7 @@ const SAMPLE_ADDRESS = '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C'
 const SAMPLE_TRUNCATED = '0x8f4F…6f4C'
 
 /**
- * The live composite-card label, from `McpServerName`'s RECORDED branch —
+ * The live agent-card MCP label, from `McpServerName`'s RECORDED branch —
  * `testAgent` carries no `mcp_server_name`, so the name is served by the
  * per-test route override below and the label is built with the component's
  * own pair rule rather than pasted.

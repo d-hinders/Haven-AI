@@ -427,35 +427,25 @@ test('/accounts: the card offers no set-default control', async ({ page }) => {
  * works the control, and `page.tap()` dispatches a genuine touch sequence only
  * under `chromium-mobile`.
  *
- * ## WHAT THIS TEST LOST TO #2374, said plainly
+ * ## WHAT CHANGED WITH #2374 AND #3550, said plainly
  *
  * It used to tap the STAR, and it could assert two containment properties
  * because the star's effect (`setDefault` -> `PUT /user/accounts/:id/default`)
- * was DISTINGUISHABLE from the card link's own effect (`setActiveAccount` ->
- * `localStorage['haven_active_account_id']`). With the star gone the only control
- * left is "Set active", whose handler calls `setActiveAccount(safe)` — **the
- * identical call the card's own `onClick` makes, with the identical argument.**
- *
- * So `stopPropagation()` is no longer observable here: whether the card's
- * handler also ran or not, the observable state is the same value written to
- * the same key. That half is therefore REMOVED rather than reworded into a
- * check that cannot fail — the same standard this file applied when it killed
- * its own "the URL did not change" assertion for being unable to distinguish
- * "navigation was suppressed" from "navigation never happens here".
- *
- * A guard that cannot fail is not a guard, and pretending otherwise here would
- * be worse than the gap: it would read as covered.
+ * was distinguishable from selecting the account. #3550 then removed the
+ * card-level click handler entirely: navigation belongs to the stretched name
+ * link, while "Set active" is a sibling button with its own state change. The
+ * button therefore needs neither `stopPropagation()` nor `preventDefault()`;
+ * its stacking position keeps the stretched link from receiving the tap.
  *
  * WHAT IS STILL ASSERTED, and it is not nothing:
  *
  *   - the tap WORKS — the active account really changes, so every hit
  *     rectangle above is geometry over a live control;
- *   - the click ends `defaultPrevented`, so the anchor's native navigation is
- *     off and the tap does not double as "open the account". This is the half
- *     that still has an independent signal, and it is read AFTER dispatch
- *     completes (a capture-phase listener holding the event, drained on a
- *     macrotask), because `defaultPrevented` during capture is always false
- *     and would assert nothing;
+ *   - the click ends with `defaultPrevented: false` and the URL remains on the
+ *     list, proving the sibling button owns the tap without an anchor-cancel
+ *     workaround. The value is read AFTER dispatch completes (a capture-phase
+ *     listener holding the event, drained on a macrotask), because
+ *     `defaultPrevented` during capture is always false and would assert nothing;
  *   - no set-default write leaves the page. Kept from the old test and
  *     repurposed: `PUT /user/accounts/:id/default` is intercepted and must never
  *     fire, which is a second, network-level reading of #2374's removal.

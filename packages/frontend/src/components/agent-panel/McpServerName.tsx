@@ -134,8 +134,8 @@ export function McpServerName({ value }: { value: string | null | undefined }) {
         signer half of the pair. A user who never reaches it has still read the
         name and can still copy it verbatim with the button beside it — the
         `CopyButton` is a sibling, so nothing here is the tooltip's only route
-        to the information. That is elaboration, and hover-only is what
-        `Tooltip` is for (`Tooltip.tsx:4-16`).
+        to the information. That is elaboration, and this standalone tooltip
+        remains keyboard-focusable and tap-openable (`Tooltip.tsx:4-16`).
 
         The null branch above was the opposite on every count: no visible value
         to elaborate, and the copy was the only place the fact existed.

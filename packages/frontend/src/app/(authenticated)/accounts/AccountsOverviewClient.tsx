@@ -86,11 +86,9 @@ function AccountCard({
   const hiddenTokenCount = Math.max(0, sortedBreakdown.length - TOP_TOKENS_PREVIEW)
 
   return (
-    <Link
-      href={`/accounts/${account.id}`}
-      onClick={onClick}
-      aria-label={account.name}
-      className={`v2-animate-stagger block ${entityCardClassName({ selected: isActive })} p-5 sm:p-6`}
+    <div
+      data-testid="account-card"
+      className={`v2-animate-stagger ${entityCardClassName({ selected: isActive, linked: true })} p-5 sm:p-6`}
       style={{
         ['--v2-stagger-delay' as string]: `${staggerIndex * 60}ms`,
       }}
@@ -146,11 +144,15 @@ function AccountCard({
       */}
       <div className="mb-2 flex items-start gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <h3
-            title={account.name}
-            className="min-w-0 truncate text-base font-semibold text-[var(--v2-ink)]"
-          >
-            {account.name}
+          <h3 className="min-w-0 truncate text-base font-semibold text-[var(--v2-ink)]">
+            <Link
+              href={`/accounts/${account.id}`}
+              onClick={onClick}
+              title={account.name}
+              className="block min-w-0 truncate rounded-sm after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+            >
+              {account.name}
+            </Link>
           </h3>
           {/*
             ONE badge group, not two siblings — this is #2235's fix.
@@ -265,7 +267,7 @@ function AccountCard({
           here.
         */}
         {!isActive && (
-          <div className="flex flex-shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
+          <div className="relative z-[var(--v2-z-content)] flex flex-shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
             {/*
               Tap target: the documented `Button` mechanism, borrowed verbatim
               and VERTICAL-ONLY (`docs/product/design-system.md` § Buttons
@@ -280,7 +282,7 @@ function AccountCard({
             */}
             <button
               type="button"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetActive() }}
+              onClick={onSetActive}
               className="relative rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
               aria-label={`Set ${account.name} as active`}
             >
@@ -314,7 +316,9 @@ function AccountCard({
               {formatFiat(fiatTotal, currency)}
             </p>
             {degradedFreshness && (
-              <BalanceFreshnessIndicator freshness={degradedFreshness} size="compact" />
+              <span className="relative z-[var(--v2-z-content)]">
+                <BalanceFreshnessIndicator freshness={degradedFreshness} size="compact" />
+              </span>
             )}
           </div>
         )}
@@ -371,7 +375,7 @@ function AccountCard({
           <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
         </span>
       </div>
-    </Link>
+    </div>
   )
 }
 

@@ -92,7 +92,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-09-30"
+last-verified: "2026-10-01"
 ---
 
 # Haven Design System
@@ -991,8 +991,8 @@ density the issue was protecting.
 What is new is the defect the measurement found *underneath* the undersized target, which
 the issue had diagnosed the other way round:
 
-- **`opacity-0` hides a control from the eye and from nobody else.** The pair sat in an
-  `opacity-0 group-hover:opacity-100 focus-within:opacity-100` wrapper, and the issue
+- **`opacity-0` hides a control from the eye and from nobody else.** Before #3550, the
+  pair sat in an `opacity-0 group-hover:opacity-100 focus-within:opacity-100` wrapper, and the issue
   read that as the controls being unreachable on touch. Measured at Pixel 5,
   `elementFromPoint` at each centre still returned the button: `opacity: 0` suppresses
   painting and leaves hit-testing untouched. So the card carried an invisible 73×24 and
@@ -1047,6 +1047,13 @@ not have seen any of this. Since #2374 that spec also pins the star's **absence*
 page-wide and against both spellings a reintroduction could take, with the surviving
 `Set active` control as its non-vacuity check.
 
+**Current account-card interaction (#3550).** The card container is not itself a link or
+tab stop. Its account-name `Link` owns a stretched pseudo-element that covers the card;
+clicking the card body therefore activates that account and navigates to it. `Set active`
+is a sibling above the overlay, so it performs only its own action without propagation
+guards. Keep its vertical 44px hit-area expansion. This sibling structure is the reason
+the historical `preventDefault()` behaviour above must not be reintroduced.
+
 **Prove it rendered, not in the class string.** A pseudo-element overlay has several
 silent no-op failure modes (a clipping ancestor, a positioning context resolving
 elsewhere, another element winning the band), and none of them exist in jsdom — which
@@ -1059,6 +1066,24 @@ returns the border box and reports 32×32 even when the overlay works perfectly.
 `bg-white border border-[var(--v2-border)] rounded-[10px] shadow-card`. Padding by use: `p-7` standard, `p-5` compact, `p-7 md:p-10` hero‑adjacent.
 
 Interactive cards (linked) add hover lift — see Shadows above.
+
+For entity cards with independent controls, use the **stretched name-link pattern**:
+
+- the card root is `relative`, is not focusable, and opts into
+  `entityCardClassName({ linked: true })`;
+- the semantic name is a normal `Link` with `after:absolute after:inset-0`; keep the link
+  and any truncating heading statically positioned so neither becomes a clipping or
+  containing block for the overlay;
+- buttons, tooltip triggers, copy controls, and native `title` hover targets are siblings
+  raised above the overlay with `relative z-[var(--v2-z-content)]`;
+- the card ring is driven only by the name link's `:focus-visible` state through the
+  shared `has-[a:focus-visible]` rule. Do not use `focus-within`, which would ring the
+  card when one of its independent actions receives focus.
+
+The link stays available while an adjacent action is busy, and normal link behaviour
+(client navigation, keyboard activation, modifier-click, and open-in-new-tab) remains
+intact. Prove body and control hit targets with a real browser at desktop and 390px;
+jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
 `Card` supports `elevation="flat" | "raised"` and `hover={false}`. Use `raised` only for prominent page anchors, and keep nested or data-dense cards flat.
 
@@ -1302,7 +1327,7 @@ Use `components/ui/Tooltip.tsx` for brief clarification that ELABORATES on somet
 
 Tooltips must not hide essential instructions, money/risk information, or the only copy of a raw address that the user must copy. If the value is required to complete the task, show it inline. #2017 is the worked example: an explanation a user needs in order to judge whether they still control their account was moved out of a tooltip and into visible text, and that decision stands.
 
-**Reachability, and its one deliberate limit (#2038).** The trigger takes focus and a tap only when it is nobody else's control — nothing focusable inside it, and no interactive element around it. Where the trigger already is (or sits inside) a button, link, or composite `role="link"` card, the primitive stays out of the way: adding a tab stop would nest one inside a single control, and adding a tap-toggle would fire alongside that control's own action and strand a bubble over whatever the tap opened. So a tooltip nested in a composite card — `McpServerName` inside `AgentCard` is the live case — remains **hover-only**, which is another way of saying its copy must not be essential.
+**Reachability, and its one deliberate limit (#2038).** The trigger takes focus and a tap only when it is nobody else's control — nothing focusable inside it, and no interactive element around it. Where the trigger already is (or sits inside) a button, link, or composite `role="link"` card, the primitive stays out of the way: adding a tab stop would nest one inside a single control, and adding a tap-toggle would fire alongside that control's own action and strand a bubble over whatever the tap opened. `AgentCard` no longer uses that composite-card structure: its stretched name link and `McpServerName` tooltip are siblings, and the tooltip trigger is raised above the overlay, so it keeps its normal keyboard and tap reachability.
 
 **Essential vs elaboration, worked on one component (#2043).** `McpServerName` carried BOTH kinds and is the clearest test the codebase has. Its `not recorded` branch held a 169-character explanation of an ABSENCE — there was no visible value for it to elaborate, and its whole job was to stop a user concluding their agent is broken. That is essential, so it moved to visible text: one sentence above the agent list, rendered only when some listed agent is unrecorded, following #2017's shape rather than inventing a second one. Its recorded branch kept its tooltip, and the difference is not a matter of degree:
 
@@ -1724,11 +1749,10 @@ the primitives' own contracts, and a **rendered spec at the real call site** for
 anything the surroundings decide. Three findings this page could not have
 produced:
 
-- a `Tooltip` trigger inside `AgentCard`'s composite `role="link"` cannot be made
-  focusable, because the composite owns the tab stop — visible only in context
-  ([#2038](https://github.com/d-hinders/Haven-AI/issues/2038); the copy
-  consequence, [#2043](https://github.com/d-hinders/Haven-AI/issues/2043), is
-  still open);
+- a `Tooltip` trigger inside a composite `role="link"` cannot be made focusable because
+  the composite owns the tab stop — visible only in context. `AgentCard` was the original
+  #2038 example; #3550 retired that structure by making the stretched name link and
+  tooltip siblings, so the live rendered check now proves the tooltip remains reachable;
 - the `wrong_wallet` gate state
   ([#2073](https://github.com/d-hinders/Haven-AI/issues/2073)) is illustrated on
   this page by hand-built markup rather than by `OnchainActionGate`, so its
@@ -1845,7 +1869,7 @@ element-scoped capture clips the very thing it photographs (#1873).
 | Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/protocols/*/page.tsx` |
 | Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, `packages/frontend/src/components/TopBar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
-| App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents |
+| App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents; linked cards use a stretched semantic name link with sibling controls above its overlay |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
 | Agent & transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
 | Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/TransactionMovement.tsx` |

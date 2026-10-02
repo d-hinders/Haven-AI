@@ -177,8 +177,8 @@ type CardReading = {
 }
 
 /**
- * Anchor on the card's `aria-label` and the `h3` inside it — never on a class
- * string, since the class strings are what these fixes change.
+ * Anchor on the named link inside the explicit card test hook — never on a
+ * class string, since the class strings are what these fixes change.
  *
  * `rowInner` is the width available to the NAME: the title row's client width
  * minus its own padding. Before #2236 that padding was `pr-12`, a reservation
@@ -188,10 +188,13 @@ type CardReading = {
  */
 async function readCard(page: Page, accountName: string): Promise<CardReading> {
   return page.evaluate((label) => {
-    const card = document.querySelector(`a[aria-label="${label}"]`)
+    const card = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="account-card"]'))
+      .find((candidate) => candidate.querySelector('h3 a')?.textContent?.trim() === label) ?? null
     if (!card) throw new Error(`no /accounts card labelled "${label}"`)
     const h3 = card.querySelector('h3')
     if (!h3) throw new Error(`the card labelled "${label}" renders no name`)
+    const nameLink = h3.querySelector('a')
+    if (!nameLink) throw new Error(`the card labelled "${label}" renders no name link`)
     const row = h3.parentElement!
     const padRight = parseFloat(getComputedStyle(row).paddingRight) || 0
     const rect = (el: Element): Rect => {
@@ -258,8 +261,8 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
     const actionsEl = card.querySelector('button')?.parentElement ?? null
 
     return {
-      text: (h3.textContent ?? '').trim(),
-      measure: +h3.getBoundingClientRect().width.toFixed(1),
+      text: (nameLink.textContent ?? '').trim(),
+      measure: +nameLink.getBoundingClientRect().width.toFixed(1),
       rowInner: +(row.clientWidth - padRight).toFixed(1),
       cardInner: +(
         card.clientWidth -
@@ -267,12 +270,12 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
         (parseFloat(getComputedStyle(card).paddingRight) || 0)
       ).toFixed(1),
       rowHeight: +row.getBoundingClientRect().height.toFixed(1),
-      nameHeight: +h3.getBoundingClientRect().height.toFixed(1),
-      truncated: h3.scrollWidth > h3.clientWidth + 1,
+      nameHeight: +nameLink.getBoundingClientRect().height.toFixed(1),
+      truncated: nameLink.scrollWidth > nameLink.clientWidth + 1,
       badges: Array.from(new Set(badges.map(([t]) => t))),
       badgeRects,
       captionRect: rect(caption),
-      nameRect: rect(h3),
+      nameRect: rect(nameLink),
       actionsRect: actionsEl ? rect(actionsEl) : null,
       actionsOpacity: actionsEl ? Number(getComputedStyle(actionsEl).opacity) : 0,
     }
@@ -309,7 +312,7 @@ async function hoverCardUntilActionsVisible(page: Page, accountName: string): Pr
   // call `tooltip-reachability.spec.ts:123` makes before its own hover — a
   // no-op at 1280, which is why it lives here rather than at each call site.
   await dismissMobileSidebar(page)
-  const card = page.locator(`a[aria-label="${accountName}"]`)
+  const card = page.getByTestId('account-card').filter({ hasText: accountName })
   await card.scrollIntoViewIfNeeded()
   let opacity = 0
   for (let i = 0; i < 20; i++) {
@@ -350,7 +353,7 @@ async function serveAccounts(page: Page, accounts: unknown[]) {
 
 async function openAccounts(page: Page) {
   await page.goto('/accounts')
-  await page.waitForSelector('a[aria-label] h3', { timeout: 60_000 })
+  await page.waitForSelector('[data-testid="account-card"] h3 a', { timeout: 60_000 })
 }
 
 test('/accounts: two accounts — the name survives its chrome at both widths', async ({ page }) => {
@@ -666,9 +669,7 @@ test('/accounts: focus reveals the actions and the ring clears the card edge', a
     // focus and not to a pointer left on the card by an earlier read.
     await page.mouse.move(0, 0)
     await dismissMobileSidebar(page)
-    const setActive = page.locator(
-      `a[aria-label="${ACTION_CARD_NAME}"] button[aria-label="Set ${ACTION_CARD_NAME} as active"]`,
-    )
+    const setActive = page.getByRole('button', { name: `Set ${ACTION_CARD_NAME} as active` })
     await setActive.scrollIntoViewIfNeeded()
     /*
       Focus the button BY KEYBOARD, not with `locator.focus()`.
@@ -681,13 +682,10 @@ test('/accounts: focus reveals the actions and the ring clears the card edge', a
       Focusing a SIBLING and pressing Tab makes the modality keyboard, which is
       the state a keyboard user is actually in.
 
-      The sibling used to be the other button. #2374 left this card one control,
-      so the anchor that WRAPS it is the sibling now — the card itself is
-      focusable (`<Link href>`), and Tab from it lands on the button inside. That
-      is also the real keyboard path a user takes to reach it, which the
-      button-to-button hop never was.
+      #3550 makes the name link and the control siblings. Focusing the link and
+      pressing Tab is therefore both the real DOM order and the user's path.
     */
-    await page.locator(`a[aria-label="${ACTION_CARD_NAME}"]`).focus()
+    await page.getByRole('link', { name: ACTION_CARD_NAME, exact: true }).focus()
     await page.keyboard.press('Tab')
     await page.waitForTimeout(400)
 
@@ -699,7 +697,8 @@ test('/accounts: focus reveals the actions and the ring clears the card edge', a
 
     const ring = await page.evaluate(
       ({ label, buttonLabel }) => {
-        const card = document.querySelector(`a[aria-label="${label}"]`) as HTMLElement
+        const card = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="account-card"]'))
+          .find((candidate) => candidate.querySelector('h3 a')?.textContent?.trim() === label) as HTMLElement
         const btn = card.querySelector(`button[aria-label="${buttonLabel}"]`) as HTMLElement
         const focused = document.activeElement === btn
         const cardBox = card.getBoundingClientRect()

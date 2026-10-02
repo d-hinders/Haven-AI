@@ -45,7 +45,7 @@ const X402_STEPS: ReadonlyArray<FlowStep> = [
   { tone: 'brand', title: 'Agent forwards the challenge to Haven', detail: 'POST /x402/authorize' },
   { tone: 'brand', title: 'Budget checked', detail: 'within period budget · recipient allowed' },
   { tone: 'brand', title: 'Agent signs the payment locally', detail: 'EIP-712 typed data · the key never leaves it' },
-  { tone: 'brand', title: 'Agent retries with the signed payment', detail: 'X-PAYMENT header' },
+  { tone: 'brand', title: 'Agent retries with the signed payment', detail: 'PAYMENT-SIGNATURE header' },
   {
     tone: 'success',
     title: 'Merchant settles from your account on Base, data delivered',

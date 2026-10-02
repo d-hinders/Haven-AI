@@ -133,6 +133,14 @@ describe('How it works', () => {
     expect(settled).toBeGreaterThan(retry)
   })
 
+  it('discloses that rotation does not move a balance already in the agent wallet', () => {
+    const { container } = render(<HowItWorksPage />)
+    const security = container.querySelector('#security') as HTMLElement
+    // copy-guidelines.md: x402 copy discloses that the key controls funds already in the agent wallet.
+    expect(security.textContent).toContain("A balance already in the agent's own wallet is controlled by its key")
+    expect(security.textContent).not.toContain('Nothing for an agent to leak')
+  })
+
   it("shows the runbook's connector command, including --api", () => {
     const { container } = render(<HowItWorksPage />)
     const code = container.querySelector('pre')?.textContent ?? ''
@@ -178,6 +186,14 @@ describe('Protocols', () => {
     const settle = steps.findIndex((t) => t.includes('settles'))
     expect(retry).toBeGreaterThan(-1)
     expect(settle).toBeGreaterThan(retry)
+  })
+
+  it('names the x402 v2 retry header, never X-PAYMENT, on the ERC-7710 path', () => {
+    const { container } = render(<ProtocolsPage />)
+    // sdk tools.ts: X-PAYMENT is never sent on erc7710 (HTTP 431); the retry carries PAYMENT-SIGNATURE.
+    const text = container.textContent ?? ''
+    expect(text).toContain('PAYMENT-SIGNATURE header')
+    expect(text).not.toContain('X-PAYMENT')
   })
 
   it('labels the flow as the ERC-7710 path whose order it shows', () => {

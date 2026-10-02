@@ -66,8 +66,8 @@ const SECURITY_CARDS: ReadonlyArray<{ title: string; body: string; link?: { labe
     body: 'An over-budget payment reverts at execution. It is not a rule in our database.',
   },
   {
-    title: 'Nothing for an agent to leak',
-    body: "An agent's credential cannot spend past its budget. If it is exposed, rotate it: the agent keeps its history and the old credential stops working.",
+    title: 'A leaked credential stays capped',
+    body: "An agent's credential cannot spend your account past its budget. If it is exposed, rotate it: the agent keeps its history and the old credential stops working. A balance already in the agent's own wallet is controlled by its key, and rotating does not move it.",
   },
   {
     title: 'An exit that needs no Haven',

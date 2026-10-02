@@ -904,8 +904,9 @@ scripts, so a local run matches CI.
 publish the half-built site.
 
 Some new routes exist **only** with the gate on and answer 404 without it,
-production included: `/how-it-works/protocols` (#3576) is the first. They
-join `PUBLIC_SURFACES` with the switch-over slice (#3579), not before.
+production included — the routes the site-redesign slices add, such as
+`/how-it-works/protocols` (#3576). They join `PUBLIC_SURFACES` with the
+switch-over slice (#3579), not before.
 
 It is build-time on purpose, unlike `HAVEN_DEMO_PAGE_VISIBLE` above. The `/demo`
 gate guards a page that hands out test funds, so it is server-only and read per

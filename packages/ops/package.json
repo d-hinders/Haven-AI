@@ -9,7 +9,8 @@
     "typecheck": "npm --prefix ../core run build && tsc --noEmit",
     "start": "next start",
     "screenshot": "node scripts/screenshot.mjs",
-    "test": "npm --prefix ../core run build && vitest run"
+    "test": "npm --prefix ../core run build && vitest run",
+    "smoke": "node scripts/render-smoke.mjs"
   },
   "dependencies": {
     "@haven_ai/core": "*",
@@ -20,6 +21,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.0.0",

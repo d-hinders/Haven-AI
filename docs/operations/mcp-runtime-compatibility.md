@@ -76,6 +76,16 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3583 (2026-10-02, the ops render smoke):** this diff touches
+> `.github/workflows/ci.yml`, a covered file, inside the `ops_checks` job
+> only: its build step gains a fixture `NEXT_PUBLIC_OPS_ENVIRONMENTS`, three
+> steps are added (the shared Playwright cache restore, a cache-miss browser
+> install, and `npm run smoke -w packages/ops`), and the job timeout goes
+> from 10 to 15 minutes. No tool, schema, version-skew or consent-hash
+> contract moves; the client releases table, upgrade hints, publish flow and
+> package resolution are untouched. `last-verified` stays 2026-10-02. Nothing
+> else in this document was re-verified.
+
 > **Re-verified, follow-up to #3587 (2026-10-02, a step rename):** this diff
 > touches `.github/workflows/ci.yml`, a covered file, in one step NAME and its
 > comment only — the `design_visual` job's dark-scheme step is renamed from

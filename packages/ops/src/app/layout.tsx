@@ -13,6 +13,12 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
+// Dynamic rendering (#3581): the middleware's CSP carries a per-request script
+// nonce, and Next stamps it on its scripts only while rendering a request. A
+// prerendered page is rendered at build time with no request, so its HTML
+// carries no nonce and the browser refuses every script.
+export const dynamic = 'force-dynamic'
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,

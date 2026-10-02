@@ -1378,9 +1378,11 @@ by its middleware (#3581; the first static form refused Next's own inline
 scripts and the console rendered blank). That is client-side defence for
 the token in `sessionStorage` and moves no authority; the rest of this
 document was not re-read for it, and `last-verified` is not bumped. The
-app's Vercel ignore-build step (#3591) decides only *when* the console
-redeploys, from what changed since its last deployment; it moves no
-authority either, and the same scope note holds. The console's CI render
+app's Vercel ignore-build step (#3591; since #3594 a script shared with
+the dashboard's Vercel project, each with its own watch file) decides
+only *when* the console or the dashboard redeploys, from what changed since
+its last deployment; it moves no authority either, and the same scope note
+holds. The console's CI render
 smoke (#3583) only proves, in a browser, that the console renders under that
 CSP and that the CSP refuses an un-nonced inline script; it moves no
 authority, and the same scope note holds.

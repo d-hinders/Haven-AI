@@ -29,6 +29,9 @@ covers:
   - packages/backend/src/routes/accounting-webhooks.ts
   - packages/frontend/src/lib/demo-gate.ts
   - packages/frontend/playwright.config.ts
+  - packages/frontend/vercel.json
+  - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
+  - scripts/vercel/**
 last-verified: "2026-10-02"
 ---
 
@@ -76,7 +79,7 @@ how to configure it. For the branch workflow that feeds it, see
 
 | Service | Platform | Deploys from | Notes |
 |---|---|---|---|
-| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, always the newest `dev` build). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
+| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, serving the newest `dev` build — and a push that changes nothing the frontend is built from normally builds nothing; see [Which pushes rebuild the frontend](#which-pushes-rebuild-the-frontend)). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend via its own `HAVEN_API_URL`. ⚠️ Was found wired to `main` with a dead upstream on 2026-08-06 — [verify before trusting it](#verifying-a-dev-service-actually-works). |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. Advertises EIP-3009 first by default; the ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
@@ -94,8 +97,11 @@ deployed that way today.
 
 - Frontend (Vercel): `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
   — the **branch-tracking preview of `dev`**: a stable hostname that Vercel
-  re-points at the newest `dev` deployment, so it is always current without ever
-  changing. Verified 2026-08-06: it serves the same build as the immutable
+  re-points at the newest `dev` deployment without ever changing. Since #3594
+  that deployment is of the newest `dev` commit *that changed the frontend's
+  inputs*: a push that changes none of them normally skips its build
+  ([below](#which-pushes-rebuild-the-frontend), including when it builds anyway). Verified 2026-08-06, before
+  that change: it serves the same build as the immutable
   deployment of `dev` HEAD, and proxies to the dev backend. Per-PR preview links
   exist alongside it (the PR's Vercel check) and are what you use to test *that
   PR's build* — they are a different domain each time.
@@ -168,6 +174,49 @@ deployed that way today.
   set as repo variables (or secrets of the same name); missing either one skips
   the leg, which the blocking Coverage completeness step reports as a failure.
   See [`agent-qa.md`](agent-qa.md) § *The hosted-MCP leg*.
+
+### Which pushes rebuild the frontend
+
+`packages/frontend/vercel.json` carries the frontend project's repo-expressible
+Vercel settings (#3594): the framework, the install command, the build command
+and the **Ignored Build Step**. Vercel reads it only because the project's
+**Root Directory** is `packages/frontend`; leave the install command, build
+command and Ignored Build Step unset in the dashboard, so the file is the one
+source. The step runs the shared `scripts/vercel/ignore-build.sh` with the
+watch file `scripts/vercel/watch/frontend.txt`, which lists the paths the
+frontend is built from: `packages/frontend`, `packages/ui`, `packages/core`,
+`tsconfig.base.json`, the root install inputs (`package.json`,
+`package-lock.json`, `.nvmrc`) and the docs `next.config.ts` serves under
+`/docs/` (the frontend's served-docs `ALLOWLIST`). A build is skipped only
+when none of them changed since the commit the project last **deployed**; the
+rule and its edge cases are described once, in
+[`ops-console.md` § Ignored Build Step](ops-console.md#1-the-vercel-project),
+since the ops project runs the same script. For this project that means:
+
+- A push that changes none of those paths (backend, SDK, CI, or a doc other
+  than the served ones) shows `Vercel – haven-ai-frontend`: "Canceled by
+  Ignored Build Step" and builds nothing, provided the commit the project last
+  deployed is in Vercel's clone; when it is not, the step builds. The `dev`
+  host then keeps serving the last build, which is current, because nothing it
+  serves changed.
+- A PR's first preview compares the branch with its merge base with `dev`,
+  fetching `dev` when Vercel's clone lacks it, so a frontend PR gets a preview
+  even when its newest push is docs-only. If no merge base can be found, the
+  preview builds. Whether that fetch succeeds inside Vercel's build is not yet
+  observed; the build log's `vercel ignore-build:` line says which branch the
+  rule took.
+- A push to `dev` or `main` with no recorded previous deployment always builds.
+- The list is checked against the real build inputs by
+  `packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts`; a new
+  workspace dependency, transpiled package or served doc that the list misses
+  fails it.
+
+**Rebuilding an unchanged commit.** A changed `NEXT_PUBLIC_*` value (Next
+inlines them at build time) needs a rebuild that no git change triggers, so the
+step would skip it. Set the project environment variable `FRONTEND_FORCE_BUILD`
+to `1` in the scope you are changing (Preview for the dev host, Production for
+production), redeploy the latest deployment of that branch, then delete
+`FRONTEND_FORCE_BUILD`; left in place it makes every build in that scope run.
 
 ### Verifying a dev service actually works
 

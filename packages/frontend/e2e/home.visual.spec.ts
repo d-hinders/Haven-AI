@@ -42,6 +42,12 @@ test.describe('/ (new home) visual regression', () => {
     testInfo.project.name === 'chromium-desktop-dark' ? 'dark' : 'light'
 
   test.beforeEach(async ({ page }, testInfo) => {
+    // The baselines are the SETTLED page (slice 2, #3574). This slice added
+    // the mockup's loops (#3575); every one falls back to its settled state
+    // under `prefers-reduced-motion: reduce` (home-motion.test.tsx asserts
+    // it), so the capture emulates reduce and no loop can run into a
+    // baseline — belt to `animations: 'disabled'`'s braces.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
     if (schemeOf(testInfo) === 'dark') {
       await page.addInitScript((themeKey: string) => {
         window.localStorage.setItem(themeKey, 'dark')
@@ -55,6 +61,12 @@ test.describe('/ (new home) visual regression', () => {
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await page.goto('/')
+
+      // The dev server's overlay ("N · n Issues") renders in a
+      // `nextjs-portal` web component the baselines never saw — same hide as
+      // `scripts/screenshot.mjs` (and mobile-nav-layering.mobile.spec.ts);
+      // CI runs the standalone production server, where it doesn't exist.
+      await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' })
 
       // The hero renders as the page's <h1> — the anchor that proves THIS
       // page, not the legacy one, answered.

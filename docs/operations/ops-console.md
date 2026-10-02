@@ -53,7 +53,10 @@ read those settings from the repo — every one of them is in
   every request;
 - public. Search engines get `noindex`, framing is refused, and the app
   ships an enforcing CSP whose `connect-src` is exactly the registry
-  origins.
+  origins. Its scripts are gated on a per-request nonce that
+  `packages/ops/src/middleware.ts` sets (#3581); a blank page with
+  `Refused to execute inline script` in the browser console means that
+  nonce is not reaching Next's scripts.
 
 ## Sign-in and the environment switcher
 

@@ -1372,7 +1372,12 @@ reads one allowlisted column and records the read first. It is a
 founders-only window, not a delegation-rail participant: no op this document
 guards runs through it, and its authority-relevance ends at what its
 operator may LOOK at. Deploy wiring and the per-environment checklist live
-in the runbook, not here.
+in the runbook, not here. The app's own browser hardening is an enforcing
+Content-Security-Policy whose scripts are gated on a per-request nonce set
+by its middleware (#3581; the first static form refused Next's own inline
+scripts and the console rendered blank). That is client-side defence for
+the token in `sessionStorage` and moves no authority; the rest of this
+document was not re-read for it, and `last-verified` is not bumped.
 
 ## 9. Owner CLI sessions — the device-code login (#2526)
 

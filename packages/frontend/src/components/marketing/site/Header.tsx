@@ -123,7 +123,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
           <div className="flex items-center gap-3 sm:gap-[18px] text-[14px]">
             <Link
               href="/login"
-              className={`inline-block whitespace-nowrap rounded-[4px] transition-colors ${
+              className={`${TAP_TARGET} inline-block whitespace-nowrap rounded-[4px] transition-colors ${
                 dark
                   ? `text-[rgba(255,255,255,0.85)] hover:text-white ${FOCUS_ON_DARK}`
                   : `text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] ${FOCUS_ON_LIGHT}`
@@ -133,7 +133,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
             </Link>
             <Link
               href="/signup"
-              className={`inline-flex h-9 items-center rounded-md px-3 sm:px-3.5 text-[14px] font-medium whitespace-nowrap transition-colors ${
+              className={`${TAP_TARGET} inline-flex h-9 items-center rounded-md px-3 sm:px-3.5 text-[14px] font-medium whitespace-nowrap transition-colors ${
                 dark
                   ? `bg-white text-[#0e1230] hover:bg-[#eef2ff] ${FOCUS_ON_DARK}`
                   : `bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)] hover:bg-[var(--v2-brand-strong)] ${FOCUS_ON_LIGHT}`
@@ -151,6 +151,12 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
     </header>
   )
 }
+
+// Button's invisible 44px hit area (#1726, design-system.md § Tap targets),
+// restated because the header's two actions are tone-switching links that
+// Button has no on-navy variant for. Vertical only, as Button's is.
+const TAP_TARGET =
+  "relative after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
 
 // Focus rings follow the tone for the same reason the ink does: a brand ring
 // on the navy band sits at ~2.6:1, a white one on a white bar is invisible.

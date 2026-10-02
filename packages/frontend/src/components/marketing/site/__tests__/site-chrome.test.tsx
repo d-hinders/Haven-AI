@@ -62,6 +62,20 @@ describe('header entries', () => {
     expect(screen.getByRole('link', { name: /Create your account/ })).toHaveAttribute('href', '/signup')
   })
 
+  it('gives both header actions the 44px hit area and a short CTA label on phones (#1726)', () => {
+    render(<Header />)
+    for (const link of [
+      screen.getByRole('link', { name: 'Sign in' }),
+      screen.getByRole('link', { name: /Create your account/ }),
+    ]) {
+      expect(link.className).toContain('after:h-11')
+      expect(link.className).toContain('relative')
+    }
+    const cta = screen.getByRole('link', { name: /Create your account/ })
+    expect(within(cta).getByText('Sign up').className).toContain('sm:hidden')
+    expect(within(cta).getByText('Create your account').className).toContain('hidden sm:inline')
+  })
+
   it('keeps the installed-app safe-area band as the header’s first child (#2819)', () => {
     render(<Header />)
     const header = document.querySelector('[data-site-header]')!

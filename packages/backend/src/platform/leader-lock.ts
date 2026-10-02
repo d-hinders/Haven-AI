@@ -89,6 +89,15 @@ export const LEADER_LOCK_KEYS = {
    * tenant would each believe they were under Fortnox's 25 / 5 s floor.
    */
   accountingRetrySweep: 811010,
+  /**
+   * Submission reconciliation (#3564) — resolves an outcome-pending direct
+   * payment (a UserOp sent but never receipt-confirmed) from the bundler's
+   * receipt index for its recorded userOpHash. Leader-gated because the read
+   * rides the delegation rail's bundler credential and the tick is otherwise
+   * replicated; correctness does not depend on it (the terminal writes are
+   * CASes).
+   */
+  submissionReconcile: 811011,
 } as const
 
 /**

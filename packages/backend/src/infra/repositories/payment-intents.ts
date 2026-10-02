@@ -613,6 +613,126 @@ export async function failSubmittedIntent(
   await db.query(FAIL_SUBMITTED_INTENT_SQL, [errorMessage, intentId, agentId])
 }
 
+// ── Outcome-pending booking + chain reconciliation (#3564) ────────────────────
+//
+// A `SubmittedUserOpFailedError` whose outcome is `receipt_unconfirmed` means
+// the UserOp was SENT and MAY have landed: booking that row `failed` records a
+// funds-moved payment as failed forever. The booking below instead leaves the
+// row `submitted` (non-terminal) and records the userOpHash in
+// `machine_metadata` as the reconciler's lookup key. The `tx_hash IS NULL`
+// conjunct keeps a confirmed row un-touchable; the `status = 'submitted'`
+// conjunct makes the write a CAS — a concurrent settle still wins cleanly.
+
+export const BOOK_SUBMITTED_OUTCOME_PENDING_SQL = `UPDATE payment_intents
+         SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_build_object(
+               'user_op_hash', $1::text,
+               'submission_outcome', 'unknown')
+         WHERE id = $2 AND agent_id = $3 AND status = 'submitted' AND tx_hash IS NULL
+         RETURNING id`
+
+/**
+ * #3564: book a receipt-unconfirmed submit as outcome-PENDING — the row stays
+ * `submitted` (status reads "outcome pending", next_action check_status_later)
+ * and the userOpHash is stored for the reconciler. False when the row was not
+ * still an open submit (already confirmed, failed, or expired meanwhile).
+ */
+export async function bookSubmittedOutcomePending(
+  input: { userOpHash: string; intentId: string; agentId: string },
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ id: string }>(BOOK_SUBMITTED_OUTCOME_PENDING_SQL, [
+    input.userOpHash,
+    input.intentId,
+    input.agentId,
+  ])
+  return result.rows.length > 0
+}
+
+export interface OutcomePendingIntentRow {
+  id: string
+  agent_id: string
+  chain_id: number
+  signed_at: string
+  user_op_hash: string
+}
+
+export const FIND_OUTCOME_PENDING_INTENTS_SQL = `SELECT id, agent_id, chain_id, signed_at,
+            machine_metadata->>'user_op_hash' AS user_op_hash
+     FROM payment_intents
+     WHERE status = 'submitted'
+       AND tx_hash IS NULL
+       AND machine_metadata->>'submission_outcome' = 'unknown'
+       AND machine_metadata->>'user_op_hash' IS NOT NULL
+       AND machine_metadata->>'user_op_hash' LIKE '0x%'
+       AND signed_at < NOW() - ($1 * interval '1 second')
+     ORDER BY signed_at ASC
+     LIMIT $2`
+
+/**
+ * #3564: the reconciler's candidate set — open submits carrying the
+ * outcome-pending metadata. `LIKE '0x%'` is the guard that keeps a
+ * non-hash-shaped value out of a bundler call; eligibility is the metadata's
+ * own presence, NOT the row's rail, because the booking seam (the sign route)
+ * does not write a rail marker and the submit is definitionally
+ * delegation-rail (the only rail that raises `SubmittedUserOpFailedError`).
+ * No index backfill here: the population is receipts-unconfirmed submits
+ * only, bounded by the tick's own LIMIT and age gate.
+ */
+export async function findOutcomePendingIntents(
+  minAgeSeconds: number,
+  limit: number,
+  db: Executor = pool,
+): Promise<OutcomePendingIntentRow[]> {
+  const result = await db.query<OutcomePendingIntentRow>(FIND_OUTCOME_PENDING_INTENTS_SQL, [
+    minAgeSeconds,
+    limit,
+  ])
+  return result.rows
+}
+
+export const RECONCILE_OUTCOME_CONFIRMED_SQL = `UPDATE payment_intents
+         SET status = 'confirmed', tx_hash = $1, confirmed_at = NOW()
+         WHERE id = $2 AND status = 'submitted' AND tx_hash IS NULL
+         RETURNING id`
+
+/**
+ * #3564: the receipt says the op landed and SUCCEEDED — confirm the row with
+ * the receipt's own transaction hash. The CAS makes a concurrent settle's
+ * confirm the winner and this write the loser (and vice versa); idempotent by
+ * construction (a second run finds no open row and returns false).
+ */
+export async function reconcileOutcomeConfirmed(
+  intentId: string,
+  txHash: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ id: string }>(RECONCILE_OUTCOME_CONFIRMED_SQL, [txHash, intentId])
+  return result.rows.length > 0
+}
+
+export const RECONCILE_OUTCOME_FAILED_SQL = `UPDATE payment_intents
+         SET status = 'failed',
+             error_message = COALESCE(error_message, '') || ' | reconciled from chain: redemption UserOp ' || (machine_metadata->>'user_op_hash') || $1::text,
+             machine_metadata = machine_metadata || jsonb_build_object('submission_outcome', 'resolved')
+         WHERE id = $2 AND status = 'submitted' AND tx_hash IS NULL
+         RETURNING id`
+
+/**
+ * #3564: the receipt says the op landed and REVERTED, or the bounded window
+ * closed with the op never seen — the row becomes `failed` with the cause
+ * appended to the stored wait error. Same CAS as the confirm arm; the
+ * `submission_outcome: resolved` marker keeps the row out of every later
+ * candidate scan.
+ */
+export async function reconcileOutcomeFailed(
+  intentId: string,
+  cause: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ id: string }>(RECONCILE_OUTCOME_FAILED_SQL, [cause, intentId])
+  return result.rows.length > 0
+}
+
 // ── Machine-rail transitions (rail-scoped guards, modules/mpp/authorize.ts) ──
 
 export const REFRESH_MACHINE_INTENT_NONCE_SQL = `UPDATE payment_intents
@@ -695,6 +815,8 @@ export const FIND_INTENT_STATUS_ROW_SQL = `SELECT pi.id, pi.chain_id, pi.token_s
             -- so a failed/direct row's status answered with no cause and no key.
             pi.error_message, pi.send_idempotency_key,
             pi.budget_delegation_hash,
+            pi.machine_metadata->>'user_op_hash' AS user_op_hash,
+            pi.machine_metadata->>'submission_outcome' AS submission_outcome,
             (mpre.id IS NOT NULL) AS funded_but_unsettled,
             EXISTS (SELECT 1 FROM machine_payment_evidence mpe
                     WHERE mpe.payment_intent_id = pi.id
@@ -747,6 +869,16 @@ export interface PaymentIntentStatusRow {
    * rail and on rows predating migration 053.
    */
   budget_delegation_hash: string | null
+  /**
+   * #3564: `machine_metadata.user_op_hash` — recorded ONLY when the sign route
+   * books a receipt-unconfirmed submit outcome-pending. Null on every other
+   * row; no other writer sets it, so its presence is what marks a `submitted`
+   * row as the reconciler's subject.
+   */
+  user_op_hash: string | null
+  /** #3564: `machine_metadata.submission_outcome` — `'unknown'` while the
+   * reconciler has not resolved the submit, `'resolved'` once it has. */
+  submission_outcome: string | null
   /** True when an open merchant_retry_rejected_after_payment reconciliation event exists. */
   funded_but_unsettled: boolean
   /**

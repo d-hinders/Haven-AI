@@ -48,7 +48,9 @@ function loadFixture(slug: string): { _base: string; body: unknown } {
 const ADDITIVE_SINCE_BASE = new Set([
   // #3128: the receipts envelope gained page fields; the receipts themselves are unchanged.
   'total', 'has_more', 'next_cursor','parties', 'funding_tx_hash', 'settlement_tx_hash',
-  'settlement_scheme', 'merchant_settlement_recorded'])
+  'settlement_scheme', 'merchant_settlement_recorded',
+  // #3564: additive outcome-pending visibility on the machine-payment status.
+  'submission_outcome_pending'])
 
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)

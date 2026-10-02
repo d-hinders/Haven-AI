@@ -300,6 +300,18 @@ describe('payment result mappers', () => {
         .merchantSettlementRecorded,
     ).toBe(true)
   })
+
+  it('mapPaymentStatusResult carries submissionOutcomePending only while the submit is outcome-pending (#3564)', () => {
+    expect(mapPaymentStatusResult(paymentStatusResponse()).submissionOutcomePending).toBeUndefined()
+    expect(
+      'submissionOutcomePending' in mapPaymentStatusResult(paymentStatusResponse()),
+    ).toBe(false)
+
+    expect(
+      mapPaymentStatusResult(paymentStatusResponse({ submission_outcome_pending: true }))
+        .submissionOutcomePending,
+    ).toBe(true)
+  })
 })
 
 describe('list scope survives the receipt mapper (#3132)', () => {

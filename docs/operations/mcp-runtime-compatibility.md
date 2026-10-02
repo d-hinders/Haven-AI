@@ -87,6 +87,28 @@ last-verified: "2026-10-02"
 > untouched. `last-verified` is bumped to 2026-10-02 for this note.
 > Nothing else in this document was re-verified.
 
+> **Re-verified #3564 (2026-10-02):** this diff touches
+> `packages/mcp-server/src/tools/support/errors.ts` and
+> `packages/sdk/src/types.ts` / `payment-mappers.ts` — all covered trees.
+> #3494's `SUBMISSION_OUTCOME_UNKNOWN` mapping moves from a
+> `stop_and_tell_user` (the intent was already `failed`, so polling this
+> payment_id's own status could never confirm the outcome) to the poll the
+> re-booked backend now permits: with the 502 body's `payment_id` the step
+> names `haven_get_payment_status` (`next_action: check_status_later` — the
+> intent is booked outcome-pending, so the status read IS the source of
+> truth, and it becomes the real terminal state once the backend's
+> submission reconciler resolves the row from the chain); without a
+> `payment_id` to poll, the step stays `stop_and_tell_user`, saying why no
+> new payment may be created. No tool added, renamed or re-shaped; the
+> runtime manifest, connector channel, dist-tag and consent-hash contracts
+> are untouched, and the failure shape rides the same refusal-wire fields
+> the #3104 parity walk already parses. Additive SDK surface:
+> `submissionOutcomePending` on the status result — absent on every other
+> row, never `false`, matching `delivered`'s honesty rule — so an older
+> backend stays wire-compatible. `last-verified` is bumped to 2026-10-02
+> for this note: the hosted refusal mapping for this code is part of this
+> document's guidance surfaces, and its `next_action` moved.
+
 > **Re-verified #3496 (2026-09-30, the tombstone tell moves ahead of the
 > identity stat):** this diff touches `packages/connect/src/doctor.ts` (and its
 > test), a covered tree. In `discoverCredentialDirectory` the `TOMBSTONE.json`

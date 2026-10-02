@@ -28,8 +28,21 @@ covers:
   - packages/backend/src/routes/accounting-webhooks.ts
   - packages/frontend/src/lib/demo-gate.ts
   - packages/frontend/playwright.config.ts
-last-verified: "2026-10-01"
+last-verified: "2026-10-02"
 ---
+
+> **Re-verified #3564 (2026-10-02):** `index.ts` gains one more
+> leader-gated background tick beside the settlement sweep — the submission
+> reconciler (`modules/payments/submission-reconciler.ts`, lock key
+> `submissionReconcile`), every 60 s, `unref`'d like the sweep's own
+> interval. It resolves the direct payments whose sign submit was SENT but
+> whose receipt was never confirmed (the rows #3564 books outcome-pending):
+> one bundler receipt read per candidate row, terminal writes via CAS, and
+> a per-candidate try/catch so one poison row cannot silence the queue. No
+> route file is added or moved, `enforcedModules` is untouched, and the
+> shadow/enforce semantics this document describes are unchanged. Nothing
+> else in this file's coverage was touched; this note and the
+> `last-verified` date are the only edits.
 
 # Dev environment
 

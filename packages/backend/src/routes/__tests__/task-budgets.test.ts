@@ -436,7 +436,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     const row = taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ userOp: true }) })
@@ -459,7 +459,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     mockReadDisabled.mockResolvedValue(new Set())
@@ -481,7 +481,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     mockReadDisabled.mockRejectedValue(new Error('rpc down'))

@@ -20,8 +20,9 @@
  * sentence points.
  *
  * The indicators are PR #1831's, on `Sidebar`'s kebab user menu and
- * `AgentCard`'s footer action row — eleven when #1831 wrote them, TEN today,
- * since #2258 deleted the card's `Revoke` control (#2687). Until this file they were protected by a
+ * `AgentCard`'s footer action row — eleven when #1831 wrote them, NINE today,
+ * after #2258 deleted `Revoke`, #3168 deleted `Edit`, and #3550 replaced
+ * `Details` with the name-link card ring. Until this file they were protected by a
  * STRUCTURAL guard (`src/__tests__/focus-ring.test.ts`, which reads class
  * strings out of source) and by nothing rendered. A ring that compiles to the
  * wrong colour, is occluded, or sits behind an overlay passed every gate we
@@ -734,28 +735,71 @@ async function gotoDesktop(page: Page, path: string) {
   await page.waitForLoadState('networkidle')
 }
 
-test('agent card stretched link: body pointer opens the agent while action controls do not navigate', async ({
-  page,
-}) => {
-  await mockHavenApi(page)
-  await seedAuthenticatedSession(page)
-
-  for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
+for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
+  test(`agent card stretched link (${viewport?.width ?? 'missing'}px): body pointer activates the agent link while action controls do not navigate`, async ({
+    page,
+  }) => {
     if (!viewport) throw new Error('focus gate: no desktop viewport configured')
+    const agentId = testAgent.id
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
     await page.setViewportSize(viewport)
     await page.goto('/agents')
     await dismissMobileSidebar(page)
 
-    const card = page.getByTestId('agent-card')
-    const budgetLabel = card.getByText('Agent budget')
-    await budgetLabel.scrollIntoViewIfNeeded()
-    const bodyBox = await budgetLabel.boundingBox()
-    if (!bodyBox) throw new Error('the agent-card body point has no rendered box')
+    const card = page.getByTestId('agent-card').filter({
+      has: page.locator(`a[href="/agents/${agentId}"]`),
+    })
+    await card.scrollIntoViewIfNeeded()
+    await card.getByRole('button', { name: `Pause ${testAgent.name}` }).click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+    await expect(page.getByRole('heading', { name: `Pause ${testAgent.name}?` })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    const bodyPoint = await card.evaluate((element, agentId) => {
+      const link = element.querySelector<HTMLAnchorElement>(`a[href="/agents/${agentId}"]`)
+      if (!link) throw new Error('the agent-card name link is missing')
+      const cardBox = element.getBoundingClientRect()
+      const linkBox = link.getBoundingClientRect()
+      let best: { x: number; y: number; score: number } | null = null
+      for (let y = cardBox.top + 4; y < cardBox.bottom - 4; y += 4) {
+        for (let x = cardBox.left + 4; x < cardBox.right - 4; x += 4) {
+          const insidePaintedLink =
+            x >= linkBox.left && x <= linkBox.right && y >= linkBox.top && y <= linkBox.bottom
+          const top = document.elementFromPoint(x, y)
+          if (!insidePaintedLink && top && (top === link || link.contains(top))) {
+            const score = Math.min(
+              x - cardBox.left,
+              cardBox.right - x,
+              y - cardBox.top,
+              cardBox.bottom - y,
+            )
+            if (!best || score > best.score) best = { x, y, score }
+          }
+        }
+      }
+      if (best) return { x: best.x, y: best.y }
+      throw new Error('the stretched name link exposes no card-body hit point')
+    }, agentId)
     await page.evaluate(() => {
       ;(window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation = 'alive'
+      ;(window as unknown as { __cardClickTarget?: string }).__cardClickTarget = ''
+      document.addEventListener('click', (event) => {
+        const target = event.target as HTMLElement | null
+        ;(window as unknown as { __cardClickTarget?: string }).__cardClickTarget =
+          `${target?.tagName ?? 'null'}:${target?.closest('a')?.getAttribute('href') ?? ''}:${event.defaultPrevented}`
+      }, { once: true })
     })
-    await page.mouse.click(bodyBox.x + bodyBox.width / 2, bodyBox.y + bodyBox.height / 2)
-    await page.waitForURL(`**/agents/${testAgent.id}`)
+    await page.mouse.move(bodyPoint.x, bodyPoint.y)
+    await expect.poll(() => page.evaluate(({ x, y, agentId }) => {
+      const link = document.querySelector<HTMLAnchorElement>(`a[href="/agents/${agentId}"]`)
+      const top = document.elementFromPoint(x, y)
+      return Boolean(link && top && (top === link || link.contains(top)))
+    }, { ...bodyPoint, agentId })).toBe(true)
+    await page.mouse.click(bodyPoint.x, bodyPoint.y)
+    await expect.poll(() => page.evaluate(
+      () => (window as unknown as { __cardClickTarget?: string }).__cardClickTarget,
+    )).toBe(`A:/agents/${agentId}:true`)
     expect(
       await page.evaluate(
         () => (window as unknown as { __cardClientNavigation?: string }).__cardClientNavigation,
@@ -763,14 +807,8 @@ test('agent card stretched link: body pointer opens the agent while action contr
       `${viewport.width}px card-body navigation performed a full reload`,
     ).toBe('alive')
 
-    await page.goto('/agents')
-    await dismissMobileSidebar(page)
-    await page.getByRole('button', { name: `Pause ${testAgent.name}` }).click()
-    expect(new URL(page.url()).pathname).toBe('/agents')
-    await expect(page.getByRole('heading', { name: `Pause ${testAgent.name}?` })).toBeVisible()
-    await page.keyboard.press('Escape')
-  }
-})
+  })
+}
 
 test.describe('driven focus-state visual regression', () => {
   test.skip(

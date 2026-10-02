@@ -274,8 +274,22 @@ describe('owner_cli route census (#2526)', () => {
       [/^\/accounts/i, 'account provisioning'],
       [/sweep|payments|x402|machine-payments/i, 'moving funds'],
     ]
+    // #3597: `GET /accounts/hybrid/{address}/signers` is the one account-
+    // scoped read on the list (the feedback secret check's layer 3 needs it
+    // to collect this user's own key-backed addresses, the same reason
+    // `GET /agents` is listed). It is PUBLIC KEY MATERIAL ONLY — "an address
+    // and P256 public-key coordinates" per the route's own OpenAPI
+    // description — never a signer-set CHANGE, which is what both blanket
+    // patterns below (`^/accounts`, `signers?`) actually exist to forbid:
+    // every other verb under `/accounts/...` provisions an account or moves
+    // money, and every other `signers` path (`/prepare`, `/submit`, the
+    // agent-scoped `account-signers` writes) mutates the set. A named
+    // exemption rather than loosening either pattern, so nothing else under
+    // either prefix is granted by accident.
+    const ACCOUNT_READ_EXEMPT = new Set(['GET /accounts/hybrid/{address}/signers'])
     const violations: string[] = []
     for (const entry of OWNER_CLI_ALLOWED_ROUTES) {
+      if (ACCOUNT_READ_EXEMPT.has(key(entry))) continue
       for (const [pattern, why] of forbidden) {
         if (pattern.test(entry.path)) violations.push(`${key(entry)} — ${why}`)
       }

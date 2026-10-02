@@ -199,6 +199,39 @@ describe('layer 3 — any other 64-hex token: derive and compare', () => {
   it('FAILS CLOSED: an unreadable address set refuses rather than silently passing', async () => {
     const result = await checkKeyBackedAddresses(`my key is ${KNOWN_PRIVATE_KEY}`, refusingApi())
     expect(result).toMatchObject({ layer: 3, reason: 'address_check_unavailable' })
+    expect(result?.message).toMatch(/retry once Haven is reachable/i)
+  })
+
+  it('a 401/403 on the address read gets a distinct message — retrying will not help', async () => {
+    const api403: CliApi = {
+      get: async () => { throw new CliApiError('Forbidden', 403) },
+      post: async () => ({}) as never,
+      put: async () => ({}) as never,
+      del: async () => ({}) as never,
+      getText: async () => '',
+    }
+    const result = await checkKeyBackedAddresses(`my key is ${KNOWN_PRIVATE_KEY}`, api403)
+    expect(result).toMatchObject({ layer: 3, reason: 'address_check_unavailable' })
+    expect(result?.message).toMatch(/login/i)
+    expect(result?.message).not.toMatch(/retry once Haven is reachable/i)
+  })
+
+  it('a 409 (unknown signer configuration) gets its own distinct message — retrying will not help', async () => {
+    const api409: CliApi = {
+      get: async <T,>(path: string) => {
+        if (path === '/agents') return { agents: [] } as T
+        if (path === '/user/accounts') return { accounts: [{ account_address: '0xacc', chain_id: 8453 }] } as T
+        throw new CliApiError('account signer configuration is unknown', 409)
+      },
+      post: async () => ({}) as never,
+      put: async () => ({}) as never,
+      del: async () => ({}) as never,
+      getText: async () => '',
+    }
+    const result = await checkKeyBackedAddresses(`my key is ${KNOWN_PRIVATE_KEY}`, api409)
+    expect(result).toMatchObject({ layer: 3, reason: 'address_check_unavailable' })
+    expect(result?.message).toMatch(/contact support/i)
+    expect(result?.message).not.toMatch(/retry once Haven is reachable/i)
   })
 
   it('does not call the backend at all when there is no 64-hex candidate', async () => {

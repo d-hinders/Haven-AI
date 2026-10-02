@@ -35,7 +35,10 @@ export function detectLabelledSecret(text: string): string | null {
   if (/sk_agent_[A-Za-z0-9]/.test(text)) return 'agent_api_key'
   if (/hv_setup_[A-Za-z0-9]/.test(text)) return 'setup_token'
   // A session JWT: three dot-separated base64url parts, each non-empty.
-  if (/\bey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/.test(text)) return 'session_jwt'
+  // `\beyJ` (not the looser `\bey`), which is the base64url encoding of `{"`
+  // — every real JWT header starts there, and the tighter anchor stops
+  // ordinary words like "eyebrow" or "eyelet" from matching their own tail.
+  if (/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/.test(text)) return 'session_jwt'
   // key= / api_key= / api-key= / apikey= / token= / secret=, `\b`-bounded —
   // the same boundary `redact-vendor-secrets.ts` uses.
   if (/\b(api[_-]?key|key|token|secret)=[^&\s"'\\)]+/i.test(text)) return 'labelled_parameter'

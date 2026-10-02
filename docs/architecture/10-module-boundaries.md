@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-09-30"
+last-verified: "2026-10-02"
 ---
 
 # Module Boundaries
@@ -82,7 +82,7 @@ packages/backend/src/
   platform/   config, db pool, logging, http bootstrap, cache, leader-lock
   domain/     PURE: money, address, chains, policy, rail decision, taxonomy
               — no fastify, no pg, no ethers/viem
-  modules/    accounts, accounting, agents, catalog, fee, mpp, owner-profile,
+  modules/    accounts, accounting, agents, catalog, fee, feedback, mpp, owner-profile,
               passport, payments, sub-budgets, task-budgets, transactions, x402
   rails/      delegation/, execution-rail.ts, hybrid-*, sweep.ts
   infra/      repositories (SQL lives here only), chain clients (the shared
@@ -124,7 +124,7 @@ severity and unconditional** (#999). Enforcement status:
 | 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons (9 today, of the 10 waived edges the lint prints; live count printed by every lint run) |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
-| 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, accounting, agents, catalog, fee, mpp, ops, owner-profile, passport, payments, sub-budgets, task-budgets, transactions, x402) — zero violations | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509) |
+| 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, accounting, agents, catalog, fee, feedback, mpp, ops, owner-profile, passport, payments, sub-budgets, task-budgets, transactions, x402) — zero violations | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — it exists specifically because `domain/` cannot hold a `viem/accounts` import, `domain-stays-pure` having no waiver) |
 | 7. The graph is acyclic | ✅ `no-circular` | at zero — held absolutely, and the one rule an inline waiver can never silence |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
@@ -309,6 +309,15 @@ in `rails/execution-rail.ts` (the `routes/payments.ts` mentions are
 `isRetiredRailIntent` comments naming it retired, the documented shape); the
 #2138 passport SQL exception and the rule-4 chain-client port
 (`infra/chain/index.ts` `getChainClient`) are as written.
+
+Re-verified 2026-10-02 (#3597): the module list and rule-6 row both gain
+`modules/feedback/` — the backend half of the CLI feedback channel's secret
+check. It is its own module rather than living in `domain/` (where its CLI
+counterpart's comments might suggest) specifically because it imports
+`viem/accounts`, and `domain-stays-pure` forbids any import there with no
+waiver, ever; `lint:deps` catches the violation as soon as the file is
+placed wrong, which is how this doc's own text was proven rather than
+assumed.
 
 ## Non-goals
 

@@ -305,6 +305,38 @@ export function receiptDropRateLimit(
 }
 
 /**
+ * `POST /feedback` (#3597): keyed per USER, not per credential or IP — the
+ * one tier in this file that is, because the issue's owner decision says so
+ * explicitly ("the rate limit... keyed per user, not per IP"). The shared
+ * `rateLimitKeyFor` buckets per presented CREDENTIAL (a hash of the bearer
+ * token itself), which is per SESSION for a dashboard JWT — see
+ * `ownerProfileRateLimit`'s note on exactly that distinction. Two sessions
+ * for the same user (two open terminals, a second machine) would get two
+ * buckets under the shared generator; this route wants one.
+ *
+ * Keyed on the VERIFIED `request.user.sub` — measured (not assumed):
+ * `@fastify/rate-limit` attaches its per-route check through `onRoute`, which
+ * appends to that specific route's own hook array rather than running as a
+ * plugin-wide `onRequest` in registration order, so a route's own
+ * `authMiddleware` (added by `app.addHook('onRequest', authMiddleware)` in
+ * `routes/feedback.ts`'s encapsulated context) runs FIRST and `request.user`
+ * is already verified and populated by the time this key generator runs. No
+ * unverified pre-auth decode, and no IP fallback: a request that reaches this
+ * generator at all has already passed `authMiddleware`, so `request.user.sub`
+ * is always present.
+ */
+export const feedbackSubmitRateLimit = {
+  rateLimit: {
+    max: 10,
+    timeWindow: '1 hour',
+    keyGenerator: (request: { user?: { sub?: unknown } }) => {
+      const sub = request.user?.sub
+      return `feedback_user:${typeof sub === 'string' ? sub : 'unknown'}`
+    },
+  },
+} as const
+
+/**
  * Public `POST /catalog/submit` (epic #1717, #1711). Unauthenticated, so the
  * shared key generator falls back to `ip:` — the same untrusted-proxy trap as
  * `authRateLimit`, and the same answer: a per-IP ceiling whose "IP" is one
@@ -321,52 +353,6 @@ export function receiptDropRateLimit(
  * (`countPendingCatalogSubmissions`) is the resilient second layer — unlike
  * this tier it binds even behind an untrusted proxy.
  */
-/**
- * `POST /feedback` (#3597): keyed per USER, not per credential or IP — the
- * one tier in this file that is, because the issue's owner decision says so
- * explicitly ("the rate limit... keyed per user, not per IP"). The shared
- * `rateLimitKeyFor` buckets per presented CREDENTIAL (a hash of the bearer
- * token itself), which is per SESSION for a dashboard JWT — see
- * `ownerProfileRateLimit`'s note on exactly that distinction. Two sessions
- * for the same user (two open terminals, a second machine) would get two
- * buckets under the shared generator; this route wants one.
- *
- * The plugin's own `onRequest` hook (registered at the root, before any route
- * plugin) runs this keyGenerator BEFORE `authMiddleware` (added inside
- * `routes/feedback.ts`'s own encapsulated context) ever sets `request.user` —
- * so the key is read straight off the bearer token's own payload, decoded
- * WITHOUT verification. That is safe here: a forged or malformed token keys
- * its own throwaway bucket and still fails `authMiddleware`'s real
- * verification immediately afterward, so decoding it unverified for bucketing
- * cannot forge someone else's identity or bypass authentication — it can only
- * mis-bucket an already-doomed request.
- */
-function subFromBearerToken(authHeader: string | undefined): string | null {
-  if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) return null
-  const token = authHeader.slice('Bearer '.length)
-  const parts = token.split('.')
-  if (parts.length !== 3) return null
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { sub?: unknown }
-    return typeof payload.sub === 'string' && payload.sub.length > 0 ? payload.sub : null
-  } catch {
-    return null
-  }
-}
-
-export const feedbackSubmitRateLimit = {
-  rateLimit: {
-    max: 10,
-    timeWindow: '1 hour',
-    keyGenerator: (request: { headers: Record<string, string | string[] | undefined>; ip: string }) => {
-      const auth = request.headers.authorization
-      const sub = subFromBearerToken(typeof auth === 'string' ? auth : undefined)
-      // No readable sub (malformed/forged token) falls back to IP — it still
-      // cannot authenticate, so bucketing it per-IP costs nothing real.
-      return sub ? `feedback_user:${sub}` : `ip:${request.ip}`
-    },
-  },
-} as const
 
 export function catalogSubmitRateLimit(
   trustProxyHops: number,

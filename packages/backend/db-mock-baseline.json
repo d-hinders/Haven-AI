@@ -94,11 +94,11 @@
   },
   "packages/backend/src/routes/__tests__/agents-characterization.test.ts": {
     "db-mock": 1,
-    "positional": 23
+    "positional": 19
   },
   "packages/backend/src/routes/__tests__/agents.test.ts": {
     "db-mock": 1,
-    "positional": 4
+    "positional": 3
   },
   "packages/backend/src/routes/__tests__/analytics.test.ts": {
     "db-mock": 1,
@@ -129,10 +129,6 @@
   },
   "packages/backend/src/routes/__tests__/dashboard.test.ts": {
     "db-mock": 1
-  },
-  "packages/backend/src/routes/__tests__/feedback.test.ts": {
-    "db-mock": 1,
-    "positional": 8
   },
   "packages/backend/src/routes/__tests__/hybrid-accounts.test.ts": {
     "db-mock": 1

@@ -1128,5 +1128,5 @@ project owner — collaborators have Viewer access, not env-var write access.
 > the spec's `minLength`/`maxLength`, matching `routes/contacts.ts`'s own
 > split between what the schema enforces and what the handler still checks
 > by hand). The shadow/enforce semantics this document describes are
-> unchanged. Nothing else in this file's coverage was touched; this note and
-> the `last-verified` date are the only edits.
+> unchanged. Nothing else in this file's coverage was touched; `last-verified`
+> was already 2026-10-02 at the base commit, so this note is the only edit.

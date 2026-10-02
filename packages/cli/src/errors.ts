@@ -48,11 +48,20 @@ export class UsageError extends Error {
 export class HavenCliError extends Error {
   readonly exit: ExitCode
   readonly hint?: string
-  constructor(message: string, exit: ExitCode, hint?: string) {
+  /**
+   * #3597: additional typed fields merged into the `--json` error object
+   * (`error.layer`, `error.reason`, …) — for a refusal where the FREE-TEXT
+   * hint is not enough to branch on. `feedback submit`'s secret check is the
+   * first caller: an agent needs `error.layer` (which of the four checks
+   * refused) as a number, not a string it has to parse out of a sentence.
+   */
+  readonly extra?: Record<string, unknown>
+  constructor(message: string, exit: ExitCode, hint?: string, extra?: Record<string, unknown>) {
     super(message)
     this.name = 'HavenCliError'
     this.exit = exit
     this.hint = hint
+    this.extra = extra
   }
 }
 
@@ -61,6 +70,7 @@ export interface Failure {
   exit: ExitCode
   message: string
   hint?: string
+  extra?: Record<string, unknown>
 }
 
 /**
@@ -90,7 +100,7 @@ export function toFailure(err: unknown): Failure {
           : err.exit === EXIT.network
             ? 'network'
             : 'failed'
-    return { code, exit: err.exit, message: err.message, hint: err.hint }
+    return { code, exit: err.exit, message: err.message, hint: err.hint, extra: err.extra }
   }
   if (err instanceof CliApiError) {
     if (err.status === 0) {

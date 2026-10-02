@@ -23,7 +23,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { keccak_256 } from '@noble/hashes/sha3'
 import { wordlist as BIP39_ENGLISH } from '@scure/bip39/wordlists/english'
-import type { CliApi } from './api.js'
+import { CliApiError, type CliApi } from './api.js'
 
 /** Mirrors the backend's own cap (`routes/feedback.ts`'s `MAX_FEEDBACK_TEXT_LENGTH`). */
 export const MAX_FEEDBACK_TEXT_LENGTH = 4000
@@ -54,8 +54,9 @@ function refusal(layer: SecretCheckRefusal['layer'], reason: SecretCheckReason, 
 // ── Layer 1 — prefixed and labelled secrets ─────────────────────────
 //
 // A superset of `redactVendorSecrets` (`packages/backend/src/domain/redact-vendor-secrets.ts`)
-// — the backend re-runs the identical list server-side (`feedback-secret-check.ts`),
-// so stored text can never trip the ops grant script's vendor-secret refusal.
+// — the backend re-runs the identical list server-side
+// (`packages/backend/src/modules/feedback/secret-check.ts`), so stored text
+// can never trip the ops grant script's vendor-secret refusal.
 // No false positives: every pattern here is a label or a prefix, never a bare
 // shape (a bare 64-hex token is layer 3).
 
@@ -63,7 +64,10 @@ const LABELLED_PATTERNS: ReadonlyArray<{ reason: SecretCheckReason; re: RegExp }
   { reason: 'agent_api_key', re: /sk_agent_[A-Za-z0-9]/ },
   { reason: 'setup_token', re: /hv_setup_[A-Za-z0-9]/ },
   // A session JWT: three dot-separated base64url parts, each non-empty.
-  { reason: 'session_jwt', re: /\bey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/ },
+  // `\beyJ` (not the looser `\bey`), which is the base64url encoding of `{"`
+  // — every real JWT header starts there, and the tighter anchor stops
+  // ordinary words like "eyebrow" or "eyelet" from matching their own tail.
+  { reason: 'session_jwt', re: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/ },
   // key= / api_key= / api-key= / apikey= / token= / secret=, `\b`-bounded —
   // the same boundary `redact-vendor-secrets.ts:19` uses.
   { reason: 'labelled_parameter', re: /\b(api[_-]?key|key|token|secret)=[^&\s"'\\)]+/i },
@@ -173,8 +177,8 @@ export function checkExactSecretMatch(text: string, secrets: ReadonlySet<string>
  * candidates rather than being windowed into two.
  */
 export function findHexTokenCandidates(text: string): string[] {
-  const matches = text.matchAll(/(?<![0-9a-fA-F])(?:0x)?([0-9a-fA-F]{64})(?![0-9a-fA-F])/g)
-  return [...matches].map((m) => m[1])
+  const matches = text.matchAll(/(?<![0-9a-fA-F])(0x)?([0-9a-fA-F]{64})(?![0-9a-fA-F])/g)
+  return [...matches].map((m) => m[2])
 }
 
 /**
@@ -232,9 +236,13 @@ export async function collectKeyBackedAddresses(api: CliApi): Promise<Set<string
 
 /**
  * The address reads happen ONLY when at least one 64-hex candidate exists.
- * If a read fails, this fails CLOSED — refuses to send, with a retry hint —
- * rather than silently skipping the one layer that stops a private key
- * reaching Haven.
+ * If a read fails, this fails CLOSED — refuses to send, with a message that
+ * fits what actually failed. A transient/network failure gets a retry hint;
+ * a 401/403 (the session cannot read this — the owner-cli allow-list refused
+ * it, or the session itself is bad) or a 409 (the account's signer
+ * configuration is unknown — nothing to compare against) are NOT fixed by
+ * retrying the same call, so each gets its own distinct wording rather than
+ * a reachability hint that would just repeat.
  */
 export async function checkKeyBackedAddresses(text: string, api: CliApi): Promise<SecretCheckRefusal | null> {
   const candidates = findHexTokenCandidates(text)
@@ -243,7 +251,21 @@ export async function checkKeyBackedAddresses(text: string, api: CliApi): Promis
   let keyBacked: Set<string>
   try {
     keyBacked = await collectKeyBackedAddresses(api)
-  } catch {
+  } catch (err) {
+    if (err instanceof CliApiError && (err.status === 401 || err.status === 403)) {
+      return refusal(
+        3,
+        'address_check_unavailable',
+        'Refusing to send: could not verify whether the text contains a private key — your session cannot read the data this check needs. Run `haven login` again; retrying this submission will not help.',
+      )
+    }
+    if (err instanceof CliApiError && err.status === 409) {
+      return refusal(
+        3,
+        'address_check_unavailable',
+        "Refusing to send: could not verify whether the text contains a private key — one of your accounts' signer configuration is unknown, so there is nothing to compare against. Retrying this submission will not help; contact support.",
+      )
+    }
     return refusal(
       3,
       'address_check_unavailable',

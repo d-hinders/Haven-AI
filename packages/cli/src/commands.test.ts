@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { run, COMMANDS, DEFAULT_API, HASH_DISCOVERY_HINT, type RunDeps } from './commands.js'
 import { helpText } from './args.js'
 import type { Session, SessionStore } from './session.js'
@@ -828,6 +831,89 @@ describe('feedback submit (#3597)', () => {
     expect(await run(['feedback', 'submit', 'hello'], deps)).toBe(3)
     expect(api.calls).toEqual([])
     expect(err.join('\n')).toMatch(/login/)
+  })
+
+  it('a refusal\'s --json error carries typed layer/reason fields, not just a free-text hint', async () => {
+    const api = fakeApi({})
+    const { deps, out } = harness({ makeApi: () => api })
+    const secret = 'sk_agent_REALSECRETNEVERSENT'
+    const code = await run(['feedback', 'submit', `my key is ${secret}`, '--json'], deps)
+    expect(code).toBe(4)
+    const body = JSON.parse(out.join('')) as { error: { layer: number; reason: string } }
+    expect(body.error.layer).toBe(1)
+    expect(body.error.reason).toBe('agent_api_key')
+  })
+
+  it('reminds the caller never to include a password, on stderr, only on the success path', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+    const clean = harness({ makeApi: () => api })
+    await run(['feedback', 'submit', 'The dashboard was slow today.', '--json'], clean.deps)
+    expect(clean.err.join('\n')).toMatch(/never include a password/i)
+    // --json: stdout stays exactly one value.
+    expect(clean.out).toHaveLength(1)
+
+    // A refusal never gets the reminder — it never reaches the point the
+    // reminder is for.
+    const refused = harness({ makeApi: () => api })
+    await run(['feedback', 'submit', 'my key is sk_agent_REALSECRETNEVERSENT'], refused.deps)
+    expect([...refused.out, ...refused.err].join('\n')).not.toMatch(/never include a password/i)
+  })
+
+  describe('layer 2 (#3597 S3): secrets this machine holds', () => {
+    it('refuses a delegate key read from signer.json, calls the API zero times, and never echoes it', async () => {
+      const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+      const dir = await mkdtemp(join(tmpdir(), 'haven-cmd-secret-check-'))
+      try {
+        const agentDir = join(dir, 'agent-1')
+        await mkdir(agentDir, { recursive: true })
+        const delegateKey = '0xDEADBEEF00000000000000000000000000000000000000000000000000001'
+        await writeFile(join(agentDir, 'signer.json'), JSON.stringify({ delegate_key: delegateKey }))
+
+        const { deps, out, err } = harness({ makeApi: () => api, credentialsBaseDir: dir })
+        const code = await run(['feedback', 'submit', `my key is ${delegateKey}`], deps)
+
+        expect(code).toBe(4)
+        expect(api.calls).toEqual([])
+        expect([...out, ...err].join('\n')).not.toContain(delegateKey)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('refuses HAVEN_DELEGATE_KEY from the environment, calls the API zero times, and never echoes it', async () => {
+      const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+      const delegateKey = '0xFEEDFACE0000000000000000000000000000000000000000000000000002'
+      const { deps, out, err } = harness({
+        makeApi: () => api,
+        env: { HAVEN_DELEGATE_KEY: delegateKey },
+      })
+
+      const code = await run(['feedback', 'submit', `env key was ${delegateKey}`], deps)
+
+      expect(code).toBe(4)
+      expect(api.calls).toEqual([])
+      expect([...out, ...err].join('\n')).not.toContain(delegateKey)
+    })
+  })
+
+  describe('layer 3 (#3597 S3): a derived address matching the caller\'s own', () => {
+    const KNOWN_PRIVATE_KEY = '0000000000000000000000000000000000000000000000000000000000000001'
+    const KNOWN_ADDRESS = '0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf'
+
+    it('refuses when the derived address matches one of the caller\'s own agents, calls the API zero times, and never echoes the key', async () => {
+      const api = fakeApi({
+        'GET /agents': { agents: [{ id: 'a1', name: 'Payer', status: 'active', delegate_address: KNOWN_ADDRESS }] },
+        'GET /user/accounts': { accounts: [] },
+        'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' },
+      })
+      const { deps, out, err } = harness({ makeApi: () => api })
+
+      const code = await run(['feedback', 'submit', `my key is ${KNOWN_PRIVATE_KEY}`], deps)
+
+      expect(code).toBe(4)
+      expect(api.calls).not.toContain('POST /feedback')
+      expect([...out, ...err].join('\n')).not.toContain(KNOWN_PRIVATE_KEY)
+    })
   })
 })
 

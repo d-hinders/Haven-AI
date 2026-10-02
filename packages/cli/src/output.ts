@@ -53,6 +53,7 @@ export function createOutput(
           code: failure.code,
           message: failure.message,
           ...(failure.hint ? { hint: failure.hint } : {}),
+          ...(failure.extra ?? {}),
         },
       }
       if (json) out(JSON.stringify(body, null, 2))

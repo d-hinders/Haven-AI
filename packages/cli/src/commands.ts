@@ -1459,16 +1459,22 @@ async function cmdContactsRemove(args: ParsedArgs, d: ResolvedDeps): Promise<num
  * free-text argument — rather than refused, so a bug report does not have to
  * be hand-quoted.
  *
- * The secret check runs BEFORE `authed` even resolves the API base URL is
- * irrelevant here — what matters is that it runs before `api.post` below,
- * the one call that would carry the text. A refusal never reaches the
+ * `authed` runs FIRST (a command with no session refuses before anything
+ * else, same as every other command), then the secret check runs — and it
+ * is the check, not `authed`, that has to run before the one call that would
+ * carry the text (`api.post` at the end): a refusal here never reaches the
  * network at all.
  */
 async function cmdFeedbackSubmit(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const text = args.positionals.join(' ').trim()
   if (!text) throw new UsageError('Usage: haven feedback submit "<text>"')
-  if (text.length > MAX_FEEDBACK_TEXT_LENGTH) {
-    throw new UsageError(`Feedback text must be ${MAX_FEEDBACK_TEXT_LENGTH} characters or fewer.`)
+  // Code points, not UTF-16 units — `text.length` double-counts anything
+  // outside the Basic Multilingual Plane (an emoji in a bug report is not
+  // exotic), and the backend's own ceiling (`routes/feedback.ts`'s ajv
+  // schema `maxLength`) counts code points too. `[...text]` iterates by
+  // code point.
+  if ([...text].length > MAX_FEEDBACK_TEXT_LENGTH) {
+    throw new UsageError(`Feedback text must be ${MAX_FEEDBACK_TEXT_LENGTH} characters (code points) or fewer.`)
   }
 
   const { session, api } = await authed(args, d)
@@ -1478,8 +1484,18 @@ async function cmdFeedbackSubmit(args: ParsedArgs, d: ResolvedDeps): Promise<num
     localSecrets: { sessionToken: session.token, env: d.env, baseDir: d.credentialsBaseDir },
   })
   if (refusal) {
-    throw new HavenCliError(refusal.message, EXIT.refused, `layer ${refusal.layer}: ${refusal.reason}`)
+    throw new HavenCliError(refusal.message, EXIT.refused, `layer ${refusal.layer}: ${refusal.reason}`, {
+      layer: refusal.layer,
+      reason: refusal.reason,
+    })
   }
+
+  // The one residual-risk case the check cannot catch by shape at all: a
+  // plain password has no recognisable form. stderr only, so `--json`'s
+  // stdout contract (one value, nothing else) stays exactly one value.
+  d.o.note(
+    'Reminder: never include a password or any other credential in feedback text — this check cannot recognise one by shape.',
+  )
 
   const result = await api.post<{ id: string; created_at: string; expires_at: string }>('/feedback', { text })
   emit(d, args.flags.json, { ok: true, ...result }, () => `Feedback submitted (id ${result.id}).`)

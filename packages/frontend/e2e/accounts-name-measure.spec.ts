@@ -193,6 +193,8 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
     if (!card) throw new Error(`no /accounts card labelled "${label}"`)
     const h3 = card.querySelector('h3')
     if (!h3) throw new Error(`the card labelled "${label}" renders no name`)
+    const nameLink = h3.querySelector('a')
+    if (!nameLink) throw new Error(`the card labelled "${label}" renders no name link`)
     const row = h3.parentElement!
     const padRight = parseFloat(getComputedStyle(row).paddingRight) || 0
     const rect = (el: Element): Rect => {
@@ -259,8 +261,8 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
     const actionsEl = card.querySelector('button')?.parentElement ?? null
 
     return {
-      text: (h3.textContent ?? '').trim(),
-      measure: +h3.getBoundingClientRect().width.toFixed(1),
+      text: (nameLink.textContent ?? '').trim(),
+      measure: +nameLink.getBoundingClientRect().width.toFixed(1),
       rowInner: +(row.clientWidth - padRight).toFixed(1),
       cardInner: +(
         card.clientWidth -
@@ -268,12 +270,12 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
         (parseFloat(getComputedStyle(card).paddingRight) || 0)
       ).toFixed(1),
       rowHeight: +row.getBoundingClientRect().height.toFixed(1),
-      nameHeight: +h3.getBoundingClientRect().height.toFixed(1),
-      truncated: h3.scrollWidth > h3.clientWidth + 1,
+      nameHeight: +nameLink.getBoundingClientRect().height.toFixed(1),
+      truncated: nameLink.scrollWidth > nameLink.clientWidth + 1,
       badges: Array.from(new Set(badges.map(([t]) => t))),
       badgeRects,
       captionRect: rect(caption),
-      nameRect: rect(h3),
+      nameRect: rect(nameLink),
       actionsRect: actionsEl ? rect(actionsEl) : null,
       actionsOpacity: actionsEl ? Number(getComputedStyle(actionsEl).opacity) : 0,
     }

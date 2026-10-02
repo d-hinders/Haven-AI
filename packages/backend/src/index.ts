@@ -84,6 +84,7 @@ import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
 import opsRoutes from './routes/ops.js'
 import { getOpsReadDb } from './db/ops-read-pool.js'
+// dep-lint-exempt: composition-root wiring — the REAL chain readers must NOT be re-exported from modules/ops/index.ts: routes/ops.ts imports that entry, and the ops invariant-1 walk (#3509) forbids the ops console's graph from reaching rails/ and infra/chain/, so onchain-readers.ts is reachable ONLY by injection here (#3513), like the #2881 accounting legacy entry.
 // #3513: the REAL ops on-chain readers touch rails/ and infra/chain/, so
 // they are imported here — where the ops invariant-1 walk (rooted at
 // routes/ops.ts) never looks — and injected through the route options.

@@ -1033,8 +1033,8 @@ jobs:
       # `main`, exactly like the light comparison above: same job identity,
       # same ruleset membership, so no ruleset edit is needed for it to gate
       # promotion. The step name points at that `testMatch` rather than
-      # listing specs: it covers seven, and a name that enumerates them drifts
-      # into naming one of a set — the #2318 failure class above.
+      # listing specs: the set is several and moves, and a name that
+      # enumerates it drifts into naming one of a set — the #2318 class above.
       - name: Visual regression — dark scheme (chromium-desktop-dark testMatch)
         run: npm run test:visual:dark -w packages/frontend
         env:

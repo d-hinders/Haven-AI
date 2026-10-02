@@ -30,6 +30,7 @@ covers:
   - packages/frontend/src/lib/demo-gate.ts
   - packages/frontend/playwright.config.ts
   - packages/frontend/vercel.json
+  - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
 last-verified: "2026-10-02"
 ---

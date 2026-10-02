@@ -4,6 +4,7 @@ status: current
 covers:
   - packages/ops/**
   - scripts/vercel/**
+  - packages/frontend/vercel.json
   - packages/backend/src/routes/ops.ts
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts

@@ -322,10 +322,11 @@ export default defineConfig({
       // #2929: the dark palette's pixel gate. Scoped to exactly the specs that
       // have committed `-dark` baselines — the list is `testMatch` below, not
       // this comment. A spec joins in the same change that commits its dark
-      // baselines, never before: a project that silently compared against (or
-      // silently auto-wrote) missing baselines would be a green tick about
-      // nothing — exactly the #2318/#1863 failure class this suite keeps
-      // relearning. The specs read `testInfo.project.name` and under this
+      // baselines, never before: `snapshotPathTemplate` carries no project
+      // name, so a spec run here without dark baselines would silently compare
+      // against its light ones (or silently auto-write missing ones): a green
+      // tick about nothing, exactly the #2318/#1863 failure class this suite
+      // keeps relearning. The specs read `testInfo.project.name` and under this
       // project captures `<base>-dark.png` and seeds `haven.theme='dark'` in
       // storage BEFORE navigation; the seed is what makes the render
       // deterministic (the app's no-flash bootstrap stamps `data-theme` from

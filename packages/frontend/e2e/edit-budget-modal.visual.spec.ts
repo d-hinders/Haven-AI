@@ -14,11 +14,9 @@
  * The period select wraps to its own line; the merchant-locked read-only
  * row, hint text and footer buttons complete the step.
  *
- * NO dark baseline exists for this file: `chromium-desktop-dark`'s
- * `testMatch` (playwright.config.ts) scopes that project to the specs
- * whose baselines exist in both schemes — design-system, analytics,
- * marketplace — and deliberately not this one. A light mobile capture is
- * the whole dispatch.
+ * NO dark baseline exists for this file: the `chromium-desktop-dark`
+ * project's `testMatch` (playwright.config.ts) does not include it. A light
+ * mobile capture is the whole dispatch.
  *
  * Route and fixtures: `/agents/agent-research` via `serveAgentDetailResponses`
  * (#2733) — the shared fixture falls through on the detail-page reads

@@ -36,8 +36,8 @@
  *     replace-warning seeded (an active budget already in the slot the new
  *     grant would occupy).
  *
- * Same discipline as `analytics.visual.spec.ts`: the desktop shots of all
- * seven ALSO run under `chromium-desktop-dark` (`<name>-dark.png`), no mobile
+ * Same discipline as `analytics.visual.spec.ts`: every desktop shot ALSO
+ * runs under `chromium-desktop-dark` (`<name>-dark.png`), no mobile
  * dark project exists, and every capture is preceded by a structural
  * assertion that runs under `VISUAL_STRUCTURE_ONLY=1` even when pixels are
  * not compared.

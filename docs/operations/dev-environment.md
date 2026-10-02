@@ -1046,3 +1046,10 @@ project owner — collaborators have Viewer access, not env-var write access.
 > schema's). The shadow/enforce semantics this document describes are
 > unchanged. Nothing else in this file's coverage was touched; the note and
 > the `last-verified` date are the only edits.
+
+> **Re-verified PR #3587 (2026-10-02):** `playwright.config.ts` changed only
+> in comments — the `chromium-desktop-dark` project's opening comment now
+> points at its `testMatch` instead of naming specs. `webServer.env`
+> (`HAVEN_DEMO_PAGE_VISIBLE`, `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`), the
+> projects and their `testMatch` lists are untouched, so the Playwright-build
+> claims above still hold. This note is the only edit.

@@ -98,9 +98,9 @@ describe('the capture fixture is safe by construction', () => {
     }
     expect(health.delegate_balances.available).toBe(true)
     // The not-available variant is pinned by the component test (unavailable
-    // budget renders as unavailable); the ops-types source carries the
-    // reason literal, which the fixture's user detail is typed against.
-    expect(readFileSync(join(process.cwd(), 'src', 'lib', 'ops-types.ts'), 'utf8')).toContain(
+    // budget renders as unavailable); the GENERATED schema contract carries
+    // the reason literal, which the fixture's user detail is typed against.
+    expect(readFileSync(join(process.cwd(), '..', 'core', 'src', 'api-types.ts'), 'utf8')).toContain(
       'not_available_on_this_replica',
     )
   })

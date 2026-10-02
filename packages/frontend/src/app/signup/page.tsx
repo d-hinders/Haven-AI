@@ -4,6 +4,7 @@ import { Check } from 'lucide-react'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { Icon } from '@/components/ui/Icon'
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
@@ -13,6 +14,8 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { AgentHandoffNote } from '@/components/onboarding/AgentHandoffNote'
+import { isNewSiteVisible } from '@/lib/site-gate'
+import { AuthShell, AuthCard } from '@/components/auth/AuthShell'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MAX_EMAIL_LENGTH = 255
@@ -48,7 +51,21 @@ function TrustRow({
   )
 }
 
-export default function SignupPage() {
+/**
+ * The ONE signup form. Fields, validation, submission and redirect handling
+ * live here exactly once; `site` picks only the frame around it — the
+ * redesigned card (epic #3572, #3578) or today's card, which production keeps
+ * rendering until the switch-over (#3579). The gate is read by the page and
+ * passed in, so this component stays presentation-only.
+ *
+ * Copy on the redesigned frame is the mockup's, minus its two untrue lines:
+ * three fields and "At least 12 characters" give way to the real four-field
+ * form with the 8-character minimum, and the "created on Base" note is not
+ * shipped — sign-up provisions an account on every supported chain, so no
+ * chain is named. The sub-line that stays ("One passkey prompt…") is true of
+ * the real flow: onboarding is passkey-only (`app/onboarding/copy.ts`).
+ */
+function SignupForm({ site, note }: { site: boolean; note?: ReactNode }) {
   const { signup } = useAuth()
   const router = useRouter()
   const [name, setName] = useState('')
@@ -128,6 +145,194 @@ export default function SignupPage() {
     }
   }
 
+  // The redesigned shell picks the card frame and type sizes around the ONE
+  // form below. Gate-off values are today's, animation classes included
+  // (legacy code is frozen until #3579); gate-on values are the mockup's
+  // (`.auth-card`: 26px heading, 14.5px sub, 12.5px labels, 13.5px alt line,
+  // no entrance animation on the new frame).
+  const headingClass = site
+    ? '[font-family:var(--font-site-display)] text-[26px] font-semibold tracking-[-0.02em] text-[var(--v2-ink)]'
+    : 'v2-animate-stagger text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2'
+  const headingStyle = site ? undefined : { ['--v2-stagger-delay' as string]: '40ms' }
+  const subClass = site
+    ? 'mb-8 mt-1.5 text-[14.5px] text-[var(--v2-ink-2)]'
+    : 'v2-animate-stagger text-sm text-[var(--v2-ink-2)] mb-8'
+  const subStyle = site ? undefined : { ['--v2-stagger-delay' as string]: '120ms' }
+  const labelClass = site
+    ? 'mb-1.5 block text-[12.5px] font-medium text-[var(--v2-ink-2)]'
+    : 'mb-1.5 block text-xs font-medium text-[var(--v2-ink-2)]'
+  const formClass = site ? 'space-y-4' : 'v2-animate-stagger space-y-4'
+  const formStyle = site ? undefined : { ['--v2-stagger-delay' as string]: '200ms' }
+  const altClass = site
+    ? 'mt-[18px] text-center text-[13.5px] text-[var(--v2-ink-2)]'
+    : 'mt-6 text-center text-sm text-[var(--v2-ink-2)]'
+
+  const card: ReactNode = (
+    <>
+      <h1 className={headingClass} style={headingStyle}>
+        {site ? 'Create your account' : 'Create your Haven account'}
+      </h1>
+      <p className={subClass} style={subStyle}>
+        {site
+          ? 'One passkey prompt, no credit card, no setup call.'
+          : 'One account, agents that spend within rules you set.'}
+      </p>
+
+      <form onSubmit={handleSubmit} noValidate className={formClass} style={formStyle}>
+        {error && (
+          <div className="rounded-md border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+            {error}
+          </div>
+        )}
+
+        <div>
+          <label htmlFor="name" className={labelClass}>
+            Name
+          </label>
+          <Input
+            id="name"
+            type="text"
+            required
+            autoComplete="name"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value)
+              setFieldErrors((prev) => ({ ...prev, name: undefined }))
+            }}
+            placeholder="Your name"
+            aria-invalid={Boolean(fieldErrors.name)}
+            aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+          />
+          {fieldErrors.name && (
+            <p id="name-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+              {fieldErrors.name}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="email" className={labelClass}>
+            Email
+          </label>
+          <Input
+            id="email"
+            type="email"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              setFieldErrors((prev) => ({ ...prev, email: undefined }))
+            }}
+            placeholder="you@example.com"
+            aria-invalid={Boolean(fieldErrors.email)}
+            aria-describedby={fieldErrors.email ? 'email-error' : undefined}
+          />
+          {fieldErrors.email && (
+            <p id="email-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+              {fieldErrors.email}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="password" className={labelClass}>
+            Password
+          </label>
+          <Input
+            id="password"
+            type="password"
+            required
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value)
+              setFieldErrors((prev) => ({
+                ...prev,
+                password: undefined,
+                confirmPassword: undefined,
+              }))
+            }}
+            placeholder="Min 8 characters"
+            aria-invalid={Boolean(fieldErrors.password)}
+            aria-describedby={fieldErrors.password ? 'password-error' : undefined}
+          />
+          {fieldErrors.password && (
+            <p id="password-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+              {fieldErrors.password}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="confirm" className={labelClass}>
+            Confirm password
+          </label>
+          <Input
+            id="confirm"
+            type="password"
+            required
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value)
+              setFieldErrors((prev) => ({ ...prev, confirmPassword: undefined }))
+            }}
+            placeholder="Repeat password"
+            aria-invalid={Boolean(fieldErrors.confirmPassword)}
+            aria-describedby={fieldErrors.confirmPassword ? 'confirm-error' : undefined}
+          />
+          {fieldErrors.confirmPassword && (
+            <p id="confirm-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+              {fieldErrors.confirmPassword}
+            </p>
+          )}
+        </div>
+
+        <Button
+          type="submit"
+          disabled={submitting}
+          className="w-full"
+        >
+          {submitting ? 'Creating account...' : 'Create account'}
+        </Button>
+      </form>
+
+      <p className={altClass}>
+        Already have an account?{' '}
+        <Link
+          href="/login"
+          className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
+        >
+          Log in
+        </Link>
+      </p>
+    </>
+  )
+
+  return site ? (
+    <AuthCard>{card}</AuthCard>
+  ) : (
+    <div className="v2-animate-step-rise rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-6 shadow-card">
+      {card}
+      {note}
+    </div>
+  )
+}
+
+// The redesigned sign-up screen (#3578, epic #3572): the mockup's auth shell
+// (public header, quiet ground, one card, agent hand-off line under the card,
+// public footer). The gate is decided here, at the page, so the legacy screen
+// below keeps rendering exactly what production serves today until #3579.
+export default function SignupPage() {
+  if (isNewSiteVisible()) {
+    return (
+      <AuthShell note={<AgentHandoffNote path="/signup" />}>
+        <SignupForm site />
+      </AuthShell>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[var(--v2-bg)] text-[var(--v2-ink)] flex flex-col">
       <div
@@ -155,173 +360,7 @@ export default function SignupPage() {
 
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
         <div className="grid w-full max-w-4xl gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
-          <div className="v2-animate-step-rise rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-6 shadow-card">
-            <h1
-              className="v2-animate-stagger text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2"
-              style={{ ['--v2-stagger-delay' as string]: '40ms' }}
-            >
-              Create your Haven account
-            </h1>
-            <p
-              className="v2-animate-stagger text-sm text-[var(--v2-ink-2)] mb-8"
-              style={{ ['--v2-stagger-delay' as string]: '120ms' }}
-            >
-              One account, agents that spend within rules you set.
-            </p>
-
-            <form
-              onSubmit={handleSubmit}
-              noValidate
-              className="v2-animate-stagger space-y-4"
-              style={{ ['--v2-stagger-delay' as string]: '200ms' }}
-            >
-              {error && (
-                <div className="rounded-md border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-                  {error}
-                </div>
-              )}
-
-              <div>
-                <label
-                  htmlFor="name"
-                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
-                >
-                  Name
-                </label>
-                <Input
-                  id="name"
-                  type="text"
-                  required
-                  autoComplete="name"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value)
-                    setFieldErrors((prev) => ({ ...prev, name: undefined }))
-                  }}
-                  placeholder="Your name"
-                  aria-invalid={Boolean(fieldErrors.name)}
-                  aria-describedby={fieldErrors.name ? 'name-error' : undefined}
-                />
-                {fieldErrors.name && (
-                  <p id="name-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
-                    {fieldErrors.name}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label
-                  htmlFor="email"
-                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
-                >
-                  Email
-                </label>
-                <Input
-                  id="email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value)
-                    setFieldErrors((prev) => ({ ...prev, email: undefined }))
-                  }}
-                  placeholder="you@example.com"
-                  aria-invalid={Boolean(fieldErrors.email)}
-                  aria-describedby={fieldErrors.email ? 'email-error' : undefined}
-                />
-                {fieldErrors.email && (
-                  <p id="email-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
-                    {fieldErrors.email}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label
-                  htmlFor="password"
-                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
-                >
-                  Password
-                </label>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value)
-                    setFieldErrors((prev) => ({
-                      ...prev,
-                      password: undefined,
-                      confirmPassword: undefined,
-                    }))
-                  }}
-                  placeholder="Min 8 characters"
-                  aria-invalid={Boolean(fieldErrors.password)}
-                  aria-describedby={fieldErrors.password ? 'password-error' : undefined}
-                />
-                {fieldErrors.password && (
-                  <p id="password-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
-                    {fieldErrors.password}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label
-                  htmlFor="confirm"
-                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
-                >
-                  Confirm password
-                </label>
-                <Input
-                  id="confirm"
-                  type="password"
-                  required
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value)
-                    setFieldErrors((prev) => ({ ...prev, confirmPassword: undefined }))
-                  }}
-                  placeholder="Repeat password"
-                  aria-invalid={Boolean(fieldErrors.confirmPassword)}
-                  aria-describedby={fieldErrors.confirmPassword ? 'confirm-error' : undefined}
-                />
-                {fieldErrors.confirmPassword && (
-                  <p id="confirm-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
-                    {fieldErrors.confirmPassword}
-                  </p>
-                )}
-              </div>
-
-              <Button
-                type="submit"
-                disabled={submitting}
-                className="w-full"
-              >
-                {submitting ? 'Creating account...' : 'Create account'}
-              </Button>
-            </form>
-
-            <p className="mt-6 text-center text-sm text-[var(--v2-ink-2)]">
-              Already have an account?{' '}
-              <Link
-                href="/login"
-                className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-              >
-                Log in
-              </Link>
-            </p>
-
-            {/* #2524: the sidebar says an account is created "with a passkey or
-                your existing wallet" but never that a human has to be the one
-                doing it. An agent reading this page needs the hand-off, not the
-                feature list. */}
-            <AgentHandoffNote path="/signup" />
-          </div>
+          <SignupForm site={false} note={<AgentHandoffNote path="/signup" />} />
 
           <div
             className="v2-animate-stagger rounded-[14px] border border-[var(--v2-border)] bg-bg/85 p-6 shadow-card"

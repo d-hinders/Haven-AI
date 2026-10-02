@@ -51,6 +51,14 @@ describe('layer 1 — prefixed and labelled secrets', () => {
   it('MUTATION PROOF: a bare tx hash (no label) is not refused by layer 1', () => {
     expect(checkLabelledSecrets(`a real tx hash is 0x${'ab'.repeat(32)}`)).toBeNull()
   })
+
+  it('MUTATION PROOF (N1): an ordinary word starting "ey" is not refused — the JWT pattern requires "eyJ"', () => {
+    // The whole reason the pattern tightened from `\bey` to `\beyJ`: a word
+    // like "eyebrow" or "eyelet" starts with "ey" but is never base64url of
+    // `{"`, so it must never read as a session JWT.
+    expect(checkLabelledSecrets('my eyebrow.test.ts file needs a fix')).toBeNull()
+    expect(checkLabelledSecrets('an eyelet.config.js change')).toBeNull()
+  })
 })
 
 describe('layer 2 — secrets this machine holds, exact match', () => {

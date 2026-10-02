@@ -859,40 +859,63 @@ describe('feedback submit (#3597)', () => {
     expect([...refused.out, ...refused.err].join('\n')).not.toMatch(/never include a password/i)
   })
 
-  describe('layer 2 (#3597 S3): secrets this machine holds', () => {
-    it('refuses a delegate key read from signer.json, calls the API zero times, and never echoes it', async () => {
-      const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+  describe('layer 2 (#3597 S3, tightened round 2 N-c): secrets this machine holds', () => {
+    // #3597 round 2, N-c: the PREVIOUS fixtures here ("DEADBEEF" + zeros +
+    // "1") were only 60-61 hex characters — not actually a 64-hex CANDIDATE
+    // at all, so they never exercised layer 3's extraction and could not
+    // prove layer 2 wins the race against it. These are exactly 64 hex
+    // characters (a real key SHAPE layer 3 would also try to derive an
+    // address from, were layer 2 not refusing first), so a regression that
+    // let layer 3 run ahead of layer 2 would make a GET call this test
+    // explicitly asserts never happens.
+    const REAL_SHAPED_KEY_A = `0xDEADBEEF${'0'.repeat(55)}1`
+    const REAL_SHAPED_KEY_B = `0xFEEDFACE${'0'.repeat(54)}12`
+
+    it('refuses a delegate key read from signer.json — layer 2, zero GET/POST calls, never echoed', async () => {
+      const api = fakeApi({
+        'GET /agents': { agents: [] },
+        'GET /user/accounts': { accounts: [] },
+        'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' },
+      })
       const dir = await mkdtemp(join(tmpdir(), 'haven-cmd-secret-check-'))
       try {
         const agentDir = join(dir, 'agent-1')
         await mkdir(agentDir, { recursive: true })
-        const delegateKey = '0xDEADBEEF00000000000000000000000000000000000000000000000000001'
-        await writeFile(join(agentDir, 'signer.json'), JSON.stringify({ delegate_key: delegateKey }))
+        await writeFile(join(agentDir, 'signer.json'), JSON.stringify({ delegate_key: REAL_SHAPED_KEY_A }))
 
         const { deps, out, err } = harness({ makeApi: () => api, credentialsBaseDir: dir })
-        const code = await run(['feedback', 'submit', `my key is ${delegateKey}`], deps)
+        const code = await run(['feedback', 'submit', `my key is ${REAL_SHAPED_KEY_A}`, '--json'], deps)
 
         expect(code).toBe(4)
+        const body = JSON.parse(out.join('')) as { error: { layer: number } }
+        expect(body.error.layer).toBe(2)
+        // Zero network calls of ANY kind — not just no POST: a regression
+        // letting layer 3 run first would show up here as a GET.
         expect(api.calls).toEqual([])
-        expect([...out, ...err].join('\n')).not.toContain(delegateKey)
+        expect([...out, ...err].join('\n')).not.toContain(REAL_SHAPED_KEY_A)
       } finally {
         await rm(dir, { recursive: true, force: true })
       }
     })
 
-    it('refuses HAVEN_DELEGATE_KEY from the environment, calls the API zero times, and never echoes it', async () => {
-      const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
-      const delegateKey = '0xFEEDFACE0000000000000000000000000000000000000000000000000002'
+    it('refuses HAVEN_DELEGATE_KEY from the environment — layer 2, zero GET/POST calls, never echoed', async () => {
+      const api = fakeApi({
+        'GET /agents': { agents: [] },
+        'GET /user/accounts': { accounts: [] },
+        'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' },
+      })
       const { deps, out, err } = harness({
         makeApi: () => api,
-        env: { HAVEN_DELEGATE_KEY: delegateKey },
+        env: { HAVEN_DELEGATE_KEY: REAL_SHAPED_KEY_B },
       })
 
-      const code = await run(['feedback', 'submit', `env key was ${delegateKey}`], deps)
+      const code = await run(['feedback', 'submit', `env key was ${REAL_SHAPED_KEY_B}`, '--json'], deps)
 
       expect(code).toBe(4)
+      const body = JSON.parse(out.join('')) as { error: { layer: number } }
+      expect(body.error.layer).toBe(2)
       expect(api.calls).toEqual([])
-      expect([...out, ...err].join('\n')).not.toContain(delegateKey)
+      expect([...out, ...err].join('\n')).not.toContain(REAL_SHAPED_KEY_B)
     })
   })
 

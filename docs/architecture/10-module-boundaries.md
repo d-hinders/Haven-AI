@@ -124,7 +124,7 @@ severity and unconditional** (#999). Enforcement status:
 | 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons (9 today, of the 10 waived edges the lint prints; live count printed by every lint run) |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
-| 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, accounting, agents, catalog, fee, feedback, mpp, ops, owner-profile, passport, payments, sub-budgets, task-budgets, transactions, x402) — zero violations | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — it exists specifically because `domain/` cannot hold a `viem/accounts` import, `domain-stays-pure` having no waiver) |
+| 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, accounting, agents, catalog, fee, feedback, mpp, ops, owner-profile, passport, payments, sub-budgets, task-budgets, transactions, x402) — zero violations | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — `domain-stays-pure` forbids its `viem/accounts` import inside `domain/`, and it lives here carrying no waiver today) |
 | 7. The graph is acyclic | ✅ `no-circular` | at zero — held absolutely, and the one rule an inline waiver can never silence |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
@@ -313,11 +313,16 @@ in `rails/execution-rail.ts` (the `routes/payments.ts` mentions are
 Re-verified 2026-10-02 (#3597): the module list and rule-6 row both gain
 `modules/feedback/` — the backend half of the CLI feedback channel's secret
 check. It is its own module rather than living in `domain/` (where its CLI
-counterpart's comments might suggest) specifically because it imports
-`viem/accounts`, and `domain-stays-pure` forbids any import there with no
-waiver, ever; `lint:deps` catches the violation as soon as the file is
-placed wrong, which is how this doc's own text was proven rather than
-assumed.
+counterpart's comments might suggest) because it imports `viem/accounts`,
+which `domain-stays-pure` forbids inside `domain/`. That rule IS waivable
+(`UNWAIVABLE_RULES` in `scripts/dep-lint.mjs:39` names only `no-circular` —
+not every absolute-sounding sentence in this doc's own rule-7 table above is
+load-bearing fact, and this one was corrected on review rather than
+repeated): placing the file in `domain/` would have needed its own inline
+`dep-lint-exempt` waiver, and none exists in `domain/` today, so the file
+lives in `modules/feedback/` carrying no waiver rather than in `domain/`
+carrying one. `lint:deps` catches the violation immediately if the file is
+ever moved back without adding that waiver.
 
 ## Non-goals
 

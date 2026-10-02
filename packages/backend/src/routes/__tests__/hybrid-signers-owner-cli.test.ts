@@ -13,16 +13,19 @@ import fastifyJwt from '@fastify/jwt'
  * `routes/auth.ts:384` mints — the thing the CLI's feedback secret check
  * (layer 3) actually sends.
  *
- * This file proves AUTH ONLY — which token reaches the handler, never what
- * Postgres returns once it does. `resolveOwnedHybridAccount` runs its
- * ownership check as a raw pool query inside `hybrid-accounts.ts` itself (no
- * repository to mock instead — a pre-existing `pg-only-in-infra` waiver,
- * `dep-lint`'s own census), so a pool-module mock is the only way to reach
- * the handler at all here; the real database behaviour this route depends on
- * is already proven on the real-DB harness by its sibling
- * `hybrid-signers.test.ts`.
+ * This file proves AUTH ROUTING ONLY — which token reaches the handler —
+ * never what Postgres returns once it does. `resolveOwnedHybridAccount` runs
+ * its ownership check (`FIND_OWNED_HYBRID_ACCOUNT_SQL`, scoped by `user_id`)
+ * as a raw pool query inside `hybrid-accounts.ts` itself (a pre-existing
+ * `pg-only-in-infra` dep-lint waiver — no repository to mock at a narrower
+ * boundary), so EVERY test of this route, including its sibling
+ * `hybrid-signers.test.ts`, mocks the pool module the same way this file
+ * does — the exemption is not this file being special, it is that nothing
+ * anywhere proves `FIND_OWNED_HYBRID_ACCOUNT_SQL`'s user-scoping against a
+ * real database today; that gap is pre-existing and not introduced here.
  */
-// db-mock-exempt: auth-only test, see the file header above for the reason
+// db-mock-exempt: auth-routing-only test; the route's ownership query has no
+// real-DB test anywhere (pre-existing gap — see the file header above)
 
 const { mockQuery, mockLoadOwner } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -41,6 +44,7 @@ describe('GET /accounts/hybrid/:address/signers accepts an owner_cli token (#359
   let app: FastifyInstance
   let ownerCliToken: string
   let dashboardToken: string
+  let otherUserOwnerCliToken: string
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
@@ -53,6 +57,15 @@ describe('GET /accounts/hybrid/:address/signers accepts an owner_cli token (#359
       },
     )
     dashboardToken = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
+    // N-d: a DIFFERENT user, also owner_cli — the allow-list grants the
+    // ROUTE, never the account. Ownership scoping is the thing that must
+    // still refuse.
+    otherUserOwnerCliToken = app.jwt.sign(
+      { sub: 'user-2', email: 'bob@example.com', purpose: 'owner_cli' } as unknown as {
+        sub: string
+        email: string
+      },
+    )
   })
   afterAll(async () => app.close())
   beforeEach(() => {
@@ -88,5 +101,15 @@ describe('GET /accounts/hybrid/:address/signers accepts an owner_cli token (#359
   it('an anonymous caller is still refused', async () => {
     const res = await get()
     expect(res.statusCode).toBe(401)
+  })
+
+  it('N-d: an owner_cli token for a DIFFERENT user is refused 404 — the allow-list grants the route, never the account', async () => {
+    // Override just the ownership check's own query: an empty result is
+    // exactly what `FIND_OWNED_HYBRID_ACCOUNT_SQL` returns for an address
+    // this caller does not own, and `resolveOwnedHybridAccount` 404s on it
+    // before anything else runs.
+    mockQuery.mockResolvedValueOnce({ rows: [] })
+    const res = await get(otherUserOwnerCliToken)
+    expect(res.statusCode).toBe(404)
   })
 })

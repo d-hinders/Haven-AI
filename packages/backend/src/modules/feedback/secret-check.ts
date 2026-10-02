@@ -17,7 +17,11 @@ import { english, privateKeyToAddress } from 'viem/accounts'
  * would need rolling back. It imports `viem/accounts` (for address
  * derivation and the English BIP-39 wordlist), which is exactly why it lives
  * under `modules/feedback/` rather than `domain/` — `domain-stays-pure`
- * (#998) forbids any import there, with no waiver, ever.
+ * (#998) forbids that import inside `domain/`. The rule is waivable (an
+ * inline `dep-lint-exempt` comment can clear it, like several other rules
+ * in `.dependency-cruiser.cjs`), but no such waiver exists in `domain/`
+ * today, so this file lives here carrying none rather than there carrying
+ * one.
  */
 
 /**

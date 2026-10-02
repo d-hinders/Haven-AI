@@ -59,7 +59,7 @@ exactly one replica sweeps per tick, mirroring the rate-limit-counter sweep
 it never serves one, because the read-side filter above is independent of
 the sweep.
 
-## The secret check — three layers of defence
+## The secret check — three lines of defence
 
 **The CLI is the control.** `packages/cli/src/secret-check.ts` refuses to
 send text that looks like a secret BEFORE any network request carrying that
@@ -79,15 +79,18 @@ text is made:
    a delegation hash and a schema hash have the same SHAPE as a private key,
    so shape alone cannot decide — this layer asks what the token would DO.
    The address read runs only when a candidate token exists, and **fails
-   closed**: an unreadable address set refuses to send, with a retry hint,
+   closed**: an unreadable address set refuses to send, with a message that
+   says whether a retry can help (a transient failure gets a retry hint; a
+   401/403/409 gets its own distinct message instead, since retrying those
+   never helps),
    rather than silently skipping the one layer that stops a private key
    reaching Haven.
 4. **Recovery phrases** — a run of 12 or more consecutive BIP-39 English
    words (`@scure/bip39`'s wordlist, bundled as a devDependency so
    `@haven_ai/cli` keeps zero runtime dependencies).
 
-**The second layer: the backend route re-runs the check, as a backstop, not
-the control.** `routes/feedback.ts` re-runs layer 1
+**The second line of defence: the backend route re-runs the check, as a
+backstop, not the control.** `routes/feedback.ts` re-runs layer 1
 (`modules/feedback/secret-check.ts`'s `detectLabelledSecret`), layer 3
 (`isKeyBackedAddress`, against every agent's `delegate_address` and every
 Hybrid DeleGator's `owner_address` **system-wide across the database**, not
@@ -98,20 +101,31 @@ caller that bypasses the CLI (a direct API call, or any future second
 client) — not the primary defence. A refused request's text is never
 logged; the 400 body carries only a `reason` code.
 
-**The third layer, independent of the first two:** `domain/redact-vendor-secrets.ts`
+**The third line of defence, independent of the first two:** `domain/redact-vendor-secrets.ts`
 runs again at the repository's own write boundary (`insertFeedback`), the
 same place it already runs for stored failure text elsewhere in the backend.
 
 ## Abuse controls
 
-- Body size capped at 16 KB. Closer than it looks: 4000 Unicode code points
-  (the cap below) at 4 UTF-8 bytes each — the worst case, every code point
-  outside the Basic Multilingual Plane — plus the JSON envelope is 16,011
-  bytes against a 16,384-byte (16 KB) ceiling, 373 bytes of headroom, not
-  "far more". Both the CLI's own pre-send cap and ajv's `maxLength` count
-  Unicode CODE POINTS, not UTF-16 units (`[...text].length`, not
-  `text.length` — verified against ajv directly: `maxLength: 1` accepts one
-  emoji, which is two UTF-16 units).
+- Body size capped at 16 KB. Closer than it looks for PRINTABLE text: 4000
+  Unicode code points (the cap below) at 4 UTF-8 bytes each — the worst case
+  for printable text, every code point outside the Basic Multilingual Plane
+  — plus the JSON envelope is 16,011 bytes against a 16,384-byte (16 KB)
+  ceiling, 373 bytes of headroom, not "far more". Both the CLI's own
+  pre-send cap and ajv's `maxLength` count Unicode CODE POINTS, not UTF-16
+  units (`[...text].length`, not `text.length` — verified against ajv
+  directly: `maxLength: 1` accepts one emoji, which is two UTF-16 units).
+  **Control characters and lone surrogates are worse than printable text,
+  not better:** `JSON.stringify` escapes each one to `\uXXXX` — 6 ASCII
+  bytes, not the 1-4 UTF-8 bytes printable text costs (verified directly:
+  `JSON.stringify('\u0001')` is `"\u0001"`, 8 bytes for 1 code point). 4000
+  such code points alone would stringify to 24,000+ bytes, over the 16 KB
+  `bodyLimit` the CLI's own code-point cap never accounts for — the backend
+  refuses that request with Fastify's own `413 Payload Too Large`
+  (`FST_ERR_CTP_BODY_TOO_LARGE`, verified directly against the route) before
+  the handler or any secret-check layer ever runs. The CLI's local cap is
+  therefore a usability check, not the enforcement; the backend's body limit
+  is what actually bounds a request this adversarial.
 - Text length capped at 4000 code points (enforced by the OpenAPI
   request-validation plugin's `maxLength`, since `routes/feedback.ts` is a
   brand-new module born **enforced**).

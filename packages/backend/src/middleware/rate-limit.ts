@@ -324,6 +324,17 @@ export function receiptDropRateLimit(
  * unverified pre-auth decode, and no IP fallback: a request that reaches this
  * generator at all has already passed `authMiddleware`, so `request.user.sub`
  * is always present.
+ *
+ * **No `'unknown'` fallback — THROWS instead (round 2 review, S-b).** A
+ * silent fallback bucket is a single point of failure disguised as
+ * resilience: if `authMiddleware` ever stopped running first (a refactor, a
+ * route moved, a future plugin reordering), every caller missing `user.sub`
+ * would collapse into the ONE shared `feedback_user:unknown` bucket — a
+ * global rate limit on every user at once, indistinguishable from an outage,
+ * caused by a wiring mistake nothing would flag until users started getting
+ * 429s. Throwing here fails the single REQUEST that somehow reached this
+ * generator unauthenticated, loudly and in isolation, instead of quietly
+ * rationing everyone.
  */
 export const feedbackSubmitRateLimit = {
   rateLimit: {
@@ -331,7 +342,12 @@ export const feedbackSubmitRateLimit = {
     timeWindow: '1 hour',
     keyGenerator: (request: { user?: { sub?: unknown } }) => {
       const sub = request.user?.sub
-      return `feedback_user:${typeof sub === 'string' ? sub : 'unknown'}`
+      if (typeof sub !== 'string' || sub.length === 0) {
+        throw new Error(
+          'feedbackSubmitRateLimit: request.user.sub is missing — authMiddleware must run before this key generator',
+        )
+      }
+      return `feedback_user:${sub}`
     },
   },
 } as const

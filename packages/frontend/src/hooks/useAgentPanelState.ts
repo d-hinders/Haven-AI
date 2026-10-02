@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
-import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useOrganizations } from '@/hooks/useOrganizations'
@@ -17,7 +16,6 @@ export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
  */
 export function useAgentPanelState() {
   const { activeAccount } = useAuth()
-  const router = useRouter()
   const accountAddress = activeAccount?.account_address ?? null
   const chainId = activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   const {
@@ -130,22 +128,6 @@ export function useAgentPanelState() {
     const timeout = window.setTimeout(() => setToastMessage(null), 3000)
     return () => window.clearTimeout(timeout)
   }, [toastMessage])
-
-  /**
-   * #3168: the card's first action navigates to the agent detail page — the
-   * surface where the agent's budgets and spending controls live, and which
-   * also hosts name/description editing (the detail page's kebab → "Edit
-   * agent" modal). What used to be the Edit/Details fork is now this one
-   * navigation for every operational card: Edit opened a name/description
-   * modal on the list, and nothing about the card needed it once the detail
-   * page is the destination. A client-side router push, not a full-page
-   * assignment, so the authenticated shell does not remount.
-   * `useAgentPanelState` is only mounted inside the app router's tree, so
-   * `useRouter` is always defined here.
-   */
-  function handleViewDetails(agent: Agent) {
-    router.push(`/agents/${agent.id}`)
-  }
 
   async function handlePause(agent: Agent) {
     setBusyAgentId(agent.id)
@@ -261,7 +243,6 @@ export function useAgentPanelState() {
     setOrganizationsManagerOpen,
     busyAgentId,
     busyAction,
-    handleViewDetails,
     handlePause,
     handleResume,
     handleArchive,

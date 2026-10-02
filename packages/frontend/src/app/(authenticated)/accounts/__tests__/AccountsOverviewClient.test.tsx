@@ -53,6 +53,12 @@ function account(id: string, name: string, chainId: number, isDefault = false) {
 const BASE = account('base1', 'Base account', 8453, true)
 const SEPOLIA = account('sep1', 'Sepolia account', 84532)
 
+function getAccountCard(name: string): HTMLElement {
+  const card = screen.getByRole('link', { name }).closest('[data-testid="account-card"]')
+  if (!(card instanceof HTMLElement)) throw new Error(`Missing account card for ${name}`)
+  return card
+}
+
 describe('AccountsOverviewClient — active account (#629)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -69,7 +75,7 @@ describe('AccountsOverviewClient — active account (#629)', () => {
   it('marks the active account and offers Set active only on the others', () => {
     render(<AccountsOverviewClient />)
 
-    const activeCard = screen.getByLabelText('Base account')
+    const activeCard = getAccountCard('Base account')
     expect(within(activeCard).getByText('Active')).toBeInTheDocument()
     // The active card has no "set active" affordance.
     expect(within(activeCard).queryByLabelText(/Set Base account as active/)).toBeNull()
@@ -78,26 +84,37 @@ describe('AccountsOverviewClient — active account (#629)', () => {
     expect(screen.getByLabelText('Set Sepolia account as active')).toBeInTheDocument()
   })
 
-  it('switches the active account via Set active without navigating', () => {
+  it('switches the active account via the sibling Set active control', () => {
     render(<AccountsOverviewClient />)
 
     fireEvent.click(screen.getByLabelText('Set Sepolia account as active'))
     expect(mockSetActiveSafe).toHaveBeenCalledWith(SEPOLIA)
-    /*
-      ONCE, not just "with the right argument" — this is the last place
-      `stopPropagation()` is still observable (#2374).
-
-      The card's own `onClick` and this button's handler now make the IDENTICAL
-      call with the IDENTICAL argument, because the set-default star that used
-      to give the two distinguishable effects is gone. At the e2e layer that
-      makes containment unobservable and the assertion was removed rather than
-      reworded into something that cannot fail. Here it survives: React's
-      synthetic events are delegated, so a handler that stops propagation keeps
-      the Link's `onClick` from running, and the difference shows up as a call
-      COUNT even though the call itself is idempotent. Raised by
-      `haven-reviewer` on this change.
-    */
     expect(mockSetActiveSafe).toHaveBeenCalledTimes(1)
+  })
+
+  it('activates from both normal and modified name-link clicks', () => {
+    render(<AccountsOverviewClient />)
+
+    const link = screen.getByRole('link', { name: 'Sepolia account' })
+    expect(link).toHaveAttribute('href', '/accounts/sep1')
+    fireEvent.click(link, { ctrlKey: true })
+    expect(mockSetActiveSafe).toHaveBeenCalledTimes(1)
+    expect(mockSetActiveSafe).toHaveBeenLastCalledWith(SEPOLIA)
+
+    fireEvent.click(link)
+    expect(mockSetActiveSafe).toHaveBeenCalledTimes(2)
+    expect(mockSetActiveSafe).toHaveBeenLastCalledWith(SEPOLIA)
+  })
+
+  it('keeps the stretched account link and Set active as siblings', () => {
+    render(<AccountsOverviewClient />)
+
+    const card = getAccountCard('Sepolia account')
+    const link = within(card).getByRole('link', { name: 'Sepolia account' })
+    const control = within(card).getByRole('button', { name: 'Set Sepolia account as active' })
+    expect(link.className).toContain('after:absolute')
+    expect(link.contains(control)).toBe(false)
+    expect(card.querySelector('a a, a button')).toBeNull()
   })
 
   /**
@@ -127,7 +144,7 @@ describe('AccountsOverviewClient — active account (#629)', () => {
     })
     render(<AccountsOverviewClient />)
 
-    const activeCard = screen.getByLabelText('Base account')
+    const activeCard = getAccountCard('Base account')
     // getByText needles are PLAIN-SPACE: RTL's normalizer collapses the
     // sv-SE NBSPs on the node side but not in the needle. The exact NBSP
     // bytes are pinned separately below via textContent.
@@ -173,7 +190,7 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     render(<AccountsOverviewClient />)
 
     // The cards still render — this is a read/manage surface, not a deletion.
-    expect(screen.getByLabelText('Base account')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Base account' })).toBeInTheDocument()
 
     expect(screen.queryByRole('button', { name: /add account/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /add your first account/i })).toBeNull()
@@ -252,7 +269,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
     render(<AccountsOverviewClient />)
 
     // Non-vacuity: the cards rendered, and the surviving action is present.
-    expect(screen.getByLabelText('Base account')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Base account' })).toBeInTheDocument()
     // `.some(includes)` rather than `toContain`: the scan concatenates the
     // accessible name with the visible text, so the entry reads
     // "Set Sepolia account as active Set active" and an exact match would be
@@ -268,7 +285,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
     // The chip that NAMES the default account stays — only the control that
     // set it from the card is gone. BASE is the default of two accounts, so
     // `showDefaultBadge` is satisfied.
-    expect(within(screen.getByLabelText('Base account')).getByText('default')).toBeInTheDocument()
+    expect(within(getAccountCard('Base account')).getByText('default')).toBeInTheDocument()
   })
 
   it('offers no set-default control for a lone NON-default account either', () => {
@@ -296,7 +313,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
     // Non-vacuity: the card is there under its own name, AND the absence scan
     // itself demonstrably finds a real control before it is trusted to find
     // none.
-    expect(screen.getByLabelText('Lone account')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Lone account' })).toBeInTheDocument()
     expect(
       controlsMentioning(/active/i).some((n) => n.includes('Set Lone account as active')),
       `the absence scan found no set-active control to prove itself on — it saw ${JSON.stringify(controlsMentioning(/active/i))}`,

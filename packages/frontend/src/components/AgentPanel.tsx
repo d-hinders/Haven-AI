@@ -429,7 +429,6 @@ export default function AgentPanel() {
                   <AgentCard
                     key={agent.id}
                     agent={agent}
-                    onViewDetails={panel.handleViewDetails}
                     onPause={panel.handlePause}
                     onResume={panel.handleResume}
                     onRevokeCredential={panel.revokeAgentCredential}
@@ -486,7 +485,6 @@ export default function AgentPanel() {
               <AgentCard
                 key={agent.id}
                 agent={agent}
-                onViewDetails={panel.handleViewDetails}
                 onPause={panel.handlePause}
                 onResume={panel.handleResume}
                 onRevokeCredential={panel.revokeAgentCredential}

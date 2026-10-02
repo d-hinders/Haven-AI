@@ -92,7 +92,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-01"
+last-verified: "2026-10-02"
 ---
 
 # Haven Design System
@@ -1534,6 +1534,8 @@ The redesigned public website (epic [#3572](https://github.com/d-hinders/Haven-A
 **Type roles (`SITE_TYPE`).** Display type is **Inter Tight** (h1 `clamp(40px, 6vw, 64px)`, h2 `clamp(28px, 3.6vw, 40px)`, h3 17px, all semibold with negative tracking); body stays the app's Inter; the eyebrow is 12px semibold uppercase with wide tracking; the lede is 18px at 1.6 in `ink-2`. Code and amounts use **JetBrains Mono** (`SITE_TYPE.mono`). Both faces load through `next/font` in `site/fonts.ts`, self-hosted, and exist only below an element carrying `SITE_FONT_VARIABLES` — every new-site root does, nothing else may. The authenticated app, `packages/ui` and `packages/ops` render Inter as before.
 
 **Product frame (`ProductFrame`).** A picture of a Haven screen: `Card` at `raised` elevation with a 14px radius, and a `Card.Header` bar holding an environment chip and the screen name. Because it is the product's own surface, it shows the dark UI in the dark theme. Its body is `inert`, and controls inside it are `FrameControl` spans, never buttons or links: a frame illustrates the product, it does not operate it.
+
+**Page building blocks (`site/blocks.tsx`, #3576).** The mockup's recurring pieces, each drawn with theme tokens on a themed ground and fixed colours on a fixed one: `SiteHero` (the compact navy hero, with an optional breadcrumb; it is `data-v2-dark-section`, so pair it with `Header overlay`), `SiteSplit` and `SiteCopy` (the two-column text-and-picture rhythm, stacking below 900px), `PaymentFlow` (a numbered payment as a real ordered list), `AgentBudgetRow` and `FramePill` (frame contents), `SiteCode` (a fixed-navy terminal block), `NavyCard` (a card on the navy band) and `SideCard` (a protocol card), plus the small text helpers `SiteLede`, `SiteTextLink`, `SiteCtaRow` and `CodePrompt`. A page that needs one of these takes it from here rather than restating the classes.
 
 **Header and footer.** The header carries only entries whose page exists. It is sticky and in the flow by default (`/demo`, `/releases`); `overlay` is the mockup's form for a page with a navy hero — absolutely positioned, transparent over the hero, and not sticky. Its tone follows what it sits over, never the theme: theme ink on the page's own ground, or fixed white ink on a fixed navy ground over a dark band, where the logo mark becomes a solid white tile with navy ink (`HavenMark tone="onNavy"`, as the mockup draws it). It keeps the installed-app `SafeAreaBand`. The footer's legal line reads "© {year} Haven Labs". It has no `href="#"` and no entry without a destination; Contact, Privacy and Terms return only with their pages.
 

@@ -344,7 +344,8 @@ export default defineConfig({
       // Joined: design-system (#2929), analytics (#3038), marketplace (#3079),
       // settings-company-details (#3332), add-funds-modal (#3483), demo and
       // releases (#3573 — the public pages' redesigned header and footer
-      // follow the visitor's theme). Baseline counts are not restated here;
+      // follow the visitor's theme), how-it-works (#3576 — How it works and
+      // its protocols sub-page). Baseline counts are not restated here;
       // `git ls-files` the `__screenshots__` tree for them. add-funds-modal
       // seeds `haven.theme='dark'` itself and skips its mobile shots under
       // this project (no mobile dark baseline), so only its desktop clips
@@ -357,6 +358,7 @@ export default defineConfig({
         '**/add-funds-modal.visual.spec.ts',
         '**/demo.visual.spec.ts',
         '**/releases.visual.spec.ts',
+        '**/how-it-works.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

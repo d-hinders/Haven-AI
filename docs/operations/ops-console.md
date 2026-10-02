@@ -121,14 +121,23 @@ nothing under `packages/ops`, `packages/ui`, `packages/core` or
 `scripts/docs` changed since the commit this project last **deployed**
 (`VERCEL_GIT_PREVIOUS_SHA`). A production build goes ahead whenever that
 cannot be proven: the variable is unset or empty, the commit is missing
-from Vercel's shallow clone, or git errors. A preview with no earlier
+from Vercel's shallow clone, or git errors. Any `VERCEL_ENV` other than
+`preview`, including none, counts as production. A preview with no earlier
 deployment (a branch's first push) instead checks only its newest commit,
 so a frontend-only PR does not spend the daily deployment cap on an ops
-preview. The rule never compares production against the newest commit's
-parent: that form (#3580) stranded the #3581 fix, whose own build was lost
-to the cap, behind later frontend-only commits (#3591). If a console change
-still is not live, use Deployments → Create Deployment with the fix's
-commit on `dev`. Two consequences to verify once, in the dashboards:
+preview; if that commit has no parent in the clone, the preview builds. The
+rule never compares production against the newest commit's parent: that
+form (#3580) stranded the #3581 fix, whose own build was lost to the cap,
+behind later frontend-only commits (#3591). If a console change still is
+not live, use Deployments → Create Deployment with the fix's commit on
+`dev`.
+
+**Rebuilding an unchanged commit.** Changing `NEXT_PUBLIC_OPS_ENVIRONMENTS`
+(step 3, or adding `prod` below) needs a rebuild, because Next inlines it at
+build time, but nothing in git changed, so the ignore step skips. Set the
+project environment variable `OPS_FORCE_BUILD` to `1`, redeploy the latest
+`dev` deployment, then delete `OPS_FORCE_BUILD`; left in place it makes
+every push build. Two consequences to verify once, in the dashboards:
 
 - The **frontend** project must still rebuild on `packages/ui` changes —
   it consumes the shared UI package, and the ops project's ignore step does

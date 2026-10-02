@@ -17,8 +17,23 @@ const ignoreCommand: string = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'vercel
 
 let repo: string
 
+/**
+ * The environment every git and sh spawn gets: no inherited `GIT_*` (a git
+ * hook exports GIT_DIR / GIT_INDEX_FILE, which would point these commands at
+ * the HOST repository), no global or system git config, and no VERCEL_* or
+ * OPS_* variable unless a test sets one. Same filter as
+ * scripts/ci/money-path-classify.test.mjs.
+ */
+function hermeticEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  for (const key of Object.keys(env)) {
+    if (/^(GIT_|VERCEL_|OPS_)/.test(key)) delete env[key]
+  }
+  return Object.assign(env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, extra)
+}
+
 function git(...args: string[]): string {
-  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim()
+  return execFileSync('git', args, { cwd: repo, encoding: 'utf8', env: hermeticEnv() }).trim()
 }
 
 /** Write a file and commit it; returns the new commit's SHA. */
@@ -31,14 +46,17 @@ function commit(path: string, content = `${Date.now()}-${Math.random()}`): strin
 }
 
 /** Run the ignore step from the project's Root Directory, as Vercel does. Returns the exit code. */
-function ignoreStep(previousSha: string | undefined, vercelEnv?: string, root = repo): number {
-  const env = { ...process.env }
-  delete env.VERCEL_GIT_PREVIOUS_SHA
-  delete env.VERCEL_ENV
-  if (previousSha !== undefined) env.VERCEL_GIT_PREVIOUS_SHA = previousSha
-  if (vercelEnv !== undefined) env.VERCEL_ENV = vercelEnv
-  return spawnSync('sh', ['-c', ignoreCommand], { cwd: join(root, 'packages', 'ops'), env }).status ?? -1
+function ignoreStep(previousSha: string | undefined, vercelEnv?: string, root = repo, extra: Record<string, string> = {}): number {
+  const vars: Record<string, string> = { ...extra }
+  if (previousSha !== undefined) vars.VERCEL_GIT_PREVIOUS_SHA = previousSha
+  if (vercelEnv !== undefined) vars.VERCEL_ENV = vercelEnv
+  return spawnSync('sh', ['-c', ignoreCommand], { cwd: join(root, 'packages', 'ops'), env: hermeticEnv(vars) }).status ?? -1
 }
+
+// The script exits exactly 1 when it decides to build. Asserting 1 (not merely
+// non-zero) tells that apart from a broken wrapper: sh's own 2 or 127.
+const BUILD = 1
+const SKIP = 0
 
 beforeEach(() => {
   repo = mkdtempSync(join(tmpdir(), 'ops-ignore-'))
@@ -60,14 +78,14 @@ describe('ops Vercel ignore step (#3591)', () => {
     const deployed = commit('packages/ops/src/a.ts')
     commit('packages/frontend/page.tsx')
     commit('docs/guide.md')
-    expect(ignoreStep(deployed)).toBe(0)
+    expect(ignoreStep(deployed)).toBe(SKIP)
   })
 
   it('builds an ops change even when an unrelated commit landed on top (the #3591 bug)', () => {
     const deployed = commit('packages/frontend/page.tsx')
     commit('packages/ops/src/middleware.ts') // the fix whose own build was lost
     commit('packages/frontend/page.tsx') // the newer, unrelated tip of dev
-    expect(ignoreStep(deployed)).not.toBe(0)
+    expect(ignoreStep(deployed)).toBe(BUILD)
   })
 
   it.each(['packages/ops/src/x.ts', 'packages/ui/src/Button.tsx', 'packages/core/src/chains.ts', 'scripts/docs/gen.mjs'])(
@@ -75,20 +93,20 @@ describe('ops Vercel ignore step (#3591)', () => {
     (path) => {
       const deployed = commit('packages/frontend/page.tsx')
       commit(path)
-      expect(ignoreStep(deployed)).not.toBe(0)
+      expect(ignoreStep(deployed)).toBe(BUILD)
     },
   )
 
   it('builds when no previous deployment is recorded', () => {
     commit('packages/frontend/page.tsx')
-    expect(ignoreStep(undefined)).not.toBe(0)
-    expect(ignoreStep('')).not.toBe(0)
+    expect(ignoreStep(undefined)).toBe(BUILD)
+    expect(ignoreStep('')).toBe(BUILD)
   })
 
   it('builds when the previous deployment is unknown, or garbage', () => {
     commit('packages/frontend/page.tsx')
-    expect(ignoreStep('0123456789abcdef0123456789abcdef01234567')).not.toBe(0)
-    expect(ignoreStep('not-a-sha; exit 0')).not.toBe(0)
+    expect(ignoreStep('0123456789abcdef0123456789abcdef01234567')).toBe(BUILD)
+    expect(ignoreStep('not-a-sha; exit 0')).toBe(BUILD)
   })
 
   it('builds when the previous deployment is missing from a real shallow clone', () => {
@@ -97,10 +115,10 @@ describe('ops Vercel ignore step (#3591)', () => {
     commit('docs/b.md')
     const shallow = mkdtempSync(join(tmpdir(), 'ops-ignore-shallow-'))
     try {
-      execFileSync('git', ['clone', '-q', '--depth', '1', `file://${repo}`, shallow])
+      execFileSync('git', ['clone', '-q', '--depth', '1', `file://${repo}`, shallow], { env: hermeticEnv() })
       // Nothing the console builds from changed, yet the deployed commit is
       // not in the clone, so the step cannot prove that, and must build.
-      expect(ignoreStep(deployed, undefined, shallow)).not.toBe(0)
+      expect(ignoreStep(deployed, undefined, shallow)).toBe(BUILD)
     } finally {
       rmSync(shallow, { recursive: true, force: true })
     }
@@ -110,20 +128,34 @@ describe('ops Vercel ignore step (#3591)', () => {
     it('skips a preview whose newest commit does not touch the console', () => {
       commit('packages/ops/src/a.ts')
       commit('packages/frontend/page.tsx')
-      expect(ignoreStep(undefined, 'preview')).toBe(0)
-      expect(ignoreStep('', 'preview')).toBe(0)
+      expect(ignoreStep(undefined, 'preview')).toBe(SKIP)
+      expect(ignoreStep('', 'preview')).toBe(SKIP)
     })
 
     it('builds a preview whose newest commit touches the console', () => {
       commit('packages/ui/src/Card.tsx')
-      expect(ignoreStep(undefined, 'preview')).not.toBe(0)
+      expect(ignoreStep(undefined, 'preview')).toBe(BUILD)
+    })
+
+    it('a later preview push uses the previous deployment, not the newest commit', () => {
+      const deployed = commit('packages/frontend/page.tsx')
+      commit('packages/ops/src/a.ts')
+      commit('packages/frontend/page.tsx')
+      expect(ignoreStep(deployed, 'preview')).toBe(BUILD)
     })
 
     it('never applies to production, or to an unset VERCEL_ENV', () => {
       commit('packages/ops/src/a.ts')
       commit('packages/frontend/page.tsx')
-      expect(ignoreStep(undefined, 'production')).not.toBe(0)
-      expect(ignoreStep(undefined)).not.toBe(0)
+      expect(ignoreStep(undefined, 'production')).toBe(BUILD)
+      expect(ignoreStep(undefined)).toBe(BUILD)
     })
+  })
+
+  it('OPS_FORCE_BUILD=1 builds an unchanged commit (an env-only change needs a rebuild)', () => {
+    const deployed = commit('packages/frontend/page.tsx')
+    expect(ignoreStep(deployed)).toBe(SKIP)
+    expect(ignoreStep(deployed, undefined, repo, { OPS_FORCE_BUILD: '1' })).toBe(BUILD)
+    expect(ignoreStep(deployed, undefined, repo, { OPS_FORCE_BUILD: '0' })).toBe(SKIP)
   })
 })

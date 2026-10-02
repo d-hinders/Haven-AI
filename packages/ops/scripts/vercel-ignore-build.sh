@@ -28,6 +28,16 @@ console_unchanged() {
     ':(top)packages/ops' ':(top)packages/ui' ':(top)packages/core' ':(top)scripts/docs'
 }
 
+# Rebuilding an UNCHANGED commit (after changing a build-time variable such as
+# NEXT_PUBLIC_OPS_ENVIRONMENTS, which Next inlines) would always skip, because
+# nothing changed since the last deployment. OPS_FORCE_BUILD=1 in the project's
+# environment variables forces one build; remove it afterwards
+# (docs/operations/ops-console.md).
+if [ "${OPS_FORCE_BUILD:-}" = "1" ]; then
+  echo "ops ignore-build: OPS_FORCE_BUILD=1; building."
+  exit 1
+fi
+
 prev="${VERCEL_GIT_PREVIOUS_SHA:-}"
 
 if [ -z "$prev" ]; then

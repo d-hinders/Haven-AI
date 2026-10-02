@@ -32,6 +32,18 @@ const ARTIFACTS = [
   // pinned separately (for-agents-runbook.test.ts); what is asserted here is
   // only that it cannot reintroduce a host nobody owns.
   'for-agents.md',
+  // #3596: the runbook's byte-sliced step files. Same link rules, same
+  // reason — each is a slice of the text above, pinned separately
+  // (agent-skill-steps.test.ts).
+  'agent-skills/what-haven-is.md',
+  'agent-skills/the-sequence.md',
+  'agent-skills/budget-changes-later.md',
+  'agent-skills/hand-off-scripts.md',
+  'agent-skills/what-you-run.md',
+  'agent-skills/how-to-verify.md',
+  'agent-skills/if-you-cannot-open-a-browser.md',
+  'agent-skills/if-something-breaks.md',
+  'agent-skills/vocabulary.md',
 ] as const
 
 /**

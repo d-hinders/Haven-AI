@@ -825,7 +825,9 @@ jobs:
       # src/lib/agent-skill-bundle.ts via skill-content.ts, which interpolates
       # four of this file's sentence constants (so "pinned to" means that file
       # for the bundle, and this one for the other two) —
-      # and only the first is checkable by lint:runbook-parity. This job is
+      # and only the first is checkable by lint:runbook-parity (which since
+      # #3596 also checks the nine public/agent-skills/*.md step-file slices,
+      # eleven copies in all). This job is
       # named an owner of that source so the other two pin tests below actually
       # run on a change to agent-guidance.ts; the check here is what makes that
       # ownership expressible in root-guard-ownership.json.

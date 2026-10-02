@@ -71,13 +71,29 @@ describe('haven guide text (#2525)', () => {
     // 1). The command is now the manifest's own `packages.cli.one_liner`, run
     // as given, so no raise was needed — the budget headroom grew instead.
     //
+    // #3596: +34 bytes / +30 UTF-16 units. Two cross-references stopped
+    // depending on the reader having just read an adjacent section, now that
+    // the runbook is also served as linked step files at
+    // `/agent-skills/<step>.md` (`docs/operations/agent-discovery-listings.md`):
+    // step 1's "(below)" pointed at "## What you run", several sections away
+    // once split, so it now names that section; "If you cannot open a
+    // browser"'s "Steps 1-3" named step numbers defined in an earlier section
+    // ("The sequence") and its "as above" pointed at the hand-off scripts
+    // section — both read fine as one document and not as an isolated slice,
+    // so the three words are now a parenthetical (account, funding, budget)
+    // and the tail clause is dropped rather than left dangling. Review then
+    // found one more: "Budget changes later"'s "the setup above" points at
+    // nothing once that section stands alone, so it now names "The sequence"
+    // (+10 bytes, 10904 -> 10914).
+    //
     // #3597: +212 bytes / +210 units — "If something breaks" gains a second
     // paragraph: `haven feedback submit "<text>"` needs `haven login` first,
     // and the sentence repeats the rule never to put a credential in that
     // text (the command's own secret check already refuses one, but cannot
-    // catch every shape).
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11082)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10997)
+    // catch every shape). Merged on top of #3596's 10914/10827, landing at
+    // 11126/11037.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11126)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11037)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

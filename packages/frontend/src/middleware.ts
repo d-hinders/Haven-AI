@@ -84,5 +84,9 @@ export const config = {
     '/device',
     // #3304: where a `client_update` hint sends an agent.
     '/releases',
+    // #3596: the agent-skills index beside haven.json, and the runbook's
+    // linked step files it lists.
+    '/.well-known/agent-skills/index.json',
+    '/agent-skills/:path*',
   ],
 }

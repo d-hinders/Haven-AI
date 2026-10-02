@@ -24,6 +24,8 @@ covers:
   - packages/sdk/src/skill-content.ts
   - packages/sdk/src/agent-guidance.ts
   - packages/frontend/src/lib/agent-onboarding-prompt.ts
+  - packages/frontend/src/lib/agent-skill-steps.ts
+  - packages/frontend/src/lib/agent-skill-index.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
 last-verified: "2026-09-26"
@@ -613,6 +615,18 @@ These guidelines are enforced on frontend copy, not just documented. `npm run li
 - **Escape hatch.** For a legitimate advanced/developer-facing surface where the technical term is correct, add `// copy-lint-ignore` on the offending line (or the line directly above). Use it sparingly; it is for developer surfaces, not a way around writing good user copy.
 - Docs under `docs/product` are separately checked by the Vale `Haven.Terminology` rule (`.vale.ini`). Vale is **advisory** — `level: suggestion`, and the docs workflow runs it `continue-on-error` — so it nudges, it does not block.
 - Where the lint and this guide disagree, **this guide wins**. Known divergence: the lint rewrites "session key(s)" to "agent credential(s)", which pulls copy toward the very framing "Separate authentication from payment signing" warns against; the correct replacement is "private signing key" per the mapping table.
+
+Re-verified 2026-10-02 (#3596, the agent-skills index and step files): this
+PR touches `packages/sdk/src/agent-guidance.ts` (three cross-reference fixes
+inside `HAVEN_AGENT_RUNBOOK_MD`, so no standalone step file points at another
+section by position) and adds no new agent-facing prose file under `lib/` — the new
+`packages/frontend/src/lib/agent-skill-steps.ts` and `agent-skill-index.ts`
+hold slug/title/description metadata and JSON-builder code, not rendered
+copy, so neither belongs in `SCAN_FILES`. No wording constraint in this guide
+or `casp-risk-guardrails.md` § Product Copy Rules is affected: all three are
+cross-reference fixes (a dangling "(below)"; a "Steps 1-3 … as above" that
+leaned on two other sections once split; a "the setup above"), not changes to
+what the runbook claims. Nothing else in this document was re-verified.
 
 Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
 enforcement claims above match the code at this head: `npm run lint:copy` /

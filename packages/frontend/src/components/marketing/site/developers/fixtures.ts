@@ -67,9 +67,11 @@ export const QUICKSTART_TERMINAL = {
 
 /**
  * The 402 walk-through (mockup `developers.html:107-113`). Every tool name is
- * a real hosted/signed tool: `haven_quote_x402` and `haven_pay_x402` in
- * `packages/mcp-server/src/tools/plain-http-x402.ts`, `haven_sign_x402` the
- * local signer's x402 tool (`packages/sdk/src/types.ts:2871`).
+ * a real hosted/signed tool: `haven_quote_x402` and `haven_pay_x402_quote` in
+ * `packages/mcp-server/src/tools/plain-http-x402.ts` (PLAIN_HTTP_X402_TOOLS),
+ * `haven_pay_x402` the hosted MCP server's settle tool
+ * (`packages/mcp/src/tools.ts:40`), `haven_sign_x402` the local signer's x402
+ * tool (`packages/signer/src/tools.ts:181`).
  */
 export const X402_TERMINAL = {
   head: 'GET https://api.example/v1/enrich',

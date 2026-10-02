@@ -15,7 +15,7 @@ covers:
   - packages/frontend/src/__tests__/api-mock-builder.test.ts
   - packages/frontend/src/__tests__/fixture-shape-parity.test.ts
   - packages/ui/**
-last-verified: "2026-09-20"
+last-verified: "2026-10-02"
 ---
 
 # Frontend playbook
@@ -102,7 +102,7 @@ Run them locally with `npm run test:e2e:mobile -w packages/frontend`, or both wi
 npm run test:e2e:mobile:built -w packages/frontend   # or test:e2e:gate:built for both projects
 ```
 
-They exist as scripts rather than as a recipe here because two details are easy to get wrong by hand and silent when you do. **They rebuild every time**, deliberately: a stale build serves a frozen bundle, and the #1816 identity probe cannot see that — `scripts/e2e-identity.mjs` says so in its own docblock, because the marker proves *this worktree's files* while the bundle beside it may be an old compile. That is the [#1800](https://github.com/d-hinders/Haven-AI/issues/1800) confidently-wrong shape, one surface over. And they build with `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=ci-placeholder`, matching `ci.yml`: `NEXT_PUBLIC_*` is inlined at build time, the placeholder is truthy, so **CI's bundle carries the `walletConnect` connector and a bare local build does not**.
+They exist as scripts rather than as a recipe here because two details are easy to get wrong by hand and silent when you do. **They rebuild every time**, deliberately: a stale build serves a frozen bundle, and the #1816 identity probe cannot see that — `scripts/e2e-identity.mjs` says so in its own docblock, because the marker proves *this worktree's files* while the bundle beside it may be an old compile. That is the [#1800](https://github.com/d-hinders/Haven-AI/issues/1800) confidently-wrong shape, one surface over. And they build with `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=ci-placeholder`, matching `ci.yml`: `NEXT_PUBLIC_*` is inlined at build time, the placeholder is truthy, so **CI's bundle carries the `walletConnect` connector and a bare local build does not**. The same holds for `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`, which the built-suite scripts also set: without it a production-shaped build renders the legacy public header and footer ([`dev-environment.md` § `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`](../../operations/dev-environment.md#next_public_haven_site_preview--the-redesigned-public-site-3573)).
 
 Measured on one laptop at [`1baaa36d`](https://github.com/d-hinders/Haven-AI/commit/1baaa36d), `chromium-mobile`, both at `--workers=1`: the suite is **41.1s** built against **3.5 min** (~210s) on `next dev` — about 5× — and the `:built` scripts rebuild every time, so one end-to-end run is 41.1 + 56 ≈ **97s against 210s**, about 2.2×. The 5× is the figure for the suite alone, which is what you get while iterating on specs against a single build (`CI=1 npx playwright test …`, no rebuild). The whole gate — both projects, 104 tests — is **58s** built, 1:35 with the rebuild. Re-derive on your own machine before quoting; what generalises is the ratio, not the seconds. `CI=1` also pins `workers` to 2 (the local default is roughly half your cores) and turns on `forbidOnly` and one retry, so **a deliberately serial run still needs `--workers=1`** — the figures above are at equal workers for exactly that reason.
 
@@ -188,12 +188,12 @@ the seed rather than fighting it. The byte-comparison guards (`redirect_captures
 judged against the dark `/dashboard`.
 
 The pixel gate has a dark half too: the `chromium-desktop-dark` Playwright
-project (`npm run test:visual:dark`) is scoped to `design-system.visual.spec.ts`
-and `analytics.visual.spec.ts` — the two specs whose baselines exist in both
-schemes — and runs under the same *Design visual regression* job — advisory on
+project (`npm run test:visual:dark`) is scoped to the specs whose baselines exist
+in both schemes — the list is its `testMatch` in `packages/frontend/playwright.config.ts`,
+not restated here — and runs under the same *Design visual regression* job — advisory on
 `dev`, required on `main`, like the light project. It seeds `haven.theme` the
 same way and commits its baselines under a `-dark` suffix. It does not extend
-to the other visual specs, which have no dark baselines: a project that
+to visual specs that have no dark baselines: a project that
 auto-writes missing snapshots is a green tick that compared nothing (the #2318
 class), so the scope is the honest one. `scripts/ci/visual-baseline-inventory.mjs`
 prints the split between the two schemes' counts; the dark baselines regenerate
@@ -386,7 +386,7 @@ design-review verdict: passed @ <sha> -- baselines: topbar-desktop.png
 
   The design reviewer produces the second line: its brief's *Changed baselines* step ([`design-reviewer.md`](../../../.agents/skills/haven-agent-workflow/references/design-reviewer.md), #3235) opens the old and new image of every modified baseline — from the regeneration run's `baseline-before-after` artifact when there is one — and returns the line naming only the baselines it passed; an unintended change is a `blocking` finding and gets a `changes requested` line instead. When verdicts conflict, the newest decides per baseline (#3301): a non-passing line, named or `*`, vetoes a pass at or before its sha, only a later `passed` clears it, and a `*` pass never clears a block that names the file — so an earlier `passed` is superseded, never deleted. **Post a block in the PR body or a PR comment, never only in a GitHub review body** ([#3309](https://github.com/d-hinders/Haven-AI/issues/3309)): the gate does not read review bodies, and submitting a review does not re-run it (a `pull_request_review` trigger would run the PR's own code). A block is read in more shapes than a pass — a table row (the label in its own cell too), a heading, a task-list item, an italic or backticked label, an HTML-wrapped line, an emoji shortcode such as `:x:` before the label, `design review verdict:` without the hyphen — so an older pass cannot survive a block written loosely; a pass must use the line above. The flip side: a non-passing line QUOTED as an example (a backticked template standing as its own line or list item, naming a real baseline) is a block too, and one without a real sha (`@ <head-sha>`) can never be cleared by a later pass — edit the quoted text instead.
 
-  - **Names** are base names (or full paths, or a comma/space list); `*` is the mass re-bless form for a font or Playwright bump that moves all of them at once — the same convention the regeneration workflow's `expected` input uses. Matching is on the base name; the 85 committed baselines share no duplicates today. **Write `*`, not a glob:** in a pass or a declaration `*.png` or `dir/*.png` covers nothing. In a block, any `*` in the list covers every baseline, fail closed (#3309) — unless it is emphasis around a whole `.png` name: one name (`**a.png**`), the whole list (`**a.png, b.png**`) or the whole line (`**design-review verdict: … a.png**`). So `*.png*`, `*top*` and `topbar*` are globs.
+  - **Names** are base names (or full paths, or a comma/space list); `*` is the mass re-bless form for a font or Playwright bump that moves all of them at once — the same convention the regeneration workflow's `expected` input uses. Matching is on the base name; the committed baselines share no duplicate base names today. **Write `*`, not a glob:** in a pass or a declaration `*.png` or `dir/*.png` covers nothing. In a block, any `*` in the list covers every baseline, fail closed (#3309) — unless it is emphasis around a whole `.png` name: one name (`**a.png**`), the whole list (`**a.png, b.png**`) or the whole line (`**design-review verdict: … a.png**`). So `*.png*`, `*top*` and `topbar*` are globs.
   - **The reason** must be at least 20 non-whitespace characters — a label is not a reason, the same bar an inline `// ui-local:` marker has to clear.
   - **The verdict sha** is verified, not just read: the last commit that touched the PNG must sit at or before the verdict's commit, and that commit at or before the PR head. A verdict given before the baseline was re-committed does not verify it — the #3222 shape, where the review happened and the pixels moved after. `passed` and `approved` verify, read as the whole verdict word before the first `@`, `--` or `baselines:` (`not approved` or `passed-with-nits` do not); `skipped` and `n/a` do not.
   - **What the gate does not know:** who wrote the lines. The author writes both, so a green tick proves the declaration EXISTS, not that the review ran — provenance is §5's job, and the gate says so in its own report.

@@ -146,7 +146,9 @@ so this is a rule to point at rather than a question to ask the release runner.
       `CREATE INDEX CONCURRENTLY`, so the deploy's `IF NOT EXISTS` is a no-op,
       or use a low-traffic deployment window.
 - [ ] **No dev-only config leaks into prod:** production leaves
-      `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge) and keeps its own
+      `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge) and
+      `NEXT_PUBLIC_HAVEN_SITE_PREVIEW` unset (it would publish the half-built
+      redesigned site while #3572 is open), and keeps its own
       secrets / relayer key / RPCs (these live on the platforms, not in code —
       just confirm nothing dev-specific was hardcoded).
 - [ ] **Sweep recovery floor:** set the production backend's

@@ -896,11 +896,10 @@ gate, `isNewSiteVisible()` in `packages/frontend/src/lib/site-gate.ts`. It is
 `NEXT_PUBLIC_HAVEN_ENV=dev`, so the dev deployment shows the new site, and
 production, which sets nothing, keeps today's pages until the switch-over slice
 removes the gate. `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1` turns it on in a
-production-shaped build — the CI build the e2e and visual suites run against
-(`ci.yml`'s frontend_checks build, `update-visual-baselines.yml`'s build and both
-regenerate steps, `playwright.config.ts`'s `webServer.env` for `next dev`, and the
-frontend's built-suite scripts `test:visual:structure`, `test:e2e:gate:built`,
-`test:e2e:desktop:built` and `test:e2e:mobile:built`, so a local run matches CI).
+production-shaped build. Every surface that builds or serves the app for the e2e
+and visual suites sets it — the CI builds, the baseline regeneration,
+Playwright's `webServer.env` for `next dev`, and the frontend's built-suite
+scripts, so a local run matches CI.
 **Neither Vercel project sets it, and neither should**: on production it would
 publish the half-built site.
 

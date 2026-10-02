@@ -396,23 +396,16 @@ last-verified: "2026-10-02"
 > one per CI edit, so this section does not accumulate a paragraph every time a
 > step is added.
 >
-> **Re-verified unchanged (#3573):** the change touches `.github/workflows/ci.yml`,
-> a covered file, but only inside the same frontend build — one build-time env
-> line (`NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'`, which turns the redesigned
-> public site's gate on for the e2e and visual suites; see
-> `docs/operations/dev-environment.md` § `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`).
-> Frontend-only CI wiring: no tool is added, renamed or re-shaped, no
-> description text changes, no schema or argument changes, and the
-> runtime-skew and consent-hash contracts are untouched. `last-verified` is not
-> bumped: this note is the scope.
->
-> **Re-verified unchanged (#3483):** the change touches `.github/workflows/ci.yml`,
+> **Re-verified unchanged (#3483, and again for #3573):** the change touches `.github/workflows/ci.yml`,
 > a covered file, but only inside the frontend build the design_visual job's
 > baselines come from — one build-time env line
 > (`NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`, a fixed synthetic literal so the Add
 > funds modal's visual baselines render the onramp variant; see
 > `docs/operations/dev-environment.md` § `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`
-> in the Playwright builds). Frontend-only CI wiring: no tool is added, renamed
+> in the Playwright builds; #3573 added one more such line,
+> `NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'`, which turns the redesigned public
+> site's gate on — same document, § `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`).
+> Frontend-only CI wiring: no tool is added, renamed
 > or re-shaped, no description text changes, no schema or argument changes, and
 > the runtime-skew and consent-hash contracts are untouched. `last-verified` is
 > not bumped: this note is the scope.

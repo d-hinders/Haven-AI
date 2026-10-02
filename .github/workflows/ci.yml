@@ -1027,9 +1027,9 @@ jobs:
 
       # #2929: the dark palette's pixel gate. Separate invocation, same job,
       # same `design_visual` check — the `chromium-desktop-dark` project is
-      # scoped to the design-system spec alone (the other specs have no dark
-      # baselines, and a project that auto-writes missing snapshots is a green
-      # tick about nothing, the #2318 class). Advisory on `dev`, required on
+      # scoped by its `testMatch` in playwright.config.ts to the specs that
+      # have dark baselines (a project that auto-writes missing snapshots is a
+      # green tick about nothing, the #2318 class). Advisory on `dev`, required on
       # `main`, exactly like the light comparison above: same job identity,
       # same ruleset membership, so no ruleset edit is needed for it to gate
       # promotion.

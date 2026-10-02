@@ -8,6 +8,7 @@
     "build": "npm --prefix ../core run build && next build",
     "typecheck": "npm --prefix ../core run build && tsc --noEmit",
     "start": "next start",
+    "screenshot": "node scripts/screenshot.mjs",
     "test": "npm --prefix ../core run build && vitest run"
   },
   "dependencies": {

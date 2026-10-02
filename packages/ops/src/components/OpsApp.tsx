@@ -1,9 +1,21 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Card, InlineAlert, Skeleton } from '@haven_ai/ui'
-import { opsFetch } from '../lib/api'
-import type { ApiSchema } from '@haven_ai/core'
+/**
+ * The console, client-side (#3515; pages #3516). Order of authority:
+ *
+ *  1. A config error (no usable registry) is a full-page error screen.
+ *  2. Until the session hook has consumed the URL fragment, nothing renders.
+ *  3. Signed out → sign-in (with the return-fragment's error message).
+ *  4. Signed in → the shell (banner + header + nav) and the routed page.
+ *
+ * The pages are real routes (`/overview`, `/search`, `/customer/[id]`,
+ * `/health`, `/doc-health`) so a deep link lands where the operator meant.
+ * The root route redirects to `/overview`; its own file renders null and the
+ * shell above this point still renders the sign-in gate for it.
+ */
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Card } from '@haven_ai/ui'
 import {
   OpsClientRoot,
   useOpsRegistry,
@@ -11,18 +23,8 @@ import {
 } from './OpsClientRoot'
 import { OpsShell } from './OpsShell'
 import { SignInView } from './SignInView'
+import { browserStorage } from './browserStorage'
 
-type OpsMe = ApiSchema<'OpsSession'>
-
-/**
- * The console, client-side (#3515). Order of authority:
- *
- *  1. A config error (no usable registry) is a full-page error screen.
- *  2. Until the session hook has consumed the URL fragment, nothing renders.
- *  3. Signed out → sign-in (with the return-fragment's error message).
- *  4. Signed in → the shell (banner + header) and the home page, which calls
- *     GET /ops/me on the selected backend's origin.
- */
 export function OpsApp({
   registry,
   children,
@@ -42,27 +44,25 @@ export function OpsApp({
   }
   return (
     <OpsClientRoot registry={registry.environments}>
-      <Console />
+      <Console>{children}</Console>
     </OpsClientRoot>
   )
 }
 
-/**
- * The Storage for handler/effect use. Effects and event handlers never run in
- * the server render pass, so this only ever resolves in the browser; the
- * `typeof window` guard keeps that fact explicit and the server pass safe
- * (the same pattern AgentPanel and DelegationBudgetCard use).
- */
-function browserStorage(): Storage {
-  if (typeof window === 'undefined') {
-    throw new Error('sessionStorage is only available in the browser')
-  }
-  return window.sessionStorage
-}
-
-function Console() {
+function Console({ children }: { children?: React.ReactNode }) {
   const registry = useOpsRegistry()
   const session = useOpsSessionContext()
+  const router = useRouter()
+
+  // The root route has no page of its own (#3516): a console opens on the
+  // overview. The redirect runs as an effect, after the session gate above
+  // has already decided what this render shows.
+  useEffect(() => {
+    if (window.location.pathname === '/' || window.location.pathname === '') {
+      router.replace('/overview')
+    }
+  }, [router])
+
   if (session.outcome.state !== 'ready') {
     return (
       <SignInView
@@ -74,67 +74,5 @@ function Console() {
       />
     )
   }
-  return (
-    <OpsShell environments={registry}>
-      {(origin) => <Home origin={origin} session={session} />}
-    </OpsShell>
-  )
-}
-
-/** The placeholder home page: calls GET /ops/me on the selected origin. */
-function Home({ origin, session }: { origin: string; session: ReturnType<typeof useOpsSessionContext> }) {
-  const [me, setMe] = useState<OpsMe | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setMe(null)
-    setError(null)
-    opsFetch(`${origin}/ops/me`, {
-      storage: browserStorage(),
-      unauthorized: session.onUnauthorized,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          setError(`The console could not read the session (${response.status}).`)
-          return
-        }
-        const data = (await response.json()) as OpsMe
-        if (!cancelled) setMe(data)
-      })
-      .catch(() => {
-        if (!cancelled) setError('The console could not reach the backend.')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [origin, session.onUnauthorized])
-
-  if (error) {
-    return (
-      <Card className="p-6" hover={false}>
-        <InlineAlert>{error}</InlineAlert>
-      </Card>
-    )
-  }
-  if (!me) {
-    return (
-      <Card className="p-6" hover={false}>
-        <Skeleton className="h-4 w-40" />
-        <div className="mt-3 space-y-2">
-          <Skeleton className="h-3 w-64" />
-          <Skeleton className="h-3 w-52" />
-        </div>
-      </Card>
-    )
-  }
-  return (
-    <Card className="p-6" hover={false}>
-      <h1 className="text-base font-semibold text-[var(--v2-ink)]">Signed in</h1>
-      <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
-        GitHub user {me.login} (id {me.github_id}); the session expires at{' '}
-        {new Date(me.expires_at).toLocaleString()}.
-      </p>
-    </Card>
-  )
+  return <OpsShell environments={registry}>{children}</OpsShell>
 }

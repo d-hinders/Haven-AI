@@ -1382,6 +1382,28 @@ app's Vercel ignore-build step (#3591) decides only *when* the console
 redeploys, from what changed since its last deployment; it moves no
 authority either, and the same scope note holds.
 
+> **Re-verified #3516 (2026-10-02, console round 3):** the change this note
+> rides touches `packages/ops/**` (plus this doc and a `.gitignore` line) —
+> the console's wire types collapsed
+> onto the generated `ApiSchema<'OpsSystemHealth'>` re-export (#3571 named
+> the response schema), a search-input sizing fix, and the #3585 base
+> update (whose CSP-nonce note above is that change's own, not re-verified
+> here). Re-read against the paragraph above: the client surface is still
+> the seven GET readers plus the one audited `reveal` and the sign-in
+> navigation (`client.test.ts` walks the client's own keys, so a method
+> added anywhere fails before review could miss it); the health page makes
+> no call beyond its single read; and the type collapse changes no wire
+> field — the generated schema carries every key the pages render, pinned
+> by the shrunken mirror test against the generated document itself. The
+> backend files this paragraph's claims rest on (`routes/ops.ts`,
+> `modules/ops/**`, `middleware/ops-auth.ts`, the read-only role grants)
+> are untouched by the diff, so nothing here grants, widens or redeems
+> anything and the no-rail-authority claim holds verbatim. Scope of this
+> re-read: this paragraph and what the console imports and renders — the
+> invariant, custody, redemption and settlement sections were NOT re-read
+> (the diff touches no file that implements them), and `last-verified` is
+> not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a

@@ -23,6 +23,8 @@
  *   per-IP limit whose "IP" is one shared proxy address is a cheap global
  *   login denial-of-service, not a protection. Also the ops console's
  *   unauthenticated GitHub sign-in pair (`ops_auth`, #3509).
+ * - feedbackSubmitRateLimit — `POST /feedback` (#3597), per USER (overrides
+ *   the shared key generator — see its own comment for why).
  * - opsRevealRateLimit — `POST /ops/reveal` (#3509), per ops token.
  * - opsSearchRateLimit — `GET /ops/search` (#3512), per ops token, in its own
  *   bucket (`groupId`) so searching never spends the reveal budget.
@@ -303,6 +305,55 @@ export function receiptDropRateLimit(
 }
 
 /**
+ * `POST /feedback` (#3597): keyed per USER, not per credential or IP — the
+ * one tier in this file that is, because the issue's owner decision says so
+ * explicitly ("the rate limit... keyed per user, not per IP"). The shared
+ * `rateLimitKeyFor` buckets per presented CREDENTIAL (a hash of the bearer
+ * token itself), which is per SESSION for a dashboard JWT — see
+ * `ownerProfileRateLimit`'s note on exactly that distinction. Two sessions
+ * for the same user (two open terminals, a second machine) would get two
+ * buckets under the shared generator; this route wants one.
+ *
+ * Keyed on the VERIFIED `request.user.sub` — measured (not assumed):
+ * `@fastify/rate-limit` attaches its per-route check through `onRoute`, which
+ * appends to that specific route's own hook array rather than running as a
+ * plugin-wide `onRequest` in registration order, so a route's own
+ * `authMiddleware` (added by `app.addHook('onRequest', authMiddleware)` in
+ * `routes/feedback.ts`'s encapsulated context) runs FIRST and `request.user`
+ * is already verified and populated by the time this key generator runs. No
+ * unverified pre-auth decode, and no IP fallback: a request that reaches this
+ * generator at all has already passed `authMiddleware`, so `request.user.sub`
+ * is always present.
+ *
+ * **No `'unknown'` fallback — THROWS instead (round 2 review, S-b).** A
+ * silent fallback bucket is a single point of failure disguised as
+ * resilience: if `authMiddleware` ever stopped running first (a refactor, a
+ * route moved, a future plugin reordering), every caller missing `user.sub`
+ * would collapse into the ONE shared `feedback_user:unknown` bucket — a
+ * global rate limit on every user at once, indistinguishable from an outage,
+ * caused by a wiring mistake nothing would flag until users started getting
+ * 429s. Throwing instead turns that wiring mistake into a loud failure: every
+ * request to the route answers 500 with an error log, and
+ * `feedback-rate-limit.test.ts` catches the reordering in CI before it ships.
+ * A loud outage beats quietly rationing everyone.
+ */
+export const feedbackSubmitRateLimit = {
+  rateLimit: {
+    max: 10,
+    timeWindow: '1 hour',
+    keyGenerator: (request: { user?: { sub?: unknown } }) => {
+      const sub = request.user?.sub
+      if (typeof sub !== 'string' || sub.length === 0) {
+        throw new Error(
+          'feedbackSubmitRateLimit: request.user.sub is missing — authMiddleware must run before this key generator',
+        )
+      }
+      return `feedback_user:${sub}`
+    },
+  },
+} as const
+
+/**
  * Public `POST /catalog/submit` (epic #1717, #1711). Unauthenticated, so the
  * shared key generator falls back to `ip:` — the same untrusted-proxy trap as
  * `authRateLimit`, and the same answer: a per-IP ceiling whose "IP" is one
@@ -319,6 +370,7 @@ export function receiptDropRateLimit(
  * (`countPendingCatalogSubmissions`) is the resilient second layer — unlike
  * this tier it binds even behind an untrusted proxy.
  */
+
 export function catalogSubmitRateLimit(
   trustProxyHops: number,
 ): { rateLimit?: { max: number; timeWindow: string } } {

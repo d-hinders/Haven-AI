@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { run, COMMANDS, DEFAULT_API, HASH_DISCOVERY_HINT, type RunDeps } from './commands.js'
 import { helpText } from './args.js'
 import type { Session, SessionStore } from './session.js'
@@ -48,6 +51,11 @@ function harness(over: Partial<RunDeps> = {}) {
     out: (l) => out.push(l),
     err: (l) => err.push(l),
     env: {},
+    // #3597: `feedback submit`'s secret check reads this directory. Pointed
+    // at a path that cannot exist so these tests never touch a developer's
+    // real `~/.haven/agents` — `readLocalSecrets` treats a missing directory
+    // exactly like an empty one.
+    credentialsBaseDir: '/nonexistent-haven-cli-test-credentials-dir',
     ...over,
   }
   return { deps, out, err }
@@ -744,6 +752,191 @@ describe('management commands (backend-only)', () => {
     // still echoed verbatim — that half is unchanged.
     expect(await run(['agents', 'list'], deps)).toBe(4)
     expect(err.join('\n')).toContain('Account is locked')
+  })
+})
+
+/**
+ * `haven feedback submit "<text>"` (#3597).
+ *
+ * Layer 2 (secrets this machine holds) and layer 3's address-derivation
+ * detail are unit-tested directly against `secret-check.ts` (with an
+ * injected `baseDir`, so they never touch the real `~/.haven`); this block
+ * proves the command's own wiring — that a refusal from ANY layer calls
+ * `POST /feedback` zero times, that the rejected text never reaches stdout
+ * or stderr, and that a clean submission reaches the backend with the text
+ * joined and intact.
+ */
+describe('feedback submit (#3597)', () => {
+  it('requires text', async () => {
+    const api = fakeApi({})
+    const { deps, err } = harness({ makeApi: () => api })
+    expect(await run(['feedback', 'submit'], deps)).toBe(2)
+    expect(api.calls).toEqual([])
+    expect(err.join('\n')).toMatch(/Usage/)
+  })
+
+  it('joins several unquoted words into one text, like `contacts add`', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['feedback', 'submit', 'The', 'CLI', 'crashed', 'on', 'login.'], deps)).toBe(0)
+    expect(api.calls).toContain('POST /feedback')
+  })
+
+  it('refuses text past the length cap before any network call', async () => {
+    const api = fakeApi({})
+    const { deps, err } = harness({ makeApi: () => api })
+    expect(await run(['feedback', 'submit', 'x'.repeat(4001)], deps)).toBe(2)
+    expect(api.calls).toEqual([])
+    expect(err.join('\n')).toMatch(/4000/)
+  })
+
+  it('layer 1: refuses a labelled secret, calls the API zero times, and never echoes it', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+    const { deps, out, err } = harness({ makeApi: () => api })
+    const secret = 'sk_agent_REALSECRETNEVERSENT'
+
+    const code = await run(['feedback', 'submit', `my key is ${secret}`], deps)
+
+    expect(code).toBe(4) // EXIT.refused
+    expect(api.calls).toEqual([])
+    expect([...out, ...err].join('\n')).not.toContain(secret)
+  })
+
+  it('layer 4: refuses a 12-word BIP-39 run, calls the API zero times, and never echoes it', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+    const { deps, out, err } = harness({ makeApi: () => api })
+    const phrase = 'abandon ability able about above absent absorb abstract absurd abuse access accident'
+
+    const code = await run(['feedback', 'submit', `backup: ${phrase}`], deps)
+
+    expect(code).toBe(4)
+    expect(api.calls).toEqual([])
+    expect([...out, ...err].join('\n')).not.toContain(phrase)
+  })
+
+  it('a clean submission reaches the backend and reports the stored id', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: '2026-10-02T00:00:00.000Z', expires_at: '2026-10-09T00:00:00.000Z' } })
+    const { deps, out } = harness({ makeApi: () => api })
+
+    const code = await run(['feedback', 'submit', 'The', 'wallets', 'funding', 'page', 'was', 'slow.'], deps)
+
+    expect(code).toBe(0)
+    expect(api.calls).toContain('POST /feedback')
+    expect(out.join('\n')).toContain('f1')
+  })
+
+  it('needs a session, with the login hint, before any network call', async () => {
+    const api = fakeApi({})
+    const { deps, err } = harness({ sessionStore: memoryStore(null), makeApi: () => api })
+    expect(await run(['feedback', 'submit', 'hello'], deps)).toBe(3)
+    expect(api.calls).toEqual([])
+    expect(err.join('\n')).toMatch(/login/)
+  })
+
+  it('a refusal\'s --json error carries typed layer/reason fields, not just a free-text hint', async () => {
+    const api = fakeApi({})
+    const { deps, out } = harness({ makeApi: () => api })
+    const secret = 'sk_agent_REALSECRETNEVERSENT'
+    const code = await run(['feedback', 'submit', `my key is ${secret}`, '--json'], deps)
+    expect(code).toBe(4)
+    const body = JSON.parse(out.join('')) as { error: { layer: number; reason: string } }
+    expect(body.error.layer).toBe(1)
+    expect(body.error.reason).toBe('agent_api_key')
+  })
+
+  it('reminds the caller never to include a password, on stderr, only on the success path', async () => {
+    const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
+    const clean = harness({ makeApi: () => api })
+    await run(['feedback', 'submit', 'The dashboard was slow today.', '--json'], clean.deps)
+    expect(clean.err.join('\n')).toMatch(/never include a password/i)
+    // --json: stdout stays exactly one value.
+    expect(clean.out).toHaveLength(1)
+
+    // A refusal never gets the reminder — it never reaches the point the
+    // reminder is for.
+    const refused = harness({ makeApi: () => api })
+    await run(['feedback', 'submit', 'my key is sk_agent_REALSECRETNEVERSENT'], refused.deps)
+    expect([...refused.out, ...refused.err].join('\n')).not.toMatch(/never include a password/i)
+  })
+
+  describe('layer 2 (#3597 S3, tightened round 2 N-c): secrets this machine holds', () => {
+    // #3597 round 2, N-c: the PREVIOUS fixtures here ("DEADBEEF" + zeros +
+    // "1") were only 60-61 hex characters — not actually a 64-hex CANDIDATE
+    // at all, so they never exercised layer 3's extraction and could not
+    // prove layer 2 wins the race against it. These are exactly 64 hex
+    // characters (a real key SHAPE layer 3 would also try to derive an
+    // address from, were layer 2 not refusing first), so a regression that
+    // let layer 3 run ahead of layer 2 would make a GET call this test
+    // explicitly asserts never happens.
+    const REAL_SHAPED_KEY_A = `0xDEADBEEF${'0'.repeat(55)}1`
+    const REAL_SHAPED_KEY_B = `0xFEEDFACE${'0'.repeat(54)}12`
+
+    it('refuses a delegate key read from signer.json — layer 2, zero GET/POST calls, never echoed', async () => {
+      const api = fakeApi({
+        'GET /agents': { agents: [] },
+        'GET /user/accounts': { accounts: [] },
+        'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' },
+      })
+      const dir = await mkdtemp(join(tmpdir(), 'haven-cmd-secret-check-'))
+      try {
+        const agentDir = join(dir, 'agent-1')
+        await mkdir(agentDir, { recursive: true })
+        await writeFile(join(agentDir, 'signer.json'), JSON.stringify({ delegate_key: REAL_SHAPED_KEY_A }))
+
+        const { deps, out, err } = harness({ makeApi: () => api, credentialsBaseDir: dir })
+        const code = await run(['feedback', 'submit', `my key is ${REAL_SHAPED_KEY_A}`, '--json'], deps)
+
+        expect(code).toBe(4)
+        const body = JSON.parse(out.join('')) as { error: { layer: number } }
+        expect(body.error.layer).toBe(2)
+        // Zero network calls of ANY kind — not just no POST: a regression
+        // letting layer 3 run first would show up here as a GET.
+        expect(api.calls).toEqual([])
+        expect([...out, ...err].join('\n')).not.toContain(REAL_SHAPED_KEY_A)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('refuses HAVEN_DELEGATE_KEY from the environment — layer 2, zero GET/POST calls, never echoed', async () => {
+      const api = fakeApi({
+        'GET /agents': { agents: [] },
+        'GET /user/accounts': { accounts: [] },
+        'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' },
+      })
+      const { deps, out, err } = harness({
+        makeApi: () => api,
+        env: { HAVEN_DELEGATE_KEY: REAL_SHAPED_KEY_B },
+      })
+
+      const code = await run(['feedback', 'submit', `env key was ${REAL_SHAPED_KEY_B}`, '--json'], deps)
+
+      expect(code).toBe(4)
+      const body = JSON.parse(out.join('')) as { error: { layer: number } }
+      expect(body.error.layer).toBe(2)
+      expect(api.calls).toEqual([])
+      expect([...out, ...err].join('\n')).not.toContain(REAL_SHAPED_KEY_B)
+    })
+  })
+
+  describe('layer 3 (#3597 S3): a derived address matching the caller\'s own', () => {
+    const KNOWN_PRIVATE_KEY = '0000000000000000000000000000000000000000000000000000000000000001'
+    const KNOWN_ADDRESS = '0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf'
+
+    it('refuses when the derived address matches one of the caller\'s own agents, calls the API zero times, and never echoes the key', async () => {
+      const api = fakeApi({
+        'GET /agents': { agents: [{ id: 'a1', name: 'Payer', status: 'active', delegate_address: KNOWN_ADDRESS }] },
+        'GET /user/accounts': { accounts: [] },
+        'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' },
+      })
+      const { deps, out, err } = harness({ makeApi: () => api })
+
+      const code = await run(['feedback', 'submit', `my key is ${KNOWN_PRIVATE_KEY}`], deps)
+
+      expect(code).toBe(4)
+      expect(api.calls).not.toContain('POST /feedback')
+      expect([...out, ...err].join('\n')).not.toContain(KNOWN_PRIVATE_KEY)
+    })
   })
 })
 

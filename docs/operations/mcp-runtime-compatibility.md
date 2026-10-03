@@ -4788,3 +4788,11 @@ to call next in structured fields, and those fields are typed end to end
 > descriptions are exactly what this document pins, and all three moved in
 > this diff. Scope of this note: those tools and reads. Nothing else in
 > this document was re-verified.
+
+> **Re-verification (#3597, 2026-10-02):** `packages/sdk/src/agent-guidance.ts`
+> is covered by this doc and was touched — the bundled agent runbook's "If
+> something breaks" section gained one paragraph naming
+> `haven feedback submit "<text>"`. Text-only: no tool, no schema, no
+> version-skew surface and no consent-hash input changed. `last-verified`
+> stays 2026-10-02 (already bumped by an earlier same-day change). Scope of
+> this note: that one file. Nothing else in this document was re-verified.

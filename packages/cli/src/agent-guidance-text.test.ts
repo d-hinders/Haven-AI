@@ -70,6 +70,7 @@ describe('haven guide text (#2525)', () => {
     // `npx @haven_ai/cli@@haven_ai/cli@dev` (the 2026-09-28 cold run, finding
     // 1). The command is now the manifest's own `packages.cli.one_liner`, run
     // as given, so no raise was needed — the budget headroom grew instead.
+    //
     // #3596: +34 bytes / +30 UTF-16 units. Two cross-references stopped
     // depending on the reader having just read an adjacent section, now that
     // the runbook is also served as linked step files at
@@ -84,8 +85,15 @@ describe('haven guide text (#2525)', () => {
     // found one more: "Budget changes later"'s "the setup above" points at
     // nothing once that section stands alone, so it now names "The sequence"
     // (+10 bytes, 10904 -> 10914).
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10914)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10827)
+    //
+    // #3597: +212 bytes / +210 units — "If something breaks" gains a second
+    // paragraph: `haven feedback submit "<text>"` needs `haven login` first,
+    // and the sentence repeats the rule never to put a credential in that
+    // text (the command's own secret check already refuses one, but cannot
+    // catch every shape). Merged on top of #3596's 10914/10827, landing at
+    // 11126/11037.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11126)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11037)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

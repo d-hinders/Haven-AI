@@ -16,6 +16,7 @@ import {
   type ConnectorOutcome,
   type Spawner,
 } from './connect-runner.js'
+import { checkTextForSecrets, MAX_FEEDBACK_TEXT_LENGTH } from './secret-check.js'
 
 // Hosted Haven backend. Override with `--api <url>` or HAVEN_API_URL (e.g. a
 // local backend at http://localhost:3001, or your own domain once self-hosted).
@@ -39,6 +40,14 @@ export interface RunDeps {
   out?: (line: string) => void
   err?: (line: string) => void
   env?: NodeJS.ProcessEnv
+  /**
+   * #3597: overrides where `feedback submit`'s secret check (layer 2) looks
+   * for local agent credentials. Tests only — production never sets it, so
+   * the check reads the real `~/.haven/agents` the way the connect package's
+   * own `defaultCredentialRoot` does, and tests that must not touch a
+   * developer's real credentials pass a temp directory instead.
+   */
+  credentialsBaseDir?: string
 }
 
 interface ResolvedDeps {
@@ -50,6 +59,7 @@ interface ResolvedDeps {
   out: (line: string) => void
   err: (line: string) => void
   env: NodeJS.ProcessEnv
+  credentialsBaseDir?: string
   /** Set once `--json` is known; every command writes through it. */
   o: Output
 }
@@ -73,6 +83,7 @@ export const COMMANDS = [
   'activity list', 'activity export',
   'catalog list',
   'contacts list', 'contacts add', 'contacts remove',
+  'feedback submit',
 ] as const
 
 // ── Backend response shapes (subset the CLI needs) ──────────────────
@@ -82,7 +93,14 @@ function accountAddressOf(s: { account_address?: string | null }): string {
   return s.account_address ?? ''
 }
 interface Allowance { token_symbol: string; allowance_amount: string; reset_period_min: number }
-interface Agent { id: string; name: string; status: string; allowances?: Allowance[] }
+interface Agent {
+  id: string
+  name: string
+  status: string
+  allowances?: Allowance[]
+  /** #3597: the spec's `Agent` schema always carries it; added here for the feedback secret check's layer 3. */
+  delegate_address?: string
+}
 interface Balance { symbol: string; formatted: string; balance: string }
 /**
  * The additive balance-freshness marker from the wire (#3295), read by the
@@ -167,6 +185,7 @@ export async function run(argv: string[], deps: RunDeps = {}): Promise<number> {
     out,
     err,
     env: deps.env ?? process.env,
+    credentialsBaseDir: deps.credentialsBaseDir,
     o,
   }
 
@@ -228,6 +247,7 @@ async function dispatch(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
     case 'contacts list': return cmdContactsList(args, d)
     case 'contacts add': return cmdContactsAdd(args, d)
     case 'contacts remove': return cmdContactsRemove(args, d)
+    case 'feedback submit': return cmdFeedbackSubmit(args, d)
     default:
       throw new UsageError(`Unknown command: ${key}.`, 'Run `haven --help` for the command list.')
   }
@@ -1427,5 +1447,57 @@ async function cmdContactsRemove(args: ParsedArgs, d: ResolvedDeps): Promise<num
   const { api } = await authed(args, d)
   await api.del(`/contacts/${id}`)
   emit(d, args.flags.json, { ok: true, contact_id: id, removed: true }, () => `Contact ${id} removed.`)
+  return EXIT.ok
+}
+
+// ── Feedback ──────────────────────────────────────────────────────────
+
+/**
+ * `haven feedback submit "<text>"` (#3597). Several unquoted words are
+ * JOINED into one text with a single space between them — the same
+ * convention `contacts add <name...> <address>` already uses for its own
+ * free-text argument — rather than refused, so a bug report does not have to
+ * be hand-quoted.
+ *
+ * `authed` runs FIRST (a command with no session refuses before anything
+ * else, same as every other command), then the secret check runs — and it
+ * is the check, not `authed`, that has to run before the one call that would
+ * carry the text (`api.post` at the end): a refusal here never reaches the
+ * network at all.
+ */
+async function cmdFeedbackSubmit(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
+  const text = args.positionals.join(' ').trim()
+  if (!text) throw new UsageError('Usage: haven feedback submit "<text>"')
+  // Code points, not UTF-16 units — `text.length` double-counts anything
+  // outside the Basic Multilingual Plane (an emoji in a bug report is not
+  // exotic), and the backend's own ceiling (`routes/feedback.ts`'s ajv
+  // schema `maxLength`) counts code points too. `[...text]` iterates by
+  // code point.
+  if ([...text].length > MAX_FEEDBACK_TEXT_LENGTH) {
+    throw new UsageError(`Feedback text must be ${MAX_FEEDBACK_TEXT_LENGTH} characters (code points) or fewer.`)
+  }
+
+  const { session, api } = await authed(args, d)
+
+  const refusal = await checkTextForSecrets(text, {
+    api,
+    localSecrets: { sessionToken: session.token, env: d.env, baseDir: d.credentialsBaseDir },
+  })
+  if (refusal) {
+    throw new HavenCliError(refusal.message, EXIT.refused, `layer ${refusal.layer}: ${refusal.reason}`, {
+      layer: refusal.layer,
+      reason: refusal.reason,
+    })
+  }
+
+  // The one residual-risk case the check cannot catch by shape at all: a
+  // plain password has no recognisable form. stderr only, so `--json`'s
+  // stdout contract (one value, nothing else) stays exactly one value.
+  d.o.note(
+    'Reminder: never include a password or any other credential in feedback text — this check cannot recognise one by shape.',
+  )
+
+  const result = await api.post<{ id: string; created_at: string; expires_at: string }>('/feedback', { text })
+  emit(d, args.flags.json, { ok: true, ...result }, () => `Feedback submitted (id ${result.id}).`)
   return EXIT.ok
 }

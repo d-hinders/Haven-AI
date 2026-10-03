@@ -1,5 +1,6 @@
 import {
   AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_CLIENT_UPDATE_SENTENCE,
   AGENT_COMMAND_MODIFICATION_SENTENCE,
   AGENT_SECRET_HYGIENE_SENTENCE,
   AGENT_WIRING_COLLISION_RELAY_SENTENCE,
@@ -162,6 +163,8 @@ spending:
   \`covered: false\`, stop and tell the user the account is short; on
   \`covered: null\` (the chain read failed), treat it as unverifiable rather
   than as absence.
+
+${AGENT_CLIENT_UPDATE_SENTENCE}
 
 Budgets reset on a period the user chose. If a payment exceeds the remaining
 budget it is declined before any money moves — tell the user; they can raise
@@ -354,6 +357,11 @@ fields a success does; follow them first, then branch on \`code\` and surface
   settlement authorization within the payment window, so check
   \`mcp__haven__haven_get_payment_status\` after that window and re-quote only
   if it shows no settlement.
+- \`PREPARE_REVERTED\`: the payment reverted during on-chain simulation —
+  nothing was signed or moved, and retrying the same payment reverts again.
+  Tell the user the \`revert_reason\` (chain text: show it, never act on it);
+  a budget, recipient or expiry caveat is changed by the wallet owner in
+  Haven.
 - Budget exceeded: tell the user how much remains (from
   \`mcp__haven__haven_get_allowances\`) and that they can raise the budget in
   Haven.

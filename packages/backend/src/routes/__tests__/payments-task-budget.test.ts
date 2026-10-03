@@ -27,6 +27,12 @@ vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({
 vi.mock('../../db.js', () => ({
   default: { query: (...a: unknown[]) => mockQuery(...a) },
 }))
+// The refusal ledger's write values the amount in fiat — a live price fetch
+// unmocked, whose latency decides whether a booked row lands inside `waitFor`.
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/fiat-values.js')>()
+  return { ...actual, getFiatValuesForTokenAmount: async () => ({ usd: 0, eur: 0, sek: 0 }) }
+})
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
   return { ...actual, computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a) }
@@ -413,7 +419,8 @@ describe('POST /payments: a task budget whose cap cannot cover the payment (#350
     prepareRedemption.mockRejectedValue(new Error('UserOperation reverted during simulation with reason: ERC20TransferAmountEnforcer:allowance-exceeded'))
     const res = await pay()
     expect(res.statusCode).toBe(502)
-    expect(res.json().error_code).toBeUndefined()
+    // Not the typed budget 403 — the #3609 revert answer, named by the classifier.
+    expect(res.json()).toMatchObject({ error_code: 'prepare_reverted', refusal_reason: 'delegation_budget_exceeded' })
     await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
     expect(refusalRows()[0]![1]).toContain('delegation_budget_exceeded')
   })

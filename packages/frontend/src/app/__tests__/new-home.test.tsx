@@ -89,7 +89,9 @@ describe('the new home page (#3574)', () => {
       ),
     )
     for (const href of hrefs) {
-      const [path] = href.split('?')
+      // Fragments (`/developers#packages`) name a spot ON the resolved page;
+      // split them off exactly as the #3577 link test's resolver does.
+      const [path] = href.split(/[?#]/)
       // `/api/:path*` rewrites to the Haven backend (next.config.ts) before
       // any filesystem route — /api/openapi.json is the backend's spec
       // mirror, which the slice-1 footer already links.

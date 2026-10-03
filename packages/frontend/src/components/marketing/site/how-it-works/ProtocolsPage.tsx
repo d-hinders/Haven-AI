@@ -192,6 +192,11 @@ export function ProtocolsPage() {
             <BrandBandButton href="/signup" trailingArrow>
               Create your account
             </BrandBandButton>
+            {/* The mockup's ghost CTA (protocols.html:96), landed with its
+                destination in #3577. */}
+            <BrandBandButton href="/developers" variant="translucent">
+              For developers
+            </BrandBandButton>
           </SiteCtaRow>
         </SiteSection>
       </main>

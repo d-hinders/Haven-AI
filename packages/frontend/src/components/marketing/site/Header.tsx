@@ -12,11 +12,13 @@ import { SITE_WRAP } from './SiteSection'
  * when `isNewSiteVisible()` is on.
  *
  * Entries land with their destination (epic rule "Entries land with their
- * page"): How it works exists today; For developers and For agents arrive
- * with their pages in #3577. No Security item, by owner decision.
+ * page"): For developers and For agents arrived with their pages in #3577.
+ * No Security item, by owner decision.
  */
 export const SITE_NAV: ReadonlyArray<{ label: string; href: string }> = [
   { label: 'How it works', href: '/how-it-works' },
+  { label: 'For developers', href: '/developers' },
+  { label: 'For agents', href: '/for-agents' },
 ]
 
 /**

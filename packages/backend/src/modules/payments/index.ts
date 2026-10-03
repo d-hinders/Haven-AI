@@ -20,3 +20,7 @@ export * from './direct-sign-context.js'
 // payment from the chain via its recorded userOpHash. Exports are disjoint
 // from the five re-exports above (checked when this was added).
 export * from './submission-reconciler.js'
+// #3609: the typed, bounded 502 a delegation-rail prepare answers
+// (prepare_reverted / prepare_failed). Exports are disjoint from the six
+// re-exports above (checked when this was added).
+export * from './prepare-failure.js'

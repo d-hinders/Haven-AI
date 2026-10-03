@@ -88,6 +88,26 @@ last-verified: "2026-10-02"
 > version-skew or consent-hash contract moves. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
 
+> **Re-verified #3609 (2026-10-02, the typed prepare 502):** the backend's
+> delegation-rail prepare 502 (`POST /payments`, the x402 EIP-3009 funding
+> leg) gains an `error_code`: `prepare_reverted` (the redemption reverted in
+> execution — `refusal_reason`, a decoded `revert_reason`, a remedy
+> `message`) or `prepare_failed` (anything else, including an ERC-4337 `AA`
+> validation failure the bundler words as a revert), and its `details` are
+> bounded at 300 characters after redaction. The hosted `normalizeError`
+> (`packages/mcp-server/src/tools/support/errors.ts`) maps `prepare_reverted`
+> to `PREPARE_REVERTED` with a `stop_and_tell_user` step and the two reason
+> fields; `prepare_failed` keeps the generic 5xx retry-once step (the
+> next-step census moves to 46 refusal fixtures and 57 `refusalNextStep`
+> calls, `src/test-support/next-step-fixtures.ts`). Skew is
+> additive both ways: an older hosted server reading the new body falls into
+> the generic 5xx branch exactly as before, and this hosted server reading an
+> older backend's untyped 502 does the same. The agent skill
+> (`packages/sdk/src/skill-content.ts` and the frontend bundle copy) gains a
+> `PREPARE_REVERTED` bullet in its failure-handling list. No tool, schema
+> input, version-skew or consent-hash contract moves. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3596 (2026-10-02, the agent-skills index and step files):**
 > this diff touches `packages/sdk/src/agent-guidance.ts`, a covered file —
 > three cross-reference fixes inside `HAVEN_AGENT_RUNBOOK_MD` (step 1's
@@ -110,6 +130,19 @@ last-verified: "2026-10-02"
 > contract moves; the client releases table, upgrade hints, publish flow and
 > package resolution are untouched. `last-verified` stays 2026-10-02. Nothing
 > else in this document was re-verified.
+
+> **Re-verified, skill `client_update` line (2026-10-02, guidance text only):**
+> this diff touches `packages/sdk/src/skill-content.ts`, a covered file. The
+> runbook's `client_update` sentence moves into a shared constant,
+> `AGENT_CLIENT_UPDATE_SENTENCE` in `agent-guidance.ts`, and the haven-pay skill
+> now carries it too. Every runtime still installs the one canonical skill
+> string (§ *Guidance surfaces*), and `/for-agents.md` is byte-unchanged
+> (`lint:runbook-parity` green). No tool, argument, schema, version-skew or
+> consent-hash contract moves; the client releases table, upgrade hints and
+> `upgrade_command` are untouched — the skill only names the existing field.
+> `last-verified` stays 2026-10-02. Nothing else in this document was
+> re-verified.
+
 
 > **Re-verified, follow-up to #3587 (2026-10-02, a step rename):** this diff
 > touches `.github/workflows/ci.yml`, a covered file, in one step NAME and its

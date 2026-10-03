@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 import {
   AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_CLIENT_UPDATE_SENTENCE,
   AGENT_COMMAND_MODIFICATION_SENTENCE,
   AGENT_SECRET_HYGIENE_SENTENCE,
   AGENT_WIRING_COLLISION_RELAY_SENTENCE,
+  HAVEN_AGENT_RUNBOOK_MD,
 } from './agent-guidance.js'
 
 describe('generic skill content', () => {
@@ -57,6 +59,13 @@ describe('generic skill content', () => {
   it('names haven_get_agent as the one-shot bootstrap with a readiness signal', () => {
     expect(HAVEN_SKILL_MD).toContain('recommended first call')
     expect(HAVEN_SKILL_MD).toContain('needs_approval')
+  })
+
+  it('tells a later session what to do with client_update, in the runbook\'s own words', () => {
+    // The runbook is read once at onboarding; the skill loads every session.
+    // Without this, an agent past setup meets client_update with no instruction.
+    expect(HAVEN_SKILL_MD).toContain(AGENT_CLIENT_UPDATE_SENTENCE)
+    expect(HAVEN_AGENT_RUNBOOK_MD).toContain(AGENT_CLIENT_UPDATE_SENTENCE)
   })
 
   it('has valid skill frontmatter and the expected folder name', () => {

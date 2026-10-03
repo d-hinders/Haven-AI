@@ -308,6 +308,12 @@ Then run:
             <BrandBandButton href="/signup" trailingArrow>
               Create your account
             </BrandBandButton>
+            {/* The mockup's ghost CTA (how-it-works.html:180), landed with its
+                destination in #3577 — the epic rule kept this page from
+                linking it before the page existed. */}
+            <BrandBandButton href="/developers" variant="translucent">
+              Read the developer guide
+            </BrandBandButton>
           </SiteCtaRow>
         </SiteSection>
       </main>

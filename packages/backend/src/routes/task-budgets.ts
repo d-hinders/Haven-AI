@@ -41,8 +41,8 @@ import {
   serializeClosePreparedUserOp,
   submitTaskBudgetClose,
 } from '../modules/task-budgets/index.js'
-import { redactVendorSecrets } from '../rails/execution-rail.js'
 import { SubmittedUserOpFailedError } from '../rails/delegation-rail.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 
 // `chain-sdk-not-in-routes`: no viem import here — a hex signature/address is
 // carried as a plain string and cast at the module boundary that DOES own
@@ -52,8 +52,9 @@ type Hex = `0x${string}`
 
 const MAX_UINT96 = (1n << 96n) - 1n
 
+// #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
-  return redactVendorSecrets(err instanceof Error ? err.message : String(err))
+  return boundedErrorDetails(err) ?? ''
 }
 
 /**

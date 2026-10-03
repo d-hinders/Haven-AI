@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Fixed
 
+- **The agent skill names `PREPARE_REVERTED` (#3609).** The backend's delegation-rail prepare 502 is now typed — `prepare_reverted` when the redemption reverted in execution (with `refusal_reason`, a decoded `revert_reason` and bounded `details`), `prepare_failed` otherwise, including an ERC-4337 `AA` validation failure that can clear on its own — and the hosted MCP maps the first to `PREPARE_REVERTED` with a stop step instead of "retry once". `HAVEN_SKILL_MD`'s failure-handling list gains the matching bullet. Read-only copy, no update needed.
+
 - **Three agent-runbook cross-references reworded for the new step files (#3596).** `HAVEN_AGENT_RUNBOOK_MD` is now also served as small, linked step files at `/agent-skills/<step>.md`, byte-sliced at `## ` boundaries. Step 1's "run the connector command in that prompt (below)" assumed the "What you run" section was still adjacent once split, and now names it; "If you cannot open a browser"'s "Steps 1-3 are links" named step numbers defined in an earlier section with no gloss of what they are, and now carries one (account, funding, budget), dropping a trailing ", as above"; "Budget changes later"'s "the setup above" now names "The sequence". No sentence constant, tool, schema or hand-off shape changed — read-only copy, no update needed.
 
 ### Added
@@ -42,6 +44,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 - **The exported `toolDescriptions.reportSettlementEvidence` wording changed (#3475 follow-up, review round 1).** It now says `settlement_tx_hash` is optional and that omitting it succeeds as a no-op (nothing checked or recorded, no network call) rather than being refused — matching the hosted `haven_report_settlement_evidence` MCP tool's new behaviour. This is the SHARED description object only; it does not change `HavenClient.reportSettlementEvidence(paymentId, settlementTxHash)`, whose `settlementTxHash` parameter is still required and unchanged — the no-op is hosted-tool behaviour (an MCP-only schema/handler change), not an SDK method change. Text only otherwise; no update needed.
 
 ### Changed
+
+- **haven-pay skill: what to do with `client_update`.** The skill, which loads every session, now carries the runbook's `client_update` rule — run the `upgrade_command` as given, then any repair line, then retry — so an agent past onboarding is not left without it. One shared sentence feeds both texts; `/for-agents.md` is byte-unchanged. No update needed.
 
 - **`reportSettlementEvidence()` also takes an eip3009 merchant settlement (#3475).** After a plain-HTTP x402 purchase on the EIP-3009 funding leg, pass the merchant's `PAYMENT-RESPONSE.transaction`: the backend verifies the delegate → merchant transfer on-chain and records it, and receipts then show it as `settlementTxHash` beside the unchanged funding hash. The method's signature and outcomes are unchanged; an older backend refuses the report (`refused`, 409) and writes nothing. The shared `haven_report_settlement_evidence` description is now scheme-neutral, and the bundled skill's plain-HTTP paragraph tells the agent to make this report. No update needed.
 

@@ -91,17 +91,17 @@ describe('/demo.md route handler', () => {
   it('describes the refusal message shape the hosted MCP actually returns (review round 2, n1/n2)', async () => {
     mockIsDemoPageVisible.mockReturnValue(true)
     const body = await GET().text()
-    // n1: the agent never sees a separate `details` field through the hosted
-    // MCP — the SDK folds it into the message as "<error>: <details>". The
-    // doc must describe ONE message string, not a message plus a details
-    // field the agent could read separately.
-    expect(body).toContain('Delegation-rail authorization failed (on-chain')
+    // #3503/#3504: the over-budget direct send is the typed
+    // DELEGATION_BUDGET_EXCEEDED, whose hosted step says retrying cannot
+    // succeed; #3609: its fallback (a budget read that failed) is the typed
+    // PREPARE_REVERTED naming the enforcer — also a stop. The doc must name
+    // both codes and never send the agent into a retry.
+    expect(body).toContain('DELEGATION_BUDGET_EXCEEDED')
+    expect(body).toContain('PREPARE_REVERTED')
     expect(body).not.toMatch(/its\s+`details`\s+carry/i)
     expect(body).toContain('ERC20PeriodTransferEnforcer:transfer-amount-exceeded')
-    // n2: normalizeError tells the agent to retry once on a 5xx — the doc
-    // must say that retry lands on the same refusal.
-    expect(body).toMatch(/retry/i)
-    expect(body).toMatch(/same refusal/i)
+    expect(body).toMatch(/retrying\s+cannot\s+succeed/i)
+    expect(body).toMatch(/never\s+a\s+retry/i)
   })
 
   it('links back to /demo', async () => {

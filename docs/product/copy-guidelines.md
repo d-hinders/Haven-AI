@@ -7,6 +7,8 @@ covers:
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
   - packages/frontend/src/app/protocols/**
+  - packages/frontend/src/app/developers/**
+  - packages/frontend/src/app/for-agents/**
   - packages/frontend/src/app/onboarding/**
   - packages/frontend/src/app/login/page.tsx
   - packages/frontend/src/app/signup/page.tsx

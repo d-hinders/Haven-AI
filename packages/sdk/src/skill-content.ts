@@ -1,5 +1,6 @@
 import {
   AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_CLIENT_UPDATE_SENTENCE,
   AGENT_COMMAND_MODIFICATION_SENTENCE,
   AGENT_SECRET_HYGIENE_SENTENCE,
   AGENT_WIRING_COLLISION_RELAY_SENTENCE,
@@ -162,6 +163,8 @@ spending:
   \`covered: false\`, stop and tell the user the account is short; on
   \`covered: null\` (the chain read failed), treat it as unverifiable rather
   than as absence.
+
+${AGENT_CLIENT_UPDATE_SENTENCE}
 
 Budgets reset on a period the user chose. If a payment exceeds the remaining
 budget it is declined before any money moves — tell the user; they can raise

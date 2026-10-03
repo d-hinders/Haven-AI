@@ -80,7 +80,6 @@ import {
   type HavenBudgetPolicy,
 } from '../rails/delegation-policy.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from '../rails/delegation-rail.js'
-import { redactVendorSecrets } from '../rails/execution-rail.js'
 import { getTokenBalance } from '../infra/chain/relayer-reads.js'
 import { sweepUsdcAddress } from '@haven_ai/sdk'
 import { readRemainingBudget } from '../infra/chain/delegation-budget-reader.js'
@@ -122,9 +121,11 @@ import {
 } from '../modules/agents/index.js'
 import { reanchorPassportBestEffort } from '../modules/passport/index.js'
 import type { Executor } from '../infra/transaction.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 
+// #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
-  return redactVendorSecrets(err instanceof Error ? err.message : String(err))
+  return boundedErrorDetails(err) ?? ''
 }
 
 // Serialize a prepared UserOperation to wire JSON: bigint → "123n" string,

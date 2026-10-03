@@ -65,7 +65,6 @@ import {
   revokeDelegationsByHashes,
   selectDelegationRowForAgentByHash,
 } from '../infra/repositories/delegation-budgets.js'
-import { redactVendorSecrets } from '../rails/execution-rail.js'
 import { getMerchantBySlug, listMerchantFundingTargets } from '../infra/repositories/merchants.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
@@ -79,8 +78,9 @@ import {
 } from '../rails/hybrid-signer-actions.js'
 
 /** Vendor errors echo the bundler URL (which embeds the API key) — #764. */
+// #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
-  return redactVendorSecrets(err instanceof Error ? err.message : String(err))
+  return boundedErrorDetails(err) ?? ''
 }
 
 const MAX_UINT96 = (1n << 96n) - 1n
@@ -652,7 +652,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         return reply.code(502).send({
           error: 'Could not deploy the account for this budget — try again',
           // #3609: bounded after redaction — never the raw viem error.
-        details: boundedErrorDetails(err),
+          details: boundedErrorDetails(err),
         })
       }
 

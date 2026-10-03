@@ -1,8 +1,9 @@
 /**
  * #3609: the 502 a delegation-rail PREPARE answers when its simulation fails —
  * `POST /payments` and the x402 EIP-3009 funding leg (`modules/x402/
- * delegation-authorize.ts`), after their typed budget fallbacks
- * (#3500/#3503) have had their turn.
+ * delegation-authorize.ts`), after their typed budget fallbacks have had
+ * their turn (#3500's task-budget re-read on both; #3503's period re-read on
+ * `POST /payments` only).
  *
  * Before this, both answered one untyped 502 carrying the raw viem error as
  * `details` (~6 KB live: the whole callData, signatures, paymaster data), and

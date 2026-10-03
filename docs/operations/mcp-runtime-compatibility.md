@@ -84,7 +84,9 @@ last-verified: "2026-10-02"
 > characters after redaction. The hosted `normalizeError`
 > (`packages/mcp-server/src/tools/support/errors.ts`) maps `prepare_reverted`
 > to `PREPARE_REVERTED` with a `stop_and_tell_user` step and the two reason
-> fields; `prepare_failed` keeps the generic 5xx retry-once step. Skew is
+> fields; `prepare_failed` keeps the generic 5xx retry-once step (the
+> next-step census moves to 46 refusal fixtures and 57 `refusalNextStep`
+> calls, `src/test-support/next-step-fixtures.ts`). Skew is
 > additive both ways: an older hosted server reading the new body falls into
 > the generic 5xx branch exactly as before, and this hosted server reading an
 > older backend's untyped 502 does the same. The agent skill

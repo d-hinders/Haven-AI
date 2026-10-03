@@ -200,8 +200,8 @@ export const REVERT_REASON_MAX_LENGTH = 120
  * #3609: the short, readable reason a simulation revert names — the first
  * decoded ABI `Error(string)` (the shape a bundler relays, #3503), else a
  * plain-text enforcer custom error or ERC-4337 `AA2x` code — or `null` when
- * the error names none. Printable ASCII only, bounded: it is chain-supplied
- * text riding a response, never trusted.
+ * the error names none. Printable ASCII only, cut at 120 characters plus an
+ * ellipsis: it is chain-supplied text riding a response, never trusted.
  */
 export function revertReasonOf(err: unknown): string | null {
   const text = flattenRaw(err, 0)

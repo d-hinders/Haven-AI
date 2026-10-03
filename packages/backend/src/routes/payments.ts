@@ -845,8 +845,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // #2945: a caveat REVERT is a policy refusal — record it
       // fire-and-forget with the classified reason. A bundler/transport
       // failure is NOT a refusal (the guardrails refused nothing); the
-      // classifier returns null for it and nothing is written. The
-      // 502 the caller receives is unchanged either way.
+      // classifier returns null for it and nothing is written. Since #3609
+      // the same classification also picks the 502's typed body
+      // (`prepare_reverted` / `prepare_failed`, below).
       // #3416: no bundler credential for this chain on this deployment — a
       // typed, non-retryable 503, and nothing booked (nothing was refused).
       if (err instanceof DelegationRailChainUnavailableError) {

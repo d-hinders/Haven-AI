@@ -550,7 +550,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       )
     } catch (err) {
       // Caveat rejection (budget/expiry) or bundler failure — database untouched.
-      // #3052: the 502 is untouched; this is the ledger write that the
+      // #3052: the ledger write that the
       // sibling for the identical condition already had and this one did not.
       // The same callee on POST /payments classifies this error and books a
       // refusal (`routes/payments.ts`, whose `prepareDelegationPayment` catch
@@ -583,7 +583,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       const fundingRefusalReason = classifyRevertForLedger(err)
       // #3053: through the shared choke point. The ledger input is null when
       // the classification says NOT a refusal (an outage is not a refusal):
-      // the write is skipped and the 502 is returned unchanged either way.
+      // the write is skipped. Since #3609 the classification also picks the
+      // 502's typed body (`prepare_reverted` / `prepare_failed`, below).
       // NOT `payTo` in merchantTo — on this leg payTo is the agent's own
       // funding EOA; the real merchant is the separate field, exactly as the
       // #2706 pre-check writer above books it.

@@ -420,8 +420,8 @@ sequenceDiagram
 > thrown one proceeds to prepare, where the enforcer's revert still surfaces
 > as a `502` **with no intent row** — typed `prepare_reverted` with the
 > decoded `revert_reason` and bounded `details` since
-> [#3609](https://github.com/d-hinders/Haven-AI/issues/3609), where this
-> branch used to answer one untyped 502 with the raw error for every refusal; on erc7710 authorize pre-checks the live remaining
+> [#3609](https://github.com/d-hinders/Haven-AI/issues/3609) (before it,
+> one untyped 502 carrying the whole redacted error); on erc7710 authorize pre-checks the live remaining
 > budget and answers `403 delegation_budget_exceeded`
 > ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)); the legacy rail
 > answers `410` (#1986). None of the three writes anything, and none produces a

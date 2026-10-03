@@ -27,13 +27,13 @@ import { encodeFunctionData } from 'viem'
 import type { Address, Hex } from 'viem'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
-import { redactVendorSecrets } from './execution-rail.js'
 import {
   resolveSignatureScheme,
   validateSignedSubmission,
   type SignerActionAccount,
   type SignerChangeFailure,
 } from './hybrid-signer-actions.js'
+import { boundedErrorDetails } from '../modules/payments/prepare-failure.js'
 
 const ERC20_TRANSFER_ABI = [
   {
@@ -55,8 +55,9 @@ export interface TransferBody {
   signature_scheme?: string
 }
 
+// #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
-  return redactVendorSecrets(err instanceof Error ? err.message : String(err))
+  return boundedErrorDetails(err) ?? ''
 }
 
 /** Validate the transfer request and encode the ERC-20 calldata. */

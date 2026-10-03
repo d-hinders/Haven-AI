@@ -383,7 +383,7 @@ export async function submitSweep(
     }
     const errorMsg = err instanceof Error ? err.message : String(err)
     await markSweepFailed(errorMsg, row.id)
-    return { statusCode: 502, body: { error: 'Sweep relay failed', details: errorMsg } }
+    return { statusCode: 502, body: { error: 'Sweep relay failed', details: boundedErrorDetails(err) } }
   }
 
   await markSweepSubmitted(txHash, row.id)

@@ -1964,10 +1964,13 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **Re-verified (#3609, 2026-10-02):** the delegation-rail prepare 502 on
 > `POST /payments` and the x402 EIP-3009 funding leg is typed
 > (`prepare_reverted` / `prepare_failed`) and its `details` are bounded after
-> redaction; four other 502s that shipped the raw viem error (settlement
-> delegation build, delegate deploy, settle payload, budget account deploy)
-> are bounded the same way. A response carries less of the error than before,
-> never more. No authority moves: no signature, key role, delegation, caveat
+> redaction; every other response `details` built from a caught error is
+> bounded the same way (`boundedErrorDetails`), including eight answers that
+> were not even redacted before — the delegate sweep (four) and the
+> sub-budget routes (three plus their helper's callers) and the account
+> address derivation, where an RPC URL with its key could ride the response.
+> A source-scan guard pins it. A response carries less of the error than
+> before, never more. No authority moves: no signature, key role, delegation, caveat
 > or on-chain surface changes, and the enforcer is still the gate. The rest of
 > this document was not re-read for it, and `last-verified` is not bumped.
 

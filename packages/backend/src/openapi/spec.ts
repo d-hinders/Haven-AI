@@ -1099,8 +1099,9 @@ const PREPARE_FAILURE_DESCRIPTION =
   'enforcer or any other on-chain revert): nothing was signed or moved, and the same payment reverts ' +
   'again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in ' +
   'the ledger. `error_code: "prepare_failed"` — not a revert (bundler, RPC or transport): may be ' +
-  'transient, nothing is booked. Both carry bounded, redacted `details`. A period-budget or ' +
-  'task-budget revert a fresh read confirms is answered by the typed 403 instead (#3503/#3500).'
+  'transient, nothing is booked. Both carry bounded, redacted `details`. A task-budget revert a ' +
+  'fresh read confirms is answered by the typed 403 instead on both routes (#3500), and on ' +
+  'POST /payments a confirmed period-budget revert too (#3503); the funding leg has no period re-read.'
 
 /**
  * #2918: the accounting connection routes gate on `config.hosted &&

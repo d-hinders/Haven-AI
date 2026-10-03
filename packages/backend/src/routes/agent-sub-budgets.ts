@@ -82,8 +82,9 @@ function isRetired(a: { status: string; archived_at: Date | string | null }): bo
   return a.status === 'revoked' || a.archived_at != null
 }
 
+// #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return boundedErrorDetails(err) ?? ''
 }
 
 function toWire(row: SubBudgetRow, nowSec: number) {

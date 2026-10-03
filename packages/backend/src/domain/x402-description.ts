@@ -3,7 +3,8 @@
  *
  * The 402 challenge carries a human description of the resource
  * (`PaymentRequired.resource.description`, x402 v2). Agents read it back on
- * `GET /machine-payments/:id/status` (`description`, `x402.description`) to
+ * the payment status (`GET /machine-payments/:id/status`, `GET /payments/:id`
+ * and x402 authorize's status branch: `description`, `x402.description`) to
  * say what was bought after the fact. It is UNTRUSTED merchant text: display
  * data only, trimmed and bounded here, never parsed or acted on.
  *

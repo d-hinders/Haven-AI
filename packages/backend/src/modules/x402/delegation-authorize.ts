@@ -307,7 +307,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   } = input
   // #3610: what was bought, in the merchant's words — the body's description,
   // else the stored 402's `resource.description`. Untrusted, bounded display
-  // text, persisted so status and receipts can say what the payment was for.
+  // text, persisted so the payment status can say what the payment was for.
   const intentDescription = x402Description(description, paymentRequired)
 
   if (tokenAddress === ZERO_ADDRESS) {

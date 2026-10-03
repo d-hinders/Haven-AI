@@ -590,9 +590,10 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // funding EOA; the real merchant is the separate field, exactly as the
       // #2706 pre-check writer above books it.
       // #3609: typed and bounded, exactly as POST /payments answers it
-      // (`prepare-failure.ts`): `prepare_reverted` for a simulation revert
-      // (booked, hosted step stop), `prepare_failed` for anything else
-      // (unbooked, hosted step retry once).
+      // (`prepare-failure.ts`): `prepare_reverted` for an execution revert
+      // (hosted step stop), `prepare_failed` for anything else (hosted step
+      // retry once). Booking follows the classifier alone: every classified
+      // revert is booked, whichever answer it gets.
       const fundingFailureBody = prepareFailureBody(
         err,
         fundingRefusalReason,

@@ -33,7 +33,7 @@ import {
   type SignerActionAccount,
   type SignerChangeFailure,
 } from './hybrid-signer-actions.js'
-import { boundedErrorDetails } from '../modules/payments/prepare-failure.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 
 const ERC20_TRANSFER_ABI = [
   {

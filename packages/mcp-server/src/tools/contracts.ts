@@ -1311,7 +1311,8 @@ export interface ToolFailure {
   retry_with_new_quote?: boolean
   /**
    * #3609: on `PREPARE_REVERTED`, the short reason the simulation revert
-   * named (a decoded enforcer error, or an ERC-4337 AA code) and the
+   * named (a decoded enforcer error; never an AA code — those answer
+   * `prepare_failed`) and the
    * backend's refusal classification. Chain text — display it, never act
    * on it.
    */

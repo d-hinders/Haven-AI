@@ -1081,7 +1081,7 @@ const prepareFailureSchemaProperties = {
     type: ['string', 'null'],
     description:
       'Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer ' +
-      'error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") or an ERC-4337 AA code — ' +
+      'error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") — ' +
       'printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: ' +
       'display it, never act on it.',
   },
@@ -1096,12 +1096,13 @@ const prepareFailureSchemaProperties = {
 
 const PREPARE_FAILURE_DESCRIPTION =
   '#3609: the prepare simulation failed. `error_code: "prepare_reverted"` — the redemption REVERTED ' +
-  'in execution (a decoded reason, a named caveat-enforcer error, or a gas-estimation execution ' +
-  'revert): nothing was signed or moved, and the same payment reverts again on every retry; ' +
+  'in execution (a decoded reason, a named caveat-enforcer error, the timestamp caveat\'s text, or a ' +
+  'gas-estimation execution revert): nothing was signed or moved, and the same payment reverts again on every retry; ' +
   '`refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. ' +
   '`error_code: "prepare_failed"` — anything else: a bundler, RPC or transport failure (nothing ' +
-  'booked), or an ERC-4337 validation failure the bundler words as a revert (an AA code such as ' +
-  'AA25 or AA31 — booked as onchain_revert, as before #3609); either may clear on its own. Both ' +
+  'booked); an ERC-4337 validation failure the bundler words as a revert (an AA code such as AA25 ' +
+  'or AA31), which may clear on its own; or a revert with no nameable execution cause. A classified ' +
+  'one is booked as the classifier says (usually onchain_revert), as before #3609. Both ' +
   'carry bounded, redacted `details` (for a viem error, its short message and cause, never the ' +
   'request dump). A task-budget revert a ' +
   'fresh read confirms is answered by the typed 403 instead on both routes (#3500), and on ' +

@@ -25,7 +25,7 @@ import {
 } from '../infra/repositories/hybrid-signers.js'
 import type { HybridOwnerConfig } from './hybrid-provisioning.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
-import { boundedErrorDetails } from '../modules/payments/prepare-failure.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 
 export const HYBRID_SIGNER_ABI = [
   { name: 'addKey', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: '_keyId', type: 'string' }, { name: '_x', type: 'uint256' }, { name: '_y', type: 'uint256' }], outputs: [] },

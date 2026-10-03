@@ -873,11 +873,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         }
       }
       const refusalReason = classifyRevertForLedger(err)
-      // #3609: typed and bounded. A simulation that REVERTED is
-      // `prepare_reverted` (deterministic — the hosted step is stop, never
-      // "retry once") and books its ledger row; anything that is not a revert
-      // (bundler, RPC, transport) is `prepare_failed`, unbooked, and keeps the
-      // retry step. Both carry `details` bounded after redaction — the raw
+      // #3609: typed and bounded. An EXECUTION revert is `prepare_reverted`
+      // (deterministic — the hosted step is stop, never "retry once");
+      // everything else is `prepare_failed` and keeps the retry step. The
+      // ledger is decided by the classifier alone, as before: every classified
+      // revert is booked — an AA validation failure too, though it answers
+      // `prepare_failed` — and an unclassified failure is not. Both carry `details` bounded after redaction — the raw
       // viem error (~6 KB live: callData, signatures, paymaster data) never
       // rides the response. #3053: both through the shared choke point.
       const failureBody = prepareFailureBody(

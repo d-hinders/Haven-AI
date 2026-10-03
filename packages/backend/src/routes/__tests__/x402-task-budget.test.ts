@@ -5,7 +5,7 @@
  * `x402-delegation.test.ts`'s mocking pattern (network seams mocked, the
  * settlement compiler runs REAL).
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const {
@@ -27,6 +27,14 @@ vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({
   readTaskBudgetSpent: (...a: unknown[]) => mockReadSpent(...a),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
+// The refusal ledger's write values the amount in fiat. Unmocked, that is a
+// live price fetch whose latency decided whether a booked refusal landed
+// inside this test's `waitFor` or leaked into the next test's rows — flaky on
+// dev, 3/3 under load (#3609).
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/fiat-values.js')>()
+  return { ...actual, getFiatValuesForTokenAmount: async () => ({ usd: 0, eur: 0, sek: 0 }) }
+})
 
 import { privateKeyToAccount } from 'viem/accounts'
 import { buildBudgetDelegation } from '../../rails/delegation-policy.js'
@@ -156,6 +164,15 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())
+  // A booked refusal's ledger write is fire-and-forget: wait for the DB mock
+  // to go quiet so it can never land in the NEXT test's rows.
+  afterEach(async () => {
+    let seen = -1
+    while (seen !== mockQuery.mock.calls.length) {
+      seen = mockQuery.mock.calls.length
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  })
   beforeEach(() => {
     mockQuery.mockReset()
     mockSelect.mockReset()

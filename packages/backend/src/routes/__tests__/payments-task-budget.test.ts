@@ -27,6 +27,12 @@ vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({
 vi.mock('../../db.js', () => ({
   default: { query: (...a: unknown[]) => mockQuery(...a) },
 }))
+// The refusal ledger's write values the amount in fiat — a live price fetch
+// unmocked, whose latency decides whether a booked row lands inside `waitFor`.
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/fiat-values.js')>()
+  return { ...actual, getFiatValuesForTokenAmount: async () => ({ usd: 0, eur: 0, sek: 0 }) }
+})
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
   return { ...actual, computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a) }

@@ -46,6 +46,8 @@ function errorText(err: unknown): string {
   if (!(err instanceof Error)) return String(err)
   const { shortMessage, details } = err as { shortMessage?: unknown; details?: unknown }
   if (typeof shortMessage === 'string' && typeof details === 'string' && details) {
+    // viem sometimes folds `details` into `shortMessage` already — never say it twice.
+    if (shortMessage.includes(details)) return shortMessage
     return details.startsWith(shortMessage) ? details : `${shortMessage} — ${details}`
   }
   return err.message

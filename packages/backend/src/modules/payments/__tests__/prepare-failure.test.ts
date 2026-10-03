@@ -125,6 +125,21 @@ describe('validation failures are not deterministic reverts (#3609 review S1)', 
     })
   }
 
+  it('an AA code wins even when the error also carries a decoded reason (AA23 + Error(string))', () => {
+    // AA23 is validateUserOp reverting — validation, not the redemption —
+    // and it carries the account's own reason as Error(string). Without the
+    // AA rule the decoded string alone would read as an execution revert.
+    const err = viemSimulationError(`UserOperation reverted during simulation with reason: AA23 reverted ${PERIOD_HEX}`)
+    const body = prepareFailureBody(err, classifyRevertForLedger(err), 'infra')
+    expect(body.error_code).toBe(PREPARE_FAILED_ERROR_CODE)
+  })
+
+  it('never repeats a cause viem already folded into its short message', () => {
+    const err = new BaseError('Execution reverted with reason: X:boom.', { details: 'X:boom' })
+    const details = boundedErrorDetails(err)!
+    expect(details.match(/X:boom/g)).toHaveLength(1)
+  })
+
   it('an execution revert in the same viem shape IS prepare_reverted', () => {
     const err = viemSimulationError(`UserOperation reverted during simulation with reason: ${PERIOD_HEX}`)
     const body = prepareFailureBody(err, classifyRevertForLedger(err), 'infra')

@@ -1378,9 +1378,14 @@ by its middleware (#3581; the first static form refused Next's own inline
 scripts and the console rendered blank). That is client-side defence for
 the token in `sessionStorage` and moves no authority; the rest of this
 document was not re-read for it, and `last-verified` is not bumped. The
-app's Vercel ignore-build step (#3591) decides only *when* the console
-redeploys, from what changed since its last deployment; it moves no
-authority either, and the same scope note holds.
+app's Vercel ignore-build step (#3591; since #3594 a script shared with
+the dashboard's Vercel project, each with its own watch file) decides
+only *when* the console or the dashboard redeploys, from what changed since
+its last deployment; it moves no authority either, and the same scope note
+holds. The console's CI render
+smoke (#3583) only proves, in a browser, that the console renders under that
+CSP and that the CSP refuses an un-nonced inline script; it moves no
+authority, and the same scope note holds.
 
 > **Re-verified #3516 (2026-10-02, console round 3):** the change this note
 > rides touches `packages/ops/**` (plus this doc and a `.gitignore` line) —
@@ -1403,6 +1408,15 @@ authority either, and the same scope note holds.
 > invariant, custody, redemption and settlement sections were NOT re-read
 > (the diff touches no file that implements them), and `last-verified` is
 > not bumped.
+
+> **Re-verified #3584 (2026-10-02, console typography):** the change touches
+> `packages/ops/src/app/layout.tsx` (Inter through `next/font/google`, which
+> self-hosts the font files under `/_next/static/media` at build time, so the
+> CSP's `font-src 'self' data:` is unchanged) and `SignInView.tsx` (the
+> sign-in button's `size="lg"`). No client method, read, reveal, sign-in
+> navigation or backend file changes, so the no-rail-authority claim above
+> holds verbatim. Scope of this re-read: this section only; `last-verified`
+> is not bumped.
 
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
@@ -2257,4 +2271,24 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > authority-reducing routes keep serving retired agents. `paused` passes, as on the delegation routes. The narrowing
 > gate and the relay's signer check are unchanged. The rest of this document
 > was not re-read for it, and `last-verified` is not bumped.
+
+> **#3531 (2026-10-01).** This diff touches one file in this document's
+> coverage list, `packages/sdk/src/client.ts` — `createIntent()` now also
+> copies an optional `recipient: { class: 'previously_paid' | 'new_address' }`
+> off the raw `POST /payments` response, the same pass-through treatment its
+> existing four fields (`paymentId`, `status`, `expiresAt`, `signData`)
+> already get. The field is advisory and history-only (owner decision,
+> 2026-10-01): computed server-side from the authenticated agent's OWN
+> confirmed `payment_intents` rows to the exact recipient address on the
+> exact chain, never from `own_account`/contact/catalog lookups — the #3528
+> `SELF_TRANSFER` hint this document's own sections never adopted was
+> withdrawn in full for exactly that reason (it let an agent probe guessed
+> addresses for owner-account membership). It sits at the TOP LEVEL of the
+> response, never inside `sign_data`/`signData` — the one shape `pay()`'s
+> `signForData` call and the signer's binding check act on — and a dedicated
+> backend test pins `sign_data` byte-identical across both classes. No
+> signature, key, delegation graph, caveat enforcer or on-chain redemption
+> path changes: `client.ts`'s role here is
+> a verbatim copy of a value it neither computes nor validates. The rest of
+> this document was not re-read for it, and `last-verified` is not bumped.
 

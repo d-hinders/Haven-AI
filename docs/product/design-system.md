@@ -21,6 +21,8 @@ covers:
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
   - packages/frontend/src/app/protocols/**
+  - packages/frontend/src/app/developers/**
+  - packages/frontend/src/app/for-agents/**
   - packages/frontend/src/app/(authenticated)/design-system/**
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/components/marketing/**
@@ -524,7 +526,7 @@ The general point, since it will recur: when a dead style rule comes back to lif
 
 ## 2. Typography
 
-Font: Inter (already loaded via `next/font/google` in `app/layout.tsx`). Optional later: switch headings to Inter Display.
+Font: Inter (already loaded via `next/font/google` in `app/layout.tsx`, in both `packages/frontend` and `packages/ops` (#3584)). Optional later: switch headings to Inter Display.
 
 Authenticated app pages use compact product typography utilities from `globals.css`:
 
@@ -1545,7 +1547,8 @@ The redesigned public website (epic [#3572](https://github.com/d-hinders/Haven-A
 
 - **No entrance animations on first paint.** Respect `prefers-reduced-motion`.
 - **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the cycling flow card on the homepage hero, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards.
-- **Banned:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax.
+- **Allowed on the public site** (`components/marketing/site/**`, #3575): in-view animation loops **inside a product frame or mini card** — the home page's hero payment loop, how-it-works cards and accounting feed, each cycling the mockup's choreography only while its region is in view and the tab is visible, resetting to the section's settled state between cycles — and the enforcement receipt's **row-by-row assembly, replaying on each entry**. A public-site loop shows its settled state under `prefers-reduced-motion: reduce`, never shifts layout, never announces (no live region, no inserted or removed text; the animated frames are hidden from assistive technology), and confirms with text and a check icon in the success colour — never a pill or a button.
+- **Banned everywhere:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax, and entrance animation on first paint outside the allowances above — nothing animates on first paint above the fold except inside the hero product frame.
 
 ---
 

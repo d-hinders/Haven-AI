@@ -326,7 +326,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.ops == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 15, not 10: the render smoke (#3583) adds a Chromium run, plus the
+    # browser download on a Playwright cache miss.
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -362,7 +364,37 @@ jobs:
         run: npm run test -w packages/ops
 
       - name: Build ops
+        # A registry is inlined at build time (NEXT_PUBLIC_*), so the render
+        # smoke below gets the real console rather than its config-error
+        # screen. The origin is a fixture host nothing resolves; the smoke
+        # runs offline and never calls it.
+        env:
+          NEXT_PUBLIC_OPS_ENVIRONMENTS: '{"dev":"https://ops-backend.fixture"}'
         run: npm run build -w packages/ops
+
+      - name: Restore Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      # Same pair as browser_smoke (#1609): only a cache MISS installs, and
+      # only the install runs apt-get. The key is shared, so a warm frontend
+      # cache serves this job too.
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+        working-directory: packages/ops
+
+      - name: Ops render smoke (#3583)
+        # The console's production build must RENDER under its enforcing CSP:
+        # #3515 shipped a blank page with every unit test green (#3581). Sign-in
+        # renders after hydration with 0 CSP violations, and an un-nonced
+        # inline script is refused. Offline: no browser request leaves the server.
+        run: npm run smoke -w packages/ops
 
   qa_agent_checks:
     name: QA agent checks
@@ -793,7 +825,9 @@ jobs:
       # src/lib/agent-skill-bundle.ts via skill-content.ts, which interpolates
       # four of this file's sentence constants (so "pinned to" means that file
       # for the bundle, and this one for the other two) —
-      # and only the first is checkable by lint:runbook-parity. This job is
+      # and only the first is checkable by lint:runbook-parity (which since
+      # #3596 also checks the nine public/agent-skills/*.md step-file slices,
+      # eleven copies in all). This job is
       # named an owner of that source so the other two pin tests below actually
       # run on a change to agent-guidance.ts; the check here is what makes that
       # ownership expressible in root-guard-ownership.json.

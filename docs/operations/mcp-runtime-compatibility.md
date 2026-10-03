@@ -76,6 +76,29 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3596 (2026-10-02, the agent-skills index and step files):**
+> this diff touches `packages/sdk/src/agent-guidance.ts`, a covered file —
+> three cross-reference fixes inside `HAVEN_AGENT_RUNBOOK_MD` (step 1's
+> "(below)" named "What you run" instead of trusting proximity; "If you cannot
+> open a browser"'s "Steps 1-3" got a three-word gloss and lost a trailing
+> ", as above"; "Budget changes later"'s "the setup above" named "The
+> sequence") so no step file at `/agent-skills/<step>.md` points at another
+> section by position; references by step number remain.
+> No sentence constant, tool, schema, version-skew or consent-hash contract
+> moves — the runtime manifest, connector channel, dist-tag and setup-prompt
+> rule sentences are byte-identical to before. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
+> **Re-verified #3583 (2026-10-02, the ops render smoke):** this diff touches
+> `.github/workflows/ci.yml`, a covered file, inside the `ops_checks` job
+> only: its build step gains a fixture `NEXT_PUBLIC_OPS_ENVIRONMENTS`, three
+> steps are added (the shared Playwright cache restore, a cache-miss browser
+> install, and `npm run smoke -w packages/ops`), and the job timeout goes
+> from 10 to 15 minutes. No tool, schema, version-skew or consent-hash
+> contract moves; the client releases table, upgrade hints, publish flow and
+> package resolution are untouched. `last-verified` stays 2026-10-02. Nothing
+> else in this document was re-verified.
+
 > **Re-verified, skill `client_update` line (2026-10-02, guidance text only):**
 > this diff touches `packages/sdk/src/skill-content.ts`, a covered file. The
 > runbook's `client_update` sentence moves into a shared constant,
@@ -87,6 +110,7 @@ last-verified: "2026-10-02"
 > `upgrade_command` are untouched — the skill only names the existing field.
 > `last-verified` stays 2026-10-02. Nothing else in this document was
 > re-verified.
+
 
 > **Re-verified, follow-up to #3587 (2026-10-02, a step rename):** this diff
 > touches `.github/workflows/ci.yml`, a covered file, in one step NAME and its
@@ -153,6 +177,20 @@ last-verified: "2026-10-02"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Re-verified #3531 (2026-10-01, advisory recipient history hint on
+> `haven_send`/`haven_pay`):** this diff touches a file under a covered tree —
+> `packages/mcp-server/src/tools/state-direct-recovery.ts`. Additive only: the
+> hosted `haven_send`/`haven_pay` success shape gains an optional top-level
+> `recipient_class` (`previously_paid` | `new_address`), present only when the
+> backend sends `intent.recipient` — an older backend omits it and the field
+> is simply absent, no new required field and no change to
+> `next_action`/`safe_to_continue`/refusal shapes. The local `@haven_ai/mcp`
+> `haven_send` (`packages/mcp/src/tools.ts`) is deliberately NOT changed: it
+> calls the all-in-one `haven.pay()`, whose returned `PaymentResult` is built
+> from post-confirmation state and carries nothing from the intermediate
+> `createIntent()` call this field is computed at — widening `PaymentResult`
+> itself is out of this change's scope.
 >
 > **Re-verified #3497 (2026-10-01, agent-surface polish from the 2026-09-30
 > purchase run):** this diff touches files under a covered tree —

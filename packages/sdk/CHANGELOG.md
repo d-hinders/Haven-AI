@@ -15,7 +15,13 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Fixed
+
+- **Three agent-runbook cross-references reworded for the new step files (#3596).** `HAVEN_AGENT_RUNBOOK_MD` is now also served as small, linked step files at `/agent-skills/<step>.md`, byte-sliced at `## ` boundaries. Step 1's "run the connector command in that prompt (below)" assumed the "What you run" section was still adjacent once split, and now names it; "If you cannot open a browser"'s "Steps 1-3 are links" named step numbers defined in an earlier section with no gloss of what they are, and now carries one (account, funding, budget), dropping a trailing ", as above"; "Budget changes later"'s "the setup above" now names "The sequence". No sentence constant, tool, schema or hand-off shape changed — read-only copy, no update needed.
+
 ### Added
+
+- **`createIntent()`'s `PaymentIntent` gains `recipient.class` (#3531).** `'previously_paid'` when this agent has any prior CONFIRMED payment (any rail, any token) to the exact recipient address on this chain, `'new_address'` otherwise — advisory only, history-only (this agent's own confirmed payments, nothing about the owner's accounts or contacts), never consulted by signing or policy. Absent against an older backend. Additive; no update needed.
 
 - **`PaymentStatusResult.failureReason` (#3494).** `getPaymentStatus()` now additionally reports a bounded, redacted cause on a `failed` payment — present (possibly `null`, when no message was recorded) only when `status` is `'failed'`, absent on every other status. An older backend simply omits it. Additive; no update needed.
 

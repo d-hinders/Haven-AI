@@ -58,7 +58,11 @@ export function SignInView({
           </label>
         ) : null}
         <div className="mt-5">
+          {/* size="lg" (#3584): the lone CTA paints 44 px. The shared `md`
+              size already has a 44 px hit area (#1726); this is an ops-only
+              density choice for a sign-in card with nothing else on it. */}
           <Button
+            size="lg"
             className="w-full"
             disabled={!selected}
             onClick={() => {

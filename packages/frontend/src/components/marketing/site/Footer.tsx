@@ -10,16 +10,17 @@ import { SITE_WRAP } from './SiteSection'
  * Every entry has a destination that exists today (epic rule "No dead
  * links"). The mockup's Company column (Contact, Privacy, Terms) is removed
  * until those destinations exist (epic decisions 8 and 9). Protocols joined
- * with its page (#3576); For developers and npm packages join with theirs
- * (#3577).
+ * with its page (#3576); For developers, For agents and npm packages joined
+ * with theirs (#3577).
  *
  * `static: true` marks a file served from `public/` or by an API route, not
  * an app route: client-side navigation would 404 it, so it renders as a
  * plain `<a>`.
  *
- * "For agents" points STRAIGHT at the runbook. It is one of the landing
+ * "For agents" points at the new page (#3577). It is one of the landing
  * page's agent-discovery hooks (#2521, #2538): `discovery-surfaces.test.ts`
- * follows it and requires it to reach `/for-agents.md`.
+ * follows it and requires it to reach `/for-agents.md` — now by way of the
+ * page, which links the runbook in its hero.
  */
 export const SITE_FOOTER_COLUMNS: ReadonlyArray<{
   heading: string
@@ -37,8 +38,10 @@ export const SITE_FOOTER_COLUMNS: ReadonlyArray<{
   {
     heading: 'Developers',
     links: [
-      { label: 'For agents', href: '/for-agents.md', static: true },
+      { label: 'For developers', href: '/developers' },
+      { label: 'For agents', href: '/for-agents' },
       { label: 'API reference', href: '/api/openapi.json', static: true },
+      { label: 'npm packages', href: '/developers#packages' },
     ],
   },
 ]

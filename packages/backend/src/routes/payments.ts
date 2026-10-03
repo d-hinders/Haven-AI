@@ -36,6 +36,7 @@ import {
   isPeriodBudgetRevert,
   isTransferCapRevert,
   boundFailureMessage,
+  prepareFailureBody,
   refuse,
 } from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
@@ -844,8 +845,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // #2945: a caveat REVERT is a policy refusal — record it
       // fire-and-forget with the classified reason. A bundler/transport
       // failure is NOT a refusal (the guardrails refused nothing); the
-      // classifier returns null for it and nothing is written. The
-      // 502 the caller receives is unchanged either way.
+      // classifier returns null for it and nothing is written. Since #3609
+      // the same classification also picks the 502's typed body
+      // (`prepare_reverted` / `prepare_failed`, below).
       // #3416: no bundler credential for this chain on this deployment — a
       // typed, non-retryable 503, and nothing booked (nothing was refused).
       if (err instanceof DelegationRailChainUnavailableError) {
@@ -871,14 +873,31 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         }
       }
       const refusalReason = classifyRevertForLedger(err)
-      // #3053: through the shared choke point; the ledger input is null when
-      // the classification says NOT a refusal.
+      // #3609: typed and bounded. An EXECUTION revert is `prepare_reverted`
+      // (deterministic — the hosted step is stop, never "retry once");
+      // everything else is `prepare_failed` and keeps the retry step. The
+      // ledger is decided by the classifier alone, as before: every classified
+      // revert is booked — an AA validation failure too, though it answers
+      // `prepare_failed` — and an unclassified failure is not. Both carry `details` bounded after redaction — the raw
+      // viem error (~6 KB live: callData, signatures, paymaster data) never
+      // rides the response. #3053: both through the shared choke point.
+      const failureBody = prepareFailureBody(
+        err,
+        refusalReason,
+        'Delegation-rail authorization failed (bundler or RPC)',
+      )
+      // The response carries only a bounded cause; the operator gets the whole
+      // error here — redacted, never with a vendor key (#3609 review S2).
+      request.log.warn(
+        { error_code: failureBody.error_code, refusal_reason: refusalReason },
+        `POST /payments prepare failed: ${redactVendorSecrets(err instanceof Error ? err.message : String(err))}`,
+      )
+      if (!refusalReason) {
+        return refuse(reply.code(502).send(failureBody), null)
+      }
       return refuse(
-        reply.code(502).send({
-          error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-        }),
-        refusalReason && {
+        reply.code(502).send(failureBody),
+        {
           userId: agent.user_id,
           agentId: agent.id,
           chainId: agent.chain_id,

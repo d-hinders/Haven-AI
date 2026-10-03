@@ -9,7 +9,7 @@
 import type { FastifyBaseLogger } from 'fastify'
 import { findSettleIntent } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
-import { redactVendorSecrets, deserializeUserOp } from '../../rails/execution-rail.js'
+import { deserializeUserOp } from '../../rails/execution-rail.js'
 import { recoverDelegationSigner } from '../../rails/delegation-policy.js'
 import {
   assembleSettlementPayload,
@@ -21,6 +21,7 @@ import { storedPaymentRequiredFromMetadata } from './sign-context.js'
 import { passportReferenceFor } from '../passport/index.js'
 import { markIntentSubmittedForSettlement } from '../../infra/repositories/x402-authorizations.js'
 import type { X402HandlerResult } from './types.js'
+import { boundedErrorDetails } from '../payments/prepare-failure.js'
 
 /** The row's recorded settlement scheme (`machine_metadata.settlement_scheme`), or null. */
 function settlementScheme(intent: { machine_metadata: Record<string, unknown> | string | null }): string | null {
@@ -202,7 +203,8 @@ export async function settleX402(
       code: 502,
       body: {
         error: 'Could not assemble the settlement payload',
-        details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        // #3609: bounded after redaction — never the raw viem error.
+        details: boundedErrorDetails(err),
       },
     }
   }

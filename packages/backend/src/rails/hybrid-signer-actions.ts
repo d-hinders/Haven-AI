@@ -25,7 +25,7 @@ import {
 } from '../infra/repositories/hybrid-signers.js'
 import type { HybridOwnerConfig } from './hybrid-provisioning.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
-import { redactVendorSecrets } from './execution-rail.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 
 export const HYBRID_SIGNER_ABI = [
   { name: 'addKey', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: '_keyId', type: 'string' }, { name: '_x', type: 'uint256' }, { name: '_y', type: 'uint256' }], outputs: [] },
@@ -58,8 +58,9 @@ export interface SignerActionAccount {
 }
 
 /** Vendor errors echo the bundler URL (which embeds the API key) — #764. */
+// #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
-  return redactVendorSecrets(err instanceof Error ? err.message : String(err))
+  return boundedErrorDetails(err) ?? ''
 }
 
 /**

@@ -211,3 +211,40 @@ describe('the typed delegation-budget 403 is fund_account_or_raise_allowance wit
     expect(String(out.next_tool_omitted_reason)).toMatch(/retrying cannot succeed/)
   })
 })
+
+describe('the typed prepare 502s split on whether the simulation reverted (#3609)', () => {
+  const prepareReverted = () =>
+    new HavenApiError(
+      'The payment reverted during on-chain simulation: UserOperation reverted during simulation with reason: 0x08c379a0…',
+      502,
+      {
+        error: 'The payment reverted during on-chain simulation',
+        error_code: 'prepare_reverted',
+        refusal_reason: 'delegation_expired',
+        revert_reason: 'TimestampEnforcer:expired-delegation',
+        details: 'UserOperation reverted during simulation with reason: 0x08c379a0…',
+      },
+    )
+
+  it('prepare_reverted is PREPARE_REVERTED, a stop — never the generic 5xx "retry once" — with the reason fields', () => {
+    const out = normalizeError(prepareReverted()) as unknown as Record<string, unknown>
+    expect(out.code).toBe('PREPARE_REVERTED')
+    expect(out.statusCode).toBe(502)
+    expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(out.revert_reason).toBe('TimestampEnforcer:expired-delegation')
+    expect(out.refusal_reason).toBe('delegation_expired')
+    expect(String(out.next_tool_omitted_reason)).toMatch(/reverts again/)
+  })
+
+  it('prepare_failed (not a revert) keeps the generic 5xx retry-once step — the transient case it was written for', () => {
+    const out = normalizeError(
+      new HavenApiError('Delegation-rail authorization failed (bundler or RPC): fetch failed', 502, {
+        error: 'Delegation-rail authorization failed (bundler or RPC)',
+        error_code: 'prepare_failed',
+        details: 'fetch failed',
+      }),
+    ) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+    expect(out.revert_reason).toBeUndefined()
+  })
+})

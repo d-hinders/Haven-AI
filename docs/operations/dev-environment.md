@@ -35,6 +35,18 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
+> `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
+> agents join the pixel gate with the same seed-before-navigation dark
+> convention the other specs use (its spec reads `testInfo.project.name`; the
+> light desktop/mobile shots ride the chromium-desktop project's viewport
+> loop, and mobile dark is skipped — no mobile dark baseline). The new
+> `/developers` and `/for-agents` pages are frontend pages behind the
+> existing site gate; no environment variable this document describes changes
+> name, meaning, surface, or where it is set, and no backend route file is
+> added or moved. Nothing else in this file's coverage was touched; this note
+> is the only edit.
+
 > **Re-verified #3574 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `home.visual.spec.ts` — the redesigned home page joins the
 > pixel gate with the same seed-before-navigation dark convention the other

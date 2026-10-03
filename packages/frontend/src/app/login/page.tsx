@@ -1,6 +1,7 @@
 'use client'
 
 import { Suspense, useState, useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -11,6 +12,8 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { AgentHandoffNote } from '@/components/onboarding/AgentHandoffNote'
+import { isNewSiteVisible } from '@/lib/site-gate'
+import { AuthShell, AuthCard } from '@/components/auth/AuthShell'
 
 function LoginForm() {
   const { login, user, loading } = useAuth()
@@ -58,10 +61,30 @@ function LoginForm() {
     }
   }
 
-  return (
-    <div className="w-full max-w-sm rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-6 shadow-card">
-      <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Welcome back</h1>
-      <p className="text-sm text-[var(--v2-ink-2)] mb-8">Log in to your Haven account.</p>
+  // The redesigned shell (#3578, epic #3572) picks the card frame and the
+  // type sizes around the ONE form below — fields, validation, submission and
+  // redirect handling are the same JSX whichever branch renders. Class values
+  // for the gate-off branch are today's, unchanged (legacy code is frozen
+  // until the switch-over, #3579); gate-on values are the mockup's
+  // (`.auth-card`: 26px heading, 14.5px sub, 12.5px labels, 13.5px alt line).
+  const site = isNewSiteVisible()
+  const headingClass = site
+    ? '[font-family:var(--font-site-display)] text-[26px] font-semibold tracking-[-0.02em] text-[var(--v2-ink)]'
+    : 'text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2'
+  const subClass = site
+    ? 'mt-1.5 mb-8 text-[14.5px] text-[var(--v2-ink-2)]'
+    : 'text-sm text-[var(--v2-ink-2)] mb-8'
+  const labelClass = site
+    ? 'mb-1.5 block text-[12.5px] font-medium text-[var(--v2-ink-2)]'
+    : 'mb-1.5 block text-xs font-medium text-[var(--v2-ink-2)]'
+  const altClass = site
+    ? 'mt-[18px] text-center text-[13.5px] text-[var(--v2-ink-2)]'
+    : 'mt-6 text-center text-sm text-[var(--v2-ink-2)]'
+
+  const card: ReactNode = (
+    <>
+      <h1 className={headingClass}>Welcome back</h1>
+      <p className={subClass}>Log in to your Haven account.</p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {justRegistered && !error && (
@@ -77,10 +100,7 @@ function LoginForm() {
         )}
 
         <div>
-          <label
-            htmlFor="email"
-            className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
-          >
+          <label htmlFor="email" className={labelClass}>
             Email
           </label>
           <Input
@@ -95,10 +115,7 @@ function LoginForm() {
         </div>
 
         <div>
-          <label
-            htmlFor="password"
-            className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
-          >
+          <label htmlFor="password" className={labelClass}>
             Password
           </label>
           <Input
@@ -120,7 +137,7 @@ function LoginForm() {
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-[var(--v2-ink-2)]">
+      <p className={altClass}>
         {"Don't have an account?"}{' '}
         <Link
           href="/signup"
@@ -129,11 +146,43 @@ function LoginForm() {
           Sign up
         </Link>
       </p>
+    </>
+  )
+
+  return site ? (
+    <AuthCard>{card}</AuthCard>
+  ) : (
+    <div className="w-full max-w-sm rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-6 shadow-card">
+      {card}
     </div>
   )
 }
 
+/** The Suspense fallback both shells render while search params resolve. */
+function LoginLoading() {
+  return (
+    <div className="flex items-center justify-center gap-3">
+      <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
+      <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
+    </div>
+  )
+}
+
+// The redesigned sign-in screen (#3578, epic #3572): the mockup's auth shell
+// (public header, quiet ground, one card, agent hand-off line, public
+// footer). The gate is decided here, at the page, so the legacy screen below
+// keeps rendering exactly what production serves today until #3579.
 export default function LoginPage() {
+  if (isNewSiteVisible()) {
+    return (
+      <AuthShell note={<AgentHandoffNote path="/login" />}>
+        <Suspense fallback={<LoginLoading />}>
+          <LoginForm />
+        </Suspense>
+      </AuthShell>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[var(--v2-bg)] text-[var(--v2-ink)] flex flex-col">
       <div
@@ -168,14 +217,7 @@ export default function LoginPage() {
 
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-16">
         <div className="w-full max-w-sm">
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-                <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
-              </div>
-            }
-          >
+          <Suspense fallback={<LoginLoading />}>
             <LoginForm />
           </Suspense>
 

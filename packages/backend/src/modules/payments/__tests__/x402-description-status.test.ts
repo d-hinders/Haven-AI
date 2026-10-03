@@ -83,6 +83,16 @@ describeDb('#3610 — x402 status reports the merchant description', () => {
     expect(status?.x402?.description).toBe('Get a random fun fact')
   })
 
+  it('a description carrying NUL and a lone surrogate is stored once cleaned — and Postgres refuses it raw', async () => {
+    // Positive control: the raw text cannot be stored in jsonb at all, which
+    // is how an unclean description turned authorize into a 500 (#3610 review).
+    await expect(db.query('SELECT $1::jsonb', [JSON.stringify({ description: 'a\u0000b' })])).rejects.toThrow()
+    const cleaned = x402Description('a\u0000b\ud800c', null)
+    const { agent, paymentId } = await seedConfirmedX402({ description: cleaned })
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    expect(status?.description).toBe('abc')
+  })
+
   it('a pre-#3610 row reads it from the stored 402 (the reported payment shape)', async () => {
     const { agent, paymentId } = await seedConfirmedX402({ payment_required: PAYMENT_REQUIRED_WITH_DESCRIPTION })
     const status = await getAgentPaymentStatus(agent, paymentId)
@@ -119,5 +129,21 @@ describe('x402Description (#3610)', () => {
     expect([...out].length).toBe(MAX_X402_DESCRIPTION_CODE_POINTS + 1)
     expect(out.endsWith('…')).toBe(true)
     expect(x402Description('😀'.repeat(MAX_X402_DESCRIPTION_CODE_POINTS), null)).toBe('😀'.repeat(MAX_X402_DESCRIPTION_CODE_POINTS))
+  })
+
+  // #3610 review: untrusted text loses control and bidi characters before it
+  // is stored — the set owner-profile refuses in a legal name.
+  it('strips NUL, C0/C1 controls, DEL and bidi overrides; spacing controls become a space', () => {
+    expect(x402Description('a\u0000b', null)).toBe('ab')
+    expect(x402Description('safe\u202Eexe.txt', null)).toBe('safeexe.txt')
+    expect(x402Description('\u2066x\u2069\u007F\u0085y', null)).toBe('xy')
+    expect(x402Description('\u001b[31mred', null)).toBe('[31mred')
+    expect(x402Description('line one\r\nline two\tend', null)).toBe('line one line two end')
+    expect(x402Description('\u0000\u202E  ', PAYMENT_REQUIRED_WITH_DESCRIPTION)).toBe('Get a random fun fact')
+  })
+
+  it('drops lone UTF-16 surrogates, keeps real pairs', () => {
+    expect(x402Description('a\ud800b\udfffc', null)).toBe('abc')
+    expect(x402Description('ok 😀', null)).toBe('ok 😀')
   })
 })

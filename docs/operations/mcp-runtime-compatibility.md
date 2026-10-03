@@ -80,7 +80,8 @@ last-verified: "2026-10-02"
 > touches `packages/backend/src/modules/x402/delegation-authorize.ts` and
 > `modules/payments/agent-payment-status.ts`, covered files: authorize now
 > persists `machine_metadata.description` (the body's `description`, else the
-> stored 402's `resource.description`, cut at 300 code points plus an ellipsis) and the
+> stored 402's `resource.description`, control/bidi characters stripped, cut at
+> 300 code points plus an ellipsis) and the
 > status reader falls back to the stored 402 on older rows. The status
 > response's `description` / `x402.description` fields already existed and
 > keep their shape (`string | null`); only their values for plain-HTTP x402

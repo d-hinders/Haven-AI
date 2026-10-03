@@ -78,10 +78,11 @@ last-verified: "2026-10-02"
 
 > **Re-verified #3609 (2026-10-02, the typed prepare 502):** the backend's
 > delegation-rail prepare 502 (`POST /payments`, the x402 EIP-3009 funding
-> leg) gains an `error_code`: `prepare_reverted` (the simulation reverted —
-> `refusal_reason`, a decoded `revert_reason`, a remedy `message`) or
-> `prepare_failed` (not a revert), and its `details` are bounded at 300
-> characters after redaction. The hosted `normalizeError`
+> leg) gains an `error_code`: `prepare_reverted` (the redemption reverted in
+> execution — `refusal_reason`, a decoded `revert_reason`, a remedy
+> `message`) or `prepare_failed` (anything else, including an ERC-4337 `AA`
+> validation failure the bundler words as a revert), and its `details` are
+> bounded at 300 characters after redaction. The hosted `normalizeError`
 > (`packages/mcp-server/src/tools/support/errors.ts`) maps `prepare_reverted`
 > to `PREPARE_REVERTED` with a `stop_and_tell_user` step and the two reason
 > fields; `prepare_failed` keeps the generic 5xx retry-once step (the

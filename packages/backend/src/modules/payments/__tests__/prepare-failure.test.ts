@@ -4,7 +4,7 @@
  * (`revertReasonOf`, `refusal-ledger.ts`). Pure: no route, no DB.
  */
 import { describe, expect, it } from 'vitest'
-import { EstimateGasExecutionError } from 'viem'
+import { BaseError, EstimateGasExecutionError } from 'viem'
 import { FAILURE_MESSAGE_MAX_LENGTH } from '../agent-payment-status.js'
 import {
   PREPARE_FAILED_ERROR_CODE,
@@ -94,6 +94,54 @@ describe('prepareFailureBody (#3609)', () => {
     expect(body.refusal_reason).toBe('onchain_revert')
     expect(body.revert_reason).toBeNull()
     expect(body.message).not.toMatch(/\(\)/)
+  })
+})
+
+/**
+ * The shape viem really throws for a failed simulation (#3609 review): the
+ * headline, then a `Request Arguments:` block with kilobytes of callData, and
+ * the bundler's actual cause LAST, under `Details:`.
+ */
+function viemSimulationError(bundlerText: string): BaseError {
+  return new BaseError('Execution reverted with reason: UserOperation reverted during simulation.', {
+    details: bundlerText,
+    metaMessages: ['Request Arguments:', `  callData: 0x5c1c6dcd${'ab'.repeat(2800)}`, `  paymasterData: 0x01${'cd'.repeat(80)}`],
+  })
+}
+
+describe('validation failures are not deterministic reverts (#3609 review S1)', () => {
+  for (const [code, text] of [
+    ['AA25', 'UserOperation reverted during simulation with reason: AA25 invalid account nonce'],
+    ['AA31', 'UserOperation reverted during simulation with reason: AA31 paymaster deposit too low'],
+    ['AA33', 'UserOperation reverted during simulation with reason: AA33 reverted (or OOG)'],
+  ] as const) {
+    it(`${code}: still booked as onchain_revert, but answered prepare_failed — a retry can succeed`, () => {
+      const err = viemSimulationError(text)
+      const reason = classifyRevertForLedger(err)
+      expect(reason).toBe('onchain_revert') // the ledger is unchanged
+      const body = prepareFailureBody(err, reason, 'Delegation-rail authorization failed (bundler or RPC)')
+      expect(body.error_code).toBe(PREPARE_FAILED_ERROR_CODE)
+      expect(body.details).toContain(code)
+    })
+  }
+
+  it('an execution revert in the same viem shape IS prepare_reverted', () => {
+    const err = viemSimulationError(`UserOperation reverted during simulation with reason: ${PERIOD_HEX}`)
+    const body = prepareFailureBody(err, classifyRevertForLedger(err), 'infra')
+    expect(body).toMatchObject({ error_code: PREPARE_REVERTED_ERROR_CODE, revert_reason: PERIOD_REASON })
+  })
+})
+
+describe('the bound keeps the cause, not the callData (#3609 review S2)', () => {
+  it('a viem error is bounded as shortMessage + details — the cause survives, the dump does not', () => {
+    const details = boundedErrorDetails(viemSimulationError('Too many requests (429) from the bundler'))!
+    expect(details).toContain('Too many requests')
+    expect(details).not.toContain('callData')
+    expect(details.length).toBeLessThanOrEqual(FAILURE_MESSAGE_MAX_LENGTH + 1)
+  })
+
+  it('a plain Error keeps its message', () => {
+    expect(boundedErrorDetails(new Error('fetch failed'))).toBe('fetch failed')
   })
 })
 

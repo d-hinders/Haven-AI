@@ -885,6 +885,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         refusalReason,
         'Delegation-rail authorization failed (bundler or RPC)',
       )
+      // The response carries only a bounded cause; the operator gets the whole
+      // error here — redacted, never with a vendor key (#3609 review S2).
+      request.log.warn(
+        { error_code: failureBody.error_code, refusal_reason: refusalReason },
+        `POST /payments prepare failed: ${redactVendorSecrets(err instanceof Error ? err.message : String(err))}`,
+      )
       if (!refusalReason) {
         return refuse(reply.code(502).send(failureBody), null)
       }

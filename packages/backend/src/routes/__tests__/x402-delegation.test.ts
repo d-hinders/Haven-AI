@@ -1189,14 +1189,16 @@ describe('x402 delegation-rail settlement (#830)', () => {
   })
 
   it('3009-mode maps a caveat revert to a typed 502 prepare_reverted; database untouched (#3609)', async () => {
-    mockPrepareFunding.mockRejectedValueOnce(new Error('estimation reverted: period budget exceeded'))
+    mockPrepareFunding.mockRejectedValueOnce(
+      new Error('UserOperation reverted during simulation with reason: ERC20PeriodTransferEnforcer:transfer-amount-exceeded'),
+    )
     const res = await app.inject({
       method: 'POST', url: '/x402/authorize',
       headers: { authorization: 'Bearer sk_agent_test' },
       payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
     })
     expect(res.statusCode).toBe(502)
-    expect(res.json()).toMatchObject({ error_code: 'prepare_reverted', refusal_reason: 'onchain_revert' })
+    expect(res.json()).toMatchObject({ error_code: 'prepare_reverted', refusal_reason: 'delegation_budget_exceeded' })
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 

@@ -12,11 +12,16 @@
  * every retry. Two typed answers now, split by the same classifier the
  * refusal ledger uses (`classifyRevertForLedger`):
  *
- * - `prepare_reverted` — the simulation REVERTED (a caveat enforcer, or any
- *   other on-chain revert): deterministic, so not retryable as made. Carries
- *   the classifier's `refusal_reason` and the decoded `revert_reason`.
- * - `prepare_failed` — not a revert (bundler, RPC, transport): may be
- *   transient, so the hosted step stays "retry once".
+ * - `prepare_reverted` — the redemption REVERTED in execution (a decoded
+ *   `Error(string)`, a named caveat-enforcer error, the timestamp caveat's
+ *   text, or viem's `EstimateGasExecutionError`): deterministic, so not
+ *   retryable as made. Carries the classifier's `refusal_reason` and the
+ *   decoded `revert_reason`.
+ * - `prepare_failed` — anything else: not a revert (bundler, RPC,
+ *   transport), or an ERC-4337 VALIDATION failure the bundler words as a
+ *   revert (`AA25` nonce race, `AA31`/`AA33` paymaster, review S1) — may
+ *   clear on its own, so the hosted step stays "retry once". The ledger
+ *   still books a classified revert either way (unchanged by #3609).
  *
  * Both stay HTTP 502 (the status the routes have always answered; the
  * `error_code` is the discriminator), and both carry `details` bounded by
@@ -25,14 +30,30 @@
  */
 import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
 import { boundFailureMessage } from './agent-payment-status.js'
-import { classifyRevertForLedger, revertReasonOf } from './refusal-ledger.js'
+import { classifyRevertForLedger, isExecutionRevert, revertReasonOf } from './refusal-ledger.js'
 
 export const PREPARE_REVERTED_ERROR_CODE = 'prepare_reverted'
 export const PREPARE_FAILED_ERROR_CODE = 'prepare_failed'
 
+/**
+ * The text worth showing for a caught error. A viem `BaseError`'s `.message`
+ * is its headline, then a `Request Arguments:` block (kilobytes of callData),
+ * then `Details:` — the actual cause — LAST, so bounding `.message` keeps the
+ * callData and cuts the cause (#3609 review S2). For those errors the
+ * headline (`shortMessage`) plus `details` is the cause without the dump.
+ */
+function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err)
+  const { shortMessage, details } = err as { shortMessage?: unknown; details?: unknown }
+  if (typeof shortMessage === 'string' && typeof details === 'string' && details) {
+    return details.startsWith(shortMessage) ? details : `${shortMessage} — ${details}`
+  }
+  return err.message
+}
+
 /** The bounded, redacted `details` every prepare-failure body carries. */
 export function boundedErrorDetails(err: unknown): string | null {
-  return boundFailureMessage(redactVendorSecrets(err instanceof Error ? err.message : String(err)))
+  return boundFailureMessage(redactVendorSecrets(errorText(err)))
 }
 
 export interface PrepareFailureBody {
@@ -57,7 +78,12 @@ export function prepareFailureBody(
   infrastructureError: string,
 ): PrepareFailureBody {
   const details = boundedErrorDetails(err)
-  if (!refusalReason) {
+  // #3609 review S1: the ledger books every classified revert (unchanged),
+  // but only an EXECUTION revert is deterministic for this payment. A
+  // validation failure the bundler words as a revert (AA25 nonce race,
+  // AA31/AA33 paymaster) can clear on its own, so it answers prepare_failed
+  // and keeps the retry step.
+  if (!refusalReason || !isExecutionRevert(err)) {
     return { error: infrastructureError, error_code: PREPARE_FAILED_ERROR_CODE, details }
   }
   const revertReason = revertReasonOf(err)

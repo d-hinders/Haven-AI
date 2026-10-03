@@ -193,6 +193,34 @@ export function isAccountValidationFailedRevert(err: unknown): boolean {
   return ACCOUNT_VALIDATION_FAILED_REVERT_PATTERN.test(flattenErrorText(err))
 }
 
+/**
+ * #3609 review (S1): true when a simulation failure is an EXECUTION-phase
+ * revert — the redemption itself reverted (a decoded `Error(string)`, or a
+ * named caveat-enforcer error) — and NOT an ERC-4337 validation failure.
+ * A bundler relays both as "UserOperation reverted during simulation", but
+ * an `AA1x/AA2x/AA3x` code is validation: a nonce race (AA25), an
+ * underfunded or flaky paymaster (AA31/AA33), a not-yet-due window (AA22) —
+ * conditions that clear on their own, so a retry can succeed. Only an
+ * execution revert is deterministic for the same payment.
+ */
+export function isExecutionRevert(err: unknown): boolean {
+  const text = flattenErrorText(err)
+  if (/\bAA[0-9]{2}\b/.test(text)) return false
+  return (
+    decodeErrorStrings(text).length > 0 ||
+    /[A-Z][A-Za-z0-9]*Enforcer:[a-z0-9-]+/.test(text) ||
+    DELEGATION_EXPIRED_REVERT_PATTERNS.some((re) => re.test(text)) ||
+    hasEstimateGasExecutionError(err)
+  )
+}
+
+/** viem's gas-estimation EXECUTION revert, anywhere in the cause chain. */
+function hasEstimateGasExecutionError(err: unknown, depth = 0): boolean {
+  if (err == null || depth > 5 || typeof err !== 'object') return false
+  if (err instanceof EstimateGasExecutionError) return true
+  return hasEstimateGasExecutionError((err as { cause?: unknown }).cause, depth + 1)
+}
+
 /** #3609: the longest revert reason a response carries (it is chain text, untrusted). */
 export const REVERT_REASON_MAX_LENGTH = 120
 

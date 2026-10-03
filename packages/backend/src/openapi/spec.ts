@@ -1095,11 +1095,15 @@ const prepareFailureSchemaProperties = {
 } as const
 
 const PREPARE_FAILURE_DESCRIPTION =
-  '#3609: the prepare simulation failed. `error_code: "prepare_reverted"` — it REVERTED (a caveat ' +
-  'enforcer or any other on-chain revert): nothing was signed or moved, and the same payment reverts ' +
-  'again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in ' +
-  'the ledger. `error_code: "prepare_failed"` — not a revert (bundler, RPC or transport): may be ' +
-  'transient, nothing is booked. Both carry bounded, redacted `details`. A task-budget revert a ' +
+  '#3609: the prepare simulation failed. `error_code: "prepare_reverted"` — the redemption REVERTED ' +
+  'in execution (a decoded reason, a named caveat-enforcer error, or a gas-estimation execution ' +
+  'revert): nothing was signed or moved, and the same payment reverts again on every retry; ' +
+  '`refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. ' +
+  '`error_code: "prepare_failed"` — anything else: a bundler, RPC or transport failure (nothing ' +
+  'booked), or an ERC-4337 validation failure the bundler words as a revert (an AA code such as ' +
+  'AA25 or AA31 — booked as onchain_revert, as before #3609); either may clear on its own. Both ' +
+  'carry bounded, redacted `details` (for a viem error, its short message and cause, never the ' +
+  'request dump). A task-budget revert a ' +
   'fresh read confirms is answered by the typed 403 instead on both routes (#3500), and on ' +
   'POST /payments a confirmed period-budget revert too (#3503); the funding leg has no period re-read.'
 

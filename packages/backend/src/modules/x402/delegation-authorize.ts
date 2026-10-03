@@ -36,6 +36,7 @@ import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './he
 import { classifyRevertForLedger, isTransferCapRevert } from '../payments/refusal-ledger.js'
 import { refuse } from '../payments/refuse.js'
 import { boundedErrorDetails, prepareFailureBody } from '../payments/prepare-failure.js'
+import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
@@ -596,6 +597,12 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         err,
         fundingRefusalReason,
         'Delegation-rail funding authorization failed (bundler or RPC)',
+      )
+      // The response carries only a bounded cause; the operator gets the whole
+      // error here — redacted, never with a vendor key (#3609 review S2).
+      console.warn(
+        `x402 funding prepare failed (${fundingFailureBody.error_code}): ` +
+          redactVendorSecrets(err instanceof Error ? err.message : String(err)),
       )
       if (!fundingRefusalReason) {
         return refuse({ code: 502, body: fundingFailureBody }, null)

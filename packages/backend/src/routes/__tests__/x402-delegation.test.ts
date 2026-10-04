@@ -1203,11 +1203,15 @@ describe('x402 delegation-rail settlement (#830)', () => {
       // #1059: on the funding leg the budget IS the signed instrument.
       budgetDelegationHash: PREPARED.delegationHash,
     }))
-    // The funding redemption targeted the EOA with the exact amount. #3329:
-    // a 5th (task-budget) argument now always accompanies the call — this
-    // request carried no task_budget_id, so it is undefined.
+    // The funding redemption targeted the EOA with the exact amount. #3617:
+    // the 5th argument carries the scope resolved once at the top of the leg
+    // — with no task or sub-budget, the (token, payTo) selection itself, so
+    // `prepareDelegationPayment` redeems the row the pre-check read instead of
+    // selecting again.
     expect(mockPrepareFunding).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n, undefined,
+      expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n,
+      // This test primes no (token, payTo) row, so the selection is null.
+      { delegation: null },
     )
     // The erc7710 SELECTOR for the merchant was never consulted (#2706 note:
     // the funding leg now calls selectDelegation itself, keyed on the funding

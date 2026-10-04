@@ -381,6 +381,33 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
     expect(res.statusCode).toBe(502)
   })
 
+  // #3617 owner decision 3 (default): the funding leg's PERIOD pre-check
+  // reads the task budget's parent BY HASH, like POST /payments and the
+  // erc7710 leg — not the (token, payTo) selection, which can name a
+  // different grant (here the wrong-parent one). Before #3617 the funding leg
+  // pre-checked that selection (`fundingDelegation`) and answered 201.
+  it('#3617 3009 funding leg: pre-checks the task budget\'s parent by hash, not the (token, to) selection', async () => {
+    primeTaskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' }))
+    mockReadRemaining.mockImplementation(async (_chain: number, json: string) => {
+      const d = JSON.parse(json) as { delegator: string }
+      // The real parent has 50_000 left; the wrong-parent selection plenty.
+      return d.delegator.toLowerCase() === WRONG_DELEGATOR.toLowerCase()
+        ? { remainingAtomic: '5000000', fromChain: true }
+        : { remainingAtomic: '50000', fromChain: true }
+    })
+    // Answered so the pre-#3617 behaviour (the wrong-parent read passes and
+    // the funding UserOp is prepared) shows as a plain 201, not a setup 403.
+    mockPrepareFunding.mockImplementation(fundingPrepared)
+    mockCreateIntent.mockImplementation(async () => ({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' }))
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error_code: 'delegation_budget_exceeded', remaining_atomic: '50000' })
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+  })
+
   it('#3500: an unreadable chain skips the pre-check on both legs', async () => {
     primeTaskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' }))
     mockReadSpent.mockRejectedValue(new Error('rpc down'))

@@ -8,8 +8,11 @@
  * `resolveSubBudgetOrRefusal` (`modules/x402/delegation-authorize.ts`) and the
  * inline task/sub resolution in `routes/payments.ts` — behaviour unchanged by
  * construction; this slice changes no entrypoint (S-B/S-C/S-D adopt it).
+ * Both copies are gone since the adoptions: `POST /payments` (#3618) and
+ * both `/x402/authorize` legs (#3617, which deleted the two x402 helpers)
+ * resolve through this module.
  *
- * Scope selection (today's `budgetOptions` ternary, `routes/payments.ts:750`):
+ * Scope selection (the `budgetOptions` ternary, `routes/payments.ts:628` as of #3617):
  * a named sub-budget wins over a named task budget over the (token, to)
  * delegation — the entrypoints make both-ids impossible before resolution
  * (`refuseBothScopeIds`), so the sub-first order here is defensive parity, not
@@ -61,7 +64,7 @@ export const TASK_BUDGET_REFUSAL_STATUS: Record<TaskBudgetPaymentRefusal, number
   task_budget_parent_mismatch: 409,
 }
 
-/** #3329 §3: the task-budget refusal messages, verbatim from both current copies. */
+/** #3329 §3: the task-budget refusal messages, verbatim from both former copies. */
 export const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
   task_budget_not_found: 'Task budget not found',
   task_budget_not_open: 'Task budget is not open (closed, closing, pending, or expired)',
@@ -79,7 +82,7 @@ export const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> 
   sub_budget_parent_mismatch: 409,
 }
 
-/** #3330 §3: the sub-budget refusal messages, verbatim from both current copies. */
+/** #3330 §3: the sub-budget refusal messages, verbatim from both former copies. */
 export const SUB_BUDGET_REFUSAL_MESSAGE: Record<SubBudgetPaymentRefusal, string> = {
   sub_budget_not_found: 'Sub-budget not found',
   sub_budget_not_open: 'Sub-budget is not open (closed, closing, pending, or expired)',
@@ -181,8 +184,8 @@ const subRefusal = (code: SubBudgetPaymentRefusal): ScopeRefusal => ({
 
 /**
  * The verbatim both-ids bodies the two entrypoints answer today — the guard
- * runs BEFORE resolution on both (`routes/payments.ts:447`,
- * `delegation-authorize.ts:386`); adopters keep calling this first so the
+ * runs BEFORE resolution on both (`routes/payments.ts:415`,
+ * `delegation-authorize.ts:169`, which calls this since #3617); adopters keep calling this first so the
  * wire prose cannot change.
  */
 export function refuseBothScopeIds(surface: 'payments' | 'x402'): { status: number; body: Record<string, unknown> } {
@@ -221,9 +224,9 @@ export async function resolveBudgetScope(input: BudgetScopeInput): Promise<Budge
   const recipientLower = input.recipient.toLowerCase()
 
   // ── Task budget (#3329) ──────────────────────────────────────────────
-  // Payments copy (`routes/payments.ts:591`) and x402 copy
-  // (`resolveTaskBudgetOrRefusal`) agree step for step: find → parent by the
-  // row's OWN hash → the service payment checks.
+  // The former payments copy and x402 copy (`resolveTaskBudgetOrRefusal`,
+  // deleted in #3617) agreed step for step: find → parent by the row's OWN
+  // hash → the service payment checks.
   if (input.taskBudgetId) {
     const row = await findTaskBudgetForAgent(input.taskBudgetId, input.agentId)
     if (!row) return { ok: false, refusal: taskRefusal('task_budget_not_found') }
@@ -297,4 +300,34 @@ export async function resolveBudgetScope(input: BudgetScopeInput): Promise<Budge
       pinned: delegation?.recipient_address != null,
     },
   }
+}
+
+/**
+ * #3617: the delegation JSONs the PERIOD pre-check reads for a resolved
+ * scope. Both `/x402/authorize` legs take it from here; `routes/payments.ts`
+ * (#3503) still states the same rule inline (`periodBudgetLinks`) — pinned
+ * equal by the x402 and /payments sub-budget route tests, not by a shared
+ * call:
+ *
+ * - sub-budget: every link of the chain it redeems — B's grant, A's
+ *   parent-child and A's budget — each carries its own period caveat, so all
+ *   three are read and the smallest remaining decides
+ *   (`evaluatePeriodPrecheck`);
+ * - task budget: the task budget's PARENT, read by hash (#3329 finding E) —
+ *   the child's own cap is the separate `taskCap` check (#3500);
+ * - none: the (token, recipient) selection, when there is one.
+ *
+ * Never the caller's own (token, recipient) grant when a scope is named: that
+ * grant is not a link of the chain the scope redeems.
+ */
+export function periodPrecheckLinks(scope: BudgetScopeSelections): string[] {
+  if (scope.subBudget) {
+    return [
+      JSON.stringify(scope.subBudget.grantDelegation),
+      JSON.stringify(scope.subBudget.parentChildDelegation),
+      scope.subBudget.parentDelegation.delegation_json,
+    ]
+  }
+  if (scope.taskBudget) return [scope.taskBudget.parentDelegation.delegation_json]
+  return scope.delegation ? [scope.delegation.delegation_json] : []
 }

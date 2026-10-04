@@ -1205,3 +1205,158 @@ issue's verdict comment lists its other corrections):
   edited a served doc, not a docs-only one (#3346).
 - The C-extra-4 "1 vs 9" count-noun figure could not be reproduced, because
   no regex was recorded; it was dropped (#3348).
+
+## 2026-10-03 — whole repo, weighted to the landings since 2026-09-25 (the budget wave of epic #3328 and the ops console; owner request 2026-10-03, no scope named)
+
+Full report: `docs/bug-reports/quality-scan-2026-10-03-whole-repo.md` (it is
+held outside the repo until the owner decides; it carries the file:line
+evidence). This entry stays path-free, per the 2026-09-10 convention.
+Measured on `origin/dev` @ `b00d75bd7` in one isolated detached checkout. The
+checkout was `npm ci`'d, and core and the SDK were built. Mutations were
+restored with `git checkout --` and a `cmp` against a `cp` backup. Real-DB runs
+used a disposable local database, dropped afterwards. GitHub was read-only. No
+live call was made. At the end, `git status --porcelain` → 0.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition, including the 2026-09-15 mock-families item (`accepted-as-debt`).
+None is re-surfaced. The re-measurable deltas are in the coverage record below.
+None worsened materially.
+
+**Structural finding (pending owner decision):**
+- S1 — each payment entrypoint decides its own budget question.
+  - The direct payment route, the two x402 legs and the MPP pre-check each
+    decide which delegation the remaining-budget pre-check reads, whether the
+    task cap applies, which replay is exempt, and how the typed
+    `delegation_budget_exceeded` body is spelled.
+  - The hosted and local tool schemas thread `task_budget_id` /
+    `sub_budget_id` tool by tool.
+  - Parity is kept by comment. One comment says the direct route answers "the
+    same body the x402 legs answer"; another says the pre-check's replay rule
+    is "STRICTER than" the x402 replay's.
+  - Measured:
+    - the typed body is built at 9 sites in 3 files
+      (`git grep -n "error_code: 'delegation_budget_exceeded'"`, non-test,
+      spec excluded → 9);
+    - with a sub-budget there are three different rules for which links the
+      period pre-check reads: all three links with the minimum winning (the
+      direct route), the delegating agent's parent only (x402 erc7710), and
+      the paying agent's own token/recipient selection (x402 EIP-3009 funding
+      leg);
+    - route test files per entrypoint × scope: payments 6 task / 2 sub, x402
+      3 task / **0 sub**.
+  - By execution:
+    - disabling sub-budget resolution on both x402 legs left 27 x402 test
+      files / 403 tests and 4 other sub-budget files / 113 tests green;
+    - the matching direct-route mutation turned its sub-budget suite 3 red of
+      16;
+    - the hosted plain-HTTP pay tool refuses `sub_budget_id` (strict parse),
+      though its handler forwards that key on both branches and the local
+      tool of the same name declares it.
+  - Cost: 11 issues in the class in 7 days, created 2026-09-26 → 10-02 (#3378,
+    #3392, #3464, #3476, #3492, #3500, #3503, #3504, #3518, #3527, #3609; a
+    hand classification). The issue numbers appear 206 times in 40 non-test
+    source files
+    (`git grep -h -o -P '#3(378|392|492|500|503|504|527|609)\b' -- 'packages/*/src/*' ':!*.test.ts' ':!*__tests__*' | wc -l` → 206; `-l` → 40).
+  - Five slices: a shared budget-scope resolver (blocks the rest), x402
+    adoption with the first x402 × sub-budget tests, direct-route adoption, one
+    replay predicate, and an entrypoint × scope × replay matrix ratchet that
+    also covers hosted-vs-local payment tool schemas.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the #3609 source-scan guard for raw error text in responses is
+  key-shaped (`details:` only).
+  - Two probes on the sweep relay's 502 stayed green (4 / 4): a cast form,
+    `details: (err as Error).message`, and the raw text under `error:`.
+  - One response already answers `String(err)` under `error` in the Fortnox
+    voucher push's `failures[]`. Its content is not tested; only the shape is
+    observed.
+  - Context: #3609 is still open.
+- C2 — the ops on-chain view's single-flight cache test is timing-flaky. It
+  asserts deep equality across two calls whose `generated_at` is stamped per
+  call with no injected clock. It turned `dev` CI red twice in the last 200
+  `ci.yml` runs (runs 37023532565, 36969879117; the diff in both is 1 ms of
+  `generated_at`). Untracked.
+- C3 — the hosted plain-HTTP pay tool refuses `sub_budget_id`, which its
+  handler forwards and the local tool declares (S1's concrete defect). The
+  owner decides whether to declare it or delete the forwarding. Untracked.
+- Context, not proposed: qa-dev `money-flow` → 15 failure / 85 skipped /
+  0 success over the last 100 runs (since 2026-10-02T12:47Z), all at the
+  harness preflight (QA wallet USDC below its floor). The #3609 deploy is not
+  QA-exercised. The remedy is the operator top-up; tracked on #2769 (17 bot
+  comments, 0 human, in the window).
+
+**Probed clean** (block → command → number, all at `b00d75bd7`):
+- sizing → the 09-22 command, pinned with `git ls-tree`/`git show`. The
+  control at `2cc23374` reproduces backend 80,798 / 101,079. Now: backend
+  101,373 / 127,733 (+25 % / +26 % in 8 days); frontend 60,143 / 54,473; sdk
+  16,876 / 18,196; core 23,676 / 500; qa-agent 8,567 / 6,513; mcp-server
+  10,123 / 19,659; signer 4,664 / 7,767; connect 11,620 / 14,592; cli
+  2,643 / 2,651.
+- block 1 (guard falsifiability) → examined. The census script gives 15
+  candidate files. 5 mutations, one per file, newest landing first:
+  - **4 caught**: raw-details guard 1 red of 4; prepare-failure redaction 2
+    of 17; x402 task-cap erc7710 1 of 11; hosted PREPARE_REVERTED mapping 1 of
+    20.
+  - **1 survivor in its named file**: the direct route's sub-budget
+    min-of-links, 11 / 11 in the period-budget file. Diagnosis: *not
+    load-bearing at the tested condition*. The sibling sub-budget suite
+    catches it, 3 red.
+  - 10 census files were not mutated (budget is 5).
+- block 2 (`covers:` completeness) → examined. The reference loop under bash
+  with `set -f`, each miss confirmed with the strict gate → 18 across 6 of 8
+  contract docs (unchanged from 09-25). Two raw "misses" were glob strings,
+  not paths. `npm run docs:covers-gaps` → 134 pairs / 36 docs (09-25:
+  138 / 36).
+- block 3 (stale numbers) → partial.
+  - The positive control matches all 3 specimens.
+  - The 25 newest shards give 1 figure line, and it is a false match; 0 have
+    a command.
+  - Blind spot: the newest shard's `label: N;` list of about 26 mutation
+    counts is unmatched. One of those counts was re-derived (the sweep-relay
+    raw-variable mutation: 1, equal to this run's M1).
+  - `any` 24 → 30 (code lines 6 → 10). db-mock gauge 54 / 273 / 57 →
+    54 / 270 / 57.
+- block 4 (retired vocabulary) → examined. Positive control 36 shards.
+  194 files, 46 historical / 148 live (+2 live: a demo page and a hosted test;
+  a Button moved packages). The ratchet is green below baseline. The three
+  x402 repository exports still have 0 non-test importers; one gained a new
+  comment that names it as a live writer.
+- block 5 (merge-method drift) → examined. Since 2026-09-25T00:00:00Z →
+  0 merge-commit / 169 squash (clean). Since 2026-08-10T00:00:00Z →
+  282 / 895 of 1,180.
+- block 6 (nets with holes) → examined, all four reference halves plus four
+  probes:
+  - copy lint 98 unscanned / 6 with hits;
+  - money perimeter 32 verb files / 20 outside (the new one is a comment
+    hit);
+  - visual gate 15 of 31 frontend routes;
+  - docs boundary 39 (unchanged);
+  - freshness-gate exit branches unchanged;
+  - probes as in C1, C3 and S1;
+  - the ops app's routes are outside the visual measure (not examined).
+- incident clustering → issues created since 2026-09-25 → 147 (131 closed /
+  16 open). The untracked recurring class is S1.
+- workflow archaeology → `ci.yml` last 200 → 8 with attempt > 1 (all feature
+  branches), 18 failures, 4 on `dev` (2 = C2, 1 = the budget-suite race fixed
+  in `b00d75bd7`, 1 design-visual not diagnosed). qa-dev is read at the
+  `money-flow` job level (see Context).
+- comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
+  1,844 files).
+- live exercise → not taken.
+- Novelty: tracker checked (open issues 25, open PRs 2, issue searches named
+  in the report). Bug-report bodies were not re-read, so novelty against them
+  is unverified.
+
+Instrument lessons:
+- An unquoted `$T` in zsh passes the whole file list as one argument, and
+  vitest answers "No test files found" with exit 1. Not a green, but it reads
+  as nothing ran — use `${=T}`.
+- Slicing a refusal message at 160 characters hid a declared key and nearly
+  produced a false claim. Read the full text before asserting a list.
+- The block-3 regex still misses the `label: N;` list shape the newest
+  measured shard uses.
+
+**Dispositions (owner decision 2026-10-03):**
+- **S1 → filed** as epic [#3615](https://github.com/d-hinders/Haven-AI/issues/3615), slices #3616–#3620 (backlog, `pending-review`); spec-review verdict posted on the epic (34 claims re-run, 5 corrected, `## Threat model` added).
+- **C3 → folded into #3617** as an explicit acceptance item (declare `sub_budget_id` on hosted `haven_pay_x402_quote`, or delete the dead forwarding); that choice is owner decision 2 on the epic and blocks the slice.
+- **C1, C2 → not filed.** The owner chose to file S1 only; no `accepted-as-debt` or `rejected` disposition has been recorded for either, so both remain open for a later decision and stay excluded from re-surfacing only as prior art.

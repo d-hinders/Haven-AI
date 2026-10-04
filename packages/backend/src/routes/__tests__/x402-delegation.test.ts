@@ -941,7 +941,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     const authorize = async (payload: Record<string, unknown>) => {
       mockCreateIntent.mockClear()
       mockSelect.mockResolvedValue(budgetRow)
-      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+      mockPrepareFunding.mockResolvedValue(PREPARED)
       mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',

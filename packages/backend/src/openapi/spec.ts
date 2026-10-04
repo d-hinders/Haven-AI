@@ -1404,7 +1404,14 @@ const agentPaymentStatus = {
     amount_atomic: { type: ['string', 'null'] },
     asset: { anyOf: [address, { type: 'null' }] },
     network: { type: ['string', 'null'] },
-    description: { type: ['string', 'null'] },
+    description: {
+      type: ['string', 'null'],
+      description:
+        "What the payment was for, in the merchant's own words — untrusted display text. On x402 it is the " +
+        "402's `resource.description` (persisted at authorize since #3610; read from the stored 402 on older " +
+        'rows), control and bidi characters stripped, trimmed and cut at 300 code points plus an ellipsis. ' +
+        'Null when the merchant gave none.',
+    },
     idempotency_key: { type: ['string', 'null'] },
     x402: { $ref: '#/components/schemas/RailContext' },
     // #2888: flat and closed, NOT `allOf: [RailContext, {...}]` — an allOf
@@ -11394,7 +11401,12 @@ export const openapiSpec = {
           network: { type: ['string', 'null'] },
           resource_url: { type: ['string', 'null'], format: 'uri' },
           merchant_address: { anyOf: [address, { type: 'null' }] },
-          description: { type: ['string', 'null'] },
+          description: {
+            type: ['string', 'null'],
+            description:
+              'The same value as the status `description` (#3610): the merchant\'s resource description, ' +
+              'untrusted display text, cut at 300 code points plus an ellipsis; null when the merchant gave none.',
+          },
           idempotency_key: { type: ['string', 'null'] },
         },
         additionalProperties: false,
@@ -11463,7 +11475,13 @@ export const openapiSpec = {
           },
           asset: address,
           network: { type: 'string', examples: ['base', 'eip155:8453'] },
-          description: { type: 'string' },
+          description: {
+            type: 'string',
+            description:
+              "The 402's `resource.description` (untrusted merchant text). Persisted, with control and bidi characters " +
+              'stripped, trimmed and cut at 300 code points plus an ellipsis, as the payment status `description` (#3610); when omitted, the stored `paymentRequired`\'s ' +
+              '`resource.description` is used.',
+          },
           // #3031: `integer` was the spec's claim, never the route's rule —
           // the handler accepted any finite number and clamped it. Stated as
           // it behaves. `minimum: 1` restores the HARMFUL half of the deleted

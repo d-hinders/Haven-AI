@@ -4919,6 +4919,7 @@ export type components = {
             /** Format: uri */
             resource_url: string | null;
             merchant_address: string | null;
+            /** @description The same value as the status `description` (#3610): the merchant's resource description, untrusted display text, cut at 300 code points plus an ellipsis; null when the merchant gave none. */
             description: string | null;
             idempotency_key: string | null;
         };
@@ -4995,6 +4996,7 @@ export type components = {
             amount_atomic?: string | null;
             asset?: string | null;
             network?: string | null;
+            /** @description What the payment was for, in the merchant's own words — untrusted display text. On x402 it is the 402's `resource.description` (persisted at authorize since #3610; read from the stored 402 on older rows), control and bidi characters stripped, trimmed and cut at 300 code points plus an ellipsis. Null when the merchant gave none. */
             description?: string | null;
             idempotency_key?: string | null;
             x402?: components["schemas"]["RailContext"];
@@ -5061,6 +5063,7 @@ export type components = {
              * @example eip155:8453
              */
             network: string;
+            /** @description The 402's `resource.description` (untrusted merchant text). Persisted, with control and bidi characters stripped, trimmed and cut at 300 code points plus an ellipsis, as the payment status `description` (#3610); when omitted, the stored `paymentRequired`'s `resource.description` is used. */
             description?: string;
             maxTimeoutSeconds?: number;
             category?: string;

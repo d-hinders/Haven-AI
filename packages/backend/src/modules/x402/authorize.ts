@@ -49,7 +49,7 @@ export interface AuthorizeX402Input {
 
 export async function authorizeX402(input: AuthorizeX402Input): Promise<X402HandlerResult> {
   const {
-    agent, url, payTo, merchantPayTo, amount, asset, network, category,
+    agent, url, payTo, merchantPayTo, amount, asset, network, description, category,
     idempotencyKey, maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses,
     mcpCallContext, paymentRequired, taskBudgetId, subBudgetId,
   } = input
@@ -142,7 +142,7 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
   // to `retired_allowance` and is refused above. The exhaustion is what makes
   // this terminal safe; it is not a claim that unknown rails route here.
   return runDelegationAuthorize({
-    agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
+    agent, url, payTo, merchantPayTo, amountRaw, amountHuman, description, category, idempotencyKey,
     maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
     mcpCallContext, paymentRequired, taskBudgetId, subBudgetId,
   })

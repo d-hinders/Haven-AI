@@ -76,6 +76,19 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3610 (2026-10-02, x402 status description):** this diff
+> touches `packages/backend/src/modules/x402/delegation-authorize.ts` and
+> `modules/payments/agent-payment-status.ts`, covered files: authorize now
+> persists `machine_metadata.description` (the body's `description`, else the
+> stored 402's `resource.description`, control/bidi characters stripped, cut at
+> 300 code points plus an ellipsis) and the
+> status reader falls back to the stored 402 on older rows. The status
+> response's `description` / `x402.description` fields already existed and
+> keep their shape (`string | null`); only their values for plain-HTTP x402
+> payments change, from `null` to the merchant's text. No tool, schema shape,
+> version-skew or consent-hash contract moves. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3609 (2026-10-02, the typed prepare 502):** the backend's
 > delegation-rail prepare 502 (`POST /payments`, the x402 EIP-3009 funding
 > leg) gains an `error_code`: `prepare_reverted` (the redemption reverted in

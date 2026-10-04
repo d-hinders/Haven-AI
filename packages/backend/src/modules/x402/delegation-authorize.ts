@@ -30,6 +30,7 @@ import {
   AgentPaymentPhase,
   AgentPaymentRail,
 } from '../../domain/agent-payment-taxonomy.js'
+import { x402Description } from '../../domain/x402-description.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
@@ -99,6 +100,8 @@ export interface DelegationAuthorizeInput {
   merchantPayTo?: string
   amountRaw: bigint
   amountHuman: string
+  /** #3610: the merchant's resource description, persisted as `machine_metadata.description`. */
+  description?: string
   category?: string
   idempotencyKey?: string
   maxTimeoutSeconds?: number
@@ -298,10 +301,14 @@ async function resolveSubBudgetOrRefusal(
 
 export async function runDelegationAuthorize(input: DelegationAuthorizeInput): Promise<X402HandlerResult> {
   const {
-    agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
+    agent, url, payTo, merchantPayTo, amountRaw, amountHuman, description, category, idempotencyKey,
     maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
     mcpCallContext, paymentRequired, taskBudgetId, subBudgetId,
   } = input
+  // #3610: what was bought, in the merchant's words — the body's description,
+  // else the stored 402's `resource.description`. Untrusted, bounded display
+  // text, persisted so the payment status can say what the payment was for.
+  const intentDescription = x402Description(description, paymentRequired)
 
   if (tokenAddress === ZERO_ADDRESS) {
     return { code: 400, body: { error: 'Native-token x402 is not supported on the delegation rail' } }
@@ -696,6 +703,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // leg mints the UserOp for, computed above as `fundingAuth.prepared.delegateAccountAddress`.
       metadata: {
         network,
+        description: intentDescription,
         settlement_scheme: 'eip3009',
         mcp_call_context: mcpCallContext ?? null,
         payment_required: paymentRequired ?? null,
@@ -1148,6 +1156,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // one the merchant's PAYMENT-RESPONSE.payer names on this scheme.
     metadata: {
       network,
+      description: intentDescription,
       settlement_scheme: 'erc7710',
       mcp_call_context: mcpCallContext ?? null,
       payment_required: paymentRequired ?? null,

@@ -386,6 +386,15 @@ describe('x402 authorize with subBudgetId (#3617)', () => {
     expect((await pay(funding)).statusCode).toBe(201)
   })
 
+  // ── both ids ─────────────────────────────────────────────────────────────
+  it('taskBudgetId AND subBudgetId → 400 with the verbatim x402 prose, before any budget read', async () => {
+    const res = await pay({ taskBudgetId: 'tb-1' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'Pass exactly one of taskBudgetId or subBudgetId — never both' })
+    expect(mockReadRemaining).not.toHaveBeenCalled()
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
   // ── (d) replay ───────────────────────────────────────────────────────────
   it('(d): a replay of a confirmed sub-budget intent answers its stored result, before any budget decision', async () => {
     primeDb({

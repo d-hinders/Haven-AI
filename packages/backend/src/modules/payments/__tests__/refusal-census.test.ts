@@ -101,7 +101,7 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // resolveTaskBudgetOrRefusal, then the funding leg's cap input + pre-check
     // and revert fallback, and the erc7710 pre-check — shifting every refuse(
     // site below by +71 to +93 (and the raw 429 allowlist entry by +56).
-    { line: 113, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — shared by both legs' pre-checks and the funding revert fallback
+    { line: 114, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — shared by both legs' pre-checks and the funding revert fallback
     { line: 346, code: 403, ledger: 'row' }, // 3009 funding-leg pre-check: over budget (#2706)
     { line: 408, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
     // #3609 split the 3009 prepare catch's 502 in two: the unbooked
@@ -112,7 +112,7 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // #3617 moved both legs onto the shared budget-scope resolver
     // (modules/budget-scope): the local task/sub-budget refusal tables and
     // resolve*OrRefusal helpers were deleted and each leg's period pre-check
-    // collapsed into evaluatePeriodPrecheck, shifting every site by −101 to
+    // collapsed into evaluatePeriodPrecheck, shifting every site by −100 to
     // −193 (and the raw 429 allowlist entry by −151). No refuse( site was
     // added or removed.
     { line: 442, code: 502, ledger: 'skipped' }, // #3609 3009 prepare catch: not a revert (bundler/RPC) — prepare_failed, allowlisted

@@ -8,6 +8,9 @@
  * `resolveSubBudgetOrRefusal` (`modules/x402/delegation-authorize.ts`) and the
  * inline task/sub resolution in `routes/payments.ts` — behaviour unchanged by
  * construction; this slice changes no entrypoint (S-B/S-C/S-D adopt it).
+ * Both copies are gone since the adoptions: `POST /payments` (#3618) and
+ * both `/x402/authorize` legs (#3617, which deleted the two x402 helpers)
+ * resolve through this module.
  *
  * Scope selection (today's `budgetOptions` ternary, `routes/payments.ts:750`):
  * a named sub-budget wins over a named task budget over the (token, to)
@@ -182,7 +185,7 @@ const subRefusal = (code: SubBudgetPaymentRefusal): ScopeRefusal => ({
 /**
  * The verbatim both-ids bodies the two entrypoints answer today — the guard
  * runs BEFORE resolution on both (`routes/payments.ts:447`,
- * `delegation-authorize.ts:386`); adopters keep calling this first so the
+ * `delegation-authorize.ts:166`, which calls this since #3617); adopters keep calling this first so the
  * wire prose cannot change.
  */
 export function refuseBothScopeIds(surface: 'payments' | 'x402'): { status: number; body: Record<string, unknown> } {
@@ -221,9 +224,9 @@ export async function resolveBudgetScope(input: BudgetScopeInput): Promise<Budge
   const recipientLower = input.recipient.toLowerCase()
 
   // ── Task budget (#3329) ──────────────────────────────────────────────
-  // Payments copy (`routes/payments.ts:591`) and x402 copy
-  // (`resolveTaskBudgetOrRefusal`) agree step for step: find → parent by the
-  // row's OWN hash → the service payment checks.
+  // The former payments copy and x402 copy (`resolveTaskBudgetOrRefusal`,
+  // deleted in #3617) agreed step for step: find → parent by the row's OWN
+  // hash → the service payment checks.
   if (input.taskBudgetId) {
     const row = await findTaskBudgetForAgent(input.taskBudgetId, input.agentId)
     if (!row) return { ok: false, refusal: taskRefusal('task_budget_not_found') }

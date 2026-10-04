@@ -42,6 +42,7 @@ import {
   evaluatePeriodPrecheck,
   periodExceededLedgerDetail,
   periodPrecheckLinks,
+  refuseBothScopeIds,
   resolveBudgetScope,
   type BudgetScopeInput,
   type ScopeRefusal,
@@ -162,12 +163,11 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   if (tokenAddress === ZERO_ADDRESS) {
     return { code: 400, body: { error: 'Native-token x402 is not supported on the delegation rail' } }
   }
-  // #3330: exactly one authorizing child per settlement.
+  // #3330: exactly one authorizing child per settlement. The body is the
+  // module's verbatim x402 prose (#3617).
   if (taskBudgetId && subBudgetId) {
-    return {
-      code: 400,
-      body: { error: 'Pass exactly one of taskBudgetId or subBudgetId — never both' },
-    }
+    const both = refuseBothScopeIds('x402')
+    return { code: both.status, body: both.body }
   }
 
   // ── Scheme routing (#946) ────────────────────────────────────────────

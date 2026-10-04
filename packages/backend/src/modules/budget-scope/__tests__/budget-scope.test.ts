@@ -42,7 +42,7 @@ vi.mock('../../../rails/delegation-authorization.js', () => ({
   prepareDelegationPayment: vi.fn(),
 }))
 
-const { resolveBudgetScope, refuseBothScopeIds } = await import('../index.js')
+const { resolveBudgetScope, refuseBothScopeIds, periodPrecheckLinks } = await import('../index.js')
 
 const AGENT_ID = '11111111-1111-1111-1111-111111111111'
 const TOKEN = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
@@ -331,5 +331,34 @@ describe('none scope (the (token, recipient) selection)', () => {
     if (!r.ok) return
     expect(r.scope.delegation).toBeNull()
     expect(r.scope.pinned).toBe(false)
+  })
+})
+
+describe('periodPrecheckLinks (#3617: the link rule both x402 legs share)', () => {
+  const row = (json: string) => ({ delegation_hash: BUDGET_HASH, delegation_json: json, recipient_address: null, budget_atomic: '1' })
+  const grant = { delegate: '0x' + 'b1'.repeat(20), delegator: '0x' + 'a1'.repeat(20), authority: PC_HASH, caveats: [], salt: '0x1', signature: '0x' }
+  const pc = { delegate: '0x' + 'a1'.repeat(20), delegator: '0x' + 'a1'.repeat(20), authority: BUDGET_HASH, caveats: [], salt: '0x2', signature: '0x' }
+
+  it('a sub-budget reads all three links of the chain it redeems, leaf first', () => {
+    const parent = row(delegationJson('0x' + 'aa'.repeat(20), '0x3'))
+    expect(
+      periodPrecheckLinks({ kind: 'subBudget', subBudget: { grantDelegation: grant as never, parentChildDelegation: pc as never, parentDelegation: parent } }),
+    ).toEqual([JSON.stringify(grant), JSON.stringify(pc), parent.delegation_json])
+  })
+
+  it('a task budget reads only its parent (the child cap is the separate taskCap check)', () => {
+    const parent = row(delegationJson('0x' + 'aa'.repeat(20), '0x4'))
+    expect(
+      periodPrecheckLinks({
+        kind: 'taskBudget',
+        taskBudget: { childDelegation: grant as never, parentDelegation: parent, taskCap: { taskBudgetId: 't', delegationHash: CHILD_HASH, maxAtomic: '1' } },
+      }),
+    ).toEqual([parent.delegation_json])
+  })
+
+  it('the none scope reads its selection, or nothing when there is none', () => {
+    const sel = row(delegationJson('0x' + 'aa'.repeat(20), '0x5'))
+    expect(periodPrecheckLinks({ kind: 'none', delegation: sel })).toEqual([sel.delegation_json])
+    expect(periodPrecheckLinks({ kind: 'none', delegation: null })).toEqual([])
   })
 })

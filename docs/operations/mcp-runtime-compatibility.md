@@ -76,6 +76,28 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3617 (2026-10-04, hosted `sub_budget_id` forwarding
+> deleted):** `packages/mcp-server/src/tools/plain-http-x402.ts` no longer
+> forwards `sub_budget_id` to `prepareX402Erc7710` or `createX402Intent`.
+> The hosted `haven_pay_x402_quote` schema never declared the key, so
+> `parseStrict` refused it before either call. The deleted lines could not
+> run, and no caller's behaviour changes: the refusal names the key and makes
+> zero Haven calls, now pinned in `plain-http-x402.test.ts`. The tool's
+> description gains one sentence saying a sub-agent pays x402 through the
+> local MCP's `haven_pay_x402` tools. It was trimmed elsewhere to stay under
+> the #1591 description budget, and the `haven_get_allowances` routing hint
+> stays. The local runtime's `haven_pay_x402_quote` and `haven_pay_x402`
+> still take `sub_budget_id` (#3330), so the #3330 entry below holds for the
+> local pay tools only. No tool is added, removed or renamed. The
+> strict/permissive split, the schemas, the expected-context versions and the
+> consent hash do not move. The backend half of #3617 (both
+> `/x402/authorize` legs on the budget-scope resolver) adds no response
+> shape: what changes is which existing answer a scoped request gets. Over
+> B's slice it is now the typed 403 `delegation_budget_exceeded` with no
+> `sign_data`, and a B without its own grant now gets the 201 on erc7710.
+> The hosted MCP already parses that 403 (#3504). `last-verified` stays 2026-10-02. Nothing else in this
+> document was re-verified.
+
 > **Re-verified #3619 (2026-10-04, one settled-replay rule; pre-check 403
 > through the #3616 builder):** this diff touches
 > `packages/backend/src/modules/mpp/budget-precheck.ts` (covered file): the

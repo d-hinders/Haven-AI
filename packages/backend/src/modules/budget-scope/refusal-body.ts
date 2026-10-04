@@ -1,19 +1,21 @@
 /**
  * The `delegation_budget_exceeded` 403 body builders (#3616, epic #3615 S-A).
  *
- * Today this body is hand-built at nine sites in three files — five response
- * bodies and four ledger `detail` objects (the sign-leg fallback books no
- * ledger row, `refuse(..., null)`):
+ * Before the adoptions this body was hand-built at nine sites in three files —
+ * five response bodies and four ledger `detail` objects (the sign-leg fallback
+ * books no ledger row, `refuse(..., null)`). Rows 1–2 call the builders since
+ * #3618 and rows 4–7 since #3617; rows 1–7 carry line numbers as of #3617,
+ * rows 8–9 pre-adoption ones:
  *
  * | # | Site | Kind |
  * |---|------|------|
- * | 1 | `routes/payments.ts:783` create-time period pre-check | `direct` body |
- * | 2 | `routes/payments.ts:818` create-time ledger detail | `periodExceededLedgerDetail` |
- * | 3 | `routes/payments.ts:1445` sign-leg period revert fallback (502) | `payments-sign-leg` body |
- * | 4 | `modules/x402/delegation-authorize.ts:486` EIP-3009 funding-leg pre-check | `x402` body |
- * | 5 | `modules/x402/delegation-authorize.ts:526` its ledger detail | `periodExceededLedgerDetail` |
- * | 6 | `modules/x402/delegation-authorize.ts:930` erc7710 pre-check | `x402` body |
- * | 7 | `modules/x402/delegation-authorize.ts:969` its ledger detail | `periodExceededLedgerDetail` |
+ * | 1 | `routes/payments.ts:669` create-time period pre-check | `direct` body |
+ * | 2 | `routes/payments.ts:691` create-time ledger detail | `periodExceededLedgerDetail` |
+ * | 3 | `routes/payments.ts:1314` (its `error_code`) sign-leg period revert fallback (502) | `payments-sign-leg` body |
+ * | 4 | `modules/x402/delegation-authorize.ts:331` EIP-3009 funding-leg pre-check | `x402` body |
+ * | 5 | `modules/x402/delegation-authorize.ts:359` its ledger detail | `periodExceededLedgerDetail` |
+ * | 6 | `modules/x402/delegation-authorize.ts:759` erc7710 pre-check | `x402` body |
+ * | 7 | `modules/x402/delegation-authorize.ts:784` its ledger detail | `periodExceededLedgerDetail` |
  * | 8 | `modules/mpp/budget-precheck.ts:404` hosted prepare | `mpp` body |
  * | 9 | `modules/mpp/budget-precheck.ts:449` its ledger detail | `periodExceededLedgerDetail` |
  *

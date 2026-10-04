@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
+  - packages/backend/src/modules/budget-scope/**
   - packages/backend/src/modules/task-budgets/**
   - packages/backend/src/routes/task-budgets.ts
   - packages/backend/src/routes/agent-sub-budgets.ts
@@ -2296,6 +2297,21 @@ itself redeems `[grant, parent-child, budget]` (three links).
    child (its chain root no longer resolves active by hash, and reverts
    on-chain once the owner's disable lands) — surfaced as the structured 409
    above.
+   On `POST /x402/authorize` both legs resolve the scope through
+   `modules/budget-scope` (#3617) and pre-check the links the redemption
+   carries (`periodPrecheckLinks`): B's grant, A's parent-child and A's budget,
+   with the smallest remaining deciding and each link failing open on its
+   own, the rule `POST /payments` applies. A task budget pre-checks its parent
+   by hash on both legs too. Before #3617 the erc7710 leg read only A's budget,
+   and the EIP-3009 funding leg read B's own (token, `payTo`) grant, which is
+   not a link of the chain it redeems. On the erc7710 leg the scope now
+   resolves before the no-delegation refusal, so a B with no
+   `agent_delegations` row of its own pays through its sub-budget, and a
+   scope refusal comes before `no_delegation_for_target`. The funding leg
+   matches the scope's recipient pin against `payTo`, the delegate EOA that
+   leg's redemption transfers to; a merchant-pinned budget reverts there
+   on-chain either way. The hosted `haven_pay_x402_quote` takes no
+   `sub_budget_id`, so B pays x402 through the local MCP.
 4. `DELETE /agents/:id/sub-budgets/:sub` (owner) or `POST
    /sub-budgets/:id/close` (the owning agent, A or B) prepares a sponsored
    `disableDelegation(child)` UserOp from the closing agent's OWN delegate

@@ -83,6 +83,27 @@ function settledReplayBody(resourceUrl: string, over: Record<string, unknown> = 
 }
 
 describe('haven_pay_x402_quote', () => {
+  it('#3617: refuses sub_budget_id before any Haven call — sub-budgets pay x402 through the local MCP only', async () => {
+    // Owner decision 2 on epic #3615: the forwarding #3330 added was dead (the
+    // tool never declared the key, so parseStrict refused it first) and was
+    // deleted rather than declared. Pin the refusal so a later declaration is
+    // a deliberate contract change, not a silent one.
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const payload = await handlers().haven_pay_x402_quote({
+      payment_required: PAYMENT_REQUIRED,
+      sub_budget_id: 'sb_1',
+    } as never)
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.message).toContain('haven_pay_x402_quote does not accept "sub_budget_id"')
+    expect(recordedCalls()).toEqual([])
+  })
+
   it('rejects with PRICE_EXCEEDS_MAX before funding when the option price is above max_amount', async () => {
     stubFetch({
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },

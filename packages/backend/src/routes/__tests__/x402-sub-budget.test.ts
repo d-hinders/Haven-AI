@@ -238,16 +238,12 @@ function body(overrides: Record<string, unknown> = {}) {
 }
 const funding = { payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }
 
-// CHARACTERIZATION COMMIT (#3617): the `it.fails` cases are today's
-// behaviour on `origin/dev` @ 5625382e7, measured — each asserts the
-// intended rule and FAILS against the current code:
-// - erc7710 over B's slice (or A's parent-child link) → 201 WITH sign_data:
-//   the pre-check reads only A's budget delegation;
-// - erc7710 with no agent_delegations row for B → 403 no_delegation_for_target
-//   before the sub-budget is ever resolved;
-// - the funding leg pre-checks B's OWN (token, payTo) grant — it neither
-//   refuses over B's slice nor ignores an unrelated, nearly spent own grant.
-// The adoption commit removes `.fails`.
+// Before #3617 (measured at 5625382e7, the characterization commit of this
+// PR): the erc7710 leg read only A's budget delegation, so a payment over B's
+// slice or A's parent-child link came back 201 WITH sign_data; a B with no
+// agent_delegations row of its own was refused 403 no_delegation_for_target
+// before its sub-budget resolved; and the funding leg pre-checked B's own
+// (token, payTo) grant whatever the scope.
 describe('x402 authorize with subBudgetId (#3617)', () => {
   let app: FastifyInstance
   beforeAll(async () => {
@@ -307,7 +303,7 @@ describe('x402 authorize with subBudgetId (#3617)', () => {
     expect(state.subBudget.parentChildDelegation.authority).toBe(BUDGET_HASH)
   })
 
-  it.fails('erc7710 (b): over B\'s slice but under A\'s budget → typed 403 delegation_budget_exceeded, no sign_data', async () => {
+  it('erc7710 (b): over B\'s slice but under A\'s budget → typed 403 delegation_budget_exceeded, no sign_data', async () => {
     remainingByLink({ grant: '50000' }) // 50_000 left on B's slice, 100_000 asked
     const res = await pay()
     expect(res.statusCode).toBe(403)
@@ -317,21 +313,21 @@ describe('x402 authorize with subBudgetId (#3617)', () => {
     await vi.waitFor(() => expect(refusalRows()).toHaveLength(1))
   })
 
-  it.fails('erc7710 (b2): over A\'s parent-child link → the same 403 (every link is read, the smallest decides)', async () => {
+  it('erc7710 (b2): over A\'s parent-child link → the same 403 (every link is read, the smallest decides)', async () => {
     remainingByLink({ parentChild: '70000' })
     const res = await pay()
     expect(res.statusCode).toBe(403)
     expect(res.json()).toMatchObject({ error_code: 'delegation_budget_exceeded', remaining_atomic: '70000' })
   })
 
-  it.fails('erc7710 (c): one link\'s read degraded → the others decide (fail open per link)', async () => {
+  it('erc7710 (c): one link\'s read degraded → the others decide (fail open per link)', async () => {
     remainingByLink({ grant: 'throw', parentChild: '70000' })
     expect((await pay()).statusCode).toBe(403)
     remainingByLink({ grant: 'throw' })
     expect((await pay()).statusCode).toBe(201)
   })
 
-  it.fails('erc7710: B with NO agent_delegations row of its own still pays through its sub-budget', async () => {
+  it('erc7710: B with NO agent_delegations row of its own still pays through its sub-budget', async () => {
     mockSelect.mockResolvedValue(null)
     const res = await pay()
     expect(res.statusCode).toBe(201)
@@ -362,7 +358,7 @@ describe('x402 authorize with subBudgetId (#3617)', () => {
     )
   })
 
-  it.fails('3009 funding (b): over B\'s slice → typed 403 delegation_budget_exceeded before any funding UserOp, naming the merchant', async () => {
+  it('3009 funding (b): over B\'s slice → typed 403 delegation_budget_exceeded before any funding UserOp, naming the merchant', async () => {
     remainingByLink({ grant: '50000' })
     const res = await pay(funding)
     expect(res.statusCode).toBe(403)
@@ -372,14 +368,14 @@ describe('x402 authorize with subBudgetId (#3617)', () => {
     expect(refusalRows()[0]![1]).toContain(MERCHANT.toLowerCase())
   })
 
-  it.fails('3009 funding (c): one link\'s read degraded → the others decide', async () => {
+  it('3009 funding (c): one link\'s read degraded → the others decide', async () => {
     remainingByLink({ parentChild: 'throw', grant: '50000' })
     expect((await pay(funding)).statusCode).toBe(403)
     remainingByLink({ parentChild: 'throw' })
     expect((await pay(funding)).statusCode).toBe(201)
   })
 
-  it.fails('3009 funding: the pre-check reads the sub-budget chain, never B\'s own (token, payTo) grant', async () => {
+  it('3009 funding: the pre-check reads the sub-budget chain, never B\'s own (token, payTo) grant', async () => {
     remainingByLink({ bOwn: '1' })
     expect((await pay(funding)).statusCode).toBe(201)
     expect(mockReadRemaining.mock.calls.map((c) => linkOf(c[1] as string))).not.toContain('bOwn')

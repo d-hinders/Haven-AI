@@ -298,3 +298,31 @@ export async function resolveBudgetScope(input: BudgetScopeInput): Promise<Budge
     },
   }
 }
+
+/**
+ * #3617: the delegation JSONs the PERIOD pre-check reads for a resolved
+ * scope — the rule `routes/payments.ts` (#3503) applies, now shared with
+ * both `/x402/authorize` legs so the three cannot drift apart:
+ *
+ * - sub-budget: every link of the chain it redeems — B's grant, A's
+ *   parent-child and A's budget — each carries its own period caveat, so all
+ *   three are read and the smallest remaining decides
+ *   (`evaluatePeriodPrecheck`);
+ * - task budget: the task budget's PARENT, read by hash (#3329 finding E) —
+ *   the child's own cap is the separate `taskCap` check (#3500);
+ * - none: the (token, recipient) selection, when there is one.
+ *
+ * Never the caller's own (token, recipient) grant when a scope is named: that
+ * grant is not a link of the chain the scope redeems.
+ */
+export function periodPrecheckLinks(scope: BudgetScopeSelections): string[] {
+  if (scope.subBudget) {
+    return [
+      JSON.stringify(scope.subBudget.grantDelegation),
+      JSON.stringify(scope.subBudget.parentChildDelegation),
+      scope.subBudget.parentDelegation.delegation_json,
+    ]
+  }
+  if (scope.taskBudget) return [scope.taskBudget.parentDelegation.delegation_json]
+  return scope.delegation ? [scope.delegation.delegation_json] : []
+}

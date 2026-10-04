@@ -13,7 +13,7 @@ import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } 
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../../rails/delegation-rail.js'
-import { selectDelegation, selectDelegationByHash, prepareDelegationPayment } from '../../rails/delegation-authorization.js'
+import { prepareDelegationPayment } from '../../rails/delegation-authorization.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../../rails/hybrid-provisioning.js'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 import {
@@ -25,11 +25,6 @@ import {
 import { serializeUserOp } from '../../rails/execution-rail.js'
 import { insertMachineIntent as createPaymentIntent } from '../../infra/repositories/payment-intents.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
-import {
-  AgentPaymentNextAction,
-  AgentPaymentPhase,
-  AgentPaymentRail,
-} from '../../domain/agent-payment-taxonomy.js'
 import { x402Description } from '../../domain/x402-description.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
@@ -41,57 +36,18 @@ import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
-import { findForAgent as findTaskBudgetForAgent } from '../../infra/repositories/task-budgets.js'
+import { checkTaskBudgetCap, taskBudgetExceededBody } from '../task-budgets/index.js'
 import {
-  findForAgent as findSubBudgetForAgent,
-  findOpenParentChildByHash,
-} from '../../infra/repositories/sub-budgets.js'
-import {
-  checkTaskBudgetCap,
-  resolveTaskBudgetChildForPayment,
-  taskBudgetExceededBody,
-  type TaskBudgetPaymentRefusal,
-} from '../task-budgets/index.js'
-import {
-  resolveSubBudgetForPayment,
-  type SubBudgetPaymentRefusal,
-} from '../sub-budgets/index.js'
-import type { Delegation } from '@metamask/smart-accounts-kit'
+  buildPeriodExceededBody,
+  evaluatePeriodPrecheck,
+  periodExceededLedgerDetail,
+  periodPrecheckLinks,
+  resolveBudgetScope,
+  type BudgetScopeInput,
+  type ScopeRefusal,
+} from '../budget-scope/index.js'
 
 type ResolvedToken = Extract<ResolvePaymentTokenResult, { ok: true }>
-
-/** #3329 §3: the refusal table's HTTP status per code, x402's own copy (matches routes/payments.ts). */
-const TASK_BUDGET_REFUSAL_STATUS: Record<TaskBudgetPaymentRefusal, number> = {
-  task_budget_not_found: 404,
-  task_budget_not_open: 409,
-  task_budget_token_mismatch: 409,
-  task_budget_recipient_mismatch: 409,
-  task_budget_parent_mismatch: 409,
-}
-const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
-  task_budget_not_found: 'Task budget not found',
-  task_budget_not_open: 'Task budget is not open (closed, closing, pending, or expired)',
-  task_budget_token_mismatch: "This payment's token does not match the task budget's token",
-  task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
-  task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
-}
-
-/** #3330 §3: the sub-budget refusal table, x402's own copy (matches routes/payments.ts). */
-const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> = {
-  sub_budget_not_found: 404,
-  sub_budget_not_open: 409,
-  sub_budget_token_mismatch: 409,
-  sub_budget_recipient_mismatch: 409,
-  sub_budget_parent_mismatch: 409,
-}
-const SUB_BUDGET_REFUSAL_MESSAGE: Record<SubBudgetPaymentRefusal, string> = {
-  sub_budget_not_found: 'Sub-budget not found',
-  sub_budget_not_open: 'Sub-budget is not open (closed, closing, pending, or expired)',
-  sub_budget_token_mismatch: "This payment's token does not match the sub-budget's token",
-  sub_budget_recipient_mismatch: "This payment's recipient does not match the sub-budget's pinned recipient",
-  sub_budget_parent_mismatch:
-    "The sub-budget's chain is broken — its parent-child link is closed or it was not carved from the budget delegation selected for this payment",
-}
 
 export interface DelegationAuthorizeInput {
   agent: AgentContext
@@ -119,63 +75,6 @@ export interface DelegationAuthorizeInput {
   taskBudgetId?: string
   /** #3330: an OPEN sub-budget (this agent is the sub-agent B) to authorize this settlement through. Mutually exclusive with taskBudgetId. */
   subBudgetId?: string
-}
-
-/**
- * #3329: resolve `taskBudgetId` (when supplied). `toAddress` is whatever the
- * eventual redemption's `to` will be — the merchant on the erc7710 leg, the
- * agent's own funding EOA on the 3009 leg (same "recipient-pinned budgets
- * are erc7710-only" reasoning a task budget's own recipient pin inherits
- * automatically, since it is checked against this exact address).
- *
- * #3329 review finding E: the parent is selected by the task budget's OWN
- * `parent_delegation_hash` (`selectDelegationByHash`) — NEVER re-derived by
- * (token, to), which can name a DIFFERENT active grant than the one the
- * task child's `authority` names (an agent holding both an open and a
- * pinned grant for this token, whose pinned recipient happens to equal
- * `toAddress`, would otherwise get a spurious task_budget_parent_mismatch).
- */
-async function resolveTaskBudgetOrRefusal(
-  agentId: string,
-  taskBudgetId: string,
-  tokenAddress: string,
-  toAddress: string,
-) {
-  const row = await findTaskBudgetForAgent(taskBudgetId, agentId)
-  if (!row) {
-    return {
-      ok: false as const,
-      result: { code: 404, body: { error: TASK_BUDGET_REFUSAL_MESSAGE.task_budget_not_found, error_code: 'task_budget_not_found' } } as X402HandlerResult,
-    }
-  }
-  const parentDelegation = await selectDelegationByHash(agentId, row.parent_delegation_hash)
-  if (!parentDelegation) {
-    return {
-      ok: false as const,
-      result: {
-        code: 409,
-        body: { error: TASK_BUDGET_REFUSAL_MESSAGE.task_budget_parent_mismatch, error_code: 'task_budget_parent_mismatch' },
-      } as X402HandlerResult,
-    }
-  }
-  const resolved = resolveTaskBudgetChildForPayment(
-    row,
-    tokenAddress,
-    toAddress,
-    parentDelegation,
-    Math.floor(Date.now() / 1000),
-  )
-  if (!resolved.ok) {
-    const code = resolved.refusal as TaskBudgetPaymentRefusal
-    return {
-      ok: false as const,
-      result: {
-        code: TASK_BUDGET_REFUSAL_STATUS[code],
-        body: { error: TASK_BUDGET_REFUSAL_MESSAGE[code], error_code: code },
-      } as X402HandlerResult,
-    }
-  }
-  return { ok: true as const, childDelegation: resolved.childDelegation, parentDelegation, row }
 }
 
 /**
@@ -233,70 +132,20 @@ async function taskBudgetCapRefusal(input: {
 }
 
 /**
- * #3330: resolve `subBudgetId` (when supplied) — the same shape as
- * `resolveTaskBudgetOrRefusal` one level deeper. The grant's
- * `parent_delegation_hash` names A's parent-child ROW (must still be open);
- * that row's `parent_delegation_hash` names A's budget delegation (must
- * still be an active grant, selected by hash — #3329 review finding E's
- * rule twice over).
+ * #3617 (epic #3615 S-B): both legs resolve their budget scope through the
+ * shared module (#3616). A scope refusal becomes this handler's result with
+ * the same status and `{ error, error_code }` body the two local copies
+ * (`resolveTaskBudgetOrRefusal` / `resolveSubBudgetOrRefusal`, deleted)
+ * answered — the tables they duplicated now live only in the module.
  */
-async function resolveSubBudgetOrRefusal(
-  agentId: string,
-  subBudgetId: string,
-  tokenAddress: string,
-  toAddress: string,
-) {
-  const grantRow = await findSubBudgetForAgent(subBudgetId, agentId)
-  if (!grantRow) {
-    return {
-      ok: false as const,
-      result: { code: 404, body: { error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_not_found, error_code: 'sub_budget_not_found' } } as X402HandlerResult,
-    }
-  }
-  const parentChildRow = await findOpenParentChildByHash(grantRow.parent_delegation_hash, Math.floor(Date.now() / 1000))
-  if (!parentChildRow) {
-    return {
-      ok: false as const,
-      result: {
-        code: 409,
-        body: { error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch, error_code: 'sub_budget_parent_mismatch' },
-      } as X402HandlerResult,
-    }
-  }
-  const parentDelegation = await selectDelegationByHash(parentChildRow.agent_id, parentChildRow.parent_delegation_hash)
-  if (!parentDelegation) {
-    return {
-      ok: false as const,
-      result: {
-        code: 409,
-        body: { error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch, error_code: 'sub_budget_parent_mismatch' },
-      } as X402HandlerResult,
-    }
-  }
-  const resolved = resolveSubBudgetForPayment(
-    grantRow,
-    parentChildRow,
-    tokenAddress,
-    toAddress,
-    parentDelegation,
-    Math.floor(Date.now() / 1000),
-  )
-  if (!resolved.ok) {
-    const code = resolved.refusal as SubBudgetPaymentRefusal
-    return {
-      ok: false as const,
-      result: {
-        code: SUB_BUDGET_REFUSAL_STATUS[code],
-        body: { error: SUB_BUDGET_REFUSAL_MESSAGE[code], error_code: code },
-      } as X402HandlerResult,
-    }
-  }
-  return {
-    ok: true as const,
-    grantDelegation: resolved.childDelegation!,
-    parentChildDelegation: JSON.parse(parentChildRow.delegation_json) as Delegation,
-    parentDelegation,
-  }
+async function resolveScopeOrRefusal(input: BudgetScopeInput) {
+  const resolution = await resolveBudgetScope(input)
+  if (!resolution.ok) return { ok: false as const, result: scopeRefusalResult(resolution.refusal) }
+  return { ok: true as const, scope: resolution.scope }
+}
+
+function scopeRefusalResult(refusal: ScopeRefusal): X402HandlerResult {
+  return { code: refusal.status, body: { error: refusal.message, error_code: refusal.code } }
 }
 
 export async function runDelegationAuthorize(input: DelegationAuthorizeInput): Promise<X402HandlerResult> {
@@ -413,37 +262,42 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // What it is NOT: a security boundary. The ERC20PeriodTransferEnforcer in
     // the funding delegation's caveat stack remains the gate and still reverts
     // an over-budget redemption inside prepareRedemption's gas estimation; the
-    // 502 below stays for genuine bundler/infrastructure failures only. The
-    // selection here is the same `selectDelegation(agent, token, payTo)` the
-    // prepare runs again — one extra indexed read ahead of a bundler call that
-    // costs orders of magnitude more.
+    // 502 below stays for genuine bundler/infrastructure failures only.
     //
     // FAIL OPEN, exactly as #2082: a degraded read (`fromChain: false`), a
     // thrown one, or an unparseable one all mean "no usable measurement" and
-    // proceed to prepare, where the enforcer rules. A null selection skips the
-    // pre-check entirely so the existing null-handling below can answer its
-    // own more specific 403 — this block must never preempt it.
-    const fundingDelegation = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
+    // proceed to prepare, where the enforcer rules. A none scope with no
+    // selection reads nothing, so the existing null-handling below can answer
+    // its own more specific 403 — this block must never preempt it.
+    //
+    // #3617: the budget scope, resolved ONCE through the shared module
+    // (#3616) and used by every step below — the task cap, the period
+    // pre-check and the funding redemption read the SAME delegations. The
+    // scope's recipient is `payTo`: on this leg that is the agent's own
+    // funding EOA, and it IS the redemption's transfer target, so a
+    // merchant-pinned budget refuses here exactly as its on-chain recipient
+    // enforcer would refuse the funding transfer (merchant-pinned budgets
+    // settle via erc7710 only). #3329 review finding E holds inside the
+    // module: a task budget's or sub-budget's parent is read by hash, never
+    // re-derived by (token, to).
+    const fundingResolution = await resolveScopeOrRefusal({
+      agentId: agent.id,
+      tokenAddress,
+      recipient: payTo,
+      taskBudgetId,
+      subBudgetId,
+    })
+    if (!fundingResolution.ok) return fundingResolution.result
+    const fundingScope = fundingResolution.scope
 
-    // ── Task budget (#3329, optional), funding leg ────────────────────────
-    // #3329 review finding E: resolved by the task budget's OWN parent hash
-    // (`resolveTaskBudgetOrRefusal`), never by `fundingDelegation` above —
-    // that (token, to) selection can name a DIFFERENT active grant. The
-    // remaining-budget PRE-CHECK below still reads `fundingDelegation`
-    // (a convenience only, never the real control); the actual redemption
-    // further down uses the task budget's own resolved parent.
-    let fundingTaskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
-    let fundingTaskBudgetParent: Awaited<ReturnType<typeof selectDelegationByHash>> = null
-    // #3500: kept for the cap pre-check and the revert fallback below.
+    // #3500: a task budget's cap, refused BEFORE the funding UserOp exists;
+    // kept for the transfer-cap revert fallback in the catch below.
     let fundingTaskBudgetCapInput: Parameters<typeof taskBudgetCapRefusal>[0] | null = null
-    if (taskBudgetId) {
-      const resolved = await resolveTaskBudgetOrRefusal(agent.id, taskBudgetId, tokenAddress, payTo.toLowerCase())
-      if (!resolved.ok) return resolved.result
-      fundingTaskBudgetChild = resolved.childDelegation
-      fundingTaskBudgetParent = resolved.parentDelegation
+    if (fundingScope.taskBudget) {
+      const cap = fundingScope.taskBudget.taskCap
       fundingTaskBudgetCapInput = {
         agent,
-        row: resolved.row,
+        row: { id: cap.taskBudgetId, delegation_hash: cap.delegationHash, max_atomic: cap.maxAtomic },
         amountRaw,
         amountHuman,
         tokenSymbol: tokenConfig.symbol,
@@ -456,85 +310,55 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       if (capRefusal) return capRefusal
     }
 
-    // ── Sub-budget (#3330, optional), funding leg ─────────────────────────
-    let fundingSubBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetOrRefusal>>['grantDelegation']
-    let fundingSubBudgetParentChild: Awaited<ReturnType<typeof resolveSubBudgetOrRefusal>>['parentChildDelegation']
-    let fundingSubBudgetParent: Awaited<ReturnType<typeof selectDelegationByHash>> = null
-    if (subBudgetId) {
-      const resolved = await resolveSubBudgetOrRefusal(agent.id, subBudgetId, tokenAddress, payTo.toLowerCase())
-      if (!resolved.ok) return resolved.result
-      fundingSubBudgetGrant = resolved.grantDelegation
-      fundingSubBudgetParentChild = resolved.parentChildDelegation
-      fundingSubBudgetParent = resolved.parentDelegation
-    }
-
-    if (fundingDelegation) {
-      let fundingRemainingAtomic: bigint | null = null
-      try {
-        const fundingRead = await readRemainingBudget(
-          agent.chain_id,
-          fundingDelegation.delegation_json,
-          amountRaw.toString(),
-        )
-        fundingRemainingAtomic = fundingRead.fromChain ? BigInt(fundingRead.remainingAtomic) : null
-      } catch {
-        fundingRemainingAtomic = null
-      }
-      // `<`, never `<=`: spending the exact remainder is what the chain allows.
-      if (fundingRemainingAtomic !== null && fundingRemainingAtomic < amountRaw) {
-        const fundingShortfallAtomic = amountRaw - fundingRemainingAtomic
-        const fundingRemainingHuman = formatTokenValue(fundingRemainingAtomic.toString(), tokenConfig.decimals)
-        const fundingShortfallHuman = formatTokenValue(fundingShortfallAtomic.toString(), tokenConfig.decimals)
-        // #3053: through the shared choke point — the decided response is
-        // returned verbatim while the ledger row is recorded fire-and-forget
-        // (the write can never change this response; see refusal-ledger.ts).
-        return refuse(
-          {
-            code: 403,
-            body: {
-              error:
-                `This x402 payment of ${amountHuman} ${tokenConfig.symbol} exceeds the agent's remaining ` +
-                `budget for this period (${fundingRemainingHuman} ${tokenConfig.symbol}, short by ${fundingShortfallHuman}). ` +
-                'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
-                'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
-              error_code: 'delegation_budget_exceeded',
-              phase: AgentPaymentPhase.InsufficientFunds,
-              next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-              rail: AgentPaymentRail.X402,
-              chain_id: agent.chain_id,
-              token: tokenConfig.symbol,
-              asset: tokenAddress,
-              network,
-              amount: amountHuman,
-              amount_atomic: amountRaw.toString(),
-              remaining: fundingRemainingHuman,
-              remaining_atomic: fundingRemainingAtomic.toString(),
-              shortfall: fundingShortfallHuman,
-              shortfall_atomic: fundingShortfallAtomic.toString(),
-              resource_url: url,
-              merchant_address: merchantPayTo.toLowerCase(),
-            },
-          },
-          {
-            userId: agent.user_id,
-            agentId: agent.id,
-            chainId: agent.chain_id,
-            tokenSymbol: tokenConfig.symbol,
-            amountAtomic: amountRaw.toString(),
-            accountAddress: agent.account_address,
-            merchantTo: merchantPayTo.toLowerCase(),
-            resourceUrl: url,
-            reason: 'delegation_budget_exceeded',
-            source: 'x402_authorize',
-            detail: {
-              error_code: 'delegation_budget_exceeded',
-              phase: AgentPaymentPhase.InsufficientFunds,
-              next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-              remaining_atomic: fundingRemainingAtomic.toString(),
-            },
-          },
-        )
-      }
+    // #2706, on the #3616 resolver since #3617: the period pre-check reads
+    // the delegations THIS leg redeems (`periodPrecheckLinks` — the rule
+    // POST /payments applies): every link of a sub-budget chain, the smallest
+    // remaining deciding; a task budget's parent by hash; otherwise the
+    // (token, payTo) selection. Before #3617 it read the agent's own (token,
+    // payTo) grant whatever the scope — not a link of a scoped redemption at
+    // all. FAIL OPEN per link (a degraded, thrown or unparseable read
+    // contributes nothing) and refuse only on `remaining < amount`: the
+    // `ERC20PeriodTransferEnforcer` in the redeemed chain stays the gate.
+    // `merchant_address` carries merchantPayTo: on this leg payTo is the
+    // funding target, not the merchant.
+    const fundingPrecheck = await evaluatePeriodPrecheck({
+      chainId: agent.chain_id,
+      amountAtomic: amountRaw,
+      delegationJsons: periodPrecheckLinks(fundingScope),
+      read: readRemainingBudget,
+    })
+    if (fundingPrecheck.refused && fundingPrecheck.remainingAtomic !== null) {
+      const body = buildPeriodExceededBody({
+        flavor: 'x402',
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
+        tokenAddress,
+        decimals: tokenConfig.decimals,
+        amountAtomic: amountRaw.toString(),
+        remainingAtomic: fundingPrecheck.remainingAtomic.toString(),
+        amount: amountHuman,
+        network,
+        resourceUrl: url,
+        merchantAddress: merchantPayTo.toLowerCase(),
+      })
+      // #3053: through the shared choke point — the decided response is
+      // returned verbatim while the ledger row is recorded fire-and-forget.
+      return refuse(
+        { code: 403, body },
+        {
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          amountAtomic: amountRaw.toString(),
+          accountAddress: agent.account_address,
+          merchantTo: merchantPayTo.toLowerCase(),
+          resourceUrl: url,
+          reason: 'delegation_budget_exceeded',
+          source: 'x402_authorize',
+          detail: periodExceededLedgerDetail(fundingPrecheck.remainingAtomic.toString()),
+        },
+      )
     }
 
     let fundingAuth
@@ -544,17 +368,19 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         tokenAddress,
         payTo.toLowerCase(),
         amountRaw,
-        fundingSubBudgetGrant && fundingSubBudgetParent && fundingSubBudgetParentChild
-          ? {
-              subBudget: {
-                grantDelegation: fundingSubBudgetGrant,
-                parentChildDelegation: fundingSubBudgetParentChild,
-                parentDelegation: fundingSubBudgetParent,
-              },
-            }
-          : fundingTaskBudgetChild && fundingTaskBudgetParent
-            ? { taskBudget: { childDelegation: fundingTaskBudgetChild, parentDelegation: fundingTaskBudgetParent } }
-            : undefined,
+        // The scope resolved above — the redemption reads exactly what the
+        // pre-check read (#3617); the none scope hands over its selection so
+        // `prepareDelegationPayment` does not select again.
+        fundingScope.subBudget
+          ? { subBudget: fundingScope.subBudget }
+          : fundingScope.taskBudget
+            ? {
+                taskBudget: {
+                  childDelegation: fundingScope.taskBudget.childDelegation,
+                  parentDelegation: fundingScope.taskBudget.parentDelegation,
+                },
+              }
+            : { delegation: fundingScope.delegation ?? null },
       )
     } catch (err) {
       // Caveat rejection (budget/expiry) or bundler failure — database untouched.
@@ -714,8 +540,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // #1059: on the funding leg the budget IS the signed instrument.
       budgetDelegationHash: fundingAuth.delegationHash,
       preparedUserOp: serializeUserOp(fundingAuth.prepared.userOperation),
-      taskBudgetId: fundingTaskBudgetChild ? taskBudgetId : null,
-      subBudgetId: fundingSubBudgetGrant ? subBudgetId : null,
+      taskBudgetId: fundingScope.taskBudget ? taskBudgetId : null,
+      subBudgetId: fundingScope.subBudget ? subBudgetId : null,
       conflictTarget: 'x402_idempotency_key',
     })
     if (!intent) {
@@ -794,7 +620,29 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     }
   }
 
-  let budget = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
+  // #3617: the budget scope, resolved ONCE through the shared module
+  // (#3616) BEFORE the no-delegation refusal. `payTo` IS the merchant on
+  // this leg. A named task budget or sub-budget redeems through its OWN
+  // parent (by hash, #3329 finding E), so the agent's own (token, payTo)
+  // grant is not consulted at all when a scope is named — before #3617 it
+  // was selected first, and a sub-agent whose only authority is a sub-budget
+  // (no agent_delegations row of its own) was refused 403
+  // `no_delegation_for_target` before its sub-budget was ever resolved.
+  // Only the none scope can answer "no delegation" now.
+  const erc7710Resolution = await resolveScopeOrRefusal({
+    agentId: agent.id,
+    tokenAddress,
+    recipient: payTo,
+    taskBudgetId,
+    subBudgetId,
+  })
+  if (!erc7710Resolution.ok) return erc7710Resolution.result
+  const erc7710Scope = erc7710Resolution.scope
+  // The budget delegation every downstream use redeems (the pre-check, the
+  // settlement child, the stored settle-time state): a scope's parent, or
+  // the (token, payTo) selection.
+  const budget =
+    erc7710Scope.subBudget?.parentDelegation ?? erc7710Scope.taskBudget?.parentDelegation ?? erc7710Scope.delegation
   if (!budget) {
     // #2945: this 403 is how a recipient pin refuses on this rail — named
     // for what it is, not distinguishable from no-delegation. Fire-and-forget.
@@ -816,29 +664,19 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       },
     )
   }
+  const erc7710TaskBudgetChild = erc7710Scope.taskBudget?.childDelegation
+  const erc7710SubBudgetGrant = erc7710Scope.subBudget?.grantDelegation
+  const erc7710SubBudgetParentChild = erc7710Scope.subBudget?.parentChildDelegation
 
-  // ── Task budget (#3329, optional), erc7710 leg ──────────────────────────
-  // `payTo` IS the merchant on this leg (unlike the funding leg, where it is
-  // the agent's own EOA). #3329 review finding E: resolved by the task
-  // budget's OWN parent hash, never by the (token, payTo) `budget` above —
-  // that selection can name a DIFFERENT active grant. On success, `budget`
-  // is REASSIGNED to the task budget's real parent so every downstream use
-  // (the remaining-budget pre-check, `buildSettlementDelegation`, the
-  // stored settle-time state) redeems the SAME grant the task child's
-  // `authority` names, not whichever one (token, payTo) happened to pick.
-  let erc7710TaskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
-  if (taskBudgetId) {
-    const resolved = await resolveTaskBudgetOrRefusal(agent.id, taskBudgetId, tokenAddress, payTo.toLowerCase())
-    if (!resolved.ok) return resolved.result
-    erc7710TaskBudgetChild = resolved.childDelegation
-    budget = resolved.parentDelegation
-    // #3500: this leg builds no UserOp, so without this an over-cap payment
-    // would only fail when the MERCHANT tried to redeem the settlement child.
-    // It sees REDEEMED spend only: a settlement child still in flight is not
-    // counted, so it narrows the redemption-time failure, it cannot close it.
+  // #3500: this leg builds no UserOp, so without this an over-cap payment
+  // would only fail when the MERCHANT tried to redeem the settlement child.
+  // It sees REDEEMED spend only: a settlement child still in flight is not
+  // counted, so it narrows the redemption-time failure, it cannot close it.
+  if (erc7710Scope.taskBudget) {
+    const cap = erc7710Scope.taskBudget.taskCap
     const capRefusal = await taskBudgetCapRefusal({
       agent,
-      row: resolved.row,
+      row: { id: cap.taskBudgetId, delegation_hash: cap.delegationHash, max_atomic: cap.maxAtomic },
       amountRaw,
       amountHuman,
       tokenSymbol: tokenConfig.symbol,
@@ -847,22 +685,6 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       resourceUrl: url,
     })
     if (capRefusal) return capRefusal
-  }
-
-  // ── Sub-budget (#3330, optional), erc7710 leg ───────────────────────────
-  // The grant's parent-child row and A's budget delegation are both read by
-  // hash (resolveSubBudgetOrRefusal) and `budget` is reassigned to A's REAL
-  // parent grant — every downstream use (the remaining-budget pre-check,
-  // buildSettlementDelegation, the stored settle-time state) then redeems
-  // the SAME grant the B child's `authority` chain names.
-  let erc7710SubBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetOrRefusal>>['grantDelegation']
-  let erc7710SubBudgetParentChild: Awaited<ReturnType<typeof resolveSubBudgetOrRefusal>>['parentChildDelegation']
-  if (subBudgetId) {
-    const resolved = await resolveSubBudgetOrRefusal(agent.id, subBudgetId, tokenAddress, payTo.toLowerCase())
-    if (!resolved.ok) return resolved.result
-    erc7710SubBudgetGrant = resolved.grantDelegation
-    erc7710SubBudgetParentChild = resolved.parentChildDelegation
-    budget = resolved.parentDelegation
   }
 
   // ── #2082: fail-fast remaining-budget pre-check ──────────────────────────
@@ -901,24 +723,24 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   // turn a fundable payment into a 500 — the one outcome this whole block is
   // supposed to be incapable of. `null` means "no usable number", which reads
   // the same as a degraded read everywhere below.
-  let remainingAtomic: bigint | null = null
-  try {
-    const read = await readRemainingBudget(
-      agent.chain_id,
-      budget.delegation_json,
-      amountRaw.toString(),
-    )
-    remainingAtomic = read.fromChain ? BigInt(read.remainingAtomic) : null
-  } catch {
-    remainingAtomic = null
-  }
+  // #3617: the links are the scope's (`periodPrecheckLinks`, the POST
+  // /payments rule) — every link of a sub-budget chain, the smallest
+  // remaining deciding. Before #3617 only A's budget delegation was read, so
+  // a payment over B's own slice came back 201 WITH `sign_data` and failed
+  // only at the merchant's redemption. Fail open PER LINK through
+  // `evaluatePeriodPrecheck`, which keeps every guard described above (the
+  // wrapped read, the parse inside the guard, `fromChain: false` = no
+  // measurement).
+  const precheck = await evaluatePeriodPrecheck({
+    chainId: agent.chain_id,
+    amountAtomic: amountRaw,
+    delegationJsons: periodPrecheckLinks(erc7710Scope),
+    read: readRemainingBudget,
+  })
   // `<`, never `<=`: spending the exact remainder is what the chain allows, and
   // refusing it would strand the last payment of every period behind a refusal
   // the enforcer would not have made.
-  if (remainingAtomic !== null && remainingAtomic < amountRaw) {
-    const shortfallAtomic = amountRaw - remainingAtomic
-    const remainingHuman = formatTokenValue(remainingAtomic.toString(), tokenConfig.decimals)
-    const shortfallHuman = formatTokenValue(shortfallAtomic.toString(), tokenConfig.decimals)
+  if (precheck.refused && precheck.remainingAtomic !== null) {
     // 403 and not 502: the sibling refusal directly above ("no active budget
     // delegation") is the same family — spend authority the agent does not
     // have — and the hosted MCP's guided pre-check already answers 403
@@ -934,29 +756,19 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     return refuse(
       {
         code: 403,
-        body: {
-          error:
-            `This x402 payment of ${amountHuman} ${tokenConfig.symbol} exceeds the agent's remaining ` +
-            `budget for this period (${remainingHuman} ${tokenConfig.symbol}, short by ${shortfallHuman}). ` +
-            'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
-            'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
-          error_code: 'delegation_budget_exceeded',
-          phase: AgentPaymentPhase.InsufficientFunds,
-          next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-          rail: AgentPaymentRail.X402,
-          chain_id: agent.chain_id,
-          token: tokenConfig.symbol,
-          asset: tokenAddress,
-          network,
+        body: buildPeriodExceededBody({
+          flavor: 'x402',
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          tokenAddress,
+          decimals: tokenConfig.decimals,
+          amountAtomic: amountRaw.toString(),
+          remainingAtomic: precheck.remainingAtomic.toString(),
           amount: amountHuman,
-          amount_atomic: amountRaw.toString(),
-          remaining: remainingHuman,
-          remaining_atomic: remainingAtomic.toString(),
-          shortfall: shortfallHuman,
-          shortfall_atomic: shortfallAtomic.toString(),
-          resource_url: url,
-          merchant_address: payTo.toLowerCase(),
-        },
+          network,
+          resourceUrl: url,
+          merchantAddress: payTo.toLowerCase(),
+        }),
       },
       {
         userId: agent.user_id,
@@ -969,12 +781,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         resourceUrl: url,
         reason: 'delegation_budget_exceeded',
         source: 'x402_authorize',
-        detail: {
-          error_code: 'delegation_budget_exceeded',
-          phase: AgentPaymentPhase.InsufficientFunds,
-          next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-          remaining_atomic: remainingAtomic.toString(),
-        },
+        detail: periodExceededLedgerDetail(precheck.remainingAtomic.toString()),
       },
     )
   }

@@ -334,7 +334,7 @@ describe('none scope (the (token, recipient) selection)', () => {
   })
 })
 
-describe('periodPrecheckLinks (#3617: one link rule for every entrypoint)', () => {
+describe('periodPrecheckLinks (#3617: the link rule both x402 legs share)', () => {
   const row = (json: string) => ({ delegation_hash: BUDGET_HASH, delegation_json: json, recipient_address: null, budget_atomic: '1' })
   const grant = { delegate: '0x' + 'b1'.repeat(20), delegator: '0x' + 'a1'.repeat(20), authority: PC_HASH, caveats: [], salt: '0x1', signature: '0x' }
   const pc = { delegate: '0x' + 'a1'.repeat(20), delegator: '0x' + 'a1'.repeat(20), authority: BUDGET_HASH, caveats: [], salt: '0x2', signature: '0x' }

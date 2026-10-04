@@ -301,8 +301,10 @@ export async function resolveBudgetScope(input: BudgetScopeInput): Promise<Budge
 
 /**
  * #3617: the delegation JSONs the PERIOD pre-check reads for a resolved
- * scope — the rule `routes/payments.ts` (#3503) applies, now shared with
- * both `/x402/authorize` legs so the three cannot drift apart:
+ * scope. Both `/x402/authorize` legs take it from here; `routes/payments.ts`
+ * (#3503) still states the same rule inline (`periodBudgetLinks`) — pinned
+ * equal by the x402 and /payments sub-budget route tests, not by a shared
+ * call:
  *
  * - sub-budget: every link of the chain it redeems — B's grant, A's
  *   parent-child and A's budget — each carries its own period caveat, so all

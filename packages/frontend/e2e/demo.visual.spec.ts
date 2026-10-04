@@ -89,6 +89,33 @@ test.describe('/demo visual regression', () => {
       await page.waitForLoadState('networkidle')
       await expect(page.locator('.animate-pulse')).toHaveCount(0)
 
+      // #3478 (slice 1 review): the shipped `<video controls>` paints
+      // Chromium's native media UI into the capture, and its buffered-range
+      // bar renders download state, not CSS — four captures of the same page
+      // froze the bar's right edge at x220/x452/x638/x800 (two red
+      // design_visual runs plus both committed baselines), all inside a 4px
+      // band at y3107..3110, far over this spec's 150-pixel budget.
+      // `animations: 'disabled'`, networkidle and the pulse wait above cannot
+      // stabilize it. Three other mechanisms were measured and rejected:
+      // a screenshot `mask` paints onto the LIVE page only (playwright-core
+      // 1.60.0, `_maskElements` before `takeScreenshot`) while the committed
+      // baseline is compared RAW by `compareImages`, so masking the video
+      // would diff the whole video box against a baseline that still shows
+      // the video (~480k pixels against the same budget); removing the
+      // `controls` attribute unmounts the media-controls shadow tree and
+      // flips the page's text rasterization from subpixel to grayscale AA
+      // (146,093 pixels, 0.04, spread over every text run — a raster mode
+      // real visitors never see); hiding only the `-enclosure` subtree keeps
+      // the shadow tree mounted and the AA mode identical.
+      // This injection runs in the visual harness only, AFTER every
+      // structural assertion above has already passed against the shipped
+      // UI — real visitors keep `controls` and `preload="metadata"` exactly
+      // as shipped.
+      await page.addStyleTag({
+        content:
+          'video::-webkit-media-controls-enclosure { display: none !important; }',
+      })
+
       await unclipScrollShell(page)
       const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
       await assertCaptureNotBlank(await page.screenshot({ fullPage: true }), {

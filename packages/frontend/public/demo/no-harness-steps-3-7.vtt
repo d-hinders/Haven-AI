@@ -1,0 +1,47 @@
+WEBVTT
+
+NOTE
+Fallback recording of /demo steps 3 to 7 (issue #3478): connect an agent,
+approve its budget, buy a joke, try to overspend. Text mirrors the /demo
+page and the refusal body Haven's API returns.
+
+00:00.000 --> 00:04.000
+See a Haven agent pay. Steps 3 to 7 of the /demo walk, about one minute.
+Test funds only: Base Sepolia test network.
+
+00:04.000 --> 00:09.500
+Step 3, connect an agent. On the Agents page, the connect flow asks for a
+budget before anything is wired up. This demo sets 0.05 USDC per day, well
+under the 1 USDC send the last step tries.
+
+00:09.500 --> 00:15.000
+The flow hands back a setup prompt to paste into Claude Code, Codex, or
+Hermes. The agent runs the connector, which creates its signing key locally
+and sends Haven only the public address.
+
+00:15.000 --> 00:22.000
+Step 4, approve the budget with your passkey. Nothing the agent does is
+authorized until you sign. The signature grants the 0.05 USDC daily budget;
+there is no Haven approval queue behind it.
+
+00:22.000 --> 00:33.000
+Step 5, check that it is connected. Ask the agent what your Haven budget is.
+It calls haven_get_agent: 0.05 USDC per day, about 0.049 USDC remaining
+today. The Haven tools are loaded.
+
+00:33.000 --> 00:45.000
+Step 6, buy a joke. The agent calls haven_pay for Ampersend's joke offer at
+0.001 USDC. The offer answers 402 Payment Required, the agent signs the
+EIP-3009 payment intent, and the merchant accepts it: well inside the
+budget, so no approval step is needed at this size.
+
+00:45.000 --> 00:57.000
+Step 7, try to overspend. Ask the agent to send 1 USDC. Haven refuses it
+before any money moves: over the agent's remaining budget, short by 0.951
+USDC. There is no approval queue; an over-budget redemption reverts
+on-chain. Retrying cannot succeed.
+
+00:57.000 --> 01:03.000
+What you just saw: an agent paid from a budget its user signed and could
+not exceed, and a payment over that budget was refused before it could
+move. Every limit is enforced by the Haven account itself, on-chain.

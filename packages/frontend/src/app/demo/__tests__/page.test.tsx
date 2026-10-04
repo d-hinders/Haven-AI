@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 const { mockIsDemoPageVisible, mockNotFound } = vi.hoisted(() => ({
   mockIsDemoPageVisible: vi.fn(),
@@ -13,6 +15,8 @@ vi.mock('@/lib/demo-gate', () => ({
 vi.mock('next/navigation', () => ({
   notFound: () => mockNotFound(),
 }))
+
+const FRONTEND_ROOT = join(__dirname, '..', '..', '..', '..')
 
 import DemoPage, { metadata, dynamic } from '../page'
 
@@ -139,5 +143,25 @@ describe('/demo page', () => {
 
     // Links to its agent-readable companion.
     expect(screen.getByRole('link', { name: '/demo.md' })).toHaveAttribute('href', '/demo.md')
+
+    // The no-harness fallback recording (#3478 slice 1): labelled as a
+    // fallback, plays signed-out from a same-origin public asset, and
+    // carries captions. jsdom renders <video> with no test ID, so this is
+    // asserted through its source and the fallback copy around it.
+    expect(screen.getByText(/No Claude Code, Codex, or Hermes handy\?/)).toBeInTheDocument()
+    expect(screen.getByText(/Watch the walk instead/)).toBeInTheDocument()
+    expect(screen.getByText(/without an AI agent of their own/)).toBeInTheDocument()
+    const video = container.querySelector('video')
+    expect(video).not.toBeNull()
+    expect(video).toHaveAttribute('src', '/demo/no-harness-steps-3-7.mp4')
+    expect(video).toHaveAttribute('controls')
+    expect(video).toHaveAttribute('preload', 'metadata')
+    const track = video?.querySelector('track[kind="captions"]')
+    expect(track).not.toBeNull()
+    expect(track).toHaveAttribute('src', '/demo/no-harness-steps-3-7.vtt')
+    // The asset itself is committed: the src must resolve to a real public
+    // file, not a route that 404s for a signed-out visitor.
+    expect(existsSync(join(FRONTEND_ROOT, 'public/demo/no-harness-steps-3-7.mp4'))).toBe(true)
+    expect(existsSync(join(FRONTEND_ROOT, 'public/demo/no-harness-steps-3-7.vtt'))).toBe(true)
   })
 })

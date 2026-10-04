@@ -384,6 +384,12 @@ describe('x402 authorize with subBudgetId (#3617)', () => {
   it('3009 funding: B with NO agent_delegations row of its own still pays through its sub-budget', async () => {
     mockSelect.mockResolvedValue(null)
     expect((await pay(funding)).statusCode).toBe(201)
+    // The 201 alone cannot fail here (prepare is mocked to succeed): pin that
+    // the redemption threads the sub-budget, not a none-scope fallback.
+    expect(mockPrepareFunding).toHaveBeenCalledWith(
+      expect.anything(), USDC, DELEGATE_SIGNER.address.toLowerCase(), 100000n,
+      expect.objectContaining({ subBudget: expect.objectContaining({ parentDelegation: expect.objectContaining({ delegation_hash: BUDGET_HASH }) }) }),
+    )
   })
 
   // ── both ids ─────────────────────────────────────────────────────────────

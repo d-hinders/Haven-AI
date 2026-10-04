@@ -1211,7 +1211,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockPrepareFunding).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n,
       // This test primes no (token, payTo) row, so the selection is null.
-      { delegation: (await mockSelect.mock.results.at(-1)?.value) ?? null },
+      { delegation: null },
     )
     // The erc7710 SELECTOR for the merchant was never consulted (#2706 note:
     // the funding leg now calls selectDelegation itself, keyed on the funding

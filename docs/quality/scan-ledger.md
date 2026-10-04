@@ -1234,16 +1234,20 @@ None worsened materially.
     same body the x402 legs answer"; another says the pre-check's replay rule
     is "STRICTER than" the x402 replay's.
   - Measured:
-    - the typed body is built at 9 sites in 3 files
-      (`git grep -n "error_code: 'delegation_budget_exceeded'"`, non-test,
-      spec excluded → 9);
+    - the typed body's error code is written at 9 sites in 3 files: 5
+      response bodies and 4 refusal-ledger `detail` objects
+      (`git grep -h "error_code: 'delegation_budget_exceeded'" b00d75bd7 -- 'packages/backend/src/*' ':!*.test.ts' ':!*__tests__*' | wc -l`
+      → 9; split corrected by the epic's spec review);
     - with a sub-budget there are three different rules for which links the
       period pre-check reads: all three links with the minimum winning (the
       direct route), the delegating agent's parent only (x402 erc7710), and
       the paying agent's own token/recipient selection (x402 EIP-3009 funding
       leg);
     - route test files per entrypoint × scope: payments 6 task / 2 sub, x402
-      3 task / **0 sub**.
+      3 task / **0 sub**
+      (`git grep -l <key> b00d75bd7 -- packages/backend/src/routes`, filtered to
+      `/<entrypoint>[^/]*\.test\.ts$`, key `task_budget_id` / `sub_budget_id`
+      → 6 / 2 / 3 / 0).
   - By execution:
     - disabling sub-budget resolution on both x402 legs left 27 x402 test
       files / 403 tests and 4 other sub-budget files / 113 tests green;
@@ -1254,9 +1258,11 @@ None worsened materially.
       tool of the same name declares it.
   - Cost: 11 issues in the class in 7 days, created 2026-09-26 → 10-02 (#3378,
     #3392, #3464, #3476, #3492, #3500, #3503, #3504, #3518, #3527, #3609; a
-    hand classification). The issue numbers appear 206 times in 40 non-test
+    hand classification). The issue numbers appear 316 times in 53 non-test
     source files
-    (`git grep -h -o -P '#3(378|392|492|500|503|504|527|609)\b' -- 'packages/*/src/*' ':!*.test.ts' ':!*__tests__*' | wc -l` → 206; `-l` → 40).
+    (`git grep -h -o -P '#3(378|392|464|476|492|500|503|504|518|527|609)\b' b00d75bd7 -- 'packages/*/src/*' ':!*.test.ts' ':!*__tests__*' | wc -l` → 316; `-l` → 53).
+    Instrument lesson: the scan's first regex listed 8 of the 11 cluster
+    issues (206 / 40); the epic's spec review caught it.
   - Five slices: a shared budget-scope resolver (blocks the rest), x402
     adoption with the first x402 × sub-budget tests, direct-route adoption, one
     replay predicate, and an entrypoint × scope × replay matrix ratchet that
@@ -1359,4 +1365,4 @@ Instrument lessons:
 **Dispositions (owner decision 2026-10-03):**
 - **S1 → filed** as epic [#3615](https://github.com/d-hinders/Haven-AI/issues/3615), slices #3616–#3620 (backlog, `pending-review`); spec-review verdict posted on the epic (34 claims re-run, 5 corrected, `## Threat model` added).
 - **C3 → folded into #3617** as an explicit acceptance item (declare `sub_budget_id` on hosted `haven_pay_x402_quote`, or delete the dead forwarding); that choice is owner decision 2 on the epic and blocks the slice.
-- **C1, C2 → not filed.** The owner chose to file S1 only; no `accepted-as-debt` or `rejected` disposition has been recorded for either, so both remain open for a later decision and stay excluded from re-surfacing only as prior art.
+- **C1, C2 → not filed.** The owner chose to file S1 only; no `accepted-as-debt` or `rejected` disposition has been recorded for either, so both remain pending owner decision; as prior candidates they are excluded from re-surfacing unless they materially worsen.

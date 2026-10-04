@@ -1418,6 +1418,14 @@ authority, and the same scope note holds.
 > holds verbatim. Scope of this re-read: this section only; `last-verified`
 > is not bumped.
 
+> **Re-verified #3624 (2026-10-04, ops on-chain test clock):** the change
+> touches only `packages/backend/src/modules/ops/__tests__/onchain.test.ts`.
+> The single-flight cache test now injects a fixed `now`, so the view's
+> per-call `generated_at` stamp cannot differ across a millisecond boundary
+> and fail the strict equality. No route, read, reveal or ops-auth file
+> changes, so the no-rail-authority claim above holds verbatim. Scope of this
+> re-read: this section only; `last-verified` is not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a

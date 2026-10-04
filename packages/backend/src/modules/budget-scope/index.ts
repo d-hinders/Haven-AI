@@ -15,6 +15,7 @@
 
 export {
   resolveBudgetScope,
+  BUDGET_SCOPE_KINDS,
   refuseBothScopeIds,
   periodPrecheckLinks,
   TASK_BUDGET_REFUSAL_STATUS,

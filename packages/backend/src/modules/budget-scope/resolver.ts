@@ -111,8 +111,16 @@ export interface ScopeRefusal {
   message: string
 }
 
+/**
+ * Which budget scopes a payment can resolve to. `none` includes "no grant
+ * found". A runtime list, not just a type, so the #3620 entrypoint matrix
+ * enumerates its scope columns from HERE: a new scope added without a
+ * decision for every entrypoint × request state reddens that matrix.
+ */
+export const BUDGET_SCOPE_KINDS = ['none', 'taskBudget', 'subBudget'] as const
+
 /** Which budget scope the payment resolves to. `none` includes "no grant found". */
-export type BudgetScopeKind = 'none' | 'taskBudget' | 'subBudget'
+export type BudgetScopeKind = (typeof BUDGET_SCOPE_KINDS)[number]
 
 /** The task-cap input for `checkTaskBudgetCap` minus the amount/chain (the caller's). */
 export interface TaskCapInput {

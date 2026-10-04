@@ -1,8 +1,8 @@
 // db-mock-exempt: route-level handler test (status/refusal codes) — DB behaviour is proven in infra/repositories/__tests__/sub-budgets.test.ts on the real-DB harness
 /**
  * #3617 (epic #3615 S-B) — `POST /x402/authorize` with `subBudgetId`, on BOTH
- * legs: the first x402 × sub-budget route tests. Until this file, 0 of the
- * 27 backend test files naming x402 or delegation-authorize mentioned a
+ * legs: the first x402 × sub-budget route tests. Until this file, none of
+ * the backend test files naming x402 or delegation-authorize mentioned a
  * sub-budget, and the quality scan's probe P3 (sub-budget resolution
  * disabled on both legs) left all of them green.
  *

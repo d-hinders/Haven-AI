@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
+  - packages/backend/src/modules/budget-scope/**
   - packages/backend/src/modules/task-budgets/**
   - packages/backend/src/routes/task-budgets.ts
   - packages/backend/src/routes/agent-sub-budgets.ts

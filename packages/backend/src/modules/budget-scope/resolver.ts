@@ -12,7 +12,7 @@
  * both `/x402/authorize` legs (#3617, which deleted the two x402 helpers)
  * resolve through this module.
  *
- * Scope selection (today's `budgetOptions` ternary, `routes/payments.ts:750`):
+ * Scope selection (the `budgetOptions` ternary, `routes/payments.ts:628` as of #3617):
  * a named sub-budget wins over a named task budget over the (token, to)
  * delegation — the entrypoints make both-ids impossible before resolution
  * (`refuseBothScopeIds`), so the sub-first order here is defensive parity, not
@@ -64,7 +64,7 @@ export const TASK_BUDGET_REFUSAL_STATUS: Record<TaskBudgetPaymentRefusal, number
   task_budget_parent_mismatch: 409,
 }
 
-/** #3329 §3: the task-budget refusal messages, verbatim from both current copies. */
+/** #3329 §3: the task-budget refusal messages, verbatim from both former copies. */
 export const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
   task_budget_not_found: 'Task budget not found',
   task_budget_not_open: 'Task budget is not open (closed, closing, pending, or expired)',
@@ -82,7 +82,7 @@ export const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> 
   sub_budget_parent_mismatch: 409,
 }
 
-/** #3330 §3: the sub-budget refusal messages, verbatim from both current copies. */
+/** #3330 §3: the sub-budget refusal messages, verbatim from both former copies. */
 export const SUB_BUDGET_REFUSAL_MESSAGE: Record<SubBudgetPaymentRefusal, string> = {
   sub_budget_not_found: 'Sub-budget not found',
   sub_budget_not_open: 'Sub-budget is not open (closed, closing, pending, or expired)',
@@ -184,8 +184,8 @@ const subRefusal = (code: SubBudgetPaymentRefusal): ScopeRefusal => ({
 
 /**
  * The verbatim both-ids bodies the two entrypoints answer today — the guard
- * runs BEFORE resolution on both (`routes/payments.ts:447`,
- * `delegation-authorize.ts:166`, which calls this since #3617); adopters keep calling this first so the
+ * runs BEFORE resolution on both (`routes/payments.ts:415`,
+ * `delegation-authorize.ts:169`, which calls this since #3617); adopters keep calling this first so the
  * wire prose cannot change.
  */
 export function refuseBothScopeIds(surface: 'payments' | 'x402'): { status: number; body: Record<string, unknown> } {

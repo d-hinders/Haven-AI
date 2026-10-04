@@ -76,6 +76,22 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3619 (2026-10-04, one settled-replay rule; pre-check 403
+> through the #3616 builder):** this diff touches
+> `packages/backend/src/modules/mpp/budget-precheck.ts` (covered file): the
+> settled-replay rule and its match guards are unchanged (still `confirmed` +
+> `tx_hash`, the `erc7710`/`eip3009` scheme set, no task-/sub-budget pin, same
+> payee/resource/token/amount) and are now pinned cell by cell — the same
+> seeded rows through `delegationReplay`, this pre-check and
+> `findPaymentReplay` (via `POST /payments`) — by
+> `routes/__tests__/replay-rules-parity.test.ts`. The 403 body the hosted tool
+> parses (#3504) and the `payment_refusals` ledger `detail` are now built by
+> the #3616 module's `buildPeriodExceededBody` (flavor `mpp`) and
+> `periodExceededLedgerDetail`, equal field for field to the hand-built body
+> for the same inputs. No tool, schema shape, version-skew or consent-hash
+> contract moves. `last-verified` stays 2026-10-02. Nothing else in this
+> document was re-verified.
+
 > **Re-verified #3610 (2026-10-02, x402 status description):** this diff
 > touches `packages/backend/src/modules/x402/delegation-authorize.ts` and
 > `modules/payments/agent-payment-status.ts`, covered files: authorize now

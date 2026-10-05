@@ -97,7 +97,9 @@ done
   **delegation rail** (epic #821, `account_type='delegator_hybrid'`,
   `execution_rail='delegation'`): a MetaMask Hybrid DeleGator smart account whose
   budget is a signed delegation with audited caveat enforcers, redeemed via the
-  DelegationManager with no funding leg and no approval queue. Each of docs 1–5
+  DelegationManager — direct payments and erc7710 x402 with no funding leg, the
+  EIP-3009 x402 fallback funding the delegate first — and no approval queue.
+  Each of docs 1–5
   now carries a scoped delegation-rail branch; the canonical deep docs are
   [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md),
   [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md),

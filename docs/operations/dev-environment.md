@@ -35,6 +35,20 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3664 (2026-10-05):** `index.ts`'s `enforcedModules` comments
+> on the sub-budget routes no longer say "money-path-adjacent" —
+> `routes/agent-sub-budgets.ts` and `routes/sub-budgets.ts` are runtime
+> money-path globs since #3661 (the owner issuance/sign routes are where a
+> sub-budget is issued and opened, the moment another agent receives spend
+> authority; Haven signs nothing there, the delegating agent's key does).
+> The `routes/task-budgets.ts` comment's "no live caller yet" is updated
+> too: qa-dev drives its lifecycle since #3505. The `enforcedModules`
+> entries themselves are byte-identical — no module joined or left the
+> list — so nothing in this document's mode/rollback semantics moves, and
+> this doc's own line above already calls `routes/task-budgets.ts`
+> money-path. Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+>
 > **Re-verified #3645 (2026-10-05):** `.env.dev.example`'s comments on the
 > hosted-MCP URL now match the backend: `NEXT_PUBLIC_HAVEN_MCP_URL` is a legacy
 > name the frontend no longer reads (#1823) and the backend reads only as a

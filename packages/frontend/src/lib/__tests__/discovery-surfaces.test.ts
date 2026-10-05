@@ -242,15 +242,21 @@ describe('the hooks are actually wired into the app', () => {
     const { createElement } = await import('react')
     const { render } = await import('@testing-library/react')
     const { NewSiteHome } = await import('@/components/marketing/site/home/HomeSections')
-    const { container } = render(createElement(NewSiteHome))
+    const { container, unmount } = render(createElement(NewSiteHome))
     const sentence = Array.from(container.querySelectorAll('p')).find((p) =>
       (p.textContent ?? '').includes('If you are an AI agent reading this for your user'),
     )
+    const sentenceHref = sentence?.querySelector('a')?.getAttribute('href') ?? undefined
+    // Unmount now: the hero's animated client components schedule React work,
+    // and a tree left mounted fires it after the jsdom environment is torn
+    // down ("window is not defined"). The dynamic import means the global
+    // auto-cleanup never ran for these renders.
+    unmount()
 
     // Each hook's destination, taken from the hook rather than assumed.
     const destinations = [
       layout.match(/rel="alternate"[\s\S]{0,200}?href="(\/[^"]+)"/)?.[1],
-      sentence?.querySelector('a')?.getAttribute('href') ?? undefined,
+      sentenceHref,
     ]
     for (const destination of destinations) {
       expect(destination, 'a landing hook lost its destination').toBeTruthy()
@@ -350,9 +356,12 @@ describe('the hooks are actually wired into the app', () => {
     const { createElement } = await import('react')
     const { render } = await import('@testing-library/react')
     const { NewSiteHome } = await import('@/components/marketing/site/home/HomeSections')
-    const { container } = render(createElement(NewSiteHome))
-    expect(container.textContent).toContain('If you are an AI agent reading this for your user')
-    expect(container.querySelector('a[href="/llms.txt"]')).not.toBeNull()
+    const { container, unmount } = render(createElement(NewSiteHome))
+    const text = container.textContent
+    const llmsLink = container.querySelector('a[href="/llms.txt"]')
+    unmount() // see the chain test above: no tree may outlive the environment
+    expect(text).toContain('If you are an AI agent reading this for your user')
+    expect(llmsLink).not.toBeNull()
   })
 
   it('the authenticated layout is a server component that emits the auth marker', () => {

@@ -1,7 +1,6 @@
 /**
  * Minimal typed client for the Haven money-movement API, used by the
- * deterministic QA scenarios (#575). Mirrors the proven flow in
- * `packages/backend/scripts/test-payment-flow.ts`:
+ * deterministic QA scenarios (#575). The direct-payment flow:
  *   POST /payments → sign the returned hash with the delegate key →
  *   POST /payments/:id/sign → poll GET /payments/:id.
  *

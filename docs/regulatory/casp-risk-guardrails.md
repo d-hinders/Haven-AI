@@ -22,6 +22,9 @@ covers:
   - packages/backend/src/domain/payment-token.ts
   - packages/backend/src/domain/redact-vendor-secrets.ts
   - packages/backend/src/modules/payments/prepare-failure.ts
+  - packages/backend/src/modules/payments/agent-payment-status.ts
+  - packages/backend/src/modules/payments/direct-sign-context.ts
+  - packages/backend/src/modules/payments/submission-reconciler.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/accounting.ts
@@ -1060,15 +1063,24 @@ not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300, #3098, #3283, #3649).**
-Measured at `f032d0aa` with #3649 applied, the pin asserts **38 of the 55
-globs**: the 40 runtime `globs` minus the two `EXEMPT` entries above, and
-none of the 15 `controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**`,
+**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661).**
+Measured at `cdb91d86` with #3649 and #3661 applied, the pin asserts **48 of
+the 65 globs**: the 50 runtime `globs` minus the two `EXEMPT` entries above,
+and none of the 15 `controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**`,
 #3283 (PR #3286) the four `packages/sdk/src/` signing-guard files and
-`userop-binding.ts`, and #3649 `packages/backend/src/modules/budget-scope/**`
-(the #2099 period pre-check, moved out of `modules/x402/` by #3616/#3617);
-all were already covered here — the last since #3648 — so the pin was
-satisfied on arrival each time. The addition #2300 made
+`userop-binding.ts`, #3649 `packages/backend/src/modules/budget-scope/**`
+(the #2099 period pre-check, moved out of `modules/x402/` by #3616/#3617),
+and #3661 the task-budget and sub-budget families (`modules/task-budgets/**`,
+`modules/sub-budgets/**`, `routes/task-budgets.ts`, `routes/sub-budgets.ts`,
+`routes/agent-sub-budgets.ts`, and the SDK's `task-budget-guards.ts` and
+`sub-budget-guards.ts`); all were already covered here — budget-scope since
+#3648, the budget families since #3659, the SDK guards by
+`packages/sdk/src/**` — so the pin was satisfied on arrival each time. #3661
+also added three `modules/payments/` files, `direct-sign-context.ts`,
+`submission-reconciler.ts` and `agent-payment-status.ts`, which were NOT
+covered: they joined `covers:` in the same PR, so edits to them now owe a
+shard (`agent-payment-status.ts` already did, through
+`04-x402-payment-sequence.md`). The addition #2300 made
 was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
 capability modules decide whether a funding userop is relayed and in what
 order (the completion capability, `src/tools/paid-mcp-completion.ts`, carries

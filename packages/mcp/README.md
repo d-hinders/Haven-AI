@@ -190,13 +190,17 @@ live.
 ## Audit log
 
 Every MCP tool invocation tags the underlying Haven API call with
-`X-Haven-MCP-Tool: <tool_name>`. The backend records one
-`agent_tool_invocations` row per call (tool name, payment id when present,
-result status, nextAction, error code, HTTP status, timestamp). The agent's
+`X-Haven-MCP-Tool: <tool_name>`. The backend records an
+`agent_tool_invocations` row (tool name, payment id when present, result
+status, nextAction, error code, HTTP status, timestamp) for the tools on its
+allowlist (`MCP_TOOL_NAMES` in the backend's `agentToolAudit.ts`):
+`haven_quote_x402`, `haven_pay_x402_quote`, `haven_resume_x402_payment`,
+`haven_get_payment_status`, `haven_get_resume_state`, `haven_get_agent`,
+`haven_get_allowances` and `haven_list_receipts`. Every other tool, including
+`haven_send`, `haven_pay_x402` and `haven_submit`, leaves no row. The agent's
 activity feed in the Haven dashboard surfaces these rows alongside payments,
-so the wallet owner can see exactly which tools the
-agent called and what happened — even for read-only calls that don't move
-money.
+so the wallet owner can see which of those tools the agent called and what
+happened — including the read-only calls that don't move money.
 
 The audit log is informational. The agent's signed budget delegation — its
 on-chain caveat enforcers — remains the only thing that can stop a spend;

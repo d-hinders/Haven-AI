@@ -28,7 +28,7 @@ import { CONNECTOR_TERMINAL } from './fixtures'
  * (95 ms per keystroke, :280), the control reads "Signing…" at 3400 ms
  * (:281) and completes to "Budget approved" at 4500 ms (:282); the terminal
  * prints its lines in sequence from 5800 ms (:283-284 — the mockup printed
- * two invented lines; this page prints the connector's real five, see
+ * two lines; this page prints its storytelling script's output lines, see
  * `fixtures.ts`, staggered 550 ms apart).
  *
  * Each controller owns only the loop's state; the settled markup lives once,
@@ -119,7 +119,7 @@ export function AnimatedBudgetMiniCard() {
   )
 }
 
-/** Step 3's controller: the five real output lines print in sequence. */
+/** Step 3's controller: the script's output lines print in sequence. */
 export function AnimatedConnectorTerminal() {
   const { ref, looping } = useLoopGate()
 

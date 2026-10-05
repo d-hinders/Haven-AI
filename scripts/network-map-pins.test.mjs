@@ -168,10 +168,12 @@ test('the backend gate is the narrowest map, and the divergence is exactly the d
   }
 })
 
-test('Gnosis stays out of the bare-alias vocabulary — CAIP-only, like-for-like', () => {
-  // eip155:100 legitimately appears in SUPPORTED (display) and not in the
-  // standard-scheme set; that scope difference is fine. What must NOT happen
-  // is a bare 'gnosis' alias appearing in one copy only. The vocabulary test
-  // above enforces it; this records WHY the vocabulary has two entries.
-  assert.equal(Object.keys(KNOWN_ALIASES).length, 2)
+test('Gnosis is out of the network vocabulary entirely (#3638)', () => {
+  // Gnosis Chain is not a Haven network (epic #3634). Before #3638 eip155:100
+  // appeared in SUPPORTED (display) only; now no copy carries it, as a CAIP id
+  // or as a bare alias. The vocabulary keeps exactly the two Base aliases.
+  assert.deepEqual(Object.keys(KNOWN_ALIASES).sort(), ['base', 'base-sepolia'])
+  const sdkX402Source = read('packages/sdk/src/x402.ts')
+  assert.ok(!/eip155:100\b/.test(sdkX402Source), 'packages/sdk/src/x402.ts still names eip155:100')
+  assert.ok(!/['"]gnosis['"]\s*:/i.test(sdkX402Source), 'packages/sdk/src/x402.ts still has a gnosis alias')
 })

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { timeAgo } from './format.js'
+import { chainName, timeAgo } from './format.js'
 
 /**
  * The stale-hint clock (#3318). `timeAgo` words the `balanceFreshness`
@@ -35,5 +35,17 @@ describe('timeAgo (#3318 stale hint)', () => {
       ['2024-09-25T18:45:00.000Z', '2y ago'], // 730 days — two 365-day years
     ]
     for (const [iso, want] of vectors) expect(timeAgo(iso)).toBe(want)
+  })
+})
+
+describe('chainName (#3638)', () => {
+  it('names Haven\'s two networks', () => {
+    expect(chainName(8453)).toBe('Base')
+    expect(chainName(84532)).toBe('Base Sepolia')
+  })
+
+  it('a retired or unknown chain prints its number, never a network Haven does not run', () => {
+    expect(chainName(100)).toBe('chain 100')
+    expect(chainName(1)).toBe('chain 1')
   })
 })

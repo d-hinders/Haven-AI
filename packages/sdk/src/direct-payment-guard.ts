@@ -51,9 +51,9 @@ export class HavenTypedDataRefusedError extends HavenSigningError {
 /**
  * Chains the delegation rail has PINNED delegation contracts for
  * (`packages/backend/src/rails/delegation-contracts.ts`) — the only chains a
- * direct-payment UserOp may be scoped to. Gnosis (100) has no pinned
- * DelegationManager/enforcer set, so it is deliberately excluded even though
- * the delegate account itself could exist there.
+ * direct-payment UserOp may be scoped to. No other chain has a pinned
+ * DelegationManager/enforcer set, so every other chain is deliberately
+ * excluded even where the delegate account itself could exist.
  */
 export const DIRECT_PAYMENT_CHAIN_IDS: ReadonlySet<number> = new Set([8453, 84532])
 

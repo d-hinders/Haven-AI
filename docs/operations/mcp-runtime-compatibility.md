@@ -76,6 +76,17 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3638 (2026-10-05, SDK networks and explorer links):** the SDK's
+> x402 network and token tables drop chain 100. The public `selectPaymentOption`
+> no longer selects an `eip155:100` option (the payment paths already refused one
+> through `selectStandardPaymentOption`), and `resolveTokenFromAddress` /
+> `resolveTokenBySymbol` no longer know the chain-100 tokens. Explorer links map
+> 84532 to `sepolia.basescan.org` (they fell back to mainnet basescan); chain 100
+> and any other chain get none. The CLI's chain names gain Base Sepolia. No tool, schema,
+> expected-context version or consent hash moves, and an installed runtime keeps
+> paying on Base and Base Sepolia unchanged. `last-verified` stays 2026-10-02.
+> Nothing else in this document was re-verified.
+
 > **Re-verified #3632 (2026-10-05, SDK text drops Gnosis Chain):** the
 > `@haven_ai/sdk` tool descriptions and the `PaymentRequest.token` JSDoc now
 > name USDC on Base (`eip155:8453`) and Base Sepolia (`eip155:84532`) only;
@@ -1639,6 +1650,17 @@ last-verified: "2026-10-02"
 > unchanged like every other — same schemas, same strict-input policy, no
 > route, migration, or signer change, and nothing about when the settle gate
 > itself decides `settled`.
+>
+> **Recent re-verification (#3645):** `packages/mcp/README.md`'s *Audit log*
+> section now states what the backend already does: an `agent_tool_invocations`
+> row is written only for the eight tools on the backend's audit allowlist,
+> so `haven_send`, `haven_submit`, the local `haven_pay_x402` and the hosted
+> `haven_pay` leave none. The README previously said every
+> call was recorded. Text only: no tool, argument, schema, description or
+> consent input changes on either runtime, and the version-skew and
+> consent-hash contracts do not move. `last-verified` is not re-stamped: this
+> block is the scope. Nothing else in this document was re-verified in this
+> pass.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
@@ -1884,6 +1906,34 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > nonetheless re-read before upgrading is the `settled` semantics and the local
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
+
+> **Re-verification (0.8.0-alpha.0 release, 2026-10-05):** the manifest table
+> above is re-pinned by the bump to `0.8.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.7.0-alpha.0` is **MINOR**, for three narrowing breaks:
+> - #3638: chain 100 leaves the SDK's x402 helpers.
+> - #3464: `PostPurchaseAllowanceSummary.rail`/`source` narrow to the delegation
+>   values (type-only; the retired values were unreachable at runtime).
+> - #3518: `getAgentSummary().taskBudgets` lists only live rows.
+>
+> **Surfaces this release moves:**
+> - **The tool set.** `haven_get_task_budget` is a new tool on **both** the hosted
+>   and the local runtime (#3518). The local consent hash includes
+>   the tool names, so **every local operator is asked to consent once more**
+>   after updating.
+> - **Tool arguments and results.**
+>   - The sub-budget `haven_submit` handoff (#3506).
+>   - `haven_send` / `haven_pay` results are compact by default, with an opt-in (#3524).
+>   - An advisory, history-only `recipient.class` (#3531).
+>   - The camelCase allowance summary, with snake_case deprecated (#3464).
+> - **Signer consent text.** It now names sub-budget open and close (#3506).
+>   `SIGNER_CONSENT_SURFACE_VERSION` is unchanged (the owner's copy-only
+>   decision), so the signer consent hash does not change.
+> - **Client minimums.** `CLIENT_COMPAT` is unchanged: `@haven_ai/signer`
+>   `min_version` stays `0.6.0-alpha.0`.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` is not bumped.
 
 > **Re-verification (0.7.0-alpha.0 release, 2026-09-29):** the manifest table
 > above is re-pinned by the bump to `0.7.0-alpha.0` for `connect`, `mcp`, `sdk`
@@ -2131,10 +2181,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.7.0-alpha.0` |
-| `@haven_ai/mcp` | `0.7.0-alpha.0` |
-| `@haven_ai/sdk` | `0.7.0-alpha.0` |
-| `@haven_ai/signer` | `0.7.0-alpha.0` |
+| `@haven_ai/connect` | `0.8.0-alpha.0` |
+| `@haven_ai/mcp` | `0.8.0-alpha.0` |
+| `@haven_ai/sdk` | `0.8.0-alpha.0` |
+| `@haven_ai/signer` | `0.8.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

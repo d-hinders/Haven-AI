@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.0-alpha.0 — 2026-10-05
+
 ### Changed
 
 - **The consent text and the `initialize` handshake now say this signer signs sub-budgets (#3506).** Since 0.7.0, `haven_sign` has signed sub-budget opens and closes (`sub_budget_id`), but the operator's consent screen named only payments and task budgets, and the handshake listed no sub-budget versions. The `haven_sign` consent summary now names "task-budget or sub-budget open or close". `signerCompatibility()` gains an additive `sub_budget_sign_context_versions` field (derived from `SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS`), and the `initialize` instructions list those versions. **No re-consent:** the consent hash covers identity, tool names and `SIGNER_CONSENT_SURFACE_VERSION`, which stays 2 (owner decision on #3506, copy-only), and a test pins the hash for a fixed identity to its previous value.

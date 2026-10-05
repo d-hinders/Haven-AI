@@ -1895,6 +1895,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > residuals above. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3638, 2026-10-05):** `direct-payment-guard.ts`
+> changes a comment only. `DIRECT_PAYMENT_CHAIN_IDS` stays `{8453, 84532}`, so
+> "its chain has pinned delegation contracts (Base, Base Sepolia)" above holds
+> verbatim. The same diff narrows the SDK's x402 network and token tables and
+> its explorer-link map to Base and Base Sepolia. Those are display and
+> client-side option selection; nothing the signer verifies moves. Scope of
+> this re-read: the "What is signed" list above. `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3378, 2026-09-26):** `client.ts`'s `payX402Quote`
 > now forwards its options (`taskBudgetId`) to `authorizeX402`, as `fetch()`
 > already did. No signing check moves: the funding leg still runs the #3271
@@ -2143,6 +2151,13 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > moves in that edit. The release's changes to the signing surface (#3330,
 > #3419) were each re-verified here when they merged. Nothing else in this
 > document was re-verified.
+>
+> **Re-verified (0.8.0-alpha.0 release, 2026-10-05):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.8.0-alpha.0`). No signing check, refusal or allowlist moves in that edit. The
+> range's two signer changes, #3539 (sub-budget `haven_submit` handoff and consent
+> text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
+> re-verified where they merged. Nothing else in this document was re-verified.
 
 > **Re-verified #3331 frontend (2026-09-27, round 2 review fixes):** this diff
 > touches `hooks/useDelegationBudget.ts` only. `reload`/`reloadSigners` read

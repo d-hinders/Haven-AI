@@ -95,6 +95,15 @@ test.describe('/ (new home) visual regression', () => {
         expect(scrollWidth, 'horizontal scroll on mobile').toBeLessThanOrEqual(clientWidth + 1)
       }
 
+      // The step 3 terminal wraps, never scrolls sideways (#3644), at every
+      // viewport this spec runs.
+      const terminal = await page.evaluate(() => {
+        const node = document.querySelector('[data-connector-terminal]')
+        return node ? { scrollWidth: node.scrollWidth, clientWidth: node.clientWidth } : null
+      })
+      expect(terminal, 'step 3 terminal rendered').not.toBeNull()
+      expect(terminal!.scrollWidth, 'step 3 terminal scrolls sideways').toBeLessThanOrEqual(terminal!.clientWidth + 1)
+
       await page.evaluate(() => document.fonts.ready)
       await page.waitForLoadState('networkidle')
       await expect(page.locator('.animate-pulse')).toHaveCount(0)

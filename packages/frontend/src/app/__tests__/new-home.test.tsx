@@ -152,25 +152,37 @@ describe('the new home page (#3574)', () => {
     expect(harnessTexts[0].textContent).toContain('Bring your own agent')
   })
 
-  it('the step-3 terminal shows the published command and the connector’s real output', () => {
+  it('the step-3 terminal tells the short setup story, keeping the published command prefix', () => {
     const { container } = render(<NewSiteHome />)
     const terminal = container.querySelector('[data-connector-terminal]')
     expect(terminal).not.toBeNull()
     const text = (terminal!.textContent ?? '').replace(/\s+/g, ' ')
-    // The published one-liner's working form: the runbook's shape with the
-    // published @alpha dist-tag, and the parser's required --setup/--api.
-    expect(text).toContain('npx -y @haven_ai/connect@alpha')
-    expect(text).toContain('--setup hv_setup_…')
-    expect(text).toContain('--api https://api.haven.example')
-    expect(text).toContain('--ack-local-tools')
-    // The mockup's bare one-liner is gone: it exits with an argument error.
-    expect(text).not.toMatch(/npx @haven_ai\/connect(?![-@\w])/)
-    // Every output line is a verbatim connector line (see fixtures.ts).
+    // The command node's own text is the fixture's: the published prefix
+    // verbatim (copy-guidelines: `npx -y @haven_ai/connect@<channel>`) and a
+    // trailing `…` for the flags left out (#3644).
+    const command = terminal!.querySelector('[data-terminal-command]')?.textContent ?? ''
+    expect(command).toBe(CONNECTOR_TERMINAL.command)
+    expect(command.startsWith('npx -y @haven_ai/connect@alpha ')).toBe(true)
+    // The mockup's bare one-liner stays out: it exits with an argument error.
+    expect(command).not.toMatch(/npx @haven_ai\/connect(?![-@\w])/)
+    // No real-looking setup token on a marketing page.
+    expect(text).not.toMatch(/hv_setup_[A-Za-z0-9]/)
+    // Every scripted line renders, ✓ marks included (the mockup's own marks,
+    // index.html:161 — illustrative, not connector stdout).
     for (const line of CONNECTOR_TERMINAL.output) {
-      expect(text).toContain(line.replace(/\s+/g, ' '))
+      expect(text).toContain(line)
     }
-    // The invented ✓ lines the mockup showed are gone with it.
-    expect(text).not.toContain('✓')
+    expect(text).toContain('✓')
+    // Short enough that no line wraps at 1280 (about 41 characters fit).
+    const lines = [
+      CONNECTOR_TERMINAL.comment,
+      `$ ${CONNECTOR_TERMINAL.command}`,
+      ...CONNECTOR_TERMINAL.output,
+      ...CONNECTOR_TERMINAL.tailComment,
+    ]
+    for (const line of lines) {
+      expect(line.length, line).toBeLessThanOrEqual(38)
+    }
   })
 
   it('the fixture data is the mockup’s: Atlas, Iris, 250 USDC, Ada Lovelace AB, invoice 1042', () => {
@@ -200,9 +212,8 @@ describe('the new home page (#3574)', () => {
     // Budget mini card: settled at the fixture budget, not the animation's
     // 0.00 start.
     expect(text).toContain('250.00')
-    // Step 3 terminal: both output lines the mockup animates on are already
-    // "on" (covered verbatim above).
-    expect(text).toContain('Haven setup on this machine is complete.')
+    // Step 3 terminal: every scripted output line is already "on".
+    expect(text).toContain('✓ Setup complete')
   })
 
   it('navy and indigo bands are dark sections; white and tint are not', () => {

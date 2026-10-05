@@ -9,6 +9,15 @@ covers:
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/catalog.ts
+  - packages/backend/src/routes/catalog-submissions.ts
+  - packages/backend/src/routes/discovery.ts
+  - packages/backend/src/routes/task-budgets.ts
+  - packages/backend/src/routes/sub-budgets.ts
+  - packages/backend/src/rails/delegation-budget-view.ts
+  - packages/backend/src/modules/mpp/allowances.ts
+  - packages/backend/src/modules/mpp/budget-precheck.ts
+  - packages/backend/src/modules/mpp/balance-coverage.ts
+  - packages/mcp-server/src/tools/catalog-purchase.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/machine-payments.ts
@@ -34,7 +43,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-23"
+last-verified: "2026-10-05"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -55,12 +64,12 @@ a credential:
 
 | Surface | What it gives |
 | --- | --- |
-| `GET /` | The root document: what this service is, the absolute URL of its OpenAPI spec, the capability-manifest URL, which credential each door wants, and the health path. The manifest URL uses configured dashboard origin rather than request headers, so it remains the deployment's dashboard endpoint even when the API is reached through another host. |
+| `GET /` | The root document: what this service is, the absolute URL of its OpenAPI spec, the dashboard's `llms.txt` and capability-manifest URLs, which credential each door wants, and the health URL. The two dashboard URLs use the configured dashboard origin rather than request headers, so they remain the deployment's dashboard endpoints even when the API is reached through another host. |
 | `GET /openapi.json` | The machine-readable contract. |
 | `GET /catalog` | The merchant catalogue, in a reduced public shape — see below. |
 
 **The root document is deliberately thin.** Names, paths, and credential
-guidance, plus the configured-origin manifest pointer — no version, build identifier or environment name. A service banner
+guidance, plus the two configured-origin dashboard pointers — no version, build identifier or environment name. A service banner
 that fingerprints the deployment is a gift to a scanner and buys an agent
 nothing.
 
@@ -69,8 +78,8 @@ The static list named the production Railway host first, always, so the dev
 backend served a spec telling clients to call production. Production stays
 listed as the documented second entry. The origin comes from
 `packages/backend/src/domain/request-origin.ts`, which is also what builds the
-connector command and the root document's own URLs — one answer, three
-surfaces.
+connector command, the root document's own URLs and `GET /discovery`'s
+`openapi_url` — one answer, four surfaces.
 
 That helper takes **headers**, not a request object. `domain/` may not import
 the web framework (`domain-stays-pure`, doc 10), and the dependency lint caught
@@ -127,8 +136,9 @@ onboarding the catalogue was supposed to lead to. The public shape is an
 **allow-list** (`PUBLIC_CATALOG_FIELDS`) and a test fails on any key outside
 it, so the exposure is reviewable as a list. It gives the endpoint **host**,
 not the full callable URL, and withholds prices and tool-invocation detail: an
-agent that intends to pay holds a credential by then. Every other catalogue
-route still requires one, and a caller presenting a **bad** credential still
+agent that intends to pay holds a credential by then. Every other route in
+`routes/catalog.ts` (`GET /catalog/{id}`) still requires one — the submission
+routes below are public by design — and a caller presenting a **bad** credential still
 gets its 401 rather than a silent downgrade — serving a reduced answer to a
 revoked agent would hide the revocation from the only party who would notice.
 There is no per-agent or per-user data in `merchant_catalog` to leak; every
@@ -145,6 +155,8 @@ servers, connector, and selected dashboard setup flows:
   deleted with the Safe rail in #2259)
 - delegate balance inspection
 - direct Haven payment intents and signature submission
+- the signing-context reads the signer fetches by id: `GET /payments/{id}/sign-context`
+  (#3271) and `GET /x402/{id}/sign-context`
 - `GET /payments/{id}/resume_state` for x402 and MPP resume context
 - x402 funding authorization at `POST /x402/authorize`
 - the deprecated `POST /x402` alias still used by the current SDK
@@ -154,7 +166,13 @@ servers, connector, and selected dashboard setup flows:
 - machine-payment evidence and reconciliation event writes
 - machine-payment allowance, receipt, and payment-receipt reads
 - delegate sweep recovery (direct Safe transfers via `POST /machine-payments/send`
-  are RETIRED — the operation documents only its 410/422 refusals, #1987/#2105)
+  are RETIRED — the operation documents no success response, only its 410/422
+  refusals and the route-level 400/401/403/426/429, #1987/#2105)
+- budget pre-checks: `POST /machine-payments/budget-precheck` (#3054) and
+  `GET /machine-payments/balance-coverage` (#3126)
+- task budgets under `/task-budgets/*` (open, sign-context, submit, close;
+  #3329) and sub-budgets under `/sub-budgets/*` (#3330), with their owner
+  routes under `/agents/{id}/task-budgets` and `/agents/{id}/sub-budgets/*`
 - wallet transaction listing
 - catalog discovery
 - agent labels (#3167): `GET /labels` and `POST /labels` (the user's tag
@@ -169,11 +187,13 @@ servers, connector, and selected dashboard setup flows:
   a route with no caller is surface area, not API). Every agent read returns
   `labels[]` so cards and filters need no second round trip. Labels are
   display/categorization only: no delegation, budget, or enforcement path
-  reads them. The `/agents` filter facet itself lands with #3165; the decided
-  behaviour it wires to: multi-select is **OR** by default — an agent matches
-  when it carries ANY selected label — because the list's job at a glance is
-  "show me the prod and finance agents", not intersection; an AND toggle is
-  #3165's to add if a user ever needs narrowing.
+  reads them. #3165 (merged) built the `/agents` facet toolbar with status and
+  budget facets only; no label facet is registered yet (`BUILT_IN_FACETS` in
+  the frontend's agent-list filters). The decided behaviour for
+  it: multi-select is **OR** by default — an agent matches when it carries ANY
+  selected label — because the list's job at a glance is "show me the prod and
+  finance agents", not intersection; the facet type already offers an `all`
+  match mode if a user ever needs narrowing.
 - health and OpenAPI discovery
 
 The SDK's quote and resume helpers are partly client-side by design. For
@@ -298,7 +318,8 @@ dedicated `OpenAPI drift check` step in
   the spec's own schema with ajv — see *What the response-shape assertion can
   and cannot catch* below
 - the security scheme states the authority boundary
-- `/openapi.json` serves the same spec object the tests inspect
+- `/openapi.json` serves the spec the tests inspect, except `servers`, where
+  the request's own origin is prepended and de-duplicated (#2530)
 
 This is the current round-trip tolerance: generated clients should treat the
 OpenAPI enum values and response field names as stable, while SDK-only helpers
@@ -356,8 +377,8 @@ A schema composed with `allOf` is also left open, on purpose. `additionalPropert
 only sees the properties declared at its own level, so closing one `allOf` member
 makes it reject the properties its siblings contribute — a valid payload would be
 reported as a spec violation. That protection covers *inline* members only:
-a `$ref`'d member points at a component schema, and every component is
-registered already closed. An `allOf` over a `$ref` therefore rejects the
+a `$ref`'d member points at a component schema, and every component that does
+not itself declare `additionalProperties: true` is registered already closed. An `allOf` over a `$ref` therefore rejects the
 sibling-declared fields on every real payload — a false failure, not an open
 schema — while an `allOf` over an inline, open member can hide an undeclared
 field. Both halves are guarded by tests in `openapi/spec.test.ts`.
@@ -378,11 +399,11 @@ assert their full payload. (#3127 re-proved the mechanism end-to-end: the new
 contract-tested the same way — emitted on the feed and asserted against the
 closed schema, so an undeclared key would fail `expectMatchesSpec`.) Other
 `allOf` shapes remain: `CreateAgentResponse`
-(over an open inline `Agent`, on an asserted route — the hiding case),
-`X402SignablePayment`, `AgentConnectionAllowance` and
-`AgentPaymentStatus.mpp` (over closed `$ref`s, not on asserted routes — the
-false-failure case once they are). Flattening them the same way is follow-up
-work.
+(over a `$ref` to `Agent`, which declares itself open, on an asserted route —
+the hiding case), and `X402SignablePayment` and `AgentConnectionAllowance`
+(over closed `$ref`s, not on asserted routes — the false-failure case once they
+are). `AgentPaymentStatus.mpp` was flattened the same way in #2965 (#2888).
+Flattening the rest is follow-up work.
 
 Coverage: `expectMatchesSpec` is asserted per route (count the call sites under
 `packages/backend/src/**/__tests__` rather than trusting a number here — an
@@ -472,19 +493,22 @@ reviewers caught it. Two, as of #2400.
 
 ## Authentication And Authority Boundaries
 
-The contract exposes three authentication schemes:
+The contract exposes four authentication schemes:
 
 - `AgentApiKey` identifies an agent on payment and read surfaces.
 - `DashboardJwt` authenticates the user for account management, setup, and
   dashboard read operations. Since #984 the dashboard read surface is
-  documented in the spec itself (tag `Dashboard`: `/dashboard/overview`,
-  `/balances/{accountAddress}`, `/portfolio/{accountAddress}`,
-  `/transactions/filters`, `/transactions/{accountAddress}`,
-  `/safe/{accountAddress}/details`) — it is the source for the frontend's
+  documented in the spec itself (tag `Dashboard`, including
+  `/dashboard/overview`, `/balances/{accountAddress}`,
+  `/portfolio/{accountAddress}`, `/transactions/filters` and
+  `/transactions/{accountAddress}`; `/safe/{accountAddress}/details` was
+  deleted in #2847) — it is the source for the frontend's
   generated response types, so it must describe what the routes actually
   emit, not an idealization (e.g. `from`/`to` can be the empty string;
   `amountSek` is present on enriched rows).
 - `SetupToken` is a narrowly scoped, expiring connector pairing credential.
+- `OpsJwt` is the ops console session (#3509): read authority over `/ops/*`
+  only, refused by every customer route, never payment authority.
 
 Authentication does not itself create payment authority. For agent payments,
 the non-custodial boundary is:
@@ -496,10 +520,12 @@ on-chain budget delegation = enforcement
 ```
 
 This restates the `AgentApiKey` security-scheme description, which is attached
-to every agent-authenticated operation — 26 of the document's operations, the
-rest being `DashboardJwt`, `SetupToken` or public. (The denominator is left
-unstated deliberately: it moves with every route added, and was already wrong
-by four before #2871 touched it.) (The description itself is prose;
+to every agent-authenticated operation — 43 at `c3df5b19`
+(`grep -c "security: \[{ AgentApiKey" packages/backend/src/openapi/spec.ts`;
+five of them also accept `DashboardJwt` or `SetupToken`), the rest being
+`DashboardJwt`, `OpsJwt`, `SetupToken` or public. (Both figures move with every
+route added and neither is enforced, so re-run the count rather than trusting
+it.) (The description itself is prose;
 the block above is a three-line paraphrase of its middle sentence.) #2105 moved
 the third clause off
 the retired primitive: it read `on-chain Safe allowance = enforcement`, naming
@@ -535,7 +561,8 @@ account provisioning under `POST /accounts/hybrid`.
 
 The agent-facing spend-authority read is rail-aware (#1135):
 `GET /machine-payments/allowances` returns the ACTIVE budget delegations
-(same #1090 derivation the dashboard uses; remaining = the period budget) on
+(same #1090 derivation the dashboard uses; `remaining` is read from the
+on-chain period enforcer, #1145) on
 the delegation rail, and the fail-closed 410 on BOTH retired rails — session
 (`session_key`, #993) and, since #2020 reversed #1986's left-readable
 decision, the legacy AllowanceModule rail too. The SDK derives its `readiness` signal from
@@ -546,8 +573,9 @@ live on-chain enforcer read, false when that read failed and `remaining` is
 the #1145 fallback (the full configured budget) — reporting only. The spec used
 to add "absent on the legacy rail"; #2105 dropped that clause as a consequence
 of the 410 above, since a legacy-rail account no longer receives this summary at
-all. `haven_prepare_catalog_purchase` (#1306) reads it to warn
-when the figure it is using is optimistic; see
+all. `haven_prepare_catalog_purchase` (#1306) warns on the same flag when the
+figure it is using is optimistic — since #3054 it reads it from
+`POST /machine-payments/budget-precheck`, not from this endpoint; see
 [`04-x402-payment-sequence.md`](04-x402-payment-sequence.md).
 
 ### `allowance_amount` Is Two Shapes, And The Spec Now Says Which (#2295)
@@ -574,9 +602,11 @@ Two things follow that a reader should not have to derive:
   builds it with `formatTokenValue(row.budget_atomic, decimals)`, and since #2020
   that view is the only source of an `allowances` array anywhere —
   `agent_allowances` is read nowhere, and since #2263's migration 075 the table
-  does not exist at all. Its production callers are exactly five —
+  does not exist at all. Its production emitters are exactly five —
   `GET /agents`, `GET /agents/{id}`, `PUT /agents/{id}`, `GET /dashboard/overview`
-  and `GET /machine-payments/allowances` (#2392 corrected the view's own header,
+  and `GET /machine-payments/allowances` (`POST /machine-payments/budget-precheck`
+  and `GET /machine-payments/balance-coverage` also call the view, but read its
+  atomic `budget_atomic` and emit none of its human-decimal value; #2392 corrected the view's own header,
   which named a `PATCH /agents/{id}` that never existed). `GET /dashboard/overview`
   carries the same value as `allowanceAmount`, which since #2400 is the named
   `allowanceHumanAmount` on `DashboardAgentAllowance` rather than a bare
@@ -624,13 +654,13 @@ justified by future work outlives the work unless something re-checks it. That
 allowlist is now empty. Deep model:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
-**How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-08-24 for #1988):**
-129 registered routes, **1 of them undocumented** — only safe-deploy.ts, deliberately, under the #1440 Safe-rail retirement: the 410 tombstone stays fail-closed, and #2847 deleted safe-exec.ts (the other deliberately-undocumented module) and safe-details.ts together with the last live Safe-rail routes. Re-counted 2026-09-11 at #2847; the count was 131/2 before the cut (re-counted 2026-09-04 after #2542 added documented public `/health` and operator-only `/health/ops` routes; the live delegation-rail x402 routes remain registered). (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
+**How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-10-05 at `c3df5b19`):**
+199 registered routes, **1 of them undocumented** — only safe-deploy.ts, deliberately, under the #1440 Safe-rail retirement: the 410 tombstone stays fail-closed, and #2847 deleted safe-exec.ts (the other deliberately-undocumented module) and safe-details.ts together with the last live Safe-rail routes, taking the count from 137/2 to 131/1. (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
 (#1446 is working the backfill one domain at a time: `contacts.ts` came off the
 list first, then the whole `agent-delegations.ts` lifecycle — grant, activate,
 per-hash and batch revocation, signer management — then the x402 demo-resource
 surface, the Agent Passport routes and the Safe-management surface, taking the
-ceilings from 18 modules / 90 routes to 2 / 2 — the backfill is complete except for the two Safe-rail routes #1440 retires. #1988 removed five approver routes outright, which is why the total moved 145 → 140 while the undocumented count held at 2 — a reminder that the total is prose and only ever right on the day someone re-counts it.) That was invisible until the
+ceilings from 18 modules / 90 routes to 2 / 2, and #2847 to 1 / 1 — the backfill is complete except for the `safe-deploy.ts` 410 tombstone #1440 retires. #1988 removed five approver routes outright, which is why the total moved 145 → 140 while the undocumented count held at 2 — a reminder that the total is prose and only ever right on the day someone re-counts it.) That was invisible until the
 coverage gate widened its scope beyond the seven hand-listed files above, which
 is the finding epic #1442 was opened on. The gap is now *recorded* rather than
 absent: `route-coverage.ts` carries a per-module deferral list with a reason per

@@ -51,7 +51,7 @@ import {
   SIGNER_CAPABILITY_KEY,
   deriveDelegateAccountAddress,
 } from '@haven_ai/signer'
-import { CLIENT_RELEASES } from '@haven_ai/core'
+import { readFileSync } from 'node:fs'
 import directPaymentUserOpFixture from '../../sdk/src/__fixtures__/direct-payment-userop.json' with { type: 'json' }
 
 /**
@@ -1461,12 +1461,17 @@ describe('#3419 — the task-budget notice is pinned to the packages it describe
     expect(notice.fallback).not.toContain('typed_data_b64')
   })
 
-  it('min_signer_version is the exported constant, tied to the first release note naming task_budget_id', () => {
-    const signerReleases = CLIENT_RELEASES['@haven_ai/signer' as keyof typeof CLIENT_RELEASES]
-    expect(signerReleases).toBeDefined()
-    const firstNoteNamingTaskBudgetId = signerReleases.notes.find((n) => n.summary.includes('task_budget_id'))
-    expect(firstNoteNamingTaskBudgetId, 'the release record must still name the task_budget_id form').toBeDefined()
-    expect(firstNoteNamingTaskBudgetId!.version).toBe(TASK_BUDGET_MIN_SIGNER_VERSION)
+  it('min_signer_version is the exported constant, tied to the first release naming task_budget_id', () => {
+    // Read the signer CHANGELOG, the permanent release history — not the
+    // public release data (`CLIENT_RELEASES`), which keeps only the newest
+    // notes per package: the 0.8.0-alpha.0 bump rolled 0.6.0 out of that
+    // window and this assertion went red with nothing wrong.
+    const changelog = readFileSync(new URL('../../signer/CHANGELOG.md', import.meta.url), 'utf8')
+    const releases = [...changelog.matchAll(/^## (\d+\.\d+\.\d+\S*) — [\s\S]*?(?=^## |(?![\s\S]))/gm)]
+    const oldestFirst = releases.reverse()
+    const firstNamingTaskBudgetId = oldestFirst.find((m) => m[0].includes('task_budget_id'))
+    expect(firstNamingTaskBudgetId, 'the signer CHANGELOG must still name the task_budget_id form').toBeDefined()
+    expect(firstNamingTaskBudgetId![1]).toBe(TASK_BUDGET_MIN_SIGNER_VERSION)
     const notice = taskSignerCompatibilityNotice()
     expect(notice.min_signer_version).toBe(TASK_BUDGET_MIN_SIGNER_VERSION)
     expect(notice.signer_capability).toBe(SIGNER_CAPABILITY_KEY)

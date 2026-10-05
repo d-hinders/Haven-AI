@@ -204,6 +204,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp/src/**'],
+    // #3645: EDITED, scope = § Audit log (rows only for the backend's
+    // MCP_TOOL_NAMES allowlist, named in full), verified against
+    // packages/backend/src/middleware/agentToolAudit.ts. Nothing else
+    // re-verified. Prior:
     // #3506: EDITED, scope = the haven_submit bullet (sub_budget_id and
     // pendingSubBudgetSignatures[]), verified against src/tools.ts. Nothing else
     // re-verified. Prior:

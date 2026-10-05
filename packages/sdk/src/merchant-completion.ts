@@ -260,10 +260,9 @@ export class MerchantCompletion {
     const merchantSettlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
     if (receipt.merchant && merchantSettlement.settlementTxHash) {
       receipt.merchant.settlementTxHash = merchantSettlement.settlementTxHash
-      receipt.merchant.settlementExplorerUrl = buildExplorerUrl(
-        receipt.chainId,
-        merchantSettlement.settlementTxHash,
-      )
+      // #3638: an unknown chain has no explorer link — keep `null`, never `''`.
+      receipt.merchant.settlementExplorerUrl =
+        buildExplorerUrl(receipt.chainId, merchantSettlement.settlementTxHash) || null
     }
 
     await this.reportEvidence({

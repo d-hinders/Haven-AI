@@ -42,14 +42,18 @@ import { paymentStateStatusCode } from './payment-state.js'
  * directly, without constructing a client.
  */
 
+// #3638: Haven's two networks. An unknown chain gets NO link rather than
+// another chain's explorer — before, every chain but the retired chain 100
+// fell back to mainnet basescan, so a Base Sepolia transaction linked to the wrong network.
+// `undefined` still means Base, the default network.
 const CHAIN_EXPLORER_TX: Record<number, string> = {
-  100:  'https://gnosisscan.io/tx',
   8453: 'https://basescan.org/tx',
+  84532: 'https://sepolia.basescan.org/tx',
 }
 
 export function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
-  const base = CHAIN_EXPLORER_TX[chainId ?? 8453] ?? CHAIN_EXPLORER_TX[8453]
-  return `${base}/${txHash}`
+  const base = CHAIN_EXPLORER_TX[chainId ?? 8453]
+  return base ? `${base}/${txHash}` : ''
 }
 
 export function explorerUrlOrEmpty(

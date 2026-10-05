@@ -76,33 +76,35 @@ export const ACCOUNTING_FEED = [
 ] as const
 
 /**
- * Step 3's connector command, in the working form the product publishes.
+ * Step 3's terminal: a short storytelling script, not a transcript (owner
+ * decision, 2026-10-05, #3644 — "It doesn't have to use the actual prompt,
+ * this is more for story telling and showing how easy it is to set up").
  *
- * The mockup's bare `npx @haven_ai/connect` throws before anything runs —
- * `packages/connect/src/args.ts:255` throws "Missing --setup" when no token is
- * given — so the page shows the command WITH its required flags, the shape
- * the setup prompt hands the agent (`agent-guidance.ts:235`:
- * `npx -y @haven_ai/connect@<channel> --setup … --api <url> --ack-local-tools`),
- * with the published dist-tag `@alpha` (agent-discovery-listings.md:137,
- * "everywhere, verbatim"). The token is the runbook's never-real placeholder.
+ * It replaced slice 2's full working command and verbatim connector stdout,
+ * which could not fit a third of the page and scrolled sideways. What still
+ * holds:
  *
- * The output lines below are the connector's real stdout on the happy path,
- * transcribed from `packages/connect/src/runtime.ts` in print order:
- * `Minting…` (:636), `Configured hosted Haven MCP identity.` / `Configured
- * local Haven signer.` (printRuntimeInstall, :1407/:1412), the
- * `→ Action needed:` budget CTA in its no-approval-url fallback form
- * (approveBudgetCta, :1333), and `Haven setup on this machine is complete.`
- * (:819). Nothing here is invented.
+ * - The command keeps the published prefix verbatim
+ *   (`docs/product/copy-guidelines.md`: `npx -y @haven_ai/connect@<channel>`
+ *   "stays verbatim wherever it appears"), with the `@alpha` dist-tag; the
+ *   trailing `…` marks the flags left out. The mockup's bare
+ *   `npx @haven_ai/connect` stays out: it throws "Missing --setup" before
+ *   anything runs (`packages/connect/src/args.ts:256`).
+ * - The output lines are illustrative and tell the real order: the key is
+ *   made on the agent's machine, the agent connects, the user approves the
+ *   budget in Haven. "Key", never "signing key" (copy-guidelines vocabulary).
+ * - Every line, comments included, is at most 38 characters, so none wraps
+ *   at 1280 (a column holds about 41 at 12.5px mono); narrower, the
+ *   terminal wraps rather than scrolls.
  */
 export const CONNECTOR_TERMINAL = {
-  comment: '# in the agent\'s terminal — the command your Haven setup prompt prints',
-  command: 'npx -y @haven_ai/connect@alpha --setup hv_setup_… --api https://api.haven.example --ack-local-tools',
+  comment: '# in your agent\'s terminal',
+  command: 'npx -y @haven_ai/connect@alpha …',
   output: [
-    'Minting a fresh signing key and API key — both stay on this machine.',
-    'Configured hosted Haven MCP identity.',
-    'Configured local Haven signer.',
-    '→ Action needed: approve this agent\'s budget in the Haven dashboard — the approval button is live now. Setup continues here in the meantime.',
-    'Haven setup on this machine is complete.',
+    '✓ Key created on this machine',
+    '✓ Agent connected to Haven',
+    '→ Approve the budget in Haven',
+    '✓ Setup complete',
   ],
-  tailComment: '# or paste the setup prompt from\n# your dashboard into your agent',
+  tailComment: ['# or paste the setup prompt from', '# your dashboard into your agent'],
 } as const

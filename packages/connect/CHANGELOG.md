@@ -15,6 +15,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.0-alpha.0 — 2026-10-05
+
+### Fixed
+
+- **`--doctor` never picks a retired credential directory as the primary (#3496).** The `TOMBSTONE.json` tell is now checked before `identity.json`, so a retired directory that kept its identity file (the `--replace`-era shape) can no longer be selected as the primary when that identity is the newest on disk — which made the doctor report the live agent as superseded and prescribe a full re-setup. A retired directory is still listed as retired; the doctor stays read-only. No update needed.
+
 ## 0.7.0-alpha.0 — 2026-09-29
 
 ### Fixed

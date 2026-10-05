@@ -163,25 +163,33 @@ installRequestValidation(app, {
     // and born ENFORCED, same precedent as agent-organizations.ts above.
     'routes/agent-task-budgets.ts',
     // #3330: sub-budgets — the owner-facing issuance/read routes are
-    // money-path-adjacent (they create the rows payments later redeem
-    // through) but carry no spend authority themselves (nothing is signed
-    // by Haven, nothing is redeemed here); born ENFORCED like the
-    // task-budget reads above. The agent-facing lifecycle in
-    // `routes/sub-budgets.ts` IS money-path-adjacent and born ENFORCED
+    // money-path: they are where a sub-budget is issued and opened, the
+    // moment another agent receives spend authority (the same reason
+    // `routes/agent-connection-setups.ts` is listed), and they have been
+    // on the runtime money-path list since #3661. Haven signs nothing
+    // here — the delegating agent's key does — and nothing is redeemed
+    // here, but the routes create the rows payments later redeem through,
+    // so read a change to them as a money-path change. Born ENFORCED like
+    // the task-budget reads above. The agent-facing lifecycle in
+    // `routes/sub-budgets.ts` IS money-path and born ENFORCED
     // under the same brand-new-module rule as `routes/task-budgets.ts`.
     'routes/agent-sub-budgets.ts',
     'routes/sub-budgets.ts',
-    // #3332: a brand new module with no live caller yet, same reasoning as
-    // task-budgets.ts below — born ENFORCED, never shadow.
+    // #3332: a brand new module with no live caller at birth (its frontend
+    // caller `useCompanyDetails` arrived later) — same reasoning as
+    // task-budgets.ts below: born ENFORCED, never shadow.
     'routes/owner-company-details.ts',
-    // #3329: `routes/task-budgets.ts` is a BRAND NEW module with no live
-    // caller yet (unlike `routes/payments.ts` / `routes/agent-delegations.ts`
-    // / `routes/machine-payments.ts`, which predate the request-validation
-    // rollout and carry real traffic the #3028 fallback could not prove) —
-    // `docs/operations/dev-environment.md`'s rule is that a genuinely new
-    // module is born ENFORCED, never shadow, because there is no existing
-    // caller a stricter schema could break. It is money-path, but that rule
-    // is about proving EXISTING traffic safe, not about gating new surfaces.
+    // #3329: `routes/task-budgets.ts` was born ENFORCED as a brand new
+    // module with no live caller (unlike `routes/payments.ts` /
+    // `routes/agent-delegations.ts` / `routes/machine-payments.ts`, which
+    // predate the request-validation rollout and carry real traffic the
+    // #3028 fallback could not prove) — `docs/operations/dev-environment.md`'s
+    // rule is that a genuinely new module is born ENFORCED, never shadow,
+    // because there is no existing caller a stricter schema could break.
+    // It is money-path (runtime glob since #3661). qa-dev drives its
+    // lifecycle today (`task-budget-lifecycle.ts` under
+    // `packages/qa-agent/src/scenarios/`, #3505), but that rule is about
+    // proving EXISTING traffic safe, not about gating new surfaces.
     'routes/task-budgets.ts',
     // Slice 2 (#3030): every non-money route module, plus the two inline
     // routes below (`GET /`, `GET /chains` — keyed `'index.ts'`). Flipped on

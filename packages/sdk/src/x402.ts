@@ -1018,7 +1018,7 @@ export function encodePaymentProof(receipt: {
  * Resolve a token symbol from a contract address.
  *
  * Checks all supported chains. For chain-specific resolution,
- * pass the optional `network` CAIP-2 string (e.g. "eip155:100").
+ * pass the optional `network` CAIP-2 string (e.g. "eip155:8453").
  */
 export function resolveTokenFromAddress(
   address: string,

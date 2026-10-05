@@ -85,7 +85,14 @@ describe('CLAUDE.md chain claims match the chains registry', () => {
 
   it('never claims Gnosis Chain (100) is supported', () => {
     expect(claudeProse).not.toMatch(/Gnosis Chain \(chain ID 100\) is also supported/i)
-    expect(claudeProse).not.toMatch(/Gnosis[^.]{0,60}\bsupported\b/i)
+    // Every sentence that names Gnosis must say it is NOT a network Haven
+    // runs: catches a re-added support claim however it is worded ("payments
+    // also run on Gnosis…"), while a true negative statement passes.
+    const gnosisSentences = claudeProse.split(/(?<=[.!?])\s+/).filter((s) => /gnosis/i.test(s))
+    expect(gnosisSentences.length).toBeGreaterThan(0)
+    for (const sentence of gnosisSentences) {
+      expect(sentence, `CLAUDE.md names Gnosis without negating it: "${sentence}"`).toMatch(/\bnot\b|\bno longer\b|\bdead\b|\blegacy\b/i)
+    }
     expect(claudeProse).toContain('Gnosis Chain (chain ID 100) is not a Haven network')
   })
 })

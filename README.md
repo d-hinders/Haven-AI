@@ -439,7 +439,7 @@ From `packages/backend/`:
 | Command | What it does |
 |---|---|
 | `npm run test:payment` | Run payment simulation script (legacy: defaults to Gnosis Chain tokens and explorer; not a supported path) |
-| `npm run agent:demo` | Run Claude agent payment demo (legacy: Gnosis Chain only; not a supported path) |
+| `npm run agent:demo` | Run Claude agent payment demo (legacy: default task pays EURe and reports a Gnosisscan link; not a supported path) |
 
 ## Project Structure
 
@@ -492,7 +492,7 @@ Agent budgets are enforced on USDC: the period enforcer is ERC-20 only. Gnosis C
 - **Model Context Protocol** — local and hosted agent tool connections
 - **Tailwind CSS** — styling
 - **Base** (primary) and **Base Sepolia** (dev/QA) — the supported networks
-- **Anthropic SDK** — Claude agent demo
+- **Anthropic SDK** — the legacy Claude agent demo script
 
 ## Contributing — Hosted Setup & Dev Workflow
 

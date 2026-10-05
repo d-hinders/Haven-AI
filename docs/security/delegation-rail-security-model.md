@@ -1773,6 +1773,11 @@ signer imports:
   (`assertOwnSubBudgetCloseUserOp`), byte-shape-identical to the task
   budget's.
 
+  > **Corrected (#3645, 2026-10-05):** the issuance parenthetical above said
+  > the owner "co-signs" each sub-budget; the owner's act is a
+  > dashboard-session call with no owner signature (decision log
+  > 2026-10-01). `last-verified` is not bumped.
+
 - **The x402 buyer tax declaration (#3427)** — a new EIP-712 shape, signed
   in-process by the SDK's `HavenClient` through a builder on the
   `@haven_ai/sdk/edge` entry beside the other shared signing guards

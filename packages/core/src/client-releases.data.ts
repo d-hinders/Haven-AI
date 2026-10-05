@@ -15,8 +15,28 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.7.0-alpha.0",
+    "released_version": "0.8.0-alpha.0",
     "notes": [
+      {
+        "version": "0.8.0-alpha.0",
+        "date": "2026-10-05",
+        "summary": "A refused settlement-evidence report carries the backend's reason. Includes a breaking change. (+21 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "A refused settlement-evidence report carries the backend's ",
+            "code": false
+          },
+          {
+            "text": "reason",
+            "code": true
+          },
+          {
+            "text": ". Includes a breaking change. (+21 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.7.0-alpha.0",
         "date": "2026-09-29",
@@ -56,80 +76,48 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.6.0-alpha.0",
-        "date": "2026-09-26",
-        "summary": "Breaking change — the four deprecated HavenPaymentReceipt twins are gone. mapPaymentReceipt no longer emits rail, proofStatus, resourceUrl or merchantAddress, and HavenPaymentReceipt no longer declares them. (+5 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "Breaking change — the four deprecated ",
-            "code": false
-          },
-          {
-            "text": "HavenPaymentReceipt",
-            "code": true
-          },
-          {
-            "text": " twins are gone. ",
-            "code": false
-          },
-          {
-            "text": "mapPaymentReceipt",
-            "code": true
-          },
-          {
-            "text": " no longer emits ",
-            "code": false
-          },
-          {
-            "text": "rail",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "proofStatus",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "resourceUrl",
-            "code": true
-          },
-          {
-            "text": " or ",
-            "code": false
-          },
-          {
-            "text": "merchantAddress",
-            "code": true
-          },
-          {
-            "text": ", and ",
-            "code": false
-          },
-          {
-            "text": "HavenPaymentReceipt",
-            "code": true
-          },
-          {
-            "text": " no longer declares them. (+5 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.7.0-alpha.0",
+    "released_version": "0.8.0-alpha.0",
     "notes": [
+      {
+        "version": "0.8.0-alpha.0",
+        "date": "2026-10-05",
+        "summary": "The consent text and the initialize handshake now say this signer signs sub-budgets. Since 0.7.0, haven_sign has signed sub-budget opens and closes (sub_budget_id), but the operator's consent screen named only payments and task budgets, and the handshake listed no sub-budget versions. (+1 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The consent text and the ",
+            "code": false
+          },
+          {
+            "text": "initialize",
+            "code": true
+          },
+          {
+            "text": " handshake now say this signer signs sub-budgets. Since 0.7.0, ",
+            "code": false
+          },
+          {
+            "text": "haven_sign",
+            "code": true
+          },
+          {
+            "text": " has signed sub-budget opens and closes (",
+            "code": false
+          },
+          {
+            "text": "sub_budget_id",
+            "code": true
+          },
+          {
+            "text": "), but the operator's consent screen named only payments and task budgets, and the handshake listed no sub-budget versions. (+1 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.7.0-alpha.0",
         "date": "2026-09-29",
@@ -185,76 +173,52 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.6.0-alpha.0",
-        "date": "2026-09-26",
-        "summary": "haven_sign gains a task_budget_id form and two new signed shapes. { task_budget_id } alone (mutually exclusive with payment_id / payload_hash) fetches the pending task-budget open or close context and signs it, returning { signature, task_budget_id, purpose } instead of { signature, x402_binding }.",
-        "summary_segments": [
-          {
-            "text": "haven_sign",
-            "code": true
-          },
-          {
-            "text": " gains a ",
-            "code": false
-          },
-          {
-            "text": "task_budget_id",
-            "code": true
-          },
-          {
-            "text": " form and two new signed shapes. ",
-            "code": false
-          },
-          {
-            "text": "{ task_budget_id }",
-            "code": true
-          },
-          {
-            "text": " alone (mutually exclusive with ",
-            "code": false
-          },
-          {
-            "text": "payment_id",
-            "code": true
-          },
-          {
-            "text": " / ",
-            "code": false
-          },
-          {
-            "text": "payload_hash",
-            "code": true
-          },
-          {
-            "text": ") fetches the pending task-budget open or close context and signs it, returning ",
-            "code": false
-          },
-          {
-            "text": "{ signature, task_budget_id, purpose }",
-            "code": true
-          },
-          {
-            "text": " instead of ",
-            "code": false
-          },
-          {
-            "text": "{ signature, x402_binding }",
-            "code": true
-          },
-          {
-            "text": ".",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.7.0-alpha.0",
+    "released_version": "0.8.0-alpha.0",
     "notes": [
+      {
+        "version": "0.8.0-alpha.0",
+        "date": "2026-10-05",
+        "summary": "haven_get_task_budget reads one task budget by id, whatever its status. haven_get_agent lists only live task budgets (closing, plus unexpired pending and open), each with its status and isExpired; closed and expired ones are read with the new tool. (+2 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "haven_get_task_budget",
+            "code": true
+          },
+          {
+            "text": " reads one task budget by id, whatever its status. ",
+            "code": false
+          },
+          {
+            "text": "haven_get_agent",
+            "code": true
+          },
+          {
+            "text": " lists only live task budgets (closing, plus unexpired pending and open), each with its ",
+            "code": false
+          },
+          {
+            "text": "status",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "isExpired",
+            "code": true
+          },
+          {
+            "text": "; closed and expired ones are read with the new tool. (+2 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.7.0-alpha.0",
         "date": "2026-09-29",
@@ -302,104 +266,28 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.6.0-alpha.0",
-        "date": "2026-09-26",
-        "summary": "Breaking change — haven_list_receipts rows lose four keys. rail, proofStatus, resourceUrl and merchantAddress, the deprecated twins kept for one full release since 0.5.0-alpha.0, are no longer emitted; read source, paymentProofStatus, x402ResourceUrl and x402MerchantAddress. (+3 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "Breaking change — ",
-            "code": false
-          },
-          {
-            "text": "haven_list_receipts",
-            "code": true
-          },
-          {
-            "text": " rows lose four keys. ",
-            "code": false
-          },
-          {
-            "text": "rail",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "proofStatus",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "resourceUrl",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "merchantAddress",
-            "code": true
-          },
-          {
-            "text": ", the deprecated twins kept for one full release since ",
-            "code": false
-          },
-          {
-            "text": "0.5.0-alpha.0",
-            "code": true
-          },
-          {
-            "text": ", are no longer emitted; read ",
-            "code": false
-          },
-          {
-            "text": "source",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "paymentProofStatus",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "x402ResourceUrl",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "x402MerchantAddress",
-            "code": true
-          },
-          {
-            "text": ". (+3 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.7.0-alpha.0",
+    "released_version": "0.8.0-alpha.0",
     "notes": [
+      {
+        "version": "0.8.0-alpha.0",
+        "date": "2026-10-05",
+        "summary": "--doctor never picks a retired credential directory as the primary.",
+        "summary_segments": [
+          {
+            "text": "--doctor",
+            "code": true
+          },
+          {
+            "text": " never picks a retired credential directory as the primary.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.7.0-alpha.0",
         "date": "2026-09-29",
@@ -415,34 +303,19 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
+      }
+    ]
+  },
+  "@haven_ai/cli": {
+    "released_version": "0.8.0-alpha.0",
+    "notes": [
       {
-        "version": "0.6.0-alpha.0",
-        "date": "2026-09-26",
-        "summary": "The runtime this connector installs moves to 0.6.0-alpha.0 (no connector source change). A setup or re-run now wires @haven_ai/mcp, @haven_ai/sdk and @haven_ai/signer 0.6.0-alpha.0. Includes a breaking change: see the changelog.",
+        "version": "0.8.0-alpha.0",
+        "date": "2026-10-05",
+        "summary": "haven wallets list and haven wallets balances name Base Sepolia, and no longer name Gnosis. The chain-name table held Gnosis (100) and Base (8453) only, so a Base Sepolia account printed chain 84532. (+1 more in the changelog)",
         "summary_segments": [
           {
-            "text": "The runtime this connector installs moves to ",
-            "code": false
-          },
-          {
-            "text": "0.6.0-alpha.0",
-            "code": true
-          },
-          {
-            "text": " (no connector source change). A setup or re-run now wires ",
-            "code": false
-          },
-          {
-            "text": "@haven_ai/mcp",
-            "code": true
-          },
-          {
-            "text": ", ",
-            "code": false
-          },
-          {
-            "text": "@haven_ai/sdk",
+            "text": "haven wallets list",
             "code": true
           },
           {
@@ -450,29 +323,24 @@ export const CLIENT_RELEASE_DATA = {
             "code": false
           },
           {
-            "text": "@haven_ai/signer",
+            "text": "haven wallets balances",
             "code": true
           },
           {
-            "text": " ",
+            "text": " name Base Sepolia, and no longer name Gnosis. The chain-name table held Gnosis (100) and Base (8453) only, so a Base Sepolia account printed ",
             "code": false
           },
           {
-            "text": "0.6.0-alpha.0",
+            "text": "chain 84532",
             "code": true
           },
           {
-            "text": ". Includes a breaking change: see the changelog.",
+            "text": ". (+1 more in the changelog)",
             "code": false
           }
         ],
         "action_required": false
-      }
-    ]
-  },
-  "@haven_ai/cli": {
-    "released_version": "0.7.0-alpha.0",
-    "notes": [
+      },
       {
         "version": "0.7.0-alpha.0",
         "date": "2026-09-29",
@@ -504,46 +372,6 @@ export const CLIENT_RELEASE_DATA = {
           },
           {
             "text": ". (+1 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.6.0-alpha.0",
-        "date": "2026-09-26",
-        "summary": "haven guide: \"If something breaks\". The bundled agent runbook (a copy of @haven_ai/sdk's) gains the section that sends an agent to a result's client_update.upgrade_command and to the /releases page. (+1 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven guide",
-            "code": true
-          },
-          {
-            "text": ": \"If something breaks\". The bundled agent runbook (a copy of ",
-            "code": false
-          },
-          {
-            "text": "@haven_ai/sdk",
-            "code": true
-          },
-          {
-            "text": "'s) gains the section that sends an agent to a result's ",
-            "code": false
-          },
-          {
-            "text": "client_update.upgrade_command",
-            "code": true
-          },
-          {
-            "text": " and to the ",
-            "code": false
-          },
-          {
-            "text": "/releases",
-            "code": true
-          },
-          {
-            "text": " page. (+1 more in the changelog)",
             "code": false
           }
         ],

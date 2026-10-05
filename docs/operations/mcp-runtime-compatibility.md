@@ -1896,6 +1896,32 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.8.0-alpha.0 release, 2026-10-05):** the manifest table
+> above is re-pinned by the bump to `0.8.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.7.0-alpha.0` is **MINOR**, with one type-only break: #3464 narrows
+> `PostPurchaseAllowanceSummary.rail`/`source` to the delegation values
+> (the retired values were unreachable at runtime).
+>
+> **Surfaces this release moves:**
+> - **The tool set.** `haven_get_task_budget` is a new tool on **both** the hosted
+>   and the local runtime (#3501 follow-on). The local consent hash includes
+>   the tool names, so **every local operator is asked to consent once more**
+>   after updating.
+> - **Tool arguments and results.**
+>   - The sub-budget `haven_submit` handoff (#3506).
+>   - `haven_send` / `haven_pay` results are compact by default, with an opt-in (#3524).
+>   - An advisory, history-only `recipient.class` (#3531).
+>   - The camelCase allowance summary, with snake_case deprecated (#3464).
+> - **Signer consent text.** It now names sub-budget open and close (#3506).
+>   `SIGNER_CONSENT_SURFACE_VERSION` is unchanged (the owner's copy-only
+>   decision), so the signer consent hash does not change.
+> - **Client minimums.** `CLIENT_COMPAT` is unchanged: `@haven_ai/signer`
+>   `min_version` stays `0.6.0-alpha.0`.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` is not bumped.
+
 > **Re-verification (0.7.0-alpha.0 release, 2026-09-29):** the manifest table
 > above is re-pinned by the bump to `0.7.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from the
@@ -2142,10 +2168,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.7.0-alpha.0` |
-| `@haven_ai/mcp` | `0.7.0-alpha.0` |
-| `@haven_ai/sdk` | `0.7.0-alpha.0` |
-| `@haven_ai/signer` | `0.7.0-alpha.0` |
+| `@haven_ai/connect` | `0.8.0-alpha.0` |
+| `@haven_ai/mcp` | `0.8.0-alpha.0` |
+| `@haven_ai/sdk` | `0.8.0-alpha.0` |
+| `@haven_ai/signer` | `0.8.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

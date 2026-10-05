@@ -2151,6 +2151,13 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > moves in that edit. The release's changes to the signing surface (#3330,
 > #3419) were each re-verified here when they merged. Nothing else in this
 > document was re-verified.
+>
+> **Re-verified (0.8.0-alpha.0 release, 2026-10-05):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.8.0-alpha.0`). No signing check, refusal or allowlist moves in that edit. The
+> range's two signer changes, #3539 (sub-budget `haven_submit` handoff and consent
+> text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
+> re-verified where they merged. Nothing else in this document was re-verified.
 
 > **Re-verified #3331 frontend (2026-09-27, round 2 review fixes):** this diff
 > touches `hooks/useDelegationBudget.ts` only. `reload`/`reloadSigners` read

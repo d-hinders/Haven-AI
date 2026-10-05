@@ -121,7 +121,7 @@ agent's delegate first. There is no approval queue. Deep dive:
 | `@haven_ai/qa-agent` | Private Base-Sepolia dev harness for deterministic seeded money-flow and merchant round-trip checks; also hosts the experimental ERC-4337 pilot scripts (ADR #719, `src/pilot/` — see the research doc); not published. |
 | `@haven_ai/demo-merchant-mcp` | Internal x402 demo merchant — test counterparty, not product. |
 | `@haven/ops` | Private operations console (epic #3507; [runbook](../operations/ops-console.md)): a separate Next.js app that signs founders in through GitHub and reads through the backend's `/ops/*` surface. Read-only — nothing under `/ops` moves funds, signs, changes signers or delegations, or acts as a user; the backend writes an audit row for every data read and every reveal. **Private**, never published. |
-| `@haven_ai/ui` | Shared design system — tokens, Tailwind preset and UI primitives (#3508), consumed by the ops console and the dashboard (whose old `components/ui` paths are now re-export shims). **Private**, never published. |
+| `@haven_ai/ui` | Shared design system — tokens, Tailwind preset and UI primitives (#3508), consumed by the ops console and the dashboard (the primitives that moved keep their old `components/ui` paths as re-export shims). **Private**, never published. |
 
 ## Default topology
 

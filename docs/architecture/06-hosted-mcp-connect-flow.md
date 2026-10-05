@@ -78,13 +78,15 @@ permissions require action by the Safe owner outside Haven.
    holds a stored key (with the account it spends from) and any MCP server name
    it is taking over from another directory's local binding record — a
    warning, never a refusal.
-4. Registration sends only the setup token, runtime/version metadata, public
+4. Registration sends only the setup token and its challenge id, runtime/version metadata, public
    signing address and proof, API-key hash/prefix, the MCP server name the
    connector wired this agent as (`haven`, or `haven-<slug>` — a display label
    the dashboard shows so several agents in one harness can be told apart;
    #1878), and `run_mode` (`json` | `prose`, #2528 — whether the connector ran
    with `--json`, which only the connector can report and which segments the
-   onboarding funnel; refused with 400 if it is anything else). No private key
+   onboarding funnel; refused with 400 if it is anything else), plus non-secret
+   `connector_context` labels (environment label, config target) and
+   `install_capabilities` flags. No private key
    or plaintext API key is registered. The response returns `approval_url`
    (#2528), the same-origin link to this setup's budget approval that create
    and status already return — a page address, carrying no token.
@@ -145,7 +147,7 @@ delegation in step 5.
 The recommended paid-MCP path is:
 
 ```text
-EIP-3009 bridge
+EIP-3009 bridge (fallback when the merchant does not advertise erc7710)
 haven_pay_mcp_tool
   → haven_sign_x402
   → haven_settle_mcp_tool
@@ -159,8 +161,8 @@ haven_pay_mcp_tool
 On the EIP-3009 bridge hosted MCP prepares the funding and merchant contexts,
 the signer locally authorizes both legs, and hosted MCP relays the signed
 merchant authorization. On erc7710 there is no funding leg: the signer signs
-the narrowed settlement child and `haven_settle_mcp_tool` assembles the
-merchant header. The result's `next_tool` names whichever applies.
+the narrowed settlement child and Haven assembles the merchant header at
+`haven_settle_mcp_tool`. The result's `next_tool` names whichever applies.
 
 The generic decomposed path remains available, in two shapes since
 [#2041](https://github.com/d-hinders/Haven-AI/issues/2041) — the scheme is
@@ -241,7 +243,7 @@ read, but the consequence differs and the difference is the whole point of
 estimated and the caveat enforcer's refusal surfaces as a `502` with no intent
 row. `POST /payments` no longer answers that way: since #3503 it runs its own
 period pre-check (fail-open per link) and, when a period-budget revert follows
-a degraded read, re-reads and answers the same typed `403` once the fresh read
+(a race or a failed-open read), re-reads and answers the same typed `403` once the fresh read
 confirms the shortfall. The erc7710
 branch prepares **nothing**: it re-delegates a narrowed child and hands it
 back, so a failed-open over-budget request comes back `201 pending_signature`

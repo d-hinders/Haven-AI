@@ -7,6 +7,9 @@ covers:
   - packages/signer/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/sdk/src/direct-payment-guard.ts
+  - packages/backend/src/routes/discovery.ts
+  - packages/connect/src/api.ts
+  - packages/backend/src/middleware/agentAuth.ts
 last-verified: "2026-10-05"
 ---
 
@@ -79,8 +82,9 @@ enforcement.
 For new agents, Connect Agent 2 can create this split automatically: Haven
 creates a pending setup, the local connector generates the signing key and API
 key on the user's machine, and Haven receives the public signing address, a
-proof signature, the API-key hash/prefix, and non-secret setup metadata (server
-name, run mode, install status), never the signing key or the plaintext API
+proof signature, the API-key hash/prefix, and non-secret setup metadata (runtime and
+connector version, server name, run mode, install capabilities, then install
+status), never the signing key or the plaintext API
 key, before wallet approval. This
 migration guide still applies to existing agents and manual hosted-MCP setups.
 
@@ -286,7 +290,7 @@ for anyone. An over-budget request is normally refused before it becomes
 signable, so the fix is for the wallet owner to grant or raise the budget in
 Haven (or wait for the period to reset) and the agent to retry, never to poll.
 A result with `payload_hash: null` is different. Its `idempotency_key` already
-belongs to a payment past signing, and it carries that payment's real `status`
+belongs to an earlier payment that is not awaiting a signature, and it carries that payment's real `status`
 (and `tx_hash` once recorded), so there is nothing left to sign.
 
 ## What You Can Remove
@@ -371,7 +375,7 @@ probe of the dev hosted MCP listed every tool for an invalid key, and the first
 call answered 401); and Connect Agent 2's registration names its non-secret
 setup metadata. Re-checked without change: the package tags, the signer flags
 and variables, the production URL default, the tool names, the erc7710
-`haven_submit` header, the hosted boot refusal, and steps 2–4.
+`haven_submit` header, the hosted boot refusal, step 2, and the rest of steps 3–4.
 
 ## Related Docs
 

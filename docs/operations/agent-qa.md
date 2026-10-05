@@ -5,7 +5,9 @@ covers:
   - scripts/ci/rpc-conformance.mjs
   - .env.dev.example
   - .github/workflows/qa-dev.yml
+  - .github/workflows/qa-balances.yml
   - scripts/ci/qa-failure-issue.mjs
+  - scripts/ci/qa-balance-issue.mjs
   - scripts/ci/qa-retry.mjs
   - scripts/ci/qa-freshness.mjs
   - scripts/ci/guard-freshness.mjs
@@ -698,12 +700,16 @@ Sepolia with an **open (unpinned) 5 USDC/day budget delegation**. Open rather
 than pinned is structural, not preference: 3009-mode funds the delegate EOA
 from the budget, and a recipient-pinned delegation cannot pay the EOA — a
 pinned identity would make both legs skip for a third reason. The treasury
-holds testnet USDC (~0.9 at provisioning; each leg spends ~0.001/run).
+holds testnet USDC (~0.9 at provisioning). A full run spends ~0.034 USDC
+(`TREASURY_RUN_COST_ATOMIC` in `packages/qa-agent/src/lib/preflight.ts`, which
+names each leg's share); most legs spend 0.001 USDC each.
 
 - **Top-up:** send Base Sepolia USDC
   (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the treasury address in
   the operator's `~/.haven/qa-delegation.env` (`QA_DELEGATION_TREASURY`) —
-  any source works; the budget refills itself daily.
+  any source works; the budget refills itself daily. The daily
+  [QA wallet balances](#qa-wallet-balances-standing-issue) check warns about
+  7 days before it runs dry.
 - **Rotation:** the full identity (user credentials, owner key, delegate key,
   API key, treasury address) lives in the operator's
   `~/.haven/qa-delegation.env`. To rotate the delegate key: create a fresh
@@ -758,6 +764,86 @@ GitHub UI:
 Secrets should appear as `***` in logs. The workflow checks out `dev`, installs
 dependencies, builds the SDK, and executes the same harness as the local
 command.
+
+## QA wallet balances (standing issue)
+
+[#3631](https://github.com/d-hinders/Haven-AI/issues/3631). Money-flow QA failed in
+preflight for about 3.5 days (2026-10-01T19:24Z → 2026-10-05T06:08Z, ~40 runs)
+because the delegation treasury ran out of Base Sepolia USDC, and nothing warned
+beforehand. Preflight has only a FAIL floor (one run's cost), and its output
+reaches only a run log.
+
+`qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
+calls `npm run qa:balances -w packages/qa-agent`, which reads three wallets on
+Base Sepolia, and `scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**,
+`QA wallet balances low` (label `qa-funding`):
+
+| Wallet | Unit | Where the address comes from |
+|---|---|---|
+| Delegation treasury | USDC | `GET /machine-payments/agent` with the QA agent key, the same derivation as preflight |
+| Demo-merchant settlement wallet | ETH (gas) | the merchant's own `/healthz` |
+| Dev backend relayer (84532) | ETH (gas) | the repo **variable** `QA_DEV_RELAYER_ADDRESS`, a recorded exception to preflight's "derive, never restate" rule, because no CI-readable source exists (owner decision on #3631) |
+
+**What the bands mean.** Runway is the balance divided by the median observed
+daily drop over the last 14 daily readings; a top-up (a rise) is ignored. The
+readings are kept as the workflow's `qa-balances-history` artifact. Until 7
+readings exist, a fixed fallback floor decides, and the row says so:
+
+- delegation treasury: 1.0 USDC (about 30 runs);
+- demo merchant: its own `warn_floor`, from `/healthz`;
+- dev relayer: 0.01 ETH, the backend's `RELAYER_LOW_BALANCE_WEI`, restated in
+  qa-agent.
+
+`warn` means under 7 days of runway. `critical` means under 1 day, or below one
+run's cost: 0.034 USDC for the treasury, the merchant's `fail_floor`, or 0.01 ETH
+for the relayer. `unknown` means a missing config value or a failed read.
+
+**How the issue behaves.**
+
+- **Any wallet `warn` or `critical`:** the body is rewritten, and the issue is
+  reopened (or created once). Each row carries the full address, balance, burn
+  per day, runway and a link to the matching top-up heading below.
+- **A comment is posted only when a wallet's band changes.**
+- **When no wallet is `warn` or `critical`:** the final balances are commented
+  and the issue closes itself.
+- **`unknown` never opens the issue and never blocks a close.**
+- **A *missing config* `unknown` turns the run red,** so GitHub notifies the
+  owner. A failed read (an RPC or `/healthz` outage) does not.
+- **Selection:** the script finds its issue by bot author and exact title, the
+  `standing-issue-upsert.mjs` rule (#3341). A human issue with the same label,
+  or one whose title contains the words, is never edited or closed.
+
+The check is read-only. It never signs or moves funds, and it receives no
+delegate private key.
+
+### Top up the delegation treasury
+
+Send Base Sepolia USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the
+treasury address the issue names, from any source. It is the same address as
+`QA_DELEGATION_TREASURY` in the operator's `~/.haven/qa-delegation.env`, and the
+**Top-up** bullet under the delegation-rail QA identity above. A full run spends
+~0.034 USDC.
+
+### Top up the demo-merchant settlement wallet
+
+Send Base Sepolia ETH to the settlement address the issue names (the merchant's
+`/healthz` reports the same one). That wallet pays the gas for the merchant's own
+settlements. The preflight section above explains the merchant's warn and fail
+floors, which are counted in settlements.
+
+### Top up the dev relayer
+
+Send Base Sepolia ETH to the relayer address the issue names (the
+`QA_DEV_RELAYER_ADDRESS` variable). It is the dev backend's single relayer EOA.
+It pays for activations, passport attestations, revocations, sweeps, and the
+outbound queue's fee bumps and lane cancels; agent payments are
+paymaster-sponsored and never use it
+([`dev-environment.md`](dev-environment.md)). The backend's own low-balance floor
+is 0.01 ETH.
+
+**Operator step (once):** set the repo variable `QA_DEV_RELAYER_ADDRESS`
+(Settings → Secrets and variables → Actions → Variables). Until it is set, the
+relayer row is `unknown` and every run is red.
 
 ## Automation & gating
 
@@ -1530,7 +1616,7 @@ everything else is `unclassified`, never a guess. Read the class before reading 
 | Class | Signature | What it means, and the example | Next step |
 |---|---|---|---|
 | `provider` | `-32016` / `over rate limit`, `RPC Request failed`, `Status: 429` or `Too Many Requests` (on the line after `HTTP request failed.`, or JSON-escaped inside a relayed 502 body), `Batch of more than N requests`, `no available upstreams`, `flashblocks`, dRPC's `on the free plan` / `upgrade to paid plan` limits, and a body quoting `URL: https://sepolia.base.org` ([#2511](#a-502-whose-body-carries-url-httpssepoliabaseorg-is-an-rpc-outage-not-a-regression-2511)) | The RPC or bundler provider refused the request. #2449: `-32016 over rate limit` inside the delegate-account deploy. | A finding for the provider, not a flake to re-dispatch away. A **recurring** provider class means the endpoint does not fit the harness's load — report it (epic #3335) and check the endpoint before retrying into the same limit. |
-| `preflight` | the run-level `✗ preflight:` line, and the resource line above it that failed its floor | The harness stopped before any leg ran. #2485: the merchant settlement wallet's gas below its floor. | Top up or fix the named resource; no leg result exists to read. |
+| `preflight` | the run-level `✗ preflight:` line, and the resource line above it that failed its floor | The harness stopped before any leg ran. #2485: the merchant settlement wallet's gas below its floor. 2026-10-01 → 10-05 (#3631): the delegation treasury at 0.0 USDC, about 40 failing runs. | Top up or fix the named resource; no leg result exists to read. |
 | `harness` | the message of a JS runtime error (`… is not a function`, `… is not defined`, `Cannot read properties of undefined`) — the harness prints `err.message`, never the error's name, so a relayed body quoting `TypeError` does not count — or the run-level `✗ harness crashed:` line | The harness itself threw. No failure in the 40-run sample below carries this signature. A harness defect does not always announce itself: #2443's second failure was intra-attempt contamination between scenarios, and this classifier records it as `unclassified`. | Fix the harness; the product may be fine. |
 | `rate_limit` | `Rate limit exceeded: max <n> x402 payments per hour`, however the leg relays it (`authorize failed (429)`, the SDK's `settleX402Erc7710 failed:`, a hosted `API_ERROR`, a bare FAIL line, `(HTTP 429: …)`); checked first, ahead of every other class (#3541) | Haven's own per-agent x402 cap (`max_x402_per_hour`, default 100, a sliding one-hour window) working as designed, out-run by the harness's own volume. Run 36840685285: about four hand dispatches plus post-deploy runs in an hour on the one QA identity, ten x402 legs refused; attempt 2 passed about 30 s later. Only that body: Haven's other limiters — `moneyPathRateLimit`'s 429 (`Rate limit exceeded, retry in 1 minute`) and `Relayer budget exceeded` — land in `haven` when relayed as `failed (429)`, and in `unclassified` when the status is lost (the SDK, the sweep scenario). | Never a product defect. Stop hand-dispatching runs back to back; the window slides, so the in-step retry often clears it, and a further hand dispatch should be spaced out. |
 | `haven` | the leg's own Haven API call answered `… failed (4xx)` | Haven refused a request the leg expected to succeed. | Read the Haven change that landed before the run. |

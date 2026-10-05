@@ -11,6 +11,7 @@
     "build": "tsup",
     "seed": "tsx src/seed.ts",
     "qa:dev": "tsx src/run.ts",
+    "qa:balances": "tsx src/balances-cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "pilot:x402-7710-buyer": "tsx src/pilot/x402-7710-buyer.ts",

@@ -93,7 +93,7 @@ flowchart TB
     AGENTS_TBL[(agents table<br/>delegate_address,<br/>api_key_hash,<br/>api_key_prefix)]
     PASSKEYS_TBL[(user_passkeys<br/>credential id, public coordinates,<br/>signer/Safe metadata, attestation)]
     BINDINGKEY[(X402_BINDING_PRIVATE_KEY<br/>authorization-context signer)]:::secret
-    RELAYERKEY[(Gas relayer key(s)<br/>global + per-chain payment keys)]:::secret
+    RELAYERKEY[("Gas relayer key(s)<br/>global + per-chain payment keys")]:::secret
   end
   class USERS,AGENTS_TBL,PASSKEYS_TBL havenZone
 
@@ -106,7 +106,7 @@ flowchart TB
   end
   class AGENT,SIGNER agentZone
 
-  subgraph CHAIN["On-chain — Base, Gnosis, Base Sepolia"]
+  subgraph CHAIN["On-chain — Base, Base Sepolia"]
     direction TB
     SAFE[Safe smart account]
     OWNERS_LIST[Safe owners + threshold]
@@ -142,7 +142,7 @@ flowchart TB
   DELEGATEKEY -->|produces signatures for| DELEGATE_ADDR
   DELEGATE_ADDR -->|signature verified as calldata| AM
   RELAYERKEY -->|pays gas for authorized calls| AM
-  RELAYERKEY -->|deploys accounts and pays gas for<br/>signed operations (nothing on the<br/>legacy Safe rail since #2847)| SAFE
+  RELAYERKEY -->|"deploys accounts and pays gas for<br/>signed operations (nothing on the<br/>legacy Safe rail since #2847)"| SAFE
   BINDINGKEY -.->|context signature verified locally| SIGNER
   AM -->|spends within allowance| SAFE
 ```

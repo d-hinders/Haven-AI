@@ -328,7 +328,7 @@ sequenceDiagram
     else merchant rejects after funding
       Resource-->>SDK: Error response
       SDK-->>Agent: x402_retry_rejected_after_funding
-      Note over Agent,SDK: Reconcile; sweep if delegate funds are stranded
+      Note over Agent,SDK: Reconcile, then sweep if delegate funds are stranded
     end
   else remaining < amount ≤ remaining + delegate balance
     API-->>SDK: pending_approval + payment id + x402 context
@@ -399,7 +399,7 @@ sequenceDiagram
     Resource-->>Agent: 200 OK / merchant response
   else outside the on-chain budget
     API-->>MCP: refusal — no intent row, no payload_hash, nothing queued
-    MCP-->>Agent: Stop and tell the user to raise the budget; do NOT poll
+    MCP-->>Agent: Stop and tell the user to raise the budget — do NOT poll
   end
 ```
 

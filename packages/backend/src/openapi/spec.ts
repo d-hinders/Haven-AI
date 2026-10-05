@@ -4235,7 +4235,7 @@ export const openapiSpec = {
         operationId: 'getAccountFunding',
         summary: 'Machine-readable funding facts for one account: what to fund, with what, where, and how much.',
         description:
-          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
+          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id (the delegation-rail account).' }],
         responses: {
@@ -11181,7 +11181,7 @@ export const openapiSpec = {
         type: 'object',
         required: ['token', 'amount', 'to'],
         properties: {
-          token: { type: 'string', examples: ['USDC', 'EURe', 'xDAI'] },
+          token: { type: 'string', examples: ['USDC'] },
           amount: { type: 'string', description: 'Human-readable token amount.' },
           to: address,
           idempotency_key: {
@@ -12471,7 +12471,7 @@ export const openapiSpec = {
             properties: {
               symbol: { type: 'string' },
               balance_human: { type: 'string', description: "On a failed read (#3317), the last successfully read native balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read." },
-              needed: { type: 'boolean', description: 'Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI.' },
+              needed: { type: 'boolean', description: 'Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH.' },
               balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
             },
             additionalProperties: false,

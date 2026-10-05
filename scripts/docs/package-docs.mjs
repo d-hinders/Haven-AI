@@ -110,7 +110,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3503: the decline paragraph re-read against `routes/payments.ts` —
     // over-budget is now a 403 delegation_budget_exceeded on POST /payments too.
     // Scope: that paragraph.
-    'last-verified': '2026-09-30',
+    // #3632: the networks table and the four EURe/gnosisscan examples (two
+    // pay() samples, the Claude tool sample, the error-handling sample)
+    // re-read against core chains.ts and src/tools.ts. Scope: those lines.
+    'last-verified': '2026-10-05',
   },
   {
     doc: 'packages/signer/README.md',

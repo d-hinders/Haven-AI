@@ -76,6 +76,14 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3632 (2026-10-05, SDK text drops Gnosis Chain):** the
+> `@haven_ai/sdk` tool descriptions and the `PaymentRequest.token` JSDoc now
+> name USDC on Base (`eip155:8453`) and Base Sepolia (`eip155:84532`) only;
+> Gnosis Chain is not a Haven network. Description text only: no tool, schema,
+> field, enum, version-skew or consent-hash contract moves, and an installed
+> runtime keeps working with the old text. `last-verified` stays 2026-10-02.
+> Nothing else in this document was re-verified.
+
 > **Re-verified #3620 (2026-10-05, budget-scope guards):** this diff touches
 > two covered files, and neither change moves a runtime contract.
 > `packages/backend/src/middleware/client-compat.ts` gets a comment-only fix:

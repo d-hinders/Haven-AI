@@ -20,14 +20,26 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.8.0-alpha.0",
         "date": "2026-10-05",
-        "summary": "A refused settlement-evidence report carries the backend's reason. Includes a breaking change. (+21 more in the changelog)",
+        "summary": "PostPurchaseAllowanceSummary (the settled-x402 allowance block) spells its figures like haven_get_agent. Includes a breaking change. (+21 more in the changelog)",
         "summary_segments": [
           {
-            "text": "A refused settlement-evidence report carries the backend's ",
+            "text": "PostPurchaseAllowanceSummary",
+            "code": true
+          },
+          {
+            "text": " (the settled-x402 ",
             "code": false
           },
           {
-            "text": "reason",
+            "text": "allowance",
+            "code": true
+          },
+          {
+            "text": " block) spells its figures like ",
+            "code": false
+          },
+          {
+            "text": "haven_get_agent",
             "code": true
           },
           {

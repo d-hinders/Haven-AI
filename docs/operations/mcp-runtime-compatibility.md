@@ -1899,13 +1899,15 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-verification (0.8.0-alpha.0 release, 2026-10-05):** the manifest table
 > above is re-pinned by the bump to `0.8.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from
-> `0.7.0-alpha.0` is **MINOR**, with one type-only break: #3464 narrows
-> `PostPurchaseAllowanceSummary.rail`/`source` to the delegation values
-> (the retired values were unreachable at runtime).
+> `0.7.0-alpha.0` is **MINOR**, for three narrowing breaks:
+> - #3638: chain 100 leaves the SDK's x402 helpers.
+> - #3464: `PostPurchaseAllowanceSummary.rail`/`source` narrow to the delegation
+>   values (type-only; the retired values were unreachable at runtime).
+> - #3518: `getAgentSummary().taskBudgets` lists only live rows.
 >
 > **Surfaces this release moves:**
 > - **The tool set.** `haven_get_task_budget` is a new tool on **both** the hosted
->   and the local runtime (#3501 follow-on). The local consent hash includes
+>   and the local runtime (#3518). The local consent hash includes
 >   the tool names, so **every local operator is asked to consent once more**
 >   after updating.
 > - **Tool arguments and results.**

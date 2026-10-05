@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.0-alpha.0 — 2026-10-05
+
 ### Fixed
 
 - **`haven wallets list` and `haven wallets balances` name Base Sepolia, and no longer name Gnosis (#3638, epic #3634).** The chain-name table held Gnosis (100) and Base (8453) only, so a Base Sepolia account printed `chain 84532`. It now prints `Base Sepolia`; a legacy chain-100 account prints `chain 100`, the existing fallback for an unknown chain. No update needed.

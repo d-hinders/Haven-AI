@@ -57,7 +57,7 @@ import { nextStepWireFields, signerRefusalStep } from './next-step.js'
  * `server.ts` re-exports them, so the package's public API is unchanged.
  */
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.7.0-alpha.0'
+export const SIGNER_VERSION = '0.8.0-alpha.0'
 
 /**
  * #3419: the marker the tool layer prefixes the undeclared-argument refusal

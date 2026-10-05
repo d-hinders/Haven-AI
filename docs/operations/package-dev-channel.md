@@ -225,6 +225,18 @@ and the `release` skill.
 > today**, and a scoped check of one constant is not a re-verification of this
 > document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
+> **Re-verification (0.8.0-alpha.0 release, 2026-10-05):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.7.0-alpha.0` → `0.8.0-alpha.0`. `HAVEN_CONNECTOR_CHANNEL` stays `alpha`.
+> - **Publish path.** Re-measured at `origin/dev` `97a330aa`: `git log
+>   origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+>   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **0**
+>   commits. The bump's own diff touches none of them.
+> - **Live dist-tags read during this release.** `dev` =
+>   `0.0.0-dev.202610051128.d0e0c97`, below `alpha`/`latest` = `0.7.0-alpha.0`.
+>
+> `last-verified` is not bumped.
+
 > **Re-verification (0.7.0-alpha.0 release, 2026-09-29):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
 > `0.6.0-alpha.0` → `0.7.0-alpha.0`. `HAVEN_CONNECTOR_CHANNEL` stays `alpha`,

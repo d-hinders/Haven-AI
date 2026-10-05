@@ -55,13 +55,18 @@
  * the caller's report and the refusal row describe the budget that pays.
  * `merchantTo` keeps its #3492 replay role unchanged (below).
  *
- * ## The refusal is a taxonomy 403, the success is a bare boolean
+ * ## The refusal body is the #3616 builder's (`mpp` flavor, #3619)
  *
- * On insufficiency the body carries the same taxonomy fields
- * (`error_code`, `phase`, `next_action`) the x402 legs refuse with — the
- * hosted tool reconstructs its OWN byte-identical refusal from the
- * `remaining_atomic` value here, so the agent-facing shape never changes.
- * On sufficiency: `{ sufficient: true, remaining_atomic, remaining_is_from_chain? }`
+ * On insufficiency the 403 body is built by `buildPeriodExceededBody`
+ * (`modules/budget-scope/refusal-body.ts`, the `mpp` flavor), byte-equal to
+ * the body this file hand-built until #3619 — the hosted tool parses the
+ * body (#3504) and reconstructs its OWN byte-identical refusal from the
+ * `remaining_atomic` value here, so field names and prose are wire. The
+ * pre-#3616 hand-built copy is preserved in
+ * `modules/budget-scope/__tests__/refusal-body.test.ts`'s characterization
+ * table. The ledger `detail` comes from `periodExceededLedgerDetail` — the
+ * 086/087 allowlist's exact subset. On sufficiency:
+ * `{ sufficient: true, remaining_atomic, remaining_is_from_chain? }`
  * — the hosted tool's `allowance` block needs the remaining figure to
  * report it.
  *
@@ -81,8 +86,9 @@
  * settled EIP-3009 row on the SAME rule — on that scheme `confirmed` +
  * `tx_hash` is the FUNDING leg (treasury → delegate), which is exactly what
  * `delegationReplay`'s own confirmed+tx_hash branch (`modules/x402/replay.ts`)
- * already treats as replayable for every scheme, so refusing it here as
- * over-budget was always a false ledger row, the same as the erc7710 case.
+ * already treats as replayable for every scheme, so it must never be
+ * REFUSED here as over-budget — that would book a false ledger row for a
+ * spend that already moved.
  * See `isSettledX402Replay` below for the exact predicate and scope.
  *
  * ## Rail posture
@@ -107,8 +113,10 @@ import {
   selectBudgetForPaymentReport,
 } from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
-import { formatTokenValue } from '../../domain/tokens.js'
-import { AgentPaymentPhase, AgentPaymentNextAction } from '../../domain/agent-payment-taxonomy.js'
+import {
+  buildPeriodExceededBody,
+  periodExceededLedgerDetail,
+} from '../budget-scope/index.js'
 import { refuse, type DecidedResponse } from '../payments/refuse.js'
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
@@ -137,44 +145,52 @@ function settlementSchemeOf(machineMetadata: unknown): string | null {
  * #3492/#3527: is `row` a SETTLED x402 replay of exactly the quote `body`
  * describes?
  *
- * This is STRICTER than `delegationReplay`'s own confirmed+tx_hash branch
- * (`modules/x402/replay.ts:89-110`), which answers its stored 200 for ANY
- * `confirmed` row with a `tx_hash` regardless of settlement scheme, payee or
- * resource — those fields are compared only by `existingX402IntentMismatch`,
- * which runs AFTER the confirmed branch and on `pending_signature` rows only.
- * This endpoint instead checks:
+ * The settled-replay RULE this endpoint runs — `confirmed` + `tx_hash` means
+ * "the money already moved, re-refusing is a false ledger row" — is the SAME
+ * rule `delegationReplay`'s confirmed branch answers 200 by
+ * (`modules/x402/replay.ts`), deliberately. What differs is the MATCH each
+ * caller requires around it, and #3619 pins those differences cell by cell in
+ * `routes/__tests__/replay-rules-parity.test.ts` (the same seeded row runs
+ * through this predicate, `delegationReplay`, and `findPaymentReplay` via the
+ * route, so a change to either side reddens the table). What differs here:
  *
- *  - `confirmed` + a `tx_hash` — the payment already moved money; refusing
- *    it as over-budget now would be a false ledger row for a spend that is
- *    done, not pending. On EIP-3009 this `tx_hash` is the FUNDING leg
- *    (treasury → delegate, written by `confirmX402Intent` in
- *    `infra/repositories/x402-authorizations.ts`), not a merchant
- *    settlement — but it is exactly the fact `delegationReplay`'s confirmed
- *    branch already treats as replayable for this scheme too (#3527), so the
- *    same "money already moved, re-refusing is false" argument applies.
  *  - `settlement_scheme` is `erc7710` or `eip3009` (#3492 scoped this to
  *    erc7710 only; #3527 is the follow-up that extended it to eip3009 on the
- *    SAME rule — see this function's old #3492 revision for the narrower
- *    predicate this replaced).
+ *    SAME rule). `delegationReplay` has no scheme condition.
  *  - no task-budget or sub-budget pin on the stored row — the catalog-purchase
  *    preflight this endpoint serves never authorizes against either, so a
  *    row that carries one belongs to a different flow this compare should
- *    not short-circuit.
+ *    not short-circuit. `delegationReplay` runs the pin the other way: the
+ *    request's ids must EQUAL the row's (a mismatch is a 409), it never
+ *    excludes pinned rows.
  *  - the SAME payee (`merchantTo`) and resource (`resourceUrl`) the request
  *    asks about — REQUIRED on both sides: an absent `merchantTo` or
  *    `resourceUrl` in the request never matches (nothing to scope the
  *    replay to), and a key collision against a different payee or resource
- *    must still run (and can still fail) today's compare. The resource
- *    comparison is scheme-agnostic BY CONSTRUCTION: it compares `body.resourceUrl`
- *    against whichever value the row's own `x402_resource_url` column stores,
- *    and that storage is already scheme-aware at authorize time — erc7710
- *    persists the caller's `resourceUrl` (`merchantUrl` on the hosted path),
- *    eip3009 persists `paymentRequired.resource.url` — the SDK's
- *    `createX402Intent` sends that as the `url` field of its `POST /x402`
- *    body unconditionally, with no caller override — so the CALLER is
- *    responsible for sending the value that matches what will be stored for
- *    the scheme it is replaying (`catalog-purchase.ts` step 5b, #3527).
- *  - the SAME token and amount the request asks about, for the same reason.
+ *    must still run (and can still fail) today's compare. `delegationReplay`
+ *    does not compare payee or resource on confirmed rows at all. The
+ *    resource comparison is scheme-agnostic BY CONSTRUCTION: it compares
+ *    `body.resourceUrl` against whichever value the row's own
+ *    `x402_resource_url` column stores, and that storage is already
+ *    scheme-aware at authorize time — erc7710 persists the caller's
+ *    `resourceUrl` (`merchantUrl` on the hosted path), eip3009 persists
+ *    `paymentRequired.resource.url` — the SDK's `createX402Intent` sends
+ *    that as the `url` field of its `POST /x402` body unconditionally, with
+ *    no caller override — so the CALLER is responsible for sending the value
+ *    that matches what will be stored for the scheme it is replaying
+ *    (`catalog-purchase.ts` step 5b, #3527).
+ *  - the SAME token and amount the request asks about, for the same reason
+ *    (also unmatched by `delegationReplay` on confirmed rows).
+ *  - `findPaymentReplay` (`routes/payments.ts`, NOT edited in this slice —
+ *    #3618 owns that file) is the BROADEST reading: any row no longer
+ *    `pending_signature` that its key lookup still finds answers its stored
+ *    status with no `tx_hash`, scheme or match-field condition (its pin runs
+ *    as a key-collision 409 first). The lookup skips `failed` and `expired`
+ *    rows (`FIND_SEND_INTENT_BY_KEY_SQL`), so those free the key (#3620).
+ *    A confirmed row with a `tx_hash` therefore replays there too — but
+ *    nothing about a replay decision is refused as over-budget on that
+ *    surface, so the false-ledger-row hazard the first bullet guards does
+ *    not arise there.
  */
 function isSettledX402Replay(
   row: Record<string, unknown>,
@@ -339,7 +355,7 @@ export async function handleBudgetPrecheck(
             "This agent's budget for this token is locked to specific recipients, and the check named none. " +
             'Repeat it with merchantTo set to the payee; a payment to any other address has no budget.',
           error_code: 'budget_requires_recipient',
-          next_action: AgentPaymentNextAction.RetryWithExplicitContext,
+          next_action: 'retry_with_explicit_context',
           chain_id: agent.chain_id,
           asset: tokenAddress,
           budget_recipient_addresses: pins,
@@ -395,48 +411,37 @@ export async function handleBudgetPrecheck(
   // fire-and-forget (the write can never change this response; see
   // refusal-ledger.ts). `source: 'hosted_prepare'` is the ONLY new thing
   // about this writer: same reason, same taxonomy detail keys as the x402
-  // legs' pre-check refusals.
-  const shortfallAtomic = amountAtomic - BigInt(remainingAtomic)
-  const amountHuman = formatTokenValue(amountAtomicString, token.decimals)
-  const remainingHuman = formatTokenValue(remainingAtomic, token.decimals)
-  const shortfallHuman = formatTokenValue(shortfallAtomic.toString(), token.decimals)
+  // legs' pre-check refusals. #3619: the body is the #3616 builder's `mpp`
+  // flavor, equal field for field to the body this file hand-built (the
+  // hosted tool parses it — #3504 — so the equality is wire).
+  const refusalBody = buildPeriodExceededBody({
+    flavor: 'mpp',
+    chainId: agent.chain_id,
+    tokenSymbol: symbol,
+    tokenAddress,
+    decimals: token.decimals,
+    amountAtomic: amountAtomicString,
+    remainingAtomic,
+    resourceUrl: body.resourceUrl,
+    merchantAddress: merchantTo ?? undefined,
+    // #3518: the refusal row and body name the budget whose remaining figure
+    // the compare ran against — the payment-selection mirror's winner. The
+    // detail allowlist (086/087) keeps the taxonomy subset only; these ride
+    // the RESPONSE body (and the ledger row's merchant column via
+    // `merchantTo`), not `detail`.
+    extraFields: match
+      ? {
+          budget_id: match.id,
+          budget_delegation_hash: match.delegation_hash,
+          budget_recipient_address: match.recipient_address,
+          budget_merchant_id: match.merchant_id,
+        }
+      : undefined,
+  })
   const decided: DecidedResponse = refuse(
     {
       code: 403,
-      body: {
-        error:
-          `This payment of ${amountHuman} ${symbol} exceeds the agent's remaining ` +
-          `budget for this period (${remainingHuman} ${symbol}, short by ${shortfallHuman} ${symbol}). ` +
-          'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
-          'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
-        error_code: 'delegation_budget_exceeded',
-        phase: AgentPaymentPhase.InsufficientFunds,
-        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-        chain_id: agent.chain_id,
-        token: symbol,
-        asset: tokenAddress,
-        amount: amountHuman,
-        amount_atomic: amountAtomicString,
-        remaining: remainingHuman,
-        remaining_atomic: remainingAtomic,
-        shortfall: shortfallHuman,
-        shortfall_atomic: shortfallAtomic.toString(),
-        resource_url: body.resourceUrl,
-        ...(merchantTo ? { merchant_address: merchantTo } : {}),
-        // #3518: the refusal row and body name the budget whose remaining
-        // figure the compare ran against — the payment-selection mirror's
-        // winner. The detail allowlist (086/087) keeps the taxonomy subset
-        // only; these ride the RESPONSE body (and the ledger row's merchant
-        // column via `merchantTo`), not `detail`.
-        ...(match
-          ? {
-              budget_id: match.id,
-              budget_delegation_hash: match.delegation_hash,
-              budget_recipient_address: match.recipient_address,
-              budget_merchant_id: match.merchant_id,
-            }
-          : {}),
-      },
+      body: refusalBody,
     },
     {
       userId: agent.user_id,
@@ -449,12 +454,7 @@ export async function handleBudgetPrecheck(
       resourceUrl: body.resourceUrl,
       reason: 'delegation_budget_exceeded',
       source: 'hosted_prepare',
-      detail: {
-        error_code: 'delegation_budget_exceeded',
-        phase: AgentPaymentPhase.InsufficientFunds,
-        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-        remaining_atomic: remainingAtomic,
-      },
+      detail: periodExceededLedgerDetail(remainingAtomic),
     },
   )
   return { statusCode: decided.code, body: decided.body as Record<string, unknown> }

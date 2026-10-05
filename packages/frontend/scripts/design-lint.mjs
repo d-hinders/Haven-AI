@@ -75,6 +75,12 @@ const MARKETING_SURFACES = [
   'src/app/page.tsx',
   'src/app/protocols/',
   'src/app/how-it-works/',
+  // #3577: the two new public pages, marketing-family by construction —
+  // their sections live under components/marketing/site/ (already covered by
+  // the second entry) and the pages themselves use the fixed navy/indigo
+  // grounds the rules below cannot judge.
+  'src/app/developers/',
+  'src/app/for-agents/',
 ]
 export function isMarketingSurface(file) {
   return MARKETING_SURFACES.some((m) =>

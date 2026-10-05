@@ -691,6 +691,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(502)
       expect(res.json().error).toMatch(/funding authorization failed/)
+      expect(res.json().error_code).toBe('prepare_failed')
       expect(res.json().details).toContain('aa_sendUserOperation timeout')
       expect(mockCreateIntent).not.toHaveBeenCalled()
     })
@@ -754,10 +755,10 @@ describe('x402 delegation-rail settlement (#830)', () => {
         headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
         payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
       })
-      // The refusal response itself is the 502 it has always been — the
-      // writer classifies the error, it does not act on it.
+      // The refusal response itself is still a 502 — the writer classifies
+      // the error, it does not act on it. #3609: typed as a revert.
       expect(res.statusCode).toBe(502)
-      expect(res.json().error).toMatch(/funding authorization failed/)
+      expect(res.json()).toMatchObject({ error_code: 'prepare_reverted', refusal_reason: 'delegation_budget_exceeded' })
       expect(mockPrepareFunding).toHaveBeenCalledTimes(1)
       expect(mockCreateIntent).not.toHaveBeenCalled()
       expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
@@ -917,6 +918,58 @@ describe('x402 delegation-rail settlement (#830)', () => {
         payment_required: expect.objectContaining({ x402Version: 2 }),
       }),
     }))
+  })
+
+  it('#3610: persists the merchant description into machine_metadata on BOTH branches, from the body or the stored 402', async () => {
+    // The 402 shape a plain-HTTP merchant sent in the #3610 report (x402 v2
+    // `resource` with url / description / mimeType). Its description must be
+    // what status later reports; before #3610 it was dropped at authorize.
+    const paymentRequired = {
+      x402Version: 2,
+      resource: {
+        url: 'https://merchant.example/api/fact',
+        description: 'Get a random fun fact',
+        mimeType: 'application/json',
+      },
+      accepts: [{ scheme: 'exact', network: 'base', amount: '100000', asset: USDC, payTo: MERCHANT }],
+    }
+    const budgetRow = {
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    }
+    const authorize = async (payload: Record<string, unknown>) => {
+      mockCreateIntent.mockClear()
+      mockSelect.mockResolvedValue(budgetRow)
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(payload),
+      })
+      expect(res.statusCode).toBe(201)
+      return (mockCreateIntent.mock.calls.at(-1)?.[0] as { metadata: Record<string, unknown> }).metadata
+    }
+    // payTo = the delegate EOA selects the eip3009 funding leg (#946); a
+    // merchant payTo selects erc7710. Each assertion pins which leg it hit.
+    const funding = { payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }
+
+    // eip3009 leg, description in the body (what the SDK's funding leg sends).
+    const fundingMeta = await authorize({ ...funding, description: '  Get a random fun fact  ' })
+    expect(fundingMeta.settlement_scheme).toBe('eip3009')
+    expect(fundingMeta.description).toBe('Get a random fun fact')
+    // erc7710 leg, no body description: read from the stored 402.
+    const childMeta = await authorize({
+      settlementScheme: 'erc7710',
+      facilitatorAddresses: ['0x' + 'fa'.repeat(20)],
+      paymentRequired,
+    })
+    expect(childMeta.settlement_scheme).toBe('erc7710')
+    expect(childMeta.description).toBe('Get a random fun fact')
+    // Neither source, on either leg: null, never invented.
+    expect((await authorize({})).description).toBeNull()
+    expect((await authorize(funding)).description).toBeNull()
   })
 
   // #3117: settle echoes the stored challenge's own matching offer, so a
@@ -1150,11 +1203,15 @@ describe('x402 delegation-rail settlement (#830)', () => {
       // #1059: on the funding leg the budget IS the signed instrument.
       budgetDelegationHash: PREPARED.delegationHash,
     }))
-    // The funding redemption targeted the EOA with the exact amount. #3329:
-    // a 5th (task-budget) argument now always accompanies the call — this
-    // request carried no task_budget_id, so it is undefined.
+    // The funding redemption targeted the EOA with the exact amount. #3617:
+    // the 5th argument carries the scope resolved once at the top of the leg
+    // — with no task or sub-budget, the (token, payTo) selection itself, so
+    // `prepareDelegationPayment` redeems the row the pre-check read instead of
+    // selecting again.
     expect(mockPrepareFunding).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n, undefined,
+      expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n,
+      // This test primes no (token, payTo) row, so the selection is null.
+      { delegation: null },
     )
     // The erc7710 SELECTOR for the merchant was never consulted (#2706 note:
     // the funding leg now calls selectDelegation itself, keyed on the funding
@@ -1187,15 +1244,17 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
-  it('3009-mode maps caveat/bundler failure to a clean 502; database untouched', async () => {
-    mockPrepareFunding.mockRejectedValueOnce(new Error('estimation reverted: period budget exceeded'))
+  it('3009-mode maps a caveat revert to a typed 502 prepare_reverted; database untouched (#3609)', async () => {
+    mockPrepareFunding.mockRejectedValueOnce(
+      new Error('UserOperation reverted during simulation with reason: ERC20PeriodTransferEnforcer:transfer-amount-exceeded'),
+    )
     const res = await app.inject({
       method: 'POST', url: '/x402/authorize',
       headers: { authorization: 'Bearer sk_agent_test' },
       payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
     })
     expect(res.statusCode).toBe(502)
-    expect(res.json().error).toMatch(/funding authorization failed/)
+    expect(res.json()).toMatchObject({ error_code: 'prepare_reverted', refusal_reason: 'delegation_budget_exceeded' })
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
@@ -2900,7 +2959,7 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
     it('the funding-leg prepare revert (expired caveat) is booked as delegation_expired; the 502 is byte-identical with a broken ledger (#3052)', async () => {
       // The classifier's four-way contract at this call site: the timestamp
       // enforcer's revert text names a refusal, so the catch books it. The
-      // 502 response — a raw redacted vendor dump — is untouched either way.
+      // 502 response (typed and bounded since #3609) is untouched either way.
       fundingPrepareReverts(
         "before execution's timestamp is before this caveat's beforeThreshold",
       )
@@ -2913,7 +2972,7 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
         payload: body,
       })
       expect(withLedger.statusCode).toBe(502)
-      expect(withLedger.json().error).toMatch(/funding authorization failed/)
+      expect(withLedger.json()).toMatchObject({ error_code: 'prepare_reverted', refusal_reason: 'delegation_expired' })
       expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
       const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
       expect(ask).toMatchObject({
@@ -2961,6 +3020,7 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
       })
       expect(res.statusCode).toBe(502)
       expect(res.json().error).toMatch(/funding authorization failed/)
+      expect(res.json().error_code).toBe('prepare_failed')
       expect(mockRecordRefusal).not.toHaveBeenCalled()
       expect(mockCreateIntent).not.toHaveBeenCalled()
     })

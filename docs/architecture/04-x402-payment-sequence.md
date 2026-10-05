@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
+  - packages/backend/src/modules/budget-scope/**
   - packages/backend/src/modules/task-budgets/**
   - packages/backend/src/routes/task-budgets.ts
   - packages/backend/src/routes/agent-sub-budgets.ts
@@ -327,7 +328,7 @@ sequenceDiagram
     else merchant rejects after funding
       Resource-->>SDK: Error response
       SDK-->>Agent: x402_retry_rejected_after_funding
-      Note over Agent,SDK: Reconcile; sweep if delegate funds are stranded
+      Note over Agent,SDK: Reconcile, then sweep if delegate funds are stranded
     end
   else remaining < amount ≤ remaining + delegate balance
     API-->>SDK: pending_approval + payment id + x402 context
@@ -398,7 +399,7 @@ sequenceDiagram
     Resource-->>Agent: 200 OK / merchant response
   else outside the on-chain budget
     API-->>MCP: refusal — no intent row, no payload_hash, nothing queued
-    MCP-->>Agent: Stop and tell the user to raise the budget; do NOT poll
+    MCP-->>Agent: Stop and tell the user to raise the budget — do NOT poll
   end
 ```
 
@@ -418,8 +419,10 @@ sequenceDiagram
 > authorize-time pre-check read the live budget — the fail-open posture is
 > inherited verbatim, so a degraded budget read (`fromChain: false`) or a
 > thrown one proceeds to prepare, where the enforcer's revert still surfaces
-> as the `502` **with no intent row** that this branch used to answer with
-> for every refusal; on erc7710 authorize pre-checks the live remaining
+> as a `502` **with no intent row** — typed `prepare_reverted` with the
+> decoded `revert_reason` and bounded `details` since
+> [#3609](https://github.com/d-hinders/Haven-AI/issues/3609) (before it,
+> one untyped 502 carrying the whole redacted error); on erc7710 authorize pre-checks the live remaining
 > budget and answers `403 delegation_budget_exceeded`
 > ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)); the legacy rail
 > answers `410` (#1986). None of the three writes anything, and none produces a
@@ -1342,8 +1345,9 @@ The flow is a two-call variant of `/x402/authorize`:
    *when* Haven says no. Previously this branch prepared nothing at authorize —
    unlike `POST /payments` and, at the time, the EIP-3009 shape, which
    estimated a redemption and so surfaced the enforcer's refusal as a `502`
-   with no intent row (the 3009 shape gained the same pre-check in #2706, so
-   today only `POST /payments` reaches the enforcer unconditionally) — so an
+   with no intent row (the 3009 shape gained the same pre-check in #2706 and
+   `POST /payments` in #3503, so no path reaches the enforcer unconditionally
+   any more) — so an
    over-budget erc7710 request came back `201 pending_signature` **with**
    `sign_data`, and the refusal only landed after the agent had signed, settled,
    and retried the merchant. Since [#1450](https://github.com/d-hinders/Haven-AI/issues/1450)
@@ -2293,6 +2297,21 @@ itself redeems `[grant, parent-child, budget]` (three links).
    child (its chain root no longer resolves active by hash, and reverts
    on-chain once the owner's disable lands) — surfaced as the structured 409
    above.
+   On `POST /x402/authorize` both legs resolve the scope through
+   `modules/budget-scope` (#3617) and pre-check the links the redemption
+   carries (`periodPrecheckLinks`): B's grant, A's parent-child and A's budget,
+   with the smallest remaining deciding and each link failing open on its
+   own, the rule `POST /payments` applies. A task budget pre-checks its parent
+   by hash on both legs too. Before #3617 the erc7710 leg read only A's budget,
+   and the EIP-3009 funding leg read B's own (token, `payTo`) grant, which is
+   not a link of the chain it redeems. On the erc7710 leg the scope now
+   resolves before the no-delegation refusal, so a B with no
+   `agent_delegations` row of its own pays through its sub-budget, and a
+   scope refusal comes before `no_delegation_for_target`. The funding leg
+   matches the scope's recipient pin against `payTo`, the delegate EOA that
+   leg's redemption transfers to; a merchant-pinned budget reverts there
+   on-chain either way. The hosted `haven_pay_x402_quote` takes no
+   `sub_budget_id`, so B pays x402 through the local MCP.
 4. `DELETE /agents/:id/sub-budgets/:sub` (owner) or `POST
    /sub-budgets/:id/close` (the owning agent, A or B) prepares a sponsored
    `disableDelegation(child)` UserOp from the closing agent's OWN delegate

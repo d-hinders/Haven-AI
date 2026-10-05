@@ -1,0 +1,100 @@
+/**
+ * `/` motion: no layout shift across a full cycle (#3575).
+ *
+ * The page under this harness is the new home with the gate ON
+ * (playwright.config.ts sets `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`), so all
+ * four animated regions are live. Each test installs Playwright's
+ * controlled clock, waits until the region's loop is demonstrably running
+ * (a loop-driven text state is visible — which also proves the
+ * IntersectionObserver delivered), then advances the clock through one
+ * FULL cycle and asserts the region's height never changed.
+ *
+ * `page.clock` virtualizes the timers the loops ride (motion.ts's engine is
+ * a setTimeout machine for exactly this reason) — including the tween's
+ * 16 ms tick chain and the typing hook's 95 ms keystroke chain. CSS
+ * entrances (translateY/opacity) paint outside layout, so a region whose
+ * animated states are height-stable passes here and fails loudly if a
+ * future edit makes one wrap.
+ */
+import { expect, test } from '@playwright/test'
+
+/** The region's rendered height, as layout reports it (integer px). */
+async function heightOf(page: import('@playwright/test').Page, testId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const node = document.querySelector(`[data-testid="${id}"]`)
+    if (!node) throw new Error(`missing region [data-testid="${id}"]`)
+    return node.getBoundingClientRect().height
+  }, testId)
+}
+
+test.describe('/ motion: layout stability across cycles', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.clock.install()
+    await page.goto('/')
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Give your agent a budget, not your credit card.' }),
+    ).toBeVisible()
+  })
+
+  test('the hero frame holds its height through the 19 s payment loop', async ({ page }) => {
+    const hero = page.getByTestId('hero-animated')
+    await hero.scrollIntoViewIfNeeded()
+
+    // 3000 ms in, the mockup's pending step proves the loop is running
+    // (index.html:105) — the IntersectionObserver has delivered.
+    await page.clock.runFor(3100)
+    await expect(hero.getByText('Pending')).toBeVisible()
+
+    const before = await heightOf(page, 'hero-animated')
+    // The rest of the cycle: settle, badge, refusal, fade, reset, restart.
+    await page.clock.runFor(19_000)
+    const after = await heightOf(page, 'hero-animated')
+    expect(after, 'hero frame height moved across one cycle').toBe(before)
+  })
+
+  test('the how-it-works cards hold their height through the 12 s cycle', async ({ page }) => {
+    const how = page.locator('#how')
+    await how.scrollIntoViewIfNeeded()
+
+    // 2100 ms in, the passkey card has completed (index.html:279). The card
+    // then shows "Account created" twice — the title and the confirmation —
+    // so the probe pins the confirmation element, not the text.
+    await page.clock.runFor(2200)
+    await expect(page.getByTestId('passkey-animated').getByTestId('confirmation')).toBeVisible()
+
+    const passkeyBefore = await heightOf(page, 'passkey-animated')
+    const budgetBefore = await heightOf(page, 'budget-animated')
+    const terminalBefore = await heightOf(page, 'terminal-animated')
+    await page.clock.runFor(12_000)
+    expect(await heightOf(page, 'passkey-animated'), 'passkey card height moved').toBe(passkeyBefore)
+    expect(await heightOf(page, 'budget-animated'), 'budget card height moved').toBe(budgetBefore)
+    expect(await heightOf(page, 'terminal-animated'), 'terminal height moved').toBe(terminalBefore)
+  })
+
+  test('the accounting feed holds its height through the 11 s retry loop', async ({ page }) => {
+    const feed = page.getByTestId('accounting-animated')
+    await feed.scrollIntoViewIfNeeded()
+
+    // 1600 ms in, the animated row is Retrying (index.html:294).
+    await page.clock.runFor(1700)
+    await expect(feed.getByText('Retrying the push to Fortnox')).toBeVisible()
+
+    const before = await heightOf(page, 'accounting-animated')
+    await page.clock.runFor(11_000)
+    const after = await heightOf(page, 'accounting-animated')
+    expect(after, 'accounting frame height moved across one cycle').toBe(before)
+  })
+
+  test('the refusal receipt holds its height through a replay', async ({ page }) => {
+    const receipt = page.getByTestId('refusal-receipt')
+    await receipt.scrollIntoViewIfNeeded()
+
+    // The assembly is entry-triggered CSS; the refusal box lands 750 ms in
+    // (site.css:338). Give the entry a beat, then cycle past a re-entry.
+    await page.clock.runFor(1000)
+    const before = await heightOf(page, 'refusal-receipt')
+    await page.clock.runFor(3000)
+    const after = await heightOf(page, 'refusal-receipt')
+    expect(after, 'receipt height moved').toBe(before)
+  })
+})

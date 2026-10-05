@@ -181,6 +181,15 @@ permissive is a live caller that would break. The enumeration for the final
 twelve (SDK, `packages/mcp`, connect, the shipped skill text and its
 byte-pinned twin, the QA legs, e2e fixtures, docs, `.agents`) found none.
 
+One argument diverges on purpose: the local `haven_pay_x402_quote` and
+`haven_pay_x402` take `sub_budget_id`, and the hosted `haven_pay_x402_quote`
+does not. The hosted handler used to forward a `sub_budget_id` it never
+declared. Strict parsing refused the key first, so the forwarding never ran,
+and #3617 deleted it rather than declare the argument (owner decision 2 on
+epic #3615). A hosted caller that sends it is refused by name, with zero Haven
+calls, and the tool description says a sub-agent pays x402 through the local
+MCP.
+
 Two of the permissive tools are `haven_get_agent` and
 `haven_get_allowances`, whose schema is `{}`. What `.strict()` would mean
 there was measured over the transport rather than argued: absent `arguments`

@@ -277,6 +277,11 @@ describe('the hooks are actually wired into the app', () => {
    * new footer could lose its "For agents" entry with that test still green.
    * This one requires the NEW footer's own destination to reach the runbook,
    * taken from the exported column data that `Footer` renders.
+   *
+   * #3577 retargeted the entry at the `/for-agents` page, so the hop is now
+   * TWO hops: the footer names the page, and the page (a component, not a
+   * public file) carries the runbook path in its hero and closing band —
+   * which is exactly "following the link through the new page".
    */
   it("the redesigned footer's own 'For agents' hook reaches the runbook (#3573)", async () => {
     const { SITE_FOOTER_COLUMNS } = await import('@/components/marketing/site/Footer')
@@ -286,10 +291,20 @@ describe('the hooks are actually wired into the app', () => {
     )
     expect(forAgents, 'the new footer has exactly one "For agents" entry').toHaveLength(1)
     const destination = forAgents[0].href
+    // First hop: the footer's destination is a real served surface — the
+    // page (an app route) or the runbook file itself.
+    const isPage = existsSync(join(FRONTEND_ROOT, `src/app${destination}/page.tsx`))
     const body = readPublic(destination)
-    expect(body, `${destination} is not a served file under public/`).not.toBeNull()
+    expect(body !== null || isPage, `${destination} is neither a served file nor an app route`).toBe(true)
+    // A direct link to the runbook still counts (handled first: it does not
+    // contain its own path), and otherwise the link must be FOLLOWED into
+    // the page it names, which must itself reach the runbook.
+    const reached =
+      destination === RUNBOOK ||
+      (body !== null && body.includes(RUNBOOK)) ||
+      read('src/components/marketing/site/for-agents/ForAgentsPage.tsx').includes(RUNBOOK)
     expect(
-      destination === RUNBOOK || body!.includes(RUNBOOK),
+      reached,
       `the new footer's "For agents" (${destination}) does not reach ${RUNBOOK}`,
     ).toBe(true)
   })

@@ -6,6 +6,14 @@ reads through the backend's `/ops/*` surface (#3509). It defines no primitives
 of its own; everything visual comes from `@haven_ai/ui` (#3508), and shared
 primitives belong in `packages/ui`, not here.
 
+Two visual choices are made here rather than in `@haven_ai/ui`. The sign-in
+button uses the shared `lg` size, an ops-only density choice (#3584). And the
+font: the root layout loads Inter through `next/font/google`, exactly as the
+dashboard does (#3584). `next/font` fetches the files at build time and serves
+them from `/_next/static/media`, so the CSP's `font-src 'self'` holds and the
+browser never contacts Google; a Google Fonts outage fails the build, not the
+page.
+
 ## Environments
 
 One env var holds every backend this console may talk to:

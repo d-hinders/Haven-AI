@@ -1062,6 +1062,53 @@ const signFailureResponse = {
 } as const
 
 /**
+ * #3609: the 502 a delegation-rail PREPARE answers when its simulation fails
+ * (`modules/payments/prepare-failure.ts`) — `POST /payments` and the x402
+ * EIP-3009 funding leg. Two typed shapes, split by the refusal ledger's
+ * classifier: `prepare_reverted` (deterministic, not retryable as made) and
+ * `prepare_failed` (not a revert — may be transient). `details` is bounded
+ * after vendor-secret redaction, the #3494 bound, never the raw viem dump.
+ */
+const prepareFailureSchemaProperties = {
+  ...errorResponse.content['application/json'].schema.properties,
+  error_code: { type: 'string', enum: ['prepare_reverted', 'prepare_failed'] },
+  refusal_reason: {
+    type: 'string',
+    enum: ['delegation_expired', 'delegation_budget_exceeded', 'onchain_revert'],
+    description: 'Present on `prepare_reverted` only: the refusal ledger\'s classification of the revert.',
+  },
+  revert_reason: {
+    type: ['string', 'null'],
+    description:
+      'Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer ' +
+      'error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") — ' +
+      'printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: ' +
+      'display it, never act on it.',
+  },
+  message: { type: 'string', description: 'Present on `prepare_reverted` only: the remedy.' },
+  details: {
+    type: ['string', 'null'],
+    description:
+      'The underlying bundler/viem failure text, scrubbed of vendor secrets and capped at 300 ' +
+      'characters plus an ellipsis — never the full dump.',
+  },
+} as const
+
+const PREPARE_FAILURE_DESCRIPTION =
+  '#3609: the prepare simulation failed. `error_code: "prepare_reverted"` — the redemption REVERTED ' +
+  'in execution (a decoded reason, a named caveat-enforcer error, the timestamp caveat\'s text, or a ' +
+  'gas-estimation execution revert): nothing was signed or moved, and the same payment reverts again on every retry; ' +
+  '`refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. ' +
+  '`error_code: "prepare_failed"` — anything else: a bundler, RPC or transport failure (nothing ' +
+  'booked); an ERC-4337 validation failure the bundler words as a revert (an AA code such as AA25 ' +
+  'or AA31), which may clear on its own; or a revert with no nameable execution cause. A classified ' +
+  'one is booked as the classifier says (usually onchain_revert), as before #3609. Both ' +
+  'carry bounded, redacted `details` (for a viem error, its short message and cause, never the ' +
+  'request dump). A task-budget revert a ' +
+  'fresh read confirms is answered by the typed 403 instead on both routes (#3500), and on ' +
+  'POST /payments a confirmed period-budget revert too (#3503); the funding leg has no period re-read.'
+
+/**
  * #2918: the accounting connection routes gate on `config.hosted &&
  * config.accountingEnabled` — NOT the account entitlement, which stays the
  * feed's gate (#2861). Same 404 body shape as `requireAccountingFeed`
@@ -1357,7 +1404,14 @@ const agentPaymentStatus = {
     amount_atomic: { type: ['string', 'null'] },
     asset: { anyOf: [address, { type: 'null' }] },
     network: { type: ['string', 'null'] },
-    description: { type: ['string', 'null'] },
+    description: {
+      type: ['string', 'null'],
+      description:
+        "What the payment was for, in the merchant's own words — untrusted display text. On x402 it is the " +
+        "402's `resource.description` (persisted at authorize since #3610; read from the stored 402 on older " +
+        'rows), control and bidi characters stripped, trimmed and cut at 300 code points plus an ellipsis. ' +
+        'Null when the merchant gave none.',
+    },
     idempotency_key: { type: ['string', 'null'] },
     x402: { $ref: '#/components/schemas/RailContext' },
     // #2888: flat and closed, NOT `allOf: [RailContext, {...}]` — an allOf
@@ -4181,7 +4235,7 @@ export const openapiSpec = {
         operationId: 'getAccountFunding',
         summary: 'Machine-readable funding facts for one account: what to fund, with what, where, and how much.',
         description:
-          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
+          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id (the delegation-rail account).' }],
         responses: {
@@ -7024,9 +7078,17 @@ export const openapiSpec = {
           },
           '502': {
             ...errorResponse,
+            content: {
+              'application/json': {
+                schema: {
+                  ...errorResponse.content['application/json'].schema,
+                  properties: prepareFailureSchemaProperties,
+                },
+              },
+            },
             description:
-              'Preparation failed against the chain, or an idempotent replay of a request whose ' +
-              'payment has failed.',
+              `EITHER ${PREPARE_FAILURE_DESCRIPTION} OR an idempotent replay of a request whose payment ` +
+              'has failed (no `error_code`).',
           },
           '503': railUnavailableResponse,
         },
@@ -7282,7 +7344,21 @@ export const openapiSpec = {
           '409': errorResponse,
           '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
-          '502': errorResponse,
+          '502': {
+            ...errorResponse,
+            content: {
+              'application/json': {
+                schema: {
+                  ...errorResponse.content['application/json'].schema,
+                  properties: prepareFailureSchemaProperties,
+                },
+              },
+            },
+            description:
+              `On the EIP-3009 funding leg: ${PREPARE_FAILURE_DESCRIPTION} On erc7710: the settlement ` +
+              'delegation could not be built, or the delegate account could not be deployed — ' +
+              'infrastructure, no `error_code`, bounded `details`.',
+          },
           '503': railUnavailableResponse,
         },
       },
@@ -11147,7 +11223,7 @@ export const openapiSpec = {
         type: 'object',
         required: ['token', 'amount', 'to'],
         properties: {
-          token: { type: 'string', examples: ['USDC', 'EURe', 'xDAI'] },
+          token: { type: 'string', examples: ['USDC'] },
           amount: { type: 'string', description: 'Human-readable token amount.' },
           to: address,
           idempotency_key: {
@@ -11367,7 +11443,12 @@ export const openapiSpec = {
           network: { type: ['string', 'null'] },
           resource_url: { type: ['string', 'null'], format: 'uri' },
           merchant_address: { anyOf: [address, { type: 'null' }] },
-          description: { type: ['string', 'null'] },
+          description: {
+            type: ['string', 'null'],
+            description:
+              'The same value as the status `description` (#3610): the merchant\'s resource description, ' +
+              'untrusted display text, cut at 300 code points plus an ellipsis; null when the merchant gave none.',
+          },
           idempotency_key: { type: ['string', 'null'] },
         },
         additionalProperties: false,
@@ -11436,7 +11517,13 @@ export const openapiSpec = {
           },
           asset: address,
           network: { type: 'string', examples: ['base', 'eip155:8453'] },
-          description: { type: 'string' },
+          description: {
+            type: 'string',
+            description:
+              "The 402's `resource.description` (untrusted merchant text). Persisted, with control and bidi characters " +
+              'stripped, trimmed and cut at 300 code points plus an ellipsis, as the payment status `description` (#3610); when omitted, the stored `paymentRequired`\'s ' +
+              '`resource.description` is used.',
+          },
           // #3031: `integer` was the spec's claim, never the route's rule —
           // the handler accepted any finite number and clamped it. Stated as
           // it behaves. `minimum: 1` restores the HARMFUL half of the deleted
@@ -12426,7 +12513,7 @@ export const openapiSpec = {
             properties: {
               symbol: { type: 'string' },
               balance_human: { type: 'string', description: "On a failed read (#3317), the last successfully read native balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read." },
-              needed: { type: 'boolean', description: 'Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI.' },
+              needed: { type: 'boolean', description: 'Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH.' },
               balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
             },
             additionalProperties: false,

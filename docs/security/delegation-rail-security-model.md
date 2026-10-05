@@ -1409,6 +1409,23 @@ authority, and the same scope note holds.
 > (the diff touches no file that implements them), and `last-verified` is
 > not bumped.
 
+> **Re-verified #3584 (2026-10-02, console typography):** the change touches
+> `packages/ops/src/app/layout.tsx` (Inter through `next/font/google`, which
+> self-hosts the font files under `/_next/static/media` at build time, so the
+> CSP's `font-src 'self' data:` is unchanged) and `SignInView.tsx` (the
+> sign-in button's `size="lg"`). No client method, read, reveal, sign-in
+> navigation or backend file changes, so the no-rail-authority claim above
+> holds verbatim. Scope of this re-read: this section only; `last-verified`
+> is not bumped.
+
+> **Re-verified #3624 (2026-10-04, ops on-chain test clock):** the change
+> touches only `packages/backend/src/modules/ops/__tests__/onchain.test.ts`.
+> The single-flight cache test now injects a fixed `now`, so the view's
+> per-call `generated_at` stamp cannot differ across a millisecond boundary
+> and fail the strict equality. No route, read, reveal or ops-auth file
+> changes, so the no-rail-authority claim above holds verbatim. Scope of this
+> re-read: this section only; `last-verified` is not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a
@@ -1951,6 +1968,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > payment whose merchant settlement is recorded. No signature, key role, delegation, caveat or on-chain surface
 > changes. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified (#3609, 2026-10-02):** the delegation-rail prepare 502 on
+> `POST /payments` and the x402 EIP-3009 funding leg is typed
+> (`prepare_reverted` / `prepare_failed`) and its `details` are bounded after
+> redaction; every other response `details` built from a caught error is
+> bounded the same way (`boundedErrorDetails`), including eight answers that
+> were not even redacted before — the delegate sweep (four) and the
+> sub-budget routes (three plus their helper's callers) and the account
+> address derivation, where an RPC URL with its key could ride the response.
+> A source-scan guard pins it. A response carries less of the error than
+> before, never more. No authority moves: no signature, key role, delegation, caveat
+> or on-chain surface changes, and the enforcer is still the gate. The rest of
+> this document was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified (#3423 slice C, 2026-09-29):** the SDK's
 > `listReceiptsPage` (and `haven_list_receipts` on both surfaces) gains an

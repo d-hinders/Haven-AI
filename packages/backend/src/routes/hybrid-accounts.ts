@@ -40,6 +40,7 @@ import {
   FIND_OWNED_HYBRID_ACCOUNT_SQL,
   INSERT_HYBRID_ACCOUNT_SQL,
 } from '../infra/repositories/smart-accounts.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 
 interface CreateHybridBody {
   chain_id?: number
@@ -145,7 +146,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     } catch (err) {
       return reply.code(502).send({
         error: 'Could not derive the account address',
-        details: err instanceof Error ? err.message : String(err),
+        details: boundedErrorDetails(err), // #3609: redacted + bounded
       })
     }
 

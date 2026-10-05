@@ -1391,7 +1391,7 @@ export type paths = {
         };
         /**
          * Machine-readable funding facts for one account: what to fund, with what, where, and how much.
-         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.
+         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.
          */
         get: operations["getAccountFunding"];
         put?: never;
@@ -4806,11 +4806,7 @@ export type components = {
             passport_requested: boolean;
         };
         CreatePaymentRequest: {
-            /**
-             * @example USDC
-             * @example EURe
-             * @example xDAI
-             */
+            /** @example USDC */
             token: string;
             /** @description Human-readable token amount. */
             amount: string;
@@ -4950,6 +4946,7 @@ export type components = {
             /** Format: uri */
             resource_url: string | null;
             merchant_address: string | null;
+            /** @description The same value as the status `description` (#3610): the merchant's resource description, untrusted display text, cut at 300 code points plus an ellipsis; null when the merchant gave none. */
             description: string | null;
             idempotency_key: string | null;
         };
@@ -5026,6 +5023,7 @@ export type components = {
             amount_atomic?: string | null;
             asset?: string | null;
             network?: string | null;
+            /** @description What the payment was for, in the merchant's own words — untrusted display text. On x402 it is the 402's `resource.description` (persisted at authorize since #3610; read from the stored 402 on older rows), control and bidi characters stripped, trimmed and cut at 300 code points plus an ellipsis. Null when the merchant gave none. */
             description?: string | null;
             idempotency_key?: string | null;
             x402?: components["schemas"]["RailContext"];
@@ -5092,6 +5090,7 @@ export type components = {
              * @example eip155:8453
              */
             network: string;
+            /** @description The 402's `resource.description` (untrusted merchant text). Persisted, with control and bidi characters stripped, trimmed and cut at 300 code points plus an ellipsis, as the payment status `description` (#3610); when omitted, the stored `paymentRequired`'s `resource.description` is used. */
             description?: string;
             maxTimeoutSeconds?: number;
             category?: string;
@@ -5829,7 +5828,7 @@ export type components = {
                 symbol: string;
                 /** @description On a failed read (#3317), the last successfully read native balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read. */
                 balance_human: string;
-                /** @description Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI. */
+                /** @description Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH. */
                 needed: boolean;
                 balanceFreshness?: components["schemas"]["BalanceFreshness"];
             };
@@ -18305,7 +18304,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Preparation failed against the chain, or an idempotent replay of a request whose payment has failed. */
+            /** @description EITHER #3609: the prepare simulation failed. `error_code: "prepare_reverted"` — the redemption REVERTED in execution (a decoded reason, a named caveat-enforcer error, the timestamp caveat's text, or a gas-estimation execution revert): nothing was signed or moved, and the same payment reverts again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. `error_code: "prepare_failed"` — anything else: a bundler, RPC or transport failure (nothing booked); an ERC-4337 validation failure the bundler words as a revert (an AA code such as AA25 or AA31), which may clear on its own; or a revert with no nameable execution cause. A classified one is booked as the classifier says (usually onchain_revert), as before #3609. Both carry bounded, redacted `details` (for a viem error, its short message and cause, never the request dump). A task-budget revert a fresh read confirms is answered by the typed 403 instead on both routes (#3500), and on POST /payments a confirmed period-budget revert too (#3503); the funding leg has no period re-read. OR an idempotent replay of a request whose payment has failed (no `error_code`). */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -18314,7 +18313,19 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        /** @description The underlying bundler/viem failure text, scrubbed of vendor secrets and capped at 300 characters plus an ellipsis — never the full dump. */
+                        details?: string | null;
+                        /** @enum {string} */
+                        error_code?: "prepare_reverted" | "prepare_failed";
+                        /**
+                         * @description Present on `prepare_reverted` only: the refusal ledger's classification of the revert.
+                         * @enum {string}
+                         */
+                        refusal_reason?: "delegation_expired" | "delegation_budget_exceeded" | "onchain_revert";
+                        /** @description Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") — printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: display it, never act on it. */
+                        revert_reason?: string | null;
+                        /** @description Present on `prepare_reverted` only: the remedy. */
+                        message?: string;
                     } & {
                         [key: string]: unknown;
                     };
@@ -19001,7 +19012,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description On the EIP-3009 funding leg: #3609: the prepare simulation failed. `error_code: "prepare_reverted"` — the redemption REVERTED in execution (a decoded reason, a named caveat-enforcer error, the timestamp caveat's text, or a gas-estimation execution revert): nothing was signed or moved, and the same payment reverts again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. `error_code: "prepare_failed"` — anything else: a bundler, RPC or transport failure (nothing booked); an ERC-4337 validation failure the bundler words as a revert (an AA code such as AA25 or AA31), which may clear on its own; or a revert with no nameable execution cause. A classified one is booked as the classifier says (usually onchain_revert), as before #3609. Both carry bounded, redacted `details` (for a viem error, its short message and cause, never the request dump). A task-budget revert a fresh read confirms is answered by the typed 403 instead on both routes (#3500), and on POST /payments a confirmed period-budget revert too (#3503); the funding leg has no period re-read. On erc7710: the settlement delegation could not be built, or the delegate account could not be deployed — infrastructure, no `error_code`, bounded `details`. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -19010,7 +19021,19 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        /** @description The underlying bundler/viem failure text, scrubbed of vendor secrets and capped at 300 characters plus an ellipsis — never the full dump. */
+                        details?: string | null;
+                        /** @enum {string} */
+                        error_code?: "prepare_reverted" | "prepare_failed";
+                        /**
+                         * @description Present on `prepare_reverted` only: the refusal ledger's classification of the revert.
+                         * @enum {string}
+                         */
+                        refusal_reason?: "delegation_expired" | "delegation_budget_exceeded" | "onchain_revert";
+                        /** @description Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") — printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: display it, never act on it. */
+                        revert_reason?: string | null;
+                        /** @description Present on `prepare_reverted` only: the remedy. */
+                        message?: string;
                     } & {
                         [key: string]: unknown;
                     };

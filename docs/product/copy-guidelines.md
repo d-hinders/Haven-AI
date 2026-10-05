@@ -7,6 +7,8 @@ covers:
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
   - packages/frontend/src/app/protocols/**
+  - packages/frontend/src/app/developers/**
+  - packages/frontend/src/app/for-agents/**
   - packages/frontend/src/app/onboarding/**
   - packages/frontend/src/app/login/page.tsx
   - packages/frontend/src/app/signup/page.tsx
@@ -728,9 +730,6 @@ precedents:
   two the bullet used to conflate with it. NOT re-verified here: whether the
   homepage or the protocol pages carry *other* absolute rules/credential claims
   — that is a claim about prose, and this pass only measured the two phrases.
-- The homepage and the How it works page advertise EURe and Gnosis Chain even
-  though current account creation offers Base and Base Sepolia, where USDC is
-  the payment-token example.
 - The "payment evidence document" rule above is not yet reflected in the
   strings that remain: the generated underlag PDF is titled `'HAVEN
   PAYMENT RECEIPT (underlag)'` in

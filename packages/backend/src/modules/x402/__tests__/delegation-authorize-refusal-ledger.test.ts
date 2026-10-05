@@ -281,11 +281,14 @@ describeDb('the x402 authorize refusal ledger writers on the funding leg (#3052)
 
     const result = await runDelegationAuthorize(authorizeInput(agent))
 
-    // The refusal response stays the raw 502 it has always been — the write
-    // records the decision, it does not make it.
+    // The refusal response stays a 502 — the write records the decision, it
+    // does not make it. #3609: typed, and named by the classifier's reason.
     expect(result.code).toBe(502)
-    expect((result.body as { error: string }).error)
-      .toMatch(/Delegation-rail funding authorization failed \(on-chain policy or bundler\)/)
+    expect(result.body).toMatchObject({
+      error_code: 'prepare_reverted',
+      refusal_reason: 'delegation_budget_exceeded',
+      revert_reason: 'ERC20PeriodTransferEnforcer:transfer-amount-exceeded',
+    })
 
     const rows = await waitForRows(agentId, 1)
     const row = rows[0]

@@ -40,6 +40,7 @@ import {
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
+import { boundedErrorDetails } from '../payments/prepare-failure.js'
 
 const USDC_DECIMALS = 6
 
@@ -124,7 +125,7 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
       statusCode: 502,
       body: {
         error: 'Failed to read delegate USDC balance',
-        details: err instanceof Error ? err.message : String(err),
+        details: boundedErrorDetails(err), // #3609: redacted + bounded, never the raw RPC error
       },
     }
   }
@@ -287,7 +288,7 @@ export async function submitSweep(
       statusCode: 400,
       body: {
         error: 'Invalid signature format',
-        details: err instanceof Error ? err.message : String(err),
+        details: boundedErrorDetails(err), // #3609: redacted + bounded, never the raw RPC error
       },
     }
   }
@@ -312,7 +313,7 @@ export async function submitSweep(
       statusCode: 502,
       body: {
         error: 'Failed to re-read delegate USDC balance',
-        details: err instanceof Error ? err.message : String(err),
+        details: boundedErrorDetails(err), // #3609: redacted + bounded, never the raw RPC error
       },
     }
   }
@@ -382,7 +383,7 @@ export async function submitSweep(
     }
     const errorMsg = err instanceof Error ? err.message : String(err)
     await markSweepFailed(errorMsg, row.id)
-    return { statusCode: 502, body: { error: 'Sweep relay failed', details: errorMsg } }
+    return { statusCode: 502, body: { error: 'Sweep relay failed', details: boundedErrorDetails(err) } }
   }
 
   await markSweepSubmitted(txHash, row.id)

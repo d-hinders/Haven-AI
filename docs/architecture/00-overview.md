@@ -166,8 +166,8 @@ payment. Current contracts:
 - **PostgreSQL** — users, wallets, agents, allowances, payments,
   receipts, catalog and accounting state, and audit records.
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)
-  is the dev/QA testnet; **Gnosis Chain** (100) remains supported for existing
-  configured Safe flows. Standard merchant x402 is exact-scheme USDC on Base
+  is the dev/QA testnet. Gnosis Chain (100) is not a Haven network; the
+  registry still carries it (historical rows render through it). Standard merchant x402 is exact-scheme USDC on Base
   and Base Sepolia; delegation-rail accounts settle x402 via ERC-7710 direct
   settlement, with a per-payment EIP-3009 fallback for facilitators without erc7710 support (#946)
   ([x402 sequence](04-x402-payment-sequence.md)).

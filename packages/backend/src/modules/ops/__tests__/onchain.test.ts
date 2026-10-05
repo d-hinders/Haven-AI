@@ -244,8 +244,12 @@ describe('ops on-chain view (#3513) — mocked chain reads', () => {
       accounts: [accountRow()],
       delegations: [delegation('acc-1', HASH_A)],
     })
-    const first = await buildOpsOnchainView(db, 'u1', { readers, cache })
-    const second = await buildOpsOnchainView(db, 'u1', { readers, cache })
+    // #3624: pin the clock. `generated_at` is stamped per call (only the
+    // read-set is cached), so two calls straddling a millisecond boundary
+    // differed and `toEqual` flaked (~2 in 10 runs).
+    const now = () => 1_700_000_000_000
+    const first = await buildOpsOnchainView(db, 'u1', { readers, cache, now })
+    const second = await buildOpsOnchainView(db, 'u1', { readers, cache, now })
     expect((readers.accountHasCode as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
     expect((readers.readDisabledDelegationHashes as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
     expect((readers.readRemainingBudget as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)

@@ -46,13 +46,13 @@ const haven = new HavenClient({
 
 // One-liner payment — handles intent, signing, submission, and confirmation
 const result = await haven.pay({
-  token: 'EURe',
+  token: 'USDC',
   amount: '5.00',
   to: '0xabc...',
 })
 
 console.log(result.txHash)      // 0x...
-console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x... (or basescan.org for Base)
+console.log(result.explorerUrl) // https://basescan.org/tx/0x... (sepolia.basescan.org on Base Sepolia)
 ```
 
 ## Pay for an x402 resource
@@ -82,8 +82,8 @@ shows up in your Haven dashboard activity feed.
 
 | Network | CAIP-2 | Tokens |
 |---------|--------|--------|
-| Gnosis Chain | `eip155:100` | EURe, USDC.e, xDAI |
-| Base | `eip155:8453` | USDC, ETH |
+| Base | `eip155:8453` | USDC |
+| Base Sepolia (dev/QA) | `eip155:84532` | USDC |
 
 ## Credential Lifecycle
 
@@ -290,7 +290,7 @@ const anthropic = new Anthropic()
 const response = await anthropic.messages.create({
   model: 'claude-opus-4-7',
   tools: havenTools.claude(),  // or havenTools.openai() for OpenAI
-  messages: [{ role: 'user', content: 'Pay 5 EURe to 0xabc for API access' }],
+  messages: [{ role: 'user', content: 'Pay 5 USDC to 0xabc for API access' }],
 })
 
 // Handle tool calls
@@ -632,7 +632,7 @@ inspection, saved resume state, and final retry.
 import { HavenApiError, HavenPaymentStateError, HavenSigningError, HavenTimeoutError } from '@haven_ai/sdk'
 
 try {
-  await haven.pay({ token: 'EURe', amount: '5.00', to: '0xabc...' })
+  await haven.pay({ token: 'USDC', amount: '5.00', to: '0xabc...' })
 } catch (err) {
   if (err instanceof HavenPaymentStateError) {
     console.log(err.paymentId, err.phase, err.nextAction)

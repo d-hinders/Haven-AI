@@ -73,14 +73,14 @@ appeared to allow it:
   USDC). This is well inside the 0.05 USDC budget and should succeed.
 - Then try to send 1 USDC to \`0x0A5B4da361AfBc5109030010c3f1d0b64b60ba6C\` —
   over your 0.05 USDC/day budget, so it demonstrates a refusal, not a payment.
-  Your account's own on-chain rules refuse it before anything is submitted.
-  The error message reads "Delegation-rail authorization failed (on-chain
-  policy or bundler): …", followed by the bundler's own details — the
-  enforcer's revert reason sits hex-encoded in there, decoding to
-  \`ERC20PeriodTransferEnforcer:transfer-amount-exceeded\`. It is not a balance
-  error, and it is a 5xx: if you retry once (the usual move on a 5xx), a
-  single retry gets the same refusal — nothing moves either time. If a
-  budget check you already ran (\`haven_get_agent\`) shows you have well under
+  Haven reads your account's own on-chain budget and refuses it before
+  anything is built: the refusal is \`DELEGATION_BUDGET_EXCEEDED\` (HTTP 403)
+  with your remaining budget and the shortfall, and it says retrying cannot
+  succeed — nothing moves. It is not a balance error. (If that budget read
+  fails, the on-chain rules still refuse it, as a typed \`PREPARE_REVERTED\`
+  naming \`ERC20PeriodTransferEnforcer:transfer-amount-exceeded\` — also a
+  stop, never a retry.) If a budget check you already ran
+  (\`haven_get_agent\`) shows you have well under
   1 USDC remaining, you may explain that and skip actually sending it — that
   is the guardrail working too, not a skipped step.
 

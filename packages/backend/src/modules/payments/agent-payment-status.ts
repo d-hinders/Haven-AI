@@ -1,3 +1,4 @@
+import { x402Description } from '../../domain/x402-description.js'
 import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
@@ -273,6 +274,8 @@ interface MachinePaymentMetadata {
   network?: unknown
   description?: unknown
   protocol?: unknown
+  /** #1355: the verbatim 402 PaymentRequired; #3610 reads `resource.description` from it on older rows. */
+  payment_required?: unknown
 }
 
 function railFor(row: { payment_rail: string | null; source: string | null }): string {
@@ -328,11 +331,14 @@ function railContext(input: {
   const metadata = metadataObject(input.machineMetadata)
 
   if (input.rail === AgentPaymentRail.X402) {
+    // #3610: rows authorized before the description was persisted still carry
+    // the verbatim 402 (#1355); read the merchant's description from there.
+    const description = x402Description(metadata.description, metadata.payment_required)
     const context = {
       amount_atomic: input.amountRaw,
       asset: input.tokenAddress,
       network: nullableString(metadata.network),
-      description: nullableString(metadata.description),
+      description,
       idempotency_key: input.idempotencyKey,
       x402: {
         amount_atomic: input.amountRaw,
@@ -340,7 +346,7 @@ function railContext(input: {
         network: nullableString(metadata.network),
         resource_url: input.resourceUrl,
         merchant_address: input.merchantAddress,
-        description: nullableString(metadata.description),
+        description,
         idempotency_key: input.idempotencyKey,
       },
     }

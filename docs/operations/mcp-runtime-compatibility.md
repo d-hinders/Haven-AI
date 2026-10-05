@@ -76,6 +76,97 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3632 (2026-10-05, SDK text drops Gnosis Chain):** the
+> `@haven_ai/sdk` tool descriptions and the `PaymentRequest.token` JSDoc now
+> name USDC on Base (`eip155:8453`) and Base Sepolia (`eip155:84532`) only;
+> Gnosis Chain is not a Haven network. Description text only: no tool, schema,
+> field, enum, version-skew or consent-hash contract moves, and an installed
+> runtime keeps working with the old text. `last-verified` stays 2026-10-02.
+> Nothing else in this document was re-verified.
+
+> **Re-verified #3620 (2026-10-05, budget-scope guards):** this diff touches
+> two covered files, and neither change moves a runtime contract.
+> `packages/backend/src/middleware/client-compat.ts` gets a comment-only fix:
+> the mirrored `findPaymentReplay` lookup skips `failed` and `expired` rows,
+> which free the key. The hosted server's cross-runtime test suite gets a
+> test-only parity block. Every tool name both runtimes register, plus
+> hosted `haven_pay` ↔ local `haven_send`, must declare the same budget-scope
+> keys. The one allowlisted difference is hosted `haven_pay_x402_quote`
+> without `sub_budget_id` (the #3617 entry below). No tool, schema,
+> description, version-skew or consent-hash contract moves. `last-verified`
+> stays 2026-10-02. Nothing else in this document was re-verified.
+
+> **Re-verified #3617 (2026-10-04, hosted `sub_budget_id` forwarding
+> deleted):** `packages/mcp-server/src/tools/plain-http-x402.ts` no longer
+> forwards `sub_budget_id` to `prepareX402Erc7710` or `createX402Intent`.
+> The hosted `haven_pay_x402_quote` schema never declared the key, so
+> `parseStrict` refused it before either call. The deleted lines could not
+> run, and no caller's behaviour changes: the refusal names the key and makes
+> zero Haven calls, now pinned in `plain-http-x402.test.ts`. The tool's
+> description gains one sentence saying a sub-agent pays x402 through the
+> local MCP's `haven_pay_x402` tools. It was trimmed elsewhere to stay under
+> the #1591 description budget, and the `haven_get_allowances` routing hint
+> stays. The local runtime's `haven_pay_x402_quote` and `haven_pay_x402`
+> still take `sub_budget_id` (#3330), so the #3330 entry below holds for the
+> local pay tools only. No tool is added, removed or renamed. The
+> strict/permissive split, the schemas, the expected-context versions and the
+> consent hash do not move. The backend half of #3617 (both
+> `/x402/authorize` legs on the budget-scope resolver) adds no response
+> shape: what changes is which existing answer a scoped request gets. Over
+> B's slice it is now the typed 403 `delegation_budget_exceeded` with no
+> `sign_data`, and a B without its own grant now gets the 201 on erc7710.
+> The hosted MCP already parses that 403 (#3504). `last-verified` stays 2026-10-02. Nothing else in this
+> document was re-verified.
+
+> **Re-verified #3619 (2026-10-04, one settled-replay rule; pre-check 403
+> through the #3616 builder):** this diff touches
+> `packages/backend/src/modules/mpp/budget-precheck.ts` (covered file): the
+> settled-replay rule and its match guards are unchanged (still `confirmed` +
+> `tx_hash`, the `erc7710`/`eip3009` scheme set, no task-/sub-budget pin, same
+> payee/resource/token/amount) and are now pinned cell by cell — the same
+> seeded rows through `delegationReplay`, this pre-check and
+> `findPaymentReplay` (via `POST /payments`) — by
+> `routes/__tests__/replay-rules-parity.test.ts`. The 403 body the hosted tool
+> parses (#3504) and the `payment_refusals` ledger `detail` are now built by
+> the #3616 module's `buildPeriodExceededBody` (flavor `mpp`) and
+> `periodExceededLedgerDetail`, equal field for field to the hand-built body
+> for the same inputs. No tool, schema shape, version-skew or consent-hash
+> contract moves. `last-verified` stays 2026-10-02. Nothing else in this
+> document was re-verified.
+
+> **Re-verified #3610 (2026-10-02, x402 status description):** this diff
+> touches `packages/backend/src/modules/x402/delegation-authorize.ts` and
+> `modules/payments/agent-payment-status.ts`, covered files: authorize now
+> persists `machine_metadata.description` (the body's `description`, else the
+> stored 402's `resource.description`, control/bidi characters stripped, cut at
+> 300 code points plus an ellipsis) and the
+> status reader falls back to the stored 402 on older rows. The status
+> response's `description` / `x402.description` fields already existed and
+> keep their shape (`string | null`); only their values for plain-HTTP x402
+> payments change, from `null` to the merchant's text. No tool, schema shape,
+> version-skew or consent-hash contract moves. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
+> **Re-verified #3609 (2026-10-02, the typed prepare 502):** the backend's
+> delegation-rail prepare 502 (`POST /payments`, the x402 EIP-3009 funding
+> leg) gains an `error_code`: `prepare_reverted` (the redemption reverted in
+> execution — `refusal_reason`, a decoded `revert_reason`, a remedy
+> `message`) or `prepare_failed` (anything else, including an ERC-4337 `AA`
+> validation failure the bundler words as a revert), and its `details` are
+> bounded at 300 characters after redaction. The hosted `normalizeError`
+> (`packages/mcp-server/src/tools/support/errors.ts`) maps `prepare_reverted`
+> to `PREPARE_REVERTED` with a `stop_and_tell_user` step and the two reason
+> fields; `prepare_failed` keeps the generic 5xx retry-once step (the
+> next-step census moves to 46 refusal fixtures and 57 `refusalNextStep`
+> calls, `src/test-support/next-step-fixtures.ts`). Skew is
+> additive both ways: an older hosted server reading the new body falls into
+> the generic 5xx branch exactly as before, and this hosted server reading an
+> older backend's untyped 502 does the same. The agent skill
+> (`packages/sdk/src/skill-content.ts` and the frontend bundle copy) gains a
+> `PREPARE_REVERTED` bullet in its failure-handling list. No tool, schema
+> input, version-skew or consent-hash contract moves. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3596 (2026-10-02, the agent-skills index and step files):**
 > this diff touches `packages/sdk/src/agent-guidance.ts`, a covered file —
 > three cross-reference fixes inside `HAVEN_AGENT_RUNBOOK_MD` (step 1's
@@ -98,6 +189,19 @@ last-verified: "2026-10-02"
 > contract moves; the client releases table, upgrade hints, publish flow and
 > package resolution are untouched. `last-verified` stays 2026-10-02. Nothing
 > else in this document was re-verified.
+
+> **Re-verified, skill `client_update` line (2026-10-02, guidance text only):**
+> this diff touches `packages/sdk/src/skill-content.ts`, a covered file. The
+> runbook's `client_update` sentence moves into a shared constant,
+> `AGENT_CLIENT_UPDATE_SENTENCE` in `agent-guidance.ts`, and the haven-pay skill
+> now carries it too. Every runtime still installs the one canonical skill
+> string (§ *Guidance surfaces*), and `/for-agents.md` is byte-unchanged
+> (`lint:runbook-parity` green). No tool, argument, schema, version-skew or
+> consent-hash contract moves; the client releases table, upgrade hints and
+> `upgrade_command` are untouched — the skill only names the existing field.
+> `last-verified` stays 2026-10-02. Nothing else in this document was
+> re-verified.
+
 
 > **Re-verified, follow-up to #3587 (2026-10-02, a step rename):** this diff
 > touches `.github/workflows/ci.yml`, a covered file, in one step NAME and its

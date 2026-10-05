@@ -250,6 +250,33 @@ export default function DemoPage() {
                   Questions? Ask the team.
                 </p>
               </Card>
+
+              <Card className="mt-10 p-6" hover={false}>
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+                  No Claude Code, Codex, or Hermes handy?
+                </p>
+                <h3 className="mt-2 text-[17px] font-semibold text-[var(--v2-ink)]">
+                  Watch the walk instead
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+                  This recording covers steps 3 to 7: connecting an agent, approving its budget,
+                  buying a joke, and trying to overspend. It is a fallback for anyone reading this page
+                  without an AI agent of their own; walking it live is still the real thing.
+                </p>
+                <div className="mt-4 overflow-hidden rounded-[10px] border border-[var(--v2-border)]">
+                  <video
+                    src="/demo/no-harness-steps-3-7.mp4"
+                    controls
+                    preload="metadata"
+                    width={1280}
+                    height={800}
+                    className="block w-full"
+                  >
+                    <track kind="captions" src="/demo/no-harness-steps-3-7.vtt" srcLang="en" label="English" default />
+                    Your browser cannot play this recording. Steps 3 to 7 are written out on this page.
+                  </video>
+                </div>
+              </Card>
             </div>
 
             <Card className="mt-10 p-4" hover={false}>

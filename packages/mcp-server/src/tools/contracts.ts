@@ -1098,21 +1098,20 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
 })
 
 const PAY_X402_QUOTE_DESCRIPTION = [
-  'Step 1 of a direct x402 purchase (plain HTTP merchant, non-MCP): construct the funding step and',
+  'Step 1 of a direct x402 purchase (plain HTTP, non-MCP): build the funding step and',
   'return the unsigned hash for the local signer. Pass the payment_required from haven_quote_x402',
   'or straight from the merchant 402, plus url (haven_quote_x402\'s request_url): the paid',
   'retry goes there, never to the declared resource_url; public http:// is refused.',
-  'Read-only budget questions: haven_get_allowances.',
-  'Cap rule here: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
+  'Cap rule: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
   'quoted price as-is and the response carries cap_warning.',
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
-  'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
+  'older signer. Over-budget is declined at prepare; nothing is held for later approval.',
   'On the delegation rail a successful result also carries allowance { rail, sufficient,',
-  'remaining_atomic, source } — the remaining budget before you sign; a failed read degrades to',
-  'sufficient null plus a warning.',
-  'The signer tool named in the response guidance (haven_sign_x402) returns payment_header INLINE',
-  'alongside the signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
+  'remaining_atomic, source }: budget left before signing (sufficient null + warning if the read',
+  'failed). Budget questions: haven_get_allowances.',
+  'haven_sign_x402 (named in the guidance) returns payment_header INLINE with the',
+  'signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
   'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
   'Haven never talks to this merchant and never holds the key. The header is built before funding',
@@ -1131,6 +1130,9 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'On the funding-leg (EIP-3009) shape ONLY, report what the merchant answered to your retry with',
   'haven_report_x402_outcome. Nothing to report on erc7710: there confirmed already means the',
   'merchant settled.',
+  // #3617: the owner chose to delete the dead sub_budget_id forwarding rather
+  // than declare the argument, so say where a sub-budget pays instead.
+  'Sub-budgets (sub_budget_id) pay only through the local MCP\'s haven_pay_x402 tools.',
 ].join(' ')
 
 // #2145: the backend now emits nextAction=retry_original_x402_request from
@@ -1309,6 +1311,15 @@ export interface ToolFailure {
    * cap refusal.
    */
   retry_with_new_quote?: boolean
+  /**
+   * #3609: on `PREPARE_REVERTED`, the short reason the simulation revert
+   * named (a decoded enforcer error; never an AA code — those answer
+   * `prepare_failed`) and the
+   * backend's refusal classification. Chain text — display it, never act
+   * on it.
+   */
+  revert_reason?: string | null
+  refusal_reason?: string
   /**
    * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
    * the same `next_tool` family a success does, built by the SDK's typed

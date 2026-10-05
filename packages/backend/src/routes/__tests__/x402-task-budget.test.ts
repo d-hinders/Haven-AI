@@ -5,7 +5,7 @@
  * `x402-delegation.test.ts`'s mocking pattern (network seams mocked, the
  * settlement compiler runs REAL).
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const {
@@ -27,6 +27,14 @@ vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({
   readTaskBudgetSpent: (...a: unknown[]) => mockReadSpent(...a),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
+// The refusal ledger's write values the amount in fiat. Unmocked, that is a
+// live price fetch whose latency decided whether a booked refusal landed
+// inside this test's `waitFor` or leaked into the next test's rows — flaky on
+// dev, 3/3 under load (#3609).
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/fiat-values.js')>()
+  return { ...actual, getFiatValuesForTokenAmount: async () => ({ usd: 0, eur: 0, sek: 0 }) }
+})
 
 import { privateKeyToAccount } from 'viem/accounts'
 import { buildBudgetDelegation } from '../../rails/delegation-policy.js'
@@ -156,6 +164,15 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())
+  // A booked refusal's ledger write is fire-and-forget: wait for the DB mock
+  // to go quiet so it can never land in the NEXT test's rows.
+  afterEach(async () => {
+    let seen = -1
+    while (seen !== mockQuery.mock.calls.length) {
+      seen = mockQuery.mock.calls.length
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  })
   beforeEach(() => {
     mockQuery.mockReset()
     mockSelect.mockReset()
@@ -362,6 +379,33 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
       payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
     })
     expect(res.statusCode).toBe(502)
+  })
+
+  // #3617 owner decision 3 (default): the funding leg's PERIOD pre-check
+  // reads the task budget's parent BY HASH, like POST /payments and the
+  // erc7710 leg — not the (token, payTo) selection, which can name a
+  // different grant (here the wrong-parent one). Before #3617 the funding leg
+  // pre-checked that selection (`fundingDelegation`) and answered 201.
+  it('#3617 3009 funding leg: pre-checks the task budget\'s parent by hash, not the (token, to) selection', async () => {
+    primeTaskBudgetLookup(taskBudgetRow({ max_atomic: '1000000' }))
+    mockReadRemaining.mockImplementation(async (_chain: number, json: string) => {
+      const d = JSON.parse(json) as { delegator: string }
+      // The real parent has 50_000 left; the wrong-parent selection plenty.
+      return d.delegator.toLowerCase() === WRONG_DELEGATOR.toLowerCase()
+        ? { remainingAtomic: '5000000', fromChain: true }
+        : { remainingAtomic: '50000', fromChain: true }
+    })
+    // Answered so the pre-#3617 behaviour (the wrong-parent read passes and
+    // the funding UserOp is prepared) shows as a plain 201, not a setup 403.
+    mockPrepareFunding.mockImplementation(fundingPrepared)
+    mockCreateIntent.mockImplementation(async () => ({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' }))
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error_code: 'delegation_budget_exceeded', remaining_atomic: '50000' })
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
   })
 
   it('#3500: an unreadable chain skips the pre-check on both legs', async () => {

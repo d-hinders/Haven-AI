@@ -215,9 +215,10 @@ export function clientCompatDeps(table: CompatTable = CLIENT_COMPAT): ClientComp
     findReplay: async (store, agentId, key) => {
       const now = Date.now()
       if (store === 'send_intent') {
-        // Mirrors `findPaymentReplay` (routes/payments.ts): a row in any status
-        // other than pending_signature is answered from the row (a status
-        // replay, or a 409 on a mismatch) — no new work. A pending_signature
+        // Mirrors `findPaymentReplay` (routes/payments.ts): a row the key
+        // lookup finds in any status other than pending_signature is answered
+        // from the row (a status replay, or a 409 on a mismatch) — no new
+        // work. The lookup skips failed/expired rows, which free the key. A pending_signature
         // row PAST its expires_at is lazily expired by the handler, which then
         // prepares a fresh payment: that is NOT a replay (#3303 review, B1).
         const row = await findSendIntentByIdempotencyKey(agentId, key)

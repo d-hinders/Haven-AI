@@ -36,6 +36,7 @@ import {
   isPeriodBudgetRevert,
   isTransferCapRevert,
   boundFailureMessage,
+  prepareFailureBody,
   refuse,
 } from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
@@ -71,58 +72,23 @@ import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/ind
 import { quoteFee } from '../modules/fee/index.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
-import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
+// #3618: these two stay as DIRECT imports — the revert classification below
+// (the sign route's catch) re-reads live state itself and deliberately does
+// NOT read the #3616 resolver: the task-budget revert confirms against
+// `findTaskBudgetForAgent`, the period revert against
+// `selectActiveDelegationByHash` (single-hash read).
 import { findForAgent as findTaskBudgetForAgent } from '../infra/repositories/task-budgets.js'
-import type { Delegation } from '../rails/delegation-policy.js'
+import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
+import { checkTaskBudgetCap, taskBudgetExceededBody } from '../modules/task-budgets/index.js'
 import {
-  findForAgent as findSubBudgetForAgent,
-  findOpenParentChildByHash,
-} from '../infra/repositories/sub-budgets.js'
-import {
-  resolveSubBudgetForPayment,
-  type SubBudgetPaymentRefusal,
-} from '../modules/sub-budgets/index.js'
-import {
-  checkTaskBudgetCap,
-  resolveTaskBudgetChildForPayment,
-  taskBudgetExceededBody,
-  type TaskBudgetPaymentRefusal,
-} from '../modules/task-budgets/index.js'
-
-/** #3329 §3: the refusal table's HTTP status per code. */
-const TASK_BUDGET_REFUSAL_STATUS: Record<TaskBudgetPaymentRefusal, number> = {
-  task_budget_not_found: 404,
-  task_budget_not_open: 409,
-  task_budget_token_mismatch: 409,
-  task_budget_recipient_mismatch: 409,
-  task_budget_parent_mismatch: 409,
-}
-
-const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
-  task_budget_not_found: 'Task budget not found',
-  task_budget_not_open: 'Task budget is not open (closed, closing, pending, or expired)',
-  task_budget_token_mismatch: "This payment's token does not match the task budget's token",
-  task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
-  task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
-}
-
-/** #3330 §3: the sub-budget refusal table's HTTP status per code. */
-const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> = {
-  sub_budget_not_found: 404,
-  sub_budget_not_open: 409,
-  sub_budget_token_mismatch: 409,
-  sub_budget_recipient_mismatch: 409,
-  sub_budget_parent_mismatch: 409,
-}
-
-const SUB_BUDGET_REFUSAL_MESSAGE: Record<SubBudgetPaymentRefusal, string> = {
-  sub_budget_not_found: 'Sub-budget not found',
-  sub_budget_not_open: 'Sub-budget is not open (closed, closing, pending, or expired)',
-  sub_budget_token_mismatch: "This payment's token does not match the sub-budget's token",
-  sub_budget_recipient_mismatch: "This payment's recipient does not match the sub-budget's pinned recipient",
-  sub_budget_parent_mismatch:
-    "The sub-budget's chain is broken — its parent-child link is closed or it was not carved from the budget delegation selected for this payment",
-}
+  buildPeriodExceededBody,
+  evaluatePeriodPrecheck,
+  periodExceededLedgerDetail,
+  refuseBothScopeIds,
+  resolveBudgetScope,
+  taskCapExceededLedgerDetail,
+  type TaskCapInput,
+} from '../modules/budget-scope/index.js'
 
 /**
  * Surface the platform fee on a payment result so it's never silently collected
@@ -444,9 +410,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // is ambiguous about which chain to redeem, and ambiguity on a money
     // path refuses rather than guesses.
     if (task_budget_id && sub_budget_id) {
-      return reply.code(400).send({
-        error: 'Pass exactly one of task_budget_id or sub_budget_id — never both',
-      })
+      // The guard itself now comes from the #3616 module (`refuseBothScopeIds`,
+      // surface 'payments') — the same 400 body this site hand-built.
+      const bothIds = refuseBothScopeIds('payments')
+      return reply.code(bothIds.status).send(bothIds.body)
     }
 
     // 1. Validate inputs
@@ -574,56 +541,35 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       })
     }
 
-    // ── Task budget (#3329, optional) ─────────────────────────────────────
-    // A task budget authorizes the payment INSTEAD OF the budget delegation
-    // directly: the redemption chain becomes [taskChild, budget]. #3329
-    // review finding E: the parent is selected by the task budget's OWN
-    // `parent_delegation_hash` — NEVER re-derived by (token, to), which can
-    // name a DIFFERENT active grant (an agent holding both an open and a
-    // pinned grant for this token, whose pinned recipient happens to equal
-    // `to`, would otherwise get a spurious task_budget_parent_mismatch).
-    let taskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
-    let taskBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
+    // ── Budget scope (#3618): one resolution through the #3616 resolver ──
+    // A task budget (#3329) authorizes the payment INSTEAD OF the budget
+    // delegation directly (redemption chain [taskChild, budget]); a
+    // sub-budget (#3330) through the three-link chain [B grant, A
+    // parent-child, A budget]; otherwise the payment's own (token, to)
+    // selection. The resolver keeps the #3329 review finding E rule in both
+    // places it applies: parents are read BY THE ROW'S OWN
+    // `parent_delegation_hash`, never re-derived by (token, to). Refusals
+    // carry the same codes/statuses/messages this file hand-built (the
+    // shared tables' one home is now the module).
+    const scopeResolution = await resolveBudgetScope({
+      agentId: agent.id,
+      tokenAddress,
+      recipient: to,
+      taskBudgetId: task_budget_id,
+      subBudgetId: sub_budget_id,
+    })
+    if (!scopeResolution.ok) {
+      return reply.code(scopeResolution.refusal.status).send({
+        error: scopeResolution.refusal.message,
+        error_code: scopeResolution.refusal.code,
+      })
+    }
+    const scope = scopeResolution.scope
+    const taskBudgetScope = scope.kind === 'taskBudget' ? scope.taskBudget : undefined
+    const subBudgetScope = scope.kind === 'subBudget' ? scope.subBudget : undefined
     // #3500: the task budget's cap inputs, kept for the pre-check below and
     // for attributing an on-chain transfer-cap revert to THIS task budget.
-    let taskBudgetCap: { id: string; delegationHash: string; maxAtomic: string } | null = null
-    if (task_budget_id) {
-      const taskBudgetRow = await findTaskBudgetForAgent(task_budget_id, agent.id)
-      if (!taskBudgetRow) {
-        return reply.code(404).send({ error: 'Task budget not found', error_code: 'task_budget_not_found' })
-      }
-      const parentDelegation = await selectActiveDelegationByHash(agent.id, taskBudgetRow.parent_delegation_hash)
-      if (!parentDelegation) {
-        // The task budget's own parent is no longer an active grant (revoked
-        // or replaced) — it can never again be redeemed through, whatever
-        // token/recipient this payment names.
-        return reply.code(409).send({
-          error: 'The task budget was not carved from the budget delegation selected for this payment',
-          error_code: 'task_budget_parent_mismatch',
-        })
-      }
-      const resolved = resolveTaskBudgetChildForPayment(
-        taskBudgetRow,
-        tokenAddress,
-        to.toLowerCase(),
-        parentDelegation,
-        Math.floor(Date.now() / 1000),
-      )
-      if (!resolved.ok) {
-        const code = resolved.refusal as TaskBudgetPaymentRefusal
-        return reply.code(TASK_BUDGET_REFUSAL_STATUS[code]).send({
-          error: TASK_BUDGET_REFUSAL_MESSAGE[code],
-          error_code: code,
-        })
-      }
-      taskBudgetChild = resolved.childDelegation
-      taskBudgetParentDelegation = parentDelegation
-      taskBudgetCap = {
-        id: taskBudgetRow.id,
-        delegationHash: taskBudgetRow.delegation_hash,
-        maxAtomic: taskBudgetRow.max_atomic,
-      }
-    }
+    const taskBudgetCap: TaskCapInput | null = taskBudgetScope ? taskBudgetScope.taskCap : null
 
     // #3500: refuse a payment the task budget's cap cannot cover BEFORE the
     // UserOp is built, from the enforcer's own spent figure — a typed,
@@ -640,7 +586,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       })
       if (check.outcome !== 'exceeded') return null
       return taskBudgetExceededBody({
-        taskBudgetId: taskBudgetCap.id,
+        taskBudgetId: taskBudgetCap.taskBudgetId,
         tokenSymbol: tokenConfig.symbol,
         amountHuman: amount,
         amountAtomic: amountRaw.toString(),
@@ -660,99 +606,41 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       reason: 'delegation_budget_exceeded' as const,
       source: 'payment' as const,
       // The 086 detail allowlist keeps error_code and remaining_atomic only.
-      detail: { error_code: 'task_budget_exceeded', remaining_atomic: body.remaining_atomic },
+      detail: taskCapExceededLedgerDetail(body.remaining_atomic as string),
     })
     const preRefusal = await taskBudgetRefusal()
     if (preRefusal) {
       return refuse(reply.code(403).send(preRefusal), taskBudgetLedger(preRefusal))
     }
 
-    // ── Sub-budget (#3330, optional) ──────────────────────────────────────
-    // Agent B pays through the sub-budget agent A granted it: the redemption
-    // chain becomes [B grant, A parent-child, A budget] — THREE links, and
-    // the DelegationManager enforces all three in one redemption, so A's
-    // period budget binds every spend B makes. The same #3329 review finding
-    // E rule applies twice: the grant's `parent_delegation_hash` names A's
-    // parent-child row (read by hash, never re-derived), and that row's own
-    // `parent_delegation_hash` names A's budget delegation (read by hash
-    // again, and it must still resolve ACTIVE: revoking A's budget
-    // delegation flips that row to `revoked`, so this lookup answers null
-    // and B's child is stranded here — and reverts on-chain once the
-    // owner's disableDelegation UserOp lands).
-    let subBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetForPayment>>['childDelegation']
-    let subBudgetParentChildDelegation: Delegation | undefined
-    let subBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
-    if (sub_budget_id) {
-      const nowSec = Math.floor(Date.now() / 1000)
-      const grantRow = await findSubBudgetForAgent(sub_budget_id, agent.id)
-      if (!grantRow) {
-        return reply.code(404).send({ error: 'Sub-budget not found', error_code: 'sub_budget_not_found' })
-      }
-      const parentChildRow = await findOpenParentChildByHash(grantRow.parent_delegation_hash, nowSec)
-      if (!parentChildRow) {
-        // The middle link of the chain is closed or expired (A revoked its
-        // grant of B, A's own budget delegation was revoked, or it simply
-        // aged out) — B's child can never again be redeemed through.
-        return reply.code(409).send({
-          error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch,
-          error_code: 'sub_budget_parent_mismatch',
-        })
-      }
-      const parentDelegation = await selectActiveDelegationByHash(
-        parentChildRow.agent_id,
-        parentChildRow.parent_delegation_hash,
-      )
-      if (!parentDelegation) {
-        return reply.code(409).send({
-          error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch,
-          error_code: 'sub_budget_parent_mismatch',
-        })
-      }
-      const resolved = resolveSubBudgetForPayment(
-        grantRow,
-        parentChildRow,
-        tokenAddress,
-        to.toLowerCase(),
-        parentDelegation,
-        nowSec,
-      )
-      if (!resolved.ok) {
-        const code = resolved.refusal as SubBudgetPaymentRefusal
-        return reply.code(SUB_BUDGET_REFUSAL_STATUS[code]).send({
-          error: SUB_BUDGET_REFUSAL_MESSAGE[code],
-          error_code: code,
-        })
-      }
-      subBudgetGrant = resolved.childDelegation
-      subBudgetParentDelegation = parentDelegation
-      subBudgetParentChildDelegation = JSON.parse(parentChildRow.delegation_json) as Delegation
-    }
-
-    // #3503: the PERIOD budget pre-check the x402 legs have had since
-    // #2082/#2706. Without it the direct route's only over-budget answer was
-    // the simulation revert — an untyped 502 whose hosted step said
-    // "transient, retry once". Reads the SAME delegations
-    // `prepareDelegationPayment` redeems: a task budget's parent by hash
-    // (#3329 finding E), otherwise the (token, to) selection — made ONCE,
-    // here, and handed to `prepareDelegationPayment`, so the row read is the
-    // row redeemed. A sub-budget redeems three links and each carries its own
-    // period caveat (`sub-budget-delegation.ts`), so all three are read and
-    // the SMALLEST remaining decides — B's own slice is usually the tighter.
-    // FAIL OPEN per link on an unreadable read or a link without a readable
-    // period caveat (`fromChain: false`), exactly like the x402 legs: the
-    // enforcer stays the gate.
-    const budgetOptions =
-      subBudgetGrant && subBudgetParentDelegation && subBudgetParentChildDelegation
+    // #3503 (adopted onto the #3616 resolver, #3618): the PERIOD budget
+    // pre-check the x402 legs have had since #2082/#2706. Without it the
+    // direct route's only over-budget answer was the simulation revert — an
+    // untyped 502 whose hosted step said "transient, retry once". Reads the
+    // SAME delegations `prepareDelegationPayment` redeems — the scope
+    // resolved ONCE above is handed to `prepareDelegationPayment` below, so
+    // the row read is the row redeemed. A sub-budget redeems three links and
+    // each carries its own period caveat (`sub-budget-delegation.ts`), so all
+    // three are read and the SMALLEST remaining decides — B's own slice is
+    // usually the tighter. FAIL OPEN per link on an unreadable read or a link
+    // without a readable period caveat (`fromChain: false`), exactly like the
+    // x402 legs: the enforcer stays the gate.
+    const budgetOptions = subBudgetScope
+      ? {
+          subBudget: {
+            grantDelegation: subBudgetScope.grantDelegation,
+            parentChildDelegation: subBudgetScope.parentChildDelegation,
+            parentDelegation: subBudgetScope.parentDelegation,
+          },
+        }
+      : taskBudgetScope
         ? {
-            subBudget: {
-              grantDelegation: subBudgetGrant,
-              parentChildDelegation: subBudgetParentChildDelegation,
-              parentDelegation: subBudgetParentDelegation,
+            taskBudget: {
+              childDelegation: taskBudgetScope.childDelegation,
+              parentDelegation: taskBudgetScope.parentDelegation,
             },
           }
-        : taskBudgetChild && taskBudgetParentDelegation
-          ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
-          : { delegation: await selectDelegation(agent.id, tokenAddress, to.toLowerCase()) }
+        : { delegation: scope.delegation }
     const periodBudgetLinks: string[] = budgetOptions.subBudget
       ? [
           JSON.stringify(budgetOptions.subBudget.grantDelegation),
@@ -764,48 +652,31 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         : budgetOptions.delegation
           ? [budgetOptions.delegation.delegation_json]
           : []
-    const readLinkRemaining = async (delegationJson: string): Promise<bigint | null> => {
-      try {
-        const read = await readRemainingBudget(agent.chain_id, delegationJson, amountRaw.toString())
-        return read.fromChain ? BigInt(read.remainingAtomic) : null
-      } catch {
-        return null
-      }
-    }
     const periodBudgetRefusal = async (): Promise<Record<string, unknown> | null> => {
-      const reads = (await Promise.all(periodBudgetLinks.map(readLinkRemaining))).filter(
-        (r): r is bigint => r !== null,
-      )
-      if (reads.length === 0) return null
-      const remainingAtomic = reads.reduce((min, r) => (r < min ? r : min))
-      // `<`, never `<=`: spending the exact remainder is what the chain allows.
-      if (remainingAtomic >= amountRaw) return null
-      const shortfallAtomic = amountRaw - remainingAtomic
-      const remainingHuman = formatTokenAmount(remainingAtomic, tokenConfig.decimals)
-      const shortfallHuman = formatTokenAmount(shortfallAtomic, tokenConfig.decimals)
+      const precheck = await evaluatePeriodPrecheck({
+        chainId: agent.chain_id,
+        amountAtomic: amountRaw,
+        delegationJsons: periodBudgetLinks,
+        read: async (chainId, delegationJson, amountAtomic) =>
+          readRemainingBudget(chainId, delegationJson, amountAtomic),
+      })
+      // `<`, never `<=`: spending the exact remainder is what the chain
+      // allows. No usable measurement on any link → no refusal (fail open).
+      if (!precheck.refused || precheck.remainingAtomic === null) return null
+      const remainingAtomic = precheck.remainingAtomic
       // The same body the x402 legs answer (delegation-authorize.ts), with
       // this route's rail and recipient in place of the x402 fields.
-      return {
-        error:
-          `This payment of ${amount} ${tokenConfig.symbol} exceeds the agent's remaining budget for this ` +
-          `period (${remainingHuman} ${tokenConfig.symbol}, short by ${shortfallHuman}). There is no approval ` +
-          'queue on the delegation rail — an over-budget redemption reverts on-chain. Ask the wallet owner ' +
-          'to grant or raise the budget in Haven, or wait for the period to reset.',
-        error_code: 'delegation_budget_exceeded',
-        phase: AgentPaymentPhase.InsufficientFunds,
-        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-        rail: AgentPaymentRail.Direct,
-        chain_id: agent.chain_id,
-        token: tokenConfig.symbol,
-        asset: tokenAddress,
+      return buildPeriodExceededBody({
+        flavor: 'direct',
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
+        tokenAddress,
+        decimals: tokenConfig.decimals,
+        amountAtomic: amountRaw.toString(),
+        remainingAtomic: remainingAtomic.toString(),
         amount,
-        amount_atomic: amountRaw.toString(),
-        remaining: remainingHuman,
-        remaining_atomic: remainingAtomic.toString(),
-        shortfall: shortfallHuman,
-        shortfall_atomic: shortfallAtomic.toString(),
         recipient: to.toLowerCase(),
-      }
+      })
     }
     const periodBudgetLedger = (body: Record<string, unknown>) => ({
       userId: agent.user_id,
@@ -817,12 +688,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       merchantTo: to.toLowerCase(),
       reason: 'delegation_budget_exceeded' as const,
       source: 'payment' as const,
-      detail: {
-        error_code: 'delegation_budget_exceeded',
-        phase: AgentPaymentPhase.InsufficientFunds,
-        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-        remaining_atomic: body.remaining_atomic,
-      },
+      detail: periodExceededLedgerDetail(body.remaining_atomic as string),
     })
     const prePeriodRefusal = await periodBudgetRefusal()
     if (prePeriodRefusal) {
@@ -844,8 +710,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // #2945: a caveat REVERT is a policy refusal — record it
       // fire-and-forget with the classified reason. A bundler/transport
       // failure is NOT a refusal (the guardrails refused nothing); the
-      // classifier returns null for it and nothing is written. The
-      // 502 the caller receives is unchanged either way.
+      // classifier returns null for it and nothing is written. Since #3609
+      // the same classification also picks the 502's typed body
+      // (`prepare_reverted` / `prepare_failed`, below).
       // #3416: no bundler credential for this chain on this deployment — a
       // typed, non-retryable 503, and nothing booked (nothing was refused).
       if (err instanceof DelegationRailChainUnavailableError) {
@@ -871,14 +738,31 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         }
       }
       const refusalReason = classifyRevertForLedger(err)
-      // #3053: through the shared choke point; the ledger input is null when
-      // the classification says NOT a refusal.
+      // #3609: typed and bounded. An EXECUTION revert is `prepare_reverted`
+      // (deterministic — the hosted step is stop, never "retry once");
+      // everything else is `prepare_failed` and keeps the retry step. The
+      // ledger is decided by the classifier alone, as before: every classified
+      // revert is booked — an AA validation failure too, though it answers
+      // `prepare_failed` — and an unclassified failure is not. Both carry `details` bounded after redaction — the raw
+      // viem error (~6 KB live: callData, signatures, paymaster data) never
+      // rides the response. #3053: both through the shared choke point.
+      const failureBody = prepareFailureBody(
+        err,
+        refusalReason,
+        'Delegation-rail authorization failed (bundler or RPC)',
+      )
+      // The response carries only a bounded cause; the operator gets the whole
+      // error here — redacted, never with a vendor key (#3609 review S2).
+      request.log.warn(
+        { error_code: failureBody.error_code, refusal_reason: refusalReason },
+        `POST /payments prepare failed: ${redactVendorSecrets(err instanceof Error ? err.message : String(err))}`,
+      )
+      if (!refusalReason) {
+        return refuse(reply.code(502).send(failureBody), null)
+      }
       return refuse(
-        reply.code(502).send({
-          error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-        }),
-        refusalReason && {
+        reply.code(502).send(failureBody),
+        {
           userId: agent.user_id,
           agentId: agent.id,
           chainId: agent.chain_id,
@@ -949,8 +833,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         budgetDelegationHash: authorization.delegationHash,
         preparedUserOp: serializeUserOp(authorization.prepared.userOperation),
         sendIdempotencyKey: idempotency_key ?? null,
-        taskBudgetId: taskBudgetChild ? (task_budget_id as string) : null,
-        subBudgetId: subBudgetGrant ? (sub_budget_id as string) : null,
+        taskBudgetId: taskBudgetScope ? task_budget_id : null,
+        subBudgetId: subBudgetScope ? sub_budget_id : null,
       })
     } catch (err) {
       // Lost the idempotency-key race with a concurrent request (migration

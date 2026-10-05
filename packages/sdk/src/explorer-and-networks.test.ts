@@ -49,11 +49,21 @@ describe('x402 networks and tokens (#3638)', () => {
     expect(selectPaymentOption([option('eip155:8453', BASE_USDC)])).toMatchObject({ network: 'eip155:8453' })
   })
 
-  it('chain-100 token addresses and symbols no longer resolve', () => {
+  it('chain-100 token addresses and symbols resolve to nothing', () => {
     expect(resolveTokenFromAddress(EURE_ON_CHAIN_100)).toBeNull()
     expect(resolveTokenFromAddress(EURE_ON_CHAIN_100, 'eip155:100')).toBeNull()
     expect(resolveTokenBySymbol(100, 'EURe')).toBeNull()
     expect(resolveTokenFromAddress(SEPOLIA_USDC, 'eip155:84532')).toEqual({ symbol: 'USDC', decimals: 6 })
     expect(resolveTokenBySymbol(8453, 'USDC')).toEqual({ symbol: 'USDC', decimals: 6 })
+  })
+
+  it('a NAMED network resolves only in its own table — never another chain’s decimals', () => {
+    // Before #3638 an unregistered network fell back to the cross-chain table,
+    // binding Base USDC's 6 decimals to an option on another chain.
+    expect(resolveTokenFromAddress(BASE_USDC, 'eip155:100')).toBeNull()
+    expect(resolveTokenFromAddress(BASE_USDC, 'eip155:1')).toBeNull()
+    expect(resolveTokenFromAddress(BASE_USDC, 'eip155:8453')).toEqual({ symbol: 'USDC', decimals: 6 })
+    // No network named: the cross-chain lookup still answers (#1351 contract).
+    expect(resolveTokenFromAddress(BASE_USDC)).toEqual({ symbol: 'USDC', decimals: 6 })
   })
 })

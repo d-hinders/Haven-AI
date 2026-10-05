@@ -76,13 +76,13 @@ covers:
 last-verified: "2026-10-02"
 ---
 
-> **Re-verified #3638 (2026-10-05, SDK networks and explorer links):** the
-> exported `SUPPORTED_X402_NETWORKS` drops `eip155:100`, and the chain-100 token
-> tables leave `resolveTokenFromAddress`/`resolveTokenBySymbol`. A 402 offering
-> only `eip155:100` now yields no supported option on the client, and the
-> backend already refused it. `buildExplorerUrl` maps 84532 to
-> `sepolia.basescan.org` (it fell back to mainnet basescan) and returns `''` for
-> an unknown chain. The CLI's chain names gain Base Sepolia. No tool, schema,
+> **Re-verified #3638 (2026-10-05, SDK networks and explorer links):** the SDK's
+> x402 network and token tables drop chain 100. The public `selectPaymentOption`
+> no longer selects an `eip155:100` option (the payment paths already refused one
+> through `selectStandardPaymentOption`), and `resolveTokenFromAddress` /
+> `resolveTokenBySymbol` no longer know the chain-100 tokens. Explorer links map
+> 84532 to `sepolia.basescan.org` (they fell back to mainnet basescan); chain 100
+> and any other chain get none. The CLI's chain names gain Base Sepolia. No tool, schema,
 > expected-context version or consent hash moves, and an installed runtime keeps
 > paying on Base and Base Sepolia unchanged. `last-verified` stays 2026-10-02.
 > Nothing else in this document was re-verified.

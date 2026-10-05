@@ -48,7 +48,7 @@ export function mapPaymentResult(
     to: raw.to,
     txHash: raw.tx_hash,
     errorMessage: raw.error_message,
-    explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) : null),
+    explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) || null : null),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

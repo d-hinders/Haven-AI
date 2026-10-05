@@ -1016,9 +1016,10 @@ export function resolveTokenFromAddress(
 ): { symbol: string; decimals: number } | null {
   const lower = address.toLowerCase()
 
-  if (network && network in NETWORK_TOKENS) {
-    return NETWORK_TOKENS[network][lower] ?? null
-  }
+  // #3638: a NAMED network resolves only in its own table. Falling back to the
+  // cross-chain table bound one chain's decimals to another chain's option
+  // (Base USDC's 6 decimals for an address on an unregistered network).
+  if (network) return NETWORK_TOKENS[network]?.[lower] ?? null
 
   return ALL_TOKENS[lower] ?? null
 }

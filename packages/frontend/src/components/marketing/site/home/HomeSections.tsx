@@ -260,29 +260,33 @@ export function HomeDevelopers() {
           </div>
         </div>
 
+        {/* Storytelling, not a transcript: every line stays within 28
+            characters so the block fits a 320px phone without a sideways
+            scroller (owner, #3579). `pre-wrap` is the backstop if a fallback
+            mono face runs wider. */}
         <div
-          className={`overflow-x-auto rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] p-[18px_20px] text-[13px] leading-[1.7] text-[#e6e9ff] ${SITE_TYPE.mono}`}
+          className={`min-w-0 rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] text-[13px] leading-[1.7] text-[#e6e9ff] ${SITE_TYPE.mono}`}
           style={{ padding: '18px 20px' }}
         >
-          <pre className="whitespace-pre">
+          <pre className="whitespace-pre-wrap break-words">
             <span className="text-[rgba(230,233,255,0.5)]"># An agent hits a paywall</span>
-            {'\n'}GET https://api.example/v1/enrich{'\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">← 402 Payment Required · 0.30 USDC</span>
+            {'\n'}GET api.example/v1/enrich{'\n'}
+            <span className="text-[rgba(230,233,255,0.5)]">← 402 · pay 0.30 USDC</span>
             {'\n\n'}
             <span className="text-[rgba(230,233,255,0.5)]">
-              {'# Haven quotes it against the agent’s budget,\n# the agent signs locally, Haven relays'}
+              {'# Haven checks the budget,\n# agent signs, Haven pays'}
             </span>
             {'\n'}
             <span className="text-[#a5b4fc]">haven_quote_x402</span>
-            {'   → within budget · 214.00 used of 250.00\n'}
+            {'\n  → within budget\n'}
             <span className="text-[#a5b4fc]">haven_sign_x402</span>
-            {'    → signed on the agent’s machine\n'}
+            {'\n  → signed on its machine\n'}
             <span className="text-[#a5b4fc]">haven_pay_x402</span>
-            {'     → settled on Base · receipt issued\n\n'}
+            {'\n  → settled on Base\n\n'}
             <span className="text-[rgba(230,233,255,0.5)]">← 200 OK</span>
             {'\n'}
             <span className="text-[rgba(230,233,255,0.5)]">
-              {'# Receipt: which agent, what it bought,\n# which policy allowed it, on-chain proof'}
+              {'# Receipt: agent, purchase,\n# policy, on-chain proof'}
             </span>
           </pre>
         </div>

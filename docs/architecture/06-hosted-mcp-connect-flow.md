@@ -20,7 +20,9 @@ covers:
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
-last-verified: "2026-09-26"
+  - packages/backend/src/modules/x402/authorize.ts
+  - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
+last-verified: "2026-10-05"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -143,13 +145,22 @@ delegation in step 5.
 The recommended paid-MCP path is:
 
 ```text
+EIP-3009 bridge
 haven_pay_mcp_tool
   → haven_sign_x402
   → haven_settle_mcp_tool
+
+erc7710 direct settlement (delegation rail + merchant advertises it)
+haven_pay_mcp_tool
+  → haven_sign                         (signs the SETTLEMENT CHILD)
+  → haven_settle_mcp_tool              (Haven assembles payment_header)
 ```
 
-Hosted MCP prepares the funding and merchant contexts, the signer locally
-authorizes both legs, and hosted MCP relays the signed merchant authorization.
+On the EIP-3009 bridge hosted MCP prepares the funding and merchant contexts,
+the signer locally authorizes both legs, and hosted MCP relays the signed
+merchant authorization. On erc7710 there is no funding leg: the signer signs
+the narrowed settlement child and `haven_settle_mcp_tool` assembles the
+merchant header. The result's `next_tool` names whichever applies.
 
 The generic decomposed path remains available, in two shapes since
 [#2041](https://github.com/d-hinders/Haven-AI/issues/2041) — the scheme is
@@ -228,7 +239,10 @@ shape since #2706. Both pre-checks **fail open** on a degraded on-chain
 read, but the consequence differs and the difference is the whole point of
 #2082. The EIP-3009 shape proceeds to prepare, where the redemption is
 estimated and the caveat enforcer's refusal surfaces as a `502` with no intent
-row — which is also what `POST /payments` does on every request. The erc7710
+row. `POST /payments` no longer answers that way: since #3503 it runs its own
+period pre-check (fail-open per link) and, when a period-budget revert follows
+a degraded read, re-reads and answers the same typed `403` once the fresh read
+confirms the shortfall. The erc7710
 branch prepares **nothing**: it re-delegates a narrowed child and hands it
 back, so a failed-open over-budget request comes back `201 pending_signature`
 **with** `sign_data`, and the refusal only lands on-chain when the merchant
@@ -266,10 +280,9 @@ x402 payment end to end through exactly this generic decomposed surface —
 `haven_pay_x402_quote` → `haven_sign` → `haven_submit` — with no funding leg at
 all.
 
-**Hosted DIRECT payments are a separate question and are NOT affected in kind:**
-`POST /payments` serves both rails and its delegation branch is untouched by
-#1986, so a delegation-rail account still creates a signable intent there. It
-is the x402 keyless construct specifically that has no working rail left.
+**Hosted DIRECT payments follow the same rail scoping:** `POST /payments`
+answers the same `410` for an `allowance_module` account (its legacy branch was
+deleted in #1987), and a delegation-rail account creates a signable intent there.
 
 After a successful paid retry — including the hosted completion path
 (`completeX402MerchantCall`) — the SDK captures a merchant-issued receipt from
@@ -280,16 +293,18 @@ best-effort, to `POST /machine-payments/:id/merchant-receipt`.
 
 Hosted MCP provides identity and allowance reads, the #3126 sufficiency check
 (whether the account actually holds a stated amount — `haven_check_funds`, a
-boolean `covered` answer, never a balance), direct send/prepare/submit,
-x402 and MPP quote/resume/status operations, paid-MCP prepare/settle,
-receipt listing and verification, discovery, and gasless USDC sweep
-orchestration. The exact registered union is in
+`covered` answer of true, false, or null when the chain read failed — never a
+balance), direct send/prepare/submit, x402 quote/resume/status operations (the
+MPP tools were retired with #1328), paid-MCP prepare/settle, outcome and
+settlement-evidence reports, receipt listing and verification, discovery and
+catalog submission, task budgets (open, read, close — #3329), and gasless USDC
+sweep orchestration. The exact registered union is in
 `packages/mcp-server/src/tools/contracts.ts` since #2807, re-exported by
 `packages/mcp-server/src/tools.ts`, which stays the facade every embedder
 imports.
 
-**An argument the tool does not declare is refused — on 22 of the 24 hosted
-tools (#2312, #2348, #2349, #2353, #3126).** It began with the money-path tools that read
+**An argument the tool does not declare is refused — on every hosted tool
+except the two `{}`-schema reads (#2312, #2348, #2349, #2353, #3126, #3329).** It began with the money-path tools that read
 from a record: several hosted tools take a `payment_id` and read the rest —
 amount, recipient, merchant, resource URL, funding transaction — from the
 payment's own stored row. A permissive parse dropped any other key silently, so
@@ -314,18 +329,21 @@ handler-level check remains for callers that import `createToolHandlers`
 directly. The advertised JSON Schema is unchanged — it already said
 `additionalProperties: false`.
 
-The edge signer exposes four local, sign-only tools. Three of the four never
-reach the network; the exception is the `{ payment_id }` form of `haven_sign`
-and `haven_sign_x402`, which since #1263 fetches that payment's exact signing
-context from Haven over an authenticated, read-only
-`GET /x402/:payment_id/sign-context` — and, for a direct payment via
-`haven_sign` only (since #3271), then `GET /payments/:payment_id/sign-context`
-after the x402 read answers 409. The delegate key is never part of that
-request or its response, and nothing here relays, submits, or broadcasts:
+The edge signer exposes four local, sign-only tools. `haven_x402_sign_header`
+and `haven_sign_sweep_delegate` never reach the network; `haven_sign` and
+`haven_sign_x402` do only in their by-id forms. Given a `payment_id`, both fetch
+that payment's exact signing context from Haven over an authenticated,
+read-only `GET /x402/:payment_id/sign-context` (since #1263) — and, for a
+direct payment via `haven_sign` only (since #3271), then
+`GET /payments/:payment_id/sign-context` after the x402 read answers 409.
+`haven_sign` also takes a `task_budget_id` (#3329) or `sub_budget_id` (#3330)
+alone, and fetches `GET /task-budgets/:id/sign-context` or
+`GET /sub-budgets/:id/sign-context`. The delegate key is never part of those
+requests or their responses, and nothing here relays, submits, or broadcasts:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign a Haven-prepared payment: a direct-payment UserOp from the agent's own account whose only call redeems a delegation made to it, or an x402 payload against a Haven-signed context; anything else is refused (#3272) |
+| `haven_sign` | Sign a Haven-prepared payload: a direct-payment UserOp from the agent's own account whose only call redeems a delegation made to it, an x402 payload against a Haven-signed context, or a task budget's or sub-budget's own child delegation or early-close UserOp fetched by id (#3329, #3330); anything else is refused (#3272) |
 | `haven_x402_sign_header` | Sign the decomposed merchant authorization |
 | `haven_sign_x402` | Sign the recommended paid-MCP funding and merchant contexts |
 | `haven_sign_sweep_delegate` | Sign a gasless delegate-to-wallet USDC sweep |
@@ -342,6 +360,23 @@ request or its response, and nothing here relays, submits, or broadcasts:
 - Sweep authorization is bound to the registered delegate and Haven wallet.
 - Live delegation agents can be paused or revoked in Haven; legacy Safe
   permissions require action by the Safe owner outside Haven.
+
+Re-verified 2026-10-05 (weekly docs audit #3645, at dev `cdb91d86`), a full
+re-read of everything except the dated notes. Changed: the recommended
+paid-MCP path shows the erc7710 shape beside the EIP-3009 bridge; the
+`POST /payments` comparison under the pre-checks now reflects its own #3503
+period pre-check and typed `403`; the hosted direct-payment paragraph says
+the legacy branch answers `410` (deleted in #1987) instead of "serves both
+rails"; the tool-surface list drops the retired MPP tools, gives
+`haven_check_funds`'s `covered` its null case and adds the reports, catalog
+submission and task budgets; the strict-input count (stale at 22 of 24) is
+replaced by the rule it counted; and the signer paragraph and `haven_sign` row
+name the task- and sub-budget sign-contexts. Re-checked without change: the
+connect steps and what registration sends, the boot-time key guard, the
+`run_mode` refusal, the collision prompt, one budget per signature, the
+direct-payment fields and recovery text, the erc7710 pre-check and its 201
+shape, the `/x402/authorize` 410, the merchant-receipt capture, and the
+custody summary.
 
 ## Related docs
 

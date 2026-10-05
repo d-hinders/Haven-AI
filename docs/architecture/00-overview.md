@@ -15,6 +15,9 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/delegation-rail.ts
+  - packages/backend/src/rails/delegation-policy.ts
+  - packages/backend/src/modules/x402/scheme-selection.ts
+  - packages/backend/src/routes/ops.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/catalog.ts
   - packages/connect/src/api.ts
@@ -66,7 +69,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-09-30"
+last-verified: "2026-10-05"
 ---
 
 # Haven — Architecture Overview
@@ -96,15 +99,17 @@ marked `execution_rail='session_key'` get HTTP 410 from the payment paths).
 `execution_rail='delegation'`), where the same identity/authority split holds but
 enforcement is a signed MetaMask delegation with audited caveat enforcers (period
 budget with native refill, optional recipient pin, expiry) redeemed via the
-DelegationManager as a sponsored UserOp — funds move account→recipient directly,
-with no funding leg and no approval queue. Deep dive:
+DelegationManager as a sponsored UserOp. Direct payments and erc7710 x402
+settlement move funds account→recipient directly, with no funding leg; the
+EIP-3009 x402 fallback (below) instead redeems the same delegation to fund the
+agent's delegate first. There is no approval queue. Deep dive:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 ## Components
 
 | Package | One-liner |
 |---|---|
-| `@haven/backend` | Fastify API: auth, Haven wallets, agents, budgets, payments, x402/MPP, receipts, catalog, the provider-generic accounting module (`modules/accounting/` — connections, the non-asserting feed, the retry sweep, Fortnox and Accounted as the live connectors, the Accounted webhook receiver; epic #2858, [runbook](../operations/accounting-feed.md)), and [OpenAPI](05-agent-api-openapi.md). The retired rail’s approval queue was deleted outright by #2055 — routes deregistered, `approval_requests` dropped. |
+| `@haven/backend` | Fastify API: auth, Haven wallets, agents, budgets, payments, x402/MPP, receipts, catalog, the provider-generic accounting module (`modules/accounting/` — connections, the non-asserting feed, the retry sweep, Fortnox and Accounted as the live connectors, the Accounted webhook receiver; epic #2858, [runbook](../operations/accounting-feed.md)), the read-only ops-console surface (`/ops/*`, off unless configured; #3509), and [OpenAPI](05-agent-api-openapi.md). The retired rail’s approval queue was deleted outright by #2055 — routes deregistered, `approval_requests` dropped. |
 | `@haven/frontend` | Next.js dashboard: onboarding, wallets, delegation agent rules, activity, custody/recovery, catalog, and the guarded accounting feed (`/accounting`; connections managed from a Settings card as of #2868, PR #2903); legacy Safe accounts are not rendered at all since #2413 — the account and agent list queries filter to `account_type = 'delegator_hybrid'`, so their rows persist in the database but reach no account, agent or dashboard screen. No approvals surface: `ApprovalQueue`, the `/approvals` route, the sidebar entry and its count badge were deleted by #1989/#2055. |
 | `@haven_ai/sdk` | TypeScript agent client plus shared signing, x402, sweep, and payment-state primitives used by direct integrations and the MCP/signer packages. |
 | `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven to approve a delegation agent's budget. |
@@ -115,6 +120,8 @@ with no funding leg and no approval queue. Deep dive:
 | `@haven_ai/core` | Shared Haven kernel — pure domain types and helpers used by BOTH the backend and the dashboard so neither re-derives them: address validation, the generated OpenAPI wire types (`api-types.ts`, drift-gated in CI by `npm run check:api-types`, #984), the chain+token registry facts (#986; backend/frontend layer env wiring and viem construction over them), and the machine-payment lifecycle domain (#987). **Private**, never published; private consumers pin it `"*"`. Must stay free of `fastify`/`pg`/`ethers`/`viem` — enforced by the `core-stays-pure` dependency rule (epic #980). |
 | `@haven_ai/qa-agent` | Private Base-Sepolia dev harness for deterministic seeded money-flow and merchant round-trip checks; also hosts the experimental ERC-4337 pilot scripts (ADR #719, `src/pilot/` — see the research doc); not published. |
 | `@haven_ai/demo-merchant-mcp` | Internal x402 demo merchant — test counterparty, not product. |
+| `@haven/ops` | Private operations console (epic #3507; [runbook](../operations/ops-console.md)): a separate Next.js app that signs founders in through GitHub and reads through the backend's `/ops/*` surface. Read-only — nothing under `/ops` moves funds, signs, changes signers or delegations, or acts as a user; the backend writes an audit row for every data read and every reveal. **Private**, never published. |
+| `@haven_ai/ui` | Shared design system — tokens, Tailwind preset and UI primitives (#3508), consumed by the ops console and the dashboard (whose old `components/ui` paths are now re-export shims). **Private**, never published. |
 
 ## Default topology
 
@@ -146,9 +153,11 @@ payment. Current contracts:
 
 - **Hybrid DeleGator (epic #821)** — the account type for every new account
   (`account_type='delegator_hybrid'`): MetaMask's audited smart account with
-  policy as delegations + caveat enforcers. Payments redeem the agent's
-  budget delegation via sponsored UserOps (#829); budgets refill natively
-  on-chain. See `docs/security/delegation-rail-security-model.md`.
+  policy as delegations + caveat enforcers. Payments redeem an owner-signed
+  budget delegation via sponsored UserOps (#829) — the paying agent's own,
+  directly or through the task-budget child it signs (#3329), or, for a
+  sub-budget, the delegating agent's, reached through that agent's signed
+  children (#3330); period budgets refill natively on-chain. See `docs/security/delegation-rail-security-model.md`.
 - **Safe + AllowanceModule — RETIRED (epic #1440).** Existing Safe accounts
   keep their rows and their owners keep on-chain control, but no account, agent or
   dashboard surface renders them (the transactions picklists are the named
@@ -166,8 +175,8 @@ payment. Current contracts:
 - **PostgreSQL** — users, wallets, agents, allowances, payments,
   receipts, catalog and accounting state, and audit records.
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)
-  is the dev/QA testnet. Gnosis Chain (100) is not a Haven network; the
-  registry still carries it (historical rows render through it). Standard merchant x402 is exact-scheme USDC on Base
+  is the dev/QA testnet. Gnosis Chain (100) is not a Haven network.
+  Standard merchant x402 is exact-scheme USDC on Base
   and Base Sepolia; delegation-rail accounts settle x402 via ERC-7710 direct
   settlement, with a per-payment EIP-3009 fallback for facilitators without erc7710 support (#946)
   ([x402 sequence](04-x402-payment-sequence.md)).
@@ -220,3 +229,19 @@ erc7710-with-EIP-3009-fallback settlement shape. The week's heavy drift
 #3471 discovery default chain, #3482 faucet/onramp) moved internals —
 including the default-chain derivation this doc's chain line does not
 state — without touching any boundary, actor or custody split named here.
+
+Re-verified 2026-10-05 (weekly docs audit #3645, at dev `cdb91d86`). Changed:
+the component table gains `@haven/ops` (#3570, epic #3507) and `@haven_ai/ui`
+(#3562, #3508), both added after the 09-30 head, and the backend row names the
+read-only `/ops/*` surface; the delegation-rail line no longer says the whole
+rail has no funding leg — direct payments and erc7710 x402 settlement have
+none, the EIP-3009 x402 fallback does (the earlier notes' "no funding leg"
+shared that scope error); the Hybrid DeleGator line names the redemption path
+through task- and sub-budget children (#3329/#3330), matching the CASP
+guardrails' wording; and the chain line drops the registry clause, which epic
+#3634's next slice will make false. Re-checked without change: the retired
+rails' 410s, the dropped approval queue, the caveat triple, the frontend
+`delegator_hybrid` filters, the accounting connectors, the core package's
+purity rule and `"*"` pins, the nine runtime profiles and Hermes paths, the
+connect-flow tool names, the budget-approval activation, and the passport
+chain.

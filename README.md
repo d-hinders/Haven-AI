@@ -55,7 +55,9 @@ Signed delegation + caveat enforcers -> On-chain agent budget enforcement
 API auth is identity. Signature is authority. On-chain delegation state is enforcement.
 
 Haven runs **one live on-chain policy rail**: the **delegation rail** (epic #821).
-Funds move account→recipient directly — no funding leg, **no approval queue**, and a
+Direct payments and erc7710 x402 settlement move funds account→recipient directly,
+with no funding leg (the EIP-3009 x402 fallback funds the agent's delegate first, by
+redeeming the same delegation); there is **no approval queue**, and a
 payment outside the budget, recipient pin or expiry **reverts during gas estimation**
 rather than queueing for a human.
 
@@ -141,7 +143,7 @@ Edit `.env` and fill in the required values:
 | `COINGECKO_API_KEY` | No | Token price lookups |
 | `FRONTEND_URL` | No | Backend CORS/link base (default: `http://localhost:3000`) |
 | `NEXT_PUBLIC_API_URL` | No | Frontend backend URL override (default through local rewrite: `http://localhost:3001`) |
-| `NEXT_PUBLIC_HAVEN_MCP_URL` | No | Hosted MCP URL shown in connect-agent snippets |
+| `HAVEN_HOSTED_MCP_URL` | Outside production | Backend: the hosted MCP URL handed to the connector and dashboard (falls back to `NEXT_PUBLIC_HAVEN_MCP_URL`, then to the production-only default) |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | WalletConnect project id; injected wallet connectors can still work without it |
 
 **Setting up the relayer wallet:**

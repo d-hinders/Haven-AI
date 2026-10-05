@@ -28,9 +28,10 @@ import { AnimatedRefusalReceipt } from './AnimatedRefusalReceipt'
  *
  * - "Talk to the founders" is removed (decisions 8), with no replacement.
  * - Step 3 names the clients the connector supports (decision 13), and its
- *   terminal shows the connector command in its published, working form —
- *   the mockup's bare one-liner exits with an argument error before anything
- *   runs (`packages/connect/src/args.ts:255`).
+ *   terminal is a short storytelling script that keeps the connector
+ *   command's published prefix (#3644) — the mockup's bare one-liner exits
+ *   with an argument error before anything runs
+ *   (`packages/connect/src/args.ts:256`).
  * - Step 1's account wording replaces the mockup's account-kind phrase that
  *   `docs/product/copy-guidelines.md` bans; the sentence keeps its meaning.
  * - The "Why now" band describes Stripe's MPP as next, never as live

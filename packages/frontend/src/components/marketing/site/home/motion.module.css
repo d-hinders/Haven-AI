@@ -68,6 +68,16 @@
   .leave {
     animation: rowout 0.4s ease both;
   }
+  /* The hero list's swap (#3644): the entering row's track grows from 0fr
+     while the displaced row's shrinks to 0fr, same duration and easing, so
+     the two heights always sum to one row and the list never changes height.
+     The displaced row is dropped at 420 ms, after its track reaches 0fr. */
+  .grow {
+    animation: rowgrow 0.4s ease both;
+  }
+  .shrink {
+    animation: rowshrink 0.4s ease both;
+  }
   /* One receipt row pair's assembly step (site.css:337; the per-pair delay
      comes from the component as an inline animation-delay, mirroring the
      mockup's `Math.floor(i/2)*110` ms per dt/dd, `index.html:301`). */
@@ -181,5 +191,21 @@
 @keyframes caret {
   to {
     opacity: 0;
+  }
+}
+@keyframes rowgrow {
+  from {
+    grid-template-rows: 0fr;
+  }
+  to {
+    grid-template-rows: 1fr;
+  }
+}
+@keyframes rowshrink {
+  from {
+    grid-template-rows: 1fr;
+  }
+  to {
+    grid-template-rows: 0fr;
   }
 }

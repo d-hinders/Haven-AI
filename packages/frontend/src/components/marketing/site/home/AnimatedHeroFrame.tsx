@@ -23,14 +23,15 @@ import { HeroAgentsFrame, type HeroActivityRow, type HeroFrameState } from './He
  *
  * Offsets, verbatim from the script (`cycle()` at :103-118):
  *
- * - 3000 ms — a payment appears as pending (`row('pending')`, :105).
+ * - 3000 ms — a payment appears as pending (`row('pending')`, :105) and
+ *   pushes the oldest row out; it is dropped 420 ms later (`insert()`, :94-97).
  * - 5200 ms — it settles; the used amount tweens 201.50 → 214.00 over 900 ms
  *   and the bar jumps to the target (`tween(BASE, BASE+PAY, 900)`, :106-109).
  * - 6800 ms — the row gains its "In Fortnox" accounting badge (:111).
  * - 11000 ms — an over-budget attempt is refused: "Refused: over budget ·
  *   36.00 left, nothing paid" — the amount it asked for (:112, :91).
- * - 11000+420 ms — the row it displaced finishes leaving and is dropped
- *   (`insert()`'s 420 ms removal, :94-97).
+ * - 11000+420 ms — the row it displaced finishes leaving and is dropped, so
+ *   the list shows three rows throughout, as the mockup's does.
  * - 17500/18100 ms — the list fades out and the settled baseline returns
  *   (:113-114); at 19000 the cycle restarts (:115).
  *
@@ -39,6 +40,9 @@ import { HeroAgentsFrame, type HeroActivityRow, type HeroFrameState } from './He
  * exactly — the mockup's script bails on the same media query (:83). The
  * frame is decorative: the hero section wraps it in `aria-hidden`.
  */
+
+/** How many activity rows the list shows at any moment (`rows.length>3`, :96). */
+const VISIBLE_ROWS = 3
 
 /** The three settled activity rows (mockup `index.html:60-74`). */
 const BASE_ROWS: HeroActivityRow[] = [
@@ -81,8 +85,7 @@ export function AnimatedHeroFrame() {
   const [settled, setSettled] = useState(false)
   const [badged, setBadged] = useState(false)
   const [refused, setRefused] = useState(false)
-  const [leavingKeys, setLeavingKeys] = useState<string[]>([])
-  const [dropped, setDropped] = useState(false)
+  const [droppedKeys, setDroppedKeys] = useState<string[]>([])
   const [fading, setFading] = useState(false)
 
   const reset = () => {
@@ -90,8 +93,7 @@ export function AnimatedHeroFrame() {
     setSettled(false)
     setBadged(false)
     setRefused(false)
-    setLeavingKeys([])
-    setDropped(false)
+    setDroppedKeys([])
     setFading(false)
   }
 
@@ -99,14 +101,7 @@ export function AnimatedHeroFrame() {
     { at: 3000, act: () => setPendingInserted(true) },
     { at: 5200, act: () => setSettled(true) },
     { at: 6800, act: () => setBadged(true) },
-    {
-      at: 11000,
-      act: () => {
-        setRefused(true)
-        // The displaced row starts its exit (`insert()`, :96).
-        setLeavingKeys(['base-3'])
-      },
-    },
+    { at: 11000, act: () => setRefused(true) },
     { at: 17500, act: () => setFading(true) },
     { at: 18100, act: reset },
   ]
@@ -114,17 +109,9 @@ export function AnimatedHeroFrame() {
   useCycle(steps, HERO_CYCLE_MS, looping, reset)
   const tween = useTween(201.5, 201.5 + HERO_PAYMENT, 900, settled)
 
-  // The leaving row is dropped 420 ms after it starts leaving (:96). The
-  // timer rides the fake clocks like every other step.
-  useEffect(() => {
-    if (leavingKeys.length === 0) return
-    const timer = setTimeout(() => setDropped(true), 420)
-    return () => clearTimeout(timer)
-  }, [leavingKeys])
-
-  const rows: HeroActivityRow[] = []
+  const ordered: HeroActivityRow[] = []
   if (refused) {
-    rows.push({
+    ordered.push({
       key: 'refusal',
       icon: 'refused',
       title: 'Atlas',
@@ -136,7 +123,7 @@ export function AnimatedHeroFrame() {
     })
   }
   if (pendingInserted) {
-    rows.push({
+    ordered.push({
       key: 'pending',
       icon: settled ? 'up' : 'pending',
       title: 'Atlas',
@@ -150,12 +137,26 @@ export function AnimatedHeroFrame() {
       entering: !settled,
     })
   }
-  rows.push(
-    ...BASE_ROWS.filter((row) => !(dropped && leavingKeys.includes(row.key))).map((row) => ({
-      ...row,
-      leaving: leavingKeys.includes(row.key),
-    })),
-  )
+  ordered.push(...BASE_ROWS)
+
+  // The list always shows three rows: each insert pushes the last one out
+  // (`insert()`, :96 — `rows.length>3` leaves on every insert). The row just
+  // displaced shrinks away while the new one grows in (the frame's `grow` /
+  // `shrink` pair), so the list's height never changes, and it is dropped
+  // 420 ms later; anything further down is already gone.
+  const displaced = ordered[VISIBLE_ROWS]
+  const rows: HeroActivityRow[] = ordered.slice(0, VISIBLE_ROWS)
+  if (displaced && !droppedKeys.includes(displaced.key)) {
+    rows.push({ ...displaced, leaving: true })
+  }
+
+  // The timer rides the fake clocks like every other step.
+  const displacedKey = displaced?.key
+  useEffect(() => {
+    if (!displacedKey) return
+    const timer = setTimeout(() => setDroppedKeys((keys) => [...keys, displacedKey]), 420)
+    return () => clearTimeout(timer)
+  }, [displacedKey])
 
   const state: HeroFrameState | undefined = !looping
     ? undefined

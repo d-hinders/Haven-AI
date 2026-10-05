@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — reference material for epic #3572; the files describe a design, not code
-last-verified: "2026-10-02"
+last-verified: "2026-10-05"
 ---
 
 # Public site mockup
@@ -52,7 +52,8 @@ Reproduced from the epic. The build follows the right-hand column.
 | Sign-up with three fields, "At least 12 characters" and "your account is created on Base" | The real form: four fields, 8-character minimum; no chain named, since sign-up provisions every supported chain (slice 6) |
 | "Claude, ChatGPT or your own harness" on the home page and How it works | "Claude, Codex, Cursor or any other agent harness" (decision 13) |
 | For agents headline "pay with a budget, not a wallet" | "pay with a budget, not a credit card" (decision 14) |
-| `npx @haven_ai/connect` in the home page terminal; snippets without `--api` | Commands in their published, working forms (slices 2, 4, 5) |
+| `npx @haven_ai/connect` in the home page terminal | A short storytelling script: the published prefix `npx -y @haven_ai/connect@alpha` verbatim, a `…` for the flags left out, and illustrative output lines short enough never to scroll sideways (owner decision 2026-10-05, #3644; slice 2 first showed the full working command and real connector output) |
+| Snippets without `--api` | Commands in their published, working forms (slices 4, 5) |
 | "Haven relays sign_hash 0x8b2f…" in the protocols flow | The agent signs the typed data; no bare hash is shown (slice 4) |
 | `EXAMPLE-SETUP-TOKEN` on For agents | The runbook's `EXAMPLE-SETUP-TOKEN-NOT-REAL` (slice 5) |
 | "© 2026 Haven" in every page's footer | "© {year} Haven Labs" (decision 16, #3586) |

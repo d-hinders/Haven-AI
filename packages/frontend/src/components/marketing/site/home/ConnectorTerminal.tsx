@@ -5,11 +5,15 @@ import styles from './motion.module.css'
 /**
  * Step 3's terminal, settled state.
  *
- * The command is the connector command in its published, working form — see
- * `fixtures.ts` for why the mockup's bare one-liner was replaced and where
- * every output line is transcribed from. Unlike the product frames this
- * block is real page content, not a decorative frame: it is the answer to
- * "what would I actually run", so it stays in the accessibility tree.
+ * A short storytelling script (owner decision, #3644) — see `fixtures.ts`
+ * for what it keeps from the real connector command and why it is short.
+ * Unlike the product frames this block is real page content, not a
+ * decorative frame: it says what setting up an agent looks like, so it
+ * stays in the accessibility tree.
+ *
+ * It never scrolls sideways (#3644): every line is its own block that wraps
+ * under a 2ch hanging indent, so a line wrapped at a narrow column stays
+ * under its `$`, `✓` or `#` marker. At 1280 no line wraps at all.
  *
  * The component owns the terminal's markup and nothing else (#3575): slice
  * 3's `AnimatedConnectorTerminal` drives the print-in sequence by passing
@@ -24,30 +28,31 @@ export type TerminalRevealState = {
   printed: number
 }
 
+/** One terminal line: its own block, wrapped lines hang under the marker. */
+const LINE = 'block pl-[2ch] -indent-[2ch]'
+
 export function ConnectorTerminal({ state }: { state?: TerminalRevealState } = {}) {
   return (
     <div
       data-connector-terminal=""
-      className={`flex-1 overflow-x-auto rounded-lg bg-[#0e1230] p-3.5 text-[12.5px] leading-[1.7] text-[#e6e9ff] ${SITE_TYPE.mono}`}
+      className={`flex-1 rounded-lg bg-[#0e1230] p-3.5 text-[12.5px] leading-[1.7] text-[#e6e9ff] ${SITE_TYPE.mono}`}
     >
-      <pre className="whitespace-pre">
-        <span className="text-[rgba(230,233,255,0.5)]">{CONNECTOR_TERMINAL.comment}</span>
-        {'\n'}
-        <span className="text-[#a5b4fc]">$ </span>
-        {CONNECTOR_TERMINAL.command}
-        {'\n'}
+      <pre className="whitespace-pre-wrap break-words">
+        <span className={`${LINE} text-[rgba(230,233,255,0.5)]`}>{CONNECTOR_TERMINAL.comment}</span>
+        <span className={LINE}>
+          <span className="text-[#a5b4fc]">$ </span>
+          <span data-terminal-command="">{CONNECTOR_TERMINAL.command}</span>
+        </span>
         {CONNECTOR_TERMINAL.output.map((line, index) => (
           <span
             key={line}
-            className={`block ${
-              state?.looping && index >= state.printed ? styles.tline : styles.tlineOn
-            }`}
+            className={`${LINE} ${state?.looping && index >= state.printed ? styles.tline : styles.tlineOn}`}
           >
             {line}
           </span>
         ))}
-        {'\n\n'}
-        <span className="text-[rgba(230,233,255,0.5)]">{CONNECTOR_TERMINAL.tailComment}</span>
+        <span className={`${LINE} mt-[1.7em] text-[rgba(230,233,255,0.5)]`}>{CONNECTOR_TERMINAL.tailComment[0]}</span>
+        <span className={`${LINE} text-[rgba(230,233,255,0.5)]`}>{CONNECTOR_TERMINAL.tailComment[1]}</span>
       </pre>
     </div>
   )

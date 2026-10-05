@@ -14,7 +14,9 @@
  * 16 ms tick chain and the typing hook's 95 ms keystroke chain. CSS
  * entrances (translateY/opacity) paint outside layout, so a region whose
  * animated states are height-stable passes here and fails loudly if a
- * future edit makes one wrap.
+ * future edit makes one wrap. The hero's row swap is the exception: its
+ * grid tracks do move layout, in real time, so that test pauses the page
+ * clock once the loop runs and lets each swap finish before it measures.
  */
 import { expect, test } from '@playwright/test'
 
@@ -42,39 +44,45 @@ test.describe('/ motion: layout stability across cycles', () => {
     // The settled frame, before the loop's first step.
     const settled = await heightOf(page, 'hero-animated')
 
-    // 3000 ms in, the mockup's pending step proves the loop is running
-    // (index.html:105) — the IntersectionObserver has delivered. Sampled
-    // DURING the cycle, not only across it (#3644): the list once grew to
-    // four rows at 3000 ms and shrank back at the reset, which a
-    // before/after pair at the same phase could not see.
-    //
-    // The row swap is a CSS animation (motion.module.css `grow`/`shrink`),
-    // which runs on real time while `page.clock` drives the JS steps, so
-    // each sample first lets the 0.4 s swap finish in real time. Sub-pixel
-    // rounding of the two tracks is tolerated (`toBeCloseTo(…, 0)`, < 0.5 px);
-    // the bug this guards against is a whole extra row (~62 px).
+    // The row swap is a CSS animation (motion.module.css `grow`/`shrink`):
+    // it runs on real time while `page.clock` drives the JS steps, so each
+    // sample first lets the 0.4 s swap finish. Sub-pixel rounding of the two
+    // tracks is tolerated (`toBeCloseTo(…, 0)`, < 0.5 px); the bug this
+    // guards against is a whole extra row (~62 px).
     const settledAfterSwap = async () => {
       await page.waitForTimeout(600)
       return heightOf(page, 'hero-animated')
     }
+
+    // 3000 ms in, the mockup's pending step proves the loop is running
+    // (index.html:105) — the IntersectionObserver has delivered. Sampled
+    // DURING the cycle, not only across it (#3644): the list once grew to
+    // four rows here and shrank back at the reset, which a before/after pair
+    // at the same phase could not see.
     await page.clock.runFor(3100)
     await expect(hero.getByText('Pending')).toBeVisible()
     expect(await settledAfterSwap(), 'hero height moved at the pending insert').toBeCloseTo(settled, 0)
 
-    // Settle, badge, refusal (and its displaced row's exit), fade, reset —
-    // offsets from the loop's start, so each step advances the difference.
-    let elapsed = 3100
-    for (const [at, label] of [
-      [5300, 'settle'],
-      [6900, 'accounting badge'],
-      [11100, 'refusal insert'],
-      [11500, 'displaced row dropped'],
-      [17000, 'before the fade'],
-      [19100, 'reset and restart'],
+    // From here the clock is paused, so it only moves on `runFor` and the
+    // real-time waits cannot drift the samples. The loop's phase at the
+    // pause is known to within a few hundred ms (after the 3000 ms step, the
+    // pause adds 300), so each sample sits mid-phase with that much margin
+    // either side: settle 5200, badge 6800, refusal 11000 (its displaced
+    // row dropped at 11420), fade 17500, reset 18100, next pending 22000.
+    await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 300))
+    // Each sample also names a text only its phase shows, so a sample that
+    // drifted into a neighbouring phase fails instead of passing quietly.
+    const activity = hero.getByTestId('hero-activity')
+    for (const [advance, label, shows] of [
+      [2200, 'settled payment', 'Paid research.example over x402'],
+      [2100, 'accounting badge', 'Paid research.example over x402 · In Fortnox'],
+      [3900, 'refusal, around its displaced row’s drop', 'Refused: over budget'],
+      [6300, 'fade-out or reset', 'Paid'],
+      [1700, 'next cycle, before its pending step', 'Paid api.example over x402'],
     ] as const) {
-      await page.clock.runFor(at - elapsed)
-      elapsed = at
+      await page.clock.runFor(advance)
       expect(await settledAfterSwap(), `hero height moved at: ${label}`).toBeCloseTo(settled, 0)
+      await expect(activity, `sample drifted out of: ${label}`).toContainText(shows)
     }
   })
 

@@ -21,9 +21,10 @@
  *     (restored in `afterAll`).
  * NOT covered: values snapshotted at module load (`SUPPORTED_CHAIN_IDS`,
  * `REGISTRY_CHAIN_IDS`, `deployableChainIds()`); those are slice 2b's
- * known-vs-supported split. The switch waits for module load because
- * `domain/tokens.ts` still reads chain 100 at load — a real removal today would
- * not boot; slice 2b deletes those exports before the registry entry goes.
+ * known-vs-supported split. The switch flips in `beforeAll` so the snapshot
+ * values above are built from the full registry, as in a pre-removal boot.
+ * (Until #3642, `domain/tokens.ts` also read chain 100 at load; that is gone,
+ * and `domain/__tests__/boot-without-chain-100.test.ts` pins it.)
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 

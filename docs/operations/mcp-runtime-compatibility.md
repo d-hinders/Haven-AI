@@ -80,8 +80,8 @@ last-verified: "2026-10-02"
 > two covered files, and neither change moves a runtime contract.
 > `packages/backend/src/middleware/client-compat.ts` gets a comment-only fix:
 > the mirrored `findPaymentReplay` lookup skips `failed` and `expired` rows,
-> which free the key. `packages/mcp-server/src/strict-tool-input.test.ts`
-> gets a test-only parity block. Every tool name both runtimes register, plus
+> which free the key. The hosted server's cross-runtime test suite gets a
+> test-only parity block. Every tool name both runtimes register, plus
 > hosted `haven_pay` ↔ local `haven_send`, must declare the same budget-scope
 > keys. The one allowlisted difference is hosted `haven_pay_x402_quote`
 > without `sub_budget_id` (the #3617 entry below). No tool, schema,

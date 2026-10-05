@@ -201,7 +201,6 @@ export function normalizePaymentRequired(value: unknown): X402PaymentRequired | 
 
 /** Network identifiers that Haven can recognise in x402 payment requests. */
 export const SUPPORTED_X402_NETWORKS: Record<string, string> = {
-  'eip155:100':   'Gnosis Chain',
   'eip155:8453':  'Base',
   'base':         'Base',
   'eip155:84532': 'Base Sepolia',
@@ -218,13 +217,6 @@ const STANDARD_X402_NETWORKS: Record<string, PaymentRequirements['network']> = {
 
 // ── Token address maps ────────────────────────────────────────────
 
-/** Known tokens on Gnosis Chain (chainId 100). */
-const GNOSIS_TOKENS: Record<string, { symbol: string; decimals: number }> = {
-  '0x0000000000000000000000000000000000000000': { symbol: 'xDAI',   decimals: 18 },
-  '0xcb444e90d8198415266c6a2724b7900fb12fc56e': { symbol: 'EURe',   decimals: 18 },
-  '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0': { symbol: 'USDC.e', decimals: 6  },
-}
-
 /** Known tokens on Base (chainId 8453). */
 const BASE_TOKENS: Record<string, { symbol: string; decimals: number }> = {
   '0x0000000000000000000000000000000000000000': { symbol: 'ETH',  decimals: 18 },
@@ -239,14 +231,12 @@ const BASE_SEPOLIA_TOKENS: Record<string, { symbol: string; decimals: number }> 
 
 /** All known tokens across all supported chains (for display / resolution). */
 const ALL_TOKENS: Record<string, { symbol: string; decimals: number }> = {
-  ...GNOSIS_TOKENS,
   ...BASE_TOKENS,
   ...BASE_SEPOLIA_TOKENS,
 }
 
 /** Maps CAIP-2 network ID → token address map. */
 const NETWORK_TOKENS: Record<string, Record<string, { symbol: string; decimals: number }>> = {
-  'eip155:100':   GNOSIS_TOKENS,
   'eip155:8453':  BASE_TOKENS,
   'base':         BASE_TOKENS,
   'eip155:84532': BASE_SEPOLIA_TOKENS,

@@ -1895,6 +1895,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > residuals above. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3638, 2026-10-05):** `direct-payment-guard.ts`
+> changes a comment only. `DIRECT_PAYMENT_CHAIN_IDS` stays `{8453, 84532}`, so
+> "its chain has pinned delegation contracts (Base, Base Sepolia)" above holds
+> verbatim. The same diff narrows the SDK's x402 network and token tables and
+> its explorer-link map to Base and Base Sepolia. Those are display and
+> client-side option selection; nothing the signer verifies moves. Scope of
+> this re-read: the "What is signed" list above. `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3378, 2026-09-26):** `client.ts`'s `payX402Quote`
 > now forwards its options (`taskBudgetId`) to `authorizeX402`, as `fetch()`
 > already did. No signing check moves: the funding leg still runs the #3271

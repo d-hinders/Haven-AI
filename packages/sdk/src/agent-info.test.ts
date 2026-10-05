@@ -413,13 +413,15 @@ describe('agent info helpers', () => {
     })
   })
 
-  it('getAgentSummary formats an 18-decimal token (EURe) correctly', async () => {
+  it('getAgentSummary formats an 18-decimal token correctly', async () => {
+    // #3638: was EURe on chain 100, which is no longer in the registry (Gnosis
+    // is not a Haven network). Native ETH is the remaining 18-decimal entry.
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const u = String(url)
       if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
       if (u.endsWith('/machine-payments/allowances')) {
-        // 1.5 EURe = 1.5 * 10^18 atomic.
-        return allowancesResponse({ tokenAddress: EURE_GNOSIS, tokenSymbol: 'EURe', remaining: '1500000000000000000' })
+        // 1.5 ETH = 1.5 * 10^18 atomic.
+        return allowancesResponse({ tokenAddress: '0x0000000000000000000000000000000000000000', tokenSymbol: 'ETH', remaining: '1500000000000000000' })
       }
       if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
       throw new Error(`unexpected fetch: ${u}`)
@@ -429,9 +431,9 @@ describe('agent info helpers', () => {
     const summary = await haven.getAgentSummary()
 
     expect(summary.allowances[0]).toMatchObject({
-      tokenSymbol: 'EURe',
+      tokenSymbol: 'ETH',
       remainingAtomic: '1500000000000000000',
-      remainingDisplay: '1.5 EURe',
+      remainingDisplay: '1.5 ETH',
     })
   })
 
@@ -719,9 +721,8 @@ function agentResponse(status: string, executionRail: 'legacy' | 'delegation' = 
 }
 
 // Real registered token addresses so remainingDisplay exercises the decimals
-// lookup (Base USDC = 6 decimals, Gnosis EURe = 18 decimals).
+// lookup (Base USDC = 6 decimals; the 18-decimal case uses native ETH).
 const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
-const EURE_GNOSIS = '0xcb444e90d8198415266c6a2724b7900fb12fc56e'
 
 /**
  * The delegation rail's /machine-payments/allowances shape (#1135): remaining

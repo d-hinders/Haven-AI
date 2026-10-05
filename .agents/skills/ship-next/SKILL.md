@@ -764,6 +764,22 @@ you need the reasoning. Never edit one without the other — CI will not let you
   now decide through it. The move took the decision off the perimeter —
   #1892's accident of location again: where the comparison lives is not what
   makes it a spend decision);
+- `modules/task-budgets/`, `modules/sub-budgets/`, `routes/task-budgets.ts`,
+  `routes/sub-budgets.ts` and `routes/agent-sub-budgets.ts` (#3661 — they build
+  the task child and the sub-budget children, including the A→B grant that
+  hands spend authority to another agent, and run the pre-sign cap and
+  narrowing refusals; `agent-sub-budgets.ts` is where the owner issues a
+  sub-budget, the `agent-connection-setups.ts` reason. Not
+  `agent-task-budgets.ts`: GET only);
+- `modules/payments/direct-sign-context.ts` (the bytes the local signer signs
+  for a direct payment, #3271), `modules/payments/submission-reconciler.ts`
+  (the terminal state of a submitted payment whose UserOp may have landed,
+  #3564) and `modules/payments/agent-payment-status.ts` (its
+  `isFundedX402AwaitingMerchantLeg` decides whether x402 sign-context re-signs
+  a confirmed payment — a wrong clause can pay a merchant twice) — file-level
+  on purpose: the rest of that module is the refusal record, receipts and
+  prepare-failure reporting, pinned as off-list in
+  `scripts/ci/money-path.test.mjs` (#3661);
 - `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
   `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
@@ -817,7 +833,10 @@ you need the reasoning. Never edit one without the other — CI will not let you
   `redemption-guard.ts`, `settlement-child.ts` and `userop-binding.ts` (the
   delegate key's signing-surface guard, moved out of `packages/signer/` into the
   SDK by #3283, and the #3271 binding check both packages import — their
-  location is not what makes them spend authority);
+  location is not what makes them spend authority); `task-budget-guards.ts` and
+  `sub-budget-guards.ts` join them on the same rule (#3661 — the signer's own
+  checks on task and sub-budget children before it signs; both arrived after
+  #3283);
 - `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
   actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
   above guards the backend re-export shim, not the code — #1905);

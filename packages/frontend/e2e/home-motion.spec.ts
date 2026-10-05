@@ -36,20 +36,46 @@ test.describe('/ motion: layout stability across cycles', () => {
     ).toBeVisible()
   })
 
-  test('the hero frame holds its height through the 19 s payment loop', async ({ page }) => {
+  test('the hero frame holds its height at every step of the 19 s payment loop', async ({ page }) => {
     const hero = page.getByTestId('hero-animated')
     await hero.scrollIntoViewIfNeeded()
+    // The settled frame, before the loop's first step.
+    const settled = await heightOf(page, 'hero-animated')
 
     // 3000 ms in, the mockup's pending step proves the loop is running
-    // (index.html:105) — the IntersectionObserver has delivered.
+    // (index.html:105) — the IntersectionObserver has delivered. Sampled
+    // DURING the cycle, not only across it (#3644): the list once grew to
+    // four rows at 3000 ms and shrank back at the reset, which a
+    // before/after pair at the same phase could not see.
+    //
+    // The row swap is a CSS animation (motion.module.css `grow`/`shrink`),
+    // which runs on real time while `page.clock` drives the JS steps, so
+    // each sample first lets the 0.4 s swap finish in real time. Sub-pixel
+    // rounding of the two tracks is tolerated (`toBeCloseTo(…, 0)`, < 0.5 px);
+    // the bug this guards against is a whole extra row (~62 px).
+    const settledAfterSwap = async () => {
+      await page.waitForTimeout(600)
+      return heightOf(page, 'hero-animated')
+    }
     await page.clock.runFor(3100)
     await expect(hero.getByText('Pending')).toBeVisible()
+    expect(await settledAfterSwap(), 'hero height moved at the pending insert').toBeCloseTo(settled, 0)
 
-    const before = await heightOf(page, 'hero-animated')
-    // The rest of the cycle: settle, badge, refusal, fade, reset, restart.
-    await page.clock.runFor(19_000)
-    const after = await heightOf(page, 'hero-animated')
-    expect(after, 'hero frame height moved across one cycle').toBe(before)
+    // Settle, badge, refusal (and its displaced row's exit), fade, reset —
+    // offsets from the loop's start, so each step advances the difference.
+    let elapsed = 3100
+    for (const [at, label] of [
+      [5300, 'settle'],
+      [6900, 'accounting badge'],
+      [11100, 'refusal insert'],
+      [11500, 'displaced row dropped'],
+      [17000, 'before the fade'],
+      [19100, 'reset and restart'],
+    ] as const) {
+      await page.clock.runFor(at - elapsed)
+      elapsed = at
+      expect(await settledAfterSwap(), `hero height moved at: ${label}`).toBeCloseTo(settled, 0)
+    }
   })
 
   test('the how-it-works cards hold their height through the 12 s cycle', async ({ page }) => {

@@ -11,8 +11,7 @@ import styles from './motion.module.css'
  * The component owns the frame's settled markup and nothing else (#3575):
  * slice 3's `AnimatedHeroFrame` drives the mockup's payment loop by passing
  * `state`; with no state (or under reduced motion) it renders the settled
- * fixture state below, byte-for-byte what slice 2 shipped — the baselines
- * and the page tests pin it.
+ * fixture state below — the baselines and the page tests pin it.
  */
 
 /** One activity row as the loop sees it. */
@@ -121,56 +120,68 @@ export function HeroAgentsFrame({ state }: { state?: HeroFrameState } = {}) {
         <div className="mb-2.5 mt-4 text-[13px] font-semibold text-[var(--v2-ink)]">Recent activity</div>
         <div
           data-testid="hero-activity"
-          className="relative"
           style={fading ? { opacity: 0, transition: 'opacity 0.5s' } : undefined}
         >
+          {/* Each row is a one-track grid around a clipping box, so the loop
+              can grow an entering row from nothing while the row it displaces
+              shrinks to nothing at the same pace: the list keeps three rows'
+              height throughout (#3644). */}
           {rows.map((row) => (
             <div
               key={row.key}
-              className={`grid grid-cols-[28px_1fr_auto] items-center gap-3 border-t border-[var(--v2-border)] py-3 text-[13px] ${
-                row.entering ? styles.enter : ''
-              } ${row.leaving ? `absolute inset-x-0 ${styles.leave}` : ''}`}
+              data-leaving={row.leaving ? '' : undefined}
+              className={`grid ${row.entering ? styles.grow : ''} ${row.leaving ? styles.shrink : ''}`}
             >
-              <div
-                aria-hidden
-                className={`grid h-7 w-7 place-items-center rounded-lg text-[13px] font-semibold ${
-                  row.icon === 'refused'
-                    ? styles.icoNo
-                    : row.icon === 'pending'
-                      ? styles.icoPend
-                      : styles.icoOut
-                }`}
-              >
-                {row.icon === 'refused' ? '✕' : row.icon === 'pending' ? '···' : '↑'}
-              </div>
-              <div className="min-w-0">
-                <div className="text-[13.5px] font-semibold leading-tight text-[var(--v2-ink)]">{row.title}</div>
-                <div className="mt-0.5 text-[12px] text-[var(--v2-ink-3)]">
-                  {row.detail}
-                  {row.badge !== null && ' · '}
-                  {row.badge === 'fortnox' && (
-                    <span
-                      className={`inline-flex h-[18px] items-center rounded-full bg-[var(--v2-success-soft)] px-2 text-[11px] font-medium text-[var(--v2-success)] ${
-                        row.badgeEntering ? styles.pillEnter : ''
-                      }`}
-                    >
-                      In Fortnox
-                    </span>
-                  )}
-                  {row.badge === 'pending' && (
-                    <span
-                      className={`inline-flex h-[18px] items-center rounded-full px-2 text-[11px] font-medium ${styles.pillPending}`}
-                    >
-                      Pending
-                    </span>
-                  )}
+              <div className="min-h-0 overflow-hidden">
+                <div
+                  className={`grid grid-cols-[28px_1fr_auto] items-center gap-3 border-t border-[var(--v2-border)] py-3 text-[13px] ${
+                    row.entering ? styles.enter : ''
+                  } ${row.leaving ? styles.leave : ''}`}
+                >
+                  <div
+                    aria-hidden
+                    className={`grid h-7 w-7 place-items-center rounded-lg text-[13px] font-semibold ${
+                      row.icon === 'refused'
+                        ? styles.icoNo
+                        : row.icon === 'pending'
+                          ? styles.icoPend
+                          : styles.icoOut
+                    }`}
+                  >
+                    {row.icon === 'refused' ? '✕' : row.icon === 'pending' ? '···' : '↑'}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-semibold leading-tight text-[var(--v2-ink)]">{row.title}</div>
+                    {/* An 18px line box, the pill's height, so a detail line reads
+                        the same height with or without a pill (#3644). */}
+                    <div className="mt-0.5 text-[12px] leading-[18px] text-[var(--v2-ink-3)]">
+                      {row.detail}
+                      {row.badge !== null && ' · '}
+                      {row.badge === 'fortnox' && (
+                        <span
+                          className={`inline-flex h-[18px] items-center rounded-full bg-[var(--v2-success-soft)] px-2 text-[11px] font-medium text-[var(--v2-success)] ${
+                            row.badgeEntering ? styles.pillEnter : ''
+                          }`}
+                        >
+                          In Fortnox
+                        </span>
+                      )}
+                      {row.badge === 'pending' && (
+                        <span
+                          className={`inline-flex h-[18px] items-center rounded-full px-2 text-[11px] font-medium ${styles.pillPending}`}
+                        >
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className={`text-right font-semibold text-[var(--v2-ink)] ${SITE_TYPE.mono}`}>
+                    {row.amount}
+                    <small className="block font-normal text-[11.5px] not-italic text-[var(--v2-ink-3)]">
+                      {row.when}
+                    </small>
+                  </div>
                 </div>
-              </div>
-              <div className={`text-right font-semibold text-[var(--v2-ink)] ${SITE_TYPE.mono}`}>
-                {row.amount}
-                <small className="block font-normal text-[11.5px] not-italic text-[var(--v2-ink-3)]">
-                  {row.when}
-                </small>
               </div>
             </div>
           ))}

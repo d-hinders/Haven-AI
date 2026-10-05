@@ -29,5 +29,5 @@ export const HERO_TWEEN_MS = 900
 /** Where the terminal's print sequence starts (the script's :283 offset). */
 export const PRINT_START_MS = 5800
 
-/** The stagger between the five real output lines (the mockup printed two). */
+/** The stagger between the terminal's output lines (the mockup printed two). */
 export const PRINT_STAGGER_MS = 550

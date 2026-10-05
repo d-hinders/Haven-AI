@@ -9,6 +9,9 @@ import {
   AnimatedConnectorTerminal,
 } from '../HowItWorksAnimated'
 import { AnimatedHeroFrame } from '../AnimatedHeroFrame'
+import { CONNECTOR_TERMINAL } from '../fixtures'
+import { PRINT_STAGGER_MS } from '../motion-timings'
+import motionStyles from '../motion.module.css'
 import { AnimatedAccountingFrame } from '../AnimatedAccountingFrame'
 import { AccountingFrame } from '../AccountingFrame'
 import { AnimatedRefusalReceipt } from '../AnimatedRefusalReceipt'
@@ -83,8 +86,8 @@ describe('the home page motion, settled (#3575)', () => {
     // Enforcement: the receipt fully assembled.
     expect(text).toContain('Nothing to book')
     expect(text).toContain('Refused: over budget')
-    // Terminal: every real output line settled ("on").
-    expect(text).toContain('Haven setup on this machine is complete.')
+    // Terminal: every scripted output line settled ("on").
+    expect(text).toContain('✓ Setup complete')
   })
 
   it('nothing announces: no live region, no role="status" on the page', () => {
@@ -155,18 +158,31 @@ describe('the mockup’s loops, driven by fake timers', () => {
 
     const text = () => (container.querySelector('[data-testid="hero-activity"]')?.textContent ?? '').replace(/\s+/g, ' ')
     const used = () => container.querySelector('[data-testid="hero-used"]')?.textContent ?? ''
+    // The list never grows past three rows (#3644, the mockup's insert()
+    // at :96): a displaced row shrinks away as the new one grows in, so
+    // the rows not marked leaving are the list's three.
+    const inFlowRows = () => container.querySelectorAll('[data-testid="hero-activity"] > div:not([data-leaving])')
+    const leavingText = () =>
+      [...container.querySelectorAll('[data-testid="hero-activity"] > div[data-leaving]')].map((n) => n.textContent ?? '').join(' ')
 
     // Before the first step: the settled frame.
     expect(used()).toBe('201.50 of 250.00 USDC')
     expect(text()).toContain('Paid data.example over x402')
+    expect(inFlowRows()).toHaveLength(3)
 
-    // 3000 — pending appears (mockup index.html:105).
+    // 3000 — pending appears (mockup index.html:105) and pushes the oldest
+    // row out: it shrinks away and is dropped 420 ms later.
     act(() => vi.advanceTimersByTime(3000))
     expect(text()).toContain('Paying research.example over x402')
     expect(text()).toContain('Pending')
+    expect(inFlowRows()).toHaveLength(3)
+    expect(leavingText()).toContain('Paid api.example over x402')
+    act(() => vi.advanceTimersByTime(420))
+    expect(text()).not.toContain('Paid api.example over x402')
+    expect(inFlowRows()).toHaveLength(3)
 
     // 5200 — settles; the tween starts (index.html:106-109).
-    act(() => vi.advanceTimersByTime(2200))
+    act(() => vi.advanceTimersByTime(2200 - 420))
     expect(text()).toContain('Paid research.example over x402')
     expect(text()).not.toContain('Pending')
     // Mid-tween: between the endpoints (the tween's first tick already ran).
@@ -183,16 +199,20 @@ describe('the mockup’s loops, driven by fake timers', () => {
     // 6800 — the row gains its accounting badge (index.html:111).
     act(() => vi.advanceTimersByTime(700))
     expect(text()).toContain('In Fortnox')
+    expect(inFlowRows()).toHaveLength(3)
 
     // 11000 — the over-budget attempt is refused (index.html:112, :91).
     act(() => vi.advanceTimersByTime(4200))
     expect(text()).toContain('Refused: over budget · 36.00 left, nothing paid')
     expect(text()).toContain('40.00 USDC')
-    // The displaced row leaves visually (overlay) without changing the
-    // section's height — the layout-shift bar — and is dropped 420 ms later.
+    // The row it displaces is now Iris's: it shrinks away as the refusal
+    // grows in, and is dropped 420 ms later.
+    expect(inFlowRows()).toHaveLength(3)
+    expect(leavingText()).toContain('Paid Klara Data AB over x402')
     act(() => vi.advanceTimersByTime(420))
     expect(text()).toContain('Refused: over budget')
-    expect(text()).not.toContain('Paid api.example over x402')
+    expect(text()).not.toContain('Paid Klara Data AB over x402')
+    expect(inFlowRows()).toHaveLength(3)
 
     // 17500 — the list fades out (:113).
     act(() => vi.advanceTimersByTime(6080))
@@ -200,6 +220,7 @@ describe('the mockup’s loops, driven by fake timers', () => {
       'style',
       expect.stringContaining('opacity: 0'),
     )
+    expect(inFlowRows()).toHaveLength(3)
 
     // 18100 — the settled baseline is restored (:114).
     act(() => vi.advanceTimersByTime(600))
@@ -266,14 +287,29 @@ describe('the mockup’s loops, driven by fake timers', () => {
     expect(confirmations().length).toBeGreaterThanOrEqual(2)
 
     // The terminal's lines are in the DOM from the start (opacity-only
-    // reveal) and finish printing by 8000 (:283-284 + the five-line stagger).
+    // reveal), so text alone proves nothing about the stagger: read the
+    // reveal classes. Before 5800 (:283) every output line is hidden.
     const terminalText = () =>
       (container.querySelector('[data-connector-terminal]')?.textContent ?? '').replace(/\s+/g, ' ')
-    expect(terminalText()).toContain('Haven setup on this machine is complete.')
+    const outputLines = () =>
+      CONNECTOR_TERMINAL.output.map(
+        (line) =>
+          [...container.querySelectorAll('[data-connector-terminal] span')].find((node) => node.textContent === line)!,
+      )
+    expect(terminalText()).toContain('✓ Setup complete')
+    expect(outputLines().every((node) => node.classList.contains(motionStyles.tline))).toBe(true)
+    // 5800 — the first line prints; the rest are still hidden.
+    act(() => vi.advanceTimersByTime(5800 - 4500))
+    expect(outputLines().map((node) => node.classList.contains(motionStyles.tlineOn))).toEqual(
+      CONNECTOR_TERMINAL.output.map((_, index) => index === 0),
+    )
+    // One stagger per further line, then every line is on.
+    act(() => vi.advanceTimersByTime(PRINT_STAGGER_MS * (CONNECTOR_TERMINAL.output.length - 1)))
+    expect(outputLines().every((node) => node.classList.contains(motionStyles.tlineOn))).toBe(true)
 
     // 12000 — the boundary resets everything and loops (:285-287).
-    // Advanced so far: 100+2000+400+475+500+1025 = 4500.
-    act(() => vi.advanceTimersByTime(12000 - 4500))
+    // Advanced so far: 4500 + 1300 + the stagger.
+    act(() => vi.advanceTimersByTime(12000 - 5800 - PRINT_STAGGER_MS * (CONNECTOR_TERMINAL.output.length - 1)))
     expect(passkey()).toContain('Create your passkey')
     expect(passkey()).not.toContain('Account created')
     expect(confirmations()).toHaveLength(0)

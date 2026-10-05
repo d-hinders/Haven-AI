@@ -222,9 +222,14 @@ since the ops project runs the same script. For this project that means:
 - A PR's first preview compares the branch with its merge base with `dev`,
   fetching `dev` when Vercel's clone lacks it, so a frontend PR gets a preview
   even when its newest push is docs-only. If no merge base can be found, the
-  preview builds. Whether that fetch succeeds inside Vercel's build is not yet
-  observed; the build log's `vercel ignore-build:` line says which branch the
-  rule took.
+  preview builds, and the build log's `vercel ignore-build:` line names the
+  step that failed. The first log after #3601 (PR #3622, 2026-10-05) found no
+  merge base, without saying whether the fetch failed or found no shared
+  commit, so the script now handles both. When `origin` is missing or its fetch
+  fails, it uses the repository's public GitHub URL, built from
+  `VERCEL_GIT_REPO_OWNER` and `VERCEL_GIT_REPO_SLUG`. When the shallow histories
+  share no commit, it deepens the clone once. Whether a real first preview now
+  skips is the operator check still open on #3594.
 - A push to `dev` or `main` with no recorded previous deployment always builds.
 - The list is checked against the real build inputs by
   `packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts`; a new

@@ -61,13 +61,14 @@ export function readWatchFile(watchFile) {
  * The environment every git and sh spawn gets: no inherited `GIT_*` (a git
  * hook exports GIT_DIR / GIT_INDEX_FILE, which would point these commands at
  * the HOST repository), no global or system git config, and no VERCEL_* or
- * *_FORCE_BUILD variable unless a test sets one. The GIT_* filter is the one
+ * *_FORCE_BUILD or IGNORE_BUILD_DEV_URL variable unless a test sets one. The
+ * GIT_* filter is the one
  * scripts/ci/money-path-classify.test.mjs uses.
  */
 export function hermeticEnv(extra = {}) {
   const env = { ...process.env }
   for (const key of Object.keys(env)) {
-    if (/^(GIT_|VERCEL_)/.test(key) || /_FORCE_BUILD$/.test(key)) delete env[key]
+    if (/^(GIT_|VERCEL_)/.test(key) || /_FORCE_BUILD$/.test(key) || key === 'IGNORE_BUILD_DEV_URL') delete env[key]
   }
   return Object.assign(env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, extra)
 }
@@ -111,11 +112,24 @@ export function makeRepo({ project, command }) {
     return spawnSync('sh', ['-c', command], { cwd: join(root, 'packages', project), env: hermeticEnv(env) }).status ?? -1
   }
 
+  /** `run`, plus the step's combined log, for the cases that pin what it says. */
+  const runLog = (vars = {}, root = repo) => {
+    const env = {}
+    for (const [key, value] of Object.entries(vars)) if (value !== undefined) env[key] = value
+    const result = spawnSync('sh', ['-c', command], {
+      cwd: join(root, 'packages', project),
+      env: hermeticEnv(env),
+      encoding: 'utf8',
+    })
+    return { status: result.status ?? -1, log: `${result.stdout ?? ''}${result.stderr ?? ''}` }
+  }
+
   /**
    * A shallow clone (default depth 1) of the repo's current branch, for the
    * missing-commit cases. Like Vercel's, it holds that branch only. Unless
-   * `withOrigin` is set the `origin` remote is removed, so the script's fetch
-   * of dev cannot happen either.
+   * `withOrigin` is set the `origin` remote is removed, so the script can
+   * fetch dev only from a public-URL source the test supplies
+   * (`IGNORE_BUILD_DEV_URL`, or Vercel's owner and slug variables).
    */
   const shallowClone = ({ withOrigin = false, depth = 1 } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), `${project}-ignore-shallow-`))
@@ -125,7 +139,7 @@ export function makeRepo({ project, command }) {
   }
 
   const cleanup = () => rmSync(repo, { recursive: true, force: true })
-  return { repo, git, commit, run, shallowClone, cleanup }
+  return { repo, git, commit, run, runLog, shallowClone, cleanup }
 }
 
 export { rmSync }

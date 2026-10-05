@@ -135,11 +135,13 @@ Vercel's shallow clone, or git errors. Any `VERCEL_ENV` other than
 the `dev` or `main` branch. A preview with no earlier deployment (a PR
 branch's first push) instead compares the branch with its merge base with
 `dev`. Vercel clones the deployed branch alone, so the script first fetches
-`dev`'s recent history from `origin`; it skips only when that yields a merge
-base and nothing watched changed on the branch, and builds on any failure.
-So a frontend-only PR can skip its ops preview, while an ops PR always gets
-one. Whether the fetch succeeds inside Vercel's build is not yet observed:
-the build log's `vercel ignore-build:` line says which branch the rule took. The rule
+`dev`'s recent history. It tries `origin`, then the repository's public
+GitHub URL. If the shallow histories share no commit, it deepens the clone
+once. The first log after #3601 could not tell a failed fetch from a missing
+shared commit, so the script covers both (#3594). It skips only when that yields a merge base and nothing watched
+changed on the branch, and builds on any failure. The build log's
+`vercel ignore-build:` line names the step that failed. So a frontend-only PR
+can skip its ops preview, while an ops PR always gets one. The rule
 never compares against the newest commit's parent: that form (#3580)
 stranded the #3581 fix, whose own build was lost to the cap, behind later
 frontend-only commits (#3591). If a console change still is not live, use

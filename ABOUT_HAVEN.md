@@ -143,7 +143,7 @@ Haven must stay within these product and architecture constraints:
 - API credentials alone cannot spend.
 - Off-chain database policy is not the real spend control.
 - Automated payment execution must be constrained by an on-chain control the user signed — today, a delegation with audited caveat enforcers.
-- User-signed on-chain authority — never an off-chain record — establishes or modifies agent authority.
+- User-signed on-chain authority — never an off-chain record — establishes or widens agent authority; an agent can only narrow it, by signing a task- or sub-budget child of an owner-signed budget (see `docs/regulatory/casp-risk-guardrails.md` § Hard Architecture Invariants).
 - Users can enumerate and revoke live delegation authority without Haven. Legacy Safe permissions are owner-managed outside Haven; Haven does not revoke them.
 - Haven must not operate swaps, ramps, fiat/card rails, merchant settlement, yield, treasury management, or financial advice flows without separate product, legal, and security review.
 

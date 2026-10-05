@@ -57,7 +57,7 @@ import { nextStepWireFields, signerRefusalStep } from './next-step.js'
  * `server.ts` re-exports them, so the package's public API is unchanged.
  */
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.7.0-alpha.0'
+export const SIGNER_VERSION = '0.8.0-alpha.0'
 
 /**
  * #3419: the marker the tool layer prefixes the undeclared-argument refusal
@@ -102,7 +102,9 @@ export class HavenUserOpBindingRefusedError extends HavenSigningError {
       nextAction: AgentPaymentNextAction.StopAndTellUser,
       nextTool: null,
       nextToolOmittedReason:
-        'call haven_sign again with payment_id alone (preferred), or with typed_data copied unchanged from the payment result',
+        'call haven_sign again with payment_id alone (preferred), or with typed_data copied unchanged from ' +
+        'the payment result (or, on a compact direct-payment result, from a same-key re-run with ' +
+        'include_signing_payload: true)',
     })
   }
 }

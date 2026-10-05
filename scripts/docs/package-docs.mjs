@@ -107,13 +107,24 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the README re-verified in this pass.
     // #3173: § Install gained the two-entry paragraph (`@haven_ai/sdk/edge`),
     // verified against package.json exports, tsup.config.ts and edge.ts.
-    'last-verified': '2026-09-20',
+    // #3503: the decline paragraph re-read against `routes/payments.ts` —
+    // over-budget is now a 403 delegation_budget_exceeded on POST /payments too.
+    // Scope: that paragraph.
+    // #3632: the networks table and the four EURe/gnosisscan examples (two
+    // pay() samples, the Claude tool sample, the error-handling sample)
+    // re-read against core chains.ts and src/tools.ts. Scope: those lines.
+    'last-verified': '2026-10-05',
   },
   {
     doc: 'packages/signer/README.md',
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
+    // #3506: EDITED, scope = the haven_sign table row ({ sub_budget_id } form,
+    // its result shape, and the "Signs only" list now naming the task-budget
+    // child, the sub-budget child and the task/sub-budget close UserOps) and the handshake-derivation sentence (task + sub-budget
+    // sign-context constants), verified against consent.ts, capabilities.ts and
+    // tools.ts. Nothing else re-verified. Prior:
     // #2515: EDITED, scope = the one connector command example. `@alpha` became
     // `<channel>`, with the sentence beside it still naming `@alpha` as what
     // production hands out. Same reason as the connect README: this file ships in
@@ -186,13 +197,20 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3173: new § "Startup, CLI options and the consent screen" verified
     // against cli-args.ts, consent.ts, server.ts, core.ts (lazy x402) and the
     // measured numbers in the PR; nothing else re-verified.
-    'last-verified': '2026-09-20',
+    'last-verified': '2026-10-01',
   },
   {
     doc: 'packages/mcp/README.md',
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp/src/**'],
+    // #3645: EDITED, scope = § Audit log (rows only for the backend's
+    // MCP_TOOL_NAMES allowlist, named in full), verified against
+    // packages/backend/src/middleware/agentToolAudit.ts. Nothing else
+    // re-verified. Prior:
+    // #3506: EDITED, scope = the haven_submit bullet (sub_budget_id and
+    // pendingSubBudgetSignatures[]), verified against src/tools.ts. Nothing else
+    // re-verified. Prior:
     // #2366 (part 1): EDITED — one new subsection under § Tools recording the
     // `idempotencyKey` -> `idempotency_key` deprecation window. This is a
     // published package's landing page and the argument is the replay contract
@@ -214,13 +232,16 @@ export const GOVERNED_PACKAGE_DOCS = [
     // SDK's own LLM tool schemas and REST /x402/authorize still spell it
     // `idempotencyKey`). Written against `packages/mcp/src/tools.ts` on this
     // branch. Rest of the README NOT re-verified.
-    'last-verified': '2026-09-12',
+    'last-verified': '2026-10-01',
   },
   {
     doc: 'packages/connect/README.md',
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
+    // #3542: EDITED, scope = the "dashboard offers the revoke" paragraph (the
+    // dashboard revoke now also ends the budget with one owner signature).
+    // Nothing else re-verified. Prior:
     // #3210: EDITED, scope = the `--doctor` / `--repair` section's runtime-flag
     // paragraph and the added flagless `--doctor` example (`--runtime` optional
     // for `--doctor`, required for `--repair`). Nothing else re-verified. Prior:
@@ -332,6 +353,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp-server/src/**'],
+    // #3506: EDITED, scope = the haven_submit table row (POST /sub-budgets/:id/submit
+    // with sub_budget_id, exactly one id), verified against
+    // tools/state-direct-recovery.ts. Nothing else re-verified. Prior:
     // #2330: re-verified and EDITED (the two merchant-header mentions only).
     // The sequence diagram and the signer paragraph both named X-PAYMENT alone
     // while the hosted server has relayed both wire names since #2289. Scope:
@@ -343,7 +367,39 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the tool table already listed. Tool names checked against the registered
     // set in src/tools/**; Run env names and endpoints checked against
     // src/cli.ts and src/http.ts. Rest of the README re-read, unchanged.
-    'last-verified': '2026-09-15',
+    // #3413 (weekly staleness audit, 2026-09-30, at dev `5b5bd059`):
+    // re-verified, no edit. The tool table's 18 rows match the registered set
+    // composed in src/tools.ts (state-direct-recovery, catalog-purchase,
+    // plain-http-x402, paid-mcp-completion, task-budgets); the six tools the
+    // table omits (`haven_send`, `haven_quote_mcp_tool`,
+    // `haven_quote_catalog_purchase`, `haven_prepare_catalog_purchase`,
+    // `haven_resume_x402_payment`, `haven_verify_receipt`) all predate the
+    // last verification — an editorial selection, not staleness. The #3423
+    // compact-receipts row, the #3475 eip3009 settlement row and the settle
+    // semantics (`DELIVERED_UNSETTLED` / `SETTLEMENT_PENDING` /
+    // `next_action: check_status_later`, paid-mcp-completion.ts) match HEAD;
+    // `createHostedHavenClient` still throws on a delegate key; the Run
+    // endpoints are as written (`POST /v1` Bearer-authenticated, `GET
+    // /healthz` unauthenticated per http.ts).
+    'last-verified': '2026-10-01',
+  },
+  {
+    // The private operations console (#3515). Its README documents the env
+    // registry, the sign-in handoff contract and the token-storage rules —
+    // prose whose claims the source can drift out from under, so it is a
+    // contract like the other private-package READMEs.
+    doc: 'packages/ops/README.md',
+    owner: '@d-hinders',
+    status: 'current',
+    covers: [
+      'packages/ops/src/**',
+      'packages/ops/next.config.ts',
+      'packages/ops/package.json',
+      'packages/ops/scripts/render-smoke.mjs',
+    ],
+    // Registered at the scaffold's own build (#3515); the coupling gate's
+    // first implicated PR re-reads the body and bumps this date.
+    'last-verified': '2026-10-02',
   },
   {
     // The #1992 file. Its prose is mostly about BACKEND behaviour — which
@@ -366,7 +422,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // 2026-08-27; a manifest entry is this file's equivalent of a chain, so it
     // drifts the same way a `last-verified` does. Scope: that paragraph and
     // the scenario-table rows it names. Nothing else in that README re-read.
-    'last-verified': '2026-09-08',
+    // #3503: the over-budget rows and discriminator paragraph re-read against
+    // `routes/payments.ts` — `over-budget-refused` is now refused at the period
+    // pre-check (typed 403), so no live leg watches the enforcer revert. Scope:
+    // those rows, that paragraph and the "Still uncovered" note.
+    'last-verified': '2026-09-30',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',
@@ -464,6 +524,28 @@ export const EXEMPT_PACKAGE_DOCS = {
     '`packages/sdk/src/agent-guidance.ts`, and a byte-equality test pins this file to it, so the '+
     'thing that catches drift is that test rather than a doc gate. Its audience is a model '+
     'mid-task, so front-matter would be tokens it pays for and cannot use.',
+  ...Object.fromEntries(
+    [
+      'what-haven-is',
+      'the-sequence',
+      'budget-changes-later',
+      'hand-off-scripts',
+      'what-you-run',
+      'how-to-verify',
+      'if-you-cannot-open-a-browser',
+      'if-something-breaks',
+      'vocabulary',
+    ].map((slug) => [
+      `packages/frontend/public/agent-skills/${slug}.md`,
+      'Agent-readable public artifact, served verbatim at /agent-skills/' +
+        slug +
+        '.md and listed in /.well-known/agent-skills/index.json (#3596). Same reasoning as the ' +
+        'for-agents.md entry above, one level finer: it is a byte-SLICE of the canonical ' +
+        '`HAVEN_AGENT_RUNBOOK_MD` at a `## ` boundary plus one generated "Next" link, pinned by ' +
+        '`agent-skill-steps.test.ts` and by `lint:runbook-parity` (`GENERATED_COPIES` in ' +
+        'sync-agent-guidance.mjs), not hand-maintained.',
+    ]),
+  ),
   'packages/qa-agent/src/pilot/README.md':
     'Index of hand-run testnet proof scripts, each of which documents itself in its own header. ' +
     'Governed one level up: `packages/qa-agent/README.md` carries the QA harness contract.',

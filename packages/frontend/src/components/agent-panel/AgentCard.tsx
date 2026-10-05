@@ -4,9 +4,18 @@ import { McpServerName } from './McpServerName'
 import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
 import { LabelChipRow } from '@/components/haven/LabelChip'
 import { useState } from 'react'
+import Link from 'next/link'
 import { type Agent } from '@/hooks/useAgents'
 import type { Organization } from '@/hooks/useOrganizations'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import {
+  FINISH_REVOKING_LABEL,
+  HALF_REVOKED_BODY,
+  HALF_REVOKED_TITLE,
+  HALF_REVOKED_UNLINKED_BODY,
+  canFinishRevoking,
+  isHalfRevoked,
+} from '@/lib/half-revoked'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
@@ -31,19 +40,18 @@ const SEPARATOR_CLASS = 'hidden text-[var(--v2-border-strong)] lg:inline'
 
 export function AgentCard({
   agent,
-  onViewDetails,
   onPause,
   onResume,
   onRevokeCredential,
   onArchive,
   onRestore,
   onMoveToOrganization,
+  onBudgetEnded,
   busyAction,
   chainId = DEFAULT_CHAIN_ID,
   organizations = [],
 }: {
   agent: Agent
-  onViewDetails: (agent: Agent) => void
   onPause: (agent: Agent) => void
   onResume: (agent: Agent) => void
   /** RemoveAgentDialog step 2: plain POST /agents/:id/revoke, throws on failure. */
@@ -53,6 +61,11 @@ export function AgentCard({
   onRestore: (agent: Agent) => void
   /** #3164: the card hosts the Move modal; this delivers the saved agent back. */
   onMoveToOrganization: (agent: Agent) => void
+  /**
+   * #3542: called once Finish revoking (or Remove) has ended the agent's budget,
+   * so the owner of the agent list can clear the half-revoked marker.
+   */
+  onBudgetEnded?: (agentId: string) => void
   busyAction: AgentBusyAction
   chainId?: number
   /** #3164: the user's organization tree, for the card's Move picker. */
@@ -60,6 +73,9 @@ export function AgentCard({
 }) {
   const [pauseModalOpen, setPauseModalOpen] = useState(false)
   const [removeModalOpen, setRemoveModalOpen] = useState(false)
+  // #3542: the same dialog in its finish mode — ends the remaining budget of an
+  // agent that is already revoked or archived, and moves nothing.
+  const [finishModalOpen, setFinishModalOpen] = useState(false)
   // #3164: mounted only while open (the per-agent modal, same pattern as
   // RemoveAgentDialog below).
   const [moveModalOpen, setMoveModalOpen] = useState(false)
@@ -70,14 +86,12 @@ export function AgentCard({
   const isArchived = Boolean(agent.archived_at)
   const isOperational = !isRevoked && !isArchived
   const isBusy = busyAction !== null
+  const halfRevoked = isHalfRevoked(agent)
+  const canFinish = canFinishRevoking(agent)
 
   async function handleConfirmPause() {
     setPauseModalOpen(false)
     onPause(agent)
-  }
-
-  function openDetails() {
-    onViewDetails(agent)
   }
 
   const hasConfiguredAllowances = agent.allowances.length > 0
@@ -86,7 +100,7 @@ export function AgentCard({
     <>
     <div
       data-testid="agent-card"
-      className={`${entityCardClassName({ muted: isRevoked })} min-w-0`}
+      className={`${entityCardClassName({ muted: isRevoked, linked: true })} min-w-0`}
     >
       {/* Header */}
       {/* #2325: `flex-wrap` here, plus the stamp's `basis-full sm:basis-auto`
@@ -146,12 +160,12 @@ export function AgentCard({
                 is the thing this issue is about. */}
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="min-w-0 truncate text-sm font-semibold text-[var(--v2-ink)]">
-                <a
+                <Link
                   href={`/agents/${agent.id}`}
-                  className="block min-w-0 truncate rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
+                  className="block min-w-0 truncate rounded-sm after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
                 >
                   {agent.name}
-                </a>
+                </Link>
               </h3>
               {!isActive ? (
                 <span
@@ -178,7 +192,7 @@ export function AgentCard({
               #1694's decision is "editable display name, immutable wiring
               slug", so the two must not read as the same kind of thing.
             */}
-            <div className="mt-0.5 flex min-w-0 items-center gap-1 text-xs">
+            <div className="relative z-[var(--v2-z-content)] mt-0.5 flex min-w-0 items-center gap-1 text-xs">
               <span className="text-[var(--v2-ink-3)]">MCP:</span>
               <McpServerName value={agent.mcp_server_name} />
             </div>
@@ -200,7 +214,7 @@ export function AgentCard({
               set is visible there and in the label manager.
             */}
             {agent.labels.length > 0 && (
-              <div className="mt-1.5">
+              <div className="relative z-[var(--v2-z-content)] mt-1.5">
                 <LabelChipRow labels={agent.labels} />
               </div>
             )}
@@ -242,7 +256,7 @@ export function AgentCard({
                keeps the "Last activity 1mo ago" text from wrapping. The
                `title` tooltip and the text are untouched — only the line it
                sits on, and its alignment on that line, change. */
-            className="ml-auto shrink-0 basis-full pt-0.5 text-left text-xs text-[var(--v2-ink-3)] sm:basis-auto sm:text-right"
+            className="relative z-[var(--v2-z-content)] ml-auto shrink-0 basis-full pt-0.5 text-left text-xs text-[var(--v2-ink-3)] sm:basis-auto sm:text-right"
             title={formatAgentLastActivityTitle(agent.mcp_last_seen_at)}
           >
             {formatAgentLastActivity(agent.mcp_last_seen_at)}
@@ -311,12 +325,19 @@ export function AgentCard({
                 (`haven-design-reviewer` on this change, measured off the 390
                 capture — it also corrected my desktop-only "2 to 3 lines"
                 reading; the real growth at 390 was 3 to 4). */}
-            <span>
-              {strandedFundsCause(null)}{' '}
-              <a href={`/agents/${agent.id}`} className="underline underline-offset-2">
-                View agent to recover these funds.
-              </a>
-            </span>
+            <span>{strandedFundsCause(null)} Open the agent to recover these funds.</span>
+          </ApprovalRequiredBanner>
+        </div>
+      )}
+
+      {/* #3542: revoked or removed, yet a budget delegation is still redeemable
+          on-chain. `status` alone says the opposite ("revoked"), so this is the
+          one place the card tells the truth about it. The action lives in the
+          row below, next to Remove / Restore. */}
+      {halfRevoked && (
+        <div className="mb-3" data-testid="half-revoked-marker">
+          <ApprovalRequiredBanner title={HALF_REVOKED_TITLE} tone="warning" density="compact">
+            {canFinish ? HALF_REVOKED_BODY : HALF_REVOKED_UNLINKED_BODY}
           </ApprovalRequiredBanner>
         </div>
       )}
@@ -366,7 +387,7 @@ export function AgentCard({
           rather than this fix. */}
       <div
         data-testid="agent-card-actions"
-        className={`flex flex-wrap lg:flex-nowrap items-center ${isOperational ? 'gap-x-4 gap-y-2 lg:gap-2' : 'gap-2'} pt-3 pb-1 border-t border-[var(--v2-border)]`}
+        className={`relative z-[var(--v2-z-content)] flex flex-wrap ${isArchived && halfRevoked ? '' : 'lg:flex-nowrap'} items-center ${isOperational ? 'gap-x-4 gap-y-2 lg:gap-2' : 'gap-2'} pt-3 pb-1 border-t border-[var(--v2-border)]`}
       >
         {/* #3222 re-review S9: below `lg` the row wraps, and a `|` could only
             ever land at a line's start or end — round 3 moved it from one to
@@ -392,21 +413,6 @@ export function AgentCard({
             one thing a baseline cannot absorb. */}
         {isOperational && (
           <>
-            {/* #3168: "Details" is the first action on EVERY operational card.
-                The Edit/Details fork (canUseWalletActions) is gone: Edit used
-                to open a name/description modal on the list, but name and
-                description are editable on the detail page (its kebab menu →
-                "Edit agent"), and budgets — the reason to reach for "Edit" —
-                live only on the detail page. One label, one destination, and
-                no dead affordance left on the card. */}
-            <button
-              onClick={openDetails}
-              disabled={isBusy}
-              aria-label={`Open details for ${agent.name}`}
-              className={ACTION_BUTTON_CLASS}
-            >
-              Details
-            </button>
             {/* #3164: file the agent under an organization. Placement only —
                 the modal's note says so, and nothing here touches authority. */}
             {/* Round-3 review (S9): each `|` travels WITH the button it
@@ -419,7 +425,6 @@ export function AgentCard({
                 a dead end that also made the mobile row wrap. */}
             {organizations.length > 0 && (
               <span className="flex items-center gap-2">
-                <span className={SEPARATOR_CLASS}>|</span>
                 <button
                   onClick={() => setMoveModalOpen(true)}
                   disabled={isBusy}
@@ -430,7 +435,6 @@ export function AgentCard({
                 </button>
               </span>
             )}
-            <span className={SEPARATOR_CLASS}>|</span>
             <span className="flex items-center gap-2">
               {isActive ? (
                 <button
@@ -470,10 +474,28 @@ export function AgentCard({
         )}
         {isRevoked && !isArchived && (
           <>
-            <span className="text-xs text-[var(--v2-ink-3)]">
-              Network access already revoked
-            </span>
-            <span className="text-[var(--v2-border-strong)]">|</span>
+            {halfRevoked ? (
+              canFinish && (
+                <>
+                  <button
+                    onClick={() => setFinishModalOpen(true)}
+                    disabled={isBusy}
+                    aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
+                    className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
+                  >
+                    {FINISH_REVOKING_LABEL}
+                  </button>
+                  <span className="text-[var(--v2-border-strong)]">|</span>
+                </>
+              )
+            ) : (
+              <>
+                <span className="text-xs text-[var(--v2-ink-3)]">
+                  Network access already revoked
+                </span>
+                <span className="text-[var(--v2-border-strong)]">|</span>
+              </>
+            )}
             <button
               onClick={() => setRemoveModalOpen(true)}
               disabled={isBusy}
@@ -515,6 +537,17 @@ export function AgentCard({
                 destination is the point (`aria-label` says "to the list").
                 Rejected: widening the container — it is the agents grid column,
                 so every card on the page moves to fix one label. */}
+            {/* #3542: the action that ends the live budget comes first. */}
+            {canFinish && (
+              <button
+                onClick={() => setFinishModalOpen(true)}
+                disabled={isBusy}
+                aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
+                className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
+              >
+                {FINISH_REVOKING_LABEL}
+              </button>
+            )}
             <button
               onClick={() => onRestore(agent)}
               disabled={isBusy}
@@ -523,8 +556,14 @@ export function AgentCard({
             >
               {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
             </button>
-            <span className="ml-auto text-xs text-[var(--v2-ink-3)]">
-              History stays readable; restoring never re-enables spending
+            {/* Half-revoked: the helper takes its own full-width line under the
+                buttons rather than wrapping beside them. */}
+            <span
+              className={`text-xs text-[var(--v2-ink-3)] ${halfRevoked ? 'basis-full' : 'ml-auto'}`}
+            >
+              {halfRevoked
+                ? 'Restoring to the list does not end its budget'
+                : 'History stays readable; restoring never re-enables spending'}
             </span>
           </>
         )}
@@ -569,7 +608,20 @@ export function AgentCard({
         chainId={chainId}
         onRevokeCredential={() => onRevokeCredential(agent.id)}
         onArchive={() => onArchive(agent)}
+        onBudgetEnded={() => onBudgetEnded?.(agent.id)}
         onClose={() => setRemoveModalOpen(false)}
+      />
+    )}
+
+    {finishModalOpen && (
+      <RemoveAgentDialog
+        agent={agent}
+        chainId={chainId}
+        mode="finish"
+        onRevokeCredential={() => onRevokeCredential(agent.id)}
+        onArchive={() => onArchive(agent)}
+        onBudgetEnded={() => onBudgetEnded?.(agent.id)}
+        onClose={() => setFinishModalOpen(false)}
       />
     )}
 

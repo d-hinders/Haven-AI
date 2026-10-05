@@ -2,34 +2,24 @@ import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { findAccountOwnership } from '../infra/repositories/transaction-history.js'
 import { getChain, isSupportedChain } from '../domain/chains.js'
-import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
-import { createCache } from '../platform/cache.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
-  balanceFreshness,
-  knownBalance,
-  recordKnownBalance,
+  balanceReadsDegraded,
+  evictBalanceReads,
+  fetchBalanceReads,
+  resolveSettledBalance,
   type BalanceFreshness,
+  type BalanceReads,
 } from '../modules/accounts/index.js'
 
-// Balance reads are RPC-standard and rail-agnostic (a `balanceOf`/native-balance
-// read is identical regardless of which execution rail the Safe uses), and this
-// route has no agent/rail context to resolve one from — it reads a Safe address
-// directly. Kept on the existing ethers-backed implementation (#994) so this
-// route's behavior is unchanged; there's no per-rail branch to make here.
-const BALANCE_READ_IMPL = 'ethers'
-
-const balanceCache = createCache<{ balances: BalanceItem[] }>(30_000)
-
-/**
- * Results where a balance read failed. A failed leg is no longer a silent
- * zero (#3295): it serves the last-known balance, marked stale with its as-of
- * time, or stays '0' marked unavailable when nothing was ever read. Either
- * way it is never cached, so one RPC blip does not pin a degraded figure for
- * the whole TTL.
- */
-const degradedResults = new WeakSet<{ balances: BalanceItem[] }>()
+// #3460: the per-route 30 s cache is gone — this route and
+// `fetchPortfolioForAccount` read the SAME (chainId, address)-keyed cache
+// (`modules/accounts/balance-reads.ts`, TTL 60 s, the longer of the two it
+// replaces), so one dashboard's two polls cause one set of on-chain reads
+// within the TTL instead of two. Visible change: a served balance can lag
+// the chain by up to 60 s (was 30 s), including the CLI's `/balances`
+// reads. The poll interval is unchanged.
 
 export interface BalanceItem {
   symbol: string
@@ -56,6 +46,36 @@ export interface BalanceItem {
 function parseChainId(value: unknown): number | null {
   if (value === undefined) return null
   return Number(value)
+}
+
+/**
+ * Build the response entries from the shared read-set. Formerly inline in the
+ * handler; the logic is untouched (it is `resolveSettledBalance` applied per
+ * leg, native first, then ERC-20s in registry order).
+ */
+function balanceItems(
+  chainId: number,
+  accountAddress: string,
+  symbols: string[],
+  tokenAddresses: (string | null)[],
+  decimals: number[],
+  reads: BalanceReads,
+): BalanceItem[] {
+  const settled = [reads.native, ...reads.erc20]
+  const items: BalanceItem[] = []
+  for (let i = 0; i < settled.length; i++) {
+    const tokenAddress = tokenAddresses[i]
+    const read = resolveSettledBalance(chainId, accountAddress, tokenAddress, settled[i])
+    items.push({
+      symbol: symbols[i],
+      address: tokenAddress,
+      balance: read.raw,
+      formatted: formatTokenValue(read.raw, decimals[i]),
+      decimals: decimals[i],
+      ...(read.freshness ? { balanceFreshness: read.freshness } : {}),
+    })
+  }
+  return items
 }
 
 export default async function balanceRoutes(
@@ -87,70 +107,26 @@ export default async function balanceRoutes(
       const chainId = requestedChainId ?? ownedAccounts[0].chain_id
       const chain = getChain(chainId)
 
-      const cacheKey = `bal:${chainId}:${accountAddress.toLowerCase()}`
-      const result = await balanceCache.getOrFetch(cacheKey, async () => {
-        const chainClient = getChainClient(BALANCE_READ_IMPL)
-        const tokens = Object.values(chain.tokens)
-        const nativeToken = tokens.find((t) => t.address === null)!
-        const erc20Tokens = tokens.filter((t) => t.address !== null)
+      const reads = await fetchBalanceReads(chainId, accountAddress)
+      const tokens = Object.values(chain.tokens)
+      const nativeToken = tokens.find((t) => t.address === null)!
+      const erc20Tokens = tokens.filter((t) => t.address !== null)
+      const tokenAddresses = [null, ...erc20Tokens.map((t) => t.address!)]
+      const result = {
+        balances: balanceItems(
+          chainId,
+          accountAddress,
+          [nativeToken.symbol, ...erc20Tokens.map((t) => t.symbol)],
+          tokenAddresses,
+          [nativeToken.decimals, ...erc20Tokens.map((t) => t.decimals)],
+          reads,
+        ),
+      }
 
-        const balances: BalanceItem[] = []
-
-        const results = await Promise.allSettled([
-          chainClient.getNativeBalance(chainId, accountAddress),
-          ...erc20Tokens.map((token) => chainClient.getTokenBalance(chainId, token.address!, accountAddress)),
-        ])
-
-        const nativeResult = results[0]
-        const nativeKnown = knownBalance(chainId, accountAddress, null)
-        const nativeBalance =
-          nativeResult.status === 'fulfilled'
-            ? nativeResult.value.toString()
-            : nativeKnown?.balance ?? '0'
-        if (nativeResult.status === 'fulfilled') {
-          recordKnownBalance(chainId, accountAddress, null, nativeBalance)
-        }
-        const nativeFreshness =
-          nativeResult.status === 'rejected'
-            ? balanceFreshness(true, nativeKnown)
-            : null
-        balances.push({
-          symbol: nativeToken.symbol,
-          address: null,
-          balance: nativeBalance,
-          formatted: formatTokenValue(nativeBalance, nativeToken.decimals),
-          decimals: nativeToken.decimals,
-          ...(nativeFreshness ? { balanceFreshness: nativeFreshness } : {}),
-        })
-
-        for (let i = 0; i < erc20Tokens.length; i++) {
-          const token = erc20Tokens[i]
-          const result = results[i + 1]
-          const known = knownBalance(chainId, accountAddress, token.address)
-          const rawBalance =
-            result.status === 'fulfilled'
-              ? result.value.toString()
-              : known?.balance ?? '0'
-          if (result.status === 'fulfilled') {
-            recordKnownBalance(chainId, accountAddress, token.address, rawBalance)
-          }
-          const freshness =
-            result.status === 'rejected' ? balanceFreshness(true, known) : null
-          balances.push({
-            symbol: token.symbol,
-            address: token.address,
-            balance: rawBalance,
-            formatted: formatTokenValue(rawBalance, token.decimals),
-            decimals: token.decimals,
-            ...(freshness ? { balanceFreshness: freshness } : {}),
-          })
-        }
-
-        const fetched = { balances }
-        if (results.some((r) => r.status === 'rejected')) degradedResults.add(fetched)
-        return fetched
-      })
-      if (degradedResults.has(result)) balanceCache.delete(cacheKey)
+      // #3295: a failed leg is never cached — the degraded result is served
+      // once (concurrent callers already waiting on the same load share it)
+      // and the key is dropped, so the next request re-reads the chain.
+      if (balanceReadsDegraded(reads)) evictBalanceReads(chainId, accountAddress)
 
       // Emit safe_funded once when the account first receives any tokens.
       // The EVENT NAME is a stored enum value (migration 021) and is out of

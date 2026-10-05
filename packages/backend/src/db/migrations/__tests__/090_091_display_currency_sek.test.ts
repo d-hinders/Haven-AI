@@ -337,5 +337,19 @@ describeDb('migration 090 + 091: display-currency SEK columns and the stored-pre
     // (the repository constant) — pinned here as a string so a revert to the
     // pre-#3127 column-less INSERT cannot pass silently.
     expect(INSERT_USER_SQL).toContain('currency_preference')
+
+    // #3195: the string pin above says the INSERT names the column; a real
+    // round trip through the exported `insertUser` proves the VALUE is bound
+    // — a signup row reads back 'SEK' (DEFAULT_TRANSACTION_CURRENCY) without
+    // the caller naming a currency at all.
+    const { insertUser } = await import('../../../infra/repositories/users.js')
+    const created = await insertUser(
+      'Signup default probe',
+      `sek-migrations-signup-${seq++}-${Date.now()}-${Math.random()}@test.example`,
+      'x',
+      null,
+    )
+    expect(await findCurrencyPreference(created.id)).toBe(DEFAULT_TRANSACTION_CURRENCY)
+    expect(DEFAULT_TRANSACTION_CURRENCY).toBe('SEK')
   })
 })

@@ -50,7 +50,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_get_agent` | `GET /machine-payments/agent` | no |
 | `haven_get_allowances` | `GET /machine-payments/allowances` | no |
 | `haven_pay` | `POST /payments` (returns `payload_hash`) | no — edge signs |
-| `haven_submit` | `POST /payments/:id/sign` (relays signature), or (#3329) `POST /task-budgets/:id/submit` when called with `task_budget_id` instead of `payment_id` | no |
+| `haven_submit` | `POST /payments/:id/sign` (relays signature), or (#3329) `POST /task-budgets/:id/submit` with `task_budget_id`, or (#3506) `POST /sub-budgets/:id/submit` with `sub_budget_id` — exactly one id | no |
 | `haven_open_task_budget` | `POST /task-budgets` (#3329: reserves a budget for one task; returns the budget to sign) | no — edge signs |
 | `haven_close_task_budget` | `POST /task-budgets/:id/close` (#3329: ends one early, releasing whatever of its cap went unspent; returns the close operation to sign) | no — edge signs |
 | `haven_quote_x402` | merchant x402 quote probe | no |
@@ -65,7 +65,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_list_receipts` | `GET /machine-payments/receipts` (paged, #3128: `limit` + `cursor`, plus `compact` (#3423) which strips payload echoes client-side → `{ receipts, total, hasMore, nextCursor }`) | no |
 | `haven_sweep_delegate` | gasless stranded-funds sweep prepare/submit | no — relays signed sweep |
 | `haven_report_x402_outcome` | `POST /machine-payments/reconciliation-events` (rejected) or `POST /machine-payments/evidence` (accepted) | no — records a caller-asserted outcome; contacts no merchant |
-| `haven_report_settlement_evidence` | `POST /machine-payments/evidence` (fail-closed on-chain verification of an erc7710 settlement hash the agent holds; #2972) | no — hands over a hash; contacts no merchant |
+| `haven_report_settlement_evidence` | `POST /machine-payments/evidence` (fail-closed on-chain verification of a settlement hash the agent holds: an erc7710 settlement, #2972, or an eip3009 merchant settlement from a plain-HTTP retry, #3475) | no — hands over a hash; contacts no merchant |
 
 `haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget. A
 payment outside the agent's on-chain budget, recipient pin or expiry is declined
@@ -143,6 +143,7 @@ mcp__haven__haven_pay_x402_quote
   -> mcp__haven-signer__haven_sign_x402
   -> (the agent's OWN retry of the merchant)
   -> mcp__haven__haven_report_x402_outcome
+  -> mcp__haven__haven_report_settlement_evidence (eip3009, only if PAYMENT-RESPONSE.transaction was returned)
 ```
 
 `outcome: "rejected"` writes the same open
@@ -151,7 +152,12 @@ retry path writes, so `haven_get_payment_status` answers
 `funded_but_unsettled` / `sweep_stranded_funds` on the **next** call instead
 of after the 15-minute merchant-report grace window. `outcome: "accepted"`
 writes the merchant-response evidence row, so a delivered purchase stops
-reading as undelivered and never enters that window.
+reading as undelivered and never enters that window. On the eip3009 funding
+leg specifically, an accepted outcome with no settlement recorded yet
+(#3475 follow-up) also names `haven_report_settlement_evidence` as the next
+step, `payment_id` prefilled — pass the merchant's `PAYMENT-RESPONSE.transaction`
+as `settlement_tx_hash` if it returned one; calling with no hash is a
+well-formed no-op, since the purchase may already be complete.
 
 The report is **evidence, not authority**. Haven does not verify the claim —
 verifying it would mean calling the merchant. What bounds it instead: the

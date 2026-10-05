@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+// #3503: POST /payments now pre-checks the period budget on-chain — never a live chain here.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: async () => ({ remainingAtomic: '1000000000000', fromChain: true }),
+}))
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -39,8 +43,10 @@ import {
  *     (`computeEffectiveAllowance`/`getTokenAllowance`/`decideCoverage` are
  *     asserted not-called in every delegation-rail case, refusal or success);
  *   - a rejection from the on-chain simulation (`prepareDelegationPayment`
- *     throwing, standing in for a caveat-enforcer revert) is forwarded
- *     verbatim as a refusal, with NOTHING written and no local override;
+ *     throwing, standing in for a caveat-enforcer revert) is forwarded as
+ *     the chain's own verdict — since #3609 typed `prepare_reverted` with
+ *     the enforcer's reason named and the raw error bounded, never verbatim
+ *     — with NOTHING written and no local override;
  *   - only an on-chain ACCEPTANCE (`prepareDelegationPayment` resolving)
  *     produces a signable intent — the mandatory positive control.
  *
@@ -140,6 +146,7 @@ const { mockQuery, fiatMocks, delegationMocks } = vi.hoisted(() => ({
     getBookTimeCapture: vi.fn().mockResolvedValue(null),
   },
   delegationMocks: {
+    selectDelegation: vi.fn(),
     prepareDelegationPayment: vi.fn(),
     submitDelegationPayment: vi.fn(),
   },
@@ -453,7 +460,7 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
 
   // ── DELEGATION RAIL: the on-chain simulation is the only gate ────────────
 
-  it('DELEGATION RAIL: a caveat-enforcer rejection is forwarded verbatim — nothing written, no off-chain override', async () => {
+  it('DELEGATION RAIL: a caveat-enforcer rejection is forwarded as the chain\'s verdict — nothing written, no off-chain override', async () => {
     // Stand-in for the DelegationManager's caveat enforcers reverting during
     // gas estimation (budget/recipient/expiry) — see the file header for what
     // this can and cannot prove about the Solidity itself.
@@ -470,7 +477,12 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     })
 
     expect(res.statusCode).toBe(502)
-    expect(res.json().error).toMatch(/on-chain policy/)
+    // #3609: forwarded as the chain's verdict — typed as a revert, the
+    // enforcer's own reason named, bounded — never re-decided off-chain.
+    expect(res.json()).toMatchObject({
+      error_code: 'prepare_reverted',
+      revert_reason: 'ERC20PeriodTransferEnforcer:transfer-amount-exceeded',
+    })
     expect(res.json().details).toContain('transfer-amount-exceeded')
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })

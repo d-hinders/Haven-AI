@@ -23,10 +23,19 @@ import { classifyAgentUserAgent } from '../discovery'
 
 const FUNNEL_SURFACES = ['/signup', '/login', '/onboarding', '/for-agents.md', '/device'] as const
 const DISCOVERY_SURFACES = ['/llms.txt', '/llms-full.txt', '/402', '/402.md', '/robots.txt', '/sitemap.xml'] as const
+// #3596: the agent-skills index and its step files, so their fetches log
+// agent_discovery_fetch like every other agent-readable artifact.
+const AGENT_SKILL_SURFACES = ['/.well-known/agent-skills/index.json', '/agent-skills/:path*'] as const
 
 describe('the discovery middleware matcher', () => {
   it('observes every funnel page an agent hands its human', () => {
     for (const path of FUNNEL_SURFACES) {
+      expect(config.matcher).toContain(path)
+    }
+  })
+
+  it('observes the agent-skills index and step files (#3596)', () => {
+    for (const path of AGENT_SKILL_SURFACES) {
       expect(config.matcher).toContain(path)
     }
   })

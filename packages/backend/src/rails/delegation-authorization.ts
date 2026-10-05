@@ -114,7 +114,18 @@ export async function prepareDelegationPayment(
   tokenAddress: string,
   toAddress: string,
   amountRaw: bigint,
-  options?: { taskBudget?: TaskBudgetForPayment; subBudget?: SubBudgetForPayment },
+  options?: {
+    taskBudget?: TaskBudgetForPayment
+    subBudget?: SubBudgetForPayment
+    /**
+     * #3503: the (token, to) selection the caller already made — POST
+     * /payments selects it once to pre-check the period budget, and the
+     * redemption must use that SAME row rather than a second selection
+     * that could name a different active grant. `null` means the caller
+     * found none. Omitted, this function selects it itself.
+     */
+    delegation?: DelegationForPaymentRow | null
+  },
 ): Promise<DelegationAuthorization | null> {
   // #3329 review finding E: a task budget's or sub-budget's parent is used
   // VERBATIM — never re-selected by (token, to), which can name a different
@@ -123,7 +134,9 @@ export async function prepareDelegationPayment(
     ? options.subBudget.parentDelegation
     : options?.taskBudget
       ? options.taskBudget.parentDelegation
-      : await selectDelegation(agent.id, tokenAddress, toAddress)
+      : options?.delegation !== undefined
+        ? options.delegation
+        : await selectDelegation(agent.id, tokenAddress, toAddress)
   if (!delegation) return null
 
   const delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {

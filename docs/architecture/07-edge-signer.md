@@ -38,7 +38,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-30"
 ---
 
 # Haven — Edge Signer
@@ -203,24 +203,36 @@ giving the hosted service payment-signing authority.
 
 ## Orchestration
 
+> **Re-verified #3495 (2026-09-30):** the "Regular payment" sequence, the
+> paragraphs through the compact-by-default note below, and the "Preferred
+> x402 form" paragraph's direct-payment sentence further down (which used to
+> say direct payments "always carry the full pair as well, for older
+> signers" — no longer true since #3495) were updated for the #3495 owner
+> decision (direct-payment results compact by default, relay behind an
+> `include_signing_payload: true` opt-in) and its review-round-1 and
+> round-2 corrections (the two-trigger-shape fix, the S5 no-sign-data-replay
+> guard, the direct fetch's 404 naming both routes). Nothing else in this
+> document was re-verified in this pass.
+
 The hosted server (brain) and the local signer (key) are two MCP servers; the
 agent runtime drives the sequence.
 
 **Regular payment**
 
 ```
-hosted:  haven_pay        -> { payment_id, payload_hash, next_tool: haven_sign, next_arguments: { payment_id }, signature_scheme?, typed_data?, typed_data_b64?, signer_compatibility }
+hosted:  haven_pay        -> { payment_id, status, idempotency_key, payload_hash, next_tool: haven_sign, next_arguments: { payment_id }, signature_scheme?, signer_compatibility }
 local:   haven_sign { payment_id } -> { signature }   (delegate key never leaves)
-         (or, on a pre-#3271 signer after its SIGN_CONTEXT_REFUSED refusal,
-          haven_sign { payload_hash, typed_data_b64 } — the recovery route the
-          result's signer_compatibility notice names)
+         (or, on a refusal carrying fallback: 'typed_data_b64' — ANY code —
+          or SIGN_CONTEXT_REFUSED / sign_context_unavailable from a signer
+          predating #3271, re-run haven_pay with the SAME idempotency_key
+          plus include_signing_payload: true, then haven_sign
+          { payload_hash, typed_data_b64 } from THAT result — the recovery
+          route the result's signer_compatibility notice names)
 hosted:  haven_submit     -> { status, tx_hash }
 ```
 
 On a **delegation-rail** account the `haven_pay` result also carries
-`signature_scheme: 'eip712_userop'` and the account's EIP-712 payload in TWO
-transports: `typed_data` (the object) and `typed_data_b64` (the same bytes as
-one opaque base64 string, #1255). **Since #3271 a current signer also accepts
+`signature_scheme: 'eip712_userop'`. **Since #3271 a current signer accepts
 `haven_sign({ payment_id })` for a direct payment**: it fetches the exact bytes
 itself (`GET /payments/:id/sign-context`), so nothing bulky crosses the agent's
 context. That fetch exists because the relay failed live: on 2026-09-24 a
@@ -230,28 +242,50 @@ complaint, and the bundler rejected the operation (`AA24 signature error`).
 `next_arguments: { payment_id }` (the exact `SIGNER_HANDOFF_SHAPES` shape),
 with a `signer_compatibility` notice alongside. Per the #1547 pattern the
 notice never asks the agent to compare a version against `initialize`
-instructions: on the one failure a pre-#3271 signer can produce — it answers
-`SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`,
-having signed nothing — the notice says to re-sign with `payload_hash` +
-`typed_data_b64` from the result, passed through unchanged, and update the
-connector. The relay fields stay on every result either way, so the recovery
-route is always available. On either path a current signer now runs the UserOp binding check before signing
+instructions: on a failure the signer can produce — TWO distinct shapes,
+covered separately below (review round 1 caught an earlier draft that
+conflated them into one wrong trigger) — it has signed nothing.
+
+**Since #3495 (owner decision 2026-09-30, superseding #3277 AC2 "the relay
+fields stay") `haven_send` / `haven_pay` results are compact by default**,
+mirroring the x402 quote tools' own #1272 contract exactly: no `typed_data` /
+`typed_data_b64` inline, only `signature_scheme` (when the rail is
+delegation). The caller's `idempotency_key` is generated fresh (never
+derived from the payment's own parameters — two separate sends of the same
+amount to the same recipient are routinely different payments) when omitted,
+and always echoed on the result. The notice's recovery route is a re-run of
+the SAME tool with the SAME `idempotency_key` plus `include_signing_payload:
+true` — the backend replays the stored payment on that key
+(`findPaymentReplay`, `payments.ts`) rather than minting a second intent,
+provided the re-run repeats the original token/amount/recipient/
+task_budget_id/sub_budget_id (a mismatch answers 409). That re-run's own
+result then carries `payload_hash` + `typed_data_b64`, passed through
+unchanged to `haven_sign` — its OWN reason says so directly, rather than
+looping the agent back through `payment_id` again. The route covers two
+DISTINCT refusal shapes: (1) any refusal carrying `fallback: 'typed_data_b64'`,
+whatever its code — a currently-published `@haven_ai/signer` sets that field
+only on a transport failure, a malformed body, or a 404 on an older backend;
+(2) `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
+and NO `fallback` field, which only a signer predating #3271 produces (it has
+no direct-fetch fallback of its own to try). On either path a current signer now runs the UserOp binding check before signing
 (`assertUserOpTypedDataBinding`, `@haven_ai/sdk`): it recomputes the v0.7
 UserOperation hash from the typed data and refuses (`USEROP_BINDING_MISMATCH`)
 unless it equals `payload_hash`, and pins the domain, field list and
 EntryPoint the hash does not cover. The Hybrid account validates the typed
 data; a bare-hash signature is rejected on-chain (AA24, #1254).
-Legacy-rail results omit all three fields, and since #3169 `haven_sign`
-REFUSES such a call (`BARE_HASH_REFUSED`) rather than signing `payload_hash`.
-The `haven_pay_mcp_tool` / `haven_pay_x402_quote` results are
-**compact by default** (#1272): they keep `signature_scheme` but omit
-`typed_data`/`typed_data_b64` unless the call sets
-`include_signing_payload=true`, because the preferred signing call needs
-neither. When the full pair IS requested, `typed_data_b64` wins when both are
-supplied — silently, so a caller that supplies both must keep them in sync: on
-a direct payment an edited `typed_data` next to a stale `typed_data_b64` signs
-the stale one only if the stale one still matches `payload_hash` (the #3271
-binding check refuses otherwise).
+Legacy-rail results omit `signature_scheme`, `typed_data` and `typed_data_b64`
+alike, and since #3169 `haven_sign` REFUSES such a call (`BARE_HASH_REFUSED`)
+rather than signing `payload_hash`.
+`haven_pay_mcp_tool` / `haven_pay_x402_quote` / `haven_send` / `haven_pay` are
+all **compact by default** (#1272, extended to the direct-payment pair by
+#3495): every one keeps `signature_scheme` but omits `typed_data`/
+`typed_data_b64` unless the same-key re-run sets `include_signing_payload:
+true`, because the preferred signing call needs neither. When the full pair
+IS requested, `typed_data_b64` wins when both are supplied — silently, so a
+caller that supplies both must keep them in sync: on a direct payment an
+edited `typed_data` next to a stale `typed_data_b64` signs the stale one only
+if the stale one still matches `payload_hash` (the #3271 binding check
+refuses otherwise).
 
 Merchant-facing fetches on the hosted path are bounded (#1300):
 `merchantTimeout` default 300 s, calibrated to the merchant's own
@@ -276,8 +310,10 @@ re-run the quote tool with the SAME `idempotency_key` plus
 `include_signing_payload=true`: the replay returns the ORIGINAL sign_data
 (#1207 semantics), and `typed_data_b64` / `typed_data` remain the fallback
 transport for older backends and for the fully offline core. Direct payments
-(`haven_pay`/`haven_send`) always carry the full pair as well, for older
-signers; since #3271 they also have a fetch path (`GET /payments/:id/sign-context`).
+(`haven_pay`/`haven_send`) have a fetch path since #3271
+(`GET /payments/:id/sign-context`); since #3495 they are compact by default
+too, and the same-key `include_signing_payload: true` re-run described above
+is how the pair is restored for older signers and diagnostics.
 
 Note the trust-model asymmetry: the **x402** typed-data leg
 (`signX402FundingTypedData`) verifies a Haven-authenticated expected context
@@ -304,15 +340,28 @@ redemption guard, the account derivation and the settlement-child verifier
 are one implementation in `@haven_ai/sdk` (imported here from
 `@haven_ai/sdk/edge`), which the SDK's own `HavenClient.signForData` runs too.
 
+The edge entry also hosts the x402 buyer tax-declaration builder (#3427,
+`tax-declaration.ts`): the delegate key signs the wg-tax #5 §2.1 declaration
+content — typed data assembled locally, refusing any `principalId`/
+`principalAttributionHash`/unknown field that arrives pre-set — and the
+signature rides the paid EIP-3009 merchant retry to the seller only as
+`X-Tax-Declaration`. It is an attestation, not an authority: nothing is
+redeemed, spent or unlocked by it, so it sits beside the guards rather than in
+their allowlist.
+
 **An over-budget direct payment is DECLINED, not queued** (#2130). The old text
 here said the result carries `payload_hash: null` and told the agent to "wait
 for the user to approve and execute the Safe payment" — an approval that cannot
 arrive on any rail, and which this file already contradicts two sections below.
-What actually happens on `POST /payments`: `prepareDelegationPayment` estimates
-the redemption, the caveat enforcer rejects budget/recipient/expiry there, and
-the caller gets a **502 with the database untouched** (`routes/payments.ts`);
-an agent with no budget delegation for that token/recipient at all gets a
-**403**. Either way there is no intent row, no `payload_hash` to sign, and
+What actually happens on `POST /payments`: an agent with no active budget
+delegation for that token/recipient (a recipient outside a pin, or a grant
+outside its validity window) gets a **403**; a period-budget pre-check refuses
+an amount the remaining budget cannot cover with a typed **403
+`delegation_budget_exceeded`** (#3503); anything out of policy that still
+reaches `prepareDelegationPayment`'s gas estimation (a budget the pre-check
+could not read, for one) is rejected by the caveat enforcer there, and the
+caller gets a **502 with the database untouched** (`routes/payments.ts`).
+In every case there is no intent row, no `payload_hash` to sign, and
 nothing to poll — tell the user to raise the budget in Haven.
 
 **Recommended paid-MCP x402 flow** — two delegate signatures in one local tool
@@ -358,10 +407,10 @@ expires, re-run `haven_pay_mcp_tool` with the same idempotency key. Hosted x402
 approval resume is not completable through the edge-signer tools — and since
 #2055 there is no approval path on any rail to fall back to: the legacy queue
 is deleted, and the delegation rail refuses over-budget instead of queueing.
-The mechanism differs by path. On a healthy budget read, BOTH x402 schemes
-refuse at a remaining-budget pre-check — erc7710 since #2082, the EIP-3009 funding leg
-since #2706 — and only `POST /payments` still reaches the enforcer
-unconditionally, as a gas-estimation revert. The pre-check is itself an
+On a healthy budget read every path refuses at a remaining-budget pre-check —
+erc7710 since #2082, the EIP-3009 funding leg since #2706, `POST /payments`
+since #3503 — and on direct payments and the 3009 leg the enforcer's
+gas-estimation revert is what a failed-open pre-check reaches. The pre-check is itself an
 `eth_call` against the enforcer's storage, so what it precedes is the
 REDEMPTION, not every chain call.
 

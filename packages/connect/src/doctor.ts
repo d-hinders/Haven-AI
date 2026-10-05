@@ -310,20 +310,26 @@ async function discoverCredentialDirectory(
   const parkedOnly: string[] = []
   for (const entry of entries) {
     const directory = join(root, entry)
+    // #3496: the tombstone tell is checked BEFORE identity, not inside the
+    // missing-identity catch. A retired directory that kept its identity.json
+    // beside its TOMBSTONE.json (the --replace-era shape) was selectable as
+    // the primary whenever that identity was the newest on disk — the doctor
+    // then reported the live agent as superseded and prescribed a full
+    // re-setup. Still reportable as retired (#1681); never selectable,
+    // whether or not identity.json survives.
+    if (await pathExists(join(directory, TOMBSTONE_FILENAME))) {
+      tombstonedOnly.push(directory)
+      continue
+    }
     try {
       const s = await stat(join(directory, 'identity.json'))
       candidates.push({ directory, mtimeMs: s.mtimeMs })
     } catch {
       try {
-        await stat(join(directory, TOMBSTONE_FILENAME))
-        tombstonedOnly.push(directory)
+        await stat(join(directory, REKEY_PENDING_FILENAME))
+        parkedOnly.push(directory)
       } catch {
-        try {
-          await stat(join(directory, REKEY_PENDING_FILENAME))
-          parkedOnly.push(directory)
-        } catch {
-          // not an agent credential dir
-        }
+        // not an agent credential dir
       }
     }
   }

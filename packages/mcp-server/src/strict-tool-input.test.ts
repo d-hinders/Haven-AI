@@ -119,6 +119,9 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   // calls the SDK's openTaskBudget.
   haven_open_task_budget: { max_amount_human: '5', ttl_minutes: 60 },
   haven_close_task_budget: { task_budget_id: 'tb_1' },
+  // #3518: the read-by-id handler calls haven.getTaskBudget('tb_1') — the
+  // stubbed Haven answers `{}`, which the loop tolerates downstream.
+  haven_get_task_budget: { task_budget_id: 'tb_1' },
 }
 
 /**
@@ -190,6 +193,9 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   // field neither tool declares.
   haven_open_task_budget: 'max_amount',
   haven_close_task_budget: 'settlement_scheme',
+  // #3518: a spelling the LOCAL MCP reserves for the sign handoff's
+  // payment branch — this read tool takes the id only.
+  haven_get_task_budget: 'signature',
 }
 
 let fetches: string[]
@@ -592,10 +598,11 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
       'haven_submit_catalog_entry',
       'haven_open_task_budget',
       'haven_close_task_budget',
+      'haven_get_task_budget',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(24)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(25)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],
@@ -761,4 +768,80 @@ describe('#2363 — the shipped skill still matches what the switch comment clai
     expect(Object.keys(STRICT_INPUT_TOOLS)).toContain('haven_complete_mcp_tool')
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS)).not.toContain('haven_complete_mcp_tool')
   })
+})
+
+describe('#3620 — budget-scope keys are the same on both runtimes, or the difference is a recorded decision', () => {
+  // Epic #3615 S-E: a scope threaded through one runtime's pay tool and not
+  // the other's is the shape of the C3 gap (#3617). Every tool name both
+  // runtimes register, plus the named different-name pairs, must declare the
+  // same scope keys — or carry an allowlist entry with its reason and link.
+  const SCOPE_KEYS = ['task_budget_id', 'sub_budget_id'] as const
+  const scopesOf = (shape: Record<string, unknown>) => SCOPE_KEYS.filter((k) => k in shape)
+
+  // Equivalent tools registered under different names. Hosted `haven_pay` is
+  // the direct wallet payment (token/amount/to → POST /payments), the same
+  // operation as local `haven_send` (asset/recipient/amount). #3620's issue
+  // body paired it with local `haven_pay_x402`, but that is the x402
+  // fetch-and-pay; the hosted x402 path is `haven_pay_x402_quote`, already
+  // paired by name below.
+  const DIFFERENT_NAME_PAIRS: ReadonlyArray<readonly [hosted: HostedToolName, local: string]> = [
+    ['haven_pay', 'haven_send'],
+  ]
+
+  // Keyed by HOSTED tool name. `missingOnHosted` / `missingOnLocal` must
+  // match the measured difference exactly, so a stale entry fails too.
+  const SCOPE_PARITY_ALLOWLIST: Record<string, { missingOnHosted: string[]; missingOnLocal: string[]; reason: string }> = {
+    haven_pay_x402_quote: {
+      missingOnHosted: ['sub_budget_id'],
+      missingOnLocal: [],
+      reason:
+        'Owner decision 2 on epic #3615 (https://github.com/d-hinders/Haven-AI/issues/3615): the hosted forwarding was ' +
+        'deleted rather than the argument declared (#3617); a sub-agent pays x402 through the local MCP.',
+    },
+  }
+
+  const sharedNames = Object.keys(toolSchemas).filter((name) => name in localToolSchemas) as HostedToolName[]
+  const pairs: Array<readonly [HostedToolName, string]> = [
+    ...sharedNames.map((name) => [name, name] as const),
+    ...DIFFERENT_NAME_PAIRS,
+  ]
+
+  it('covers the tools that carry a scope today (anti-vacuity: the pair list cannot silently shrink)', () => {
+    const pairNames = pairs.map(([hosted, local]) => `${hosted}↔${local}`)
+    for (const expected of [
+      'haven_send↔haven_send',
+      'haven_submit↔haven_submit',
+      'haven_get_task_budget↔haven_get_task_budget',
+      'haven_close_task_budget↔haven_close_task_budget',
+      'haven_pay_x402_quote↔haven_pay_x402_quote',
+      'haven_pay↔haven_send',
+    ]) {
+      expect(pairNames).toContain(expected)
+    }
+    // Both members of every different-name pair exist on their runtime.
+    for (const [hosted, local] of DIFFERENT_NAME_PAIRS) {
+      expect(Object.keys(toolSchemas)).toContain(hosted)
+      expect(Object.keys(localToolSchemas)).toContain(local)
+    }
+    // The key probe can say yes: a schema-shape change that made `k in shape`
+    // always false would otherwise pass every pair below as "equal".
+    expect(scopesOf(toolSchemas.haven_send as Record<string, unknown>)).toEqual(['task_budget_id', 'sub_budget_id'])
+    expect(scopesOf(localToolSchemas.haven_send as Record<string, unknown>)).toEqual(['task_budget_id', 'sub_budget_id'])
+    // And the allowlist names only real pairs.
+    for (const name of Object.keys(SCOPE_PARITY_ALLOWLIST)) {
+      expect(pairs.map(([hosted]) => hosted as string)).toContain(name)
+    }
+  })
+
+  for (const [hosted, local] of pairs) {
+    it(`${hosted} (hosted) ↔ ${local} (local): same budget-scope keys, or an allowlisted difference`, () => {
+      const hostedScopes: string[] = scopesOf(toolSchemas[hosted] as Record<string, unknown>)
+      const localScopes: string[] = scopesOf(localToolSchemas[local as keyof typeof localToolSchemas] as Record<string, unknown>)
+      const allowed = SCOPE_PARITY_ALLOWLIST[hosted] ?? { missingOnHosted: [], missingOnLocal: [] }
+      expect({
+        missingOnHosted: localScopes.filter((k) => !hostedScopes.includes(k)),
+        missingOnLocal: hostedScopes.filter((k) => !localScopes.includes(k)),
+      }).toEqual({ missingOnHosted: allowed.missingOnHosted, missingOnLocal: allowed.missingOnLocal })
+    })
+  }
 })

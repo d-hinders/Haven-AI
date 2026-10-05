@@ -10,7 +10,7 @@
  * On the #1220 harness; zero mocks; row builders local per the harness's
  * domain-free rule.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
@@ -26,6 +26,7 @@ import {
   findSendIntentByIdempotencyKey,
   findSettledPaymentReceiptRow,
   getIntentStatus,
+  hasConfirmedPaymentToRecipient,
   insertDelegationIntent,
   insertMachineIntent,
   insertSendIntent,
@@ -47,6 +48,15 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
     [user.rows[0].id],
   )
   return { agentId: agent.rows[0].id, userId: user.rows[0].id }
+}
+
+/** A second agent under an EXISTING owner (`userId`) — same owner, sibling agent. */
+async function seedSiblingAgent(userId: string): Promise<{ agentId: string; userId: string }> {
+  const agent = await db.query<{ id: string }>(
+    `INSERT INTO agents (user_id, name) VALUES ($1, 'sibling intents agent') RETURNING id`,
+    [userId],
+  )
+  return { agentId: agent.rows[0].id, userId }
 }
 
 /**
@@ -507,5 +517,157 @@ describeDb('payment-intents repository (#1223)', () => {
     const bareRow = await findSettledPaymentReceiptRow(bare, agentId)
     expect(bareRow?.execution_rail).toBe('delegation')
     expect(bareRow?.settlement_scheme).toBeNull()
+  })
+
+  // ── #3531: the sole input to the advisory recipient.class field ──────────
+
+  describe('hasConfirmedPaymentToRecipient (#3531)', () => {
+    /** Insert, claim and confirm one delegation intent — the only path that
+     *  produces a `confirmed` row without touching the CAS guards directly. */
+    async function confirmedIntent(
+      agentId: string,
+      userId: string,
+      overrides: Record<string, unknown> = {},
+    ): Promise<string> {
+      const intent = await insertDelegationIntent(delegationInput(agentId, userId, overrides))
+      const claimed = await claimIntentForSubmission(`0xsig-${intent.id}`, intent.id, agentId)
+      expect(claimed).toBe(true)
+      const confirmed = await confirmSubmittedIntent({
+        txHash: `0x${String(++seq).padStart(64, 'f')}`.slice(0, 66),
+        intentId: intent.id,
+        usdValue: null,
+        eurValue: null,
+        sekValue: null,
+        agentId,
+      })
+      expect(confirmed).toBe(true)
+      return intent.id
+    }
+
+    it('answers false for a brand-new recipient address', async () => {
+      const { agentId, userId } = await seedAgent()
+      const fresh = '0x00000000000000000000000000000000009999'
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, fresh)).toBe(false)
+    })
+
+    it('answers true after THIS agent has a confirmed payment to the recipient', async () => {
+      const { agentId, userId } = await seedAgent()
+      const recipient = '0x0000000000000000000000000000000000aaaa'
+      await confirmedIntent(agentId, userId, { toAddress: recipient })
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, recipient)).toBe(true)
+    })
+
+    it('counts a CONFIRMED x402 (machine-rail) payment to the recipient too — the query is rail-agnostic by design', async () => {
+      const { agentId, userId } = await seedAgent()
+      const recipient = '0x00000000000000000000000000000000000402'
+      const machine = await insertMachineIntent(
+        machineInput({ agentId, userId }, { rail: 'x402', payTo: recipient, conflictTarget: 'x402_idempotency_key' }),
+      )
+      expect(machine).not.toBeNull()
+      const claimed = await claimIntentForSubmission(`0xsig-${machine!.id}`, machine!.id, agentId)
+      expect(claimed).toBe(true)
+      const confirmed = await confirmSubmittedIntent({
+        txHash: `0x${String(++seq).padStart(64, 'e')}`.slice(0, 66),
+        intentId: machine!.id,
+        usdValue: null,
+        eurValue: null,
+        sekValue: null,
+        agentId,
+      })
+      expect(confirmed).toBe(true)
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, recipient)).toBe(true)
+    })
+
+    it('counts a different token to the same recipient — any token counts', async () => {
+      const { agentId, userId } = await seedAgent()
+      const recipient = '0x0000000000000000000000000000000000bbbb'
+      await confirmedIntent(agentId, userId, {
+        toAddress: recipient,
+        tokenSymbol: 'USDC2',
+        tokenAddress: '0x0000000000000000000000000000000000cccc',
+      })
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, recipient)).toBe(true)
+    })
+
+    it('does not count a PENDING (unsigned) payment to the recipient', async () => {
+      const { agentId, userId } = await seedAgent()
+      const recipient = '0x0000000000000000000000000000000000dddd'
+      await insertDelegationIntent(delegationInput(agentId, userId, { toAddress: recipient }))
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, recipient)).toBe(false)
+    })
+
+    it('does not count a FAILED payment to the recipient', async () => {
+      const { agentId, userId } = await seedAgent()
+      const recipient = '0x0000000000000000000000000000000000eeee'
+      const intent = await insertDelegationIntent(delegationInput(agentId, userId, { toAddress: recipient }))
+      const claimed = await claimIntentForSubmission(`0xsig-${intent.id}`, intent.id, agentId)
+      expect(claimed).toBe(true)
+      await failSubmittedIntent('simulated bundler failure', intent.id, agentId)
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, recipient)).toBe(false)
+    })
+
+    it('does not count a different CHAIN carrying the same recipient address', async () => {
+      const { agentId, userId } = await seedAgent()
+      const recipient = '0x0000000000000000000000000000000000ff01'
+      await confirmedIntent(agentId, userId, { toAddress: recipient })
+      // The confirmed row above is chain 84532 (delegationInput's default) —
+      // the same address on a different chain must not read as paid.
+      expect(await hasConfirmedPaymentToRecipient(agentId, 8453, recipient)).toBe(false)
+    })
+
+    it('cross-tenant: another AGENT paying the same recipient does not leak', async () => {
+      const victim = await seedAgent()
+      const other = await seedAgent()
+      const recipient = '0x0000000000000000000000000000000000f00d'
+      await confirmedIntent(other.agentId, other.userId, { toAddress: recipient })
+      expect(await hasConfirmedPaymentToRecipient(victim.agentId, 84532, recipient)).toBe(false)
+      expect(await hasConfirmedPaymentToRecipient(other.agentId, 84532, recipient)).toBe(true)
+    })
+
+    it('cross-tenant: a second OWNER\'s confirmed payment to the same recipient does not leak', async () => {
+      // seedAgent() creates a fresh user per call — a distinct owner, not just
+      // a distinct agent under the same owner.
+      const ownerAAgent = await seedAgent()
+      const ownerBAgent = await seedAgent()
+      const recipient = '0x0000000000000000000000000000000000b007'
+      await confirmedIntent(ownerBAgent.agentId, ownerBAgent.userId, { toAddress: recipient })
+      expect(await hasConfirmedPaymentToRecipient(ownerAAgent.agentId, 84532, recipient)).toBe(false)
+    })
+
+    // #3531 review round 1, B1 (blocking): the two cross-tenant cases above
+    // both also change OWNER between the two agents, so a mutation that
+    // widened the predicate to `user_id = (SELECT user_id FROM agents WHERE
+    // id = $1)` — i.e. owner-scoped rather than agent-scoped — would survive
+    // both of them (agent A's owner never matches agent B's owner in either
+    // case). This is the case that actually exercises the agent/owner
+    // distinction: TWO agents under the SAME owner, one of which paid the
+    // recipient and one of which did not.
+    it('same-owner SIBLING agent: agent B\'s confirmed payment does not make agent A answer previously_paid', async () => {
+      const owner = await seedAgent()
+      const sibling = await seedSiblingAgent(owner.userId)
+      const recipient = '0x0000000000000000000000000000000000beef'
+      await confirmedIntent(sibling.agentId, sibling.userId, { toAddress: recipient })
+      // Agent A (the original seedAgent() agent), same owner as the sibling,
+      // never itself paid this recipient.
+      expect(await hasConfirmedPaymentToRecipient(owner.agentId, 84532, recipient)).toBe(false)
+      // The sibling itself, naturally, answers true.
+      expect(await hasConfirmedPaymentToRecipient(sibling.agentId, 84532, recipient)).toBe(true)
+    })
+
+    it('matches exactly, by design — case normalisation is the CALLER\'s job', async () => {
+      // `hasConfirmedPaymentToRecipient`'s own doc pins this: the function
+      // does no case-folding, `to_address` is written exactly as given, and
+      // `routes/payments.ts` is the contract's one caller — it always passes
+      // `to.toLowerCase()` (classifyRecipient), which is where the real
+      // case-insensitivity property lives (asserted in payments-recipient-history.test.ts). A
+      // mixed-case lookup against a lower-cased confirmed row is a genuine
+      // miss here, pinning that nothing silently folds case underneath it.
+      const { agentId, userId } = await seedAgent()
+      const lower = '0x0000000000000000000000000000000000c0de'
+      await confirmedIntent(agentId, userId, { toAddress: lower })
+      const mixedCase = '0x0000000000000000000000000000000000C0DE'
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, mixedCase)).toBe(false)
+      expect(await hasConfirmedPaymentToRecipient(agentId, 84532, lower)).toBe(true)
+    })
   })
 })

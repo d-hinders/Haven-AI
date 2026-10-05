@@ -163,14 +163,207 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * 22,586 UTF-8 bytes; the absolute pin moves to that measured value,
  * shrink-only from here. The mean pin stays HELD at 875: 22,586 / 26 =
  * 868.69, still below the ceiling.
+ *
+ * **Shrunk — #3475 (2026-09-29).** `haven_report_settlement_evidence` now
+ * also takes an eip3009 merchant settlement, so its shared description drops
+ * the "an erc7710 payment's" scoping and "confirm the payment" (an eip3009
+ * payment is already confirmed; the hash is recorded beside it): −11 UTF-8
+ * bytes. Measured total 22,575 across 26 tools; the absolute pin follows it
+ * down. The mean pin stays HELD at 875: 22,575 / 26 = 868.27.
+ *
+ * **Re-derived — round 8, #3464 (2026-09-29).** Four descriptions must now
+ * name the canonical allowance-block key set — remainingAtomic /
+ * remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress, the names
+ * `haven_get_agent`'s rows report — AND mark the snake_case spellings
+ * deprecated with the removal window stated: `haven_settle_mcp_tool`,
+ * `haven_complete_mcp_tool`, the shared `getPaymentStatus` behavior the
+ * hosted status tool composes, and the catalog-preflight paragraph inside
+ * `haven_prepare_catalog_purchase`. The issue mandates exactly this copy in
+ * exactly these descriptions; the leanest version that still enumerates the
+ * five canonical keys and the five deprecated ones costs +1,195 UTF-8 bytes
+ * net (22,586 → 23,781 across the same 26 tools; #3475's disjoint −11 above
+ * makes the merged-tree measure 23,770), and the enumeration IS the
+ * mandated content — no duplication or overclaim remains to trim. So the
+ * absolute pin moves to the exact measured value of this surface,
+ * 23,770 UTF-8 bytes across 26 tools, shrink-only from here; and the mean
+ * pin moves too, because 23,770 / 26 = 914.23 sits ABOVE the held 875
+ * ceiling and a pin above the tree it guards is the exact failure rounds
+ * 2-3 named ("the constant cannot stay while the tree the PR must merge
+ * into already exceeds it"). Re-derived at the measured mean, shrink-only
+ * from here.
+ *
+ * **Re-derived — round 9, #3476 (2026-09-29).** `haven_pay_x402_quote` gains
+ * an `allowance` block (the plain-HTTP sibling of the catalog preflight's
+ * budget visibility), and its description carries one lean clause naming the
+ * field and its degraded read (+213 UTF-8 bytes on that one description,
+ * 1,926 → 2,139): an agent reading tools/list learns the block exists before
+ * its first pay, the same field-naming obligation every additive response
+ * field on this surface has carried. No overclaim remains to trim — the
+ * clause states the shape and the degraded read and nothing else. Measured
+ * total 23,983 across the same 26 tools; the absolute pin moves to that
+ * exact value, shrink-only from here. The mean pin moves too: 23,983 / 26 =
+ * 922.42 sits above round 8's 914.24, and the same round-8 rule applies (the
+ * constant cannot stay while the tree the PR must merge into already
+ * exceeds it) — re-derived at the measured mean, shrink-only from here.
+ *
+ * **Re-derived — round 10, #3475 follow-up (2026-09-30, review round 1
+ * wording).** The shared `haven_report_settlement_evidence` description now
+ * says `settlement_tx_hash` is optional and that omitting it SUCCEEDS AS A
+ * NO-OP — nothing checked, nothing recorded, no network call — rather than
+ * refusing, per review round 1's S3 (an agent following next_tool /
+ * next_arguments verbatim must never get an error for doing exactly that).
+ * The same field-naming obligation round 9 states applies:
+ * `haven_report_x402_outcome` can now name this tool as the next step
+ * before it knows whether the merchant returned a hash at all, and an agent
+ * reading tools/list needs to know a bare `payment_id` call is well-formed
+ * and what it does (+140 UTF-8 bytes on that one description). No overclaim
+ * remains to trim. Measured total 24,123 across the same 26 tools; the
+ * absolute pin moves to that exact value, shrink-only from here. The mean
+ * pin moves too: 24,123 / 26 = 927.81 sits above round 9's 922.42, and the
+ * same rule applies — re-derived at the measured mean, shrink-only from
+ * here.
+ *
+ * **Re-derived — round 11, #3495 (2026-09-30).** The direct-payment
+ * description (`PAY_DESCRIPTION`, shared by `haven_pay`) now documents the
+ * compact-by-default contract this issue built: `idempotency_key` in the
+ * returned shape, that it is generated when omitted, and the
+ * `include_signing_payload=true` same-key re-run that restores the relay
+ * pair — replacing the old unconditional "re-sign with { payload_hash,
+ * typed_data_b64 } from the result" sentence, which was no longer true. Same
+ * tool count (26) — this is a reword, not a new tool. Measured total 24,452;
+ * the absolute pin moves to that exact value, shrink-only from here. The
+ * mean pin moves too: 24,452 / 26 = 940.4615… sits above round 10's 927.81,
+ * and the same rule applies — re-derived at the measured mean, shrink-only
+ * from here.
+ *
+ * **Re-derived — round 12, #3495 review round 2 (2026-09-30).**
+ * `PAY_DESCRIPTION` (`haven_pay`) named only `SIGN_CONTEXT_REFUSED` /
+ * `sign_context_unavailable` as the opt-in trigger — review round 2 caught
+ * that a currently-published signer's OWN transport-failure/malformed/404
+ * fallback (`fallback: 'typed_data_b64'`, any code) never sets that backend
+ * code, so an agent whose signer refused that way had no route named in this
+ * description at all. The sentence now names both trigger shapes (+95 UTF-8
+ * bytes on that one description: was 24,452 total / 940.4615 mean, now
+ * 24,547 / 944.1153…). Same tool count (26) — a reword, not a new tool.
+ * Measured total 24,547; the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin moves too: 24,547 / 26 = 944.1153… sits
+ * above round 11's 940.47, and the same rule applies — re-derived at the
+ * measured mean, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 22_586
-// Mean pin: HELD at the #3329 ceiling (21,000 / 24 = 875.0), not re-derived —
-// the composed surface's actual mean (22,173 / 26 = 852.81) already sits
-// BELOW the ceiling, so the held value is the stricter pin, and re-deriving
-// it to the latest measured mean would turn the ceiling into a running
-// average of whatever landed most recently, which #3329's round rejected.
-const MAX_MEAN_BYTES = 875
+/**
+ * **Re-derived — round 13, #3501 union with #3495 (2026-10-01 merge).** Both
+ * changes grew from the same round-10 base: this branch (#3501) adds
+ * `haven_get_agent`'s budget-visibility figures — `taskBudgets[]` rows gain
+ * `spentAtomic`, `remainingAtomic`, `remainingDisplay` (what the chain will
+ * still allow through an open task budget) and the `remainingIsFromChain`
+ * honesty flag — and `haven_get_allowances` names where task budgets live
+ * (+351 UTF-8 bytes across those two descriptions, compressed once: the
+ * clauses state the fields, the degraded read, and nothing else — an agent
+ * reading tools/list learns the fields exist before it attempts a payment a
+ * spent-out task budget will refuse, the same field-naming obligation rounds
+ * 9/10 recorded for additive response fields. No overclaim remains to trim),
+ * while dev's #3495 rewords the direct-payment description (rounds 11/12
+ * above). The union tree re-measures at 24,898 across the same 26 tools —
+ * 24,547 + the 351 bytes this branch adds, exactly — so the absolute pin
+ * moves to that exact value, shrink-only from here. The mean pin moves too:
+ * 24,898 / 26 = 957.6154 sits above round 12's 944.12, and the same rule
+ * applies — re-derived at the measured mean, shrink-only from here.
+ *
+ * **Re-derived — round 14, #3529 (2026-10-01).** The shared
+ * `haven_report_settlement_evidence` nextActionGuidance must name the new
+ * refusal code before an agent meets it: a reason-bearing refusal (the
+ * backend's relayed `reason`, #3475's evidence contract) now answers
+ * `SETTLEMENT_NOT_RECORDED` instead of `DELIVERED_UNSETTLED`, and the
+ * guidance says what that means — funding confirmed, this hash not accepted,
+ * the reason carried verbatim — while the `DELIVERED_UNSETTLED` line is
+ * reworded to the honest-for-every-case form (+185 UTF-8 bytes on that one
+ * description). No overclaim remains to trim: the added lines name the code,
+ * the field, and the do-not-retry, exactly the shape rounds 9/10 recorded
+ * for additive response vocabulary. Measured total 25,083 across the same 26
+ * tools; the absolute pin moves to that exact value, shrink-only from here.
+ * The mean pin moves too: 25,083 / 26 = 964.7308 sits above round 13's
+ * 957.62, and the same rule applies — re-derived at the measured mean,
+ * shrink-only from here.
+ */
+/**
+ * **Re-derived — round 14, #3518 (2026-10-01).** A new hosted tool joins the
+ * surface — `haven_get_task_budget`, the read-by-id a close refusal's
+ * "re-check the budget's status" points at — and two descriptions grow to
+ * name the new visibility fields: `haven_get_agent`'s rows now carry their
+ * lifecycle `status` + `isExpired` (a closing budget must be visible AS
+ * closing, not vanish), and `haven_get_allowances` names `delegationHash` /
+ * `recipientAddress` (null = open) / `merchantId` / `reservedHavenAtomic` —
+ * the scope fields that let an agent holding two budgets for one token name
+ * the merchant-locked one BEFORE paying, and the Haven-side reservation
+ * figure reported beside (never folded into) the on-chain remaining. The
+ * clauses state the fields and their degraded read and nothing else — the
+ * same field-naming obligation rounds 9/10 recorded for additive response
+ * fields; no overclaim remains to trim. Measured on this tree: 25,716 UTF-8
+ * bytes across 27 tools; the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin is HELD without moving: 25,716 / 27 =
+ * 952.44 sits BELOW round 13's 957.62 ceiling — the new tool's lean
+ * description plus the additive clauses land under it.
+ *
+ * **Re-derived — round 14, #3506 (agent-completes sub-budgets).** The agent
+ * can now complete a sub-budget itself, which needs two additive facts an
+ * agent only learns from `tools/list`: `haven_get_agent` carries
+ * `pendingSubBudgetSignatures[]` (the rows awaiting ITS signature, each with
+ * its `haven_sign` next step), and `haven_submit` accepts `sub_budget_id`
+ * beside `payment_id` / `task_budget_id` (exactly one). +144 UTF-8 bytes
+ * across those two descriptions, compressed to one clause each (the field
+ * name and where the id goes; the response carries the rest as next-step
+ * fields) — the same field-naming obligation rounds 9/10/13 recorded for
+ * additive response fields and a new accepted argument. Same tool count (26).
+ * 24,898 + 144 = 25,042, measured, so the absolute pin moves to that exact
+ * value, shrink-only from here; the mean moves with it (25,042 / 26 =
+ * 963.1538…, pinned at the two-decimal ceiling).
+ *
+ * **Re-derived — round 14, #3529 (2026-10-01).** The shared
+ * `haven_report_settlement_evidence` nextActionGuidance must name the new
+ * refusal code before an agent meets it: a reason-bearing refusal (the
+ * backend's relayed `reason`, #3475's evidence contract) now answers
+ * `SETTLEMENT_NOT_RECORDED` instead of `DELIVERED_UNSETTLED`, and the
+ * guidance says what that means — funding confirmed, this hash not accepted,
+ * the reason carried verbatim — while the `DELIVERED_UNSETTLED` line is
+ * reworded to the honest-for-every-case form (+185 UTF-8 bytes on that one
+ * description). No overclaim remains to trim: the added lines name the code,
+ * the field, and the do-not-retry, exactly the shape rounds 9/10 recorded
+ * for additive response vocabulary.
+ *
+ * **Re-derived — round 15, #3506 ∪ #3529 union tree (2026-10-01 rebase).**
+ * Both round-14 changes grew from the same round-13 base on disjoint
+ * descriptions: this branch (#3529) grew the shared
+ * `haven_report_settlement_evidence` nextActionGuidance by 185 bytes, while
+ * dev's #3506 added 144 bytes across `haven_get_agent` and `haven_submit`.
+ * The union tree re-measures at 25,227 across the same 26 tools — 25,042 +
+ * 185 = 25,227, exactly — so the absolute pin moves to that exact value,
+ * shrink-only from here. The mean pin moves too: 25,227 / 26 = 970.2692
+ * sits above both round-14 pins, and the same rule applies — re-derived at
+ * the measured mean, shrink-only from here.
+ *
+ * **Re-derived — round 16, #3518 ∪ (#3506 ∪ #3529) integration tree
+ * (2026-10-01 merge).** The two round-14 branches meet here on disjoint
+ * descriptions: #3518's round-14 grew FROM the same round-13 base and joins
+ * the union with its new hosted tool (`haven_get_task_budget`, 26 → 27) plus
+ * the visibility clauses on `haven_get_agent` / `haven_get_allowances`,
+ * while dev's round-15 union carries #3506 + #3529's additions on the other
+ * descriptions. The three-way union re-measures at 26,045 UTF-8 bytes across
+ * 27 tools, measured on the merged tree (not derived arithmetically — the
+ * sentence-level unions on `haven_get_agent` overlap both branches), so the
+ * absolute pin moves to that exact value, shrink-only from here. The mean
+ * pin: 26,045 / 27 = 964.6296…, pinned at the two-decimal ceiling (964.63)
+ * — below round 15's 970.27 because the 27th tool joins the denominator,
+ * and the stricter of the two holds; shrink-only still applies.
+ *
+ * **Shrunk — round 17, #3518 review.** The `haven_get_task_budget` and
+ * `haven_get_agent` descriptions stopped claiming the agent read lists every
+ * task budget (it lists live rows only). Measured 26,029 bytes / 27 tools;
+ * both pins ratchet down to the measured values.
+ */
+const MAX_TOTAL_BYTES = 26_029
+// Mean pin: round 17 (block above): 26,029 / 27 = 964.0370…, pinned at the
+// two-decimal ceiling (964.04). Shrink-only from here.
+const MAX_MEAN_BYTES = 964.04
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {
@@ -187,6 +380,12 @@ describe('tool description payload (#1591)', () => {
     // The history is for maintainers — it lives in code comments, and a
     // Codex/GPT agent burning context on "#1308" learns nothing from it.
     // Allowlist NOTHING (the AC's words).
+    //
+    // #3497: the rule now also covers response PROSE (guidance reason /
+    // signer_compatibility check / strict-input messages) — enforced as a
+    // source scan over src/tools/** in `response-prose.test.ts`, which is
+    // where the live run's leaks ("(#1455)", "(#1547)", "predating #3271")
+    // actually lived. This file keeps guarding what it always has.
     const offenders = Object.entries(toolDescriptions)
       .filter(([, description]) => /#\d+/.test(description))
       .map(([name]) => name)

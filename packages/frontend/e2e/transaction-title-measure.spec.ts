@@ -110,7 +110,8 @@ type TitleReading = {
 }
 
 /**
- * Anchor on the title `<p title=…>` inside a `tbody` row and walk up, never on
+ * Anchor on the title element (`<p title=…>`, or on selectable rows the row's
+ * `<button data-row-select>` that carries the truncation, #3554) inside a `tbody` row and walk up, never on
  * a class string — trap 1 from `transaction-row.mobile.spec.ts`, and this fix
  * is again a change of which cells render.
  *
@@ -125,7 +126,7 @@ async function readTitles(page: import('@playwright/test').Page): Promise<TitleR
     return Array.from(document.querySelectorAll('tbody tr'))
       .filter(visible)
       .map((tr) => {
-        const p = tr.querySelector('p[title]')
+        const p = tr.querySelector('p[title], button[data-row-select]')
         if (!p || !visible(p)) return null
         const range = document.createRange()
         range.selectNodeContents(p)

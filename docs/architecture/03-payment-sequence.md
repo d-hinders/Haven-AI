@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/modules/transactions/receive.ts
   - packages/backend/src/modules/transactions/off-ramp.ts
   - packages/backend/src/infra/repositories/inbound-transfers.ts
-last-verified: "2026-09-27"
+last-verified: "2026-09-30"
 ---
 
 # Haven — Payment Execution Sequence
@@ -184,17 +184,30 @@ path above:
 1. `POST /payments` authenticates the agent and selects its active budget
    delegation for the requested token **and recipient** (native-token transfers
    are not supported on this rail). With no matching delegation, it returns an
-   error — there is no approval-queue fallback.
-2. Haven prepares a redeeming sponsored UserOp; **budget (with native period
+   error — there is no approval-queue fallback. A task budget's or sub-budget's
+   parent is selected by hash instead, and the selected row is the one
+   redeemed.
+2. **Period-budget pre-check (#3503).** Haven reads that delegation's live
+   remaining period budget — for a sub-budget, every link of its three-link
+   chain, the smallest deciding. When it cannot cover the amount, the payment
+   is refused with a typed `403 delegation_budget_exceeded` (remaining,
+   shortfall, `next_action: fund_account_or_raise_allowance`) before any UserOp
+   is built — the error code and budget fields the x402 legs answer. An
+   unreadable read fails open: this is a fail-fast convenience, and the
+   enforcer below stays the gate.
+3. Haven prepares a redeeming sponsored UserOp; **budget (with native period
    refill), recipient, and expiry are enforced on-chain during gas estimation**,
    so an over-budget or wrong-recipient intent reverts here rather than being
-   queued. The response is `201` with `status`, `expires_at`, and
+   queued. A period revert that a fresh budget read confirms is answered with
+   the same 403, and a task-budget cap revert its own confirmed
+   `403 task_budget_exceeded` (#3500); any other revert is a `502`. The
+   response is `201` with `status`, `expires_at`, and
    `sign_data: { signature_scheme: 'eip712_userop', typed_data }`.
-3. The agent signs the account's **exact EIP-712 `typed_data` VERBATIM** with its
+4. The agent signs the account's **exact EIP-712 `typed_data` VERBATIM** with its
    delegate key — never a bare 4337 UserOp hash (the #829 lesson; the account
    validates the typed data, not the raw hash). It submits `{ signature }` to
    `POST /payments/:id/sign`, which Haven relays as the sponsored UserOp.
-4. Funds move **account→recipient directly** — no funding leg, no delegate EOA to
+5. Funds move **account→recipient directly** — no funding leg, no delegate EOA to
    strand. The intent settles to `confirmed`, or reverts if it breached the
    on-chain policy.
 

@@ -2,7 +2,7 @@
 
 import { EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
@@ -32,7 +32,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Row } from '@/components/ui/Row'
-import { StatusBadge } from '@/components/ui/StatusBadge'
+import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
@@ -45,6 +45,7 @@ import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatFiat, truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { isHalfRevoked } from '@/lib/half-revoked'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -58,6 +59,11 @@ function formatResetPeriod(minutes: number): string {
 }
 
 function agentBudgetSummary(agent: Agent, chainId: number | null): string {
+  // #3542: "Access revoked" is false while a budget delegation is still
+  // redeemable on-chain — checked before status, and before the allowances,
+  // which are a view of ACTIVE rows only. The row links to the agent page,
+  // which is where the budget is ended; nothing here acts.
+  if (isHalfRevoked(agent)) return 'Budget still active on-chain'
   if (agent.status === 'revoked') return 'Access revoked'
   const allowances = agent.allowances ?? []
   if (allowances.length === 0) return 'No agent budget set'
@@ -72,8 +78,22 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
   return `${amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
 }
 
-function agentAccessSummary(agent: Agent, chainId: number | null): string {
-  return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
+function agentAccessSummary(agent: Agent, chainId: number | null): ReactNode {
+  const activity = formatAgentLastActivity(agent.mcp_last_seen_at)
+  if (!isHalfRevoked(agent)) return `${agentBudgetSummary(agent, chainId)} · ${activity}`
+  // #3542: warning tone for the half-revoked line, so the status badge beside
+  // it does not outweigh it. Short enough to fit at 390px without truncating.
+  return (
+    <>
+      <span className="font-medium text-[var(--v2-warning)]">{agentBudgetSummary(agent, chainId)}</span>
+      {` · ${activity}`}
+    </>
+  )
+}
+
+/** Half-revoked agents get a warning badge: a red "Revoked" understates a live budget. */
+function agentBadgeTone(agent: Agent, base: StatusTone): StatusTone {
+  return isHalfRevoked(agent) ? 'warning' : base
 }
 
 
@@ -195,9 +215,10 @@ export default function AccountDetailClient() {
   // the copy names that instead of restating the server's sentence.
   //
   // Two words in it are load-bearing, both from the design review:
-  //  - "a budget", not "an active budget" — `HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL`
-  //    matches `status IN ('pending', 'active')`, so a grant that was never
-  //    activated blocks the unlink too.
+  //  - "a budget", not "an active budget" — `HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`
+  //    matches `LIVE_DELEGATION_STATUSES_SQL` (pending/active/replaced), so a
+  //    grant that was never activated, or one replaced but not yet disabled,
+  //    blocks the unlink too.
   //  - "recovering funds", not "a recovery" — this page already renders a
   //    "Backup & recovery" card (`AccountSignersCard`), which is signer
   //    replacement and has nothing to do with the sweep this refusal means.
@@ -478,7 +499,7 @@ export default function AccountDetailClient() {
                     trailing={
                       agent.status === 'active'
                         ? undefined
-                        : <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                        : <StatusBadge tone={agentBadgeTone(agent, status.tone)}>{status.label}</StatusBadge>
                     }
                   />
                 )
@@ -509,7 +530,7 @@ export default function AccountDetailClient() {
                   trailing={
                     agent.status === 'active'
                       ? undefined
-                      : <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                      : <StatusBadge tone={agentBadgeTone(agent, status.tone)}>{status.label}</StatusBadge>
                   }
                 />
               )

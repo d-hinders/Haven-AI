@@ -25,7 +25,7 @@ covers:
   - .claude/agents/**
   - .claude/commands/**
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-15"
+last-verified: "2026-09-30"
 ---
 
 # Haven — CLAUDE.md
@@ -138,9 +138,12 @@ HTTP 410 fail-closed, nothing written, distinct in the body returned.
 
 ```
 1. Agent intent → { action: "payment", asset: "USDC", amount: "100", recipient: "0xabc" }
-2. Haven authenticates the agent, selects its budget delegation for that token/recipient
+2. Haven authenticates the agent, selects its budget delegation for that token/recipient,
+   and pre-checks its live remaining period budget (a typed 403 when it cannot cover
+   the amount; fails open on an unreadable read — #3503)
 3. Haven prepares a redeeming UserOp; budget, recipient and expiry are enforced
-   ON-CHAIN during gas estimation — over-budget or wrong-recipient reverts here
+   ON-CHAIN during gas estimation — anything out of policy that gets this far
+   (over-budget when the pre-check failed open) reverts here
 4. The agent signs the account's exact EIP-712 typed data VERBATIM (never a bare
    hash); Haven submits the sponsored UserOp, funds move account→recipient
 5. Response → { status: "executed", tx }
@@ -200,8 +203,9 @@ All of these must fail for funds to be at risk.
 
 ## Tech Stack
 
-- **Chain:** **Base (chain ID 8453) is the primary / default network**; Gnosis
-  Chain (chain ID 100) is also supported. Chain and token FACTS live in
+- **Chain:** **Base (chain ID 8453) is the primary / default network** and
+  Base Sepolia (84532) is dev/QA; Gnosis Chain (chain ID 100) is not a Haven
+  network. Chain and token FACTS live in
   `packages/core/src/chains.ts`, with backend env wiring and frontend viem
   construction pinned to it. `DEFAULT_CHAIN_ID` is the single home for the
   default; a guard test flags new bare numeric fallbacks.

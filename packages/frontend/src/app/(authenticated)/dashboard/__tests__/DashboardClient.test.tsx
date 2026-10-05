@@ -287,7 +287,11 @@ describe('DashboardClient', () => {
       // `lib/__tests__/analytics-format.test.ts`; the accounts card's compact
       // voice is pinned in AccountsOverviewClient.test.tsx.
       expect(screen.getByText('13 000,50 kr')).toBeInTheDocument()
-      expect(screen.getByText('+130,00 kr (+1.00%) today')).toBeInTheDocument()
+      // #3195 (round-2 finding b): the percent renders in the currency's
+      // locale — sv-SE under SEK: decimal comma, NBSP before `%` (normalized
+      // to a plain space by getByText). The kr half was already sv-SE; the
+      // line no longer mixes a hand-rolled English percent scaffold into it.
+      expect(screen.getByText('+130,00 kr (+1,00 %) today')).toBeInTheDocument()
       expect(screen.getByText('440,00 kr')).toBeInTheDocument()
       // The USD total must not leak onto a SEK hero under any label.
       expect(screen.queryByText('$1,234.56')).toBeNull()

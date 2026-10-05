@@ -3,7 +3,7 @@ owner: "@AntonioSaaranen"
 status: current
 covers:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-21"
+last-verified: "2026-09-30"
 ---
 
 # CASP verification log — sharded entries (#1366)
@@ -126,10 +126,13 @@ version rather than an issue:
   bump itself touches (version strings and pins only)>. Perimeter unchanged.
 ```
 
-Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
-directory held 416 shards at verification time, every one matching the
-`YYYY-MM-DD-<issue-or-version>` convention; the newest entries are the
-2026-09-20 money-path shards (#3019, #3134, #3166, #3167, #3173, #3202). The
-added-file gate behaviour, the immutability rules and the release-shard
-convention above are unchanged since the last verification (#2192 was the last
-behaviour change).
+Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`): the
+directory holds 507 shards at verification time, every one still matching the
+`YYYY-MM-DD-<issue-or-version>` convention (the batch since the last
+verification is dominated by the #2769 dRPC incident shards, the #3423
+receive-side slices, the #3330 sub-budgets shard and the 0.5.0/0.6.0/0.7.0
+release shards); the newest entries are the 2026-09-29 shards (#3423, #3426,
+#3427, #3430, #3431, #3458, #3464, #3475, #3476, #3478). The added-file gate
+behaviour, the immutability rules and the release-shard convention above are
+unchanged since the last verification (#2192 was the last behaviour change;
+the gate's added-match logic is as documented).

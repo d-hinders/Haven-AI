@@ -444,15 +444,51 @@ describe('DELETE /agents/:id — retired (#1401)', () => {
 })
 
 describe('POST /agents/:id/revoke', () => {
-  it('revokes an active/paused agent and fires the passport revocation best-effort', async () => {
+  /**
+   * #3544: the revoke runs inside `withTransaction`, so BEGIN/COMMIT ride the
+   * same driver mock as the statements and a positional `mockResolvedValueOnce`
+   * queue would feed the transaction frames first. Key every mock on the SQL
+   * shape instead — the assertions stay true to the behaviour under test no
+   * matter how many control frames the transaction adds.
+   */
+  const REVOKE_SQL_MATCH = "status IN ('active', 'paused', 'pending_approval')"
+
+  it('revokes an active/paused/pending_approval agent and fires the passport revocation best-effort', async () => {
     const app = await makeApp()
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'agent-1' }] })
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] }
+      if (text.includes(REVOKE_SQL_MATCH)) return { rows: [{ id: 'agent-1' }] }
+      // #3544: the revoke now also cancels the agent's open connection setup,
+      // in the same transaction.
+      if (text.includes('UPDATE agent_connection_setups')) return { rows: [] }
+      throw new Error(`unexpected query in the revoke path: ${text}`)
+    })
 
     const res = await app.inject({ method: 'POST', url: '/agents/agent-1/revoke' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ success: true })
-    expect(String(mockQuery.mock.calls[0][0])).toContain("status IN ('active', 'paused')")
-    expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1'])
+    const texts = mockQuery.mock.calls.map((call) => String(call[0]))
+    // Order pinned by shape: BEGIN, the widened revoke, the in-transaction
+    // open-setup cancel, COMMIT.
+    const phase = texts.map((t) =>
+      t === 'BEGIN'
+        ? 'begin'
+        : t === 'COMMIT'
+          ? 'commit'
+          : t.includes(REVOKE_SQL_MATCH)
+            ? 'revoke'
+            : t.includes('UPDATE agent_connection_setups')
+              ? 'cancel'
+              : 'other',
+    )
+    expect(phase).toEqual(['begin', 'revoke', 'cancel', 'commit'])
+    const revokeCall = mockQuery.mock.calls.find((call) => String(call[0]).includes(REVOKE_SQL_MATCH))
+    expect(revokeCall?.[1]).toEqual(['agent-1', 'user-1'])
+    const cancelCall = mockQuery.mock.calls.find((call) =>
+      String(call[0]).includes('UPDATE agent_connection_setups'),
+    )
+    expect(cancelCall?.[1]).toEqual(['agent-1', 'user-1'])
     expect(mockEnqueueRevocation).toHaveBeenCalledWith('agent-1')
     expect(mockRevokeBestEffort).toHaveBeenCalledWith('agent-1')
     await app.close()
@@ -460,7 +496,13 @@ describe('POST /agents/:id/revoke', () => {
 
   it('a passport revocation enqueue failure never fails the revoke', async () => {
     const app = await makeApp()
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'agent-1' }] })
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] }
+      if (text.includes(REVOKE_SQL_MATCH)) return { rows: [{ id: 'agent-1' }] }
+      if (text.includes('UPDATE agent_connection_setups')) return { rows: [] }
+      throw new Error(`unexpected query in the revoke path: ${text}`)
+    })
     mockEnqueueRevocation.mockRejectedValueOnce(new Error('eas down'))
 
     const res = await app.inject({ method: 'POST', url: '/agents/agent-1/revoke' })
@@ -469,12 +511,49 @@ describe('POST /agents/:id/revoke', () => {
     await app.close()
   })
 
-  it('404s when nothing was revocable', async () => {
+  it('an owned agent that cannot be revoked 404s only when it does not exist, else 409s with a typed error_code (#3544)', async () => {
     const app = await makeApp()
-    mockQuery.mockResolvedValueOnce({ rows: [] })
+    /** The revoke UPDATE answers empty; the status read decides the scenario. */
+    function mockRevokeMiss(statusRow: { id: string; status: string } | null): void {
+      mockQuery.mockImplementation(async (sql: unknown) => {
+        const text = String(sql)
+        if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] }
+        if (text.includes(REVOKE_SQL_MATCH)) return { rows: [] }
+        if (text.includes('SELECT id, status FROM agents')) {
+          return { rows: statusRow ? [statusRow] : [] }
+        }
+        throw new Error(`unexpected query in the revoke path: ${text}`)
+      })
+    }
 
-    const res = await app.inject({ method: 'POST', url: '/agents/agent-1/revoke' })
-    expect(res.statusCode).toBe(404)
+    // Missing agent: revoke matched nothing, the status read matches nothing.
+    mockRevokeMiss(null)
+    const missing = await app.inject({ method: 'POST', url: '/agents/agent-1/revoke' })
+    expect(missing.statusCode).toBe(404)
+    expect(missing.json().error).toBe('Agent not found')
+    expect(mockEnqueueRevocation).not.toHaveBeenCalled()
+
+    mockQuery.mockClear()
+    // Owned but already revoked: 409 already_revoked — "done", not a failure.
+    mockRevokeMiss({ id: 'agent-1', status: 'revoked' })
+    const revoked = await app.inject({ method: 'POST', url: '/agents/agent-1/revoke' })
+    expect(revoked.statusCode).toBe(409)
+    expect(revoked.json()).toEqual({
+      error: 'Agent is already revoked',
+      error_code: 'already_revoked',
+    })
+    expect(mockEnqueueRevocation).not.toHaveBeenCalled()
+
+    mockQuery.mockClear()
+    // Owned but outside the revocable set (an unknown future status): 409
+    // not_revocable — a real refusal a caller must surface.
+    mockRevokeMiss({ id: 'agent-1', status: 'archived' })
+    const other = await app.inject({ method: 'POST', url: '/agents/agent-1/revoke' })
+    expect(other.statusCode).toBe(409)
+    expect(other.json()).toEqual({
+      error: 'Agent cannot be revoked',
+      error_code: 'not_revocable',
+    })
     expect(mockEnqueueRevocation).not.toHaveBeenCalled()
     await app.close()
   })

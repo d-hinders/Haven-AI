@@ -46,6 +46,14 @@
  * the agent the same non-throwing way `haven_pay_x402_quote` already does and
  * feeds it to the shared helper, so this quote can never predict a scheme its
  * own sibling handler would select differently.
+ *
+ * #3476 adds the `allowance` block to `haven_pay_x402_quote`'s successful
+ * results — the budget visibility `haven_prepare_catalog_purchase`'s preflight
+ * already provides, for the plain-HTTP sibling. The read is capability-local
+ * (`delegationAllowanceBlock`, then in this file): on current dev the catalog
+ * tool no longer runs a client-side budget read at all (the #3054 compare
+ * moved server-side into `POST /machine-payments/budget-precheck`), so there
+ * was no shared helper left to extract and the ownership map stayed untouched.
  */
 import {
   AgentPaymentFailureCode,
@@ -64,6 +72,7 @@ import {
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
+import { delegationAllowanceBlock } from './support/allowance-block.js'
 import {
   CAP_WARNING_TEXT,
   priceSelectedOption,
@@ -90,11 +99,27 @@ import {
 // URL existed to compare against. On the pay-from-declaration path nothing was
 // compared, and a literal `false` there read as "the merchant agrees with what
 // you quoted" (haven-reviewer on #3112).
-/** #3101: the handoff after a reported outcome — sweep on a rejection, nothing (with the reason) on acceptance. */
-function reportOutcomeHandoff(outcome: 'accepted' | 'rejected'): HostedHandoff {
-  return outcome === 'rejected'
-    ? { nextTool: 'haven_sweep_delegate', nextArguments: {} }
-    : { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
+/**
+ * #3101: the handoff after a reported outcome — sweep on a rejection; on
+ * acceptance, nothing follows UNLESS `offerSettlementEvidence` is true.
+ *
+ * #3475 follow-up (owner decision, 2026-09-30): an `accepted` eip3009
+ * plain-HTTP payment with no merchant settlement recorded yet names
+ * `haven_report_settlement_evidence` as the next tool, `payment_id` prefilled
+ * — the schema's `settlement_tx_hash` is optional for exactly this reason
+ * (see `contracts.ts`'s `haven_report_settlement_evidence` shape), so this is
+ * a genuinely callable next step even though the agent may have nothing to
+ * add. Rejected outcomes, erc7710 payments, a non-eip3009/unknown scheme, and
+ * a payment whose settlement is already recorded all keep the old answer.
+ */
+function reportOutcomeHandoff(outcome: 'accepted' | 'rejected', offerSettlementEvidence: boolean, paymentId: string): HostedHandoff {
+  if (outcome === 'rejected') {
+    return { nextTool: 'haven_sweep_delegate', nextArguments: {} }
+  }
+  if (offerSettlementEvidence) {
+    return { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId } }
+  }
+  return { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
 }
 
 function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
@@ -102,6 +127,13 @@ function differsFromRequest(target: X402RetryTarget): { resource_url_differs_fro
     ? {}
     : { resource_url_differs_from_request: target.resourceUrlDiffersFromRequest }
 }
+
+// #3497: the block itself moved to `support/allowance-block.ts` — #3476 built
+// it here and declared it capability-local because nothing else called it;
+// #3497 item 4 wires the same block into `haven_pay_mcp_tool`, which made it
+// a two-slice helper. Imported from support (never deep, per the barrel rule)
+// — the moved helper's own doc comment carries the data-source and degradation
+// reasoning verbatim, and the plain-HTTP call sites are unchanged.
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a
@@ -372,14 +404,22 @@ export function createPlainHttpX402Handlers(
               // #3378: build the settlement child under the task budget the
               // caller named (#3329) — this handler used to drop it.
               ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
-              // #3330: build the settlement chain under the sub-budget the
-              // caller named (it is sub-agent B). Mutually exclusive with
-              // task_budget_id server-side.
-              ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
+              // #3617: no sub_budget_id here — haven_pay_x402_quote never
+              // declared it, so parseStrict refused it before this line and the
+              // forwarding #3330 added was dead. Sub-budgets pay x402 through
+              // the local MCP only.
             }).catch(catchSettledReplay)
             // #3417: a replayed key whose payment already settled is a done state,
             // not the transient 500 it used to surface as — answer with the original.
             if ('settledReplay' in prepared) return prepared.settledReplay
+            // #3476: same block on the erc7710 branch, built from the settlement
+            // child's own asset/amount — the entry the selector actually chose.
+            const allowance = await delegationAllowanceBlock(
+              haven,
+              prefetchedAgent,
+              prepared.settlement.amountAtomic,
+              prepared.settlement.asset,
+            )
             return {
               payment_id: prepared.paymentId,
               status: 'pending_signature',
@@ -401,6 +441,7 @@ export function createPlainHttpX402Handlers(
               // merchant's declaration.
               retry_url: retryTarget.url,
               ...differsFromRequest(retryTarget),
+              ...(allowance.allowance ? { allowance: allowance.allowance } : {}),
               // #1275/#1351: the optional-cap nudge applies on both schemes.
               ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
               ...buildAgentGuidance({
@@ -411,7 +452,7 @@ export function createPlainHttpX402Handlers(
                 reason:
                   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
                   "fetches the settlement child itself and verifies its caveats against Haven's " +
-                  'signed context (#1455) before signing. Then call haven_submit with ' +
+                  'signed context before signing. Then call haven_submit with ' +
                   "settlement_scheme: 'erc7710' to receive the merchant payment_header, and retry " +
                   'the original merchant request yourself, setting PAYMENT-SIGNATURE ' +
                   '(x402 v2) to it and ONLY that name on this scheme. Do NOT call ' +
@@ -426,10 +467,13 @@ export function createPlainHttpX402Handlers(
                   // scheme, not the intent's — no quote-expiry warning applies.
                   expires_at: undefined,
                 },
-                warnings: quoteWarnings({
-                  capped: cap.kind !== 'none',
-                  expiresAt: undefined,
-                }),
+                warnings: [
+                  ...allowance.warnings,
+                  ...quoteWarnings({
+                    capped: cap.kind !== 'none',
+                    expiresAt: undefined,
+                  }),
+                ],
               }),
             }
           }
@@ -438,18 +482,30 @@ export function createPlainHttpX402Handlers(
             idempotencyKey: args.idempotency_key,
             // #3378: fund the leg under the task budget the caller named (#3329).
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
-            // #3330: fund the leg under the sub-budget the caller named (it is
-            // sub-agent B). Mutually exclusive with task_budget_id server-side.
-            ...(args.sub_budget_id ? { subBudgetId: args.sub_budget_id } : {}),
+            // #3617: no sub_budget_id — see the erc7710 branch above.
             ...(prefetchedAgent?.delegateAddress
               ? { delegateAddress: prefetchedAgent.delegateAddress }
               : {}),
           })
+          // #3476: the budget block rides the 3009 shape too — the plain-HTTP
+          // sibling must answer with the same visibility the catalog preflight
+          // gives its agents on the delegation rail. The amount/token compared
+          // are `createX402Intent`'s OWN authorization facts
+          // (x402AuthorizationAmount(option) over the selected entry's asset),
+          // so the figure can never describe a different option than the one
+          // this intent funds.
+          const allowance = await delegationAllowanceBlock(
+            haven,
+            prefetchedAgent,
+            intent.amountAtomic,
+            intent.asset,
+          )
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
             // #3097: see the erc7710 branch — the retry goes to the caller's URL.
             retry_url: retryTarget.url,
             ...differsFromRequest(retryTarget),
+            ...(allowance.allowance ? { allowance: allowance.allowance } : {}),
             // #1275: optional-cap soft nudge for this generic x402 flow.
             // #1351: either spelling of the cap clears it.
             ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
@@ -465,9 +521,9 @@ export function createPlainHttpX402Handlers(
               // building the header, so the named successor could only refuse.
               // One contract now, and it is the one the tool already implements.
               reason:
-                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given — the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
-                'none, re-call with the payment_required you passed to this tool added VERBATIM). ' +
+                'none, re-call with the payment_required you passed to this tool added VERBATIM. ' +
                 'It returns BOTH signature and payment_header. Relay signature via haven_submit, ' +
                 'then retry retry_url yourself with payment_header. Do NOT call ' +
                 'haven_x402_sign_header: haven_sign_x402 already spent its binding building that ' +
@@ -480,10 +536,13 @@ export function createPlainHttpX402Handlers(
                 network: intent.network,
                 expires_at: intent.expiresAt,
               },
-              warnings: quoteWarnings({
-                capped: cap.kind !== 'none',
-                expiresAt: intent.expiresAt,
-              }),
+              warnings: [
+                ...allowance.warnings,
+                ...quoteWarnings({
+                  capped: cap.kind !== 'none',
+                  expiresAt: intent.expiresAt,
+                }),
+              ],
             }),
           }
         } catch (err) {
@@ -653,6 +712,19 @@ export function createPlainHttpX402Handlers(
         } catch {
           status = null
         }
+        // #3475 follow-up (owner decision, 2026-09-30): an `accepted` outcome
+        // on an eip3009 plain-HTTP payment with no merchant settlement
+        // recorded yet offers haven_report_settlement_evidence as the next
+        // step. `settlementScheme`/`merchantSettlementRecorded` are read from
+        // the SAME re-read above — no second call — and default to "do not
+        // offer" when the read failed or the fields are absent (an older
+        // backend, or genuinely unknown), which is the safe side: erc7710,
+        // a non-x402 rail, and an already-recorded settlement all keep the
+        // pre-existing "no tool follows" answer, unchanged.
+        const offerSettlementEvidence =
+          report.outcome === 'accepted' &&
+          status?.settlementScheme === 'eip3009' &&
+          status?.merchantSettlementRecorded !== true
         return {
           payment_id: report.paymentId,
           outcome: report.outcome,
@@ -662,20 +734,33 @@ export function createPlainHttpX402Handlers(
           tx_hash: report.txHash,
           resource_url: report.resourceUrl,
           ...buildAgentGuidance({
+            // #3475 follow-up review round 1 (S1): next_action is UNCHANGED
+            // by the settlement-evidence offer — it stays the status re-read's
+            // own answer (or the pre-existing per-outcome default), exactly as
+            // before this follow-up. The offer rides next_tool /
+            // next_arguments / reason only, so
+            // AgentPaymentNextAction.AwaitingSettlementEvidence's published
+            // meaning (an erc7710 payment past its settlement window with no
+            // verified evidence) is never reused for a different fact.
             nextAction:
               status?.nextAction ??
               (report.outcome === 'rejected'
                 ? AgentPaymentNextAction.SweepStrandedFunds
                 : AgentPaymentNextAction.None),
-            ...reportOutcomeHandoff(report.outcome),
+            ...reportOutcomeHandoff(report.outcome, offerSettlementEvidence, report.paymentId),
             safeToContinue: true,
             reason:
               report.outcome === 'rejected'
                 ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
                   'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
                   'the same purchase.'
-                : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
-                  'Haven tool is needed.',
+                : offerSettlementEvidence
+                  ? "Recorded. If the merchant's response carried a settlement transaction " +
+                    '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
+                    'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
+                    'not, the purchase is already complete and no further Haven tool is needed.'
+                  : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
+                    'Haven tool is needed.',
             summary: {
               payment_id: report.paymentId,
               status: status?.status ?? 'confirmed',

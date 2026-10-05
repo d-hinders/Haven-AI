@@ -549,11 +549,15 @@ export function classifyErc7710Settlement(
 }
 
 /**
- * #2972: the `haven_report_settlement_evidence` tool's response shape — the
- * SAME three outcomes `classifyErc7710Settlement` classifies for the settle/
- * complete gate, built directly from `MerchantCompletion.reportEvidence`'s
- * `EvidenceReportOutcome` rather than derived from a merchant HTTP call (there
- * is none here — the agent is handing Haven a hash it already holds).
+ * #2972: builds THREE of the `haven_report_settlement_evidence` tool's four
+ * possible response shapes — the SAME three outcomes `classifyErc7710Settlement`
+ * classifies for the settle/complete gate, built directly from
+ * `MerchantCompletion.reportEvidence`'s `EvidenceReportOutcome` rather than
+ * derived from a merchant HTTP call (there is none here — the agent is
+ * handing Haven a hash it already holds). The fourth shape — no
+ * `settlement_tx_hash` supplied at all — is a SUCCESS no-op the handler
+ * returns directly, before this function is ever called (#3475 follow-up,
+ * the `if (!args.settlement_tx_hash)` branch below).
  *
  * `confirmed` -> settled: true. `retryable` -> SETTLEMENT_PENDING (the chain
  * could not be read yet, or the transaction is not mined — worth reporting
@@ -562,6 +566,23 @@ export function classifyErc7710Settlement(
  * DELIVERED_UNSETTLED: a settled no, never a write. `next_tool` is always
  * `haven_get_payment_status` on the two unsettled branches, exactly as the
  * settle/complete gate points there — this tool does not retry itself.
+ *
+ * #3529: a refusal that carries the backend's relayed `reason` is its OWN
+ * arm, keyed on the REASON's presence — never on payment status (on eip3009
+ * "confirmed" means the FUNDING leg, so a status-keyed code would also fire
+ * on ordinary, correct refusals of mismatched hashes). The backend puts a
+ * reason in the evidence 409/503 body only on the eip3009 settlement-report
+ * refusal (`SettlementReportRefusal`), which fires on a payment whose
+ * funding is already confirmed — so this arm says exactly what Haven knows:
+ * the funding leg is confirmed and unchanged, and THIS hash was not accepted
+ * for it. New code `SETTLEMENT_NOT_RECORDED` (it is not "delivered,
+ * unsettled" — the payment's funding is verified; what failed is the
+ * settlement attribution) with the backend's sentence relayed verbatim as
+ * `refusal_reason`. A reasonless refusal keeps `DELIVERED_UNSETTLED` and the
+ * honest-for-every-case wording: that arm can still be reached by a real
+ * mismatch, a foreign payment id, a validation refusal, or an older backend
+ * that never relays a reason, and none of those may claim the funding is
+ * confirmed.
  */
 export function classifySettlementEvidenceReport(
   paymentId: string,
@@ -586,8 +607,36 @@ export function classifySettlementEvidenceReport(
         safeToContinue: true,
         reason:
           'Haven verified this settlement transaction on-chain against the payment and ' +
-          'confirmed it — the payment now has verified settlement evidence.',
+          'recorded it — the payment now has verified settlement evidence.',
         summary: { payment_id: paymentId, status: 'settled' },
+      }),
+    }
+  }
+  // #3529: the reason-bearing refusal. The reason is the backend's own
+  // sentence, relayed verbatim — the tool never paraphrases it into a verdict
+  // it cannot check (whether the hash was genuinely wrong, or the connected
+  // backend predates the relay, is exactly what the agent must decide by
+  // polling status, which is why next_tool is unchanged).
+  if (outcome.outcome === 'refused' && outcome.reason) {
+    return {
+      payment_id: paymentId,
+      settled: false,
+      code: 'SETTLEMENT_NOT_RECORDED',
+      refusal_reason: outcome.reason,
+      settlement_tx_hash: settlementTxHash,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        nextTool: 'haven_get_payment_status',
+        nextArguments: { payment_id: paymentId },
+        safeToContinue: true,
+        reason:
+          // The relayed reasons never end with punctuation (the verifier's
+          // sentences are period-free), so the period here is always single.
+          'Haven refused this settlement report: ' + outcome.reason + '. The payment itself is ' +
+          'unchanged — its funding leg is confirmed, and this transaction was not accepted as ' +
+          "its settlement. Reporting the same hash again will not change that; poll next_tool for " +
+          "the payment's current state.",
+        summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
       }),
     }
   }
@@ -606,9 +655,10 @@ export function classifySettlementEvidenceReport(
       reason: pending
         ? 'Haven could not yet verify this transaction on-chain — the RPC was unreachable, or ' +
           'the transaction is not mined yet. Report the same hash again shortly, or poll next_tool.'
-        : 'Haven could not verify this transaction against this payment on-chain — it does not ' +
-          "match this payment's transfer shape or window, or the payment could not be found for " +
-          'this agent. Reporting it again will not change that; poll next_tool for the current status.',
+        : 'Haven did not record this settlement hash for this payment. Either the transaction does ' +
+          'not match this payment on-chain, or the payment could not be found for this agent, or ' +
+          'the connected backend does not yet take this kind of settlement report. Reporting it ' +
+          'again will not change that; poll next_tool for the current status.',
       summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
     }),
   }
@@ -844,7 +894,12 @@ export function createPaidMcpCompletionHandlers(
                   // #3423 review round 1 (F1): additive, not a replacement —
                   // `product` stayed the field this summary carried before
                   // this fix, and `purchase_summary` is new alongside it.
-                  product: args.tool_name,
+                  // #3497 item 2: `product` now reports the MERCHANT's product
+                  // name when the delivered result carries one (the same
+                  // source `purchase_summary.product` reads), falling back to
+                  // the tool name — the tool name is what called the merchant,
+                  // not what the user bought.
+                  product: purchaseSummary.product ?? merchantContext.toolName,
                   purchase_summary: purchaseSummary,
                 },
                 warnings: summary7710.warnings,
@@ -1004,6 +1059,12 @@ export function createPaidMcpCompletionHandlers(
             summary: {
               payment_id: args.payment_id,
               status: 'settled',
+              // #3497 item 2: the merchant's product name when the delivered
+              // result carries one, falling back to the tool name — same
+              // fallback as the erc7710 settled arm above. `tool_name` is
+              // always present on this path (resolveMerchantCallContext
+              // requires it), so `product` is never undefined here.
+              product: purchaseSummary.product ?? merchantContext.toolName,
               purchase_summary: purchaseSummary,
             },
             warnings,
@@ -1024,6 +1085,38 @@ export function createPaidMcpCompletionHandlers(
     haven_report_settlement_evidence: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_report_settlement_evidence', input)
+        // #3475 follow-up (review round 1, S3): `settlement_tx_hash` is
+        // optional on the SCHEMA so haven_report_x402_outcome can name this
+        // tool with only payment_id prefilled, before it knows whether the
+        // merchant returned a hash at all. A call that never supplies one is
+        // a SUCCESS no-op, not a refusal — an agent following next_tool /
+        // next_arguments VERBATIM (the contract every hosted tool promises)
+        // must never get an error for doing exactly that. Zero backend
+        // calls: nothing to check or record without a hash.
+        if (!args.settlement_tx_hash) {
+          // #3475 follow-up review round 2 (both reviewers): state only what
+          // is known. This tool is ALSO the named remedy for an erc7710
+          // payment `awaiting_settlement_evidence` / `delivered_unverified`
+          // — a no-hash call there means the agent has not yet received one
+          // from the merchant, not that the purchase is complete. Nothing
+          // was checked or recorded is the only thing every payment_id this
+          // tool accepts can honestly say.
+          return {
+            payment_id: args.payment_id,
+            recorded: false,
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.None,
+              nextTool: null,
+              nextToolOmittedReason: 'no settlement hash was supplied; nothing was checked or recorded',
+              safeToContinue: true,
+              reason:
+                'No settlement_tx_hash was supplied, so nothing was checked or recorded — Haven made ' +
+                'no network call. If you receive the merchant settlement transaction, call again with ' +
+                'settlement_tx_hash to record it.',
+              summary: { payment_id: args.payment_id, status: 'not_recorded' },
+            }),
+          }
+        }
         const outcome = await haven.reportSettlementEvidence(
           args.payment_id,
           args.settlement_tx_hash,

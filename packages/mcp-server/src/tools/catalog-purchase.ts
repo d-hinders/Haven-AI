@@ -51,6 +51,7 @@ import {
 } from '@haven_ai/sdk'
 import type { DiscoveryEntry, DiscoveryHint, HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
+import { delegationAllowanceBlock } from './support/allowance-block.js'
 import {
   priceSelectedOption,
   quoteWarnings,
@@ -62,6 +63,7 @@ import { HostedToolError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   catchSettledReplay,
+  eip3009ConfirmedReplayResponse,
   paymentStatusHandoff,
   refusalNextStep,
 } from './support/guidance.js'
@@ -281,6 +283,17 @@ export function createCatalogPurchaseHandlers(
               {
                 resourceUrl: merchantUrl,
                 delegationRail: true,
+                // Persisted so haven_settle_mcp_tool can rehydrate the
+                // merchant call by payment_id instead of the agent
+                // re-threading merchant_url/tool_name/arguments/mcp_transport —
+                // same contract as this tool's EIP-3009 branch below and the
+                // catalog tool's erc7710 branch.
+                mcpCallContext: {
+                  merchantUrl,
+                  toolName: args.tool_name as string,
+                  arguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
+                  ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
+                },
                 // #3042 (scan B2, measured live on dev): this branch never
                 // passed the key, so a retried call minted a SECOND
                 // independently-signable settlement child — on this scheme
@@ -300,6 +313,19 @@ export function createCatalogPurchaseHandlers(
             // #3417: a replayed key whose payment already settled is a done state,
             // not the transient 500 it used to surface as — answer with the original.
             if ('settledReplay' in prepared) return prepared.settledReplay
+            // #3497 item 4: the same visibility block #3476 gave
+            // `haven_pay_x402_quote`, now on `haven_pay_mcp_tool`'s erc7710
+            // branch too — built from the settlement child's own asset/amount
+            // (the entry the selector chose), through the pure allowances read.
+            // Visibility only: never refuses, and a failed read degrades to
+            // `sufficient: null` with a warning, exactly as on the plain-HTTP
+            // sibling.
+            const allowance = await delegationAllowanceBlock(
+              haven,
+              prefetchedAgent,
+              prepared.settlement.amountAtomic,
+              prepared.settlement.asset,
+            )
             return {
               payment_id: prepared.paymentId,
               settlement_scheme: 'erc7710',
@@ -317,6 +343,7 @@ export function createCatalogPurchaseHandlers(
               amount_atomic: prepared.settlement.amountAtomic,
               amount: priced.amount,
               token: priced.token,
+              ...(allowance.allowance ? { allowance: allowance.allowance } : {}),
               merchant_url: merchantUrl,
               ...(merchantUrl !== args.merchant_url
                 ? { merchant_url_discovered_from: args.merchant_url }
@@ -334,8 +361,9 @@ export function createCatalogPurchaseHandlers(
                 reason:
                   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
                   "fetches the settlement child itself and verifies its caveats against Haven's " +
-                  'signed context (#1455) before signing. Then call haven_settle_mcp_tool with the ' +
-                  'returned signature and the merchant_url/tool_name/arguments from this response. ' +
+                  'signed context before signing. Then call haven_settle_mcp_tool with ' +
+                  'payment_id and the returned signature — merchant_url/tool_name/arguments/' +
+                  'mcp_transport are OPTIONAL there: Haven rehydrates them by payment_id. ' +
                   'Do NOT pass payment_header: on this scheme Haven assembles it at settle, so ' +
                   'there is nothing to build locally and no funding transaction to wait for.',
                 summary: {
@@ -350,15 +378,18 @@ export function createCatalogPurchaseHandlers(
                   expires_at: undefined,
                   product: args.tool_name,
                 },
-                warnings: quoteWarnings({
-                  capped: cap.kind !== 'none',
-                  // The child's own short expiry is the binding window here,
-                  // not the intent's — no quote-expiry warning applies.
-                  expiresAt: undefined,
-                  ...(merchantUrl !== args.merchant_url
-                    ? { discoveredFrom: args.merchant_url }
-                    : {}),
-                }),
+                warnings: [
+                  ...allowance.warnings,
+                  ...quoteWarnings({
+                    capped: cap.kind !== 'none',
+                    // The child's own short expiry is the binding window here,
+                    // not the intent's — no quote-expiry warning applies.
+                    expiresAt: undefined,
+                    ...(merchantUrl !== args.merchant_url
+                      ? { discoveredFrom: args.merchant_url }
+                      : {}),
+                  }),
+                ],
               }),
             }
           }
@@ -378,6 +409,16 @@ export function createCatalogPurchaseHandlers(
                 ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
               },
             },
+          )
+          // #3497 item 4: the block rides the 3009 shape too. The amount/token
+          // compared are `createX402Intent`'s OWN authorization facts, so the
+          // figure can never describe a different option than the one this
+          // intent funds — same rule as the plain-HTTP sibling's comment.
+          const allowance = await delegationAllowanceBlock(
+            haven,
+            prefetchedAgent,
+            intent.amountAtomic,
+            intent.asset,
           )
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
@@ -399,6 +440,7 @@ export function createCatalogPurchaseHandlers(
             amount_atomic: quote.amountAtomic,
             amount: quote.amount,
             token: quote.token,
+            ...(allowance.allowance ? { allowance: allowance.allowance } : {}),
             // Request details to pass back to haven_complete_mcp_tool after
             // signing. The RESOLVED endpoint (#1271), not the input as given —
             // settle/complete must hit the same URL the 402 came from.
@@ -417,11 +459,11 @@ export function createCatalogPurchaseHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given — the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
                 'none, re-run this tool with the SAME idempotency_key plus ' +
                 'include_signing_payload=true and re-call the signer with its payment_required ' +
-                'added VERBATIM, #1549), then ' +
+                'added VERBATIM), then ' +
                 'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
@@ -435,11 +477,14 @@ export function createCatalogPurchaseHandlers(
                 expires_at: intent.expiresAt,
                 product: args.tool_name,
               },
-              warnings: quoteWarnings({
-                capped: cap.kind !== 'none',
-                expiresAt: intent.expiresAt,
-                ...(merchantUrl !== args.merchant_url ? { discoveredFrom: args.merchant_url } : {}),
-              }),
+              warnings: [
+                ...allowance.warnings,
+                ...quoteWarnings({
+                  capped: cap.kind !== 'none',
+                  expiresAt: intent.expiresAt,
+                  ...(merchantUrl !== args.merchant_url ? { discoveredFrom: args.merchant_url } : {}),
+                }),
+              ],
             }),
           }
         } catch (err) {
@@ -465,6 +510,15 @@ export function createCatalogPurchaseHandlers(
                 summary: { payment_id: err.paymentId ?? 'unknown', status: 'pending_approval' },
               }),
             }
+          }
+          // #3527: a settled EIP-3009 replay (the funding leg already
+          // confirmed — the backend's pre-check and `delegationReplay` both
+          // treat it as replayable) used to surface here as a bare
+          // HavenApiError/API_ERROR. Split by merchant-leg evidence instead
+          // of rethrowing — never a fresh funding sign for an idempotency
+          // key that already funded a payment.
+          if (err instanceof HavenPaymentStateError && err.status === 'confirmed') {
+            return eip3009ConfirmedReplayResponse(haven, err)
           }
           throw err
         }
@@ -540,7 +594,6 @@ export function createCatalogPurchaseHandlers(
           // degraded here the way the allowance read at step 5 can.
           const agent = await agentPromise
           const rail = agent.executionRail
-          const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
 
           // 4. Both halves of the #1450 rule: the merchant must advertise
           // erc7710 AND the account must be on the delegation rail. #1453's
@@ -601,13 +654,39 @@ export function createCatalogPurchaseHandlers(
           // as the failed allowances read did — the on-chain policy remains
           // the actual gate either way.
           const warnings: AgentPaymentWarning[] = []
+          // #3464: the preflight block is narrowed to the delegation rail —
+          // proven by exhaustion, not declared: POST /x402 answers 410 for
+          // every retired rail (#1986) and `budget-precheck` 410s them the
+          // same way (`budget-precheck-guards.ts`), so no retired-rail
+          // account can complete step 3's agent read and reach this block.
+          // The guard below keeps that proof machine-checked: if a retired
+          // rail ever reaches here on a stubbed or drifted backend, the
+          // preflight degrades to `sufficient: null` with a warning — never a
+          // fabricated 'legacy'/'allowance_module' row. `rail` above is read
+          // from `HavenAgent.executionRail`, whose declared union is untouched.
+          // On the settlement scheme this guard sits AFTER the selector
+          // (#2054): a legacy agent at an erc7710-only merchant still gets
+          // the selector's rail-named refusal, not a budget null.
           let allowanceBlock: {
-            rail: 'legacy' | 'delegation'
+            rail: 'delegation'
             sufficient: boolean | null
             remaining_atomic?: string
-            source: 'allowance_module' | 'active_delegations'
-          }
-          try {
+            source: 'active_delegations'
+            /** #3464: canonical camelCase names — the SAME spelling `haven_get_agent`'s `allowances[]` rows report. */
+            remainingAtomic?: string
+          } | null
+          if (rail !== 'delegation') {
+            allowanceBlock = null
+            warnings.push({
+              code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+              message:
+                `This agent's account is on the '${rail}' rail, which is retired and cannot purchase — ` +
+                'no preflight budget figure is reported. The on-chain policy remains the actual spend gate; ' +
+                're-onboard the account on the delegation rail to pay this merchant.',
+            })
+          } else {
+            const source = 'active_delegations' as const
+            try {
             // #2051: asked about the SELECTED option's asset and amount —
             // the option that will actually be authorized, not a cheap
             // standard entry sailing past a small budget while an expensive
@@ -623,13 +702,50 @@ export function createCatalogPurchaseHandlers(
               merchantTo: catalogSelection.option.payTo,
               // The merchant resource being bought — the ledger dedupe
               // window's discriminating column — never this request's URL.
-              resourceUrl: merchantUrl,
+              // #3527: the two settlement schemes persist a DIFFERENT value
+              // into the stored x402 row's own resource column at authorize
+              // time — erc7710 persists the caller's resourceUrl (merchantUrl,
+              // step 8 below), eip3009's createX402Intent always persists
+              // `paymentRequired.resource.url` (SDK client.ts) — so the
+              // replay match at the backend (`isSettledX402Replay`) only ever
+              // succeeds when THIS value equals what that scheme will store.
+              // Sending merchantUrl unconditionally made a 3009 replay whose
+              // resource.url differs from the discovered merchant URL a false
+              // key-collision refusal. Falling back to merchantUrl when the
+              // quote carries no resource object keeps erc7710 (and any 3009
+              // quote with no declared resource) byte-identical to before.
+              resourceUrl:
+                catalogSelection.scheme === 'erc7710'
+                  ? merchantUrl
+                  : ((quote.paymentRequired as X402PaymentRequired).resource?.url ?? merchantUrl),
+              // #3492/#3527: a replayed idempotency key whose erc7710 OR
+              // eip3009 authorize already settled must not refuse here as
+              // over-budget against the now-spent remaining figure — the
+              // backend answers sufficient (replay: true) for that exact
+              // shape and runs today's compare unchanged for every other one,
+              // including a fresh key with no prior payment. #3527: the
+              // EFFECTIVE key — the one step 9's `createX402Intent` actually
+              // authorizes with (`args.idempotency_key ?? quote.idempotencyKey`,
+              // never null on this path) — not just the explicit key, so an
+              // agent that never passed one still has its auto-derived
+              // 5-minute-bucket key checked against the same row step 9 will
+              // replay. The erc7710 branch (step 8) still forwards the
+              // EXPLICIT key only, unchanged: its own idempotency key is
+              // never auto-derived on this path.
+              idempotencyKey:
+                catalogSelection.scheme === 'erc7710'
+                  ? (args.idempotency_key as string | undefined)
+                  : ((args.idempotency_key as string | undefined) ?? quote.idempotencyKey),
             })
             allowanceBlock = {
               rail,
               sufficient: precheck.sufficient,
               remaining_atomic: precheck.remaining_atomic,
               source,
+              // The settle-time summary and this block share ONE spelling
+              // (#3464): these are the same names `haven_get_agent`'s
+              // allowances[] rows carry for the same figures.
+              remainingAtomic: precheck.remaining_atomic,
             }
             // #1319: the pre-check above SUCCEEDED — distinct from the catch
             // below, which fires when it fails outright. On the delegation
@@ -676,6 +792,9 @@ export function createCatalogPurchaseHandlers(
                 remaining_atomic:
                   (err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ?? '0',
                 source,
+                remainingAtomic:
+                  ((err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ??
+                    '0') as string,
               }
             } else {
               allowanceBlock = { rail, sufficient: null, source }
@@ -688,6 +807,7 @@ export function createCatalogPurchaseHandlers(
               })
             }
           }
+          }
 
           // 6. Over-budget REVERTS at prepare and no approval queue exists
           // anywhere (#1090; the last one died with #2055) — refuse BEFORE any
@@ -697,7 +817,7 @@ export function createCatalogPurchaseHandlers(
           // server-side and the ledger row is already recorded); this shape
           // is the RELAY of that decision — byte-identical to the refusal
           // the local compare used to throw, characterized below.
-          if (rail === 'delegation' && allowanceBlock.sufficient === false) {
+          if (rail === 'delegation' && allowanceBlock?.sufficient === false) {
             throw new HostedToolError({
               code: 'DELEGATION_BUDGET_EXCEEDED',
               message:
@@ -797,9 +917,9 @@ export function createCatalogPurchaseHandlers(
                 reason:
                   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
                   "fetches the settlement child itself and verifies its caveats against Haven's " +
-                  'signed context (#1455) before signing. Then call haven_settle_mcp_tool with ' +
+                  'signed context before signing. Then call haven_settle_mcp_tool with ' +
                   'payment_id and the returned signature — merchant_url/tool_name/arguments are ' +
-                  'OPTIONAL there (#1307): Haven rehydrates them by payment_id. Do NOT pass ' +
+                  'OPTIONAL there: Haven rehydrates them by payment_id. Do NOT pass ' +
                   'payment_header: on this scheme Haven assembles it at settle, so there is ' +
                   'nothing to build locally and no funding transaction to wait for.',
                 summary: {
@@ -831,7 +951,11 @@ export function createCatalogPurchaseHandlers(
           // intent — IDENTICAL machinery to haven_pay_mcp_tool
           // (mcpCallContext persisted per #1307), so the signer flow from
           // here is IDENTICAL to today's: haven_sign_x402 with payment_id +
-          // payment_required, then haven_settle_mcp_tool.
+          // payment_required, then haven_settle_mcp_tool. #3527: the SAME
+          // effective key step 5b's pre-check now checks
+          // (`args.idempotency_key ?? quote.idempotencyKey`) — a settled
+          // replay of this exact key reaches this call's own confirmed-replay
+          // branch below (`catch (err)`), not a fresh funding intent.
           const intent = await haven.createX402Intent(quote.paymentRequired as X402PaymentRequired, {
             idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
             mcpCallContext: catalogCallContext,
@@ -876,11 +1000,11 @@ export function createCatalogPurchaseHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given — the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
                 'none, re-run this tool with the SAME idempotency_key plus ' +
                 'include_signing_payload=true and re-call the signer with its payment_required ' +
-                'added VERBATIM, #1549), then ' +
+                'added VERBATIM), then ' +
                 'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
@@ -930,6 +1054,15 @@ export function createCatalogPurchaseHandlers(
                 summary: { payment_id: err.paymentId ?? 'unknown', status: 'pending_approval' },
               }),
             }
+          }
+          // #3527: a settled EIP-3009 replay at step 9 (the budget pre-check
+          // above now answers it sufficient, so this intent create reaches
+          // the backend's own confirmed-replay branch) used to surface as a
+          // bare HavenApiError/API_ERROR. Split by merchant-leg evidence
+          // instead — never a fresh funding sign for an idempotency key that
+          // already funded a payment.
+          if (err instanceof HavenPaymentStateError && err.status === 'confirmed') {
+            return eip3009ConfirmedReplayResponse(haven, err)
           }
           throw err
         }

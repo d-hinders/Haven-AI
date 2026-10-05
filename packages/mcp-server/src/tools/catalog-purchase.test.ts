@@ -489,10 +489,10 @@ describe('haven_prepare_catalog_purchase', () => {
     'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
   }
 
-  it('success (legacy rail, sufficient allowance): loads catalog, quotes live, creates the intent, returns the compact ready-to-sign shape + catalog fields + allowance block', async () => {
+  it('success (delegation rail, sufficient budget): loads catalog, quotes live, creates the intent, returns the compact ready-to-sign shape + catalog fields + allowance block', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -537,12 +537,15 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.catalog_name).toBe('CloudNest 50GB')
     expect(result.data.catalog_price_atomic).toBe('1500000')
     expect(result.data.catalog_price_is_indicative).toBe(true)
-    // Rail-aware allowance block.
+    // Rail-aware allowance block. #3464: narrowed to the delegation rail;
+    // remainingAtomic is the canonical spelling (the deprecated snake_case
+    // alias rides along for the deprecation window).
     expect(result.data.allowance).toEqual({
-      rail: 'legacy',
+      rail: 'delegation',
       sufficient: true,
       remaining_atomic: '5000000',
-      source: 'allowance_module',
+      source: 'active_delegations',
+      remainingAtomic: '5000000',
     })
     // #1308 guidance — next step is the SAME signer call as haven_pay_mcp_tool.
     expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
@@ -570,7 +573,7 @@ describe('haven_prepare_catalog_purchase', () => {
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', remaining_is_from_chain: true } },
     })
 
-    const result = ok<{ allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string } }>(
+    const result = ok<{ allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string; remainingAtomic?: string } | null }>(
       await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
     )
 
@@ -579,6 +582,7 @@ describe('haven_prepare_catalog_purchase', () => {
       sufficient: true,
       remaining_atomic: '5000000',
       source: 'active_delegations',
+      remainingAtomic: '5000000',
     })
     // The intent was still created — sufficient budget does not refuse.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
@@ -606,7 +610,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('rejects with PRICE_EXCEEDS_MAX before any funding intent when the live price exceeds max_amount', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -640,6 +644,21 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(recordedCalls()).toHaveLength(0)
   })
 
+  it('refuses an empty or over-long idempotency_key at tool input, before any Haven call (#3492)', async () => {
+    for (const idempotency_key of ['', 'k'.repeat(129)]) {
+      stubFetch({})
+      const payload = await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount_human: '1',
+        idempotency_key,
+      })
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe('INVALID_INPUT')
+      expect(recordedCalls()).toHaveLength(0)
+    }
+  })
+
   // #2259 re-based this test rather than deleting it. Its OLD framing —
   // "legacy rail: insufficient allowance still proceeds … queues for approval"
   // — asserts something unreachable: the legacy rail answers 410 at every
@@ -660,7 +679,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('passes a stored pending_approval intent through as a defined stop, with no signable payload', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '7500' } },
       // A pre-retirement row, echoed back — not a queue this rail could create.
       'POST /x402': { status: 202, body: { payment_id: 'over_1', status: 'pending_approval' } },
@@ -719,6 +738,43 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.suggested_tool).toBe('haven_get_allowances')
   })
 
+  // #3492: a keyed twin of the test above. A FRESH idempotency key that has
+  // never settled anything must still be refused exactly as before — the
+  // key is forwarded, but the backend answers 403 for this shape (no prior
+  // settled row to replay), so the refusal is unchanged and no /x402 call
+  // is ever made.
+  it('a fresh idempotency_key over budget is still refused, with no POST /x402 (#3492 keyed twin)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': {
+        status: 403,
+        body: {
+          error: 'This payment of 1.5 USDC exceeds the agent\'s remaining budget for this period (0.0001 USDC, short by 1.4999 USDC). There is no approval queue on the delegation rail — an over-budget redemption reverts on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
+          error_code: 'delegation_budget_exceeded',
+          phase: 'insufficient_funds',
+          next_action: 'fund_safe_or_raise_allowance',
+          remaining_atomic: '100',
+          amount_atomic: '1500000',
+        },
+      },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+      idempotency_key: 'catalog-7710-fresh-over-budget',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('DELEGATION_BUDGET_EXCEEDED')
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+
+    const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+    expect(precheck?.body).toMatchObject({ idempotencyKey: 'catalog-7710-fresh-over-budget' })
+  })
+
   it('sends the server the quote facts it needs: the SELECTED option asset/amount, the merchant payTo, and the bought resource URL (#3054)', async () => {
     stubFetch({
       ...baseRoutes,
@@ -735,14 +791,60 @@ describe('haven_prepare_catalog_purchase', () => {
     // window's discriminating column — never the allowances read's URL or
     // this endpoint's own. `token`/`amountAtomic` are the SELECTED option's
     // (#2051); `merchantTo` is advisory metadata for the ledger row.
+    // #3527: on THIS scheme (no erc7710 option — every quote here settles on
+    // the 3009 bridge) the forwarded value is the quote's OWN
+    // `paymentRequired.resource.url` — what `createX402Intent` will persist
+    // on the stored row at authorize — never `merchantUrl` (the discovered
+    // endpoint, `http://merchant.test/mcp`, a DIFFERENT fact on this scheme).
     expect(precheck?.body).toMatchObject({
       token: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
       amountAtomic: '1500000',
       merchantTo: PAYMENT_REQUIRED.accepts[0].payTo,
-      resourceUrl: 'http://merchant.test/mcp',
+      resourceUrl: PAYMENT_REQUIRED.resource.url,
     })
     // The allowances GET is GONE — one budget read, now this POST (#1348).
     expect(recordedCalls().find((c) => c.method === 'GET' && new URL(c.url).pathname.endsWith('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  it('forwards args.idempotency_key onto the pre-check body (#3492)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+    })
+
+    ok(
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount: '2000000',
+        idempotency_key: 'catalog-7710-precheck-key',
+      }),
+    )
+
+    const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+    expect(precheck?.body).toMatchObject({ idempotencyKey: 'catalog-7710-precheck-key' })
+  })
+
+  it('sends the EFFECTIVE (implicit) idempotencyKey on the pre-check on this 3009-only merchant, matching the authorize call (#3492/#3527)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+    })
+
+    ok(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    // #3527: unlike erc7710 (explicit key only, unchanged), the 3009 branch
+    // forwards the EFFECTIVE key — `args.idempotency_key ?? quote.idempotencyKey`
+    // — which is never null on this path (the SDK derives a 5-minute-bucket
+    // key with no tool arguments given). It must be the SAME key step 9's
+    // createX402Intent authorizes with, so a real backend's replay check
+    // scopes to the row that call creates.
+    const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+    const authorize = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')
+    const authorizeBody = typeof authorize?.body === 'string' ? JSON.parse(authorize.body) : authorize?.body
+    expect(typeof precheck?.body?.idempotencyKey).toBe('string')
+    expect(precheck?.body?.idempotencyKey).toBe(authorizeBody?.idempotencyKey)
   })
 
   it('a non-budget 403 from the pre-check is NOT a refusal — it degrades to sufficient: null with a warning (#3054)', async () => {
@@ -836,7 +938,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, price_atomic: '999999' } },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -853,16 +955,16 @@ describe('haven_prepare_catalog_purchase', () => {
   it('reports sufficient: null (never a fabricated guess) when the allowance/budget read fails — the preflight still succeeds', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
     })
 
     const result = ok<{
-      allowance: { rail: string; sufficient: boolean | null; source: string }
+      allowance: { rail: string; sufficient: boolean | null; source: string } | null
       warnings: Array<{ code: string }>
     }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
 
-    expect(result.data.allowance).toEqual({ rail: 'legacy', sufficient: null, source: 'allowance_module' })
+    expect(result.data.allowance).toEqual({ rail: 'delegation', sufficient: null, source: 'active_delegations' })
     expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
     // A failed read never fails the preflight — the intent was still created.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
@@ -926,7 +1028,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('ROUND-TRIP BUDGET: a successful preflight makes exactly one call per Haven surface — no duplicate agent fetch (#1348)', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -948,7 +1050,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('ROUND-TRIP BUDGET: the agent read is dispatched before the merchant probe resolves; the budget pre-check rides the SAME round-trip count the allowances read used (#1348, #3054)', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -1023,7 +1125,7 @@ describe('haven_prepare_catalog_purchase', () => {
     // optimistic read (the caveat enforcer re-checks at redemption), never a
     // failed read like ALLOWANCE_CHECK_UNAVAILABLE above.
     expect(result.data.allowance).toEqual({
-      rail: 'delegation', sufficient: true, remaining_atomic: '5000000', source: 'active_delegations',
+      rail: 'delegation', sufficient: true, remaining_atomic: '5000000', source: 'active_delegations', remainingAtomic: '5000000',
     })
     const warning = result.data.warnings.find((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')
     expect(warning).toBeDefined()
@@ -1049,10 +1151,10 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')).toBe(false)
   })
 
-  it('legacy rail: never warns ALLOWANCE_READ_OPTIMISTIC — the provenance flag is delegation-rail only', async () => {
+  it('an erc7710-optimistic provenance flag never warns on its own — only ALLOWANCE_READ_OPTIMISTIC distinguishes it', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -1066,7 +1168,7 @@ describe('haven_prepare_catalog_purchase', () => {
   it('passes idempotency_key through to the merchant quote and the funding intent (#1207 replay semantics apply unchanged)', async () => {
     stubFetch({
       ...baseRoutes,
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
@@ -1229,6 +1331,13 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(res.data).not.toHaveProperty('delivered')
       expect(res.data.reason).toMatch(/cannot re-deliver/)
       expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/settle'))).toEqual([])
+      // #3492: the key that resolved the authorize replay above was ALSO
+      // forwarded onto step 5b's pre-check — the fix this test's stub
+      // cannot itself exercise (the precheck stub answers sufficient
+      // either way here), but the forward is what lets a REAL backend
+      // answer sufficient instead of refusing over the now-spent budget.
+      const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+      expect(precheck?.body).toMatchObject({ idempotencyKey: 'catalog-7710-settled' })
     })
 
     it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
@@ -1265,6 +1374,504 @@ describe('haven_prepare_catalog_purchase', () => {
       )
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(res.data.warnings.map((w) => w.code)).toContain('CATALOG_PRICE_DIFFERS')
+    })
+  })
+})
+
+// ── #3527 — a settled EIP-3009 replay (the #3492 follow-up) ────────────────
+
+describe('#3527 — settled EIP-3009 replay', () => {
+  // No erc7710 option on PAYMENT_REQUIRED, so every quote here settles on
+  // the 3009 bridge regardless of rail.
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+
+  // Deliberately DIFFERENT from PAYMENT_REQUIRED.resource.url
+  // ('https://merchant.test/paid') — the discovered merchant URL and the
+  // merchant's own declared resource are two different facts on this scheme.
+  const CATALOG_ENTRY_RESPONSE = {
+    id: 'cat_3009',
+    name: 'Cat 3009',
+    description: '3009-only tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: PAYMENT_REQUIRED.accepts[0].asset,
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  function xBody() {
+    const call = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')
+    if (!call) return undefined
+    return (typeof call.body === 'string' ? JSON.parse(call.body) : call.body) as Record<string, any>
+  }
+
+  function precheckBody() {
+    const call = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+    if (!call) return undefined
+    return (typeof call.body === 'string' ? JSON.parse(call.body) : call.body) as Record<string, any>
+  }
+
+  describe('haven_prepare_catalog_purchase step 5b forwarding', () => {
+    it('forwards the quote\'s resource.url (never merchantUrl) and the EFFECTIVE idempotency key on the 3009 branch', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+
+      // No idempotency_key given — the implicit (effective) key is the
+      // quote's own derived one, the same one step 9 authorizes with.
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_3009', max_amount: '2000000' })
+
+      expect(precheckBody()).toMatchObject({ resourceUrl: PAYMENT_REQUIRED.resource.url })
+      expect(precheckBody()?.resourceUrl).not.toBe(CATALOG_ENTRY_RESPONSE.resource_url)
+      expect(typeof precheckBody()?.idempotencyKey).toBe('string')
+      expect(precheckBody()?.idempotencyKey).toBe(xBody()?.idempotencyKey)
+    })
+
+    it('an explicit idempotency_key is forwarded verbatim on the 3009 branch, matching the authorize call', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_3009',
+        max_amount: '2000000',
+        idempotency_key: 'catalog-3009-explicit-1',
+      })
+
+      expect(precheckBody()?.idempotencyKey).toBe('catalog-3009-explicit-1')
+      expect(xBody()?.idempotencyKey).toBe('catalog-3009-explicit-1')
+    })
+  })
+
+  describe('a confirmed 3009 replay reaching createX402Intent\'s own state-error path', () => {
+    it('haven_prepare_catalog_purchase: a recorded merchant settlement reaches a DONE state (never a fresh sign)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_done', status: 'confirmed', tx_hash: '0x' + 'f1'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_done/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_done',
+            status: 'confirmed',
+            next_action: 'none',
+            tx_hash: '0x' + 'f1'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            merchant_settlement_recorded: true,
+            delivered: true,
+            message: 'The payment is confirmed.',
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-done-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_done',
+        status: 'confirmed',
+        settlement_scheme: 'eip3009',
+        // #3527 review round 1 S1: settled means VERIFIED on-chain.
+        settled: true,
+        merchant_leg_reported: true,
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f1'.repeat(32),
+        next_action: 'none',
+      })
+      // #3527: never backfilled from the funding hash — getPaymentStatus
+      // carries only a verified BOOLEAN today, never the merchant's own hash.
+      expect(res.data.settlement_tx_hash).toBeNull()
+      expect(res.data.next_tool).toBeUndefined()
+      // Never a fresh funding sign for this key.
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
+    it('haven_prepare_catalog_purchase: a REPORTED but UNVERIFIED merchant leg is a done state, but settled stays false (#3527 review round 1 S1)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_reported', status: 'confirmed', tx_hash: '0x' + 'f5'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_reported/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_reported',
+            status: 'confirmed',
+            next_action: 'none',
+            tx_hash: '0x' + 'f5'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            // Reported (the merchant answered) but NOT verified on-chain.
+            delivered: true,
+            message: 'The payment is confirmed.',
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-reported-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_reported',
+        settlement_scheme: 'eip3009',
+        settled: false,
+        merchant_leg_reported: true,
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f5'.repeat(32),
+        next_action: 'none',
+      })
+      expect(res.data.settlement_tx_hash).toBeNull()
+      expect(res.data.next_tool).toBeUndefined()
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
+    it('haven_prepare_catalog_purchase: a VERIFIED merchant settlement with NO reported leg is a done state, settled true, merchant_leg_reported false (#3527 review round 2)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_verified_only', status: 'confirmed', tx_hash: '0x' + 'f6'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_verified_only/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_verified_only',
+            status: 'confirmed',
+            next_action: 'none',
+            tx_hash: '0x' + 'f6'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            // Verified on-chain through a reported settlement hash, with no
+            // merchant-response evidence row: delivered is absent.
+            merchant_settlement_recorded: true,
+            message: 'The payment is confirmed.',
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-verified-only-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_verified_only',
+        settlement_scheme: 'eip3009',
+        settled: true,
+        merchant_leg_reported: false,
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f6'.repeat(32),
+        next_action: 'none',
+      })
+      expect(res.data.settlement_tx_hash).toBeNull()
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
+    it('haven_prepare_catalog_purchase: a merchant-rejected funded payment forwards sweep_stranded_funds (#3527 review round 2)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_stranded', status: 'confirmed', tx_hash: '0x' + 'f7'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_stranded/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_stranded',
+            status: 'confirmed',
+            next_action: 'sweep_stranded_funds',
+            tx_hash: '0x' + 'f7'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            message: 'The merchant rejected the payment; the funds are stranded on the delegate. Sweep them back.',
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-stranded-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_stranded',
+        settlement_scheme: 'eip3009',
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f7'.repeat(32),
+        next_action: 'sweep_stranded_funds',
+        merchant_leg_reported: false,
+      })
+      expect(res.data.settled).toBeUndefined()
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
+    it('haven_prepare_catalog_purchase: INSIDE the merchant-report grace window with no evidence answers check_status_later — never a done state and never a stale "none" (#3527 review round 1 B1)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_ingrace', status: 'confirmed', tx_hash: '0x' + 'f6'.repeat(32), rail: 'x402' },
+        },
+        // The REAL status projection inside its own 15-minute grace window:
+        // no evidence either way, so next_action falls through to the plain
+        // confirmed mapping — `none` + "The payment is confirmed." — exactly
+        // the shape that must NEVER be relayed verbatim here.
+        'GET /machine-payments/pay_3009_ingrace/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_ingrace',
+            status: 'confirmed',
+            next_action: 'none',
+            tx_hash: '0x' + 'f6'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            message: 'The payment is confirmed.',
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-ingrace-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_ingrace',
+        settlement_scheme: 'eip3009',
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f6'.repeat(32),
+        next_action: 'check_status_later',
+      })
+      expect(res.data.settled).toBeUndefined()
+      expect(res.data.merchant_leg_reported).toBe(false)
+      expect(res.data.settlement_tx_hash).toBeNull()
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(res.data.next_arguments).toMatchObject({ payment_id: 'pay_3009_ingrace' })
+      // Never the stale wire text verbatim.
+      expect(res.data.reason).not.toMatch(/The payment is confirmed\./)
+      expect(res.data.reason).toMatch(/no merchant-leg evidence/)
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
+    it('haven_prepare_catalog_purchase: a FAILED status re-read also answers check_status_later (#3527 review round 1 B1, pinned)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_reread_fail', status: 'confirmed', tx_hash: '0x' + 'f7'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_reread_fail/status': { status: 500, body: { error: 'boom' } },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-reread-fail-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_reread_fail',
+        settlement_scheme: 'eip3009',
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f7'.repeat(32),
+        next_action: 'check_status_later',
+      })
+      expect(res.data.settled).toBeUndefined()
+      expect(res.data.merchant_leg_reported).toBe(false)
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    })
+
+    it('haven_prepare_catalog_purchase: no recorded merchant-leg evidence reaches the funded-awaiting-merchant remedy (never a done state)', async () => {
+      stubFetch({
+        'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', replay: true } },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_awaiting', status: 'confirmed', tx_hash: '0x' + 'f2'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_awaiting/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_awaiting',
+            status: 'confirmed',
+            next_action: 'retry_original_x402_request',
+            tx_hash: '0x' + 'f2'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            message: "Haven's funding leg confirmed but no merchant response was ever recorded — the merchant has likely not been paid. Resume this payment to retry the original request; do not start a new payment for the same purchase.",
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_3009',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-3009-awaiting-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_awaiting',
+        settlement_scheme: 'eip3009',
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f2'.repeat(32),
+        next_action: 'retry_original_x402_request',
+      })
+      expect(res.data.settlement_tx_hash).toBeNull()
+      // Never claims the merchant was paid.
+      expect(res.data.settled).toBeUndefined()
+      expect(res.data.merchant_leg_reported).toBe(false)
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(res.data.next_arguments).toMatchObject({ payment_id: 'pay_3009_awaiting' })
+      // Never a fresh funding sign for this key.
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
+    it('haven_pay_mcp_tool: a VERIFIED merchant settlement reaches a DONE state with settled: true', async () => {
+      stubFetch({
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_pay_done', status: 'confirmed', tx_hash: '0x' + 'f3'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_pay_done/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_pay_done',
+            status: 'confirmed',
+            next_action: 'none',
+            tx_hash: '0x' + 'f3'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            merchant_settlement_recorded: true,
+            delivered: true,
+            message: 'The payment is confirmed.',
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '1.5',
+          idempotency_key: 'pay-3009-done-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_pay_done',
+        status: 'confirmed',
+        settlement_scheme: 'eip3009',
+        settled: true,
+        merchant_leg_reported: true,
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f3'.repeat(32),
+      })
+      expect(res.data.settlement_tx_hash).toBeNull()
+      expect(res.data.next_tool).toBeUndefined()
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
+    })
+
+    it('haven_pay_mcp_tool: no recorded merchant-leg evidence reaches the funded-awaiting-merchant remedy', async () => {
+      stubFetch({
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': {
+          status: 200,
+          body: { success: true, payment_id: 'pay_3009_pay_awaiting', status: 'confirmed', tx_hash: '0x' + 'f4'.repeat(32), rail: 'x402' },
+        },
+        'GET /machine-payments/pay_3009_pay_awaiting/status': {
+          status: 200,
+          body: {
+            payment_id: 'pay_3009_pay_awaiting',
+            status: 'confirmed',
+            next_action: 'retry_original_x402_request',
+            tx_hash: '0x' + 'f4'.repeat(32),
+            rail: 'x402',
+            settlement_scheme: 'eip3009',
+            message: "Haven's funding leg confirmed but no merchant response was ever recorded.",
+          },
+        },
+      })
+
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '1.5',
+          idempotency_key: 'pay-3009-awaiting-1',
+        }),
+      )
+      expect(res.data).toMatchObject({
+        payment_id: 'pay_3009_pay_awaiting',
+        settlement_scheme: 'eip3009',
+        idempotent_replay: true,
+        funding_tx_hash: '0x' + 'f4'.repeat(32),
+        next_action: 'retry_original_x402_request',
+      })
+      expect(res.data.settlement_tx_hash).toBeNull()
+      expect(res.data.settled).toBeUndefined()
+      expect(res.data.merchant_leg_reported).toBe(false)
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname === '/x402')).toHaveLength(1)
     })
   })
 })
@@ -1965,6 +2572,33 @@ describe('#2051 — cap binds the authorized option', () => {
       expect(x402Body()).not.toHaveProperty('idempotencyKey')
     })
 
+    // #3493: this branch never persisted the merchant call context on the
+    // erc7710 authorize — haven_settle_mcp_tool with only payment_id +
+    // signature had nothing to rehydrate. Mirrors the sibling assertion on
+    // haven_prepare_catalog_purchase's erc7710 branch above.
+    it('persists the merchant call context on the erc7710 authorize, so settle rehydrates by payment_id', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.mcpCallContext).toMatchObject({
+        merchantUrl: 'http://merchant.test/mcp',
+        toolName: 'create_text',
+        arguments: { prompt: 'Hello' },
+        mcpTransport: { handshakeRequired: true, source: 'path' },
+      })
+    })
+
+    it('the erc7710 pay reason states merchant/tool/mcp_transport fields are optional at settle', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.reason).toMatch(
+        /merchant_url\/tool_name\/arguments\/mcp_transport are OPTIONAL there/,
+      )
+    })
+
     it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {
       const res = ok<Record<string, any>>(
         await pay(merchant('1000000', '2500000'), DELEGATION_AGENT, { max_amount_human: '5' }, true),
@@ -2427,6 +3061,117 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(x402Body()?.amount).toBe(PAYMENT_REQUIRED.accepts[0].maxAmountRequired)
       expect(x402Body()?.amount).not.toBe(PERMIT2_ONLY_ATOMIC)
     })
+
+    // ── #3497 item 4: the allowance block rides BOTH pay branches ────────────
+    // The same visibility #3476 gave haven_pay_x402_quote: `GET
+    // /machine-payments/allowances` (the pure read, never the precheck — that
+    // would book a refusal row for a tool that does not refuse here), built
+    // from the intent/settlement child's OWN authorization facts. The failed
+    // read degrades to sufficient: null with the unavailable warning — never
+    // an error, never a refusal (the on-chain policy remains the spend gate).
+    const PAY_ALLOWANCES = {
+      agent_id: 'agt_1',
+      account_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: 'allowance-1',
+        token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        token_symbol: 'USDC',
+        configured_amount: '5000000',
+        reset_period_min: 60,
+        onchain: {
+          amount: '5000000', spent: '0', remaining: '5000000', effective_spent: '0',
+          reset_time_min: 60, last_reset_min: 0, nonce: 0, is_reset_pending: false,
+          remaining_is_from_chain: true,
+        },
+      }],
+    }
+
+    it('delegation rail, erc7710 branch: the response carries the allowance block from the pure allowances read', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(ERC7710_ONLY_PR)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: CHILD },
+        'GET /machine-payments/allowances': { status: 200, body: PAY_ALLOWANCES },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '3',
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.allowance).toEqual({
+        rail: 'delegation',
+        sufficient: true,
+        remaining_atomic: '5000000',
+        source: 'active_delegations',
+        remainingAtomic: '5000000',
+      })
+      // The pure read — NEVER the precheck, which books a refusal row this
+      // visibility tool must not produce (the #3476 rule, now here too).
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/budget-precheck'))).toEqual([])
+    })
+
+    it('delegation rail, 3009 branch: the same block, compared against the intent authorization', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: CHILD_3009 },
+        'GET /machine-payments/allowances': { status: 200, body: PAY_ALLOWANCES },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '3',
+        }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(res.data.allowance).toEqual({
+        rail: 'delegation',
+        sufficient: true,
+        remaining_atomic: '5000000',
+        source: 'active_delegations',
+        remainingAtomic: '5000000',
+      })
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/budget-precheck'))).toEqual([])
+    })
+
+    it('a failed allowances read degrades to sufficient: null with the unavailable warning — never an error', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: CHILD_3009 },
+        'GET /machine-payments/allowances': { status: 500, body: { error: 'allowance boom' } },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '3',
+        }),
+      )
+      expect(res.data.allowance).toEqual({ rail: 'delegation', sufficient: null, source: 'active_delegations' })
+      const warnings = res.data.warnings as Array<{ code: string }>
+      expect(warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+      // The purchase itself proceeded — the read failure never fails it.
+      expect(res.data.payment_id).toBe(CHILD_3009.payment_id)
+    })
   })
 
   describe('haven_prepare_catalog_purchase', () => {
@@ -2643,6 +3388,9 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
     fail_floor: 12,
     retry_after_s: 60,
   }
+  // #3464: the preflight's allowance block is delegation-only, so the
+  // prepare-leg stubs here read the delegation agent.
+  const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
 
   describe('haven_quote_mcp_tool', () => {
     async function quoteAgainstNotReadyMerchant() {
@@ -2732,7 +3480,7 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
           body: MERCHANT_NOT_READY_BODY,
           responseHeaders: { 'Retry-After': '60' },
         },
-        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
         'POST /machine-payments/budget-precheck': {
           status: 200,
           body: { sufficient: true, remaining_atomic: '5000000' },

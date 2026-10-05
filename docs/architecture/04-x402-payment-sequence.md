@@ -7,8 +7,12 @@ covers:
   - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
+  - packages/backend/src/modules/budget-scope/**
   - packages/backend/src/modules/task-budgets/**
   - packages/backend/src/routes/task-budgets.ts
+  - packages/backend/src/routes/agent-sub-budgets.ts
+  - packages/backend/src/routes/sub-budgets.ts
+  - packages/backend/src/modules/sub-budgets/**
   - packages/sdk/src/task-budget-guards.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
@@ -58,7 +62,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-24"
+last-verified: "2026-10-01"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -324,7 +328,7 @@ sequenceDiagram
     else merchant rejects after funding
       Resource-->>SDK: Error response
       SDK-->>Agent: x402_retry_rejected_after_funding
-      Note over Agent,SDK: Reconcile; sweep if delegate funds are stranded
+      Note over Agent,SDK: Reconcile, then sweep if delegate funds are stranded
     end
   else remaining < amount ≤ remaining + delegate balance
     API-->>SDK: pending_approval + payment id + x402 context
@@ -395,7 +399,7 @@ sequenceDiagram
     Resource-->>Agent: 200 OK / merchant response
   else outside the on-chain budget
     API-->>MCP: refusal — no intent row, no payload_hash, nothing queued
-    MCP-->>Agent: Stop and tell the user to raise the budget; do NOT poll
+    MCP-->>Agent: Stop and tell the user to raise the budget — do NOT poll
   end
 ```
 
@@ -415,8 +419,10 @@ sequenceDiagram
 > authorize-time pre-check read the live budget — the fail-open posture is
 > inherited verbatim, so a degraded budget read (`fromChain: false`) or a
 > thrown one proceeds to prepare, where the enforcer's revert still surfaces
-> as the `502` **with no intent row** that this branch used to answer with
-> for every refusal; on erc7710 authorize pre-checks the live remaining
+> as a `502` **with no intent row** — typed `prepare_reverted` with the
+> decoded `revert_reason` and bounded `details` since
+> [#3609](https://github.com/d-hinders/Haven-AI/issues/3609) (before it,
+> one untyped 502 carrying the whole redacted error); on erc7710 authorize pre-checks the live remaining
 > budget and answers `403 delegation_budget_exceeded`
 > ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)); the legacy rail
 > answers `410` (#1986). None of the three writes anything, and none produces a
@@ -813,15 +819,20 @@ Sequence:
    refused; an exact atomic `max_amount` still works, since comparing it needs no
    decimals. `max_amount`'s meaning is unchanged for existing callers.
 5. Read a rail-aware allowance/budget report via the EXISTING, already
-   rail-aware `GET /machine-payments/allowances` (#1135) and the account's
-   `execution_rail` (now also carried on `GET /machine-payments/agent`,
-   #1306) — no new derivation logic. The response carries an `allowance`
-   block: `{ rail: 'legacy' | 'delegation', sufficient: boolean | null,
-   remaining_atomic?: string, source: 'allowance_module' | 'active_delegations'
-   }`. The union is the declared TYPE; its `'legacy'` / `'allowance_module'`
-   arm is **unreachable in practice** — since #2020,
-   `GET /machine-payments/allowances` answers HTTP 410 for a retired-rail
-   account, so no caller receives those values from this read (#2265). A failed read degrades to `sufficient: null` plus a warning
+   rail-aware `POST /machine-payments/budget-precheck` (#3054) — no new
+   derivation logic. The response carries an `allowance`
+   block: `{ rail: 'delegation', sufficient: boolean | null,
+   remaining_atomic?: string, remainingAtomic?: string,
+   source: 'active_delegations' }`. #3464: the declared TYPE is the
+   delegation arm only — its former `'legacy'` / `'allowance_module'` arm was
+   **unreachable in practice** — since #2020, every retired-rail read answers
+   HTTP 410 (`GET /machine-payments/allowances` for the summary read,
+   `budget-precheck` for this block; `POST /x402` refuses the account before
+   step 3 could pass), so no caller ever received those values (#2265); the
+   declared type now says so instead of carrying dead arms. The canonical
+   figure spelling is `remainingAtomic` — the SAME name `haven_get_agent`'s
+   `allowances[]` rows report (#3464) — with `remaining_atomic` kept as a
+   deprecated alias for a deprecation window. A failed read degrades to `sufficient: null` plus a warning
    (`ALLOWANCE_CHECK_UNAVAILABLE`) — it never fails the preflight, since the
    on-chain policy remains the actual gate either way; this holds on BOTH
    rails, including the delegation rail's no-approval-queue branch below
@@ -844,7 +855,42 @@ Sequence:
    created (`DELEGATION_BUDGET_EXCEEDED`,
    `next_action: fund_account_or_raise_allowance`), rather than letting a later
    on-chain redemption revert. There is no approval queue to fall back to
-   (#1090).
+   (#1090). **#3492:** when this tool also names the quote's
+   `idempotency_key` and the #3054 read resolves it to an already-SETTLED
+   erc7710 payment for this exact quote, the budget-precheck answers
+   sufficient (`replay: true`) instead — this bullet's refusal never fires —
+   and the authorize step that follows falls through to the #3417 done
+   state for the same settled replay, rather than a fresh purchase. **#3527:**
+   the same bypass extends to a settled EIP-3009 replay (confirmed funding
+   leg); step 9's `createX402Intent` call then reaches its own confirmed
+   state, answered either as the `eip3009ConfirmedReplayResponse` done state
+   (funding_tx_hash set, settlement_tx_hash always null; `settled: true` only when the merchant settlement is verified) or, with no
+   merchant-leg evidence yet, the funded-awaiting-merchant / check-status-later
+   answer — see the compat note's #3527 entry for the exact split.
+
+   > **#3518 re-verification, 2026-10-01 — WHICH budget the compare runs
+   > against.** The pre-check selects the payment's OWN budget
+   > (`selectBudgetForPaymentReport`, the mirror of the payment rule
+   > `SELECT_DELEGATION_FOR_PAYMENT_SQL`): a recipient-pinned budget for
+   > `merchantTo` wins, a pin to a different payee is excluded, and the open
+   > budget answers everything else — never the FIRST per-token row, which
+   > with an open 0.001 beside a pinned 0.005 described a budget that did
+   > not pay. No `merchantTo` in the call → only the open budget is
+   > eligible (a pinless quote cannot claim a recipient-scoped grant). This
+   > changes refusals in both directions: an open 0.001 plus a pinned 0.005
+   > for the pinned merchant is no longer refused; a large open budget
+   > beside a small pin for this payee is now refused on the pin's
+   > remaining. Success and refusal bodies both name the budget that paid
+   > (`budget_id`, `budget_delegation_hash`,
+   > `budget_recipient_address`, `budget_merchant_id`), additive/optional;
+   > the typed refusal contract (`error_code`, `phase`,
+   > `next_action`, `remaining_atomic`, `shortfall_atomic`, the refusal
+   > ledger row) is unchanged — only the budget whose figures it cites
+   > moved. The allowance rows this section's summary reports carry the
+   > same identity (`delegation_hash`) plus scope
+   > (`recipient_address`, `merchant_id`) and the Haven-side
+   > reservation (`reserved_haven_atomic`, summed beside the on-chain
+   > remaining, never folded into it).
 
    > **This bullet described a two-rail split until #2265, and the legacy half
    > was false on every clause.** It read: "on the **legacy** rail, an
@@ -891,19 +937,32 @@ values are the #1090 `deriveDelegationBudgets`-backed enforcer read, never
 the same fixture. Shape:
 
 ```text
-{ rail: 'legacy' | 'delegation', remaining_atomic: string,
-  remaining_display?: string, token_symbol?: string, token_address?: string,
-  reset_period?: number, source: 'allowance_module' | 'active_delegations' }
+{ rail: 'delegation', remaining_atomic: string, remainingAtomic?: string,
+  remaining_display?: string, remainingDisplay?: string,
+  token_symbol?: string, tokenAddress?: string, tokenSymbol?: string,
+  token_address?: string, reset_period?: number, resetPeriodMin?: number,
+  source: 'active_delegations' }
 ```
 
-As in #1306's block above, the `'legacy'` / `'allowance_module'` arm is the
-declared type rather than a reachable value: this summary reads through
+#3464: the declared type is the delegation arm only. The former
+`'legacy'` / `'allowance_module'` arms were the declared type rather than a
+reachable value — this summary reads through
 `GET /machine-payments/allowances`, which 410s for a retired-rail account
 (#2020), and it only fires for a settled x402 payment, which a retired-rail
-account cannot have (#1986). Doubly unreachable (#2265).
+account cannot have (#1986) — doubly unreachable (#2265) — so the type now
+carries the one reachable arm instead of dead ones. The canonical key
+spelling is the camelCase set — `remainingAtomic`, `remainingDisplay`,
+`resetPeriodMin`, `tokenSymbol`, `tokenAddress` — the SAME names
+`haven_get_agent`'s `allowances[]` rows report; the snake_case keys
+(`remaining_atomic`, `remaining_display`, `token_symbol`, `token_address`,
+`reset_period`) are DEPRECATED and kept for a deprecation window, removed
+once `packages/qa-agent` reads the camelCase keys.
 
-Deliberately the SAME rail-labeled spelling as #1306's `allowance` block,
-minus the preflight-only `sufficient` field — post-purchase reporting answers
+Deliberately the SAME spelling as `haven_get_agent`'s `allowances[]` rows —
+which is also the spelling of #1306's `allowance` block above, minus the
+preflight-only `sufficient` field (#3464 restated the invariant from
+"matches #1306" to "matches `haven_get_agent`"; the two blocks still move
+together) — post-purchase reporting answers
 "what is left", not "was this purchase covered". This is read-only reporting,
 never a spend authority claim: the on-chain policy (the active delegation's
 caveat enforcers) remains the actual gate regardless of
@@ -916,7 +975,11 @@ settled token (#1320 review: unknown is reported as unknown, never a
 fabricated zero) —
 folded into the response's existing `warnings[]` (#1308). `ALLOWANCE_CHECK_UNAVAILABLE`
 predates this issue (#1306) and is reused rather than respelled; per #1318 it
-was confirmed SDK-side only, never mirrored on the backend.
+was confirmed SDK-side only, never mirrored on the backend. #3464: the
+summary's `remainingDisplay` is now produced by the ONE shared formatter
+(`formatRemainingDisplay`) `haven_get_agent` uses, so a settled
+unknown-decimals token reports the same explicit atomic label get_agent does
+instead of omitting the field.
 
 Freshness caveat (#1319): the delegation rail's on-chain enforcer read can
 silently fall back to the optimistic full period budget without throwing when
@@ -924,9 +987,26 @@ the RPC read itself fails (the pre-existing #1145 design, deliberately
 unchanged by #1319 — the fallback stays fund-safe). The underlying wire now
 carries the provenance (`onchain.remaining_is_from_chain`, #1319), but this
 summary — unlike the #1306 catalog-purchase preflight above — does not yet
-surface it as a warning; `remaining_atomic` still reflects the last successful
+surface it as a warning; `remaining_atomic` / `remainingAtomic` still reflect
+the last successful
 chain read, not a guaranteed-live one, and phrasing here avoids claiming
 freshness.
+
+#3518 re-verification (2026-10-01): the settled row now names the budget that
+metered it. `payment_intents.budget_delegation_hash` (recorded at authorize,
+migration 053) rides `GET /machine-payments/:id/status` as
+`budget_delegation_hash` / SDK `budgetDelegationHash` (additive/optional;
+omitted on the legacy rail and on rows predating migration 053), and the
+settle summary picks the allowance row whose `delegationHash` equals it —
+the budget that PAID — instead of re-deriving a (token, payee) first match
+whose winner can move between pay and settle (the grants' window can shift,
+and task-/sub-budget payments meter their PARENT by hash while the payee
+matches no pin at all). The token first-match remains only as the fallback
+for an older backend whose status predates the field. A status payload that
+carries the field but matches none of the agent's own rows (a sub-budget
+payment metering another agent's budget, or a re-key between pay and settle)
+reports the figure unavailable (`ALLOWANCE_CHECK_UNAVAILABLE`), never another
+budget's remaining; the failed-read degradation above is unchanged.
 
 ## Resuming An Authorized Payment
 
@@ -1034,6 +1114,17 @@ case 1 fires on the next status call; `accepted` posts `POST
 /machine-payments/evidence`, which upgrades `proof_status` to
 `merchant_response_observed` and therefore removes the payment from case 2's
 predicate permanently rather than until the window elapses.
+
+> **Re-verified (#3475 follow-up, 2026-09-30, passage only).** An `accepted`
+> outcome on an eip3009 payment with no merchant *settlement* recorded yet
+> (a separate fact from the evidence row above — the delegate → merchant
+> transfer, not the merchant's HTTP response) also names
+> `haven_report_settlement_evidence` as the next tool, `payment_id`
+> prefilled: pass the merchant's `PAYMENT-RESPONSE.transaction` as
+> `settlement_tx_hash` if it returned one. A call carrying only `payment_id`
+> is a well-formed success no-op — nothing checked, nothing recorded — never
+> a refusal, since the merchant may simply have returned no hash.
+> `last-verified` unchanged.
 
 The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
 drew it for a caller-asserted settlement hash:
@@ -1189,6 +1280,28 @@ now carries the same distinction the confirmation text already made.
 | Header sent to merchant | None | EIP-3009: `PAYMENT-SIGNATURE` **and** `X-PAYMENT`, same value (#2289); erc7710: `PAYMENT-SIGNATURE` alone (#2341) |
 | Payment authority | Agent signature over the account's typed data, redeeming the owner-signed budget delegation; the caveat enforcers are the gate | Same for the funding leg; EIP-3009 signature for the merchant leg |
 | Restart recovery | Fetch payment status | Rehydrate stored x402 context by payment id (`getResumeState`); resume when status answers `retry_original_x402_request` (#2145) — see [Resuming An Authorized Payment](#resuming-an-authorized-payment) |
+| Recipient history hint | `recipient.class` (#3531), direct `/payments` only | Not present |
+
+**`recipient.class` (#3531).** A direct `POST /payments` 201 carries a
+top-level, advisory `recipient: { class }` — never inside `sign_data`, which
+the signer validates and which stays byte-identical with or without this
+field. `previously_paid` when the AUTHENTICATED AGENT itself has any prior
+CONFIRMED payment to this exact recipient address on this chain — any token
+and any rail (direct, x402 or MPP); `new_address` otherwise. A failure of
+that read omits the field; it never fails the prepare. It is history-only by owner decision (2026-10-01): no
+`own_account`, `contact` or `catalog_merchant` class is computed or returned,
+so an agent cannot learn anything about the owner's accounts or address book
+by probing addresses — the #3528/#3560 lesson (a `SELF_TRANSFER` warning that
+leaked exactly that, withdrawn before reaching `main`). It never looks at
+another agent's or another owner's confirmed payments, changes no refusal, no
+`safe_to_continue` value, and is recomputed (never carried on the row) on an
+idempotent replay of the same key, so a replay answers the caller's CURRENT
+history rather than a stale snapshot. The hosted `haven_send`/`haven_pay`
+results carry it as a top-level `recipient_class` (not inside
+`agent_summary`); the local `@haven_ai/mcp`
+`haven_send` does not, because it calls the all-in-one `pay()`, whose
+`PaymentResult` is built from post-confirmation state and carries nothing from
+the intermediate `createIntent()` call this field is computed at.
 
 The `payment_intents` INSERTs are the SAME
 rail-agnostic `infra/repositories/` writers the mpp module uses for its own
@@ -1232,8 +1345,9 @@ The flow is a two-call variant of `/x402/authorize`:
    *when* Haven says no. Previously this branch prepared nothing at authorize —
    unlike `POST /payments` and, at the time, the EIP-3009 shape, which
    estimated a redemption and so surfaced the enforcer's refusal as a `502`
-   with no intent row (the 3009 shape gained the same pre-check in #2706, so
-   today only `POST /payments` reaches the enforcer unconditionally) — so an
+   with no intent row (the 3009 shape gained the same pre-check in #2706 and
+   `POST /payments` in #3503, so no path reaches the enforcer unconditionally
+   any more) — so an
    over-budget erc7710 request came back `201 pending_signature` **with**
    `sign_data`, and the refusal only landed after the agent had signed, settled,
    and retried the merchant. Since [#1450](https://github.com/d-hinders/Haven-AI/issues/1450)
@@ -1378,14 +1492,18 @@ in the SDK, the same spelling `AgentPurchaseSummary` already uses):
 `funding_tx_hash` is `tx_hash` on eip3009 (and on scheme-less retired-x402
 rows) and `null` on erc7710 and on scheme-less retired mpp-rail rows (one
 direct account → merchant transaction); `settlement_tx_hash` is `tx_hash`
-itself on erc7710 and on those retired mpp rows, and on eip3009 is
+itself on erc7710 and on those retired mpp rows. On eip3009 it is, first,
+the merchant settlement an agent reported and Haven verified on-chain (#3475,
+`machine_metadata.merchant_settlement_tx_hash`: a delegate → merchant
+Transfer of exactly the amount, mined after this payment's funding, through
+`haven_report_settlement_evidence`); otherwise
 `protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed
-32-byte hash, else `null` — the merchant has not reported a settlement, or
+32-byte hash; else `null` — the merchant has not reported a settlement, or
 reported the zero-hash "delivered, not settled" marker `isZeroSettlementTxHash`
-recognizes elsewhere in the SDK. The trust level differs: on erc7710 Haven
-verified the settlement hash on-chain before the receipt existed; on eip3009
-it is the merchant's claim as relayed in `PAYMENT-RESPONSE`, not verified
-on-chain by Haven — cite it as such. `tx_hash` /
+recognizes elsewhere in the SDK. The trust level differs: on erc7710, and on
+eip3009 when the hash is the verified report, Haven verified it on-chain; the
+eip3009 fallback is the merchant's claim as relayed in `PAYMENT-RESPONSE`, not
+verified on-chain by Haven — cite it as such. `tx_hash` /
 `txHash` are unchanged and kept for wire compatibility, marked deprecated in
 their OpenAPI/SDK description only.
 
@@ -2049,8 +2167,10 @@ child's delegator and its delegate (owner decision 2026-09-25, recorded on
 #3329) — so the chain a payment redeems is `[task child, budget]`, the
 `ERC20TransferAmountEnforcer` on the child caps the run and the
 `ERC20PeriodTransferEnforcer` on the budget still meters the period. Over the
-child's amount or past its expiry the redemption reverts during gas
-estimation; nothing queues. Key separation for a *different* delegate is
+child's amount, Haven refuses first with a typed 403 `task_budget_exceeded`
+(#3500), read from the child's own `spentMap` on every path that takes a task
+budget; if that read is unavailable, the enforcer still reverts at gas
+estimation. Past its expiry the redemption reverts; nothing queues. Key separation for a *different* delegate is
 #3330's job, not this one.
 
 **Lifecycle** (`packages/backend/src/modules/task-budgets/`,
@@ -2090,6 +2210,25 @@ short explanation above the task-budget list —
 an open child reserves nothing on-chain, so the two figures are shown apart
 rather than netted into a number the chain would not agree with.
 
+#3518 re-verification (2026-10-01): the agent-facing reads now say which
+budget and what is reserved. `GET /machine-payments/allowances` rows carry
+`delegation_hash` / `recipient_address` (null = open) / `merchant_id`
+(null except a #3331 merchant-locked budget) / `reserved_haven_atomic` —
+the sum of the budget's OPEN, unexpired task- and sub-budget children's
+caps, keyed by delegation hash and reported BESIDE `onchain.remaining`,
+never folded into it (the on-chain figure stays authoritative; a
+reservation releases on close/expire without any chain event). The
+sub-budget half of that sum walks grant → parent-child → the budget
+delegation's hash (`SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL`) —
+`sumOpenReservedForParent` keys on the parent-child row's OWN hash and
+would answer 0 here. `GET /task-budgets?status=live` (and the MCP/SDK reads
+over it) list closing rows always and unexpired pending and open rows, each
+with its `status` (closed and expired rows omitted; `status=all` still
+answers every row), and
+`GET /task-budgets/:id` is the read-by-id the MCP
+`haven_get_task_budget` surfaces — the status check a close refusal's
+"re-check the budget's status" points at, for any status.
+
 ## Sub-agent budgets — an agent re-delegates a narrower budget to another agent (#3330)
 
 A **sub-budget** is agent A re-delegating a narrower budget to agent B in the
@@ -2098,8 +2237,9 @@ its own budget delegation (the parent-child), then grants it to agent B's
 delegate account (the grant). Both children are `erc20PeriodTransfer`-scoped
 with the SAME periodDuration and startDate as the parent — a slice of the same
 window, never a different clock — and are issued owner-governed (the owner
-co-signs each sub-budget; A's delegate key only signs within the
-owner-approved envelope, decision log 2026-09-27). The chain agent B redeems
+issues each sub-budget; A's delegate key only signs within the
+owner-approved envelope, decision log 2026-09-27; A submits its own
+signatures, decision log 2026-10-01). The chain agent B redeems
 is three links, leaf first:
 
 ```
@@ -2120,8 +2260,14 @@ itself redeems `[grant, parent-child, budget]` (three links).
 **Lifecycle** (`packages/backend/src/modules/sub-budgets/`,
 `routes/agent-sub-budgets.ts`, `routes/sub-budgets.ts`, migration 100):
 
-1. `POST /agents/:id/sub-budgets` (the OWNER) issues
-   `{ period_amount_human, period, expiry, recipient? }` for agent B; the API
+1. `POST /agents/:id/sub-budgets` (the OWNER, from the dashboard's issue flow
+   or the API) issues `{ sub_agent_id, period_amount_atomic, expires_at,
+   token_address?, recipient_address?, label? }` for agent B (`token_address`
+   defaults to the chain's USDC). There is no period input: the child inherits
+   the parent's period window. The parent is A's active budget delegation for
+   that token, selected the way a payment selects one — recipient-pinned
+   first (matched against the requested recipient, else A's treasury), else
+   open. The API
    decodes the parent budget delegation and refuses a child wider than the
    parent in amount, expiry or recipient BEFORE signing
    (`sub_budget_wider_than_parent`), and both rows are stored `pending`
@@ -2130,10 +2276,15 @@ itself redeems `[grant, parent-child, budget]` (three links).
 2. A's delegate key signs both rows — `haven_sign` with `sub_budget_id`
    fetches the exact bytes from `GET /sub-budgets/:id/sign-context`
    (delegator-scoped: only A can fetch; A signs both) and runs the SDK's
-   `assertOwnSubBudgetChild`; `POST /sub-budgets/:id/submit` (A) and the
-   owner's `POST /agents/:id/sub-budgets/:id/sign` flip each row
-   `pending`→`open` as its signature lands. B's grant is redeemable only
-   once BOTH rows are open.
+   `assertOwnSubBudgetChild`. A submits each signature itself, with
+   `haven_submit { sub_budget_id, signature }` → `POST /sub-budgets/:id/submit`
+   (#3506; issuance answers `next_action: 'agent_signs_then_submits'`), which
+   flips the row `pending`→`open` as its signature lands. A finds its pending
+   rows in `haven_get_agent`'s `pendingSubBudgetSignatures`
+   (`GET /sub-budgets?status=awaiting_signature`). The owner's
+   `POST /agents/:id/sub-budgets/:id/sign` relay still works but is optional
+   (decision log 2026-10-01). B's grant is redeemable only once BOTH rows are
+   open.
 3. Agent B names the budget: `sub_budget_id` on `POST /payments`,
    `subBudgetId` on `POST /x402/authorize`. The backend refuses before
    building the chain when the grant or its parent-child row is not open
@@ -2146,6 +2297,21 @@ itself redeems `[grant, parent-child, budget]` (three links).
    child (its chain root no longer resolves active by hash, and reverts
    on-chain once the owner's disable lands) — surfaced as the structured 409
    above.
+   On `POST /x402/authorize` both legs resolve the scope through
+   `modules/budget-scope` (#3617) and pre-check the links the redemption
+   carries (`periodPrecheckLinks`): B's grant, A's parent-child and A's budget,
+   with the smallest remaining deciding and each link failing open on its
+   own, the rule `POST /payments` applies. A task budget pre-checks its parent
+   by hash on both legs too. Before #3617 the erc7710 leg read only A's budget,
+   and the EIP-3009 funding leg read B's own (token, `payTo`) grant, which is
+   not a link of the chain it redeems. On the erc7710 leg the scope now
+   resolves before the no-delegation refusal, so a B with no
+   `agent_delegations` row of its own pays through its sub-budget, and a
+   scope refusal comes before `no_delegation_for_target`. The funding leg
+   matches the scope's recipient pin against `payTo`, the delegate EOA that
+   leg's redemption transfers to; a merchant-pinned budget reverts there
+   on-chain either way. The hosted `haven_pay_x402_quote` takes no
+   `sub_budget_id`, so B pays x402 through the local MCP.
 4. `DELETE /agents/:id/sub-budgets/:sub` (owner) or `POST
    /sub-budgets/:id/close` (the owning agent, A or B) prepares a sponsored
    `disableDelegation(child)` UserOp from the closing agent's OWN delegate
@@ -2158,8 +2324,9 @@ itself redeems `[grant, parent-child, budget]` (three links).
 - *Two-party flow:* owner-governed issuance (the owner picks B, amount,
   expiry, pin; the API refuses wider-than-parent pre-sign), then A's delegate
   key signs both already-built children within that owner-approved envelope
-  and the owner relays each signature (`POST /agents/:id/sub-budgets/:id/sign`,
-  decision log 2026-09-27).
+  and A submits each signature itself (`haven_submit { sub_budget_id }`; the
+  owner relay `POST /agents/:id/sub-budgets/:id/sign` stays optional, decision
+  log 2026-10-01, superseding the relay half of 2026-09-27).
 - *A's rekey:* A's rekey revokes A's budget delegation, so B's child dies with
   it — surfaced, not hidden: the parent-child's chain root stops resolving
   active by hash and B's payments answer the structured 409 above, and the

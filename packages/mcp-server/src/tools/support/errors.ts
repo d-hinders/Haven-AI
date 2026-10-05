@@ -181,6 +181,71 @@ const RAIL_UNAVAILABLE_ERROR_CODE = 'rail_unavailable_for_chain'
 const RAIL_UNAVAILABLE_OMITTED_REASON =
   "this Haven deployment cannot serve this chain's payments until its operator provisions it; retrying gets the same answer, so tell the user"
 
+/** #3500: the backend's `error_code` for a payment an open task budget's cap cannot cover. */
+const TASK_BUDGET_EXCEEDED_ERROR_CODE = 'task_budget_exceeded'
+const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
+  "the task budget's cap is spent and is enforced on-chain, so retrying cannot succeed; close it and open a new one, or pay without it, after telling the user"
+
+/** #3564 (the #3494 mapping follow-through): the backend's `error_code` for a submit whose receipt was never confirmed. */
+const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
+const SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON =
+  'the payment was submitted but its on-chain outcome is not known yet, and no payment id is available to poll; do not create a new payment for this — tell the user, who can check the account\'s activity or the userOpHash before paying again'
+
+/** #3504: the backend's `error_code` for a payment the delegation's period budget cannot cover. */
+const DELEGATION_BUDGET_EXCEEDED_ERROR_CODE = 'delegation_budget_exceeded'
+const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
+  "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
+
+/**
+ * #3494: the backend's `error_code` when the delegate account rejected the
+ * UserOperation signature during on-chain validation (`POST
+ * /payments/:id/sign`, ERC-4337 `AA24 signature error` — the ONE AA2x code
+ * this backend attributes to the signer; see `ACCOUNT_VALIDATION_FAILED`
+ * below for the rest of the family). The intent is already `failed`; this
+ * payment_id has nothing left to resubmit — a NEW payment, signed by a
+ * corrected signer, is the only path.
+ */
+const SIGNATURE_REJECTED_ERROR_CODE = 'signature_rejected'
+const SIGNATURE_REJECTED_OMITTED_REASON =
+  'the account rejected this signature during on-chain validation; retrying this payment_id cannot succeed — update the signer, then create a NEW payment, after telling the user'
+
+/**
+ * #3494 review round 1 (S1): every OTHER ERC-4337 AA2x validation failure —
+ * a real `validateUserOp` rejection, but NOT evidence the signature itself
+ * is wrong (AA24 alone is `signature_rejected` above). Deliberately never
+ * names the signer: the remedy is a new payment, not a signer update.
+ */
+const ACCOUNT_VALIDATION_FAILED_ERROR_CODE = 'account_validation_failed'
+const ACCOUNT_VALIDATION_FAILED_OMITTED_REASON =
+  'the account rejected this payment during on-chain validation (not a signature cause); retrying this payment_id cannot succeed — create a new payment, after telling the user'
+
+/**
+ * #3494: the backend's `error_code` for every other `POST /payments/:id/sign`
+ * on-chain/bundler failure — the one case this route cannot classify as a
+ * signature, account-validation or budget cause, INCLUDING a
+ * `SubmittedUserOpFailedError` whose `reverted` flag is `true` (round 2,
+ * N3): the op executed and reverted is a KNOWN, confirmed outcome (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed), unlike
+ * `SUBMISSION_OUTCOME_UNKNOWN` below. Still a failed intent, so still
+ * stop-and-tell, never the generic 5xx "retry once" below (there is no live
+ * state left on this payment_id for a retry to find).
+ */
+const ONCHAIN_EXECUTION_FAILED_ERROR_CODE = 'onchain_execution_failed'
+const ONCHAIN_EXECUTION_FAILED_OMITTED_REASON =
+  'this payment_id already failed on-chain and cannot be retried; tell the user what the message says, and create a new payment if they still want to pay'
+
+/**
+ * #3609: the backend's `error_code` when a delegation-rail PREPARE simulation
+ * REVERTED (`POST /payments`, the x402 EIP-3009 funding leg) — a caveat
+ * enforcer or any other on-chain revert. Deterministic: the same payment
+ * reverts again on every retry, so this is stop-and-tell, never the generic
+ * 5xx "retry once" below. Its sibling `prepare_failed` (not a revert — a
+ * bundler, RPC or transport failure) deliberately has NO branch here: it is
+ * the transient case the generic 5xx step was written for.
+ */
+const PREPARE_REVERTED_ERROR_CODE = 'prepare_reverted'
+const PREPARE_REVERTED_OMITTED_REASON =
+  'the payment reverted during on-chain simulation (see revert_reason); nothing was signed or moved and retrying the same payment reverts again — tell the user the reason; a budget, recipient or expiry caveat is changed by the wallet owner in Haven'
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -246,6 +311,194 @@ export function normalizeError(err: unknown): ToolFailure {
     return {
       success: false,
       code: 'RAIL_UNAVAILABLE_FOR_CHAIN',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #3500: a payment the task budget's cap cannot cover. A 403 would already
+  // say stop, but under the generic API_ERROR code; the agent needs to know
+  // it is the TASK BUDGET that is spent (so it can close it and open a new
+  // one), not the agent's budget, and never to retry.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === TASK_BUDGET_EXCEEDED_ERROR_CODE
+  ) {
+    const body = err.body as { task_budget_id?: string; remaining_atomic?: string | null }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: TASK_BUDGET_EXCEEDED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'TASK_BUDGET_EXCEEDED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      ...(body.task_budget_id ? { task_budget_id: body.task_budget_id } : {}),
+      ...(body.remaining_atomic !== undefined ? { remaining_atomic: body.remaining_atomic } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #3504: a payment the delegation's period budget cannot cover. The same
+  // condition already reached the agent as the catalog path's typed
+  // DELEGATION_BUDGET_EXCEEDED refusal (catalog-purchase.ts step 6); every
+  // other tool relayed the backend's typed 403 as the generic 4xx API_ERROR
+  // below, dropping the backend's own next_action and the remaining/shortfall
+  // figures. The backend's body carries the taxonomy field for field on every
+  // path that answers it (delegation-authorize.ts both schemes, mpp
+  // budget-precheck, the direct POST /payments pre-check), so this branch
+  // relays the decision: the body's fund_account_or_raise_allowance step with
+  // a reason naming the remedy, and the atomic figures the agent reports.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === DELEGATION_BUDGET_EXCEEDED_ERROR_CODE
+  ) {
+    const body = err.body as {
+      remaining_atomic?: string | null
+      shortfall_atomic?: string | null
+      phase?: string
+      rail?: string
+    }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+      nextTool: null,
+      nextToolOmittedReason: DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'DELEGATION_BUDGET_EXCEEDED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      ...(body.remaining_atomic !== undefined ? { remaining_atomic: body.remaining_atomic } : {}),
+      ...(body.shortfall_atomic !== undefined ? { shortfall_atomic: body.shortfall_atomic } : {}),
+      ...(body.phase !== undefined ? { phase: body.phase } : {}),
+      ...(body.rail !== undefined ? { rail: body.rail } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #3564 (the #3494 mapping follow-through): `POST /payments/:id/sign`'s
+  // receipt-unconfirmed case is NO longer a transient 5xx and the backend no
+  // longer books it `failed` — the intent row stays outcome-pending
+  // (`submitted`, userOpHash recorded) and the submission reconciler resolves
+  // it from the chain. Unlike #3494's world, `haven_get_payment_status` IS
+  // truthful here, so with the body's payment_id the step names that read
+  // (the id comes from the body — the SDK builds these errors without a
+  // paymentId arg). What did NOT change: "create a new payment" is still the
+  // wrong instruction — the submitted UserOp may have landed — so the step
+  // never says retry, and without a payment id to poll (older backend or an
+  // unparseable body) the answer is stop_and_tell_user with the user checking
+  // the account's activity or the UserOperation hash, never a new payment.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE
+  ) {
+    const body = err.body as { error_code?: string; payment_id?: string }
+    const step =
+      body.payment_id
+        ? refusalNextStep({
+            nextAction: AgentPaymentNextAction.CheckStatusLater,
+            nextTool: 'haven_get_payment_status',
+            nextArguments: { payment_id: body.payment_id },
+          })
+        : refusalNextStep({
+            // Not check_status_later here: that action's default table names
+            // haven_get_payment_status, which cannot be called without a
+            // payment id. Stop, say why no new payment may be created, and
+            // let the user check the account's activity or the UserOperation
+            // hash.
+            nextAction: AgentPaymentNextAction.StopAndTellUser,
+            nextTool: null,
+            nextToolOmittedReason: SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON,
+          })
+    return {
+      success: false,
+      code: 'SUBMISSION_OUTCOME_UNKNOWN',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId ?? body.payment_id,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === ACCOUNT_VALIDATION_FAILED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: ACCOUNT_VALIDATION_FAILED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'ACCOUNT_VALIDATION_FAILED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === SIGNATURE_REJECTED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: SIGNATURE_REJECTED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'SIGNATURE_REJECTED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === PREPARE_REVERTED_ERROR_CODE
+  ) {
+    const body = err.body as { revert_reason?: string | null; refusal_reason?: string }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: PREPARE_REVERTED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'PREPARE_REVERTED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      ...(body.revert_reason !== undefined ? { revert_reason: body.revert_reason } : {}),
+      ...(body.refusal_reason !== undefined ? { refusal_reason: body.refusal_reason } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === ONCHAIN_EXECUTION_FAILED_ERROR_CODE
+  ) {
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: ONCHAIN_EXECUTION_FAILED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'ONCHAIN_EXECUTION_FAILED',
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId,

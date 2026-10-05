@@ -73,6 +73,7 @@ export type HostedToolName =
   | 'haven_submit_catalog_entry'
   | 'haven_open_task_budget'
   | 'haven_close_task_budget'
+  | 'haven_get_task_budget'
 
 /**
  * #2282: the hosted MCP tool boundary spells arguments in **snake_case**
@@ -212,6 +213,11 @@ export const toolSchemas = {
     // sub-agent B). Mutually exclusive with task_budget_id — the backend
     // refuses a body naming both.
     sub_budget_id: z.string().min(1).optional(),
+    // #3495: the result is compact by default (no typed_data / typed_data_b64
+    // — #1272's contract). Set true on a re-run naming the SAME idempotency_key
+    // (generated and echoed when omitted) to get the relay pair back: the
+    // backend replays the stored payment, it never creates a second one.
+    include_signing_payload: z.boolean().optional(),
   },
   haven_pay: {
     token: z.string().min(1),
@@ -224,13 +230,19 @@ export const toolSchemas = {
     // #3330: spend against an open sub-budget this agent holds (it is
     // sub-agent B). Mutually exclusive with task_budget_id.
     sub_budget_id: z.string().min(1).optional(),
+    // #3495: same contract as haven_send — see there.
+    include_signing_payload: z.boolean().optional(),
   },
   haven_submit: {
-    // #3329: exactly one of payment_id / task_budget_id — never both, never
-    // neither. Amount, recipient, expiry and (for a task budget) the parent
-    // budget it draws from all come from the stored record either way.
+    // #3329 / #3506: exactly one of payment_id / task_budget_id /
+    // sub_budget_id — never two, never none. Amount, recipient, expiry and
+    // (for a task or sub-budget) the parent budget it draws from all come from
+    // the stored record either way.
     payment_id: z.string().min(1).optional(),
     task_budget_id: z.string().min(1).optional(),
+    // #3506: the delegating agent's signature for a sub-budget row (the
+    // signer's haven_sign names this key in next_arguments).
+    sub_budget_id: z.string().min(1).optional(),
     signature: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
@@ -254,6 +266,12 @@ export const toolSchemas = {
     token: z.string().optional(),
   },
   haven_close_task_budget: {
+    task_budget_id: z.string().min(1),
+  },
+  // #3518: read ONE task budget by id — the status check a close refusal's
+  // "re-check the budget's status" points at, including pending/closing
+  // rows the agent summary now lists with `status`.
+  haven_get_task_budget: {
     task_budget_id: z.string().min(1),
   },
   haven_pay_mcp_tool: {
@@ -324,7 +342,7 @@ export const toolSchemas = {
         'max_amount_human must be a plain decimal amount in whole tokens, e.g. "1" or "0.25"',
       )
       .optional(),
-    idempotency_key: z.string().optional(),
+    idempotency_key: z.string().min(1).max(128).optional(),
     // #1272: same contract as haven_pay_mcp_tool — see there.
     include_signing_payload: z.boolean().optional(),
   },
@@ -452,16 +470,28 @@ export const toolSchemas = {
     // #2972: the remedy #2970's guidance could not name — an erc7710 agent
     // holding the merchant's real settlement transaction hash
     // (PAYMENT-RESPONSE.transaction, or a prior settle/complete result's
-    // settlement_tx_hash) while Haven holds none. Nothing else is taken: the
+    // settlement_tx_hash) while Haven holds none. #3475: equally an eip3009
+    // agent holding the PAYMENT-RESPONSE.transaction of a plain-HTTP merchant
+    // it retried itself. Nothing else is taken: the
     // payment's rail, amount, and merchant are read from Haven's own record,
     // scoped to this agent, exactly like haven_report_x402_outcome.
+    //
+    // #3475 follow-up: `settlement_tx_hash` is OPTIONAL — `haven_report_x402_outcome`
+    // now names this tool as the next step for an eip3009 acceptance before it
+    // knows whether the merchant returned a settlement hash at all, prefilling
+    // only `payment_id`. Calling with no hash is a well-formed call that
+    // SUCCEEDS as a no-op (review round 1, S3) — `recorded: false`, zero
+    // backend calls, `next_action: none` — rather than a refusal: an agent
+    // following next_tool / next_arguments verbatim must never get an error
+    // for doing exactly that. It never reports anything without a real hash.
     payment_id: z.string().min(1),
     settlement_tx_hash: z
       .string()
       .regex(
         /^0x[0-9a-fA-F]{64}$/,
         'settlement_tx_hash must be a 0x-prefixed transaction hash: 0x followed by exactly 64 hex characters (case-insensitive).',
-      ),
+      )
+      .optional(),
   },
   haven_get_payment_status: {
     payment_id: z.string().min(1),
@@ -720,9 +750,9 @@ export const STRICT_INPUT_TOOLS = {
   // from the stored intent. A stripped key here means relaying a signature for
   // a different question than the caller asked.
   haven_submit:
-    'Amount, recipient and rail come from the stored payment intent (or, for a task budget, ' +
-    'from the stored task budget record); this tool takes only which payment or which task ' +
-    'budget, which signature, and (optionally) which settlement scheme that signature is for.',
+    'Amount, recipient and rail come from the stored payment intent (or, for a task or sub-budget, ' +
+    'from the stored budget record); this tool takes only which payment, task budget or sub-budget, ' +
+    'which signature, and (optionally) which settlement scheme that signature is for.',
   // #1307: merchant_url / tool_name / arguments / mcp_transport are OPTIONAL
   // because Haven rehydrates the stored MCP call context from payment_id, and
   // it relays the funding signature: this one moves money before it delivers.
@@ -757,24 +787,24 @@ export const STRICT_INPUT_TOOLS = {
     'The local MCP (@haven_ai/mcp) used to spell it idempotencyKey — carrying that spelling ' +
     'here used to be dropped in silence, and the payment then reached POST /payments with no ' +
     'idempotency_key at all, so the replay contract never engaged and a retry spent twice. ' +
-    '@haven_ai/mcp now refuses idempotencyKey itself (#3411); it takes idempotency_key.',
+    '@haven_ai/mcp now refuses idempotencyKey itself; it takes idempotency_key.',
   haven_pay_mcp_tool:
     'This is the HOSTED surface, which spells the key idempotency_key (snake_case). ' +
     'The local MCP (@haven_ai/mcp) used to spell it idempotencyKey — carrying that spelling ' +
     'here used to be dropped in silence, and the SDK then fell back to a key DERIVED from the ' +
     "merchant quote inside a 5-minute bucket, so the caller's own replay scope was " +
     'silently replaced by a different one rather than merely lost. @haven_ai/mcp now refuses ' +
-    'idempotencyKey itself (#3411); it takes idempotency_key.',
+    'idempotencyKey itself; it takes idempotency_key.',
   haven_quote_x402:
-    'This is the HOSTED surface. It takes url, method, headers and body (#2366 added body, so ' +
+    'This is the HOSTED surface. It takes url, method, headers and body (body was added so ' +
     'a body-bearing POST paywall is quoted with the body the caller means to pay for). The ' +
     'local MCP (@haven_ai/mcp) additionally takes idempotency_key, which the hosted quote ' +
     'has no use for — carrying it here used to be dropped in silence. haven_discover_tools ' +
-    'hands you resource_url; this tool spells that argument url (#3100).',
+    'hands you resource_url; this tool spells that argument url.',
   haven_pay_x402_quote:
     'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
     '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotency_key — it used to ' +
-    'take idempotencyKey, but now refuses that spelling itself (#3411). Passing quote already ' +
+    'take idempotencyKey, but now refuses that spelling itself. Passing quote already ' +
     'failed loudly here, because payment_required is required — it is idempotencyKey that was ' +
     'dropped in silence before that, replacing the caller\'s replay scope with a key derived ' +
     'from the quote. Pass payment_required (the paymentRequired field of a haven_quote_x402 ' +
@@ -859,6 +889,9 @@ export const STRICT_INPUT_TOOLS = {
     'rather than dropped.',
   haven_close_task_budget:
     'This tool declares task_budget_id only; which budget closes is never inferred from ' +
+    'anything else, so an undeclared key is refused rather than dropped.',
+  haven_get_task_budget:
+    'This tool declares task_budget_id only; which budget is read is never inferred from ' +
     'anything else, so an undeclared key is refused rather than dropped.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
@@ -968,9 +1001,13 @@ const _noHostedToolIsDecidedTwice: [DoublyDecidedInputTool] extends [never]
 const PAY_DESCRIPTION = [
   'Construct a direct wallet payment inside the agent budget and return the unsigned payload for the local signer.',
   'For read-only allowance/budget questions use haven_get_allowances instead.',
-  'Returns { payment_id, payload_hash, expires_at, next_tool, next_arguments, signer_compatibility }.',
-  'Sign by payment_id; if the signer refuses with SIGN_CONTEXT_REFUSED / sign_context_unavailable (it signed',
-  'nothing), re-sign with { payload_hash, typed_data_b64 } from the result, UNCHANGED, then haven_submit.',
+  'Returns { payment_id, status, idempotency_key, payload_hash, expires_at, next_tool, next_arguments, signer_compatibility } —',
+  'compact by default, no typed_data / typed_data_b64; idempotency_key is generated when you pass none, and echoed here.',
+  'Sign by payment_id; if haven_sign refuses that call — carrying fallback: \'typed_data_b64\' (any code),',
+  'or SIGN_CONTEXT_REFUSED / sign_context_unavailable from an older signer (it signed nothing either way)',
+  '— re-run this tool with the SAME idempotency_key plus include_signing_payload=true — repeating token,',
+  'amount, recipient, task_budget_id and sub_budget_id, or it answers 409 — then re-sign with',
+  '{ payload_hash, typed_data_b64 } from that result, UNCHANGED, then haven_submit.',
   'A payment outside the budget, recipient or expiry is declined at prepare — nothing to sign, nothing queued:',
   'ask the user to raise the budget in Haven. Haven never receives the signing key.',
 ].join(' ')
@@ -983,8 +1020,8 @@ const SUBMIT_DESCRIPTION = [
   'When the quote reported settlement_scheme "erc7710", pass settlement_scheme: "erc7710" here:',
   'the signature is the settlement child, not a funding authorization, and the response returns',
   'payment_header for you to retry the merchant with — no funding tx, no header to build locally.',
-  'For a task budget (haven_open_task_budget / haven_close_task_budget), pass task_budget_id',
-  'INSTEAD of payment_id — exactly one, never both. Returns { task_budget, status }.',
+  'For a task budget pass task_budget_id, for a sub-budget (haven_get_agent pendingSubBudgetSignatures[])',
+  'sub_budget_id, INSTEAD of payment_id — exactly one id. Returns { task_budget | sub_budget, status }.',
 ].join(' ')
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -1018,7 +1055,7 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
     'Prefer this over haven_pay_mcp_tool when you hold a catalog_id from haven_discover_tools. A degraded catalog row refuses and names haven_pay_mcp_tool as the manual fallback. Read-only budget questions: haven_get_allowances.',
   behavior:
     'Exactly ONE cap is REQUIRED — max_amount_human (whole tokens, preferred) or max_amount (atomic); both or neither refuses before any network call, and with no user-stated cap, quote first (haven_quote_catalog_purchase) and cap at the quoted amount. The cap is enforced against the LIVE quote before any funding intent exists. ' +
-    'Returns the same compact quote shape as haven_pay_mcp_tool plus catalog fields and an allowance block { rail, sufficient, remaining_atomic, source }: an over-budget quote REFUSES here, before any payment exists and with no approval queue to fall back on. sufficient can be null with a warning when the read itself failed — the on-chain policy remains the real gate. ' +
+    'Returns the same compact quote shape as haven_pay_mcp_tool plus catalog fields and an allowance block { rail, sufficient, remainingAtomic (deprecated alias remaining_atomic — the name haven_get_agent reports; the snake_case key is kept for a deprecation window), source }: an over-budget quote REFUSES here, before any payment exists and with no approval queue to fall back on. sufficient can be null with a warning when the read itself failed — the on-chain policy remains the real gate. ' +
     'The response guidance says which settlement shape you are on (erc7710 direct settlement has no funding leg and no payment_header). Catalog prices are indicative; the live quote in this response is authoritative (CATALOG_PRICE_DIFFERS warns on mismatch). An unknown catalog_id, or one curated for a different chain, refuses with 404.',
   nextActionGuidance:
     'Next: the signer tool named by the response guidance, then haven_settle_mcp_tool. On a refusal, tell the user the budget was exceeded and ask them to raise it in Haven — never re-quote, re-pay, or poll: nothing is queued.',
@@ -1038,6 +1075,7 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Final step of the decomposed x402 MCP purchase: deliver the signed merchant payment header (both x402 wire names) and return the tool result.',
   behavior:
     'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — Haven rehydrates them by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
+    'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — recover with haven_sweep_delegate; on erc7710 (no funding leg) nothing moved, so re-quote instead.',
   nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
 })
@@ -1047,6 +1085,7 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the merchant payment header and return the merchant tool result.',
   behavior:
     'Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome for reconciliation via haven_list_receipts / haven_get_payment_status. ' +
+    'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
     'settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, SETTLEMENT_UNCONFIRMED, null settlement_tx_hash. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds, recover with haven_sweep_delegate; on erc7710 (no funding leg) nothing moved, so re-quote instead.',
   nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
@@ -1059,18 +1098,20 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
 })
 
 const PAY_X402_QUOTE_DESCRIPTION = [
-  'Step 1 of a direct x402 purchase (plain HTTP merchant, non-MCP): construct the funding step and',
+  'Step 1 of a direct x402 purchase (plain HTTP, non-MCP): build the funding step and',
   'return the unsigned hash for the local signer. Pass the payment_required from haven_quote_x402',
   'or straight from the merchant 402, plus url (haven_quote_x402\'s request_url): the paid',
   'retry goes there, never to the declared resource_url; public http:// is refused.',
-  'Read-only budget questions: haven_get_allowances.',
-  'Cap rule here: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
+  'Cap rule: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
   'quoted price as-is and the response carries cap_warning.',
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
-  'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
-  'The signer tool named in the response guidance (haven_sign_x402) returns payment_header INLINE',
-  'alongside the signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
+  'older signer. Over-budget is declined at prepare; nothing is held for later approval.',
+  'On the delegation rail a successful result also carries allowance { rail, sufficient,',
+  'remaining_atomic, source }: budget left before signing (sufficient null + warning if the read',
+  'failed). Budget questions: haven_get_allowances.',
+  'haven_sign_x402 (named in the guidance) returns payment_header INLINE with the',
+  'signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
   'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
   'Haven never talks to this merchant and never holds the key. The header is built before funding',
@@ -1089,6 +1130,9 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'On the funding-leg (EIP-3009) shape ONLY, report what the merchant answered to your retry with',
   'haven_report_x402_outcome. Nothing to report on erc7710: there confirmed already means the',
   'merchant settled.',
+  // #3617: the owner chose to delete the dead sub_budget_id forwarding rather
+  // than declare the argument, so say where a sub-budget pays instead.
+  'Sub-budgets (sub_budget_id) pay only through the local MCP\'s haven_pay_x402 tools.',
 ].join(' ')
 
 // #2145: the backend now emits nextAction=retry_original_x402_request from
@@ -1185,6 +1229,16 @@ const CLOSE_TASK_BUDGET_DESCRIPTION = [
   'recovery route if the signer predates task budgets.',
 ].join(' ')
 
+// #3518: the status check a close refusal's "re-check the budget's status"
+// names — reads ONE task budget by id, any status (pending/closing rows
+// included; haven_get_agent lists them with their status too).
+const GET_TASK_BUDGET_DESCRIPTION = [
+  'Read one task budget by id, any status.',
+  'Returns { task_budget } with status (pending | open | closing | closed), isExpired, maxDisplay, recipientAddress, label and expiresAt —',
+  'the check to run after a close or submit refusal says to re-check the budget\'s status.',
+  'haven_get_agent lists live task budgets only; this reads any one, closed or expired included.',
+].join(' ')
+
 const CHECK_FUNDS_DESCRIPTION = [
   sharedDescriptions.checkFunds.summary + '.',
   'Pass the token address or allowance symbol and ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic).',
@@ -1227,6 +1281,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
   haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
   haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
+  haven_get_task_budget: GET_TASK_BUDGET_DESCRIPTION,
 }
 
 export interface ToolSuccess<T> {
@@ -1256,6 +1311,15 @@ export interface ToolFailure {
    * cap refusal.
    */
   retry_with_new_quote?: boolean
+  /**
+   * #3609: on `PREPARE_REVERTED`, the short reason the simulation revert
+   * named (a decoded enforcer error; never an AA code — those answer
+   * `prepare_failed`) and the
+   * backend's refusal classification. Chain text — display it, never act
+   * on it.
+   */
+  revert_reason?: string | null
+  refusal_reason?: string
   /**
    * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
    * the same `next_tool` family a success does, built by the SDK's typed

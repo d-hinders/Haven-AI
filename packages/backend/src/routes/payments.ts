@@ -1,6 +1,7 @@
 import { RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import {
+  bookSubmittedOutcomePending,
   claimIntentForSubmission,
   confirmSubmittedIntent,
   expireOverdueIntent,
@@ -11,6 +12,7 @@ import {
   findIntentForAgent,
   getIntentStatus,
   findSendIntentByIdempotencyKey,
+  hasConfirmedPaymentToRecipient,
   insertDelegationIntent,
   listIntentsForAgent,
   releaseSubmittedClaim,
@@ -24,10 +26,19 @@ import {
 } from '../modules/payments/index.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
-import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payment-taxonomy.js'
+import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../domain/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { classifyRevertForLedger, refuse } from '../modules/payments/index.js'
+import {
+  classifyRevertForLedger,
+  isSignatureRejectedRevert,
+  isAccountValidationFailedRevert,
+  isPeriodBudgetRevert,
+  isTransferCapRevert,
+  boundFailureMessage,
+  prepareFailureBody,
+  refuse,
+} from '../modules/payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
@@ -45,66 +56,39 @@ import {
   allowanceModuleRailRetired,
   isRetiredAllowanceIntent,
 } from '../rails/execution-rail.js'
-import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../rails/delegation-rail.js'
+import {
+  DelegationRailChainUnavailableError,
+  SubmittedUserOpFailedError,
+  railUnavailableRefusalBody,
+} from '../rails/delegation-rail.js'
 import {
   prepareDelegationPayment,
+  selectDelegation,
   submitDelegationPayment,
 } from '../rails/delegation-authorization.js'
+import { readRemainingBudget } from '../infra/chain/delegation-budget-reader.js'
 import { getAgentPaymentResumeState } from '../modules/payments/index.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/index.js'
 import { quoteFee } from '../modules/fee/index.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
-import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
+// #3618: these two stay as DIRECT imports — the revert classification below
+// (the sign route's catch) re-reads live state itself and deliberately does
+// NOT read the #3616 resolver: the task-budget revert confirms against
+// `findTaskBudgetForAgent`, the period revert against
+// `selectActiveDelegationByHash` (single-hash read).
 import { findForAgent as findTaskBudgetForAgent } from '../infra/repositories/task-budgets.js'
-import type { Delegation } from '../rails/delegation-policy.js'
+import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
+import { checkTaskBudgetCap, taskBudgetExceededBody } from '../modules/task-budgets/index.js'
 import {
-  findForAgent as findSubBudgetForAgent,
-  findOpenParentChildByHash,
-} from '../infra/repositories/sub-budgets.js'
-import {
-  resolveSubBudgetForPayment,
-  type SubBudgetPaymentRefusal,
-} from '../modules/sub-budgets/index.js'
-import {
-  resolveTaskBudgetChildForPayment,
-  type TaskBudgetPaymentRefusal,
-} from '../modules/task-budgets/index.js'
-
-/** #3329 §3: the refusal table's HTTP status per code. */
-const TASK_BUDGET_REFUSAL_STATUS: Record<TaskBudgetPaymentRefusal, number> = {
-  task_budget_not_found: 404,
-  task_budget_not_open: 409,
-  task_budget_token_mismatch: 409,
-  task_budget_recipient_mismatch: 409,
-  task_budget_parent_mismatch: 409,
-}
-
-const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
-  task_budget_not_found: 'Task budget not found',
-  task_budget_not_open: 'Task budget is not open (closed, closing, pending, or expired)',
-  task_budget_token_mismatch: "This payment's token does not match the task budget's token",
-  task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
-  task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
-}
-
-/** #3330 §3: the sub-budget refusal table's HTTP status per code. */
-const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> = {
-  sub_budget_not_found: 404,
-  sub_budget_not_open: 409,
-  sub_budget_token_mismatch: 409,
-  sub_budget_recipient_mismatch: 409,
-  sub_budget_parent_mismatch: 409,
-}
-
-const SUB_BUDGET_REFUSAL_MESSAGE: Record<SubBudgetPaymentRefusal, string> = {
-  sub_budget_not_found: 'Sub-budget not found',
-  sub_budget_not_open: 'Sub-budget is not open (closed, closing, pending, or expired)',
-  sub_budget_token_mismatch: "This payment's token does not match the sub-budget's token",
-  sub_budget_recipient_mismatch: "This payment's recipient does not match the sub-budget's pinned recipient",
-  sub_budget_parent_mismatch:
-    "The sub-budget's chain is broken — its parent-child link is closed or it was not carved from the budget delegation selected for this payment",
-}
+  buildPeriodExceededBody,
+  evaluatePeriodPrecheck,
+  periodExceededLedgerDetail,
+  refuseBothScopeIds,
+  resolveBudgetScope,
+  taskCapExceededLedgerDetail,
+  type TaskCapInput,
+} from '../modules/budget-scope/index.js'
 
 /**
  * Surface the platform fee on a payment result so it's never silently collected
@@ -184,6 +168,36 @@ interface PaymentIntentRow {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
+
+/**
+ * #3531: advisory `recipient.class` on `POST /payments` — `previously_paid`
+ * when THIS agent has ANY prior CONFIRMED payment to this exact recipient
+ * address on this chain, on ANY rail (direct, x402 or MPP — including an
+ * EIP-3009 funding leg whose `to_address` is the agent's own delegate EOA,
+ * which is harmless: it is still this agent's own history), `new_address`
+ * otherwise. History-only by owner decision (2026-10-01): no
+ * `own_account`/`contact`/`catalog_merchant` lookup, so an agent can never
+ * probe for the owner's accounts or contacts by guessing addresses — only
+ * its own settled payment history, which it already knows. Never affects
+ * policy or signing; it is informational for the caller.
+ *
+ * #3531 review S3: the advisory read must never fail the prepare — a throw
+ * here (a transient DB blip) is swallowed and the field is simply OMITTED,
+ * never a 500 on an otherwise-successful payment.
+ */
+type RecipientClass = 'previously_paid' | 'new_address'
+
+async function classifyRecipient(
+  agent: Pick<AgentContext, 'id' | 'chain_id'>,
+  toAddressLower: string,
+): Promise<{ class: RecipientClass } | undefined> {
+  try {
+    const previouslyPaid = await hasConfirmedPaymentToRecipient(agent.id, agent.chain_id, toAddressLower)
+    return { class: previouslyPaid ? 'previously_paid' : 'new_address' }
+  } catch {
+    return undefined
+  }
+}
 
 /** Resolve a token symbol to its config for a specific chain. */
 function resolveToken(chainId: number, symbol: string) {
@@ -316,11 +330,21 @@ async function replayIntentBody(
       pi,
       agent,
     )
+    // #3531: recomputed on every replay (never carried on the row) — it
+    // reads the agent's CURRENT confirmed history, which can only grow
+    // between the original request and a retry, so this is at worst a
+    // same-request-window-consistent read, never a stale one. `undefined`
+    // (read throws, S3) omits the field entirely rather than sending an
+    // empty/null one — same contract as the fresh-201 site below. Lives at
+    // the top level, never inside `sign_data` below, which
+    // `buildDirectSignData` alone builds and which never carries it.
+    const recipientClass = await classifyRecipient(agent, pi.to_address)
     return {
       payment_id: pi.id,
       status: pi.status,
       expires_at: pi.expires_at,
       idempotent_replay: true,
+      ...(recipientClass ? { recipient: recipientClass } : {}),
       sign_data: {
         hash,
         signature_scheme,
@@ -339,6 +363,11 @@ async function replayIntentBody(
       },
     }
   }
+  // The legacy/retired-rail replay shape (`execution_rail` unset or not
+  // `delegation`) — unreachable for any new row since the retirement gate
+  // 410s before this lookup runs, kept only for a pre-existing row. #3531
+  // deliberately does NOT add `recipient` here: it is optional on the wire,
+  // and this branch is the retired rail's own shape, never extended.
   return {
     payment_id: pi.id,
     status: pi.status,
@@ -381,9 +410,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // is ambiguous about which chain to redeem, and ambiguity on a money
     // path refuses rather than guesses.
     if (task_budget_id && sub_budget_id) {
-      return reply.code(400).send({
-        error: 'Pass exactly one of task_budget_id or sub_budget_id — never both',
-      })
+      // The guard itself now comes from the #3616 module (`refuseBothScopeIds`,
+      // surface 'payments') — the same 400 body this site hand-built.
+      const bothIds = refuseBothScopeIds('payments')
+      return reply.code(bothIds.status).send(bothIds.body)
     }
 
     // 1. Validate inputs
@@ -511,108 +541,158 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       })
     }
 
-    // ── Task budget (#3329, optional) ─────────────────────────────────────
-    // A task budget authorizes the payment INSTEAD OF the budget delegation
-    // directly: the redemption chain becomes [taskChild, budget]. #3329
-    // review finding E: the parent is selected by the task budget's OWN
-    // `parent_delegation_hash` — NEVER re-derived by (token, to), which can
-    // name a DIFFERENT active grant (an agent holding both an open and a
-    // pinned grant for this token, whose pinned recipient happens to equal
-    // `to`, would otherwise get a spurious task_budget_parent_mismatch).
-    let taskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
-    let taskBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
-    if (task_budget_id) {
-      const taskBudgetRow = await findTaskBudgetForAgent(task_budget_id, agent.id)
-      if (!taskBudgetRow) {
-        return reply.code(404).send({ error: 'Task budget not found', error_code: 'task_budget_not_found' })
-      }
-      const parentDelegation = await selectActiveDelegationByHash(agent.id, taskBudgetRow.parent_delegation_hash)
-      if (!parentDelegation) {
-        // The task budget's own parent is no longer an active grant (revoked
-        // or replaced) — it can never again be redeemed through, whatever
-        // token/recipient this payment names.
-        return reply.code(409).send({
-          error: 'The task budget was not carved from the budget delegation selected for this payment',
-          error_code: 'task_budget_parent_mismatch',
-        })
-      }
-      const resolved = resolveTaskBudgetChildForPayment(
-        taskBudgetRow,
-        tokenAddress,
-        to.toLowerCase(),
-        parentDelegation,
-        Math.floor(Date.now() / 1000),
-      )
-      if (!resolved.ok) {
-        const code = resolved.refusal as TaskBudgetPaymentRefusal
-        return reply.code(TASK_BUDGET_REFUSAL_STATUS[code]).send({
-          error: TASK_BUDGET_REFUSAL_MESSAGE[code],
-          error_code: code,
-        })
-      }
-      taskBudgetChild = resolved.childDelegation
-      taskBudgetParentDelegation = parentDelegation
+    // ── Budget scope (#3618): one resolution through the #3616 resolver ──
+    // A task budget (#3329) authorizes the payment INSTEAD OF the budget
+    // delegation directly (redemption chain [taskChild, budget]); a
+    // sub-budget (#3330) through the three-link chain [B grant, A
+    // parent-child, A budget]; otherwise the payment's own (token, to)
+    // selection. The resolver keeps the #3329 review finding E rule in both
+    // places it applies: parents are read BY THE ROW'S OWN
+    // `parent_delegation_hash`, never re-derived by (token, to). Refusals
+    // carry the same codes/statuses/messages this file hand-built (the
+    // shared tables' one home is now the module).
+    const scopeResolution = await resolveBudgetScope({
+      agentId: agent.id,
+      tokenAddress,
+      recipient: to,
+      taskBudgetId: task_budget_id,
+      subBudgetId: sub_budget_id,
+    })
+    if (!scopeResolution.ok) {
+      return reply.code(scopeResolution.refusal.status).send({
+        error: scopeResolution.refusal.message,
+        error_code: scopeResolution.refusal.code,
+      })
+    }
+    const scope = scopeResolution.scope
+    const taskBudgetScope = scope.kind === 'taskBudget' ? scope.taskBudget : undefined
+    const subBudgetScope = scope.kind === 'subBudget' ? scope.subBudget : undefined
+    // #3500: the task budget's cap inputs, kept for the pre-check below and
+    // for attributing an on-chain transfer-cap revert to THIS task budget.
+    const taskBudgetCap: TaskCapInput | null = taskBudgetScope ? taskBudgetScope.taskCap : null
+
+    // #3500: refuse a payment the task budget's cap cannot cover BEFORE the
+    // UserOp is built, from the enforcer's own spent figure — a typed,
+    // non-retryable 403 instead of the simulation revert's untyped 502. An
+    // unreadable chain skips the check; the enforcer remains the gate and the
+    // revert fallback in the catch below answers the same refusal.
+    const taskBudgetRefusal = async (): Promise<Record<string, unknown> | null> => {
+      if (!taskBudgetCap) return null
+      const check = await checkTaskBudgetCap({
+        chainId: agent.chain_id,
+        delegationHash: taskBudgetCap.delegationHash,
+        maxAtomic: taskBudgetCap.maxAtomic,
+        amountAtomic: amountRaw,
+      })
+      if (check.outcome !== 'exceeded') return null
+      return taskBudgetExceededBody({
+        taskBudgetId: taskBudgetCap.taskBudgetId,
+        tokenSymbol: tokenConfig.symbol,
+        amountHuman: amount,
+        amountAtomic: amountRaw.toString(),
+        remainingAtomic: check.remainingAtomic.toString(),
+        remainingHuman: formatTokenAmount(check.remainingAtomic, tokenConfig.decimals),
+        maxAtomic: check.maxAtomic.toString(),
+      })
+    }
+    const taskBudgetLedger = (body: Record<string, unknown>) => ({
+      userId: agent.user_id,
+      agentId: agent.id,
+      chainId: agent.chain_id,
+      tokenSymbol: tokenConfig.symbol,
+      amountAtomic: amountRaw.toString(),
+      accountAddress: agent.account_address,
+      merchantTo: to.toLowerCase(),
+      reason: 'delegation_budget_exceeded' as const,
+      source: 'payment' as const,
+      // The 086 detail allowlist keeps error_code and remaining_atomic only.
+      detail: taskCapExceededLedgerDetail(body.remaining_atomic as string),
+    })
+    const preRefusal = await taskBudgetRefusal()
+    if (preRefusal) {
+      return refuse(reply.code(403).send(preRefusal), taskBudgetLedger(preRefusal))
     }
 
-    // ── Sub-budget (#3330, optional) ──────────────────────────────────────
-    // Agent B pays through the sub-budget agent A granted it: the redemption
-    // chain becomes [B grant, A parent-child, A budget] — THREE links, and
-    // the DelegationManager enforces all three in one redemption, so A's
-    // period budget binds every spend B makes. The same #3329 review finding
-    // E rule applies twice: the grant's `parent_delegation_hash` names A's
-    // parent-child row (read by hash, never re-derived), and that row's own
-    // `parent_delegation_hash` names A's budget delegation (read by hash
-    // again, and it must still resolve ACTIVE: revoking A's budget
-    // delegation flips that row to `revoked`, so this lookup answers null
-    // and B's child is stranded here — and reverts on-chain once the
-    // owner's disableDelegation UserOp lands).
-    let subBudgetGrant: Awaited<ReturnType<typeof resolveSubBudgetForPayment>>['childDelegation']
-    let subBudgetParentChildDelegation: Delegation | undefined
-    let subBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
-    if (sub_budget_id) {
-      const nowSec = Math.floor(Date.now() / 1000)
-      const grantRow = await findSubBudgetForAgent(sub_budget_id, agent.id)
-      if (!grantRow) {
-        return reply.code(404).send({ error: 'Sub-budget not found', error_code: 'sub_budget_not_found' })
-      }
-      const parentChildRow = await findOpenParentChildByHash(grantRow.parent_delegation_hash, nowSec)
-      if (!parentChildRow) {
-        // The middle link of the chain is closed or expired (A revoked its
-        // grant of B, A's own budget delegation was revoked, or it simply
-        // aged out) — B's child can never again be redeemed through.
-        return reply.code(409).send({
-          error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch,
-          error_code: 'sub_budget_parent_mismatch',
-        })
-      }
-      const parentDelegation = await selectActiveDelegationByHash(
-        parentChildRow.agent_id,
-        parentChildRow.parent_delegation_hash,
-      )
-      if (!parentDelegation) {
-        return reply.code(409).send({
-          error: SUB_BUDGET_REFUSAL_MESSAGE.sub_budget_parent_mismatch,
-          error_code: 'sub_budget_parent_mismatch',
-        })
-      }
-      const resolved = resolveSubBudgetForPayment(
-        grantRow,
-        parentChildRow,
+    // #3503 (adopted onto the #3616 resolver, #3618): the PERIOD budget
+    // pre-check the x402 legs have had since #2082/#2706. Without it the
+    // direct route's only over-budget answer was the simulation revert — an
+    // untyped 502 whose hosted step said "transient, retry once". Reads the
+    // SAME delegations `prepareDelegationPayment` redeems — the scope
+    // resolved ONCE above is handed to `prepareDelegationPayment` below, so
+    // the row read is the row redeemed. A sub-budget redeems three links and
+    // each carries its own period caveat (`sub-budget-delegation.ts`), so all
+    // three are read and the SMALLEST remaining decides — B's own slice is
+    // usually the tighter. FAIL OPEN per link on an unreadable read or a link
+    // without a readable period caveat (`fromChain: false`), exactly like the
+    // x402 legs: the enforcer stays the gate.
+    const budgetOptions = subBudgetScope
+      ? {
+          subBudget: {
+            grantDelegation: subBudgetScope.grantDelegation,
+            parentChildDelegation: subBudgetScope.parentChildDelegation,
+            parentDelegation: subBudgetScope.parentDelegation,
+          },
+        }
+      : taskBudgetScope
+        ? {
+            taskBudget: {
+              childDelegation: taskBudgetScope.childDelegation,
+              parentDelegation: taskBudgetScope.parentDelegation,
+            },
+          }
+        : { delegation: scope.delegation }
+    const periodBudgetLinks: string[] = budgetOptions.subBudget
+      ? [
+          JSON.stringify(budgetOptions.subBudget.grantDelegation),
+          JSON.stringify(budgetOptions.subBudget.parentChildDelegation),
+          budgetOptions.subBudget.parentDelegation.delegation_json,
+        ]
+      : budgetOptions.taskBudget
+        ? [budgetOptions.taskBudget.parentDelegation.delegation_json]
+        : budgetOptions.delegation
+          ? [budgetOptions.delegation.delegation_json]
+          : []
+    const periodBudgetRefusal = async (): Promise<Record<string, unknown> | null> => {
+      const precheck = await evaluatePeriodPrecheck({
+        chainId: agent.chain_id,
+        amountAtomic: amountRaw,
+        delegationJsons: periodBudgetLinks,
+        read: async (chainId, delegationJson, amountAtomic) =>
+          readRemainingBudget(chainId, delegationJson, amountAtomic),
+      })
+      // `<`, never `<=`: spending the exact remainder is what the chain
+      // allows. No usable measurement on any link → no refusal (fail open).
+      if (!precheck.refused || precheck.remainingAtomic === null) return null
+      const remainingAtomic = precheck.remainingAtomic
+      // The same body the x402 legs answer (delegation-authorize.ts), with
+      // this route's rail and recipient in place of the x402 fields.
+      return buildPeriodExceededBody({
+        flavor: 'direct',
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
         tokenAddress,
-        to.toLowerCase(),
-        parentDelegation,
-        nowSec,
-      )
-      if (!resolved.ok) {
-        const code = resolved.refusal as SubBudgetPaymentRefusal
-        return reply.code(SUB_BUDGET_REFUSAL_STATUS[code]).send({
-          error: SUB_BUDGET_REFUSAL_MESSAGE[code],
-          error_code: code,
-        })
-      }
-      subBudgetGrant = resolved.childDelegation
-      subBudgetParentDelegation = parentDelegation
-      subBudgetParentChildDelegation = JSON.parse(parentChildRow.delegation_json) as Delegation
+        decimals: tokenConfig.decimals,
+        amountAtomic: amountRaw.toString(),
+        remainingAtomic: remainingAtomic.toString(),
+        amount,
+        recipient: to.toLowerCase(),
+      })
+    }
+    const periodBudgetLedger = (body: Record<string, unknown>) => ({
+      userId: agent.user_id,
+      agentId: agent.id,
+      chainId: agent.chain_id,
+      tokenSymbol: tokenConfig.symbol,
+      amountAtomic: amountRaw.toString(),
+      accountAddress: agent.account_address,
+      merchantTo: to.toLowerCase(),
+      reason: 'delegation_budget_exceeded' as const,
+      source: 'payment' as const,
+      detail: periodExceededLedgerDetail(body.remaining_atomic as string),
+    })
+    const prePeriodRefusal = await periodBudgetRefusal()
+    if (prePeriodRefusal) {
+      return refuse(reply.code(403).send(prePeriodRefusal), periodBudgetLedger(prePeriodRefusal))
     }
 
     let authorization
@@ -622,17 +702,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         tokenAddress,
         to.toLowerCase(),
         amountRaw,
-        subBudgetGrant && subBudgetParentDelegation && subBudgetParentChildDelegation
-          ? {
-              subBudget: {
-                grantDelegation: subBudgetGrant,
-                parentChildDelegation: subBudgetParentChildDelegation,
-                parentDelegation: subBudgetParentDelegation,
-              },
-            }
-          : taskBudgetChild && taskBudgetParentDelegation
-            ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
-            : undefined,
+        budgetOptions,
       )
     } catch (err) {
       // Caveat rejection (budget/recipient/expiry) or bundler failure —
@@ -640,22 +710,59 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // #2945: a caveat REVERT is a policy refusal — record it
       // fire-and-forget with the classified reason. A bundler/transport
       // failure is NOT a refusal (the guardrails refused nothing); the
-      // classifier returns null for it and nothing is written. The
-      // 502 the caller receives is unchanged either way.
+      // classifier returns null for it and nothing is written. Since #3609
+      // the same classification also picks the 502's typed body
+      // (`prepare_reverted` / `prepare_failed`, below).
       // #3416: no bundler credential for this chain on this deployment — a
       // typed, non-retryable 503, and nothing booked (nothing was refused).
       if (err instanceof DelegationRailChainUnavailableError) {
         return refuse(reply.code(503).send(railUnavailableRefusalBody(err)), null)
       }
+      // #3500: a transfer-cap revert on a task-budget payment is that task
+      // budget's cap — but only once its own spent figure confirms it (the
+      // same enforcer also carries a budget's lifetime cap). Then it is the
+      // same typed 403 the pre-check answers, never a "transient" 502.
+      if (taskBudgetCap && isTransferCapRevert(err)) {
+        const revertRefusal = await taskBudgetRefusal()
+        if (revertRefusal) {
+          return refuse(reply.code(403).send(revertRefusal), taskBudgetLedger(revertRefusal))
+        }
+      }
+      // #3503: the period budget's own revert (a payment that raced past the
+      // pre-check, or a read that failed open) is the same typed 403 once a
+      // fresh read confirms it — never the "transient" 502.
+      if (isPeriodBudgetRevert(err)) {
+        const revertRefusal = await periodBudgetRefusal()
+        if (revertRefusal) {
+          return refuse(reply.code(403).send(revertRefusal), periodBudgetLedger(revertRefusal))
+        }
+      }
       const refusalReason = classifyRevertForLedger(err)
-      // #3053: through the shared choke point; the ledger input is null when
-      // the classification says NOT a refusal.
+      // #3609: typed and bounded. An EXECUTION revert is `prepare_reverted`
+      // (deterministic — the hosted step is stop, never "retry once");
+      // everything else is `prepare_failed` and keeps the retry step. The
+      // ledger is decided by the classifier alone, as before: every classified
+      // revert is booked — an AA validation failure too, though it answers
+      // `prepare_failed` — and an unclassified failure is not. Both carry `details` bounded after redaction — the raw
+      // viem error (~6 KB live: callData, signatures, paymaster data) never
+      // rides the response. #3053: both through the shared choke point.
+      const failureBody = prepareFailureBody(
+        err,
+        refusalReason,
+        'Delegation-rail authorization failed (bundler or RPC)',
+      )
+      // The response carries only a bounded cause; the operator gets the whole
+      // error here — redacted, never with a vendor key (#3609 review S2).
+      request.log.warn(
+        { error_code: failureBody.error_code, refusal_reason: refusalReason },
+        `POST /payments prepare failed: ${redactVendorSecrets(err instanceof Error ? err.message : String(err))}`,
+      )
+      if (!refusalReason) {
+        return refuse(reply.code(502).send(failureBody), null)
+      }
       return refuse(
-        reply.code(502).send({
-          error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-        }),
-        refusalReason && {
+        reply.code(502).send(failureBody),
+        {
           userId: agent.user_id,
           agentId: agent.id,
           chainId: agent.chain_id,
@@ -693,6 +800,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       )
     }
 
+    // #3531 review S3: computed BEFORE the insert, so a throw here is caught
+    // by `classifyRecipient` itself (never thrown here) and can never turn an
+    // otherwise-successful payment into a 500 — advisory-only, must not be
+    // allowed to fail the prepare.
+    const recipientClass = await classifyRecipient(agent, to.toLowerCase())
+
     let delegationIntent
     try {
       delegationIntent = await insertDelegationIntent({
@@ -720,8 +833,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         budgetDelegationHash: authorization.delegationHash,
         preparedUserOp: serializeUserOp(authorization.prepared.userOperation),
         sendIdempotencyKey: idempotency_key ?? null,
-        taskBudgetId: taskBudgetChild ? (task_budget_id as string) : null,
-        subBudgetId: subBudgetGrant ? (sub_budget_id as string) : null,
+        taskBudgetId: taskBudgetScope ? task_budget_id : null,
+        subBudgetId: subBudgetScope ? sub_budget_id : null,
       })
     } catch (err) {
       // Lost the idempotency-key race with a concurrent request (migration
@@ -743,6 +856,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       payment_id: delegationIntent.id,
       status: delegationIntent.status,
       expires_at: delegationIntent.expires_at,
+      // #3531: advisory only, computed from this agent's own confirmed
+      // history above, BEFORE the insert — never consulted by the sign_data
+      // below or by any authorization check above, and omitted entirely
+      // (not sent as null) when the read threw.
+      ...(recipientClass ? { recipient: recipientClass } : {}),
       sign_data: {
         hash: authorization.prepared.userOpHash,
         signature_scheme: 'eip712_userop',
@@ -992,20 +1110,260 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           await releaseSubmittedClaim(intent.id)
           return refused
         }
-        // 6. Failure. Session-rail (bundler) errors echo the request URL,
-        // which embeds the API key — scrub before persisting or responding.
+        // 6. Failure — CLASSIFIED first (#3564). Session-rail (bundler) errors
+        // echo the request URL, which embeds the API key — scrub before
+        // persisting or responding.
         const errorMsg = redactVendorSecrets(err instanceof Error ? err.message : String(err))
+        // Bound ONCE, above every arm (#3564 review round 2): redaction is
+        // not a length bound — a viem/bundler message can still carry full
+        // callData/ABI after scrubbing — and every body that answers
+        // `details` (the outcome-pending one included) must carry the
+        // bounded text, never the raw redacted error.
+        const boundedMessage = boundFailureMessage(errorMsg)
+        // #3564: the receipt-unconfirmed variant of SubmittedUserOpFailedError
+        // means the UserOp was SENT and MAY have landed (the funds may have
+        // moved). Booking that `failed` would record a funds-moved payment as
+        // failed forever, so the row is left `submitted` — status reads
+        // "outcome pending" (phase payment_submitted, next_action
+        // check_status_later) — and the userOpHash is stored for the
+        // submission reconciler (modules/payments/submission-reconciler.ts),
+        // which resolves the row from the bundler's receipt: landed+succeeded
+        // → confirmed with its tx_hash; landed+reverted or never seen within
+        // the bounded window → failed with the cause. The booking is a CAS on
+        // the open submit; if the row is no longer one (a concurrent settle
+        // won, the claim was already resolved), no booking happens and the
+        // generic failure body below still answers THIS call — the row's
+        // truth is whatever won the race.
+        if (err instanceof SubmittedUserOpFailedError && err.outcome === 'receipt_unconfirmed') {
+          await bookSubmittedOutcomePending({ userOpHash: err.userOpHash, intentId: id, agentId: agent.id })
+          return refuse(
+            reply.code(502).send({
+              payment_id: id,
+              status: 'submitted',
+              error: 'On-chain submission outcome unknown',
+              error_code: 'submission_outcome_unknown',
+              message:
+                `The payment was submitted (UserOperation ${err.userOpHash}) but its on-chain outcome ` +
+                'is not known yet — it may have moved the funds. Do not create a new payment for this ' +
+                'payment_id: poll haven_get_payment_status for it — Haven reconciles this payment from ' +
+                'the chain, and this status becomes the real outcome.',
+              user_op_hash: err.userOpHash,
+              details: boundedMessage,
+            }),
+            null,
+          )
+        }
+        // Every KNOWN failure — the `included but reverted` variant of
+        // SubmittedUserOpFailedError (the op landed and reverted, so no funds
+        // moved) and every pre-send bundler rejection — is terminal: book
+        // `failed` BEFORE classifying (the classification below describes a
+        // row that is already terminal; nothing here is retryable).
         await failSubmittedIntent(errorMsg, id, agent.id)
+        // #3494: a typed `error_code` + cause class on the 502, instead of
+        // one untyped "On-chain execution failed" for everything a bundler
+        // can throw after this route already claimed the intent to
+        // 'submitted'. Unlike the create-time pre-checks (#3500/#3503), the
+        // branches below run against an intent ALREADY FAILED (booked above)
+        // — there is nothing left to retry on this payment_id whatever the
+        // cause, so every branch here answers 502 (the row read nothing
+        // retryable), never the create route's non-retryable 403; `message`
+        // is what differs per cause. No ledger row either way — the comment
+        // this replaced already established that this is the
+        // on-chain/bundler FAILURE answer, booked on the intent row, not a
+        // policy refusal the ledger owns.
+        // #3564 composed over this: the outcome-UNKNOWN variant never reaches
+        // here (the booking split above returned first — it books the row
+        // outcome-pending and the submission reconciler, not this route,
+        // resolves it), so `haven_get_payment_status` IS truthful on this
+        // seam now. What remains below classifies the KNOWN failures, and is
+        // still reachable for the pre-send bundler simulation rejections
+        // (AA2x codes) that arrive as generic errors. (`boundedMessage` is
+        // computed above the booking split, so the outcome-pending arm can
+        // bound its `details` too.)
 
-        // #3053: through the shared choke point; allowlisted without a ledger
-        // row — this is the on-chain/bundler FAILURE answer, booked on the
-        // intent row by failSubmittedIntent above, not a policy refusal.
+        // #3494 review round 1 (S1): AA24 is the one AA2x code this backend
+        // can attribute to the signer. There is no live budget or chain
+        // state to re-read — the fix is a new signer, on a NEW payment,
+        // never a resubmit of this payment_id (the signature is already
+        // spent: the intent is 'failed', and `/:id/sign` only ever accepts
+        // 'pending_signature').
+        if (isSignatureRejectedRevert(err)) {
+          return refuse(
+            reply.code(502).send({
+              payment_id: id,
+              status: 'failed',
+              error: 'The account rejected this signature during on-chain validation',
+              error_code: 'signature_rejected',
+              message:
+                'The delegate account rejected this signature during validation (AA24 signature error). ' +
+                'Update the signer and sign a NEW payment — this payment_id is already failed and cannot ' +
+                'be retried with the same or a corrected signature.',
+              details: boundedMessage,
+            }),
+            null,
+          )
+        }
+
+        // #3494 review round 1 (S1): every OTHER AA2x validation failure —
+        // a real `validateUserOp` rejection, but not evidence the SIGNATURE
+        // is wrong (AA20 account not deployed, AA21 didn't pay prefund,
+        // AA22 expired or not due, AA23 validateUserOp reverted for an
+        // unrelated reason, AA25 invalid account nonce, AA26 over
+        // verificationGasLimit). Deliberately does not name the signer —
+        // `message` carries the AA code in its bounded `details` so a
+        // human can diagnose it, but the agent-facing instruction is only
+        // "create a new payment", never "update the signer".
+        if (isAccountValidationFailedRevert(err)) {
+          return refuse(
+            reply.code(502).send({
+              payment_id: id,
+              status: 'failed',
+              error: 'The account rejected this payment during on-chain validation',
+              error_code: 'account_validation_failed',
+              message:
+                'The delegate account rejected this payment during validation. This payment_id is already ' +
+                'failed and cannot be retried — create a new payment. See details for the on-chain reason.',
+              details: boundedMessage,
+            }),
+            null,
+          )
+        }
+
+        // #3494 review round 1 (S2): classification below reads the DB
+        // (`findTaskBudgetForAgent`/`selectActiveDelegationByHash`) and the
+        // chain (`checkTaskBudgetCap`/`readRemainingBudget`) to confirm a
+        // revert against LIVE state, never the revert text alone. Any of
+        // those reads failing must fall through to the generic answer below
+        // — never a 500, and never losing the original on-chain cause.
+        try {
+          // A transfer-cap revert on a task-budget payment is that task
+          // budget's cap, confirmed the same way the create-route catch
+          // confirms it (#3500) — re-read the enforcer's own spent figure
+          // before answering, never on the revert text alone (the same
+          // enforcer also carries a budget delegation's lifetime cap).
+          // Deliberately `sub_budget_id` is NOT checked here: a sub-budget's
+          // own transfer-cap revert has no re-read path on this route (its
+          // cap sits on the grant, not a row this catch can look up by the
+          // intent alone) — it falls through to the generic body below,
+          // unclassified, rather than guessing.
+          if (intent.task_budget_id && isTransferCapRevert(err)) {
+            const taskBudgetRow = await findTaskBudgetForAgent(intent.task_budget_id, agent.id)
+            if (taskBudgetRow) {
+              const check = await checkTaskBudgetCap({
+                chainId: intent.chain_id,
+                delegationHash: taskBudgetRow.delegation_hash,
+                maxAtomic: taskBudgetRow.max_atomic,
+                amountAtomic: BigInt(intent.amount_raw ?? '0'),
+              })
+              const tokenConfig = resolveToken(intent.chain_id, intent.token_symbol)
+              // `=== 'exceeded'` deliberately, never `!== 'fits'`: `fits`
+              // (the payment is covered after all — a race the chain
+              // resolved in the agent's favour) and `unreadable` (the chain
+              // read failed; the enforcer's revert stands unconfirmed) must
+              // BOTH fall through to the generic body, not be folded into
+              // "exceeded" by a looser check.
+              if (check.outcome === 'exceeded' && tokenConfig) {
+                return refuse(
+                  reply.code(502).send({
+                    payment_id: id,
+                    status: 'failed',
+                    ...taskBudgetExceededBody({
+                      taskBudgetId: taskBudgetRow.id,
+                      tokenSymbol: intent.token_symbol,
+                      amountHuman: intent.amount_human,
+                      amountAtomic: intent.amount_raw ?? '0',
+                      remainingAtomic: check.remainingAtomic.toString(),
+                      remainingHuman: formatTokenAmount(check.remainingAtomic, tokenConfig.decimals),
+                      maxAtomic: check.maxAtomic.toString(),
+                    }),
+                  }),
+                  null,
+                )
+              }
+            }
+          }
+
+          // The period budget's own revert (#3503) — a payment that raced
+          // past the create-time pre-check, or the pre-check read failed
+          // open — confirmed the same way: a fresh read of the SAME
+          // delegation this intent redeemed (`budget_delegation_hash`),
+          // never the revert text alone.
+          if (isPeriodBudgetRevert(err) && intent.budget_delegation_hash) {
+            const delegationRow = await selectActiveDelegationByHash(agent.id, intent.budget_delegation_hash)
+            if (delegationRow) {
+              const read = await readRemainingBudget(
+                intent.chain_id,
+                delegationRow.delegation_json,
+                intent.amount_raw ?? '0',
+              )
+              if (read.fromChain) {
+                const remainingAtomic = BigInt(read.remainingAtomic)
+                const amountRaw = BigInt(intent.amount_raw ?? '0')
+                const tokenConfig = resolveToken(intent.chain_id, intent.token_symbol)
+                if (remainingAtomic < amountRaw && tokenConfig) {
+                  const shortfallAtomic = amountRaw - remainingAtomic
+                  return refuse(
+                    reply.code(502).send({
+                      payment_id: id,
+                      status: 'failed',
+                      error:
+                        `This payment of ${intent.amount_human} ${intent.token_symbol} exceeded the agent's ` +
+                        "remaining budget for this period by the time it was signed. There is no approval " +
+                        'queue on the delegation rail — ask the wallet owner to grant or raise the budget in ' +
+                        'Haven, or wait for the period to reset, then sign a NEW payment.',
+                      error_code: 'delegation_budget_exceeded',
+                      phase: AgentPaymentPhase.InsufficientFunds,
+                      next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+                      // This route also relays the EIP-3009 funding leg
+                      // (`POST /x402/authorize` names it in its sign_data
+                      // instructions), so the rail is whichever one this
+                      // intent actually is — never a hardcoded 'direct'.
+                      rail: intent.payment_rail ?? intent.source ?? AgentPaymentRail.Direct,
+                      chain_id: intent.chain_id,
+                      token: intent.token_symbol,
+                      // #3494 review round 1 (S2): matches the create-time
+                      // body (`periodBudgetRefusal` above), which also
+                      // carries `asset`.
+                      asset: intent.token_address,
+                      amount: intent.amount_human,
+                      amount_atomic: intent.amount_raw,
+                      remaining: formatTokenAmount(remainingAtomic, tokenConfig.decimals),
+                      remaining_atomic: remainingAtomic.toString(),
+                      shortfall: formatTokenAmount(shortfallAtomic, tokenConfig.decimals),
+                      shortfall_atomic: shortfallAtomic.toString(),
+                      recipient: intent.to_address,
+                    }),
+                    null,
+                  )
+                }
+              }
+            }
+          }
+        } catch (classificationErr) {
+          // A DB or chain failure WHILE classifying is not the original
+          // cause — log it and fall through to the generic answer below,
+          // never a 500, and never masking `err` (the real on-chain
+          // failure) with this secondary one.
+          request.log.warn(
+            { err: classificationErr },
+            'sign-failure classification raised; falling back to the generic answer',
+          )
+        }
+
+        // Everything else: a bundler/transport failure this route cannot
+        // name more precisely. The bounded message replaces the old
+        // unbounded `details` — a viem/bundler error can carry its full
+        // callData or ABI in `.message`, which must never ride a response
+        // wholesale (`redactVendorSecrets` only strips vendor credentials,
+        // not length).
         return refuse(
           reply.code(502).send({
             payment_id: id,
             status: 'failed',
             error: 'On-chain execution failed',
-            details: errorMsg,
+            error_code: 'onchain_execution_failed',
+            message: boundedMessage ?? 'On-chain execution failed',
+            details: boundedMessage,
           }),
           null,
         )
@@ -1112,7 +1470,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       tx_hash: intent.tx_hash,
       explorer_url: intent.tx_hash ? getExplorerUrl(intent.chain_id, 'tx', intent.tx_hash) : null,
       fee: buildResponseFee(intent),
-      error_message: intent.error_message,
+      // #3494: bounded at this read — the stored value is already scrubbed of
+      // vendor secrets (`redactVendorSecrets`, written at `failSubmittedIntent`
+      // time) but not length-capped, and a viem/bundler failure can carry its
+      // full callData or ABI in `.message`.
+      error_message: boundFailureMessage(intent.error_message),
       created_at: intent.created_at,
       signed_at: intent.signed_at,
       submitted_at: intent.submitted_at,

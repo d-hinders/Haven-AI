@@ -70,8 +70,22 @@ describe('haven guide text (#2525)', () => {
     // `npx @haven_ai/cli@@haven_ai/cli@dev` (the 2026-09-28 cold run, finding
     // 1). The command is now the manifest's own `packages.cli.one_liner`, run
     // as given, so no raise was needed — the budget headroom grew instead.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10870)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10787)
+    // #3596: +34 bytes / +30 UTF-16 units. Two cross-references stopped
+    // depending on the reader having just read an adjacent section, now that
+    // the runbook is also served as linked step files at
+    // `/agent-skills/<step>.md` (`docs/operations/agent-discovery-listings.md`):
+    // step 1's "(below)" pointed at "## What you run", several sections away
+    // once split, so it now names that section; "If you cannot open a
+    // browser"'s "Steps 1-3" named step numbers defined in an earlier section
+    // ("The sequence") and its "as above" pointed at the hand-off scripts
+    // section — both read fine as one document and not as an isolated slice,
+    // so the three words are now a parenthetical (account, funding, budget)
+    // and the tail clause is dropped rather than left dangling. Review then
+    // found one more: "Budget changes later"'s "the setup above" points at
+    // nothing once that section stands alone, so it now names "The sequence"
+    // (+10 bytes, 10904 -> 10914).
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10914)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10827)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

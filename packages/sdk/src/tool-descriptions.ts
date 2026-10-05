@@ -69,7 +69,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Prefer this over the quote+pay split when the agent just wants the paid resource and does not need to inspect the price first. If you already have a quote from haven_quote_x402, use haven_pay_x402_quote instead. Do not use for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
-      'Calls the URL, parses any HTTP 402 x402 challenge (or, since #3118, a native-MCP payment-required tool result under HTTP 200), signs the payment locally, then retries the original request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT on the EIP-3009 path only) and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status with no payment-required tool result, returns it unchanged without contacting Haven.',
+      'Calls the URL, parses any HTTP 402 x402 challenge (or, since #3118, a native-MCP payment-required tool result under HTTP 200), signs the payment locally, then retries the original request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT on the EIP-3009 path only) and returns the merchant response. On the EIP-3009 path, when the owner opted this agent in, the same retry also carries the agent-signed buyer tax declaration in X-Tax-Declaration — signed by the same local delegate key, sent to the seller only, and omitted when the declaration is not available or on the direct-settlement (erc7710) scheme. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status with no payment-required tool result, returns it unchanged without contacting Haven.',
     nextActionGuidance:
       'Preserve the returned resume_state or paymentId — either identifies this payment if you need to ask about it later. ' +
       'This tool performs the merchant retry itself, so do not wait on a signal while the call is in flight. ' +
@@ -80,7 +80,7 @@ export const toolDescriptions = {
     summary:
       'Resume an x402 payment whose Haven-side authorization already succeeded but whose merchant retry did not complete.',
     behavior:
-      'Accepts either resume_state or payment_id, validates the x402 details against the authorized funding, and retries the merchant request with the signed payment header (PAYMENT-SIGNATURE, plus legacy X-PAYMENT on EIP-3009 only; also params._meta on an MCP tools/call body). No new Haven payment is created.',
+      'Accepts either resume_state or payment_id, validates the x402 details against the authorized funding, and retries the merchant request with the signed payment header (PAYMENT-SIGNATURE, plus legacy X-PAYMENT on EIP-3009 only; also params._meta on an MCP tools/call body). On the EIP-3009 scheme the retry also carries the agent-signed buyer tax declaration in X-Tax-Declaration when the owner opted this agent in and the declaration is available — signed locally by the same delegate key, sent to the seller only. No new Haven payment is created.',
     nextActionGuidance:
       'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request — that means Haven\'s funding leg confirmed but no merchant response was ever recorded, most often because the process crashed between funding and the merchant retry. ' +
       'Any other nextAction reports a conflict instead of retrying, so do not call this speculatively. ' +
@@ -94,7 +94,7 @@ export const toolDescriptions = {
     summary:
       'Fetch structured Haven payment status for agent recovery.',
     behavior:
-      'State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; delivered when the merchant answered; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified. delivered_unverified: terminal, stop.',
+      'State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; delivered when the merchant answered; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified. delivered_unverified: terminal, stop. For a settled x402 payment the allowance block reports remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window.',
     nextActionGuidance: '',
   },
   getResumeState: {
@@ -110,7 +110,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this as the session bootstrap, or to confirm identity together with whether the agent can spend right now. For per-token detail (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:
-      'Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget in Haven. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay per token. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.',
+      'Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget in Haven. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay per token. taskBudgets[] rows carry maxAtomic/maxDisplay plus spentAtomic/remainingAtomic/remainingDisplay — what the chain still allows that budget — and remainingIsFromChain: false marks a failed read (figures null, never the full cap); only live rows are listed (closed and expired omitted), each with its status (pending | open | closing) and isExpired, so a closing budget stays visible. pendingSubBudgetSignatures[] lists sub-budget rows awaiting YOUR signature, each with its haven_sign next step. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.',
     nextActionGuidance: '',
   },
   getAllowances: {
@@ -119,7 +119,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this when the user asks about allowance, budget, spend limit, remaining amount, remaining allowance, remaining budget, daily limit, reset period, what can I spend, or what the agent can still spend. For whether the account actually HOLDS funds behind the budget use haven_check_funds.',
     behavior:
-      'Returns the per-token spend authority for the account: the active budget delegation (remaining = the period budget, which re-arms natively at the period boundary), each with id, onchain.remaining, remainingDisplay. An over-budget payment is declined before any money moves; nothing queues. Configured amounts from Haven are returned alongside.',
+      'Returns the per-token spend authority for the account: the active budget delegation (remaining = the period budget, which re-arms natively at the period boundary), each with id, onchain.remaining, remainingDisplay, delegationHash, recipientAddress (null = open; a pinned budget pays only that recipient), merchantId (set only on a merchant-locked budget), and reservedHavenAtomic — Haven-side task- and sub-budget reservations summed beside, never folded into, the on-chain figure. An over-budget payment is declined before any money moves; nothing queues. Configured amounts from Haven are returned alongside. Open task budgets are not listed here: haven_get_agent\'s taskBudgets[] carries each one\'s spentAtomic/remainingAtomic and lifecycle status.',
     nextActionGuidance: '',
   },
   // #3126 — the sufficiency signal, deliberately NOT a balance tool. The
@@ -237,11 +237,12 @@ export const toolDescriptions = {
   },
   reportSettlementEvidence: {
     summary:
-      'Report an erc7710 payment\'s real settlement transaction hash so Haven can verify it on-chain and confirm the payment.',
+      'Report a payment\'s real merchant settlement transaction hash so Haven can verify it on-chain and record it.',
     behavior:
-      'Pass payment_id and settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Haven verifies on-chain before confirming; a zero, mismatched, or reverted hash is refused. Your own payments only.',
+      'Pass payment_id and, when you hold one, settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Omitting settlement_tx_hash succeeds as a no-op — nothing is checked or recorded, and no network call is made. Haven verifies on-chain before recording a hash; a zero, mismatched, or reverted hash is refused. Your own payments only.',
     nextActionGuidance:
-      'code DELIVERED_UNSETTLED: did not verify, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.',
+      'code SETTLEMENT_NOT_RECORDED (refusal_reason present): the payment\'s funding is confirmed and this hash was not accepted for it — do not retry it; refusal_reason carries why, verbatim. ' +
+      'code DELIVERED_UNSETTLED: not verified, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.',
   },
 } as const satisfies Record<string, ToolDescription>
 

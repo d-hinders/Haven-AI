@@ -16,6 +16,7 @@ import {
 } from './direct-payment-guard.js'
 import type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 import type {
+  BudgetPrecheckResult,
   HavenClientConfig,
   PaymentRequest,
   PaymentIntent,
@@ -71,6 +72,11 @@ import type {
   RawSubmitTaskBudgetResponse,
   RawCloseTaskBudgetResponse,
   RawTaskBudgetSignContext,
+  SubmitSubBudgetResult,
+  CloseSubBudgetResult,
+  HavenPendingSubBudgetSignature,
+  RawSubmitSubBudgetResponse,
+  RawCloseSubBudgetResponse,
 } from './types.js'
 import {
   AgentPaymentNextAction,
@@ -100,6 +106,7 @@ import type {
   SweepSubmitResponse,
 } from './sweep.js'
 import { HavenApiTransport } from './haven-api-transport.js'
+import { resolveTaxDeclarationHeader } from './client-tax-declaration.js'
 import type { HavenClientUpdate } from './client-identity.js'
 import {
   mapPaymentResult,
@@ -118,7 +125,7 @@ import {
   mcpSettlementFromToolResult,
   mcpToolResultOf,
 } from './mcp-merchant-transport.js'
-import { AccountReads, mapTaskBudget } from './account-reads.js'
+import { AccountReads, mapSubBudget, mapTaskBudget } from './account-reads.js'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import {
   assertCanResumeX402,
@@ -290,6 +297,21 @@ export class HavenClient {
       getAgent: () => this.getAgent(),
       delegateAddress: this.delegateAddress,
       x402Wallet: this.x402Wallet,
+      // #3427: the buyer-side tax declaration is resolved (and signed) only
+      // by the local, key-holding client. The resolver is bound ONLY when a
+      // delegate key exists, so the hosted, keyless construction of this
+      // class — `completeX402MerchantCall`'s `MerchantCompletion` — cannot
+      // resolve a declaration at all, let alone sign one.
+      ...(config.delegateKey
+        ? {
+            getTaxDeclarationHeader: (input) =>
+              resolveTaxDeclarationHeader(
+                { getAgent: () => this.getAgent(), get: (path) => this.get(path) },
+                input,
+              ),
+            delegateKey: config.delegateKey,
+          }
+        : {}),
     })
     this.erc7710 = new X402Erc7710({
       delegateKey: this.delegateKey,
@@ -395,6 +417,9 @@ export class HavenClient {
       status: 'pending_signature',
       expiresAt: raw.expires_at,
       signData: raw.sign_data,
+      // #3531: advisory, history-only — copied through verbatim, absent
+      // against an older backend that doesn't send it.
+      ...(raw.recipient ? { recipient: raw.recipient } : {}),
     }
   }
 
@@ -790,6 +815,11 @@ export class HavenClient {
    * degrade-to-warning path and the ledger row would still land while the
    * purchase proceeded.
    *
+   * #3518: without `merchantTo`, an agent whose budgets for the token are all
+   * merchant-locked gets 409 `budget_requires_recipient` (thrown, nothing
+   * recorded) naming the pins in `budget_recipient_addresses` — repeat the
+   * check with `merchantTo`.
+   *
    * camelCase body like the route family; the response mirrors the wire
    * (`sufficient`, `remaining_atomic`). `resourceUrl` is the merchant
    * resource being bought — the ledger dedupe window's discriminating
@@ -801,17 +831,23 @@ export class HavenClient {
     amountAtomic: string
     merchantTo?: string
     resourceUrl?: string
-  }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean }> {
-    return this.post<{
-      sufficient: boolean
-      remaining_atomic: string
-      remaining_is_from_chain?: boolean
-    }>('/machine-payments/budget-precheck', {
+    /**
+     * #3492/#3527: the x402 idempotency key of the quote this pre-check
+     * describes. When it resolves to an already-settled erc7710 OR eip3009
+     * replay of the SAME quote, the response answers sufficient (with
+     * `replay: true`) instead of comparing against the now-lower remaining
+     * budget — see `BudgetPrecheckRequest.idempotencyKey` in the OpenAPI
+     * spec. Omitted: unchanged behavior.
+     */
+    idempotencyKey?: string
+  }): Promise<BudgetPrecheckResult> {
+    return this.post<BudgetPrecheckResult>('/machine-payments/budget-precheck', {
       chainId: input.chainId,
       token: input.token,
       amountAtomic: input.amountAtomic,
       ...(input.merchantTo !== undefined ? { merchantTo: input.merchantTo } : {}),
       ...(input.resourceUrl !== undefined ? { resourceUrl: input.resourceUrl } : {}),
+      ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
     })
   }
 
@@ -1106,6 +1142,54 @@ export class HavenClient {
     return {
       taskBudget: mapTaskBudget(raw.task_budget),
       status: raw.status,
+      ...(raw.sign_data ? { signData: raw.sign_data } : {}),
+      ...(raw.next_action ? { nextAction: raw.next_action } : {}),
+    }
+  }
+
+  // ── Sub-budgets (#3330, agent-completes since #3506) ─────────────────
+
+  /**
+   * Submit the DELEGATING agent's signature for a sub-budget row: opens a
+   * `pending` row (the signature is over the child delegation the backend
+   * built — sign it with `haven_sign` and `sub_budget_id`) or relays the
+   * signed close of a `closing` row. The owner issues a sub-budget; this is
+   * how the agent completes it — no owner relay is needed. Returns
+   * `status: 'open'` or `'closed'`.
+   */
+  async submitSubBudget(id: string, signature: string): Promise<SubmitSubBudgetResult> {
+    const raw = await this.post<RawSubmitSubBudgetResponse>(
+      `/sub-budgets/${encodeURIComponent(id)}/submit`,
+      { signature },
+    )
+    return {
+      subBudget: mapSubBudget(raw.sub_budget),
+      status: raw.status,
+      ...(raw.close_tx_hash ? { closeTxHash: raw.close_tx_hash } : {}),
+    }
+  }
+
+  /**
+   * The sub-budget rows THIS agent must still sign as the delegating agent
+   * (pending an open signature, or closing a close signature) — the same
+   * list `getAgentSummary().pendingSubBudgetSignatures` carries, but a
+   * transport failure throws instead of reading as an empty list.
+   */
+  async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]> {
+    return this.accountReads.listPendingSubBudgetSignatures()
+  }
+
+  /**
+   * Close a sub-budget row (delegating agent only). A `pending` or expired row
+   * closes immediately; a live child returns `signData` for the on-chain
+   * revocation — sign it (`haven_sign` with `sub_budget_id`) and call
+   * `submitSubBudget`.
+   */
+  async closeSubBudget(id: string): Promise<CloseSubBudgetResult> {
+    const raw = await this.post<RawCloseSubBudgetResponse>(`/sub-budgets/${encodeURIComponent(id)}/close`, {})
+    return {
+      subBudget: mapSubBudget(raw.sub_budget),
+      ...(raw.status ? { status: raw.status } : {}),
       ...(raw.sign_data ? { signData: raw.sign_data } : {}),
       ...(raw.next_action ? { nextAction: raw.next_action } : {}),
     }
@@ -1885,6 +1969,13 @@ export class HavenClient {
    * `MerchantCompletion.reportSettlementEvidence` for the fail-closed
    * verification this posts into (`observeErc7710Settlement`) and the
    * client-side zero-hash refusal.
+   *
+   * #3475: also takes an eip3009 payment's merchant settlement (the
+   * `PAYMENT-RESPONSE.transaction` of a plain-HTTP merchant the agent retried
+   * itself). The payment is already confirmed by its funding transaction;
+   * Haven verifies the delegate → merchant transfer on-chain
+   * (`observeEip3009MerchantSettlement`) and records it beside the funding
+   * hash, so receipts name the merchant's settlement.
    */
   async reportSettlementEvidence(
     paymentId: string,

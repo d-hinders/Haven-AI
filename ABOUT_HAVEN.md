@@ -170,7 +170,7 @@ Avoid exposing Safe, module, relayer, signer, owner, transaction hash, and raw a
 - SDK: `@haven_ai/sdk`.
 - MCP: local `@haven_ai/mcp`, hosted/keyless `@haven_ai/mcp-server`, and local `@haven_ai/signer`.
 - Smart account model: MetaMask Hybrid DeleGator plus signed delegations. (Safe plus AllowanceModule is the retired legacy model.)
-- Current chain focus: Base (primary/default) and Gnosis; Base USDC for standard x402 demo merchant flows.
+- Current chain focus: Base (primary/default) and Base Sepolia (dev/QA); Gnosis Chain is not a Haven network. Base USDC for standard x402 demo merchant flows.
 - Payment surfaces: direct payments, x402, Haven machine-payment challenge demos, and internal demo merchant MCP.
 
 ## Mental Model

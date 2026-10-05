@@ -5,7 +5,9 @@ covers:
   - scripts/ci/rpc-conformance.mjs
   - .env.dev.example
   - .github/workflows/qa-dev.yml
+  - .github/workflows/qa-balances.yml
   - scripts/ci/qa-failure-issue.mjs
+  - scripts/ci/qa-balance-issue.mjs
   - scripts/ci/qa-retry.mjs
   - scripts/ci/qa-freshness.mjs
   - scripts/ci/guard-freshness.mjs
@@ -28,7 +30,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-09-26"
+last-verified: "2026-09-30"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -67,7 +69,7 @@ promotion — see [Automation & gating](#automation--gating).
 | Demo merchant | `https://demo-merchant-dev-84e4.up.railway.app` |
 | Chain | Base Sepolia (`84532`) |
 | USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
-| Frontend | `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app` — the branch-tracking preview of `dev` (stable hostname, always the newest `dev` build; verified 2026-08-06). ⚠️ never `haven-ai-frontend.vercel.app` (prod alias → prod backend; passkeys are domain-bound), and ⚠️ never the `-git-main-` alias, which is **not** production and currently proxies to the dev backend |
+| Frontend | `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app` — the branch-tracking preview of `dev` (stable hostname, verified 2026-08-06; it serves the newest `dev` build that changed the frontend's inputs, since a push that changes none normally skips its build, [`dev-environment.md` § Which pushes rebuild the frontend](dev-environment.md#which-pushes-rebuild-the-frontend)). ⚠️ never `haven-ai-frontend.vercel.app` (prod alias → prod backend; passkeys are domain-bound), and ⚠️ never the `-git-main-` alias, which is **not** production and currently proxies to the dev backend |
 
 The seed and money-flow harness are Node processes that call the backend
 directly. They do not depend on browser CORS. The live UI smoke drives a real
@@ -133,13 +135,15 @@ delegation's** period budget and period length. `SEED_RPC_URL` is no longer read
 |---|---|---|
 | Owner EOA | **No on-chain funding required** | Signs the budget delegation off-chain. Hybrid provisioning is counterfactual — zero transactions (#2007) |
 | Hybrid account | Base Sepolia test USDC | The treasury every QA payment spends from |
-| Dev relayer | Base Sepolia ETH | Sponsors the UserOps, including the counterfactual account's first deployment, and gasless sweep recovery |
+| Dev relayer | Base Sepolia ETH | Pays gas for activations, passport attestations, revocations, sweeps, and the outbound queue's fee bumps and lane cancels. Agent payment UserOps are paymaster-sponsored and never use it (#3264) |
 | Delegate EOA | No on-chain funding required | Signs payment and EIP-3009 sweep authorizations off-chain |
 | **Demo-merchant settlement wallet** | **Base Sepolia ETH** | **Submits `transferWithAuthorization` / `redeemDelegations`. Derived from the merchant's `SETTLEMENT_PRIVATE_KEY`; NOT the receiving wallet** |
 
 Ordinary payments and sweep recovery do not require delegate gas. The delegate
-signs off-chain; the relayer sponsors the payment UserOps and submits the
-gasless EIP-3009 USDC sweep. Keep the dev relayer funded with Base Sepolia ETH.
+signs off-chain; payment UserOps are paymaster-sponsored, and the relayer submits
+the gasless EIP-3009 USDC sweep. Keep the dev relayer funded with Base Sepolia ETH
+(the daily [QA wallet balances](#qa-wallet-balances-standing-issue) check warns
+before it runs dry).
 
 > **The settlement wallet was missing from this table until
 > [#1530](https://github.com/d-hinders/Haven-AI/issues/1530).** On 2026-08-17 it
@@ -189,7 +193,7 @@ to run when one is definitively below its floor:
 preflight — resources this run consumes:
   ✗ merchant settlement wallet (gas) 0xC03F…22c1: 0.000000255 ETH (0 settlement(s))
       below the merchant's fail floor (warn 25/fail 12) — a run cannot
-      complete: 0 settlement(s) of gas left, ~8 per run. Top this wallet up,
+      complete: 0 settlement(s) of gas left, ~9 per run. Top this wallet up,
       or every x402 leg needing a merchant-side settlement will fail with a
       merchant error that does not name gas (the 2026-08-17 outage)
   ⚠ merchant settlement wallet (gas) 0xC03F…22c1: 0.00006 ETH (24 settlement(s))
@@ -237,8 +241,10 @@ The address is derived at runtime (`GET /machine-payments/agent` →
 restated in config; absent that key the check skips like everything else. The
 floor is derived from every standing-treasury debit: 0.010 USDC for the direct
 settle, seven 0.001-USDC settling merchant legs (including the #2159 resume
-leg), 0.006 USDC to the fresh-agent fixture, and 0.004 USDC net for the
-`delegation-lifecycle` fixture — **0.027 USDC**. The sweep leg's 0.001 USDC is
+leg), 0.006 USDC to the fresh-agent fixture, 0.004 USDC net for the
+`delegation-lifecycle` fixture, 0.004 USDC net for the `sub-budget-redemption`
+fixture and 0.003 USDC for the `merchant-locked-budget` fixture (#3505;
+`task-budget-lifecycle` funds nothing) — **0.034 USDC**. The sweep leg's 0.001 USDC is
 temporarily spent then returned. A below-floor detail line names the token
 contract and that any source works, per the **Top-up** bullet under
 *The delegation-rail QA identity (#1063)* below.
@@ -260,12 +266,12 @@ never restate). The floors live in `packages/demo-merchant-mcp/src/x402.ts`:
 
 - **`MIN_SETTLEMENT_HEADROOM_FAIL = 12`** — below this the run is refused. The
   anchor is what one full run consumes: seven 0.001-USDC settling merchant
-  legs plus the 0.010 direct settle (the same derivation as the treasury's
-  0.027-USDC floor above), i.e. ~8 settlements. Not 8 — that admits a run that
+  legs plus the 0.010 direct settle (the treasury floor's derivation above; #3505's
+  `merchant-locked-budget` adds one more merchant settlement), i.e. ~9 settlements. Not 9 — that admits a run that
   spends the wallet to zero with no margin for a retry leg or fee drift. Not
   16 — a floor near the old single value re-creates #2485 at a smaller scale,
   refusing runs while real capacity sits unused. 12 is one run plus half a
-  run of headroom: a run admitted at the floor still ends with ≥ 4
+  run of headroom: a run admitted at the floor still ends with ≥ 3
   settlements left. It must keep catching the condition #1530 was built for —
   at the 2026-08-17 outage balance (255 gwei) the wallet holds 0 settlements,
   far below the floor, so that state still blocks.
@@ -352,13 +358,13 @@ QA identities.
 
 ## Money-flow QA
 
-The deterministic harness runs fourteen scenarios in order:
+The deterministic harness runs seventeen scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
 | `within-budget-settle` | A 0.01 USDC **delegation-rail** payment settles on-chain and has a receipt: `POST /payments` → sign the `eip712_userop` typed data → poll to `confirmed` → **read the settle's receipt on the observer node and require the exact USDC `Transfer` treasury → payee for 0.01 USDC** (#3344). `confirmed` alone is the backend's word, and the recorded hash is the ERC-4337 bundler transaction, whose status stays 1 when the inner call reverts. Re-based from the legacy raw-hash scheme by #2016. Doubles as the suite's **positive control** — the leg that proves the money path can still say YES, which is what makes the two refusals below mean anything. Its budget read is a **floor** check, not a ceiling one (#2594): it needs the remaining budget to be at least the amount, and it refuses a fallback read because the fallback reports the FULL configured budget and would clear a floor the real remaining might not — reporting budget exhaustion as a settlement defect. Until #2594 it was handed the over-budget legs' refusal text instead, so a run report said this leg builds an over-budget amount. It does not. **Skips** without `QA_DELEGATION_*` |
-| `over-budget-refused` | An over-budget payment is refused **before it becomes signable**, by the on-chain caveat enforcer — HTTP 502 with no intent row. Renamed from `over-budget-queue` by #2016: that leg asserted `pending_approval`, and the approval queue was legacy-rail-only and no longer exists anywhere (#1986/#1989). A bare 502 is NOT accepted as proof — the amount is derived from a **live** enforcer read (a fallback reading or an exhausted budget fails the leg rather than passing it), a within-budget request against the same account must still be offered, and the ABI-encoded revert reason must decode to a **named caveat enforcer** |
-| `x402-over-budget-rejected` | The same *guarantee* on the x402 **EIP-3009 funding leg**, but no longer the same refusal. Until #2706 (PR #2719) this leg reached gas estimation and asserted the enforcer's 502; that PR added a typed **403 pre-check before any prepare**, so on a healthy budget read the enforcer is never asked and the leg now asserts `error_code: delegation_budget_exceeded`, a `remaining_atomic` matching the live on-chain read, and a within-budget **control that IS still offered** (added by #2738 — without it a dead merchant URL, a retired rail or a revoked delegation reads exactly like working enforcement). **State what is now uncovered, not just what still is**: no leg observes the on-chain refusal of an x402 3009 *funding redemption* any more — that observation is gone, not relocated. Gone from the SUITE rather than from the system: the pre-check **fails open** (#2706, inherited from #2082), so a degraded `fromChain: false` read falls through to prepare where the enforcer still refuses with the 502, which is why a 502 on this leg has two causes and the failure text names both. What the pair preserves is the RAIL-level guarantee on a different entrypoint: delete the pre-check and this leg goes red (403 becomes 502); delete the enforcer and `over-budget-refused` above goes red, since `POST /payments` still reaches the chain. Neither half alone proves the invariant, so do not retire `over-budget-refused` without moving its revert-reason assertion first. Re-based by #2016, which found it **passing for the wrong reason**: driven against the retired legacy identity it was satisfied by the rail-retirement 410, and would have passed with over-budget enforcement deleted outright. Its erc7710 sibling below closes what used to be flagged here as a known gap (#2082) |
+| `over-budget-refused` | An over-budget payment is refused **before it becomes signable** — since #3503 by a period-budget pre-check in `POST /payments`, HTTP 403 `delegation_budget_exceeded` with no UserOp and no intent row (before it, the on-chain caveat enforcer's gas-estimation revert, HTTP 502). Renamed from `over-budget-queue` by #2016: that leg asserted `pending_approval`, and the approval queue was legacy-rail-only and no longer exists anywhere (#1986/#1989). A bare 502 is NOT accepted as proof — the amount is derived from a **live** enforcer read (a fallback reading or an exhausted budget fails the leg rather than passing it), a within-budget request against the same account must still be offered, and the refusal must carry `error_code: delegation_budget_exceeded` with a `remaining_atomic` equal to the live read — a missing delegation also refuses with 403. A 502 fails the leg with both causes named: the pre-check removed, or failed open on a degraded read. Until #3503 the leg decoded the enforcer's revert reason instead; no live leg watches that revert now, and the deployed enforcer's own refusal is proven by the backend's `non-custody-onchain-enforcer.contract.test.ts` |
+| `x402-over-budget-rejected` | The same *guarantee* on the x402 **EIP-3009 funding leg**, but no longer the same refusal. Until #2706 (PR #2719) this leg reached gas estimation and asserted the enforcer's 502; that PR added a typed **403 pre-check before any prepare**, so on a healthy budget read the enforcer is never asked and the leg now asserts `error_code: delegation_budget_exceeded`, a `remaining_atomic` matching the live on-chain read, and a within-budget **control that IS still offered** (added by #2738 — without it a dead merchant URL, a retired rail or a revoked delegation reads exactly like working enforcement). **State what is now uncovered, not just what still is**: no leg observes the on-chain refusal of an x402 3009 *funding redemption* any more — that observation is gone, not relocated. Gone from the SUITE rather than from the system: the pre-check **fails open** (#2706, inherited from #2082), so a degraded `fromChain: false` read falls through to prepare where the enforcer still refuses with the 502, which is why a 502 on this leg has two causes and the failure text names both. Delete the pre-check and this leg goes red (403 becomes 502). Until #3503, deleting the enforcer turned `over-budget-refused` above red, since `POST /payments` reached the chain; #3503 gave that route the same pre-check, so the enforcer's own refusal now rests on the backend's `non-custody-onchain-enforcer.contract.test.ts`. Re-based by #2016, which found it **passing for the wrong reason**: driven against the retired legacy identity it was satisfied by the rail-retirement 410, and would have passed with over-budget enforcement deleted outright. Its erc7710 sibling below closes what used to be flagged here as a known gap (#2082) |
 | `x402-erc7710-over-budget-rejected` | The same refusal on the **preferred** scheme (#2082). Until then the case did not exist to assert: erc7710 authorize returned 201 `pending_signature` WITH `sign_data` for ANY amount, so the #420 invariant's own words ("refused before it becomes signable") were FALSE on the path most payments take — measured live against dev 2026-08-25 and handed to #1993 rather than asserted around. The fail-fast pre-check refuses **HTTP 403 `delegation_budget_exceeded`** with no settlement child, no intent row and no relayer-paid delegate deploy. The discriminators are different from its 3009 sibling's, because the vacuous pass this shape invites is a different one: a bare 403 is ALSO what a MISSING delegation returns, so the leg requires the `error_code` AND requires the refusal's `remaining_atomic` to equal the live budget it derived the over-budget amount from, with a within-budget erc7710 authorize offered first as the control (and its `signature_scheme` checked, so a dispatch regression onto the funding leg cannot pass as this one). **What it does not claim:** that the CHAIN refuses the redemption — the caveat stack was always the gate and #2082 did not touch it; proving the redemption-side revert still needs a merchant that attempts one, and no leg does. Needs `QA_DELEGATION_AGENT_API_KEY`; **skips** without it |
 | `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and the delegate must not still be holding this payment's own amount. Two thresholds, because they answer different questions (#2444): residue at or above the 0.01 USDC sweep floor is stranding, and residue reaching the amount just funded is the payment itself, undelivered — which the floor alone waved through, since `buy_vpn/basic` costs 0.001 USDC. The undelivered case is polled for 20s first, because the facilitator settles outside Haven's view, and its failure text names both possible causes — an unsettled merchant leg, or the harness's own node not having caught up, since it reads a different node from the one the backend writes through (#2445). **Skips** without `QA_DELEGATION_*` |
 | `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount — counting only the merchant credit this scenario CAUSED, with any drain off the delegate's pre-existing balance subtracted out (#2444), since the delegate EOA and the merchant are shared with the scenario above — and must leave no unsettled funding of its own on the delegate; a failed post-funding path attempts a gasless sweep before reporting. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
@@ -370,6 +376,9 @@ The deterministic harness runs fourteen scenarios in order:
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 | `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*`. **Skips** (#1441) when the hosted quote comes back **erc7710-shaped**: #1450's preference rule selects erc7710 whenever the merchant advertises it, and this leg's invariant is the FUNDING-LEG one, so against such a merchant it is unreachable rather than violated. Nothing goes uncovered — hosted erc7710 is `x402-erc7710-hosted`, and `x402-catalog-guided-purchase` is scheme-aware since #1547 (erc7710 expected on dev, the 3009 two-leg proof kept as its fallback shape; same topology, zero residual either way). What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT on the funding path; point it at a merchant that does not advertise erc7710 to exercise that, and note `QA_REQUIRE_ALL_LEGS=1` turns the skip into a run failure |
 | `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, then branches on the preflight's `settlement_scheme` (#1547 — the guided prepare runs the #1450 preference): on **erc7710** (expected on dev) it signs via `haven_sign` by **`payment_id`** alone and settles with **only `payment_id` + `signature`** — no `payment_header` (Haven assembles it at settle), money proof inverted (a `funding_tx_hash` is a FAILURE, treasury debit = merchant credit, delegate untouched); on the **eip3009 fallback shape** it signs via `haven_sign_x402` by `payment_id` alone (#1549 — the compact preflight no longer echoes `payment_required`; the signer fetches it by payment_id, and the leg FAILS if the echo reappears) and settles with **only `payment_id` + `signature` + `payment_header`**. Neither shape ever re-sends `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy). **FAILS (never skips)**, before any of that, if the merchant's discovery document is unreachable, a `qa_fixture` product it names has a listed catalog row on this host, or a `qa_fixture` product cannot be mapped to a catalog `(tool_name, tool_arguments)` pair (#3421 tripwire) |
+| `task-budget-lifecycle` | A task budget opens and closes from **re-served bytes** (#3505, #3491): on a throwaway identity (its agent revoked when the leg ends, #3459; funds nothing) `POST /task-budgets`, then **both** the open and the close are signed from `GET /task-budgets/:id/sign-context` — never the inline typed data `POST /close` also returns, which is the path that passed on the pre-#3491 500 — and the close must return `closed` + `close_tx_hash` and the child must read **disabled on-chain** on the observer. Env: none beyond the base config |
+| `sub-budget-redemption` | An A→B sub-budget is redeemable and its own cap refuses (#3505, #3519): throwaway identity funded ~0.006 USDC from the standing delegation identity; A's budget is partly spent, A issues B a 0.003 grant (the parent-child link is built from the same amount, so the two links are equal by construction), both signed from `GET /sub-budgets/:id/sign-context`; B redeems 0.001 USDC (exact `Transfer` on the observer); then an amount **above both child links and at or below A's root remaining** must be refused **403 `delegation_budget_exceeded`** whose `remaining_atomic` equals **both** child-link readings (read by delegation hash) and is strictly below A's root. **A 502 is a failure, not a pass** — since #3519 the pre-check refuses on a healthy run, so a 502 means the per-link read failed open AND the on-chain enforcer then caught the payment; the result names both causes. The grant is closed through `GET /sub-budgets/:id/sign-context` and read disabled on-chain. Both agents are revoked on every exit. Env: `QA_DELEGATION_AGENT_API_KEY` / `QA_DELEGATION_DELEGATE_PRIVATE_KEY` (funding source only; the standing delegation is never revoked or replaced) |
+| `merchant-locked-budget` | A merchant-locked budget is spent before the open one (#3505, #3331): throwaway identity (open grant from provisioning) plus a second grant built with `merchant_slug: haven-demo-store` and owner-signed client-side; it asserts the merchant **qualifies at run time** (`GET /merchants/haven-demo-store` `funding`: verified payTo + erc7710 — otherwise the leg **fails with the cause, it never skips**), buys a settling product (NordShield VPN Basic) by erc7710, requires the exact USDC `Transfer` treasury→payTo from the observer's logs, and reads both delegations **by hash** (`readOnchainBudget` is by symbol and cannot tell two USDC grants apart): the pinned delegation's remaining dropped by exactly the amount and the open one did not move. Funded ~0.003 USDC per run from the standing identity. Env: `QA_DEMO_MERCHANT_URL` plus the standing delegation identity, as `x402-erc7710-fresh-agent` |
 
 The harness exits non-zero if any non-skipped scenario fails. **A skip IS a
 failure (#1066).** Since every leg's identity is provisioned (#1063) and the
@@ -693,12 +702,16 @@ Sepolia with an **open (unpinned) 5 USDC/day budget delegation**. Open rather
 than pinned is structural, not preference: 3009-mode funds the delegate EOA
 from the budget, and a recipient-pinned delegation cannot pay the EOA — a
 pinned identity would make both legs skip for a third reason. The treasury
-holds testnet USDC (~0.9 at provisioning; each leg spends ~0.001/run).
+holds testnet USDC (~0.9 at provisioning). A full run spends ~0.034 USDC
+(`TREASURY_RUN_COST_ATOMIC` in `packages/qa-agent/src/lib/preflight.ts`, which
+names each leg's share); most legs spend 0.001 USDC each.
 
 - **Top-up:** send Base Sepolia USDC
   (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the treasury address in
   the operator's `~/.haven/qa-delegation.env` (`QA_DELEGATION_TREASURY`) —
-  any source works; the budget refills itself daily.
+  any source works; the budget refills itself daily. The daily
+  [QA wallet balances](#qa-wallet-balances-standing-issue) check warns about
+  7 days before it runs dry.
 - **Rotation:** the full identity (user credentials, owner key, delegate key,
   API key, treasury address) lives in the operator's
   `~/.haven/qa-delegation.env`. To rotate the delegate key: create a fresh
@@ -753,6 +766,89 @@ GitHub UI:
 Secrets should appear as `***` in logs. The workflow checks out `dev`, installs
 dependencies, builds the SDK, and executes the same harness as the local
 command.
+
+## QA wallet balances (standing issue)
+
+[#3631](https://github.com/d-hinders/Haven-AI/issues/3631). Money-flow QA failed in
+preflight for about 3.5 days (2026-10-01T19:24Z → 2026-10-05T06:08Z, ~40 runs)
+because the delegation treasury ran out of Base Sepolia USDC, and nothing warned
+beforehand. Preflight's treasury check has only a FAIL floor (one run's cost),
+and preflight output reaches only a run log.
+
+`qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
+calls `npm run qa:balances -w packages/qa-agent`, which reads three wallets on
+Base Sepolia, and `scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**,
+`QA wallet balances low` (label `qa-funding`):
+
+| Wallet | Unit | Where the address comes from |
+|---|---|---|
+| Delegation treasury | USDC | `GET /machine-payments/agent` with the QA agent key, the same derivation as preflight |
+| Demo-merchant settlement wallet | ETH (gas) | the merchant's own `/healthz` |
+| Dev backend relayer (84532) | ETH (gas) | the repo **variable** `QA_DEV_RELAYER_ADDRESS`, a recorded exception to preflight's "derive, never restate" rule, because no CI-readable source exists (owner decision on #3631) |
+
+**What the bands mean.** Runway is the balance divided by the median observed
+daily drop over the last 14 daily readings; a top-up (a rise) is ignored. The
+readings are kept as the workflow's `qa-balances-history` artifact. Until 7
+readings exist, a fixed fallback floor decides, and the row says so:
+
+- delegation treasury: 1.0 USDC (about 30 runs);
+- demo merchant: its own `warn_floor`, from `/healthz`;
+- dev relayer: 0.01 ETH, the backend's `RELAYER_LOW_BALANCE_WEI`, restated in
+  qa-agent.
+
+`warn` means under 7 days of runway. `critical` means under 1 day, or below one
+run's cost: 0.034 USDC for the treasury, the merchant's `fail_floor`, or 0.01 ETH
+for the relayer. `unknown` means a missing config value or a failed read.
+
+**How the issue behaves.**
+
+- **Any wallet `warn` or `critical`:** the body is rewritten, and the issue is
+  reopened (or created once). Each row carries the full address, balance, burn
+  per day, runway and a link to the matching top-up heading below.
+- **A comment is posted only when a wallet's band changes.**
+- **When no wallet is `warn` or `critical`:** the final balances are commented
+  and the issue closes itself.
+- **`unknown` never opens the issue and never blocks a close.**
+- **A *missing config* `unknown` turns the run red,** so GitHub notifies the
+  owner. A failed read (an RPC or `/healthz` outage) does not.
+- **Selection:** the script finds its issue by bot author and exact title, the
+  `standing-issue-upsert.mjs` rule (#3341). A human issue with the same label,
+  or one whose title contains the words, is never edited or closed.
+
+The check is read-only. It never signs or moves funds, and it receives no
+delegate private key.
+
+### Top up the delegation treasury
+
+Send Base Sepolia USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the
+treasury address the issue names, from any source. It is the same address as
+`QA_DELEGATION_TREASURY` in the operator's `~/.haven/qa-delegation.env`, and the
+**Top-up** bullet under the delegation-rail QA identity above. A full run spends
+~0.034 USDC.
+
+### Top up the demo-merchant settlement wallet
+
+Send Base Sepolia ETH to the settlement address the issue names (the merchant's
+`/healthz` reports the same one). That wallet pays the gas for the merchant's own
+settlements. The merchant's warn and fail floors are counted in settlements;
+[the preflight section](#preflight-resources-every-run-consumes-1530) explains them, and the
+[demo-merchant README](../../packages/demo-merchant-mcp/README.md) covers its
+settlement wallet.
+
+### Top up the dev relayer
+
+Send Base Sepolia ETH to the relayer address the issue names (the
+`QA_DEV_RELAYER_ADDRESS` variable). It is the one relayer EOA that dev AND
+prod share on Base mainnet and Base Sepolia, so its 84532 burn includes
+non-QA traffic. It pays for activations, passport attestations, revocations, sweeps, and the
+outbound queue's fee bumps and lane cancels; agent payments are
+paymaster-sponsored and never use it
+([`dev-environment.md`](dev-environment.md)). The backend's own low-balance floor
+is 0.01 ETH.
+
+**Operator step (once):** set the repo variable `QA_DEV_RELAYER_ADDRESS`
+(Settings → Secrets and variables → Actions → Variables). Until it is set, the
+relayer row is `unknown` and every run is red.
 
 ## Automation & gating
 
@@ -1055,8 +1151,8 @@ them is a string a caller supplies:
   firing again (#2268) — the listing alone cannot tell them apart, so
   `unconfirmed` no longer claims "a success may exist further back" unless
   the page cap, the lookup budget, or the index's reach also stopped the
-  search (those causes still leave it possible); #3321 still reopens either
-  way. Every observation without an in-budget success (`never-run`,
+  search (those causes still leave it possible). Every observation without an
+  in-budget success (`never-run`,
   `never-succeeded`, `unconfirmed`, `stale`) also logs
   per-page row counts and newest/oldest `createdAt`, the deployment index's
   size (every creator's shas, not only Railway's), its actual oldest entry,
@@ -1064,6 +1160,93 @@ them is a string a caller supplies:
   reach further back), plus the lookup accounting (attempted/failed/cached) —
   the diagnostics that would have told the leading hypothesis apart from a
   failed lookup at the time, rather than only after the fact.
+  > **Re-verified #3321 (2026-09-30):** the guard-freshness listing-coherence
+  > / page-1 retry passage only; nothing else in this document was
+  > re-verified.
+
+  **A transient stale read is now retried, for both guard kinds (#3321).**
+  #3409's leading hypothesis — an anomalous listing page — went from a guess
+  to a proven, recurring incident: a re-read of the reopen history (review
+  round 1, 2026-09-30) found 8 of the 9 guard-freshness reopens were
+  `qa-dev.yml` reading the IDENTICAL frozen page — 100 `deployment_status`
+  rows, newest `2026-09-19T16:20:14Z`, oldest `2026-09-18T21:18:20Z`, printed
+  verbatim by runs `36542205451`, `36548966124`, `36565011143` and
+  `36692820874`. Before the #3409 diagnostics existed to print the page
+  itself, the four 09-28 runs (e.g. `gh run view 36393133139 --log`) show the
+  same frozen page a different way — the summary line reads
+  `✗ qa-dev.yml — last success none since 2026-09-18T21:18:20Z (budget 4d)`
+  with a separate `never-run: Actions has no record of it ever running.`
+  line, the same `2026-09-18T21:18:20Z` this whole passage is about. The 9th
+  (`36570505601`, 09-29 12:47) was a DIFFERENT guard reading a DIFFERENT
+  frozen page:
+  `db-concurrency-proof.yml`'s `schedule` page 1 frozen at
+  `2026-09-18T07:36:48Z` ("11.2d ago"), while that job in fact succeeds
+  nightly — so the defect is not specific to `deployment_status`, the
+  Deployments index, or a guard with `provenance`. The endpoint sets
+  `Cache-Control: private, max-age=60, s-maxage=60` (measured live) — proof
+  the response is *allowed* to be cache-served, but a 60 s directive cannot
+  by itself explain an 11-day-old snapshot, so the deeper cause is GitHub's
+  own read path for this listing (cache or search-index replica)
+  occasionally serving a stale snapshot.
+
+  What the evidence shows, read from `guard-freshness.yml`'s own CI run
+  logs (each run's summary line, `❌ A scheduled guard has gone stale.` or
+  `✅ Every scheduled guard is fresh.`): of the 57 evaluations from 09-27 to
+  09-30, 12 came back stale. On 09-28, three consecutive evaluations were
+  stale (15:02:50, 15:22:17, 15:39:50), spanning 37 minutes and bracketed by
+  fresh ones at 14:58:20 and 15:41:17; nothing was sampled between them, so
+  whether the staleness was continuous is inferred, not observed. The other
+  stale evaluations were single, apart from two in a row on 09-29 that hit
+  different guards (12:47:37 `db-concurrency-proof.yml`, 13:09:04
+  `qa-dev.yml`); each was followed by a fresh evaluation, the shortest gap
+  being about a minute (16:09:59 stale, 16:11:04 fresh). The gaps are only
+  upper bounds, set by when the next push arrived. The actual recovery time of a stale read is unmeasured.
+  Whether varying the request shape (`per_page`, a `created=>` filter)
+  dodges the stale read was tried by hand during this fix and was
+  inconclusive; it is not recorded anywhere reproducible.
+
+  Staleness is per-request, not per-workflow-run or per-cluster — one
+  evaluation read `qa-dev.yml` fresh while reading `db-concurrency-proof.yml`
+  stale in the same run. `observe()` now retries page 1 of a counted event —
+  up to `PAGE1_RETRY_ATTEMPTS` times, `PAGE1_RETRY_DELAY_MS` apart — whenever
+  the retry could still change the answer: no qualifying success found yet,
+  AND either the guard has provenance and its Deployments index shows an
+  in-window deploy (the original, narrower condition), or the guard has no
+  provenance at all, in which case page 1 being stale is retried
+  unconditionally, since it is indistinguishable from the guard being about
+  to fail either way. A page with no rows (a workflow that has genuinely
+  never run) is "stale" by the same test and is retried too, up to the same
+  bound — wasted reads, capped, and a truly-empty history stays empty on
+  every retry. The first retry that opens near "now" replaces the stale read;
+  a genuinely dead trigger cannot self-correct on retry — every attempt stays
+  old — so it still exhausts the retries and still escalates exactly as
+  before; only a transient stale read is cleared, silently, before it ever
+  becomes a finding.
+
+  **This is a best-effort mitigation for the isolated case, not a fix for a
+  cluster.** Every isolated stale read observed was cleared by a later
+  evaluation, and `3 × PAGE1_RETRY_DELAY_MS` (worst case ~60 s per
+  stale page 1, per counted event, per guard — a single evaluation can sleep
+  on multiple: up to ~60 s for `qa-dev.yml`'s one counted event plus up to
+  ~120 s for `db-concurrency-proof.yml`'s two, `schedule` and
+  `workflow_dispatch`, so ~180 s (~3 min) worst case for one evaluation,
+  inside `guard-freshness.yml`'s own `timeout-minutes: 5`) is a judgement
+  call sized for that case, not a claim that it covers it. The 09-28 run of
+  stale evaluations spanned 37 minutes, longer than any in-evaluation retry
+  budget can reasonably cover, so for that case the mitigation is the *next*
+  evaluation, not the retry: `guard-freshness.yml` runs on every push to
+  `dev`/`main` (124 push-triggered runs 2026-09-24..30, measured with
+  `gh run list --workflow guard-freshness.yml --created 2026-09-24..2026-09-30`),
+  but the next push can be minutes or hours away — the 2026-09-30T08:56Z
+  reopen waited 6 h 20 min for the next evaluation. The
+  `(retried Nx — #3321)` diagnostic line is what will
+  show whether a future occurrence outlasts even that. Mutation-proven in
+  `guard-freshness.test.mjs` for both guard kinds: the self-correcting and
+  stays-stale-through-every-retry cases (qa-dev.yml, with provenance, and
+  db-concurrency-proof.yml, without), a guard that skips the retry once a
+  qualifying success is already found on an earlier counted event, a page 1
+  with no in-window deploy that is never retried, and page 2+ never being
+  retried (only page 1 is).
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`
@@ -1438,8 +1621,9 @@ everything else is `unclassified`, never a guess. Read the class before reading 
 | Class | Signature | What it means, and the example | Next step |
 |---|---|---|---|
 | `provider` | `-32016` / `over rate limit`, `RPC Request failed`, `Status: 429` or `Too Many Requests` (on the line after `HTTP request failed.`, or JSON-escaped inside a relayed 502 body), `Batch of more than N requests`, `no available upstreams`, `flashblocks`, dRPC's `on the free plan` / `upgrade to paid plan` limits, and a body quoting `URL: https://sepolia.base.org` ([#2511](#a-502-whose-body-carries-url-httpssepoliabaseorg-is-an-rpc-outage-not-a-regression-2511)) | The RPC or bundler provider refused the request. #2449: `-32016 over rate limit` inside the delegate-account deploy. | A finding for the provider, not a flake to re-dispatch away. A **recurring** provider class means the endpoint does not fit the harness's load — report it (epic #3335) and check the endpoint before retrying into the same limit. |
-| `preflight` | the run-level `✗ preflight:` line, and the resource line above it that failed its floor | The harness stopped before any leg ran. #2485: the merchant settlement wallet's gas below its floor. | Top up or fix the named resource; no leg result exists to read. |
+| `preflight` | the run-level `✗ preflight:` line, and the resource line above it that failed its floor | The harness stopped before any leg ran. #2485: the merchant settlement wallet's gas below its floor. 2026-10-01 → 10-05 (#3631): the delegation treasury at 0.0 USDC, about 40 failing runs. | Top up or fix the named resource; no leg result exists to read. |
 | `harness` | the message of a JS runtime error (`… is not a function`, `… is not defined`, `Cannot read properties of undefined`) — the harness prints `err.message`, never the error's name, so a relayed body quoting `TypeError` does not count — or the run-level `✗ harness crashed:` line | The harness itself threw. No failure in the 40-run sample below carries this signature. A harness defect does not always announce itself: #2443's second failure was intra-attempt contamination between scenarios, and this classifier records it as `unclassified`. | Fix the harness; the product may be fine. |
+| `rate_limit` | `Rate limit exceeded: max <n> x402 payments per hour`, however the leg relays it (`authorize failed (429)`, the SDK's `settleX402Erc7710 failed:`, a hosted `API_ERROR`, a bare FAIL line, `(HTTP 429: …)`); checked first, ahead of every other class (#3541) | Haven's own per-agent x402 cap (`max_x402_per_hour`, default 100, a sliding one-hour window) working as designed, out-run by the harness's own volume. Run 36840685285: about four hand dispatches plus post-deploy runs in an hour on the one QA identity, ten x402 legs refused; attempt 2 passed about 30 s later. Only that body: Haven's other limiters — `moneyPathRateLimit`'s 429 (`Rate limit exceeded, retry in 1 minute`) and `Relayer budget exceeded` — land in `haven` when relayed as `failed (429)`, and in `unclassified` when the status is lost (the SDK, the sweep scenario). | Never a product defect. Stop hand-dispatching runs back to back; the window slides, so the in-step retry often clears it, and a further hand dispatch should be spaced out. |
 | `haven` | the leg's own Haven API call answered `… failed (4xx)` | Haven refused a request the leg expected to succeed. | Read the Haven change that landed before the run. |
 | `unclassified` | none of the above — including the backend's masked `activate failed (502): Could not deploy the account for this budget` and timeouts on a Haven endpoint | Could be the provider underneath or Haven; the masked message does not say. | Read the run log and the backend log for that window. Do not re-dispatch it away: if it recurs, it is a finding. |
 
@@ -1524,6 +1708,20 @@ Check balances by role:
 
 Do not repeatedly rerun a money-moving harness while the cause is unknown; each
 run consumes test allowance and test USDC.
+
+**#3494: `POST /payments/:id/sign`'s failure body now carries a typed
+`error_code`** (`submission_outcome_unknown`, `signature_rejected`,
+`account_validation_failed`, `task_budget_exceeded`,
+`delegation_budget_exceeded`, or `onchain_execution_failed`) and, on the
+four non-budget codes, a bounded `details` string — capped at 300
+characters plus an ellipsis, never the full bundler/viem failure. The bound
+applies to viem's own FULL `.message` (after `redactVendorSecrets`), not
+just its `shortMessage` summary field — and viem formats that message as the
+`shortMessage`, then the request arguments, then a `Details:` line carrying the on-chain
+revert reason, then `Version:`. The revert reason is therefore often past
+the 300-character cut, truncated or absent from `details` entirely — read
+the on-chain transaction directly (the explorer, or a raw `eth_call`
+replay) for the full reason, rather than assuming `details` is complete.
 
 ### Sweep is skipped after 20 seconds
 

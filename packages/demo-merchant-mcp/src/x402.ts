@@ -497,15 +497,15 @@ export const SETTLEMENT_COST_WEI = 2_500_000_000_000n
 /**
  * #2490: below this many settlements of headroom a QA run is REFUSED.
  *
- * Anchored on what one full run consumes: seven 0.001-USDC settling merchant
- * legs plus the 0.010 direct settle — the same derivation
- * `TREASURY_RUN_COST_ATOMIC` documents in the QA harness — which is ~8
- * settlements. Not 8: that would admit a run that spends the wallet to zero
+ * Anchored on what one full run consumes: eight 0.001-USDC settling merchant
+ * legs (including `merchant-locked-budget`, #3505) plus the 0.010 direct
+ * settle — the same derivation `TREASURY_RUN_COST_ATOMIC` documents in the QA
+ * harness — which is ~9 settlements. Not 9: that would admit a run that spends the wallet to zero
  * with no margin for a retry leg or a fee drift. Not 16: at 24 the old single
  * floor produced #2485 (three qa-dev failures while ~3 runs of real capacity
  * sat unused), so a fail floor anywhere near that re-creates the same
  * incident at a smaller scale. 12 is one full run plus half a run of
- * headroom: a run admitted at the floor still ends with >= 4 settlements
+ * headroom: a run admitted at the floor still ends with >= 3 settlements
  * left. Must still catch the condition #1530 was built for — at the
  * 2026-08-17 outage balance (255 gwei) the wallet holds 0 settlements, far
  * below this floor, exactly as the fail band requires.

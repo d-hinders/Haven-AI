@@ -45,6 +45,11 @@ import {
   recordRefusalFireAndForget,
   pickRefusalDetail,
   classifyRevertForLedger,
+  decodeErrorStrings,
+  isPeriodBudgetRevert,
+  isTransferCapRevert,
+  isSignatureRejectedRevert,
+  isAccountValidationFailedRevert,
 } from '../refusal-ledger.js'
 import { EstimateGasExecutionError } from 'viem'
 
@@ -312,5 +317,101 @@ describe('refusal ledger unit contracts', () => {
     expect(classifyRevertForLedger(new Error('DELEGATION_RAIL_BUNDLER_URL is not configured'))).toBeNull()
     expect(classifyRevertForLedger(new Error('fetch failed'))).toBeNull()
     expect(classifyRevertForLedger(null)).toBeNull()
+  })
+
+  // #3503 review finding: a bundler relays the enforcer's reason as an
+  // ABI-encoded Error(string), hex — the verbatim dev shape (2026-08-25, also
+  // the qa-agent's ENFORCER_502 fixture). Every pattern above only ever saw
+  // decoded test strings.
+  const hexRevert = (reason: string) =>
+    'UserOperation reverted during simulation with reason: 0x08c379a0' +
+    (32).toString(16).padStart(64, '0') +
+    reason.length.toString(16).padStart(64, '0') +
+    Buffer.from(reason, 'utf8').toString('hex').padEnd(Math.ceil(reason.length / 32) * 64, '0')
+  const VERBATIM_DEV_PERIOD_REVERT =
+    'UserOperation reverted during simulation with reason: 0x08c379a0' +
+    '0000000000000000000000000000000000000000000000000000000000000020' +
+    '0000000000000000000000000000000000000000000000000000000000000034' +
+    '4552433230506572696f645472616e73666572456e666f726365723a7472616e736665722d616d6f756e742d65786365656465' +
+    '6400000000000000000000000000'
+
+  it('decodeErrorStrings: reads the reason out of an ABI-encoded Error(string), skips malformed payloads', () => {
+    expect(decodeErrorStrings(VERBATIM_DEV_PERIOD_REVERT)).toEqual([
+      'ERC20PeriodTransferEnforcer:transfer-amount-exceeded',
+    ])
+    expect(decodeErrorStrings('reason: 0x08c379a0deadbeef')).toEqual([])
+    expect(decodeErrorStrings('no payload here')).toEqual([])
+    // Truncated: the declared length runs past the hex.
+    expect(decodeErrorStrings(VERBATIM_DEV_PERIOD_REVERT.slice(0, -40))).toEqual([])
+    // A non-0x20 offset is honoured, not assumed.
+    const reason = 'ERC20PeriodTransferEnforcer:transfer-amount-exceeded'
+    const offset40 =
+      '08c379a0' +
+      (64).toString(16).padStart(64, '0') +
+      '0'.repeat(64) +
+      reason.length.toString(16).padStart(64, '0') +
+      Buffer.from(reason, 'utf8').toString('hex').padEnd(128, '0')
+    expect(decodeErrorStrings(offset40)).toEqual([reason])
+    // A stray selector earlier in the SAME hex run does not hide the payload.
+    expect(decodeErrorStrings(`0x08c379a0ff${VERBATIM_DEV_PERIOD_REVERT.split('0x')[1]}`)).toEqual([reason])
+    // Uppercase hex.
+    expect(decodeErrorStrings(VERBATIM_DEV_PERIOD_REVERT.toUpperCase().replace('0X', '0x'))).toEqual([reason])
+  })
+
+  it('the hex-encoded enforcer reverts classify exactly like their decoded text', () => {
+    const period = new Error(VERBATIM_DEV_PERIOD_REVERT)
+    expect(isPeriodBudgetRevert(period)).toBe(true)
+    expect(classifyRevertForLedger(period)).toBe('delegation_budget_exceeded')
+    // Wrapped as viem does — the hex sits in the cause.
+    expect(isPeriodBudgetRevert(new Error('estimate failed', { cause: period }))).toBe(true)
+
+    const cap = new Error(hexRevert('ERC20TransferAmountEnforcer:allowance-exceeded'))
+    expect(isTransferCapRevert(cap)).toBe(true)
+    expect(isPeriodBudgetRevert(cap)).toBe(false)
+    expect(classifyRevertForLedger(cap)).toBe('delegation_budget_exceeded')
+
+    const expired = new Error(hexRevert('TimestampEnforcer:expired-delegation'))
+    expect(classifyRevertForLedger(expired)).toBe('delegation_expired')
+    expect(isPeriodBudgetRevert(expired)).toBe(false)
+  })
+
+  // #3494 review round 1 (S1): AA24 names the signer; every other AA2x code
+  // does not — each gets its own explicit case, not a loop over the family.
+  it('isSignatureRejectedRevert: matches AA24 only, not a budget revert, another AA2x code, or an unrelated error', () => {
+    expect(isSignatureRejectedRevert(new Error('UserOperation reverted during simulation: AA24 signature error'))).toBe(true)
+    // Wrapped as viem does — the text sits in the cause.
+    expect(
+      isSignatureRejectedRevert(
+        new Error('estimate failed', { cause: new Error('AA24 signature error') }),
+      ),
+    ).toBe(true)
+    // AA25 (a different AA2x code) is NOT a signature rejection.
+    expect(isSignatureRejectedRevert(new Error('AA25 invalid account nonce'))).toBe(false)
+    // A budget revert is not a signature revert, and vice versa.
+    const period = new Error(VERBATIM_DEV_PERIOD_REVERT)
+    expect(isSignatureRejectedRevert(period)).toBe(false)
+    expect(isPeriodBudgetRevert(period)).toBe(true)
+    // AA1x/AA3x are a different phase (factory/paymaster) — not this family.
+    expect(isSignatureRejectedRevert(new Error('AA10 sender already constructed'))).toBe(false)
+    expect(isSignatureRejectedRevert(new Error('nothing enforcer-shaped here'))).toBe(false)
+  })
+
+  it('isAccountValidationFailedRevert: matches AA25 (and the rest of the family) but never AA24, a budget revert, or an unrelated error', () => {
+    expect(isAccountValidationFailedRevert(new Error('AA25 invalid account nonce'))).toBe(true)
+    // Wrapped as viem does — the text sits in the cause.
+    expect(
+      isAccountValidationFailedRevert(
+        new Error('estimate failed', { cause: new Error('AA25 invalid account nonce') }),
+      ),
+    ).toBe(true)
+    // AA24 belongs to isSignatureRejectedRevert, never this one.
+    expect(isAccountValidationFailedRevert(new Error('AA24 signature error'))).toBe(false)
+    // A budget revert is not an account-validation failure, and vice versa.
+    const period = new Error(VERBATIM_DEV_PERIOD_REVERT)
+    expect(isAccountValidationFailedRevert(period)).toBe(false)
+    expect(isPeriodBudgetRevert(period)).toBe(true)
+    // AA1x/AA3x are a different phase (factory/paymaster) — not this family.
+    expect(isAccountValidationFailedRevert(new Error('AA10 sender already constructed'))).toBe(false)
+    expect(isAccountValidationFailedRevert(new Error('nothing enforcer-shaped here'))).toBe(false)
   })
 })

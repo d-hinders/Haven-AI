@@ -185,6 +185,183 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/auth/github/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Begin an ops console sign-in with GitHub.
+         * @description Redirects the browser to GitHub (no scopes requested) with a signed, 10-minute `state` carrying `return_to` and `nonce`. `return_to` must exactly equal one of the deployment's `OPS_REDIRECT_ORIGINS` (scheme, host and port; no prefix, suffix or wildcard matching). Returns 404 when the ops console is not configured on this deployment.
+         */
+        get: operations["startOpsSignIn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/auth/github/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Finish an ops console sign-in (GitHub redirects here).
+         * @description Verifies the `state` this backend issued, re-checks its origin against `OPS_REDIRECT_ORIGINS`, exchanges the code, reads the GitHub user and discards GitHub's token. An allowlisted numeric GitHub id (with 2FA, when GitHub reports it) is redirected to `<origin>/#token=<ops token>&nonce=<nonce>`; every other outcome to `<origin>/#error=<code>&nonce=<nonce>` (`not_allowed`, `two_factor_required`, `github_denied`, `github_unavailable`, `missing_code`). Every sign-in that reaches a GitHub identity (allowed, `not_allowed` or `two_factor_required`) is audited first; a failed audit write answers 503 and issues nothing. `github_denied`, `github_unavailable` and `missing_code` have no identity to record.
+         */
+        get: operations["finishOpsSignIn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the signed-in ops operator. */
+        get: operations["getOpsSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Platform-wide counts for the ops console.
+         * @description Counts only: users, smart accounts per chain split by account_type (retired legacy_safe rows stay visible apart), agents by status, active agent delegations, and payment intents and payment refusals in the last 24 h. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. Returns 404 while the deployment has no read-only ops database configured.
+         */
+        get: operations["getOpsOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find customer records by a pasted id, address, tx hash or email prefix.
+         * @description Detects the key type: a UUID matches users, agents and payment intents; an address (0x + 40 hex) matches smart accounts and agent delegate addresses; a tx hash (0x + 64 hex) matches payment intents and, as a typed system_tx hit with no user link, outbound system transactions; anything else is a case-insensitive email prefix of at least 3 characters. At most 20 hits per lookup. The lookups run one after another inside a 5 s total budget; lookups that did not complete are listed in timed_out and the hits found so far are returned. Emails are masked. The audit row stores the key type and the masked term, never the raw query. Returns 404 while the deployment has no read-only ops database configured.
+         */
+        get: operations["searchOps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One customer's record, masked, for support.
+         * @description The user (email and name masked), their smart accounts per chain with account_type, their agents with status, their agents' active delegations (budget shape, recipient pin, window), and their last 50 payment intents and last 50 payment refusals. Payment-intent error messages are stored redacted of vendor secrets. Company details, machine metadata, hashes, signatures and delegation bodies are never returned. Reads through the read-only ops database role and writes one audit row before answering. Returns 404 for an unknown user, or while the deployment has no read-only ops database configured.
+         */
+        get: operations["getOpsUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/users/{id}/onchain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The chain's view of one customer's accounts, next to the database's.
+         * @description Per smart account: whether code exists on-chain (deployed vs counterfactual, best-effort — a lagging RPC node can report a deployed account as having no code), and per ACTIVE stored delegation whether the DelegationManager reports it disabled on-chain and the period enforcer's remaining budget. A failed budget read renders 'unavailable', never a remaining figure. Accounts that are not delegation-rail rows (legacy_safe), on a chain this environment does not serve, or on a chain without pinned delegation contracts are listed with their reason and are NEVER read on-chain — zero RPC calls for them. Addresses are masked; delegation hashes and bodies are never returned. Reads through the read-only ops database role; the chain reads are batched per chain and cached per (chain, user) for 60 s with single-flight. Writes one audit row before answering. The signer set is DB-only in v1 (no on-chain signer-set reader exists). Returns 404 for an unknown user, while the deployment has no read-only ops database or no chain readers configured.
+         */
+        get: operations["getOpsUserOnchain"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the operational problems: sweepable intents, stuck revocations, stuck lanes, delegate balances.
+         * @description The ops console’s system-health read (#3514). ERC-7710 payment intents the settlement sweeper works on (in its retry window, and past its horizon — the payments actually lost without an operator, 24 h to 30 days), confirmed payments whose evidence row never landed (#2213), revocations and re-anchors unreconciled past 1 h, broadcast outbound transactions unmined past the bump worker’s stale threshold per served chain, the delegate balance monitor’s last report, and the same payload GET /health/ops serves (built by the same function). READ-ONLY about the operational world: no RPC call on request, no claim, no receipt read — a listed lane MAY already be mined. Delegate balances are the monitor’s in-memory last report, never a scan on request; a replica without the monitor leader lock answers not_available_on_this_replica. Atomic amounts are decimal strings. Every list is capped at 50. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. Returns 404 while the deployment has no read-only ops database or no diagnostics builder configured.
+         */
+        get: operations["getOpsSystemHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal one masked field of one record, audited.
+         * @description Accepts only a closed set of `(target_type, field)` pairs and reads through the read-only ops database role. Every reveal writes an audit row before the value is returned; a failed audit write answers 503 with no value. Returns 404 while the deployment has no read-only ops database configured.
+         */
+        post: operations["revealOpsField"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/organizations": {
         parameters: {
             query?: never;
@@ -382,7 +559,7 @@ export type paths = {
         put?: never;
         /**
          * Archive an agent (soft removal — history is kept).
-         * @description Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
+         * @description Replaces agent deletion (#1401). Delegation agents require status=revoked and no live budget delegations (pending, active or replaced — anything revoke-all would still target) because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.
          */
         post: operations["archiveAgent"];
         delete?: never;
@@ -422,7 +599,7 @@ export type paths = {
         put?: never;
         /**
          * Mark an agent as revoked in Haven.
-         * @description Blocks Haven API access for the agent. Users can also revoke or change Safe module permissions outside Haven; on-chain revocation remains the authority boundary.
+         * @description Blocks Haven API access for the agent. Revoking is permitted from `active`, `paused` and `pending_approval` — nothing re-activates a revoked agent, so the credential cannot return to life (on-chain revocation remains the authority boundary). Revoking also cancels the agent's open connection setup in the same transaction, so a connect flow that has not finished cannot approve a budget for an agent that no longer exists. The agent's `api_key_hash` is kept: sweep recovery for a stranded delegate balance stays available. Users can also revoke or change Safe module permissions outside Haven.
          */
         post: operations["revokeAgent"];
         delete?: never;
@@ -605,7 +782,7 @@ export type paths = {
         };
         /**
          * List an agent's task budgets.
-         * @description Every task budget on this agent, newest first — the owner-facing twin of the agent-auth list at GET /task-budgets. Scoped by BOTH agent id and the caller's ownership of it.
+         * @description Every task budget on this agent, newest first — the owner-facing twin of the agent-auth list at GET /task-budgets. Scoped by BOTH agent id and the caller's ownership of it. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash; a failed on-chain read reports null with remaining_is_from_chain: false — never the full cap as remaining.
          */
         get: operations["listAgentTaskBudgets"];
         put?: never;
@@ -631,7 +808,7 @@ export type paths = {
         put?: never;
         /**
          * Issue a sub-budget: agent A re-delegates a narrower budget to agent B.
-         * @description Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (409 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side (sign-context, then relay each signature via POST /agents/{id}/sub-budgets/{sub}/sign). A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329).
+         * @description Owner-authorised two-party flow (#3330): the owner picks the sub-agent, amount, expiry and optional recipient pin; the route refuses a child WIDER than the parent budget in amount, expiry or recipient BEFORE signing (400 sub_budget_wider_than_parent), and refuses 409 sub_budget_exceeds_remaining when the slice plus already-open slices under the same parent would exceed the parent's remaining budget. Creates TWO pending rows: A's self-delegated parent-child and B's grant chained under it. Both are signed by A's delegate key agent-side: the agent lists its rows (GET /sub-budgets?status=awaiting_signature), fetches each sign-context, and submits each signature itself (POST /sub-budgets/{id}/submit; next_action 'agent_signs_then_submits'). The owner relay via POST /agents/{id}/sub-budgets/{sub}/sign still works but is optional. A sub_budget_id naming the delegating agent itself is refused: that is a task budget (#3329). Lifecycle gate (#3553), checked before the handler's body checks and writing nothing: 409 issuer_retired when the issuing agent is revoked or archived (including a half-revoked agent whose budget delegation is still live), and 409 sub_agent_retired when the receiving sub-agent is revoked, archived or pending_approval (only active or paused agents may receive); paused agents pass the gate. Opening a grant later is also refused (409 sub_agent_retired, row stays pending) if its receiving agent was retired after issuance, on both the owner relay and the agent submit.
          */
         post: operations["issueAgentSubBudget"];
         delete?: never;
@@ -671,7 +848,7 @@ export type paths = {
         put?: never;
         /**
          * Relay the delegating agent's signature over one pending sub-budget child.
-         * @description Owner relays step (#3330): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch.
+         * @description OPTIONAL owner relay (#3330; since #3506 the agent submits its own signature via POST /sub-budgets/{id}/submit and this relay is not required): verifies the signature recovers A's OWN delegate key over the stored child typed data (recoverSubBudgetChildSigner), then flips the row open. Both rows of a tree are signed this way (one call per row). A signature by any other key answers 400 signature_mismatch. Refuses 409 issuer_retired (#3553) when the issuing agent is revoked or archived, leaving the pending row pending; paused agents pass. Also refuses 409 sub_agent_retired when the row is a grant whose receiving agent is revoked, archived or pending_approval; the row stays pending.
          */
         post: operations["signAgentSubBudget"];
         delete?: never;
@@ -1177,7 +1354,7 @@ export type paths = {
         post?: never;
         /**
          * Unlink an account from the Haven account.
-         * @description Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.
+         * @description Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key.
          */
         delete: operations["unlinkUserAccount"];
         options?: never;
@@ -1214,7 +1391,7 @@ export type paths = {
         };
         /**
          * Machine-readable funding facts for one account: what to fund, with what, where, and how much.
-         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.
+         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.
          */
         get: operations["getAccountFunding"];
         put?: never;
@@ -1294,7 +1471,7 @@ export type paths = {
         };
         /**
          * Read the caller's display-currency preference.
-         * @description Defaults to 'USD' when the account has never set one — a value, not an absence.
+         * @description Defaults to 'SEK' when the account has never set one — a value, not an absence.
          */
         get: operations["getUserPreferences"];
         /**
@@ -1986,7 +2163,7 @@ export type paths = {
         };
         /**
          * One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.
-         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-3 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.
+         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-2 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.
          */
         get: operations["getAnalyticsOverview"];
         put?: never;
@@ -2320,7 +2497,7 @@ export type paths = {
         };
         /**
          * List task budgets for the authenticated agent.
-         * @description Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry.
+         * @description Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — closing rows always, pending and open rows while not expired; closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.
          */
         get: operations["listTaskBudgets"];
         put?: never;
@@ -2342,7 +2519,10 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Fetch one task budget. */
+        /**
+         * Fetch one task budget.
+         * @description #3501: an OPEN task budget carries spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.
+         */
         get: operations["getTaskBudget"];
         put?: never;
         post?: never;
@@ -2420,8 +2600,8 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * List sub-budgets this agent holds (it is the sub-agent).
-         * @description Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. The agent's own parent-child narrowings are read through the delegating side (sign-context/close below) — this list is what a sub-agent spends through.
+         * List sub-budgets this agent holds (it is the sub-agent), or owes a signature on (it is the delegating agent).
+         * @description Default status=open: OPEN, not expired grants where this agent is the HOLDER (sub-agent B). status=all: every row regardless of status or expiry. status=awaiting_signature (#3506): the DELEGATING side — the rows this agent must still sign, i.e. its own parent-child row and every grant it issued, while pending (an open signature is owed; a pending row past its expiry is omitted) or closing (a close signature is owed), parent-child row first. Each row's id is the sub_budget_id to pass to haven_sign, then haven_submit. The agent's own parent-child narrowings are otherwise read through the delegating side (sign-context/close below) — the default list is what a sub-agent spends through.
          */
         get: operations["listSubBudgets"];
         put?: never;
@@ -2480,7 +2660,7 @@ export type paths = {
         put?: never;
         /**
          * Submit the delegating agent signature — opens a pending child, or relays the signed close operation.
-         * @description status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409.
+         * @description status=pending: verifies the signature recovers the DELEGATING agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed. Any other status is 409. A pending grant whose receiving agent was revoked, archived or is pending_approval (retired after issuance, #3553) is refused 409 sub_agent_retired and stays pending; close submits are never gated.
          */
         post: operations["submitSubBudget"];
         delete?: never;
@@ -2521,7 +2701,7 @@ export type paths = {
         put?: never;
         /**
          * Create a direct Haven payment intent.
-         * @description Creates a signable payment intent on the delegation rail. The agent must sign the returned sign_data with its delegate key before Haven can relay execution; the budget delegation's caveat enforcers authorize it on-chain at redemption. #2105: there is no over-budget approval branch — an over-budget payment REVERTS during gas estimation rather than queuing, and the approval queue died with the Safe rail (#2055). Both retired rails are refused with 410 before anything is written.
+         * @description Creates a signable payment intent on the delegation rail. The agent must sign the returned sign_data with its delegate key before Haven can relay execution; the budget delegation's caveat enforcers authorize it on-chain at redemption. #2105: there is no over-budget approval branch — the approval queue died with the Safe rail (#2055). Both retired rails are refused with 410 before anything is written. #3503: a payment the budget delegation's live remaining PERIOD budget cannot cover is refused with 403 error_code "delegation_budget_exceeded" (phase "insufficient_funds", next_action "fund_account_or_raise_allowance", remaining/remaining_atomic, shortfall/shortfall_atomic, amount/amount_atomic) before any UserOp is built — the same error_code and budget fields the x402 legs refuse with. It reads the delegation the payment redeems (a task budget's parent, else the (token, recipient) grant); for a sub-budget, every link of its three-link chain, the smallest remaining deciding. It is a fail-fast convenience, not the gate: an unreadable read fails OPEN and the ERC20PeriodTransferEnforcer still reverts on-chain; a period revert that a fresh read confirms gets the same 403. #3500: with task_budget_id, a payment the task budget's own cap cannot cover is refused with 403 error_code "task_budget_exceeded" (task_budget_id, remaining_atomic, max_atomic, amount_atomic) before anything is built, read from the task child's ERC20TransferAmountEnforcer; the enforcer still reverts on-chain when that read is unavailable.
          */
         post: operations["createPaymentIntent"];
         delete?: never;
@@ -2755,7 +2935,7 @@ export type paths = {
         put?: never;
         /**
          * Decide server-side whether a quote amount fits the agent’s remaining budget.
-         * @description #3054: the guided prepare's budget compare moved server-side so an over-budget refusal is DECIDED by Haven — and reaches the payment_refusals ledger with source "hosted_prepare" through the refuse() choke point — instead of being computed in the agent's runtime where the ledger never saw it. The body carries the merchant quote facts (chainId/token/amountAtomic plus advisory merchantTo and the bought resourceUrl — the refusal dedupe window's discriminating column, never this endpoint's own URL); nothing about the caller's claim is trusted beyond which quote it asks about. Sufficiency answers { sufficient: true, remaining_atomic }. Insufficiency refuses 403 delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption.
+         * @description #3054: the guided prepare's budget compare moved server-side so an over-budget refusal is DECIDED by Haven — and reaches the payment_refusals ledger with source "hosted_prepare" through the refuse() choke point — instead of being computed in the agent's runtime where the ledger never saw it. The body carries the merchant quote facts (chainId/token/amountAtomic plus advisory merchantTo and the bought resourceUrl — the refusal dedupe window's discriminating column, never this endpoint's own URL); nothing about the caller's claim is trusted beyond which quote it asks about. Sufficiency answers { sufficient: true, remaining_atomic }. Insufficiency refuses 403 delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption. #3492/#3527: when the body also carries idempotencyKey and it resolves to an already-SETTLED erc7710 OR eip3009 payment for this exact quote, the answer is { sufficient: true, remaining_atomic, replay: true } instead — no refusal, no ledger write, because the money already moved. See BudgetPrecheckRequest.idempotencyKey for the exact match rule and scope.
          */
         post: operations["precheckMachinePaymentBudget"];
         delete?: never;
@@ -2875,7 +3055,7 @@ export type paths = {
         put?: never;
         /**
          * Attach merchant proof evidence for a settled machine payment.
-         * @description Records proof-loop evidence for a settled x402 or MPP payment owned by the authenticated agent. This does not authorize or execute payment. On most schemes the payment is already confirmed and this only attaches merchant/protocol evidence. On erc7710 direct settlement the merchant redeems the delegation chain and Haven submits nothing, so this call is also what COMPLETES the payment: it verifies the reported txHash on-chain against the intent (token, payer, merchant, exact amount, and the settlement window) and confirms the intent before recording evidence. It fails closed — 409 when the transaction does not settle this payment or cannot be attributed to it unambiguously, 503 when the chain could not be read or the transaction is not mined yet; neither confirms anything.
+         * @description Records proof-loop evidence for a settled x402 or MPP payment owned by the authenticated agent. This does not authorize or execute payment. On most schemes the payment is already confirmed and this only attaches merchant/protocol evidence. On erc7710 direct settlement the merchant redeems the delegation chain and Haven submits nothing, so this call is also what COMPLETES the payment: it verifies the reported txHash on-chain against the intent (token, payer, merchant, exact amount, and the settlement window) and confirms the intent before recording evidence. On eip3009, a funded payment reported with a txHash other than its own funding transaction is the merchant's settlement: it is verified on-chain as a delegate → merchant transfer of the exact amount, mined after funding confirmed, and recorded on the payment (receipts then show it as settlement_tx_hash); the funding hash and the proof status do not change. It fails closed — 409 when the transaction does not settle this payment, cannot be attributed to it unambiguously, or is already recorded (on eip3009 the body carries a reason), 503 when the chain could not be read or the transaction is not mined yet; neither confirms or records anything.
          */
         post: operations["attachMachinePaymentEvidence"];
         delete?: never;
@@ -3461,6 +3641,16 @@ export type components = {
             delegation_hash: string;
             label: string | null;
             max_atomic: string;
+            /** @description What has been transferred through this child so far, read live from the ERC20TransferAmountEnforcer's spentMap for this delegation hash — the same authority the chain applies at redemption. Present on GET reads of an open task budget only; null when the on-chain read failed (a warning is logged server-side). Absent on responses that did not read the chain. */
+            spent_atomic?: string | null;
+            /** @description max_atomic minus spent_atomic, clamped at zero — what the chain will still allow through this child. Never fabricated: a failed read reports null, never the full cap. */
+            remaining_atomic?: string | null;
+            /** @description Human form of spent_atomic ("0.001 USDC"), derived server-side from the chain registry. Null exactly when spent_atomic is null; an unknown token renders the atomic figure explicitly labelled. */
+            spent_display?: string | null;
+            /** @description Human form of remaining_atomic. Null exactly when remaining_atomic is null. */
+            remaining_display?: string | null;
+            /** @description Provenance of remaining_atomic (#1319-style honesty flag): true when it came from the live enforcer read, false when that read failed (spent_atomic and remaining_atomic are then null). Present only where the read was attempted. */
+            remaining_is_from_chain?: boolean;
             /** @enum {string} */
             status: "pending" | "open" | "closing" | "closed";
             /** @description Unix seconds. */
@@ -3768,6 +3958,313 @@ export type components = {
                 status: "ok" | "error";
                 latencyMs?: number;
             };
+        };
+        OpsSystemHealth: {
+            /** @description ERC-7710 payment intents the settlement sweeper works on, oldest first, at most 50. in_window: still inside the recovery window it retries. past_horizon: past 24 h up to 30 days — the sweeper no longer retries these, the payments actually lost without an operator. */
+            sweepable_intents: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_human: string;
+                status: string;
+                /** @enum {string} */
+                window: "in_window" | "past_horizon";
+                age_seconds: number;
+            }[];
+            /** @description Confirmed ERC-7710 payments no machine_payment_evidence row references (#2213): settled on-chain, booked nowhere, outside every automated retry path. */
+            evidence_orphans: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_human: string;
+                status: string;
+                age_seconds: number;
+            }[];
+            /** @description Revocations unreconciled past 1 h (#973): Haven's DB says the agent is revoked, the live attestation does not. A merchant reading only the chain still sees the agent as valid. */
+            stuck_revocations: {
+                /** Format: uuid */
+                agent_id: string;
+                /** Format: date-time */
+                revocation_requested_at: string | null;
+                revocation_attempts: number;
+                age_seconds: number;
+            }[];
+            /** @description Re-anchors unreconciled past 1 h (#1699): the live attestation names the retired key. */
+            stuck_reanchors: {
+                /** Format: uuid */
+                agent_id: string;
+                agent_eoa: string | null;
+                delegate_address: string | null;
+                revocation_attempts: number;
+            }[];
+            /** @description Broadcast outbound transactions unmined past the bump worker's stale threshold, per served chain. No receipt is read on this path: a row listed here MAY ALREADY BE MINED — the worker's chain-first tick closes those. id is the unmasked outbound_txs id the operator pastes into ops:cancel-stuck-lane; it links to no user. capped_needs_operator: a rebroadcast-safe submitter's lane at the bump cap — the worker has stopped for good and the lane is the operator's. */
+            stuck_lanes: {
+                /** Format: uuid */
+                id: string;
+                chain_id: number;
+                submitter: string;
+                nonce: string;
+                age_seconds: number;
+                /** @enum {string} */
+                reason: "stale_unmined" | "capped_needs_operator";
+            }[];
+            delegate_balances: {
+                /** @enum {boolean} */
+                available: true;
+                /** Format: date-time */
+                scanned_at: string;
+                report: {
+                    scanned_delegates: number;
+                    unread: number;
+                    /** @description Balances at/above the sweep floor with no fresh pending payment — sweepable money on a hot EOA. */
+                    lingering: {
+                        /** Format: uuid */
+                        agent_id: string;
+                        agent_name: string;
+                        delegate_address: string;
+                        chain_id: number;
+                        balance_atomic: string;
+                    }[];
+                    dust_total_atomic: string;
+                    dust_alert: boolean;
+                    chain_errors: {
+                        [key: string]: string;
+                    };
+                };
+            } | {
+                /** @enum {boolean} */
+                available: false;
+                /** @enum {string} */
+                reason: "not_available_on_this_replica";
+            };
+            ops_diagnostics: components["schemas"]["HealthOpsResponse"];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        OpsSession: {
+            /** @description Numeric GitHub user id (the allowlist key). */
+            github_id: string;
+            /** @description GitHub login at sign-in time; display only. */
+            login: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        OpsOverview: {
+            users: number;
+            smart_accounts: {
+                chain_id: number;
+                account_type: string;
+                count: number;
+            }[];
+            agents_by_status: {
+                status: string;
+                count: number;
+            }[];
+            active_delegations: number;
+            payment_intents_24h: {
+                status: string;
+                count: number;
+            }[];
+            payment_refusals_24h: {
+                reason: string;
+                count: number;
+            }[];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        OpsSearchResponse: {
+            /** @enum {string} */
+            key_type: "uuid" | "address" | "tx_hash" | "email";
+            /** @description Typed by kind: user (email masked), agent, payment_intent, smart_account, or system_tx (no user link). */
+            hits: {
+                /** @enum {string} */
+                kind: "user" | "agent" | "payment_intent" | "smart_account" | "system_tx";
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                user_id?: string;
+                /** Format: uuid */
+                agent_id?: string;
+                /** @description Masked. */
+                email?: string;
+                status?: string;
+                chain_id?: number;
+                delegate_address?: string | null;
+                account_address?: string;
+                account_type?: string;
+                submitter?: string;
+                /** Format: date-time */
+                created_at?: string | null;
+            }[];
+            timed_out: ("users" | "agents" | "payment_intents" | "smart_accounts" | "system_txs")[];
+        };
+        OpsUserDetail: {
+            user: {
+                /** Format: uuid */
+                id: string;
+                /** @description Masked; reveal through POST /ops/reveal. */
+                email: string;
+                /** @description Masked; reveal through POST /ops/reveal. */
+                name: string | null;
+                /** Format: date-time */
+                created_at: string | null;
+            };
+            smart_accounts: {
+                /** Format: uuid */
+                id: string;
+                chain_id: number;
+                account_address: string;
+                account_type: string;
+                execution_rail: string;
+                name: string;
+                /** Format: date-time */
+                created_at: string | null;
+            }[];
+            agents: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                account_id: string | null;
+                name: string;
+                status: string;
+                delegate_address: string | null;
+                /** Format: date-time */
+                created_at: string | null;
+                /** Format: date-time */
+                archived_at: string | null;
+            }[];
+            active_delegations: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_address: string;
+                /** @description The recipient pin; null for an open budget. */
+                recipient_address: string | null;
+                /** Format: uuid */
+                merchant_id: string | null;
+                budget_atomic: string;
+                period_seconds: number;
+                /** @description Unix seconds. */
+                start_date: number;
+                /** @description Unix seconds. */
+                expires_at: number;
+            }[];
+            payment_intents: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                status: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_human: string;
+                to_address: string;
+                /** @description Stored redacted of vendor secrets. */
+                error_message: string | null;
+                /** Format: date-time */
+                created_at: string | null;
+            }[];
+            payment_refusals: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                agent_id: string;
+                chain_id: number;
+                token_symbol: string;
+                amount_atomic: string;
+                reason: string;
+                source: string;
+                /** Format: date-time */
+                created_at: string | null;
+            }[];
+        };
+        OpsOnchainDelegation: {
+            /** @description The ACTIVE stored delegation period budget, atomic units. */
+            budget_atomic: string;
+            /**
+             * @description Whether the DelegationManager reports the delegation disabled. 'unknown': the cached read-set does not cover it yet; 'unavailable': the read failed.
+             * @enum {string}
+             */
+            onchain: "enabled" | "disabled" | "unknown" | "unavailable";
+            /**
+             * @description 'from_chain': budget_remaining_atomic is the enforcer's answer. A failed read renders 'unavailable' — never the fallback figure.
+             * @enum {string}
+             */
+            budget_status: "from_chain" | "unknown" | "unavailable";
+            /** @description The enforcer's remaining period budget; null unless budget_status is 'from_chain'. */
+            budget_remaining_atomic: string | null;
+        };
+        OpsOnchainAccount: {
+            /** Format: uuid */
+            account_id: string;
+            chain_id: number;
+            /** @description Masked. */
+            account_address: string;
+            /** @enum {string} */
+            account_type: "delegator_hybrid";
+            execution_rail: string;
+            name: string;
+            db: {
+                active_delegations: {
+                    budget_atomic: string;
+                }[];
+            };
+            chain: {
+                /**
+                 * @description Best-effort: a lagging RPC node can report a deployed account as having no code.
+                 * @enum {string}
+                 */
+                deploy_status: "deployed" | "counterfactual" | "unknown" | "unavailable";
+                /** @description Same order as db.active_delegations — position identifies the delegation. */
+                delegations: components["schemas"]["OpsOnchainDelegation"][];
+            };
+            flags: {
+                /** @description No on-chain code while an active delegation is stored. Best-effort; may be a lagging node. */
+                counterfactual_with_active_delegation: boolean;
+                /** @description The DelegationManager reports a delegation disabled that the DB still holds as active. */
+                delegation_disabled_onchain_active_in_db: boolean;
+            };
+        };
+        OpsOnchainNotServedAccount: {
+            /** Format: uuid */
+            account_id: string;
+            chain_id: number;
+            /** @description Masked. */
+            account_address: string;
+            account_type: string;
+            execution_rail: string;
+            /** @enum {string} */
+            status: "not_served";
+            /** @enum {string} */
+            reason: "legacy_safe" | "chain_not_served" | "chain_not_pinned";
+        };
+        OpsOnchainView: {
+            /** Format: uuid */
+            user_id: string;
+            accounts: (components["schemas"]["OpsOnchainAccount"] | components["schemas"]["OpsOnchainNotServedAccount"])[];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        OpsRevealRequest: {
+            /** @enum {string} */
+            target_type: "user";
+            target_id: string;
+            /** @enum {string} */
+            field: "email" | "name";
+        };
+        OpsRevealResponse: {
+            target_type: string;
+            target_id: string;
+            field: string;
+            value: string | null;
         };
         HealthOpsResponse: {
             /** @description Cached per-chain relayer gas balance from the hourly scan. Never a live RPC read. */
@@ -4236,6 +4733,7 @@ export type components = {
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
+            live_delegation_count?: number;
         } & {
             [key: string]: unknown;
         };
@@ -4277,11 +4775,7 @@ export type components = {
             passport_requested: boolean;
         };
         CreatePaymentRequest: {
-            /**
-             * @example USDC
-             * @example EURe
-             * @example xDAI
-             */
+            /** @example USDC */
             token: string;
             /** @description Human-readable token amount. */
             amount: string;
@@ -4289,8 +4783,10 @@ export type components = {
             to: string;
             /** @description Optional dedupe key (#1207): a retried request with the same key returns the first request's result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer — token, recipient, amount or task budget (#3392) — is a 409. */
             idempotency_key?: string;
-            /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
+            /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found, 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch, or (#3500) 403 task_budget_exceeded when the task child's ERC20TransferAmountEnforcer shows too little left of its cap (task_budget_id, remaining_atomic, max_atomic, amount_atomic; decided before anything is built, fails open on an unreadable chain). Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             task_budget_id?: string;
+            /** @description #3330: an OPEN sub-budget another agent in the same account granted THIS agent — the redemption chain becomes [grant, parent-child, budget]. Mutually exclusive with task_budget_id (400 when both). Refused with 404 sub_budget_not_found, 409 sub_budget_not_open/sub_budget_parent_mismatch/sub_budget_token_mismatch/sub_budget_recipient_mismatch, or (#3519) 403 delegation_budget_exceeded when the smallest live remaining across the three links cannot cover the amount (fails open per link on an unreadable read). Part of the idempotency pin, like task_budget_id: a key replayed under a different sub-budget is a 409. */
+            sub_budget_id?: string;
         };
         SignablePaymentIntent: {
             /** Format: uuid */
@@ -4330,6 +4826,14 @@ export type components = {
                     amount: string;
                 };
                 instructions: string;
+            };
+            /** @description Advisory, history-only recipient classification. Present only on a direct `POST /payments` response (fresh or idempotent-replay) and only when the underlying read succeeded — absent, never null, otherwise. `x402/authorize` never sets it, even though this schema is shared with its response shape. */
+            recipient?: {
+                /**
+                 * @description `previously_paid`: this agent has a prior CONFIRMED payment (any rail, any token) to this exact recipient address on this chain. `new_address`: it does not. Never derived from another agent, another owner, or any own_account/contact/catalog lookup.
+                 * @enum {string}
+                 */
+                class: "previously_paid" | "new_address";
             };
         };
         DirectSignContext: {
@@ -4411,6 +4915,7 @@ export type components = {
             /** Format: uri */
             resource_url: string | null;
             merchant_address: string | null;
+            /** @description The same value as the status `description` (#3610): the merchant's resource description, untrusted display text, cut at 300 code points plus an ellipsis; null when the merchant gave none. */
             description: string | null;
             idempotency_key: string | null;
         };
@@ -4468,6 +4973,16 @@ export type components = {
             message: string;
             /** @description True when the merchant answered 2xx and the response is recorded (evidence row). Omitted when unknown. */
             delivered?: boolean;
+            /** @description True while the payment was submitted but its on-chain outcome is not known yet (#3564): do not create a new payment — the status becomes the real outcome once Haven reconciles it from the chain. Omitted on every other row. */
+            submission_outcome_pending?: boolean;
+            /** @description Which settlement branch this x402 payment runs (#946), from machine_metadata. Null on the legacy rail, on any x402 intent whose scheme metadata predates #946, or any stored value outside this enum. */
+            settlement_scheme?: ("eip3009" | "erc7710") | null;
+            /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
+            merchant_settlement_recorded?: boolean;
+            /** @description A bounded, redacted cause for a `failed` payment — the stored error message (already scrubbed of vendor secrets before it was written), capped so a viem/bundler dump never rides this response. Present (possibly `null`, when no message was recorded) only when `status` is `failed`; omitted on every other status. */
+            failure_reason?: string | null;
+            /** @description The budget delegation that metered this payment (#1059), recorded at authorize. The settle summary keys its allowance rows on this — the budget that PAID, never a re-derived (token, payee) first match. Omitted on the legacy rail and on intents predating migration 053. */
+            budget_delegation_hash?: string;
             fee?: {
                 amount: string;
                 token: string;
@@ -4477,6 +4992,7 @@ export type components = {
             amount_atomic?: string | null;
             asset?: string | null;
             network?: string | null;
+            /** @description What the payment was for, in the merchant's own words — untrusted display text. On x402 it is the 402's `resource.description` (persisted at authorize since #3610; read from the stored 402 on older rows), control and bidi characters stripped, trimmed and cut at 300 code points plus an ellipsis. Null when the merchant gave none. */
             description?: string | null;
             idempotency_key?: string | null;
             x402?: components["schemas"]["RailContext"];
@@ -4543,6 +5059,7 @@ export type components = {
              * @example eip155:8453
              */
             network: string;
+            /** @description The 402's `resource.description` (untrusted merchant text). Persisted, with control and bidi characters stripped, trimmed and cut at 300 code points plus an ellipsis, as the payment status `description` (#3610); when omitted, the stored `paymentRequired`'s `resource.description` is used. */
             description?: string;
             maxTimeoutSeconds?: number;
             category?: string;
@@ -4570,8 +5087,10 @@ export type components = {
             paymentRequired?: {
                 [key: string]: unknown;
             };
-            /** @description #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget's signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent's delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
+            /** @description #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget's signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent's delegate EOA. Refused with 404 task_budget_not_found, 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch, or (#3500) 403 task_budget_exceeded when the task child's ERC20TransferAmountEnforcer shows too little left of its cap (task_budget_id, remaining_atomic, max_atomic, amount_atomic; decided before anything is built, fails open on an unreadable chain). Part of the idempotency pin (#3392): a key replayed under a different task budget — or none, or from none to one — is a 409, not a replay charged to another budget. */
             taskBudgetId?: string;
+            /** @description #3330: an OPEN sub-budget another agent in the same account granted THIS agent. erc7710: the settlement child is carved under the grant ([settlement, grant, parent-child, budget]). EIP-3009: the funding leg redeems [grant, parent-child, budget] to fund the agent's delegate EOA. Mutually exclusive with taskBudgetId (400 when both). Refused with 404 sub_budget_not_found, 409 sub_budget_not_open/sub_budget_parent_mismatch/sub_budget_token_mismatch/sub_budget_recipient_mismatch, or 403 delegation_budget_exceeded. Shared by POST /x402 and POST /x402/authorize. */
+            subBudgetId?: string;
         };
         X402MerchantCallContext: {
             /** Format: uuid */
@@ -4795,6 +5314,17 @@ export type components = {
                 /** @description HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent's active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals), whose output is always "0" or <integer>.<2–6 fraction digits> — so this pattern REJECTS an atomic value such as "500" (#2408). "0" is the one value both shapes share. Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token's decimals first (#2295). */
                 configured_amount: string;
                 reset_period_min: number;
+                /** @description #3518: this budget delegation's hash — the identifier a payment authorization records as budget_delegation_hash and the key `reserved_haven_atomic` sums children under. */
+                delegation_hash?: string;
+                /** @description #3518: the recipient pin — null for an open budget; a recipient-scoped budget pays ONLY this address (a payment's selection prefers the pin matching its payee). */
+                recipient_address?: string | null;
+                /**
+                 * Format: uuid
+                 * @description #3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.
+                 */
+                merchant_id?: string | null;
+                /** @description #3518: Haven-side reservation — the sum of this budget's OPEN, unexpired task- and sub-budget children's caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort). */
+                reserved_haven_atomic?: string;
                 onchain: {
                     /** @description The configured period budget in ATOMIC units — the same budget as the sibling `configured_amount`, which states it in whole token units. `spent`, `remaining` and `effective_spent` are atomic too (#2295). */
                     amount: string;
@@ -4821,10 +5351,12 @@ export type components = {
             token: string;
             /** @description The amount that would be authorized, in ATOMIC units, as a non-negative integer string. */
             amountAtomic: string;
-            /** @description Advisory: the merchant payTo address from the selected option. Carried onto the refusal row; it does not scope the compare — the budget is per-token and the enforcer is the gate on recipients. */
+            /** @description The merchant payTo address from the selected option, carried onto the refusal row. #3518: it scopes the compare the way the payment selects its budget — a recipient-pinned budget for this payee wins, a pin to another payee is excluded, and the open budget covers the rest. Absent: only the open budget is eligible; when the agent holds only merchant-locked budgets for the token the answer is 409 budget_requires_recipient (nothing recorded), never a budget refusal. #3492/#3527: when `idempotencyKey` is also present, this field additionally scopes the settled-replay match below — a replay answer requires it to equal the stored row's payee. */
             merchantTo?: string;
-            /** @description The merchant resource being bought. Lands on the refusal row's dedupe key when the pre-check refuses. */
+            /** @description The merchant resource being bought. Lands on the refusal row's dedupe key when the pre-check refuses. #3492/#3527: when `idempotencyKey` is also present, this field additionally scopes the settled-replay match below — required, and must equal the stored row's resource. The two settlement schemes persist a DIFFERENT value into that stored column at authorize time (erc7710: the caller's resourceUrl; eip3009: the merchant's own `paymentRequired.resource.url`), so the CALLER is responsible for sending the value that matches what was stored for the scheme it is replaying. */
             resourceUrl?: string;
+            /** @description #3492/#3527: the x402 idempotency key of the quote this pre-check describes. When it resolves to an already-SETTLED erc7710 OR eip3009 payment matching this same quote (confirmed, a tx_hash, settlement_scheme erc7710 or eip3009, and the SAME token/amountAtomic/merchantTo/resourceUrl this request names — both of the latter two are REQUIRED for a replay match, no task- or sub-budget pin), the pre-check answers sufficient — with `replay: true` — WITHOUT comparing against the now-lower remaining budget and WITHOUT recording a payment_refusals row: the money already moved (on eip3009, its funding leg did — the same fact the x402 replay guard already treats as replayable for every scheme), so re-refusing it as over-budget would be a false ledger row. Any other shape (no row, a pending child, a key collision on a different quote, or a task/sub-budget-scoped row) leaves today's compare unchanged. Omitted: unchanged behavior. */
+            idempotencyKey?: string;
         };
         /** @description The sufficient branch of the server-side budget pre-check (#3054). The insufficient answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which also lands a payment_refusals row with source "hosted_prepare". */
         BudgetPrecheckResponse: {
@@ -4834,6 +5366,22 @@ export type components = {
             remaining_atomic: string;
             /** @description #1319 provenance, same semantics as the allowances read's flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
             remaining_is_from_chain?: boolean;
+            /**
+             * Format: uuid
+             * @description #3518: the budget row the remaining figure describes — the payment-selection mirror's winner (recipient match for merchantTo, else the open budget), not the first per-token row. Absent when no row matched.
+             */
+            budget_id?: string;
+            /** @description #3518: the selected budget's delegation hash — the same identifier a payment authorization records as budget_delegation_hash, so a caller can verify report and payment name the same budget. */
+            budget_delegation_hash?: string;
+            /** @description #3518: the selected budget's recipient pin — null for an open budget, the merchant payee for a pinned/merchant-locked one. */
+            budget_recipient_address?: string | null;
+            /**
+             * Format: uuid
+             * @description #3518: the merchant the selected budget was issued for (#3331), null for every other budget.
+             */
+            budget_merchant_id?: string | null;
+            /** @description #3492/#3527: present and true only when sufficiency was decided because `idempotencyKey` resolved to an already-settled erc7710 OR eip3009 replay of this exact quote — NOT because `remaining_atomic` covers `amountAtomic` (it may not, on this branch: the settlement already spent it). Absent on every other sufficient answer. */
+            replay?: boolean;
         };
         /** @description The #3126 sufficiency answer — whether HELD funds cover the checked amount. Deliberately NOT a balance: no field carries the account's balance, and nothing is named like the authority figures (remaining/available). `covered` speaks only of holdings; `budget_remaining_atomic` is the PERMITTED figure the allowances read reports. */
         BalanceCoverageResponse: {
@@ -4851,6 +5399,8 @@ export type components = {
             budget_remaining_atomic: string;
             /** @description #1319 provenance, same semantics as the allowances read's flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
             budget_remaining_is_from_chain?: boolean;
+            /** @description #3518: present only when budget_remaining_atomic is "0" because the agent has no OPEN budget for the token but holds live merchant-locked budgets — their recipients, lowercase. Those budgets pay only these addresses; haven_get_allowances reports their remaining figures. */
+            budget_recipient_addresses?: string[];
         };
         MachinePaymentReceipt: {
             /** Format: uuid */
@@ -4871,7 +5421,7 @@ export type components = {
             tx_hash: string;
             /** @description The account → delegate funding transaction, relayed by Haven (#2998). Set on eip3009 and on scheme-less retired-x402-rail rows; null on erc7710 (no funding leg) and on scheme-less retired mpp-rail rows (one direct account → merchant transaction, which is the settlement). */
             funding_tx_hash?: string | null;
-            /** @description The delegate → merchant settlement transaction (#2998). On erc7710 this is `tx_hash` itself (the one transaction). On eip3009 this is the merchant-reported `protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed 32-byte hash, else null — the merchant has not reported a settlement yet, or reported the zero-hash "delivered, not settled" marker. Trust level differs by scheme: on erc7710 Haven verified this hash on-chain before the receipt existed; on eip3009 it is the merchant's claim as relayed (PAYMENT-RESPONSE), NOT verified on-chain by Haven. On scheme-less retired mpp-rail rows it is `tx_hash` itself. */
+            /** @description The delegate → merchant settlement transaction (#2998). On erc7710 this is `tx_hash` itself (the one transaction). On eip3009 this is, first, a merchant settlement the agent reported and Haven verified on-chain (#3475); otherwise the merchant-reported `protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed 32-byte hash, else null — the merchant has not reported a settlement yet, or reported the zero-hash "delivered, not settled" marker. Trust level differs: on erc7710, and for the verified eip3009 report, Haven verified this hash on-chain; the eip3009 fallback is the merchant's claim as relayed (PAYMENT-RESPONSE), NOT verified on-chain by Haven. On scheme-less retired mpp-rail rows it is `tx_hash` itself. */
             settlement_tx_hash?: string | null;
             chain_id: number;
             /** Format: uri */
@@ -5247,7 +5797,7 @@ export type components = {
                 symbol: string;
                 /** @description On a failed read (#3317), the last successfully read native balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read. */
                 balance_human: string;
-                /** @description Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI. */
+                /** @description Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH. */
                 needed: boolean;
                 balanceFreshness?: components["schemas"]["BalanceFreshness"];
             };
@@ -5911,6 +6461,702 @@ export interface operations {
             };
             /** @description Operator diagnostics are not configured on this deployment. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    startOpsSignIn: {
+        parameters: {
+            query: {
+                /** @description The ops app origin to return to. */
+                return_to: string;
+                /** @description The ops app's nonce, echoed back in the redirect fragment. */
+                nonce: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to GitHub's authorize page. */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `return_to` is not an allowed ops origin. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console is not configured on this deployment. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    finishOpsSignIn: {
+        parameters: {
+            query?: {
+                /** @description Authorization code from GitHub. */
+                code?: string;
+                /** @description The signed state `start` issued. */
+                state?: string;
+                /** @description Present when the user declined. */
+                error?: string;
+                error_description?: string;
+                error_uri?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect back to the ops app with a token or an error code in the fragment. */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The state is missing, forged, expired, or names an origin no longer allowed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console is not configured on this deployment. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The sign-in could not be audited, so nothing was issued. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The operator the ops token belongs to. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsSession"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console is not configured on this deployment. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsOverview"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    searchOps: {
+        parameters: {
+            query: {
+                /** @description What to look up: a UUID, an address, a tx hash, or an email prefix. */
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The hits, and any lookups that ran out of time. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsSearchResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The search could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The masked record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsUserDetail"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such user, or the ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsUserOnchain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The masked DB-vs-chain view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsOnchainView"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such user, or the ops console (its read-only database or its chain readers) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsSystemHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The operational problems, and the backend’s own diagnostics. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsSystemHealth"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (its read-only database or its diagnostics builder) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    revealOpsField: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpsRevealRequest"];
+            };
+        };
+        responses: {
+            /** @description The unmasked value. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsRevealResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such record, or the ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The reveal could not be audited, so no value was returned. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7208,6 +8454,19 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The agent exists and is owned by the caller but cannot be revoked: `error_code` `already_revoked` (nothing to do) or `not_revocable` (the status is outside the revocable set). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "already_revoked" | "not_revocable";
                     };
                 };
             };
@@ -14595,6 +15854,7 @@ export interface operations {
                             };
                             refusals: number;
                         }[];
+                        /** @description The tenant's delegation-rail agents, unordered. An agent is listed when it is not revoked (even with no activity in range), when it had a confirmed payment or a refusal in range, or when it is revoked but still holds an active budget delegation (revoking flips only the agent's status). A revoked agent with none of these is omitted (#3540). */
                         agents: {
                             /** Format: uuid */
                             id: string;
@@ -15845,7 +17105,7 @@ export interface operations {
     listTaskBudgets: {
         parameters: {
             query?: {
-                status?: "open" | "all";
+                status?: "open" | "live" | "all";
             };
             header?: never;
             path?: never;
@@ -16406,7 +17666,7 @@ export interface operations {
     listSubBudgets: {
         parameters: {
             query?: {
-                status?: "open" | "all";
+                status?: "open" | "all" | "awaiting_signature";
             };
             header?: never;
             path?: never;
@@ -16414,7 +17674,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Sub-budgets held by this agent. */
+            /** @description Sub-budgets held by this agent, or owed a signature by it. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16936,7 +18196,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description EITHER the agent-auth refusal (`agent_pending_approval` / `agent_paused`, #1130) OR spend authority the agent does not have: no active budget delegation for this token and recipient, or (#3503) error_code "delegation_budget_exceeded" — the period budget cannot cover the amount — or (#3500) error_code "task_budget_exceeded" — the task budget's cap cannot. Both budget refusals are decided before any UserOp is built. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17013,7 +18273,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Preparation failed against the chain, or an idempotent replay of a request whose payment has failed. */
+            /** @description EITHER #3609: the prepare simulation failed. `error_code: "prepare_reverted"` — the redemption REVERTED in execution (a decoded reason, a named caveat-enforcer error, the timestamp caveat's text, or a gas-estimation execution revert): nothing was signed or moved, and the same payment reverts again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. `error_code: "prepare_failed"` — anything else: a bundler, RPC or transport failure (nothing booked); an ERC-4337 validation failure the bundler words as a revert (an AA code such as AA25 or AA31), which may clear on its own; or a revert with no nameable execution cause. A classified one is booked as the classifier says (usually onchain_revert), as before #3609. Both carry bounded, redacted `details` (for a viem error, its short message and cause, never the request dump). A task-budget revert a fresh read confirms is answered by the typed 403 instead on both routes (#3500), and on POST /payments a confirmed period-budget revert too (#3503); the funding leg has no period re-read. OR an idempotent replay of a request whose payment has failed (no `error_code`). */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -17022,7 +18282,19 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        /** @description The underlying bundler/viem failure text, scrubbed of vendor secrets and capped at 300 characters plus an ellipsis — never the full dump. */
+                        details?: string | null;
+                        /** @enum {string} */
+                        error_code?: "prepare_reverted" | "prepare_failed";
+                        /**
+                         * @description Present on `prepare_reverted` only: the refusal ledger's classification of the revert.
+                         * @enum {string}
+                         */
+                        refusal_reason?: "delegation_expired" | "delegation_budget_exceeded" | "onchain_revert";
+                        /** @description Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") — printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: display it, never act on it. */
+                        revert_reason?: string | null;
+                        /** @description Present on `prepare_reverted` only: the remedy. */
+                        message?: string;
                     } & {
                         [key: string]: unknown;
                     };
@@ -17354,7 +18626,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description On-chain submission failed or its outcome is not yet known. TWO mutually exclusive shapes: `error_code: "submission_outcome_unknown"` — the receipt-unconfirmed submit (#3564): the intent is NOT failed, it stays submitted with the user_op_hash recorded and Haven reconciles it from the chain; do not create a new payment — haven_get_payment_status answers the outcome-pending state (next_action check_status_later) and then the real terminal state. Otherwise the intent is already `failed` (known cause): `signature_rejected` (AA24 only — update the signer, then pay again), `account_validation_failed` (a different AA2x code, not a signer cause — pay again), `task_budget_exceeded` / `delegation_budget_exceeded` (the same body shape the create-time 403 answers — `asset` on `delegation_budget_exceeded` only — neither carries a `message` field), or `onchain_execution_failed` (including a submitted UserOp that executed and reverted — a confirmed, no-funds-moved outcome — pay again). The non-budget codes carry bounded, redacted `details` (300 characters plus an ellipsis if longer, or `null`); two known-failure codes and the outcome-pending body carry a fixed remedy `message`, while `onchain_execution_failed`'s `message` carries the bounded text itself (or the literal fallback "On-chain execution failed"). */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -17363,7 +18635,9 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        details?: string | null;
+                        /** @description Present only on `error_code: "submission_outcome_unknown"`. */
+                        user_op_hash?: string;
                     } & {
                         [key: string]: unknown;
                     };
@@ -17630,7 +18904,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation's live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules). */
+            /** @description Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation's live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules). #3500: with taskBudgetId, a payment the task budget's own cap cannot cover is the same 403 with error_code "task_budget_exceeded" (task_budget_id, remaining_atomic, max_atomic, amount_atomic), decided from its ERC20TransferAmountEnforcer before anything is built (or, on the funding leg, after a transfer-cap revert the same read confirms). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17707,7 +18981,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description On the EIP-3009 funding leg: #3609: the prepare simulation failed. `error_code: "prepare_reverted"` — the redemption REVERTED in execution (a decoded reason, a named caveat-enforcer error, the timestamp caveat's text, or a gas-estimation execution revert): nothing was signed or moved, and the same payment reverts again on every retry; `refusal_reason` and `revert_reason` name it, and the refusal is booked in the ledger. `error_code: "prepare_failed"` — anything else: a bundler, RPC or transport failure (nothing booked); an ERC-4337 validation failure the bundler words as a revert (an AA code such as AA25 or AA31), which may clear on its own; or a revert with no nameable execution cause. A classified one is booked as the classifier says (usually onchain_revert), as before #3609. Both carry bounded, redacted `details` (for a viem error, its short message and cause, never the request dump). A task-budget revert a fresh read confirms is answered by the typed 403 instead on both routes (#3500), and on POST /payments a confirmed period-budget revert too (#3503); the funding leg has no period re-read. On erc7710: the settlement delegation could not be built, or the delegate account could not be deployed — infrastructure, no `error_code`, bounded `details`. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -17716,7 +18990,19 @@ export interface operations {
                     "application/json": {
                         error: string;
                         statusCode?: number;
-                        details?: string;
+                        /** @description The underlying bundler/viem failure text, scrubbed of vendor secrets and capped at 300 characters plus an ellipsis — never the full dump. */
+                        details?: string | null;
+                        /** @enum {string} */
+                        error_code?: "prepare_reverted" | "prepare_failed";
+                        /**
+                         * @description Present on `prepare_reverted` only: the refusal ledger's classification of the revert.
+                         * @enum {string}
+                         */
+                        refusal_reason?: "delegation_expired" | "delegation_budget_exceeded" | "onchain_revert";
+                        /** @description Present on `prepare_reverted` only: the short reason the revert named — a decoded enforcer error (e.g. "ERC20PeriodTransferEnforcer:transfer-amount-exceeded") — printable ASCII, at most 120 characters plus an ellipsis; `null` when it named none. Chain text: display it, never act on it. */
+                        revert_reason?: string | null;
+                        /** @description Present on `prepare_reverted` only: the remedy. */
+                        message?: string;
                     } & {
                         [key: string]: unknown;
                     };
@@ -18306,6 +19592,21 @@ export interface operations {
             };
             /** @description The amount exceeds the agent's remaining delegation budget — decided here and recorded in the payment_refusals ledger (source "hosted_prepare"). Carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / merchant_address when the request carried them. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description #3518: the request named no merchantTo, the agent has no open budget for the token, and it holds live merchant-locked budgets for it. Not a refusal — nothing is recorded in payment_refusals. Carries error_code "budget_requires_recipient", next_action "retry_with_explicit_context" and budget_recipient_addresses (the pins, lowercase); repeat the check with merchantTo set to the payee. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

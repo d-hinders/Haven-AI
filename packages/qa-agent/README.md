@@ -18,7 +18,10 @@ Implemented: the shared **config contract** (`src/config.ts`), the **dev seed**
 with the scenarios registered in `SCENARIOS` — three direct money-path legs plus the
 delegation-rail suite. `run.ts` is the source of truth for the list and its
 order; the canonical per-scenario table lives in
-[`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
+[`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md). The
+**balances check** (`npm run qa:balances`, `src/balances-cli.ts`, #3631) reads
+the QA wallets read-only for the daily `qa-balances.yml` workflow; see that
+doc's § QA wallet balances.
 
 ⚠️ The seed's **on-chain steps are not exercised in CI** (no funded testnet
 wallets there). Run it locally against funded Base Sepolia accounts. The
@@ -46,8 +49,8 @@ exists to prove. The invariants outlived the rail; only the instruments changed.
 | Scenario | #420 invariant | Instrument on the delegation rail |
 |---|---|---|
 | `within-budget-settle` | A payment inside the budget settles on-chain + is logged | `POST /payments` → sign the `eip712_userop` typed data → poll to `confirmed` → read the receipt on the observer node and require the exact USDC `Transfer` (#3344). Also the suite's **positive control**: the leg that proves the money path can still say YES |
-| `over-budget-refused` | A payment over the budget is refused before it becomes signable, never auto-executed | The ERC20PeriodTransferEnforcer reverts during gas estimation → HTTP 502, **no intent row**. Renamed from `over-budget-queue`: the approval QUEUE it asserted does not exist on this rail and no longer exists anywhere |
-| `x402-over-budget-rejected` | A priced x402 call above the budget is refused, never a signable intent | The **EIP-3009 funding leg** of `POST /x402/authorize`. Until #2706 this reached gas estimation and asserted the enforcer's 502; that PR added the same fail-fast pre-check the erc7710 row below describes, so this leg now asserts HTTP 403 `delegation_budget_exceeded`, a `remaining_atomic` matching the live on-chain read, and a within-budget control that IS still offered. Stated rather than implied: no leg observes the on-chain refusal of an x402 3009 funding redemption any more. Gone from the SUITE, not from the system — the pre-check **fails open** (#2706, inherited from #2082), so a degraded budget read falls through to prepare where the enforcer still refuses with the 502. The rail-level proof survives on a different entrypoint, `over-budget-refused` above (`POST /payments`), which still reaches the chain: delete the pre-check and this leg reddens, delete the enforcer and that one does |
+| `over-budget-refused` | A payment over the budget is refused before it becomes signable, never auto-executed | Since #3503 a period-budget pre-check in `POST /payments` → HTTP 403 `delegation_budget_exceeded` with a `remaining_atomic` matching the live on-chain read, **no UserOp, no intent row** (before it, the ERC20PeriodTransferEnforcer's gas-estimation revert → HTTP 502). Renamed from `over-budget-queue`: the approval QUEUE it asserted does not exist on this rail and no longer exists anywhere |
+| `x402-over-budget-rejected` | A priced x402 call above the budget is refused, never a signable intent | The **EIP-3009 funding leg** of `POST /x402/authorize`. Until #2706 this reached gas estimation and asserted the enforcer's 502; that PR added the same fail-fast pre-check the erc7710 row below describes, so this leg now asserts HTTP 403 `delegation_budget_exceeded`, a `remaining_atomic` matching the live on-chain read, and a within-budget control that IS still offered. Stated rather than implied: no leg observes the on-chain refusal of an x402 3009 funding redemption any more. Gone from the SUITE, not from the system — the pre-check **fails open** (#2706, inherited from #2082), so a degraded budget read falls through to prepare where the enforcer still refuses with the 502. Since #3503 `over-budget-refused` above refuses at the same kind of pre-check, so no live leg watches the enforcer revert: the deployed enforcer's own refusal is proven by the backend's `non-custody-onchain-enforcer.contract.test.ts` |
 | `x402-erc7710-over-budget-rejected` | The same invariant on the **preferred** scheme (#2082) | A fail-fast remaining-budget pre-check in `POST /x402/authorize`'s erc7710 branch → HTTP 403 `delegation_budget_exceeded`, **no settlement child, no intent row, no delegate deploy**. The on-chain enforcer is still the gate; the pre-check only makes the refusal arrive at authorize instead of at merchant redemption |
 
 **A status code is not proof, and these legs do not treat it as proof.** A
@@ -60,17 +63,16 @@ offered — `x402-over-budget-rejected` gained that control only in #2738, and
 also checks the control's `signature_scheme` so a dispatch regression onto the
 erc7710 branch cannot pass as this leg.
 
-The third discriminator differs by path, and since #2706 that split matters:
-`over-budget-refused` still reaches the chain, so it (3) decodes the
-ABI-encoded revert reason and requires it to **name a caveat enforcer**
-(`lib/revert-reason.ts`). Both x402 legs are refused at a pre-check before the
-REDEMPTION — the pre-check is itself an `eth_call` against the enforcer's
-storage, so "before any chain call" would be wrong — and there is therefore no
-revert reason to decode; they instead require the
-typed `error_code: delegation_budget_exceeded` and a `remaining_atomic` equal
-to the live on-chain read — a pre-check answering from a different delegation
-refuses correctly by accident. Asserting only the status is the defect #2016
-was filed about.
+The third discriminator is the same on all three since #3503: each is refused
+at a pre-check before the REDEMPTION — the pre-check is itself an `eth_call`
+against the enforcer's storage, so "before any chain call" would be wrong — and
+there is therefore no revert reason to decode; each requires the typed
+`error_code: delegation_budget_exceeded` and a `remaining_atomic` equal to the
+live on-chain read — a pre-check answering from a different delegation refuses
+correctly by accident. A 502 — the enforcer's revert, which only a failed-open
+pre-check lets through — fails the direct and 3009 legs on its status, so the
+hex revert decoder the direct leg used until #3503 (`lib/revert-reason.ts`) is
+deleted. Asserting only the status is the defect #2016 was filed about.
 
 **The erc7710 gap is closed at authorize, and only at authorize (#2082).**
 Until then, `POST /x402/authorize` returned 201 with a signable child
@@ -83,11 +85,14 @@ the leg requires `error_code: delegation_budget_exceeded` and requires the
 `remaining_atomic` in the refusal to match the budget it derived the request
 from.
 
-⚠️ **Still uncovered: the redemption-side revert.** Neither over-budget leg
-proves the CHAIN refuses an over-budget redemption — that needs a merchant that
-actually attempts one, and none of these legs do. The caveat stack was always
-the gate and #2082 did not touch it; what the new leg asserts is WHEN Haven
-says no, not whether the chain would have.
+⚠️ **Still uncovered: the redemption-side revert.** Since #3503 no over-budget
+leg — direct or x402 — proves the CHAIN refuses an over-budget redemption
+(the backend's `non-custody-onchain-enforcer.contract.test.ts` proves each
+deployed enforcer refuses via `eth_call`, not a redemption). On x402 that
+needs a merchant that actually attempts one; on `POST /payments` it needs a
+failed-open pre-check. The caveat stack was always the gate and neither #2082
+nor #3503 touched it; what these legs assert is WHEN Haven says no, not whether
+the chain would have.
 
 **x402 settlement is covered on the delegation rail only.** The legacy
 `x402-settle` and `x402-sweep-recovery` legs were removed by owner decision
@@ -98,6 +103,20 @@ uncovered no longer exists — the note is history, not outstanding debt.
 The delegation-rail legs are the majority of the suite and are documented, with
 their env requirements and skip conditions, in the canonical table in
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
+
+**Budget-authority legs (#3505).** Three legs, each on a throwaway identity
+whose agents are revoked on every exit (#3459), and each of which never skips on a data condition (a missing-config skip is
+turned into a failure by `QA_REQUIRE_ALL_LEGS=1`):
+`task-budget-lifecycle` (open and close signed from `GET /task-budgets/:id/sign-context`,
+never the inline `POST /close` bytes), `sub-budget-redemption` (A→B grant
+redeemed; an amount above both child links but within A's root is refused 403
+`delegation_budget_exceeded` since #3519, and a 502 is a failure naming both
+causes) and `merchant-locked-budget` (a `merchant_slug`-pinned budget is spent
+before the open one, read by delegation hash). They need
+`QA_DELEGATION_AGENT_API_KEY` / `QA_DELEGATION_DELEGATE_PRIVATE_KEY` as a
+funding source (the task leg needs nothing), and the merchant leg also
+`QA_DEMO_MERCHANT_URL`. Each leg's assertions are mutation-pinned by unit tests
+with scripted fetches, because the legs themselves only run against deployed dev.
 
 > **Infra dependency:** `within-budget-settle` moves real testnet USDC. On the
 > delegation rail the redemption is a **sponsored UserOp**, so the dependency is

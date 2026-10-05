@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ethers } from 'ethers'
-import { describeObserverRpc, proveUsdcTransfer, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
+import { describeObserverRpc, proveUsdcTransfer, proveUsdcTransferSince, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
 
 /**
  * The observer-RPC announcement must never print the endpoint (#2511).
@@ -180,5 +180,33 @@ describe('waitForDisabled (#3344)', () => {
     const r = await waitForDisabled('0xd', { ...fast, read: async () => { throw new Error('rpc down') } })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toMatch(/read failed: rpc down/)
+  })
+})
+
+describe('proveUsdcTransferSince (#3505)', () => {
+  const from = '0x' + '11'.repeat(20)
+  const to = '0x' + '22'.repeat(20)
+  const fast = { fromBlock: 5, timeoutMs: 20, intervalMs: 5 }
+  const provider = (logs: Array<{ data: string; transactionHash: string }>) => ({
+    getBlockNumber: async () => 5,
+    getLogs: async () => logs,
+  })
+
+  it('accepts only the exact amount, and filters on payer and payee topics', async () => {
+    let filter: { topics: Array<string | null> } | undefined
+    const reader = { getBlockNumber: async () => 5, getLogs: async (f: never) => { filter = f; return [{ data: ethers.toBeHex(1000n, 32), transactionHash: '0xt' }] } }
+    const ok = await proveUsdcTransferSince({ from, to, amount: 1000n }, { ...fast, provider: reader })
+    expect(ok).toEqual({ ok: true, txHash: '0xt' })
+    expect(filter?.topics?.[1]).toBe(ethers.zeroPadValue(from, 32))
+    expect(filter?.topics?.[2]).toBe(ethers.zeroPadValue(to, 32))
+  })
+
+  it('fails on a wrong amount or no log', async () => {
+    const wrong = await proveUsdcTransferSince({ from, to, amount: 1000n }, {
+      ...fast, provider: provider([{ data: ethers.toBeHex(999n, 32), transactionHash: '0xt' }]),
+    })
+    expect(wrong.ok).toBe(false)
+    const none = await proveUsdcTransferSince({ from, to, amount: 1000n }, { ...fast, provider: provider([]) })
+    expect(none.ok).toBe(false)
   })
 })

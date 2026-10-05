@@ -210,10 +210,12 @@ form to empty.
 
 This is the owner's own data, about themself, saved voluntarily to appear on
 receipts their own agents may hand to merchants. For a sole trader, the
-organisation number *is* the personal identity number — this document, and
-the settings form itself, state this plainly, alongside the VAT number's own
-SE-format personal-number encoding (`SE` + personal number + `01`) for the
-same reason.
+organisation number *is* the personal identity number. This document and
+the settings form itself both state that plainly: the form's short purpose line
+says it before anything is saved (trimmed in the owner's copy review,
+2026-09-30). This document also records the VAT number's own SE-format
+personal-number encoding (`SE` + personal number + `01`) for the same reason;
+the form no longer repeats that detail.
 
 - **Basis**: consent — the owner opts in by calling `PUT
   /user/company-details` or filling in the Settings → Company details form;
@@ -238,6 +240,9 @@ same reason.
   `agent_rekeys.initiated_by_user_id`); a future self-serve account-deletion
   flow will need to delete rows in those (and this) table explicitly rather
   than relying on cascades alone.
+- **The ops console cannot read these details.** Its read-only database role
+  (#3510, [`ops-readonly-role.md`](../operations/ops-readonly-role.md)) is not granted
+  `owner_company_details`, so internal ops access adds no new reader.
 
 ## Env var
 

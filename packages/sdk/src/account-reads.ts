@@ -8,6 +8,8 @@ import type {
   HavenAllowanceSummary,
   HavenBalanceCoverage,
   HavenPaymentReceipt,
+  HavenPendingSubBudgetSignature,
+  HavenSubBudget,
   HavenTaskBudget,
   HavenTaskBudgetSummary,
   PaymentStatusResult,
@@ -16,10 +18,11 @@ import type {
   RawHavenAllowanceSummary,
   RawHavenBalanceCoverage,
   RawHavenPaymentReceiptsResponse,
+  RawSubBudget,
   RawTaskBudget,
   HavenPaymentReceiptsPage,
 } from './types.js'
-import { AgentPaymentWarningCode } from './types.js'
+import { AgentPaymentWarningCode, HavenApiError } from './types.js'
 import { HavenApiTransport } from './haven-api-transport.js'
 import { mapPaymentReceipt } from './payment-mappers.js'
 import { resolveTokenFromAddress } from './x402.js'
@@ -99,6 +102,13 @@ export function mapTaskBudget(raw: RawTaskBudget): HavenTaskBudget {
     delegationHash: raw.delegation_hash,
     label: raw.label,
     maxAtomic: raw.max_atomic,
+    // #3501: the wire keys are optional/present-when-read; the mapping
+    // preserves presence exactly — absent stays absent, so a caller can
+    // distinguish "this response did not read the chain" from "the read
+    // failed" (null) and from a live figure.
+    ...(raw.spent_atomic === undefined ? {} : { spentAtomic: raw.spent_atomic }),
+    ...(raw.remaining_atomic === undefined ? {} : { remainingAtomic: raw.remaining_atomic }),
+    ...(raw.remaining_is_from_chain === undefined ? {} : { remainingIsFromChain: raw.remaining_is_from_chain }),
     status: raw.status,
     expiresAt: raw.expires_at,
     isExpired: raw.is_expired,
@@ -109,20 +119,87 @@ export function mapTaskBudget(raw: RawTaskBudget): HavenTaskBudget {
   }
 }
 
+/** #3506: `RawSubBudget` (snake_case wire) → `HavenSubBudget` (camelCase). */
+export function mapSubBudget(raw: RawSubBudget): HavenSubBudget {
+  return {
+    id: raw.id,
+    agentId: raw.agent_id,
+    parentAgentId: raw.parent_agent_id,
+    parentSubBudgetId: raw.parent_sub_budget_id,
+    chainId: raw.chain_id,
+    tokenAddress: raw.token_address,
+    recipientAddress: raw.recipient_address,
+    parentDelegationHash: raw.parent_delegation_hash,
+    delegationHash: raw.delegation_hash,
+    label: raw.label,
+    periodAmountAtomic: raw.period_amount_atomic,
+    status: raw.status,
+    expiresAt: raw.expires_at,
+    isExpired: raw.is_expired,
+    createdAt: raw.created_at,
+    openedAt: raw.opened_at,
+    closedAt: raw.closed_at,
+    closeTxHash: raw.close_tx_hash,
+  }
+}
+
+/** #3506: a sub-budget row owed a signature → the condensed row `getAgentSummary()` carries. */
+function summarizePendingSubBudget(row: HavenSubBudget): HavenPendingSubBudgetSignature {
+  const isParentChild = row.parentSubBudgetId === null
+  return {
+    subBudgetId: row.id,
+    parentSubBudgetId: row.parentSubBudgetId,
+    purpose: row.status === 'closing' ? 'close' : 'open',
+    what: isParentChild ? 'parent-child' : 'grant',
+    subAgentId: isParentChild ? null : row.agentId,
+    tokenAddress: row.tokenAddress,
+    recipientAddress: row.recipientAddress,
+    periodAmountAtomic: row.periodAmountAtomic,
+    expiresAt: row.expiresAt,
+    isExpired: row.isExpired,
+  }
+}
+
 /** #3329: `HavenTaskBudget` → the condensed row `getAgentSummary()` carries. */
 function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummary {
   const token = resolveTokenFromAddress(taskBudget.tokenAddress)
   const maxDisplay = token
     ? `${formatAtomicAmount(safeBigInt(taskBudget.maxAtomic), token.decimals)} ${token.symbol}`
     : `${taskBudget.maxAtomic} (atomic; unknown decimals)`
+  // #3501: the display form rides beside the atomic one, derived by the SAME
+  // formatter as `maxDisplay` — one arithmetic, no drift between max and
+  // remaining. Null atomic (failed read) maps to null display, never "0" or
+  // the cap; an unknown token spells the atomic figure out explicitly
+  // instead of guessing decimals.
+  const spendDisplay = (atomic: string | null): string | null => {
+    if (atomic === null) return null
+    return token
+      ? `${formatAtomicAmount(safeBigInt(atomic), token.decimals)} ${token.symbol}`
+      : `${atomic} (atomic; unknown decimals)`
+  }
   return {
     id: taskBudget.id,
     label: taskBudget.label,
     tokenAddress: taskBudget.tokenAddress,
     maxAtomic: taskBudget.maxAtomic,
     maxDisplay,
+    // The GET route only enriches OPEN rows, and the list the summary feeds
+    // keeps closed/expired rows out (below), so a mapped row is an OPEN one
+    // whenever the backend deployed this far. An older backend without the
+    // figures maps to the honest degraded shape (null figures, false flag),
+    // which is also exactly what a backend whose live read failed reports:
+    // "unknown", never optimistic.
+    spentAtomic: taskBudget.spentAtomic ?? null,
+    remainingAtomic: taskBudget.remainingAtomic ?? null,
+    remainingIsFromChain: taskBudget.remainingIsFromChain ?? false,
+    remainingDisplay: spendDisplay(taskBudget.remainingAtomic ?? null),
     recipientAddress: taskBudget.recipientAddress,
     expiresAt: taskBudget.expiresAt,
+    // #3518: lifecycle status + derived expiry ride the summary — a
+    // close/pending row must be visible AS closing/pending, not silently
+    // dropped from the agent read.
+    status: taskBudget.status,
+    isExpired: taskBudget.isExpired,
   }
 }
 
@@ -164,10 +241,13 @@ export class AccountReads {
   }
 
   async getAgentSummary(): Promise<HavenAgentSummary> {
-    const [agent, allowanceSummary, taskBudgets] = await Promise.all([
+    const [agent, allowanceSummary, taskBudgets, pendingSubBudgetSignatures] = await Promise.all([
       this.getAgent(),
       this.getAllowances(),
-      this.listOpenTaskBudgetsSummary(),
+      this.listTaskBudgetsSummary(),
+      // #3506: fails SOFT in the summary (the owner-issued sign targets are
+      // additive, never the reason the whole bootstrap fails).
+      this.listPendingSubBudgetSignatures().catch((): HavenPendingSubBudgetSignature[] => []),
     ])
     // #3128: every field here is the HavenAllowance's own (or, for the display
     // string, derived by the same function `getAllowances` used), so the two
@@ -185,7 +265,7 @@ export class AccountReads {
       }
     })
     const readiness = deriveReadiness(agent.status, allowances)
-    return { ...agent, readiness, spend_authority_readiness: readiness, allowances, taskBudgets }
+    return { ...agent, readiness, spend_authority_readiness: readiness, allowances, taskBudgets, pendingSubBudgetSignatures }
   }
 
   /**
@@ -198,20 +278,81 @@ export class AccountReads {
    * `getAgentSummary`'s identity + readiness + allowances fields are what
    * callers depend on, and this read must never be why the whole summary
    * fails.
+   *
+   * #3518: the query is `status=all` now. The close refusal tells the caller
+   * to RE-CHECK the budget's status, and `haven_get_agent` is the read an
+   * agent is holding — so a `closing` (or `pending`) budget must appear
+   * there with its status, not vanish the moment its close starts. Every
+   * row carries `status` (+ `isExpired`) so the reader distinguishes them;
+   * the soft-fail contract is unchanged.
+   *
+   * #3518 boundedness: `status=all` answers EVERY row this agent ever held —
+   * closed and long-expired included (nothing ever moves an expired task
+   * budget out of `open`), so reading it would grow `haven_get_agent` — and
+   * the backend's per-row on-chain reads behind it — without bound. The read
+   * asks for `status=live` (#3518 review): the backend returns only the rows
+   * an agent can still act on, and read-by-id (`haven_get_task_budget`) is
+   * the any-status surface for everything else:
+   *
+   * - `closing` ALWAYS stays visible, expired or not — the close submit is
+   *   in flight and the signer's close refusal tells the caller to re-check
+   *   exactly this row's status;
+   * - `closed` rows drop (terminal — `closed_at` names what happened, and
+   *   the read-by-id tool answers any status);
+   * - a `pending` or `open` row past its `expires_at` drops (an expired
+   *   budget reserves nothing and pays nothing);
+   * - unexpired `pending` and `open` rows stay.
+   *
+   * The same filter also runs here, client-side: it is what keeps the list
+   * bounded against a backend that predates `status=live`, which refuses the
+   * value with a 400 — that refusal (and only that) falls back to
+   * `status=all`. A row whose wire carries
+   * no `is_expired` is treated as unexpired — the degraded read errs toward
+   * KEEPING rows, never toward hiding one the agent could still act on.
    */
-  private async listOpenTaskBudgetsSummary(): Promise<HavenTaskBudgetSummary[]> {
+  private async listTaskBudgetsSummary(): Promise<HavenTaskBudgetSummary[]> {
     try {
-      const raw = await this.transport.get<{ task_budgets?: RawTaskBudget[] } | null | undefined>(
-        '/task-budgets?status=open',
-      )
+      type RawList = { task_budgets?: RawTaskBudget[] } | null | undefined
+      // Only an older backend's 400 (its enforced schema refuses `live`)
+      // earns the unbounded `status=all` read: a 401, 5xx or timeout on a
+      // new backend is not retried into the heavier query.
+      const raw = await this.transport.get<RawList>('/task-budgets?status=live').catch((error: unknown) => {
+        if (error instanceof HavenApiError && error.statusCode === 400) {
+          return this.transport.get<RawList>('/task-budgets?status=all')
+        }
+        throw error
+      })
       const rows = raw?.task_budgets
       if (!Array.isArray(rows)) return []
-      return rows.map((row) => summarizeTaskBudget(mapTaskBudget(row)))
+      // The boundedness filter (comment above): closing rows always ride;
+      // closed and expired rows drop. A no-op on a `status=live` answer.
+      return rows
+        .map((row) => mapTaskBudget(row))
+        .filter((tb) => tb.status === 'closing' || (!tb.isExpired && tb.status !== 'closed'))
+        .map((tb) => summarizeTaskBudget(tb))
     } catch {
       // #3093: any transport failure (404, network error, malformed body) —
       // never let it fail the agent summary this feeds.
       return []
     }
+  }
+
+  /**
+   * #3506: `GET /sub-budgets?status=awaiting_signature` — the sub-budget rows
+   * THIS agent (as the delegating agent) must still sign, mapped to the
+   * condensed summary rows. A transport error THROWS here (a caller that
+   * reasons from "nothing is pending" must be able to tell that from "the
+   * read failed"); `getAgentSummary()` wraps it soft, like the task-budget
+   * read (#3093), so an old backend's 404 never fails the bootstrap. A
+   * missing or non-array body is `[]`.
+   */
+  async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]> {
+    const raw = await this.transport.get<{ sub_budgets?: RawSubBudget[] } | null | undefined>(
+      '/sub-budgets?status=awaiting_signature',
+    )
+    const rows = raw?.sub_budgets
+    if (!Array.isArray(rows)) return []
+    return rows.map((row) => summarizePendingSubBudget(mapSubBudget(row)))
   }
 
   async getAllowances(): Promise<HavenAllowanceSummary> {
@@ -233,6 +374,14 @@ export class AccountReads {
         tokenSymbol: allowance.token_symbol,
         configuredAmount: allowance.configured_amount,
         resetPeriodMin: allowance.reset_period_min,
+        // #3518: scope + Haven-side reservation, additive — undefined on an
+        // older backend whose rows do not carry them.
+        ...(allowance.delegation_hash !== undefined ? { delegationHash: allowance.delegation_hash } : {}),
+        ...(allowance.recipient_address !== undefined ? { recipientAddress: allowance.recipient_address } : {}),
+        ...(allowance.merchant_id !== undefined ? { merchantId: allowance.merchant_id } : {}),
+        ...(allowance.reserved_haven_atomic !== undefined
+          ? { reservedHavenAtomic: allowance.reserved_haven_atomic }
+          : {}),
         remainingDisplay: formatRemainingDisplay(allowance.token_address, allowance.token_symbol, allowance.onchain.remaining),
         onchain: {
           amount: allowance.onchain.amount,
@@ -276,6 +425,9 @@ export class AccountReads {
       ...(raw.budget_remaining_is_from_chain !== undefined
         ? { budgetRemainingIsFromChain: raw.budget_remaining_is_from_chain }
         : {}),
+      ...(raw.budget_recipient_addresses !== undefined
+        ? { budgetRecipientAddresses: raw.budget_recipient_addresses }
+        : {}),
     }
   }
 
@@ -310,25 +462,64 @@ export class AccountReads {
     try {
       const tokenAddress = payment.asset ?? payment.x402?.asset ?? null
       if (!tokenAddress) return unavailable('the settled payment does not carry a resolvable token address', payment)
-      const match = allowanceResult.value.allowances.find(
+      // #3518: report the budget that PAID, never a re-derived first match.
+      // The payment status carries `budgetDelegationHash` (recorded at
+      // authorize, migration 053) — the allowance row whose
+      // `delegationHash` equals it is the one whose remaining figure is
+      // honest here. Re-deriving (token, payee) selection at settle time is
+      // wrong twice over: the grants' window can have moved between pay and
+      // settle, and task/sub-budget payments meter their PARENT by hash
+      // while the payee matches no pin at all. The token match below is the
+      // fallback for an older backend whose status predates the field — the
+      // old first-match behaviour, kept only where nothing better exists.
+      // A RECORDED hash that matches none of the caller's rows (a sub-budget
+      // payment metering another agent's budget, or a re-key between pay and
+      // settle) is unavailable, never the first row: naming a budget that did
+      // not pay is the bug #3518 exists to remove.
+      const tokenRows = allowanceResult.value.allowances.filter(
         (allowance) => allowance.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
       )
+      const payingHash = payment.budgetDelegationHash ?? null
+      const match = payingHash
+        ? tokenRows.find((allowance) => allowance.delegationHash === payingHash) ?? null
+        : tokenRows[0] ?? null
+      if (!match && payingHash) {
+        return unavailable("the budget that paid is not one of this agent's own budgets", payment)
+      }
       if (!match) return unavailable('no allowance/budget row matches the settled token', payment)
-      const token = resolveTokenFromAddress(match.tokenAddress)
-      const remainingDisplay = token
-        ? `${formatAtomicAmount(safeBigInt(match.onchain.remaining), token.decimals)} ${match.tokenSymbol}`
-        : undefined
+      // #3464: the ONE shared formatter — `haven_get_agent`'s allowances[]
+      // rows use the same `formatRemainingDisplay` call, so the settle summary
+      // can never omit or disagree with the display figure get_agent emits
+      // for the same fixture (an unknown-decimals token gets the same explicit
+      // atomic label instead of a missing field).
+      const remainingDisplay = formatRemainingDisplay(match.tokenAddress, match.tokenSymbol, match.onchain.remaining)
+      // #1986/#2020 proven by exhaustion: a retired-rail account is refused
+      // (410) by GET /machine-payments/allowances BEFORE this read completes,
+      // so `executionRail` can only be 'delegation' here — narrowed at the
+      // mapping, not at the public HavenAgent.executionRail type (#3464).
       const rail = agentResult.value.executionRail
+      if (rail !== 'delegation') {
+        return unavailable(`the account's rail ('${rail}') cannot have a settled x402 payment`, payment)
+      }
       return {
         payment,
         allowance: {
           rail,
           remaining_atomic: match.onchain.remaining,
-          ...(remainingDisplay ? { remaining_display: remainingDisplay } : {}),
+          // Deprecated spellings (#3464): kept for the deprecation window;
+          // removal condition on the type's JSDoc.
+          remaining_display: remainingDisplay,
           token_symbol: match.tokenSymbol,
           token_address: match.tokenAddress,
           reset_period: match.resetPeriodMin,
-          source: rail === 'delegation' ? 'active_delegations' : 'allowance_module',
+          source: 'active_delegations',
+          // The canonical spellings — the SAME names and values
+          // `haven_get_agent`'s allowances[] rows report.
+          remainingAtomic: match.onchain.remaining,
+          remainingDisplay,
+          resetPeriodMin: match.resetPeriodMin,
+          tokenSymbol: match.tokenSymbol,
+          tokenAddress: match.tokenAddress,
         },
         warnings: [],
       }

@@ -33,7 +33,7 @@ const makePaymentSchema = {
   properties: {
     token: {
       type: 'string' as const,
-      description: 'Token to send. Gnosis Chain: EURe, USDC.e, xDAI. Base: USDC, ETH.',
+      description: 'Token to send: USDC (agent budgets are USDC on Base and Base Sepolia).',
     },
     amount: {
       type: 'string' as const,
@@ -89,7 +89,7 @@ const authorizeX402Schema = {
     },
     network: {
       type: 'string' as const,
-      description: 'CAIP-2 chain ID. "eip155:100" for Gnosis Chain, "eip155:8453" for Base.',
+      description: 'CAIP-2 chain ID: "eip155:8453" for Base, "eip155:84532" for Base Sepolia.',
     },
     description: {
       type: 'string' as const,
@@ -146,7 +146,7 @@ const MAKE_PAYMENT_DESCRIPTION =
   'Request and sign a payment from the user-controlled account within its on-chain budget. ' +
   'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions, use get_allowances instead of making a payment. ' +
   'Haven authenticates the agent and relays the signed transaction that redeems the agent budget delegation; it does not hold keys or control funds. ' +
-  'Gnosis Chain tokens: EURe, USDC.e, xDAI. Base tokens: USDC, ETH.'
+  'Token: USDC, on Base (eip155:8453) or Base Sepolia (eip155:84532).'
 
 // Descriptions are composed from the shared semantic source so the SDK and MCP
 // surfaces stay in lockstep. Each constant prepends the shared `summary` (the

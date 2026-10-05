@@ -10,12 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { privateKeyToAccount } from 'viem/accounts'
 
-const { mockQuery, mockCompute, mockReadRemaining, mockCreateRail, mockReadDisabled } = vi.hoisted(() => ({
+const { mockQuery, mockCompute, mockReadRemaining, mockCreateRail, mockReadDisabled, mockReadSpent } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockCompute: vi.fn(),
   mockReadRemaining: vi.fn(),
   mockCreateRail: vi.fn(),
   mockReadDisabled: vi.fn(),
+  mockReadSpent: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({
   default: { query: (...a: unknown[]) => mockQuery(...a) },
@@ -36,6 +37,13 @@ vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
 vi.mock('../../infra/chain/delegation-budget-reader.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../infra/chain/delegation-budget-reader.js')>()
   return { ...actual, readRemainingBudget: (...a: unknown[]) => mockReadRemaining(...a) }
+})
+// #3501: the GETs enrich open rows with the enforcer spent read — the chain
+// seam is mocked here, the degrade arithmetic runs REAL (the module boundary
+// `task-budget-cap.ts` owns it).
+vi.mock('../../modules/task-budgets/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/task-budgets/index.js')>()
+  return { ...actual, readTaskBudgetSpentForReport: (...a: unknown[]) => mockReadSpent(...a) }
 })
 vi.mock('../../rails/delegation-rail.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/delegation-rail.js')>()
@@ -172,6 +180,8 @@ describe('task budgets API (#3329)', () => {
     mockCreateRail.mockReset()
     mockReadDisabled.mockReset()
     mockReadDisabled.mockResolvedValue(new Set())
+    mockReadSpent.mockReset()
+    mockReadSpent.mockResolvedValue({ spentAtomic: '500000', remainingAtomic: '500000' })
     app = Fastify({ logger: false })
     await app.register(taskBudgetRoutes, { prefix: '/task-budgets' })
   })
@@ -249,6 +259,66 @@ describe('task budgets API (#3329)', () => {
     const res = await app.inject({ method: 'GET', url: '/task-budgets' })
     expect(res.statusCode).toBe(200)
     expect(res.json().task_budgets).toHaveLength(1)
+  })
+
+  it('#3518: GET /?status=live asks the repository for live rows only (closing, or unexpired pending/open)', async () => {
+    mockDb({ list: [taskBudgetRow({ status: 'open' })] })
+    const res = await app.inject({ method: 'GET', url: '/task-budgets?status=live' })
+    expect(res.statusCode).toBe(200)
+    const listSql = mockQuery.mock.calls.map(([sql]) => String(sql)).find((sql) => /FROM agent_task_budgets/.test(sql))
+    expect(listSql).toMatch(/status = 'closing' OR \(status IN \('pending', 'open'\) AND expires_at > \$2\)/)
+  })
+
+  it('#3501: GET / enriches an open row with the on-chain spent/remaining, atomic and display', async () => {
+    mockDb({ list: [taskBudgetRow({ status: 'open', max_atomic: '1500' })] })
+    const res = await app.inject({ method: 'GET', url: '/task-budgets' })
+    expect(res.statusCode).toBe(200)
+    const row = res.json().task_budgets[0]
+    expect(row.spent_atomic).toBe('500000')
+    expect(row.remaining_atomic).toBe('500000')
+    expect(row.remaining_is_from_chain).toBe(true)
+    expect(row.spent_display).toBe('0.50 USDC')
+    expect(row.remaining_display).toBe('0.50 USDC')
+  })
+
+  it('#3501: GET /:id carries the same figures; a spent-past-cap budget reports remaining 0, never the cap', async () => {
+    mockDb({ taskBudget: taskBudgetRow({ status: 'open', max_atomic: '1500' }) })
+    mockReadSpent.mockResolvedValue({ spentAtomic: '1500', remainingAtomic: '0' })
+    const res = await app.inject({ method: 'GET', url: '/task-budgets/tb-1' })
+    expect(res.statusCode).toBe(200)
+    const row = res.json().task_budget
+    expect(row.max_atomic).toBe('1500')
+    expect(row.spent_atomic).toBe('1500')
+    expect(row.remaining_atomic).toBe('0')
+    expect(row.remaining_is_from_chain).toBe(true)
+    // formatTokenValue renders zero as '0' — the display follows the ONE
+    // shared backend formatter, not a bespoke shape.
+    expect(row.remaining_display).toBe('0 USDC')
+  })
+
+  it('#3501: GET /:id on a failed chain read degrades to null figures with remaining_is_from_chain false — never the full cap as remaining', async () => {
+    mockDb({ taskBudget: taskBudgetRow({ status: 'open', max_atomic: '1500' }) })
+    mockReadSpent.mockResolvedValue({ spentAtomic: null, remainingAtomic: null })
+    const res = await app.inject({ method: 'GET', url: '/task-budgets/tb-1' })
+    expect(res.statusCode).toBe(200)
+    const row = res.json().task_budget
+    expect(row.spent_atomic).toBeNull()
+    expect(row.remaining_atomic).toBeNull()
+    expect(row.spent_display).toBeNull()
+    expect(row.remaining_display).toBeNull()
+    expect(row.remaining_is_from_chain).toBe(false)
+    expect(row.remaining_atomic).not.toBe('1500')
+  })
+
+  it('#3501: a pending row carries no spend figures — nothing was signed, nothing was read', async () => {
+    mockDb({ taskBudget: taskBudgetRow({ status: 'pending' }) })
+    const res = await app.inject({ method: 'GET', url: '/task-budgets/tb-1' })
+    expect(res.statusCode).toBe(200)
+    const row = res.json().task_budget
+    expect(row.status).toBe('pending')
+    expect('spent_atomic' in row).toBe(false)
+    expect('remaining_atomic' in row).toBe(false)
+    expect('remaining_is_from_chain' in row).toBe(false)
   })
 
   it('GET /:id 404s for an unknown or foreign task budget', async () => {
@@ -366,7 +436,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     const row = taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ userOp: true }) })
@@ -389,7 +459,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     mockReadDisabled.mockResolvedValue(new Set())
@@ -411,7 +481,7 @@ describe('task budgets API (#3329)', () => {
       delegateAccountAddress: DELEGATE_ACCOUNT,
       prepareAccountCall: vi.fn(),
       submitRedemption: vi.fn().mockRejectedValue(
-        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`, 'receipt_unconfirmed'),
       ),
     })
     mockReadDisabled.mockRejectedValue(new Error('rpc down'))

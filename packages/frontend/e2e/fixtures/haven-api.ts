@@ -868,6 +868,38 @@ export async function serveSekUser(page: Page) {
 }
 
 /**
+ * Overlay `/auth/me` (and only it) with the Add-funds account (#3483).
+ *
+ * The Add funds modal's layout is a function of the SELECTED ACCOUNT's chain
+ * (`AddFundsModal.tsx` #3478: faucet on a testnet account, onramp on a
+ * mainnet one), but the shared `testSafe` is pinned to 8453 for every other
+ * spec and baseline — so a spec that needs a different chain overlays
+ * `/auth/me` with a one-field-splice of it rather than mutating the shared
+ * object. The dashboard reads only `/auth/me` for the account list
+ * (`DashboardClient.tsx` → `user?.accounts`), yet BOTH safe-serving shapes
+ * stay consistent by construction: this derives from `testSafe` itself, so
+ * `/user/safes` cannot disagree about whether the account HAS a chain (the
+ * trap `add-funds-unresolved-chain` documents in `scripts/screenshot.mjs`).
+ *
+ * `chainId` may be `undefined`, which serves the account WITHOUT `chain_id` —
+ * the unresolved-chain state (the refusal copy, no network named). Register
+ * AFTER `mockHavenApi` (later-registered routes win); everything else falls
+ * through to the shared fixture untouched.
+ */
+export async function serveAddFundsAccount(page: Page, chainId?: number) {
+  const account = chainId === undefined ? { ...testSafe, chain_id: undefined } : { ...testSafe, chain_id: chainId }
+  await page.route('**/api/**', async (route: Route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/auth/me') {
+      await fulfillJson(route, { ...testUser, accounts: [account] })
+      return
+    }
+    await route.fallback()
+  })
+}
+
+/**
  * Serve one feed-status answer over the shared fixture (#2869), so a spec can
  * render `/accounting` and the sidebar in a chosen flag state. Registered
  * AFTER `mockHavenApi` (later routes win) and scoped to that one read —
@@ -971,7 +1003,21 @@ export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: stri
  * Scoped deliberately: everything else keeps falling back to the shared
  * fixture, so the agents LIST and every unrelated surface are untouched.
  */
-export async function serveAgentDetailResponses(page: Page, agentId: string) {
+export async function serveAgentDetailResponses(
+  page: Page,
+  agentId: string,
+  // #3506: the shared list's other agent is also named "Research agent", so a
+  // spec that shows BOTH names side by side (the sub-budget modal) can give
+  // it a distinct one. Default unchanged, so no other baseline moves.
+  options: {
+    otherAgentName?: string
+    // #3549: revoke the researched agent while it still holds its ACTIVE
+    // delegation — the half-revoked state #3542 describes, reachable whenever
+    // a credential is revoked before its budget (`POST /revoke` flips status
+    // only). No archived override: archiving needs no live budget.
+    agentOverrides?: { status?: 'revoked' }
+  } = {},
+) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -986,11 +1032,12 @@ export async function serveAgentDetailResponses(page: Page, agentId: string) {
       // the connect-flow rows the shared list exists for are untouched.
       await fulfillJson(route, {
         agents: [
-          testAgent,
+          options.otherAgentName ? { ...testAgent, name: options.otherAgentName } : testAgent,
           {
             ...testAgent,
             id: agentId,
             created_at: '2026-05-02T10:00:00.000Z',
+            ...options.agentOverrides,
             allowances: [
               {
                 id: 'dlg-e2e-1',

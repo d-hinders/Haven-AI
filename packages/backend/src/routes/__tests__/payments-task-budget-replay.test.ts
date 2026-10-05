@@ -14,6 +14,12 @@
  */
 import { createHash } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
+// #3503: POST /payments now pre-checks the period budget on-chain — never a live chain here.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: async () => ({ remainingAtomic: '1000000000000', fromChain: true }),
+}))
+// #3500: the task-budget cap pre-check reads the enforcer's spentMap — never a live chain here.
+vi.mock('../../infra/chain/task-budget-spent-reader.js', () => ({ readTaskBudgetSpent: async () => 0n }))
 import Fastify, { type FastifyInstance } from 'fastify'
 import { packedUserOperationHash } from '@haven_ai/sdk'
 import db from '../../db.js'

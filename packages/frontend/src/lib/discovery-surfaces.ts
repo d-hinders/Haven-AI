@@ -6,6 +6,16 @@
  * public page and forgetting to advertise it is a test failure rather than a
  * silent omission (#2521).
  *
+ * Precisely: the guard only checks list → filesystem (every entry here
+ * resolves to a real route or artifact), not the reverse. It does not fail a
+ * public, unauthenticated page that exists but was never added here —
+ * `/demo` (`src/app/demo/page.tsx`, #3477) is exactly that, deliberately: a
+ * semi-private investor demo, not advertised; the team hands the link to
+ * invited investors. It must stay out of the sitemap, `robots.txt`, `llms.txt` and
+ * every other discovery surface. `src/app/demo/__tests__/not-listed.test.ts`
+ * pins its absence with its own assertions rather than relying on this file's
+ * guard to catch a page it structurally cannot see.
+ *
  * The 2026-09-04 cold test found `llms.txt`, `402.md` and the OpenAPI spec only
  * by guessing the convention; nothing in the served HTML pointed at them. See
  * `docs/bug-reports/agent-first-cold-test-2026-09-04.md`.
@@ -34,6 +44,21 @@ export const PUBLIC_SURFACES = [
   '/402',
   '/402.md',
   '/for-agents.md',
+  // #3596: the runbook above, also served as small, linked step files — one
+  // skill per step, the pattern `/.well-known/agent-skills/index.json` (kept
+  // OUT of this list on purpose, matching haven.json and the OpenAPI spec
+  // below) lists in full. `AGENT_SKILL_STEPS` (`agent-skill-steps.ts`) is the
+  // generating list; this literal array is pinned against it the same way
+  // every other entry here is pinned against the filesystem.
+  '/agent-skills/what-haven-is.md',
+  '/agent-skills/the-sequence.md',
+  '/agent-skills/budget-changes-later.md',
+  '/agent-skills/hand-off-scripts.md',
+  '/agent-skills/what-you-run.md',
+  '/agent-skills/how-to-verify.md',
+  '/agent-skills/if-you-cannot-open-a-browser.md',
+  '/agent-skills/if-something-breaks.md',
+  '/agent-skills/vocabulary.md',
   '/llms.txt',
   '/llms-full.txt',
   '/docs/account-recovery.md',
@@ -135,6 +160,8 @@ export function buildRobotsTxt(origin: string): string {
 #   /402.md            your agent hit a 402 — how to pay it
 #   /for-agents.md     you are the agent and your user has no account yet
 #   /api/openapi.json  the full OpenAPI 3.1 spec
+#   /.well-known/agent-skills/index.json  the above, indexed one skill per step
+#   /agent-skills/<step>.md               /for-agents.md split into linked steps
 
 User-agent: *
 Allow: /

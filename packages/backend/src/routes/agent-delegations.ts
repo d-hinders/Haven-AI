@@ -65,8 +65,8 @@ import {
   revokeDelegationsByHashes,
   selectDelegationRowForAgentByHash,
 } from '../infra/repositories/delegation-budgets.js'
-import { redactVendorSecrets } from '../rails/execution-rail.js'
 import { getMerchantBySlug, listMerchantFundingTargets } from '../infra/repositories/merchants.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
 // copy of the authority rules, reached two ways.
 import {
@@ -78,8 +78,9 @@ import {
 } from '../rails/hybrid-signer-actions.js'
 
 /** Vendor errors echo the bundler URL (which embeds the API key) — #764. */
+// #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
-  return redactVendorSecrets(err instanceof Error ? err.message : String(err))
+  return boundedErrorDetails(err) ?? ''
 }
 
 const MAX_UINT96 = (1n << 96n) - 1n
@@ -650,7 +651,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         }
         return reply.code(502).send({
           error: 'Could not deploy the account for this budget — try again',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+          // #3609: bounded after redaction — never the raw viem error.
+          details: boundedErrorDetails(err),
         })
       }
 
@@ -780,7 +782,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
 
     let targets = await listNonRevokedDelegationsForAgent(request.params.id)
     if (targets.length === 0) {
-      return reply.code(409).send({ error: 'Nothing to revoke — the agent has no pending or active budget delegations.' })
+      return reply.code(409).send({ error: 'Nothing to revoke — the agent has no pending, active or replaced budget delegations.' })
     }
 
     if (targets.length > RECONCILE_READ_CEILING) {
@@ -909,7 +911,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const expectedRows = await listNonRevokedDelegationsForAgent(request.params.id)
     if (expectedRows.length === 0) {
       return reply.code(409).send({
-        error: 'Nothing to revoke — the agent has no pending or active budget delegations. Re-prepare.',
+        error: 'Nothing to revoke — the agent has no pending, active or replaced budget delegations. Re-prepare.',
       })
     }
 

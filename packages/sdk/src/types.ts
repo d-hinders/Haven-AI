@@ -68,7 +68,7 @@ export interface HavenClientConfig {
 // ── Payment Types ────────────────────────────────────────────────
 
 export interface PaymentRequest {
-  /** Token symbol: "EURe", "USDC.e", or "xDAI" */
+  /** Token symbol: "USDC" (agent budgets are USDC on Base and Base Sepolia) */
   token: string
 
   /** Amount as a decimal string, e.g. "5.00" */
@@ -159,6 +159,16 @@ export interface PaymentIntent {
 
   /** Data needed to sign the payment */
   signData: SignData
+
+  /**
+   * #3531: advisory, history-only recipient classification — `previously_paid`
+   * when this agent has a prior confirmed payment to this recipient,
+   * `new_address` otherwise. Never affects signing or policy. Absent against
+   * an older backend, and when the backend's history read fails.
+   */
+  recipient?: {
+    class: 'previously_paid' | 'new_address'
+  }
 }
 
 export type PaymentStatus =
@@ -662,6 +672,26 @@ export interface HavenAllowance {
   configuredAmount: string
   resetPeriodMin: number
   /**
+   * #3518: this budget's SCOPE, so an agent holding more than one budget
+   * for a token can name the merchant-locked one before paying. The
+   * recipient pin is null for an open budget; `merchantId` is set only on a
+   * #3331 merchant-locked budget (which always carries a pin). Additive —
+   * undefined on an older backend that does not send them.
+   */
+  delegationHash?: string
+  recipientAddress?: string | null
+  merchantId?: string | null
+  /**
+   * #3518: the Haven-side reservation against this budget — the sum of its
+   * open, unexpired task- and sub-budget children's caps, in ATOMIC units.
+   * Reported beside `onchain.remaining` and never folded into it (the
+   * on-chain figure stays authoritative; a reservation releases on
+   * close/expire without any chain event). `'0'` also covers a failed
+   * read — the sum is best-effort server-side. Additive; undefined on an
+   * older backend.
+   */
+  reservedHavenAtomic?: string
+  /**
    * #3128: human-readable `onchain.remaining`, e.g. "4.96 USDC" — the SAME
    * string {@link HavenAgentAllowanceSummary.remainingDisplay} carries for
    * this allowance, computed by one function from `onchain.remaining` and
@@ -703,8 +733,12 @@ export interface HavenAllowanceSummary {
  * (#1310). Read-only reporting — the on-chain policy remains the actual
  * spend gate either way, this only says what is left after the purchase.
  *
- * Deliberately the SAME rail-labeled field spelling as #1306's
- * catalog-purchase preflight `allowance` block (never a new spelling),
+ * #3464: the canonical key spelling is the ONE `haven_get_agent`'s
+ * `allowances[]` rows use — the read the server tells an agent to make
+ * first — with the figures named `remainingAtomic`, `remainingDisplay`,
+ * `resetPeriodMin`, `tokenSymbol`, `tokenAddress`. Deliberately the SAME
+ * spelling as #1306's catalog-purchase preflight `allowance` block (never a
+ * new spelling; the hosted result types carry the same names),
  * minus the preflight-only `sufficient` field: post-purchase reporting
  * answers "what is left", not "was this purchase covered". Read through the
  * exact same source as {@link HavenAllowanceSummary} / `haven_get_allowances`
@@ -712,19 +746,57 @@ export interface HavenAllowanceSummary {
  * `deriveDelegationBudgets`-backed enforcer read, never `agent_allowances`),
  * so this can never disagree with `haven_get_allowances` for the same
  * fixture.
+ *
+ * The snake_case keys below are DEPRECATED since #3464 and kept for one
+ * deprecation window so existing readers keep working; every value is also
+ * emitted under the camelCase name above. Removal condition: once
+ * `packages/qa-agent` reads the camelCase keys on a released qa-agent build,
+ * the snake_case keys go — tracked as the additive-window close, not a
+ * separate decision. The new keys stay OPTIONAL on this exported type so
+ * existing constructors keep type-checking unchanged.
  */
 export interface PostPurchaseAllowanceSummary {
-  /** Which on-chain policy primitive gates this agent's spend (#1306 labeling). */
-  rail: 'legacy' | 'delegation'
+  /**
+   * Which on-chain policy primitive gates this agent's spend (#1306
+   * labeling). #3464: `'legacy'` removed — unreachable since #1986/#2020
+   * (`GET /machine-payments/allowances` answers 410 before this summary is
+   * built), superseding #2265's keep-as-declared rationale; the public
+   * {@link HavenAgent.executionRail} keeps its declared union.
+   */
+  rail: 'delegation'
   /** Remaining atomic units, read through the same source as {@link HavenAllowance.onchain.remaining}. */
   remaining_atomic: string
-  /** Human-readable remaining, e.g. "4.96 USDC". Omitted when the token's decimals are unknown. */
+  /**
+   * @deprecated #3464 — use `remainingAtomic` (same value). Kept for the
+   * deprecation window; removed once `packages/qa-agent` reads the camelCase
+   * keys.
+   */
   remaining_display?: string
+  /** @deprecated #3464 — use `tokenSymbol` (same value). Same removal condition. */
   token_symbol?: string
+  /** @deprecated #3464 — use `tokenAddress` (same value). Same removal condition. */
   token_address?: string
-  /** Minutes — mirrors {@link HavenAllowance.resetPeriodMin} / the delegation's period. */
+  /** @deprecated #3464 — use `resetPeriodMin` (same value). Same removal condition. */
   reset_period?: number
-  source: 'allowance_module' | 'active_delegations'
+  /**
+   * Which source produced the figures. #3464: `'allowance_module'` removed
+   * for the same unreachability as `rail: 'legacy'` above.
+   */
+  source: 'active_delegations'
+  /** Remaining atomic units — the same figure `remaining_atomic` carries. Optional on the type, always emitted at runtime. */
+  remainingAtomic?: string
+  /**
+   * Human-readable remaining, formatted by the ONE shared formatter
+   * (`formatRemainingDisplay`) — always emitted at runtime, never omitted:
+   * an unknown-decimals token gets the same explicit atomic label
+   * `haven_get_agent`'s `allowances[]` rows carry. Optional on the type so
+   * existing constructors stay valid.
+   */
+  remainingDisplay?: string
+  /** Minutes — mirrors {@link HavenAllowance.resetPeriodMin} / the delegation's period. */
+  resetPeriodMin?: number
+  tokenSymbol?: string
+  tokenAddress?: string
 }
 
 /**
@@ -783,6 +855,13 @@ export interface HavenBalanceCoverage {
    * token (nothing was read).
    */
   budgetRemainingIsFromChain?: boolean
+  /**
+   * #3518: present only when `budgetRemainingAtomic` is "0" because the
+   * agent has no OPEN budget for the token but holds live merchant-locked
+   * budgets — their recipients (lowercase). Those budgets pay only these
+   * addresses; `getAllowances()` reports their remaining figures.
+   */
+  budgetRecipientAddresses?: string[]
 }
 
 /** @internal wire shape of {@link HavenBalanceCoverage}. */
@@ -795,6 +874,7 @@ export interface RawHavenBalanceCoverage {
   checked_amount_atomic: string
   budget_remaining_atomic: string
   budget_remaining_is_from_chain?: boolean
+  budget_recipient_addresses?: string[]
 }
 
 /**
@@ -881,6 +961,122 @@ export interface HavenAgentSummary extends HavenAgent {
    * budgets", not a fetch failure).
    */
   taskBudgets: HavenTaskBudgetSummary[]
+  /**
+   * #3506: the sub-budget rows THIS agent must still sign as the DELEGATING
+   * agent — the owner issued a sub-budget (a parent-child row for this agent
+   * plus a grant to the sub-agent), and each row is `pending` until this
+   * agent's delegate key signs it (or `closing` until it signs the close).
+   * A derived VIEW, populated from `GET /sub-budgets?status=awaiting_signature`;
+   * empty (never throws) against a backend that predates the filter.
+   */
+  pendingSubBudgetSignatures: HavenPendingSubBudgetSignature[]
+}
+
+/**
+ * #3506: one sub-budget row awaiting THIS agent's signature — what
+ * `haven_get_agent` carries per row so the agent can call
+ * `haven_sign { sub_budget_id }` then `haven_submit { sub_budget_id, signature }`.
+ */
+export interface HavenPendingSubBudgetSignature {
+  subBudgetId: string
+  /** The parent-child row a grant hangs under; null on the parent-child row itself (they share a tree). */
+  parentSubBudgetId: string | null
+  /** `open`: sign the child delegation (row is pending). `close`: sign the revocation (row is closing). */
+  purpose: 'open' | 'close'
+  /** `parent-child`: this agent's own narrowing of its budget. `grant`: the slice delegated to the sub-agent. */
+  what: 'parent-child' | 'grant'
+  /** The sub-agent that holds the grant; null on this agent's own parent-child row. */
+  subAgentId: string | null
+  tokenAddress: string
+  recipientAddress: string | null
+  periodAmountAtomic: string
+  expiresAt: number
+  isExpired: boolean
+}
+
+/** #3506: sub-budget lifecycle status, as the wire names it. */
+export type HavenSubBudgetStatus = 'pending' | 'open' | 'closing' | 'closed'
+
+/** #3330: the wire shape of `components.schemas.SubBudget` (snake_case). */
+export interface RawSubBudget {
+  id: string
+  agent_id: string
+  parent_agent_id: string
+  parent_sub_budget_id: string | null
+  chain_id: number
+  token_address: string
+  recipient_address: string | null
+  parent_delegation_hash: string
+  delegation_hash: string
+  label: string | null
+  period_amount_atomic: string
+  status: HavenSubBudgetStatus
+  expires_at: number
+  is_expired: boolean
+  created_at: string
+  opened_at: string | null
+  closed_at: string | null
+  close_tx_hash: string | null
+}
+
+/** #3506: `RawSubBudget`, camelCased — what the SDK sub-budget methods return. */
+export interface HavenSubBudget {
+  id: string
+  agentId: string
+  parentAgentId: string
+  parentSubBudgetId: string | null
+  chainId: number
+  tokenAddress: string
+  recipientAddress: string | null
+  parentDelegationHash: string
+  delegationHash: string
+  label: string | null
+  periodAmountAtomic: string
+  status: HavenSubBudgetStatus
+  expiresAt: number
+  isExpired: boolean
+  createdAt: string
+  openedAt: string | null
+  closedAt: string | null
+  closeTxHash: string | null
+}
+
+/** #3506: `POST /sub-budgets/:id/submit` — opened (from pending) or closed (from closing). */
+export interface SubmitSubBudgetResult {
+  subBudget: HavenSubBudget
+  status: 'open' | 'closed'
+  /** Present only once the close UserOp lands (`status === 'closed'` from `closing`). */
+  closeTxHash?: string
+}
+
+/** #3506: the sign data a live-child close returns (the revocation UserOp's typed data). */
+export interface HavenSubBudgetCloseSignData {
+  signature_scheme: 'eip712_userop'
+  typed_data: Record<string, unknown>
+  user_op_hash: string
+}
+
+/** #3506: `POST /sub-budgets/:id/close`. */
+export interface CloseSubBudgetResult {
+  subBudget: HavenSubBudget
+  /** `closed` on a trivial close (never signed, or already expired); absent when a close signature is pending. */
+  status?: 'closed'
+  /** Present only when the close needed a signature (a live child). */
+  signData?: HavenSubBudgetCloseSignData
+  nextAction?: string
+}
+
+export interface RawSubmitSubBudgetResponse {
+  sub_budget: RawSubBudget
+  status: 'open' | 'closed'
+  close_tx_hash?: string
+}
+
+export interface RawCloseSubBudgetResponse {
+  sub_budget: RawSubBudget
+  status?: 'closed'
+  sign_data?: HavenSubBudgetCloseSignData
+  next_action?: string
 }
 
 /** #3329: task-budget lifecycle status, as the wire names it. */
@@ -897,6 +1093,27 @@ export interface RawTaskBudget {
   delegation_hash: string
   label: string | null
   max_atomic: string
+  /**
+   * #3501: what the child has spent so far, read live from the enforcer's
+   * `spentMap` for the delegation hash. Present on GET reads of an OPEN task
+   * budget only; null when the on-chain read failed; absent on responses
+   * that did not read the chain.
+   */
+  spent_atomic?: string | null
+  /**
+   * #3501: `max_atomic` minus `spent_atomic`, clamped at zero — what the
+   * chain will still allow. Never fabricated: a failed read is null, never
+   * the full cap.
+   */
+  remaining_atomic?: string | null
+  /**
+   * #3501: provenance of `remaining_atomic`, the same honesty flag the
+   * parent allowance carries (`onchain.remaining_is_from_chain`, #1319):
+   * true when it came from the live enforcer read, false when that read
+   * failed (spent/remaining are then null). Present only where the read was
+   * attempted.
+   */
+  remaining_is_from_chain?: boolean
   status: HavenTaskBudgetStatus
   expires_at: number
   is_expired: boolean
@@ -917,6 +1134,22 @@ export interface HavenTaskBudget {
   delegationHash: string
   label: string | null
   maxAtomic: string
+  /**
+   * #3501: camelCase form of `spent_atomic` — the live enforcer figure.
+   * Present on GET reads of an open task budget; null when the read failed;
+   * absent when the response did not read the chain.
+   */
+  spentAtomic?: string | null
+  /**
+   * #3501: what the chain will still allow through this child (cap minus
+   * spent, clamped at zero). A failed read is null — never the full cap.
+   */
+  remainingAtomic?: string | null
+  /**
+   * #3501: provenance of `remainingAtomic`, the parent allowance's honesty
+   * flag (`onchain.remainingIsFromChain`, #1319) on the task-budget surface.
+   */
+  remainingIsFromChain?: boolean
   status: HavenTaskBudgetStatus
   expiresAt: number
   isExpired: boolean
@@ -930,6 +1163,15 @@ export interface HavenTaskBudget {
  * #3329: the condensed row `getAgentSummary()` carries per open, unexpired
  * task budget — enough to render a "reserved by open task budgets" line and
  * a task-budget list without a second read.
+ *
+ * #3501: each row also carries the budget-visibility figure the issue asks
+ * for — what the chain will still allow through this child — so an agent
+ * reading `haven_get_agent` can tell BEFORE its next payment whether the
+ * task budget will refuse it. `remainingAtomic` is null when the on-chain
+ * read failed (never the full cap as remaining), and
+ * `remainingIsFromChain` is the same honesty flag the parent allowance's
+ * `onchain.remainingIsFromChain` carries (#1319): true = live enforcer
+ * read, false = the read failed and the figures are null.
  */
 export interface HavenTaskBudgetSummary {
   id: string
@@ -937,8 +1179,56 @@ export interface HavenTaskBudgetSummary {
   tokenAddress: string
   maxAtomic: string
   maxDisplay: string
+  /**
+   * #3501: spent so far through this child, from the enforcer's `spentMap`.
+   * Null when the on-chain read failed; also null for a budget whose
+   * delegation the read could not speak for.
+   */
+  spentAtomic: string | null
+  /**
+   * #3501: `maxAtomic` minus spent, clamped at zero. Null — never the full
+   * cap — when the on-chain read failed.
+   */
+  remainingAtomic: string | null
+  /**
+   * #3501: true when `remainingAtomic` came from the live enforcer read,
+   * false when that read failed (spent/remaining are then null).
+   */
+  remainingIsFromChain: boolean
+  /**
+   * #3501: human form of `remainingAtomic` ("0.001 USDC"), derived by the
+   * same formatter as `maxDisplay`. Null exactly when `remainingAtomic` is
+   * null — a failed read never renders as an amount.
+   */
+  remainingDisplay: string | null
   recipientAddress: string | null
   expiresAt: number
+  /**
+   * #3518: the budget's lifecycle status (`pending` | `open` | `closing` |
+   * `closed`) — `haven_get_agent` lists closing and pending budgets too (a
+   * close refusal says "re-check the budget's status", so the status must
+   * be readable there), and an agent that only ever saw open rows could
+   * not. Additive; undefined on a stale cached read from an older client
+   * build.
+   */
+  status?: HavenTaskBudgetStatus
+  isExpired?: boolean
+}
+
+/**
+ * `precheckBudget()`'s 200 answer. #3518: the `budget_*` fields name the
+ * budget the compare ran against — the one the payment would draw on
+ * (absent when no budget row matched the token).
+ */
+export interface BudgetPrecheckResult {
+  sufficient: boolean
+  remaining_atomic: string
+  remaining_is_from_chain?: boolean
+  replay?: boolean
+  budget_id?: string
+  budget_delegation_hash?: string
+  budget_recipient_address?: string | null
+  budget_merchant_id?: string | null
 }
 
 /** #3329: `POST /task-budgets` and `POST /task-budgets/:id/close` — the sign-then-submit envelope. */
@@ -1146,8 +1436,10 @@ export interface HavenPaymentReceipt {
   /**
    * The delegate → merchant settlement transaction (#2998). Trust level differs
    * by scheme: on erc7710 it is `txHash` itself and Haven VERIFIED it on-chain
-   * before the receipt existed; on eip3009 it is the merchant's claim as relayed
-   * (PAYMENT-RESPONSE), NOT verified on-chain by Haven — cite it as such.
+   * before the receipt existed. On eip3009 it is the settlement the agent
+   * reported through `reportSettlementEvidence()` when there is one, which Haven
+   * also VERIFIED on-chain (#3475); otherwise the merchant's claim as relayed
+   * (PAYMENT-RESPONSE), NOT verified on-chain by Haven — cite that as such.
    */
   settlementTxHash: string | null
   chainId: number
@@ -1805,6 +2097,38 @@ export interface PaymentStatusResult {
    * row records its response); absent = unknown. See the raw field's doc.
    */
   delivered?: boolean
+  /**
+   * #3475 follow-up: which settlement branch this x402 payment runs (#946).
+   * `null` on the legacy rail, on any x402 intent whose scheme metadata
+   * predates #946, or any stored value outside this enum.
+   */
+  settlementScheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #3475 follow-up: `true` only when an eip3009 payment's merchant
+   * settlement transaction is already recorded and on-chain-verified.
+   * Absent — never `false` — when unknown or on erc7710, matching
+   * `delivered`'s own honesty rule.
+   */
+  merchantSettlementRecorded?: boolean
+  /**
+   * #3494: a bounded, redacted cause for a `failed` payment — present
+   * (possibly `null`, when no message was recorded) only when `status` is
+   * `'failed'`; absent on every other status.
+   */
+  failureReason?: string | null
+  /**
+   * #3518: the budget delegation that METERED this payment, recorded at
+   * authorize (migration 053) — the settle summary's authoritative answer
+   * to "which budget paid". Absent on the legacy rail and on rows
+   * predating migration 053.
+   */
+  budgetDelegationHash?: string
+  /**
+   * #3564: `true` only while a payment's submit is receipt-unconfirmed and
+   * not yet reconciled from the chain. Absent — never `false` — on every
+   * other row, matching `delivered`'s own honesty rule.
+   */
+  submissionOutcomePending?: true
   /** Platform fee surfaced so it's never silently collected (#386). */
   fee?: PaymentFee | null
   amountAtomic?: string | null
@@ -1969,6 +2293,14 @@ export interface RawCreateResponse {
     }
     instructions: string
   }
+  /**
+   * #3531: advisory, history-only — `previously_paid` when this agent has a
+   * prior confirmed payment to this recipient, `new_address` otherwise.
+   * Optional: older backends omit it, and `createIntent` must not require it.
+   */
+  recipient?: {
+    class: 'previously_paid' | 'new_address'
+  }
   error?: string
   supported?: string[]
 }
@@ -2055,6 +2387,35 @@ export interface RawPaymentStatusResult {
    * DELIVERED_UNSETTLED branches.
    */
   delivered?: boolean
+  /**
+   * #3475 follow-up: `machine_metadata.settlement_scheme`, additive
+   * alongside `delivered`. `null` on the legacy rail, on any x402 intent
+   * whose scheme metadata predates #946, or any stored value outside this
+   * enum.
+   */
+  settlement_scheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #3475 follow-up: `true` only when an eip3009 payment's merchant
+   * settlement transaction is already recorded and on-chain-verified.
+   * Absent — never `false` — when unknown or on erc7710, matching
+   * `delivered`'s own honesty rule.
+   */
+  merchant_settlement_recorded?: boolean
+  /** #3494: see `PaymentStatusResult.failureReason`'s doc. */
+  failure_reason?: string | null
+  /**
+   * #3518: the budget delegation that METERED this payment, recorded at
+   * authorize (migration 053). The settle summary keys its allowance rows
+   * on this — the budget that PAID, never a re-derived first match.
+   * Absent on the legacy rail and pre-053 rows.
+   */
+  budget_delegation_hash?: string
+  /**
+   * #3564: `true` only while a payment's submit is receipt-unconfirmed and
+   * not yet reconciled from the chain. Absent on every other row — never
+   * `false` — matching `delivered`'s own honesty rule.
+   */
+  submission_outcome_pending?: true
   fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
@@ -2083,6 +2444,14 @@ export interface RawHavenAllowance {
   token_symbol: string
   configured_amount: string
   reset_period_min: number
+  /**
+   * #3518: scope + Haven-side reservation, additive/optional — an older
+   * backend's rows omit all four and the mapping keeps them absent.
+   */
+  delegation_hash?: string
+  recipient_address?: string | null
+  merchant_id?: string | null
+  reserved_haven_atomic?: string
   onchain: {
     amount: string
     spent: string

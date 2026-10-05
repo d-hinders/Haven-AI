@@ -1,0 +1,211 @@
+/* The mockup's animation CSS (docs/product/site-mockup/site.css:314-346),
+   carried into the page as a CSS Module (#3575).
+   Every ANIMATED declaration sits inside the prefers-reduced-motion gate —
+   the Animation Discipline self-check (docs/contributing/ai-agent-workflow.md:87)
+   — and the hooks in motion.ts never apply these classes when the user asks
+   for reduced motion, so the gate and the JS gate agree. Static colour
+   classes the loops toggle sit outside it: they are states, not motion. */
+
+/* --- States the loops toggle (colour/layout only, no motion) ------------- */
+
+/* The pending pill/icon (site.css:314-315). */
+.pillPending {
+  background: var(--v2-surface);
+  color: var(--v2-ink-2);
+}
+.icoPend {
+  background: var(--v2-surface);
+  color: var(--v2-ink-3);
+  letter-spacing: 1px;
+}
+.icoOut {
+  background: var(--v2-brand-soft);
+  color: var(--v2-brand);
+}
+.icoNo {
+  background: var(--v2-danger-soft);
+  color: var(--v2-danger);
+}
+
+/* The passkey face's settled state (site.css:329). */
+.done {
+  background: var(--v2-success-soft);
+  color: var(--v2-success);
+}
+
+/* A terminal output line before/after its reveal (site.css:332-333). The
+   transition is motion, so it is gated with the rest; the hidden state
+   itself is only ever applied while a loop is running. */
+.tline {
+  display: block;
+  opacity: 0;
+  transform: translateY(3px);
+}
+.tlineOn {
+  opacity: 1;
+  transform: none;
+}
+
+/* The confirmation: text with a check icon in the success colour — never a
+   pill or a button (site.css:346). The entrance animation is gated below. */
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--v2-success);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* --- Motion (all of it inside the reduced-motion gate) ------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* A row entering the activity list (site.css:316, keyframe :319). */
+  .enter {
+    animation: rowin 0.5s ease both;
+  }
+  /* A row leaving the activity list (site.css:317, keyframe :320). */
+  .leave {
+    animation: rowout 0.4s ease both;
+  }
+  /* The hero list's swap (#3644): the entering row's track grows from 0fr
+     while the displaced row's shrinks to 0fr, same duration and easing, so
+     the two heights always sum to one row and the list never changes height.
+     The displaced row is dropped at 420 ms, after its track reaches 0fr. */
+  .grow {
+    animation: rowgrow 0.4s ease both;
+  }
+  .shrink {
+    animation: rowshrink 0.4s ease both;
+  }
+  /* One receipt row pair's assembly step (site.css:337; the per-pair delay
+     comes from the component as an inline animation-delay, mirroring the
+     mockup's `Math.floor(i/2)*110` ms per dt/dd, `index.html:301`). */
+  .receiptRow {
+    animation: rowin 0.45s ease both;
+  }
+  /* The accounting row's success flash (site.css:335, keyframe :336). */
+  .flash {
+    animation: rowflash 1.2s ease;
+  }
+  /* The "In Fortnox" badge as it lands (site.css:318). */
+  .pillEnter {
+    animation: rowin 0.4s ease both;
+  }
+  /* The passkey's scanning ring (site.css:327, keyframe :328). */
+  .scanRing::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border-radius: 15px;
+    border: 2px solid var(--v2-brand);
+    animation: scanring 1.1s ease-out infinite;
+  }
+  /* The budget amount's typing caret (site.css:344, keyframe :345). */
+  .typing::after {
+    content: '';
+    display: inline-block;
+    width: 1px;
+    height: 1em;
+    background: currentColor;
+    margin-left: 1px;
+    vertical-align: -2px;
+    animation: caret 1s steps(2) infinite;
+  }
+  /* A confirmation's entrance (site.css:346). */
+  .confirm {
+    animation: rowin 0.35s ease both;
+  }
+  /* The terminal lines print in (site.css:332-333). */
+  .tline {
+    transition:
+      opacity 0.45s,
+      transform 0.45s;
+  }
+  /* The receipt's refusal lands last (site.css:338, keyframes :339-340). */
+  .refusalBox {
+    animation:
+      refin 0.5s ease 0.75s both,
+      refglow 1.6s ease 1.2s;
+  }
+}
+
+@keyframes rowin {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes rowout {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes rowflash {
+  0% {
+    background: var(--v2-success-soft);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@keyframes scanring {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.22);
+  }
+}
+@keyframes refin {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes refglow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 120, 110, 0);
+  }
+  35% {
+    box-shadow: 0 0 0 6px rgba(255, 120, 110, 0.16);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 120, 110, 0);
+  }
+}
+@keyframes caret {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes rowgrow {
+  from {
+    grid-template-rows: 0fr;
+  }
+  to {
+    grid-template-rows: 1fr;
+  }
+}
+@keyframes rowshrink {
+  from {
+    grid-template-rows: 1fr;
+  }
+  to {
+    grid-template-rows: 0fr;
+  }
+}

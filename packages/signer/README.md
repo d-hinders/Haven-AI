@@ -65,7 +65,7 @@ It exposes four stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign one payment, or (#3329) one task-budget open/close. Preferred form is `{ payment_id }` alone for a payment, or `{ task_budget_id }` alone (mutually exclusive with `payment_id`) for a task-budget open/close — the signer fetches the exact payload itself either way. Signs only Haven-prepared payloads (#3272, #3281, #3329): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account EITHER directly OR through a self-delegated task-budget child under it (the two-link `[task child, budget]` chain), or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }`, `{ signature, x402_binding }`, or `{ signature, task_budget_id, purpose }` |
+| `haven_sign` | Sign one payment, or (#3329) one task-budget open/close, or (#3330, #3506) one sub-budget open/close. Preferred form is `{ payment_id }` alone for a payment, `{ task_budget_id }` alone for a task-budget open/close, or `{ sub_budget_id }` alone for a sub-budget this agent delegates (its own parent-child and the grant to another agent of the same account) — exactly one of the three; the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272, #3281, #3329): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account EITHER directly OR through a self-delegated task-budget child under it (the two-link `[task child, budget]` chain), or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; a self-delegated task-budget child `Delegation` from this signer's own account (`assertOwnTaskChild`); a sub-budget child `Delegation` from this signer's own account narrowing its budget for another agent of the same account (`assertOwnSubBudgetChild`); or a task-budget or sub-budget close — a `disableDelegation` UserOp from this signer's own account revoking that child (`assertOwnTaskBudgetCloseUserOp`, `assertOwnSubBudgetCloseUserOp`); other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }`, `{ signature, x402_binding }`, `{ signature, task_budget_id, purpose }`, or `{ signature, sub_budget_id, purpose }` (then `haven_submit` with that id) |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
@@ -74,8 +74,9 @@ The `initialize` handshake advertises which binding versions this signer
 understands, under `capabilities.experimental['haven/signer-compatibility']`
 and in the MCP `instructions` string. Both are **derived** from
 `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS` in
-`src/core.ts` and `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS` in
-`src/sign-context.ts` (#3271) — the same constants the signing path enforces — so this README
+`src/core.ts` and `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS` (#3271),
+`SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` (#3329) and
+`SUPPORTED_SUB_BUDGET_SIGN_CONTEXT_VERSIONS` (#3506) in `src/sign-context.ts` — the same constants the signing path enforces — so this README
 deliberately does not restate the numbers. Read them from the handshake, or
 from those constants.
 
@@ -327,8 +328,14 @@ table.** When the x402 fetch answers `SIGN_CONTEXT_REFUSED` with
 `GET /payments/:id/sign-context` instead, same auth header, timeout and
 refusal structuring. That second fetch's own refusals reuse the codes in the
 table below with direct-payment remedies: no quote to re-run, and the
-`typed_data_b64` relay from the `haven_send` / `haven_pay` result is the
-fallback. A 409 `sign_context_unavailable` from the direct route too (an
+`typed_data_b64` relay — reached by re-running whichever of `haven_send` /
+`haven_pay` was called, with the SAME `idempotency_key` (echoed on its
+result) plus `include_signing_payload: true` (#3495; superseding #3277's
+"the relay fields stay") — is the fallback, EXCEPT the direct fetch's 404
+(the table row below): that message names BOTH routes, since a 404 there is
+ambiguous with a backend old enough to predate #3495 too, whose result
+already carries the pair unconditionally with no opt-in to re-run.
+A 409 `sign_context_unavailable` from the direct route too (an
 x402 row the x402 route could not serve, or a direct row with no stored
 signing payload) surfaces the x402 route's own refusal instead. `haven_sign_x402` never takes this branch: a direct payment
 carries no x402 context to fund a merchant retry with, so it surfaces the
@@ -353,8 +360,12 @@ no direct route, #3271). For x402 it is **not** in the default quote result
 since #1272: obtain it by re-running the SAME quote tool with the SAME
 `idempotency_key` plus `include_signing_payload: true`, then pass
 `typed_data_b64` (plus `payload_hash` / `x402_expected`) instead of
-`payment_id`. A direct payment's `haven_send` / `haven_pay` result always
-carries `payload_hash` + `typed_data_b64`. Any other backend REFUSAL
+`payment_id`. A direct payment's `haven_send` / `haven_pay` result is compact
+by default too (#3495) — `payload_hash` is on that result unconditionally (as
+is `idempotency_key`, generated fresh when the caller passed none and always
+echoed); only `typed_data` / `typed_data_b64` are withheld, reached the same
+way — a `include_signing_payload: true` re-run on the SAME `idempotency_key`.
+Any other backend REFUSAL
 carries no fallback: an expired, executed or unsignable intent cannot be
 rescued by re-signing its bytes — an expired x402 one is re-quoted (the same
 `payment_window_expired` + `retry_with_new_quote` the signer emits for

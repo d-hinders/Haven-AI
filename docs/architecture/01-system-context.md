@@ -25,7 +25,9 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-09-21"
+  - packages/ops/**
+  - packages/backend/src/routes/ops.ts
+last-verified: "2026-10-02"
 ---
 
 # Haven — System Context
@@ -83,7 +85,7 @@ flowchart LR
   end
   class AGENT,SIGNER agentCustody
 
-  subgraph CHAIN["Supported chains — Base, Gnosis, Base Sepolia"]
+  subgraph CHAIN["Supported chains — Base, Base Sepolia"]
     SAFE["Haven wallet<br/>Safe smart account"]
     AM["AllowanceModule"]
     DELEGATE["Delegate EOA<br/>temporary x402 funds"]
@@ -210,13 +212,31 @@ flowchart LR
   [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md)
   ([delegation rail](../../packages/backend/src/rails/delegation-rail.ts),
   [agent auth](../../packages/backend/src/middleware/agentAuth.ts)).
-- **Supported chains are Base (8453), Gnosis Chain (100), and Base Sepolia
-  (84532).** Base is the primary production network; Base Sepolia is the dev/QA
-  testnet. Per-chain facts (token addresses, Safe contracts, explorers) live in
+- **Supported chains are Base (8453) and Base Sepolia (84532).** Base is the
+  primary production network; Base Sepolia is the dev/QA testnet. Gnosis Chain
+  (100) is not a Haven network; the registry still carries it (historical rows
+  render through it). Per-chain facts (token addresses, Safe contracts, explorers) live in
   the shared `@haven_ai/core` registry; the backend layers RPC endpoints and
   relayer configuration over it per chain
   ([core registry](../../packages/core/src/chains.ts),
   [backend chain wiring](../../packages/backend/src/domain/chains.ts)).
+- **The ops console is a read-only trust boundary of its own (epic #3507).**
+  `@haven/ops` is a separate Next.js app deployed as its **own Vercel
+  project** (Production Branch `dev`, runbook:
+  [`../operations/ops-console.md`](../operations/ops-console.md)) that talks
+  to a backend's `/ops/*` surface over bearer-token REST. Its boundary is
+  **founder-only read, no spend authority**: sign-in is a GitHub OAuth
+  identity check against a numeric allowlist (2FA required) minting an 8-hour
+  ops JWT that authenticates nothing but reads; the backend re-checks the id
+  on every request and every read is audited to `ops_access_log` before the
+  response is sent. Nothing under `/ops` moves funds, signs, changes signers
+  or delegations, or acts as a user — data reads go through a dedicated
+  read-only Postgres role (#3510), never the backend's login, and the chain
+  view (#3513) reads public state only. The console appears in the diagram's
+  Haven-operated box but touches no custody edge: it is observation
+  infrastructure, and every authority line in this document runs past it
+  ([ops routes](../../packages/backend/src/routes/ops.ts),
+  [ops app](../../packages/ops/src/app/page.tsx)).
 - Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
   custody claims above were re-checked against the code at this head:
   `middleware/agentAuth.ts` still stores `delegate_address` and the API-key
@@ -228,3 +248,17 @@ flowchart LR
   intervening commits (#3167 agent labels, #3127 currency preference, #3173
   signer cold start, #3202 marketplace prospects) touched covered files but
   moved no custody boundary this diagram describes.
+- Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`): the
+  custody claims re-checked at this head — `middleware/agentAuth.ts` and
+  `routes/agents.ts` still store only `delegate_address` (never a private
+  key), `config.ts` still resolves `RELAYER_PRIVATE_KEY_<chainId>` over the
+  global fallback, `POST /safe/exec` stays deleted (`routes/safe-deploy.ts`
+  and `index.ts` record the #2847 removal), `lib/safe-tx.ts` is still absent,
+  the hosted MCP facade stays keyless (the `tools/**` capability modules
+  compose in `tools.ts`, unchanged), and `lib/signer.ts` still mirrors the
+  Hybrid DeleGator signer-set read. The week's drift (#3444 sub-budgets — an
+  agent re-delegating a narrower budget to another agent, still owner-signed
+  at the root and metered by the same caveat enforcers; #3423 receive-side
+  slices; #3479 settlement recording; #3485 allowance-summary alignment)
+  widened what a delegate may redeem but moved no custody boundary, actor or
+  trust edge this diagram names.

@@ -431,6 +431,119 @@ export async function confirmObservedSettlement(
   })
 }
 
+// ── eip3009 merchant settlement evidence (#3475) ─────────────────────────────
+
+/**
+ * Some OTHER payment already holds this hash, as its own transaction or as its
+ * recorded merchant settlement. Built from placeholders because the same
+ * predicate runs standalone (to classify a refusal) and inside the guarded
+ * UPDATE, with different numbering.
+ */
+function settlementHashTakenSql(p: { hash: string; id: string }): string {
+  return `SELECT 1 FROM payment_intents other
+              WHERE other.id <> ${p.id}
+                AND (
+                  (other.tx_hash IS NOT NULL AND LOWER(other.tx_hash) = LOWER(${p.hash}))
+                  OR LOWER(other.machine_metadata->>'merchant_settlement_tx_hash') = LOWER(${p.hash})
+                )`
+}
+
+export const SETTLEMENT_HASH_TAKEN_SQL = settlementHashTakenSql({ hash: '$1', id: '$2' })
+
+/**
+ * Record a verified eip3009 merchant settlement hash on its intent (#3475).
+ *
+ * The intent is already `confirmed` with Haven's own FUNDING hash in `tx_hash`,
+ * and that never changes. The merchant's settlement (delegate → merchant) is
+ * kept beside it as `machine_metadata.merchant_settlement_tx_hash`, which the
+ * receipt read prefers over the merchant's unverified `PAYMENT-RESPONSE` echo.
+ * JSONB, so no migration.
+ *
+ * What it does NOT try to decide is which of two same-shaped payments (same
+ * agent, token, delegate, merchant and amount, overlapping in time) a transfer
+ * settled: Haven never sees the EIP-3009 nonce on this path, so it cannot. A
+ * look-alike guard was tried and dropped in review: every payment it refused
+ * stayed unrecorded and so refused the next one, and an unreportable payment
+ * (merchant-rejected, or reported through the funding hash) blocked every later
+ * same-price payment for good. What remains bounds the damage instead: one
+ * hash backs at most one eip3009 payment (`settlementHashTakenSql`), a payment
+ * takes one hash only (`merchant_settlement_tx_hash IS NULL` makes the UPDATE
+ * a compare-and-set). The residual: a hash can be recorded on ANY payment
+ * with the same agent, amount, token, delegate and merchant whose funding
+ * confirmed before the transfer was mined (within the skew), including one
+ * whose merchant leg failed, and that payment's receipt and funded-retry
+ * remedy (`isFundedX402AwaitingMerchantLeg`) then follow the attribution. It
+ * takes an agent misreporting a payment id; the record itself moves no money.
+ */
+export const RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL = `UPDATE payment_intents target
+           SET machine_metadata = COALESCE(target.machine_metadata, '{}'::jsonb)
+                 || jsonb_build_object('merchant_settlement_tx_hash', LOWER($1))
+         WHERE target.id = $2
+           AND target.agent_id = $3
+           AND COALESCE(target.payment_rail, target.source) = 'x402'
+           AND target.execution_rail = 'delegation'
+           AND target.machine_metadata->>'settlement_scheme' = 'eip3009'
+           AND target.status = 'confirmed'
+           AND target.tx_hash IS NOT NULL
+           AND LOWER(target.tx_hash) <> LOWER($1)
+           AND target.machine_metadata->>'merchant_settlement_tx_hash' IS NULL
+           AND NOT EXISTS (${settlementHashTakenSql({ hash: '$1', id: '$2' })})
+         RETURNING target.id`
+
+export const FIND_RECORDED_EIP3009_SETTLEMENT_SQL = `SELECT machine_metadata->>'merchant_settlement_tx_hash' AS recorded
+           FROM payment_intents WHERE id = $1 AND agent_id = $2`
+
+export interface Eip3009SettlementRecord {
+  txHash: string
+  intentId: string
+  agentId: string
+}
+
+export type Eip3009SettlementRecordOutcome =
+  /** Written now, or this exact hash was already recorded for this payment. */
+  | 'recorded'
+  /** This payment already holds a DIFFERENT verified settlement hash. */
+  | 'conflict'
+  /** Another payment already holds this hash. */
+  | 'hash_taken'
+  /** Not a confirmed eip3009 delegation-rail x402 intent of this agent. */
+  | 'not_eligible'
+
+/**
+ * {@link RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL}, serialized per settlement
+ * hash with the same advisory lock the erc7710 confirm takes. The uniqueness
+ * this enforces is one-directional: an eip3009 record refuses a hash an
+ * erc7710 row already confirmed with, but the erc7710 confirm checks only
+ * `tx_hash`. The reverse collision would need one transaction to be both an
+ * account → merchant settlement and a delegate EOA → merchant one, which the
+ * two payers make unreachable in practice.
+ */
+export async function recordEip3009MerchantSettlement(
+  input: Eip3009SettlementRecord,
+  db: Executor = pool,
+): Promise<Eip3009SettlementRecordOutcome> {
+  return withTransaction(db, async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.txHash.toLowerCase()])
+    const existing = await tx.query<{ recorded: string | null }>(FIND_RECORDED_EIP3009_SETTLEMENT_SQL, [
+      input.intentId,
+      input.agentId,
+    ])
+    const recorded = existing.rows[0]?.recorded ?? null
+    if (recorded) {
+      return recorded.toLowerCase() === input.txHash.toLowerCase() ? 'recorded' : 'conflict'
+    }
+    if ((await tx.query(SETTLEMENT_HASH_TAKEN_SQL, [input.txHash, input.intentId])).rows.length > 0) {
+      return 'hash_taken'
+    }
+    const written = await tx.query<{ id: string }>(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [
+      input.txHash,
+      input.intentId,
+      input.agentId,
+    ])
+    return written.rows.length > 0 ? 'recorded' : 'not_eligible'
+  })
+}
+
 // ── passive settlement sweep candidates (#2117) ──────────────────────────────
 
 /**

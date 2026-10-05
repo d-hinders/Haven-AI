@@ -64,19 +64,129 @@ describe('haven_pay', () => {
       },
     })
 
-    const result = ok<{ payload_hash: string; payment_id: string; status: string }>(
+    const result = ok<{ payload_hash: string; payment_id: string; status: string; idempotency_key?: string }>(
       await handlers().haven_pay({ token: 'USDC', amount: '12.50', to: '0xabc' }),
     )
 
     expect(result.data.payment_id).toBe('pay_1')
     expect(result.data.payload_hash).toBe('0xdeadbeef')
     expect(result.data.status).toBe('pending_signature')
+    // #3495: generated when the caller passes none, and echoed.
+    expect(typeof result.data.idempotency_key).toBe('string')
+    expect(result.data.idempotency_key).toMatch(/^direct:[0-9a-f-]{36}$/)
   })
 
-  it('forwards signature_scheme + typed_data VERBATIM for delegation-rail intents (#1254)', async () => {
-    // Found live during the #908 mainnet canary: the x402 quote path always
-    // forwarded these, this direct path dropped them — so the local signer
-    // raw-signed the userOp hash and the Hybrid account rejected it (AA24).
+  it('surfaces recipient_class when the backend carries recipient.class (#3531)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+          recipient: { class: 'previously_paid' },
+        },
+      },
+    })
+
+    const result = ok<{ recipient_class?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '12.50', to: '0xabc' }),
+    )
+
+    expect(result.data.recipient_class).toBe('previously_paid')
+  })
+
+  it('omits recipient_class against an older backend that sends no recipient field (#3531)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+        },
+      },
+    })
+
+    const result = ok<{ recipient_class?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '12.50', to: '0xabc' }),
+    )
+
+    expect('recipient_class' in result.data).toBe(false)
+  })
+
+  it('two no-key calls with IDENTICAL arguments get two DIFFERENT generated keys and hit the backend twice (#3495 review correction)', async () => {
+    // Two genuinely separate payments (two tips, two payouts) of the same
+    // amount to the same recipient must never collapse into one: a
+    // deterministic/bucketed key would make the backend's idempotency replay
+    // return the FIRST payment for the second call, and the agent would be
+    // told the second send succeeded while no second transfer ever happened.
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_first',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+        },
+      },
+    })
+    const first = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '1', to: '0xabc' }),
+    )
+
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_second',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+        },
+      },
+    })
+    const second = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '1', to: '0xabc' }),
+    )
+
+    expect(first.data.idempotency_key).not.toBe(second.data.idempotency_key)
+    expect(first.data.payment_id).not.toBe(second.data.payment_id)
+
+    const payCalls = recordedCalls().filter((c) => c.url.endsWith('/payments'))
+    expect(payCalls).toHaveLength(2)
+    const keys = payCalls.map((c) => (c.body as Record<string, unknown>).idempotency_key)
+    expect(keys[0]).not.toBe(keys[1])
+  })
+
+  it('echoes the caller-supplied idempotency_key verbatim instead of generating one (#3495)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_caller_key',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+        },
+      },
+    })
+
+    const result = ok<{ idempotency_key?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '1', to: '0xabc', idempotency_key: 'caller-chosen' }),
+    )
+
+    expect(result.data.idempotency_key).toBe('caller-chosen')
+    const payCall = recordedCalls().find((c) => c.url.endsWith('/payments'))
+    expect((payCall?.body as Record<string, unknown>).idempotency_key).toBe('caller-chosen')
+  })
+
+  it('omits typed_data / typed_data_b64 by DEFAULT on a delegation-rail intent, keeping only signature_scheme (#3495)', async () => {
+    // #3495: supersedes #3277 AC2 ("the relay fields stay") — the compact
+    // default now matches the x402 quote tools' #1272 contract exactly.
     const typedData = {
       domain: { name: 'HybridDeleGator', chainId: 8453 },
       types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
@@ -99,8 +209,51 @@ describe('haven_pay', () => {
       },
     })
 
-    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string }>(
+    const result = ok<Record<string, unknown>>(
       await handlers().haven_pay({ token: 'USDC', amount: '0.10', to: '0xabc' }),
+    )
+
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+    expect(result.data.payload_hash).toBe('0xdeadbeef')
+  })
+
+  it('include_signing_payload: true restores signature_scheme + typed_data + typed_data_b64 VERBATIM (#1254, #3495)', async () => {
+    // Found live during the #908 mainnet canary: the x402 quote path always
+    // forwarded these, this direct path dropped them once — so the local
+    // signer raw-signed the userOp hash and the Hybrid account rejected it
+    // (AA24). Since #3495 the pair only rides the result on this opt-in.
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xabc' },
+    }
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_delegation',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: {
+            hash: '0xdeadbeef',
+            signature_scheme: 'eip712_userop',
+            typed_data: typedData,
+          },
+        },
+      },
+    })
+
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string; reason?: string }>(
+      await handlers().haven_pay({
+        token: 'USDC',
+        amount: '0.10',
+        to: '0xabc',
+        idempotency_key: 'k-include-payload',
+        include_signing_payload: true,
+      }),
     )
 
     expect(result.data.signature_scheme).toBe('eip712_userop')
@@ -111,12 +264,14 @@ describe('haven_pay', () => {
       JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
     ).toEqual(typedData)
     expect(result.data.payload_hash).toBe('0xdeadbeef')
+    // #3495 review N3: the reason tailors to this being the opt-in re-run —
+    // relay the pair directly, don't loop back through payment_id.
+    expect(String(result.data.reason)).toContain('payload_hash, typed_data_b64')
+    expect(String(result.data.reason)).toContain('already includes')
+    expect(String(result.data.reason)).not.toMatch(/EXACTLY as given/)
   })
 
-  it('names the byte-free haven_sign handoff and the refusal-recovery route, relay fields intact (#3277)', async () => {
-    // The stub carries a typed-data sign_data so the delegation fields are
-    // actually exercised: #3277 names the handoff ON TOP of them, never
-    // instead of them.
+  it('names the byte-free haven_sign handoff and the opt-in relay route (#3277, #3495)', async () => {
     const typedData = {
       domain: { name: 'HybridDeleGator', chainId: 8453 },
       types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
@@ -148,31 +303,96 @@ describe('haven_pay', () => {
     expect(result.data.next_arguments).toEqual({ payment_id: 'pay_handoff' })
     expect(result.data.safe_to_continue).toBe(true)
 
-    // The recovery notice: refusal-triggered, relay-routed, NO initialize
-    // version comparison (#1547 pattern).
+    // The recovery notice: refusal-triggered, opt-in-relay-routed, NO
+    // initialize version comparison (#1547 pattern).
     const notice = result.data.signer_compatibility as Record<string, string>
     expect(notice.direct_sign_context_version).toBe(1)
     expect(notice.check).toContain('SIGN_CONTEXT_REFUSED')
     expect(notice.check).toContain('sign_context_unavailable')
+    expect(notice.check).toContain('include_signing_payload: true')
     expect(notice.check).toContain('{ payload_hash, typed_data_b64 }')
     expect(notice.fallback).toContain('sign_context_unavailable')
+    expect(notice.fallback).toContain('include_signing_payload: true')
     expect(notice.fallback).toContain('typed_data_b64')
     expect(notice.check).not.toMatch(/initialize/i)
     expect(notice.fallback).not.toMatch(/initialize/i)
+    // #3495 review round 2 (S1 pin): the trigger is the routable
+    // fallback: 'typed_data_b64' string, on EITHER a current signer's own
+    // transport-failure/malformed/404 case OR the older-signer
+    // sign_context_unavailable case — never the round-1 text that
+    // conflated a current signer's transport failure INTO the
+    // sign_context_unavailable trigger.
+    expect(notice.check).toContain("fallback: 'typed_data_b64'")
+    expect(notice.fallback).toContain("fallback: 'typed_data_b64'")
+    expect(notice.check).not.toMatch(/current signer.{0,2}s own transport-failure/)
+    expect(notice.fallback).not.toMatch(/current signer.{0,2}s own transport-failure/)
 
-    // The relay fields stay, unchanged, beside the handoff.
-    expect(result.data.payload_hash).toBe('0xdeadbeef')
-    expect(result.data.signature_scheme).toBe('eip712_userop')
-    expect(result.data.typed_data).toEqual(typedData)
-    expect(
-      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
-    ).toEqual(typedData)
+    // #3495: the relay fields are NOT on this (default) result — the notice
+    // routes through a same-key opt-in re-run instead.
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
 
     // The step's reason carries the same recovery route for an agent that
     // reads only the guidance.
     expect(String(result.data.reason)).toContain('SIGN_CONTEXT_REFUSED')
     expect(String(result.data.reason)).toContain('sign_context_unavailable')
+    expect(String(result.data.reason)).toContain('include_signing_payload')
     expect(String(result.data.reason)).not.toMatch(/initialize/i)
+    // Never a payload_hash-only call — a pre-#3169 signer signs it raw (AA24).
+    expect(String(result.data.reason)).toMatch(/payload_hash-only/i)
+    // #3495 review round 2 (S1 pin): see the matching note above.
+    expect(String(result.data.reason)).toContain("fallback: 'typed_data_b64'")
+    expect(String(result.data.reason)).not.toMatch(/current signer.{0,2}s own transport-failure/)
+  })
+
+  it('a same-key include_signing_payload=true re-run replays the ORIGINAL payment — never a second intent (#3495)', async () => {
+    // A dumb stub cannot itself enforce the backend's idempotency-replay
+    // contract (payments.ts's findPaymentReplay), so this proves the
+    // mcp-server SIDE of that contract: the re-run hits the backend with the
+    // SAME key the first call echoed, and the response the stub returns
+    // (the same payment_id, a real backend's replay body) surfaces its
+    // relay fields only now that include_signing_payload is set.
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xabc' },
+    }
+    const replayBody = {
+      payment_id: 'pay_replay',
+      status: 'pending_signature',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      sign_data: { hash: '0xdeadbeef', signature_scheme: 'eip712_userop', typed_data: typedData },
+    }
+    stubFetch({ 'POST /payments': { status: 201, body: replayBody } })
+
+    const first = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '0.10', to: '0xabc' }),
+    )
+    expect('typed_data' in (first.data as Record<string, unknown>)).toBe(false)
+    const key = first.data.idempotency_key
+    expect(typeof key).toBe('string')
+
+    stubFetch({ 'POST /payments': { status: 201, body: replayBody } })
+    const second = ok<{ payment_id: string; idempotency_key?: string; typed_data?: unknown }>(
+      await handlers().haven_pay({
+        token: 'USDC',
+        amount: '0.10',
+        to: '0xabc',
+        idempotency_key: key,
+        include_signing_payload: true,
+      }),
+    )
+
+    // Same logical payment — never a second one.
+    expect(second.data.payment_id).toBe(first.data.payment_id)
+    expect(second.data.idempotency_key).toBe(key)
+    expect(second.data.typed_data).toEqual(typedData)
+
+    const payCalls = recordedCalls().filter((c) => c.url.endsWith('/payments'))
+    expect(payCalls).toHaveLength(2)
+    expect((payCalls[0].body as Record<string, unknown>).idempotency_key).toBe(key)
+    expect((payCalls[1].body as Record<string, unknown>).idempotency_key).toBe(key)
   })
 
   it('omits the delegation fields entirely on legacy-rail intents (#1254)', async () => {
@@ -197,7 +417,7 @@ describe('haven_pay', () => {
     expect('typed_data_b64' in result.data).toBe(false)
   })
 
-  it('surfaces pending_approval (no hash) when over budget', async () => {
+  it('surfaces pending_approval (no hash) when over budget, still echoing idempotency_key', async () => {
     stubFetch({
       'POST /payments': {
         status: 202,
@@ -209,12 +429,13 @@ describe('haven_pay', () => {
       },
     })
 
-    const result = ok<{ status: string; payload_hash: unknown }>(
+    const result = ok<{ status: string; payload_hash: unknown; idempotency_key?: string }>(
       await handlers().haven_pay({ token: 'USDC', amount: '999999', to: '0xabc' }),
     )
 
     expect(result.data.status).toBe('pending_approval')
     expect(result.data.payload_hash).toBeNull()
+    expect(typeof result.data.idempotency_key).toBe('string')
   })
 
   it('never sends a delegate key in the construct request', async () => {
@@ -228,7 +449,12 @@ describe('haven_pay', () => {
     await handlers().haven_pay({ token: 'USDC', amount: '1', to: '0xabc' })
 
     const payCall = recordedCalls().find((c) => c.url.endsWith('/payments'))
-    expect(payCall?.body).toEqual({ token: 'USDC', amount: '1', to: '0xabc' })
+    const body = payCall?.body as Record<string, unknown>
+    expect(body.token).toBe('USDC')
+    expect(body.amount).toBe('1')
+    expect(body.to).toBe('0xabc')
+    // #3495: a generated idempotency_key rides the request too.
+    expect(typeof body.idempotency_key).toBe('string')
     // Custody invariant: no field anywhere in the request carries key material.
     expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
     expect(JSON.stringify(recordedCalls())).not.toContain('delegate_key')
@@ -541,7 +767,7 @@ describe('haven_get_resume_state', () => {
 // ── haven_send ────────────────────────────────────────────────────────────────
 
 describe('haven_send', () => {
-  it('returns payload_hash for in-budget transfer', async () => {
+  it('returns payload_hash for in-budget transfer, and echoes a generated idempotency_key (#3495)', async () => {
     stubFetch({
       'POST /payments': {
         status: 201,
@@ -554,7 +780,7 @@ describe('haven_send', () => {
       },
     })
 
-    const result = ok<{ payment_id: string; payload_hash: string; asset: string; amount: string }>(
+    const result = ok<{ payment_id: string; payload_hash: string; asset: string; amount: string; idempotency_key?: string }>(
       await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
     )
 
@@ -562,14 +788,139 @@ describe('haven_send', () => {
     expect(result.data.payload_hash).toBe('0xsendhash')
     expect(result.data.asset).toBe('USDC')
     expect(result.data.amount).toBe('5.00')
+    expect(typeof result.data.idempotency_key).toBe('string')
+    expect(result.data.idempotency_key).toMatch(/^direct:[0-9a-f-]{36}$/)
 
     const postCall = recordedCalls().find((c) => c.url.endsWith('/payments'))
-    expect(postCall?.body).toEqual({ token: 'USDC', amount: '5.00', to: '0xRecipient' })
+    const body = postCall?.body as Record<string, unknown>
+    expect(body.token).toBe('USDC')
+    expect(body.amount).toBe('5.00')
+    expect(body.to).toBe('0xRecipient')
+    expect(body.idempotency_key).toBe(result.data.idempotency_key)
     // Custody invariant
     expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
   })
 
-  it('forwards signature_scheme + typed_data VERBATIM for delegation-rail intents (#1254)', async () => {
+  it('surfaces recipient_class when the backend carries recipient.class (#3531)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+          recipient: { class: 'new_address' },
+        },
+      },
+    })
+
+    const result = ok<{ recipient_class?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    expect(result.data.recipient_class).toBe('new_address')
+  })
+
+  it('omits recipient_class against an older backend that sends no recipient field (#3531)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+
+    const result = ok<{ recipient_class?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    expect('recipient_class' in result.data).toBe(false)
+  })
+
+  it('two no-key calls with IDENTICAL arguments get two DIFFERENT generated keys and hit the backend twice (#3495 review correction)', async () => {
+    // Same property as the haven_pay twin above: two separate tips/payouts of
+    // the same amount to the same recipient must never collapse into one
+    // silently-replayed payment.
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_first',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+    const first = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_second',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+    const second = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    expect(first.data.idempotency_key).not.toBe(second.data.idempotency_key)
+    expect(first.data.payment_id).not.toBe(second.data.payment_id)
+
+    const payCalls = recordedCalls().filter((c) => c.url.endsWith('/payments'))
+    expect(payCalls).toHaveLength(2)
+    const keys = payCalls.map((c) => (c.body as Record<string, unknown>).idempotency_key)
+    expect(keys[0]).not.toBe(keys[1])
+  })
+
+  it('omits typed_data / typed_data_b64 by DEFAULT on a delegation-rail intent, keeping only signature_scheme (#3495)', async () => {
+    // #3495: supersedes #3277 AC2 ("the relay fields stay") — the compact
+    // default now matches the x402 quote tools' #1272 contract exactly.
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xRecipient' },
+    }
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_delegation',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: {
+            hash: '0xsendhash',
+            signature_scheme: 'eip712_userop',
+            typed_data: typedData,
+          },
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
+    )
+
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+    expect(result.data.payload_hash).toBe('0xsendhash')
+  })
+
+  it('include_signing_payload: true restores signature_scheme + typed_data + typed_data_b64 VERBATIM (#1254, #3495)', async () => {
     // haven_send was named in the live bug alongside haven_pay — reviewer
     // mutation showed the shared helper's use HERE was untested (dropping it
     // from only this handler passed the whole suite).
@@ -595,8 +946,14 @@ describe('haven_send', () => {
       },
     })
 
-    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string }>(
-      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string; reason?: string }>(
+      await handlers().haven_send({
+        asset: 'USDC',
+        recipient: '0xRecipient',
+        amount: '0.10',
+        idempotency_key: 'k-include-payload-send',
+        include_signing_payload: true,
+      }),
     )
 
     expect(result.data.signature_scheme).toBe('eip712_userop')
@@ -606,9 +963,13 @@ describe('haven_send', () => {
       JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
     ).toEqual(typedData)
     expect(result.data.payload_hash).toBe('0xsendhash')
+    // #3495 review N3: same tailored reason as the haven_pay twin above.
+    expect(String(result.data.reason)).toContain('payload_hash, typed_data_b64')
+    expect(String(result.data.reason)).toContain('already includes')
+    expect(String(result.data.reason)).not.toMatch(/EXACTLY as given/)
   })
 
-  it('names the byte-free haven_sign handoff and the refusal-recovery route, relay fields intact (#3277)', async () => {
+  it('names the byte-free haven_sign handoff and the opt-in relay route (#3277, #3495)', async () => {
     const typedData = {
       domain: { name: 'HybridDeleGator', chainId: 8453 },
       types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
@@ -642,16 +1003,64 @@ describe('haven_send', () => {
     expect(notice.direct_sign_context_version).toBe(1)
     expect(notice.check).toContain('SIGN_CONTEXT_REFUSED')
     expect(notice.check).toContain('sign_context_unavailable')
+    expect(notice.check).toContain('include_signing_payload: true')
     expect(notice.check).toContain('{ payload_hash, typed_data_b64 }')
     expect(notice.check).not.toMatch(/initialize/i)
+    // #3495 review round 2 (S1 pin): see the matching note on the haven_pay
+    // twin above.
+    expect(notice.check).toContain("fallback: 'typed_data_b64'")
+    expect(notice.check).not.toMatch(/current signer.{0,2}s own transport-failure/)
 
-    // The relay fields stay, unchanged, beside the handoff.
-    expect(result.data.payload_hash).toBe('0xsendhash')
-    expect(result.data.signature_scheme).toBe('eip712_userop')
-    expect(result.data.typed_data).toEqual(typedData)
-    expect(
-      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
-    ).toEqual(typedData)
+    // #3495: the relay fields are NOT on this (default) result.
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+
+    // #3495 review round 2 (S1 pin): the reason carries the same routable
+    // trigger string as the notice, never the round-1 conflated text.
+    expect(String(result.data.reason)).toContain("fallback: 'typed_data_b64'")
+    expect(String(result.data.reason)).not.toMatch(/current signer.{0,2}s own transport-failure/)
+  })
+
+  it('a same-key include_signing_payload=true re-run replays the ORIGINAL payment — never a second intent (#3495)', async () => {
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xRecipient' },
+    }
+    const replayBody = {
+      payment_id: 'pay_send_replay',
+      status: 'pending_signature',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      sign_data: { hash: '0xsendhash', signature_scheme: 'eip712_userop', typed_data: typedData },
+    }
+    stubFetch({ 'POST /payments': { status: 201, body: replayBody } })
+
+    const first = ok<{ payment_id: string; idempotency_key?: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
+    )
+    const key = first.data.idempotency_key
+    expect(typeof key).toBe('string')
+
+    stubFetch({ 'POST /payments': { status: 201, body: replayBody } })
+    const second = ok<{ payment_id: string; idempotency_key?: string; typed_data?: unknown }>(
+      await handlers().haven_send({
+        asset: 'USDC',
+        recipient: '0xRecipient',
+        amount: '0.10',
+        idempotency_key: key,
+        include_signing_payload: true,
+      }),
+    )
+
+    expect(second.data.payment_id).toBe(first.data.payment_id)
+    expect(second.data.idempotency_key).toBe(key)
+    expect(second.data.typed_data).toEqual(typedData)
+
+    const payCalls = recordedCalls().filter((c) => c.url.endsWith('/payments'))
+    expect(payCalls).toHaveLength(2)
+    expect((payCalls[0].body as Record<string, unknown>).idempotency_key).toBe(key)
+    expect((payCalls[1].body as Record<string, unknown>).idempotency_key).toBe(key)
   })
 
   it('omits the delegation fields entirely on legacy-rail intents (#1254)', async () => {
@@ -676,7 +1085,7 @@ describe('haven_send', () => {
     expect('typed_data_b64' in result.data).toBe(false)
   })
 
-  it('surfaces pending_approval when over allowance budget', async () => {
+  it('surfaces pending_approval when over allowance budget, still echoing idempotency_key', async () => {
     stubFetch({
       'POST /payments': {
         status: 202,
@@ -684,12 +1093,13 @@ describe('haven_send', () => {
       },
     })
 
-    const result = ok<{ status: string; payload_hash: unknown }>(
+    const result = ok<{ status: string; payload_hash: unknown; idempotency_key?: string }>(
       await handlers().haven_send({ asset: 'ETH', recipient: '0xRecipient', amount: '999' }),
     )
 
     expect(result.data.status).toBe('pending_approval')
     expect(result.data.payload_hash).toBeNull()
+    expect(typeof result.data.idempotency_key).toBe('string')
   })
 
   it('rejects unknown asset values', async () => {
@@ -697,6 +1107,144 @@ describe('haven_send', () => {
     const result = await handlers().haven_send({ asset: 'DAI', recipient: '0xRecipient', amount: '1' })
     expect(result.success).toBe(false)
     expect(recordedCalls()).toHaveLength(0)
+  })
+})
+
+
+// ── a same-key replay of an already-progressed payment (#3495 review S5) ──────
+//
+// The backend's idempotency replay for a payment that has moved PAST
+// pending_signature (confirmed, submitted, failed, expired…) returns a
+// STATUS body with no sign_data at all — but HavenClient.createIntent's
+// return type hardcodes status: 'pending_signature' regardless, so
+// intent.signData.hash used to crash (UNKNOWN_ERROR) instead of surfacing
+// the real state. Found in review: no stub before this ever omitted
+// sign_data.
+
+function confirmedStatusFixture(paymentId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    payment_id: paymentId,
+    kind: 'payment_intent',
+    rail: 'direct',
+    status: 'confirmed',
+    phase: 'payment_confirmed',
+    next_action: 'none',
+    amount: '5',
+    token: 'USDC',
+    resource_url: null,
+    merchant_address: null,
+    tx_hash: '0xsettled',
+    expires_at: '2099-01-01T00:00:00.000Z',
+    chain_id: 8453,
+    message: 'The payment is confirmed.',
+    ...overrides,
+  }
+}
+
+describe('a same-key replay of an already-progressed payment (#3495 review S5)', () => {
+  it('haven_pay: a CONFIRMED replay returns status + tx_hash, no signing fields, and does not crash', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 200, // agentPaymentStatusHttpCode('confirmed') === 200
+        body: {
+          // No sign_data: the real shape payments.ts's statusReplay returns
+          // once the stored payment is no longer pending_signature.
+          payment_id: 'pay_confirmed_replay',
+          status: 'confirmed',
+          idempotent_replay: true,
+        },
+      },
+      'GET /machine-payments/pay_confirmed_replay/status': {
+        status: 200,
+        body: confirmedStatusFixture('pay_confirmed_replay'),
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay({ token: 'USDC', amount: '5', to: '0xabc', idempotency_key: 'k-confirmed' }),
+    )
+
+    expect(result.data.payment_id).toBe('pay_confirmed_replay')
+    expect(result.data.status).toBe('confirmed')
+    expect(result.data.idempotency_key).toBe('k-confirmed')
+    expect(result.data.tx_hash).toBe('0xsettled')
+    expect(result.data.payload_hash).toBeNull()
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+    expect('signature_scheme' in result.data).toBe(false)
+    expect(result.data.next_action).toBe('none')
+    expect(result.data.next_tool).toBeUndefined()
+    expect(result.data.next_tool_omitted_reason).toMatch(/already settled/)
+    expect(String(result.data.reason)).toMatch(/confirmed/)
+  })
+
+  it('haven_send: a CONFIRMED replay returns status + tx_hash, no signing fields, and does not crash', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 200, // agentPaymentStatusHttpCode('confirmed') === 200
+        body: { payment_id: 'pay_send_confirmed_replay', status: 'confirmed', idempotent_replay: true },
+      },
+      'GET /machine-payments/pay_send_confirmed_replay/status': {
+        status: 200,
+        body: confirmedStatusFixture('pay_send_confirmed_replay'),
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_send({
+        asset: 'USDC',
+        recipient: '0xabc',
+        amount: '5',
+        idempotency_key: 'k-send-confirmed',
+      }),
+    )
+
+    expect(result.data.payment_id).toBe('pay_send_confirmed_replay')
+    expect(result.data.status).toBe('confirmed')
+    expect(result.data.tx_hash).toBe('0xsettled')
+    expect(result.data.payload_hash).toBeNull()
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+  })
+
+  it('haven_pay: the defensive non-confirmed 200 branch points at haven_get_payment_status, not "none" (#3495 review round 2, nit R2-4)', async () => {
+    // #3495 review round 2 caught that a REAL `submitted`-status replay
+    // cannot reach this branch: `agentPaymentStatusHttpCode` (backend) maps
+    // pending_signature/submitted to HTTP 409, and the SDK's transport
+    // throws HavenApiError on a non-ok response — `createIntent` never
+    // returns for that status, so `respondToNoSignDataReplay` is never
+    // reached; the round-1 test stubbed an unreachable 201 for it. The
+    // remaining branch is defensive: `agentPaymentStatusHttpCode` answers 200
+    // only for `confirmed` and, through its default arm, for statuses no
+    // current payment intent carries. This test drives it with a synthetic
+    // non-confirmed 200 status (`rejected`, not a real payment-intent status).
+    stubFetch({
+      'POST /payments': {
+        status: 200,
+        body: { payment_id: 'pay_rejected_replay', status: 'rejected', idempotent_replay: true },
+      },
+      'GET /machine-payments/pay_rejected_replay/status': {
+        status: 200,
+        body: confirmedStatusFixture('pay_rejected_replay', {
+          status: 'rejected',
+          phase: 'payment_rejected',
+          next_action: 'check_status_later',
+          tx_hash: null,
+          message: 'The payment was rejected.',
+        }),
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay({ token: 'USDC', amount: '5', to: '0xabc', idempotency_key: 'k-rejected' }),
+    )
+
+    expect(result.data.status).toBe('rejected')
+    expect('tx_hash' in result.data).toBe(false)
+    expect(result.data.payload_hash).toBeNull()
+    expect(result.data.next_action).toBe('check_status_later')
+    expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_rejected_replay' })
   })
 })
 
@@ -750,16 +1298,16 @@ describe('haven_get_payment_status: post-purchase allowance summary (#1310)', ()
   it('attaches allowance for a genuinely settled x402 payment (rail: x402, phase: payment_confirmed)', async () => {
     stubFetch({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, execution_rail: 'delegation' } },
       'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3000000') },
     })
 
-    const result = ok<{ allowance: { rail: string; remaining_atomic: string } | null }>(
+    const result = ok<{ allowance: { rail: string; remaining_atomic: string; remainingAtomic?: string } | null }>(
       await handlers().haven_get_payment_status({ payment_id: 'pay_x402' }),
     )
 
     expect(result.data.allowance).toEqual(
-      expect.objectContaining({ rail: 'legacy', remaining_atomic: '3000000' }),
+      expect.objectContaining({ rail: 'delegation', remaining_atomic: '3000000', remainingAtomic: '3000000' }),
     )
   })
 

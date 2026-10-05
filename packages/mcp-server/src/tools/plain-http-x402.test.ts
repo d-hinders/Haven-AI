@@ -83,6 +83,27 @@ function settledReplayBody(resourceUrl: string, over: Record<string, unknown> = 
 }
 
 describe('haven_pay_x402_quote', () => {
+  it('#3617: refuses sub_budget_id before any Haven call — sub-budgets pay x402 through the local MCP only', async () => {
+    // Owner decision 2 on epic #3615: the forwarding #3330 added was dead (the
+    // tool never declared the key, so parseStrict refused it first) and was
+    // deleted rather than declared. Pin the refusal so a later declaration is
+    // a deliberate contract change, not a silent one.
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const payload = await handlers().haven_pay_x402_quote({
+      payment_required: PAYMENT_REQUIRED,
+      sub_budget_id: 'sb_1',
+    } as never)
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.message).toContain('haven_pay_x402_quote does not accept "sub_budget_id"')
+    expect(recordedCalls()).toEqual([])
+  })
+
   it('rejects with PRICE_EXCEEDS_MAX before funding when the option price is above max_amount', async () => {
     stubFetch({
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
@@ -708,10 +729,12 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     agent: Record<string, unknown>,
     expectErc7710 = false,
     extraArgs: Record<string, unknown> = {},
+    extraRoutes: Record<string, { status?: number; body?: unknown }> = {},
   ) {
     stubFetch({
       'GET /machine-payments/agent': { status: 200, body: agent },
       'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
+      ...extraRoutes,
     })
     return handlers().haven_pay_x402_quote({ payment_required: paymentRequired, ...extraArgs })
   }
@@ -721,8 +744,9 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     agent: Record<string, unknown>,
     expectErc7710 = false,
     extraArgs: Record<string, unknown> = {},
+    extraRoutes: Record<string, { status?: number; body?: unknown }> = {},
   ) {
-    return ok(await rawQuotePay(paymentRequired, agent, expectErc7710, extraArgs)) as {
+    return ok(await rawQuotePay(paymentRequired, agent, expectErc7710, extraArgs, extraRoutes)) as {
       data: Record<string, any>
     }
   }
@@ -1104,6 +1128,215 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
       const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(authorizeBody().settlementScheme).toBe('erc7710')
+    })
+  })
+
+  /**
+   * #3476 — the allowance block. The plain-HTTP sibling must answer with the
+   * budget visibility the catalog preflight provides: `{ rail, sufficient,
+   * remaining_atomic, source }` from `active_delegations`, degraded to
+   * `sufficient: null` + a warning on a failed read, never a refusal.
+   * Additive only: every pre-existing field of the successful result is
+   * untouched, and the degraded shape keeps the key PRESENT (mirroring
+   * `catalog-purchase.ts`'s own catch shape).
+   */
+  describe('#3476: allowance block', () => {
+    // 5 USDC remaining on the delegated budget — above the standard entry's
+    // 1.5 USDC and the erc7710 entry's 2.5 USDC, below the expensive-standard
+    // fixture's 3 USDC mirror where a deliberate insufficiency is wanted.
+    const BUDGET = {
+      agent_id: 'agt_1',
+      account_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: 'allowance-1',
+        token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        token_symbol: 'USDC',
+        configured_amount: '5000000',
+        reset_period_min: 60,
+        onchain: {
+          amount: '5000000', spent: '0', remaining: '5000000', effective_spent: '0',
+          reset_time_min: 60, last_reset_min: 0, nonce: 0, is_reset_pending: false,
+          remaining_is_from_chain: true,
+        },
+      }],
+    }
+
+    it('CHARACTERIZATION — the successful 3009 result carries every pre-#3476 field', async () => {
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+      const res = await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT)
+      // The block is additive; this is the pin that fails if ANY existing
+      // field moves, renames, or drops while #3476 lands.
+      expect(res.data).toMatchObject({
+        payment_id: X402_INTENT_RESPONSE.payment_id,
+        payload_hash: '0xfunding',
+        expires_at: X402_INTENT_RESPONSE.expires_at,
+        retry_url: PAYMENT_REQUIRED.resource.url,
+        cap_warning: expect.any(String),
+        next_tool: 'mcp__haven-signer__haven_sign_x402',
+      })
+      expect(res.data.x402.expected.auth.version).toBe(2)
+    })
+
+    it('delegation rail, 3009: the block rides the signing context, sourced from active_delegations', async () => {
+      // Cap supplied so the ONLY warnings are the allowance ones — the no-cap
+      // MISSING_MAX_AMOUNT nudge would sit in the same array.
+      const res = await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT, false, { max_amount: '1500000' }, {
+        'GET /machine-payments/allowances': { status: 200, body: BUDGET },
+      })
+      expect(res.data.allowance).toEqual({
+        rail: 'delegation',
+        sufficient: true,
+        remaining_atomic: '5000000',
+        source: 'active_delegations',
+        remainingAtomic: '5000000',
+      })
+      expect(res.data.warnings).toEqual([])
+      // ONE allowances read — the #3464 canonical spelling rides with it.
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/allowances'))).toHaveLength(1)
+    })
+
+    it('same block shape on the erc7710 branch, compared against the entry ACTUALLY authorized', async () => {
+      const res = await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, { max_amount: '2500000' }, {
+        'GET /machine-payments/allowances': { status: 200, body: BUDGET },
+      })
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      // The erc7710 entry authorizes 2.5 USDC; 5 USDC covers it.
+      expect(res.data.allowance).toEqual({
+        rail: 'delegation',
+        sufficient: true,
+        remaining_atomic: '5000000',
+        source: 'active_delegations',
+        remainingAtomic: '5000000',
+      })
+    })
+
+    it('sufficient flips false against a smaller budget without refusing the quote', async () => {
+      // 1 USDC remaining — below the 1.5 USDC the intent authorizes
+      // (PAYMENT_REQUIRED's maxAmountRequired is the authorization amount).
+      const SMALL = {
+        ...BUDGET,
+        allowances: [{
+          ...BUDGET.allowances[0],
+          configured_amount: '1000000',
+          onchain: { ...BUDGET.allowances[0].onchain, amount: '1000000', remaining: '1000000' },
+        }],
+      }
+      // Visibility, not a gate: the quote still returns a signable intent —
+      // the tool's own over-budget answer remains the backend's (the pending
+      // state / the typed 403 on each leg), and the enforcer is the real gate.
+      const res = await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT, false, { max_amount: '1500000' }, {
+        'GET /machine-payments/allowances': { status: 200, body: SMALL },
+      })
+      expect(res.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+      expect(res.data.allowance).toEqual({
+        rail: 'delegation',
+        sufficient: false,
+        remaining_atomic: '1000000',
+        source: 'active_delegations',
+        remainingAtomic: '1000000',
+      })
+      expect(res.data.warnings).toEqual([])
+    })
+
+    it('a failed allowances read degrades to sufficient null plus a warning — never a refusal', async () => {
+      const res = await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT, false, { max_amount: '1500000' }, {
+        'GET /machine-payments/allowances': { status: 500, body: {} },
+      })
+      // The intent still minted: the block degrades, it does not block.
+      expect(res.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+      expect(res.data.payload_hash).toBe('0xfunding')
+      // The catalog catch shape: key PRESENT, figures absent, null sufficiency.
+      expect(res.data.allowance).toEqual({ rail: 'delegation', sufficient: null, source: 'active_delegations' })
+      expect(res.data.warnings).toEqual([
+        expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' }),
+      ])
+      expect(res.data.warnings?.[0]?.message).toContain('on-chain policy')
+    })
+
+    it('an OPTIMISTIC remaining (the #1145 fallback) warns instead of asserting a live figure', async () => {
+      const OPTIMISTIC = {
+        ...BUDGET,
+        allowances: [{
+          ...BUDGET.allowances[0],
+          onchain: { ...BUDGET.allowances[0].onchain, remaining_is_from_chain: false },
+        }],
+      }
+      const res = await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT, false, { max_amount: '1500000' }, {
+        'GET /machine-payments/allowances': { status: 200, body: OPTIMISTIC },
+      })
+      expect(res.data.allowance).toMatchObject({ sufficient: true, remaining_atomic: '5000000' })
+      expect(res.data.warnings).toEqual([
+        expect.objectContaining({ code: 'ALLOWANCE_READ_OPTIMISTIC' }),
+      ])
+    })
+
+    it('no budget row for the quoted asset reports sufficient false at zero, still no refusal', async () => {
+      const OTHER_TOKEN = {
+        ...BUDGET,
+        allowances: [{
+          ...BUDGET.allowances[0],
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        }],
+      }
+      const res = await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT, false, { max_amount: '1500000' }, {
+        'GET /machine-payments/allowances': { status: 200, body: OTHER_TOKEN },
+      })
+      expect(res.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+      expect(res.data.allowance).toEqual({
+        rail: 'delegation',
+        sufficient: false,
+        remaining_atomic: '0',
+        source: 'active_delegations',
+        remainingAtomic: '0',
+      })
+      expect(res.data.warnings).toEqual([
+        expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' }),
+      ])
+    })
+
+    it('a LEGACY-rail account gets NO allowance block (never a fabricated delegation row) and no extra read', async () => {
+      const res = await quotePay(PAYMENT_REQUIRED, LEGACY_AGENT, false, { max_amount: '1500000' })
+      expect(res.data).not.toHaveProperty('allowance')
+      expect(res.data.warnings).toEqual([
+        expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' }),
+      ])
+      expect(res.data.warnings?.[0]?.message).toContain('retired')
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/allowances'))).toHaveLength(0)
+    })
+
+    it('keeps the #1348 budget WITH the block: exactly ONE agent fetch, no second getAgent', async () => {
+      await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
+      const onErc7710 = recordedCalls().filter((c) =>
+        new URL(c.url).pathname.endsWith('/machine-payments/agent'),
+      ).length
+      clearCalls()
+      await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT)
+      const on3009 = recordedCalls().filter((c) =>
+        new URL(c.url).pathname.endsWith('/machine-payments/agent'),
+      ).length
+      expect([onErc7710, on3009]).toEqual([1, 1])
+    })
+
+    it('CHARACTERIZATION — a failed agent prefetch still fails the pay exactly as before (no hint, no block)', async () => {
+      // Pre-#3476 behaviour unchanged: without the agent the 3009 branch has
+      // no delegateAddress hint, so createX402Intent's own agent read fails
+      // and the tool refuses — the block is never involved. Pinning the read
+      // COUNT (prefetch + the SDK's hint-less fetch) proves #3476 added no
+      // allowance read on this dead path.
+      stubFetch({
+        'GET /machine-payments/agent': { status: 500, body: {} },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+      const payload = await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED })
+      expect(payload.success).toBe(false)
+      expect(JSON.stringify(payload)).not.toContain('allowance')
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(2)
+      expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/allowances'))).toHaveLength(0)
     })
   })
 })

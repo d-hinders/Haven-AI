@@ -9,9 +9,10 @@ import { generate } from './scripts/serve-docs.mjs'
  * Deliberately here rather than in an npm `prebuild` hook. That hook fires for
  * `npm run build`, which is what CI uses — but a deployment whose build command
  * invokes `next build` directly would skip it, and every `/docs/*.md` path
- * would 404 in production with nothing failing. There is no `vercel.json` in
- * this repository, so the deployed command is not knowable from the tree.
- * Putting the call here makes the question stop mattering.
+ * would 404 in production with nothing failing. `packages/frontend/vercel.json`
+ * sets the build command today (#3594), but a dashboard override or a later
+ * edit could change it, and putting the call here makes the question stop
+ * mattering.
  *
  * PHASE-GATED. `next start` also loads this config — measured, not assumed:
  * deleting `public/docs/` and starting the server without rebuilding put the
@@ -38,7 +39,7 @@ const nextConfig: NextConfig = {
   // dashboard keeps building if core ever exposes untranspiled source, and so
   // core's output goes through Next's own browser-target pipeline rather than
   // being trusted verbatim.
-  transpilePackages: ['@haven_ai/core'],
+  transpilePackages: ['@haven_ai/core', '@haven_ai/ui'],
   async rewrites() {
     return [
       {

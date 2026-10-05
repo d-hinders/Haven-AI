@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.0-alpha.0 — 2026-10-05
+
+- **`haven_get_task_budget` reads one task budget by id, whatever its status (#3518).** `haven_get_agent` lists only live task budgets (closing, plus unexpired pending and open), each with its `status` and `isExpired`; closed and expired ones are read with the new tool. `haven_get_allowances` rows carry each budget's scope (`recipientAddress`, `merchantId`, `delegationHash`, `reservedHavenAtomic`). A new tool name changes this runtime's tool list, so a client that pins tool consent will ask once after updating. No update needed.
+
+- **`haven_submit` accepts `sub_budget_id`, and `haven_get_agent` lists pending sub-budget signatures (#3506).** The signer's `haven_sign { sub_budget_id }` step hands off to `haven_submit { sub_budget_id, signature }`. This runtime used to refuse that, so a sub-budget could not be completed by the agent. `haven_submit` now takes exactly one of `payment_id`, `task_budget_id` or `sub_budget_id` (plus `signature`) and refuses zero or several before contacting anything. An opened sub-budget row whose sibling is still pending names `haven_sign` for the sibling. `haven_get_agent` grew `pendingSubBudgetSignatures[]` (additive): each row this agent must sign, with its `haven_sign` step. A stale sub-budget close (`close_needs_reprepare`) is recovered inside `haven_submit`, which re-prepares the close and names `haven_sign` for the fresh operation (or reports `closed`); an unconfirmed one (`close_outcome_unconfirmed`) asks to repeat the same `haven_submit` later. No tool added, removed or renamed: no agent-side close tool is needed.
+
+- **`haven_pay_x402`'s paid retry carries the buyer tax declaration (#3427).** The local MCP reaches the merchant through the SDK's `fetch`, `payX402Quote` and `resumeX402Payment` paths, so when the owner opted the agent in (#3426) the paid EIP-3009 retry now also carries `X-Tax-Declaration: <base64url(JSON)>` — signed locally by the agent's own delegate key (wg-tax #5 §2.2), sent to the seller only, and omitted on the erc7710 scheme, the first unpaid request, a "not available" content answer, or a 404 from the content endpoint (older backend). Tool descriptions for `haven_pay_x402` and `haven_resume_x402_payment` document the new header. No update needed otherwise: without the opt-in the wire is unchanged.
+
 ## 0.7.0-alpha.0 — 2026-09-29
 
 ### Added

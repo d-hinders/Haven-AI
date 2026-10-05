@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+// #3503: POST /payments now pre-checks the period budget on-chain — never a live chain here.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: async () => ({ remainingAtomic: '1000000000000', fromChain: true }),
+}))
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 
@@ -124,6 +128,7 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks, x402DelegationMoc
       getBookTimeCapture: vi.fn().mockResolvedValue(null),
     },
     delegationMocks: {
+      selectDelegation: vi.fn(),
       prepareDelegationPayment: vi.fn(),
       submitDelegationPayment: vi.fn(),
     },

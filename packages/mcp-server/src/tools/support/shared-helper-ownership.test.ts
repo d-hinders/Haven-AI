@@ -73,6 +73,7 @@ import {
 } from '@haven_ai/sdk'
 import * as capPrice from './cap-price.js'
 import * as catalogEntry from './catalog-entry.js'
+import * as allowanceBlock from './allowance-block.js'
 import * as errors from './errors.js'
 import * as guidance from './guidance.js'
 import * as mcpContext from './mcp-context.js'
@@ -140,15 +141,24 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // #3423: its settle-side twin — haven_settle_mcp_tool (s2812) and
   // haven_submit's erc7710 branch (s2809).
   catchSettledResettle: { module: 'guidance', slices: ['s2809', 's2812'] },
+  // #3527: the EIP-3009 twin of settledReplayResponse/catchSettledReplay for
+  // createX402Intent's confirmed-replay answer. Both call sites
+  // (haven_prepare_catalog_purchase step 9, haven_pay_mcp_tool's 3009 branch)
+  // live in THIS module (s2810) — see SINGLE_SLICE_RETAINED for why it still
+  // lives in shared support rather than moving into catalog-purchase.ts.
+  eip3009ConfirmedReplayResponse: { module: 'guidance', slices: ['s2810'] },
   // #3101: the status handoff for a refusal that may not know its payment id —
   // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
-  paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
+  // #3495 review S5: s2809 joined it too — haven_send/haven_pay's
+  // no-sign-data replay guard names haven_get_payment_status the same way.
+  paymentStatusHandoff: { module: 'guidance', slices: ['s2809', 's2810', 's2811'] },
   // #3102: the refusal-side builder — every HostedToolError that names an action.
   refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
   // #3329: the success-side counterpart — a task budget's signer hand-off,
   // which is not a payment and so cannot go through buildAgentGuidance's
-  // AgentPaymentSummary (see SINGLE_SLICE_RETAINED for why it stays shared).
-  taskBudgetNextStep: { module: 'guidance', slices: ['s3329'] },
+  // AgentPaymentSummary. #3506: a sub-budget row's hand-off (haven_get_agent's
+  // pending rows, haven_submit's sub_budget_id result) uses it from s2809 too.
+  taskBudgetNextStep: { module: 'guidance', slices: ['s2809', 's3329'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -189,6 +199,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   submitSignatureWithExpiryMapping: { module: 'mcp-context', slices: ['s2809', 's2812'] },
   submitErc7710WithExpiryMapping: { module: 'mcp-context', slices: ['s2809'] },
   coerceJsonField: { module: 'mcp-context', slices: ['s2811'] },
+  // #3495: the direct-payment idempotency-key generator, called only by the
+  // s2809 handlers (haven_send/haven_pay) — see SINGLE_SLICE_RETAINED for why
+  // it still lives in shared support beside delegationSignFields.
+  generateDirectIdempotencyKey: { module: 'mcp-context', slices: ['s2809'] },
   // tools/paid-mcp-completion.ts — the #2812 capability module itself now owns
   // its single-slice merchant helpers (the carve-out the #2808 map retained
   // them for has landed, so "until #2812 moves them" is satisfied).
@@ -217,6 +231,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
   // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
   getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
+  // #3497 item 4: the moved block is called from BOTH slices' pay tools —
+  // s2811's haven_pay_x402_quote (both branches) and s2810's
+  // haven_pay_mcp_tool (both branches).
+  delegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
+  // The block's shape type — type-only, mapped for ownership (see TYPE_ONLY_EXPORTS).
+  DelegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
 }
 
 /**
@@ -283,6 +303,18 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     '(s2809+s2812) and stays beside it in support until #2812 settles where the shared pattern lives. ' +
     'Moving it into the capability would fork the pattern across a module boundary on the signing path, ' +
     'which is the failure this epic exists to make impossible.',
+  // #3495: only the #2809 handlers (haven_send/haven_pay) call it, but it is
+  // DELIBERATE: it stays beside delegationSignFields/buildX402SigningContext
+  // in tools/support/mcp-context.ts, the helpers whose compact-by-default /
+  // include_signing_payload=true contract it extends to haven_send/haven_pay
+  // (review correction, 2026-09-30: this generator is a fresh random key per
+  // call, NOT a derivation of the x402 tools' buildX402IdempotencyKey —
+  // bucketing a hash of a direct payment's own parameters would collide two
+  // genuinely separate sends of the same amount to the same recipient).
+  generateDirectIdempotencyKey:
+    'Only the #2809 handlers (haven_send/haven_pay) call it (#3495), but it is DELIBERATE: it stays in ' +
+    'tools/support/mcp-context.ts beside delegationSignFields/buildX402SigningContext, the helpers ' +
+    'whose compact-by-default / include_signing_payload=true contract it extends to haven_send/haven_pay.',
   // #3277: the direct-payment twin of signerCompatibilityNotice, called only by
   // s2809's two success sites — recorded here because SINGLE_SLICE_RETAINED is
   // where a support helper with one calling slice states why it still lives in
@@ -311,13 +343,18 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
   resolveResumeState:
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
-  // s3329 (#3329 task budgets):
-  taskBudgetNextStep:
-    'Only tools/task-budgets.ts calls it today, but it is DELIBERATE, not "until the capability moves ' +
-    'it": it is the general success-side counterpart of refusalNextStep (same builder, same target ' +
-    'map, same compile-time twins) for any future non-payment next step, and forking it into one ' +
-    "capability would mean a second slice needing it copies refusalNextStep's own pattern rather than " +
-    'importing the general one — the exact drift #2808 exists to prevent.',
+  // #3527: only catalog-purchase.ts calls it (s2810's two confirmed-replay
+  // catches), but it is DELIBERATE: it is the EIP-3009 twin of
+  // settledReplayResponse/catchSettledReplay and stays beside them in
+  // guidance.ts so the two schemes' "already-paid, reached this error on
+  // replay" answers never drift into separate copies — the same reason
+  // catchSettledResettle stays beside catchSettledReplay. plain-http-x402.ts
+  // (s2811) reaches the identical createX402Intent confirmed-replay shape at
+  // its own authorize call and is the natural second caller.
+  eip3009ConfirmedReplayResponse:
+    'Only the #2810 handlers (haven_prepare_catalog_purchase, haven_pay_mcp_tool) call it today, but it is ' +
+    'DELIBERATE: it is the EIP-3009 twin of settledReplayResponse/catchSettledReplay and stays beside them ' +
+    'in guidance.ts, the same reason catchSettledResettle is not owned by one capability.',
 }
 
 /**
@@ -390,6 +427,11 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'quoteWarnings',
   ],
   'catalog-entry': ['getUsableCatalogMcpEntry'],
+  // #3497 item 4: the delegation-rail allowance block. #3476 built it inside
+  // the plain-HTTP slice and declared it capability-local; wiring the SAME
+  // block into `haven_pay_mcp_tool` (s2810) made it a two-slice helper —
+  // moved VERBATIM, call sites unchanged.
+  'allowance-block': ['delegationAllowanceBlock', 'DelegationAllowanceBlock'],
   errors: [
     'HostedToolError',
     'runTool',
@@ -403,6 +445,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'buildPurchaseSummary',
     'catchSettledReplay',
     'catchSettledResettle',
+    'eip3009ConfirmedReplayResponse',
     'paymentStatusHandoff',
     'refusalNextStep',
     'taskBudgetNextStep',
@@ -419,6 +462,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'coerceJsonField',
     'submitSignatureWithExpiryMapping',
     'submitErc7710WithExpiryMapping',
+    'generateDirectIdempotencyKey',
   ],
   // The #2812 capability module — a single-slice owner, not shared support,
   // but the four helpers it owns are mapped in HELPER_OWNERSHIP like any
@@ -493,7 +537,7 @@ const REGISTRATION_SURFACE_EXPORTS = new Set([
 ])
 
 /** Type-only exports: mapped for ownership, absent at runtime by design. */
-const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext'])
+const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext', 'DelegationAllowanceBlock'])
 
 /**
  * Exact-name exclusion for symbols that appear on a module namespace at
@@ -507,6 +551,7 @@ const MODULE_INTERNAL_SYMBOLS = new Set(['default', 'META_ENV'])
 const SUPPORT_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
   'cap-price': capPrice,
   'catalog-entry': catalogEntry,
+  'allowance-block': allowanceBlock,
   errors,
   guidance,
   'mcp-context': mcpContext,
@@ -1155,9 +1200,10 @@ describe('shared fixture (test-support/hosted-mcp.ts)', () => {
     await handlers().haven_get_agent({})
     const calls = recordedCalls()
     // getAgentSummary reads the agent, its allowances, AND its open task
-    // budgets (#3329: GET /task-budgets?status=open, three GETs total —
-    // the third fails soft to [] when unstubbed, per the #3093 rule).
-    expect(calls).toHaveLength(3)
+    // budgets (#3329: GET /task-budgets?status=open) and, since #3506, the
+    // sub-budget rows awaiting its signature (GET /sub-budgets?status=awaiting_signature)
+    // — four GETs total, the last two failing soft to [] when unstubbed (#3093).
+    expect(calls).toHaveLength(4)
     const agentCall = calls.find((c) => c.url.endsWith('/machine-payments/agent'))!
     expect(agentCall.method).toBe('GET')
     expect(agentCall.headers).toBeDefined()

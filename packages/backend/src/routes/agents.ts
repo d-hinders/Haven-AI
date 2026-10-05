@@ -470,9 +470,26 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const revoked = await revokeAgent(id, sub)
 
       if (!revoked) {
-        return reply
-          .code(404)
-          .send({ error: 'Agent not found or cannot be revoked' })
+        // #3544: one 404 for three different cases cannot be acted on by a
+        // caller that must treat "already done" differently from a real
+        // refusal (the Remove dialog's retry guard). Typed instead: 404 for
+        // not found / not owned; 409 with an `error_code` for an owned agent
+        // this route will not revoke, `already_revoked` distinct from any
+        // other reason. Installed CLIs map both to the same exit class.
+        const status = await findAgentIdStatusForUser(id, sub)
+        if (!status) {
+          return reply.code(404).send({ error: 'Agent not found' })
+        }
+        if (status.status === 'revoked') {
+          return reply.code(409).send({
+            error: 'Agent is already revoked',
+            error_code: 'already_revoked',
+          })
+        }
+        return reply.code(409).send({
+          error: 'Agent cannot be revoked',
+          error_code: 'not_revocable',
+        })
       }
 
       // The UPDATE above IS the revocation — authoritative and already applied

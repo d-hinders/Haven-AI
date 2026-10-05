@@ -3,9 +3,13 @@
  * narrower budget an agent (A) re-delegates to another agent (B) in the
  * same account, as an ERC-7710 child of A's OWN budget delegation. Chain
  * `[B child, A child, A budget]`; issuance is owner-governed (decision log
- * 2026-09-27 — the owner co-signs each sub-budget via
- * `/agents/:id/sub-budgets/:id/sign`, and A's delegate key only SIGNS the
- * built children within that envelope, here and nowhere else).
+ * 2026-09-27 — the owner issues each sub-budget, and A's delegate key only
+ * SIGNS the built children within that envelope, here and nowhere else).
+ * #3506: the agent completes the flow itself — it learns its pending rows
+ * from `GET /sub-budgets?status=awaiting_signature`, signs each one's
+ * sign-context, and submits the signature to `POST /:id/submit` below. The
+ * owner's `/agents/:id/sub-budgets/:sub/sign` relay still works but is an
+ * optional relay, no longer a required step.
  *
  * Haven never signs (#824 invariant 12): `submit` applies the agent's own
  * signature over typed data this backend built, `close` returns a userOp
@@ -25,6 +29,7 @@ import {
   findForAgent,
   findForDelegatingAgent,
   insertPendingSubBudget,
+  listAwaitingSignatureForDelegatingAgent,
   listForAgent,
   markClosed,
   markClosing,
@@ -33,15 +38,18 @@ import {
 } from '../infra/repositories/sub-budgets.js'
 import {
   buildSubBudgetSignContext,
+  SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+  SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
   checkNarrowingRefusal,
+  isGrantReceiverRetired,
   isSubBudgetChildDisabledOnChain,
   prepareSubBudgetClose,
   recoverSubBudgetChildSigner,
   serializeClosePreparedUserOp,
   submitSubBudgetClose,
 } from '../modules/sub-budgets/index.js'
-import { redactVendorSecrets } from '../rails/execution-rail.js'
 import { SubmittedUserOpFailedError } from '../rails/delegation-rail.js'
+import { boundedErrorDetails } from '../modules/payments/index.js'
 
 // `chain-sdk-not-in-routes`: no viem import here — a hex signature/address is
 // carried as a plain string and cast at the module boundary that DOES own
@@ -50,8 +58,9 @@ type Hex = `0x${string}`
 
 const MAX_UINT96 = (1n << 96n) - 1n
 
+// #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
-  return redactVendorSecrets(err instanceof Error ? err.message : String(err))
+  return boundedErrorDetails(err) ?? ''
 }
 
 /** Wire shape — snake_case, `is_expired` derived (same as task budgets). */
@@ -82,10 +91,17 @@ export default async function subBudgetRoutes(app: FastifyInstance): Promise<voi
   app.addHook('onRequest', agentAuthMiddleware)
 
   // ── GET /sub-budgets — list (default: open, not expired) ─────────────────
+  // `status=awaiting_signature` (#3506) is the DELEGATING side: the rows this
+  // agent must still sign (its parent-child row and the grants it issued,
+  // `pending` or `closing`) — how agent A discovers its sign targets.
   app.get<{ Querystring: { status?: string } }>('/', async (request, reply) => {
     const agent = request.agent as AgentContext
-    const status = request.query?.status === 'all' ? 'all' : 'open'
     const nowSec = Math.floor(Date.now() / 1000)
+    if (request.query?.status === 'awaiting_signature') {
+      const awaiting = await listAwaitingSignatureForDelegatingAgent(agent.id, nowSec)
+      return reply.send({ sub_budgets: awaiting.map((r) => toWire(r, nowSec)) })
+    }
+    const status = request.query?.status === 'all' ? 'all' : 'open'
     const rows = await listForAgent(agent.id, { status, nowSec })
     return reply.send({ sub_budgets: rows.map((r) => toWire(r, nowSec)) })
   })
@@ -134,6 +150,14 @@ export default async function subBudgetRoutes(app: FastifyInstance): Promise<voi
       if (!row) return reply.code(404).send({ error: 'Sub-budget not found' })
 
       if (row.status === 'pending') {
+        // #3553: a grant whose receiving agent was retired after issuance must
+        // not open (row stays pending). Close submits are never gated.
+        if (await isGrantReceiverRetired(row)) {
+          return reply.code(409).send({
+            error: SUB_BUDGET_SUB_AGENT_RETIRED_REFUSAL,
+            error_code: SUB_BUDGET_SUB_AGENT_RETIRED_CODE,
+          })
+        }
         let signer: string
         try {
           signer = await recoverSubBudgetChildSigner(row, agent.chain_id, signature as Hex)

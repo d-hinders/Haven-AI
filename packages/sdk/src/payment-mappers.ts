@@ -48,7 +48,7 @@ export function mapPaymentResult(
     to: raw.to,
     txHash: raw.tx_hash,
     errorMessage: raw.error_message,
-    explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) : null),
+    explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) || null : null),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,
@@ -86,6 +86,21 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     // #3420: the delivered half of the settle vocabulary, additive — absent
     // from the raw payload (older backend) stays absent here.
     ...(raw.delivered === true ? { delivered: true as const } : {}),
+    // #3475 follow-up: additive alongside `delivered` — absent from the raw
+    // payload (older backend) stays absent here; `settlementScheme` is
+    // carried through even when `null` (a real, known answer).
+    ...(raw.settlement_scheme !== undefined ? { settlementScheme: raw.settlement_scheme } : {}),
+    ...(raw.merchant_settlement_recorded === true ? { merchantSettlementRecorded: true as const } : {}),
+    // #3494: additive, mirrors the backend's own `status === 'failed'` gate —
+    // absent from the raw payload (older backend, or any non-failed status)
+    // stays absent here.
+    ...(raw.failure_reason !== undefined ? { failureReason: raw.failure_reason } : {}),
+    // #3518: which budget metered this payment — absent from the raw
+    // payload (older backend) stays absent here.
+    ...(raw.budget_delegation_hash !== undefined ? { budgetDelegationHash: raw.budget_delegation_hash } : {}),
+    // #3564: additive outcome-pending visibility — absent from the raw
+    // payload (older backend) stays absent here.
+    ...(raw.submission_outcome_pending === true ? { submissionOutcomePending: true as const } : {}),
     fee: raw.fee
       ? {
           amount: raw.fee.amount,

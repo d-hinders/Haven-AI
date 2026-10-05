@@ -257,6 +257,23 @@ export function serializeUserOp(userOp: unknown): string {
 }
 
 /**
+ * A prepared UserOperation as WIRE JSON for a response body: bigint →
+ * `"123n"`, the same shape the prepare routes emit (`agent-delegations.ts`,
+ * `agent-rekey.ts`) and their `nSuffixStringToBigintReplacer` revives. A
+ * deserialized `prepared_user_op` carries real bigints, and Fastify's
+ * `JSON.stringify` throws on them — the task- and sub-budget CLOSE sign
+ * contexts returned the object raw and answered 500 on every close (found in
+ * epic #3328's dev verification, 2026-09-30).
+ */
+export function userOperationToWire(userOp: unknown): unknown {
+  return JSON.parse(
+    JSON.stringify(userOp, (_key, value: unknown) =>
+      typeof value === 'bigint' ? `${value.toString()}n` : value,
+    ),
+  )
+}
+
+/**
  * Accepts either the serialized string or the object pg hands back from a
  * JSONB column (node-postgres parses JSONB on read).
  */
@@ -286,23 +303,6 @@ export function isSettlementChainState(state: unknown): boolean {
 
 // ── Error-surface hygiene ───────────────────────────────────────────────────
 
-/**
- * Scrub vendor credentials from error text before it reaches API responses or
- * the database. Viem/bundler errors echo the full request URL — which for
- * hosted bundlers EMBEDS THE API KEY (`?apikey=…`). Found live during the
- * #738 exhaustion test: the sponsorship decline leaked the key into the 502
- * `details`. Every session-rail error surface must pass through this.
- */
-export function redactVendorSecrets(message: string): string {
-  return (
-    message
-      // Query-param credentials in any spelling: apikey=, api_key=, api-key=,
-      // key=, token= (#1053 review, finding 6 — the old regex caught only
-      // `apikey=`).
-      .replace(/\b(api[_-]?key|key|token|secret)=[^&\s"'\\)]+/gi, '$1=REDACTED')
-      // Basic-auth credentials embedded in a URL: https://user:pass@host
-      .replace(/(https?:\/\/)[^\s/@]+:[^\s@]+@/gi, '$1REDACTED@')
-      // Pimlico-style key-in-path segments: /rpc/<hex-ish token>
-      .replace(/(\/(?:rpc|v2)\/)[A-Za-z0-9_-]{16,}/g, '$1REDACTED')
-  )
-}
+// `redactVendorSecrets` moved to `domain/redact-vendor-secrets.ts` (#3510) so the
+// repository layer can use it; re-exported here for its existing callers.
+export { redactVendorSecrets } from '../domain/redact-vendor-secrets.js'

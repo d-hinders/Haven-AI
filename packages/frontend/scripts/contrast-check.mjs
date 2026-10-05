@@ -22,7 +22,9 @@ import path from 'node:path'
 import { CONTRAST_PAIRS, contrastRatio } from '../src/lib/theme-tokens.ts'
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const CSS_PATH = path.join(FRONTEND, 'src/app/globals.css')
+// The palette moved to @haven_ai/ui (#3508): tokens.css lives in
+// packages/ui/src, imported by the app layout before globals.css.
+const CSS_PATH = path.join(FRONTEND, '../ui/src/tokens.css')
 
 /**
  * Extract the inner text of a `{ ... }` block that starts at `openBrace`

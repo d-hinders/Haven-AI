@@ -38,6 +38,9 @@ import {
 } from '../src/infra/repositories/delegation-budgets.js'
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
+import { INSERT_OPS_ACCESS_LOG_SQL } from '../src/infra/repositories/ops-access-log.js'
+import { OPS_REVEAL_SQL } from '../src/infra/repositories/ops-reveal.js'
+import * as OPS_READS from '../src/infra/repositories/ops-reads.js'
 import {
   FIND_TASK_BUDGET_FOR_AGENT_SQL,
   INSERT_PENDING_TASK_BUDGET_SQL,
@@ -63,6 +66,10 @@ import {
   MARK_OUTBOUND_TX_REPLACED_SQL,
   LIST_LIVE_BROADCAST_NONCES_FROM_SQL,
 } from '../src/infra/repositories/outbound-txs.js'
+import {
+  SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL,
+  SUM_OPEN_RESERVED_FOR_PARENT_SQL,
+} from '../src/infra/repositories/sub-budgets.js'
 import {
   GET_RECORDED_FEE_SQL,
   INSERT_PAYMENT_FEE_SQL,
@@ -529,6 +536,22 @@ const QUERIES: SmokeQuery[] = [
     sql: INSERT_AGENT_TOOL_INVOCATION_SQL,
   },
   {
+    name: 'ops: access-log insert (#3509, imported)',
+    sql: INSERT_OPS_ACCESS_LOG_SQL,
+  },
+  {
+    name: 'ops: reveal users.email (#3509, imported)',
+    sql: OPS_REVEAL_SQL.user.email,
+  },
+  {
+    name: 'ops: reveal users.name (#3509, imported)',
+    sql: OPS_REVEAL_SQL.user.name,
+  },
+  // #3512: every ops data read (overview, search, customer detail), imported.
+  ...Object.entries(OPS_READS)
+    .filter(([name]) => name.endsWith('_SQL'))
+    .map(([name, sql]) => ({ name: `ops: ${name} (#3512, imported)`, sql: sql as string })),
+  {
     // IMPORTED since #995 — the pasted copy predated the repository.
     name: 'x402: exact-amount idempotency reload',
     sql: FIND_X402_INTENT_BY_KEY_SQL,
@@ -640,6 +663,18 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'task budgets: sum open-reserved atomic under one parent (#3329)',
     sql: SUM_OPEN_RESERVED_ATOMIC_SQL,
+  },
+  {
+    // #3518 (and the #3330 owner route): the sub-budget sums. The FOR_PARENT
+    // one keys on the parent-child row's own hash; the FOR_BUDGET_DELEGATION
+    // one walks grant → parent-child → the budget delegation's hash, the key
+    // an allowance row carries.
+    name: 'sub budgets: sum open-reserved grants under one parent-child (#3330)',
+    sql: SUM_OPEN_RESERVED_FOR_PARENT_SQL,
+  },
+  {
+    name: 'sub budgets: sum open-reserved grants under one budget delegation (#3518)',
+    sql: SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL,
   },
   {
     name: 'task budgets: mark open (pending only, #3329)',

@@ -308,6 +308,9 @@ describe('index.ts readers', () => {
       // rollout is in `enforce` mode, so a new route file registers enforced
       // from its first commit (one file = one enforcedModules entry).
       'routes/receive.ts',
+      // #3509: the ops console is born enforced; its plugin 404s from an
+      // onRequest hook before validation when ops is unconfigured.
+      'routes/ops.ts',
     ])
   })
 })

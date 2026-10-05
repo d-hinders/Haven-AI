@@ -26,10 +26,6 @@ export function getNativeToken(chainId: number): TokenConfig {
   return native
 }
 
-// Legacy exports for Gnosis-only callers (will be removed as routes are updated)
-export const SUPPORTED_TOKENS = getSupportedTokens(100)
-export const TOKEN_BY_ADDRESS: Record<string, TokenConfig> = getChain(100).tokenByAddress
-
 export function formatTokenValue(
   rawValue: string,
   decimals: number,

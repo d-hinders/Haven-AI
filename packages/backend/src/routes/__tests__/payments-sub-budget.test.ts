@@ -16,10 +16,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const { mockQuery, mockCompute, mockCreateRail } = vi.hoisted(() => ({
+const { mockQuery, mockCompute, mockCreateRail, mockReadRemaining } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockCompute: vi.fn(),
   mockCreateRail: vi.fn(),
+  mockReadRemaining: vi.fn(),
+}))
+// #3503: POST /payments pre-checks the period budget of every redeemed link
+// on-chain — never a live chain here; the period-budget cases below steer it.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: (...a: unknown[]) => mockReadRemaining(...a),
 }))
 vi.mock('../../db.js', () => ({
   default: { query: (...a: unknown[]) => mockQuery(...a) },
@@ -203,6 +209,8 @@ describe('POST /payments with sub_budget_id (#3330)', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
+    mockReadRemaining.mockReset()
+    mockReadRemaining.mockResolvedValue({ remainingAtomic: '1000000000000', fromChain: true })
     mockCompute.mockReset()
     mockCompute.mockResolvedValue(B_DELEGATE_ACCOUNT)
     mockCreateRail.mockReset()
@@ -355,6 +363,69 @@ describe('POST /payments with sub_budget_id (#3330)', () => {
     expect(insertCall).toBeDefined()
     const params = insertCall![1] as unknown[]
     expect(params).toContain('sb-1')
+  })
+
+  // #3503 review finding F2: each of the three links carries its own period
+  // caveat, and B's slice is usually the tighter — so every link is read and
+  // the SMALLEST remaining decides.
+  function remainingByLink(grant: string, parentChild: string, root: string) {
+    mockReadRemaining.mockImplementation(async (_chain: number, json: string) => {
+      const d = JSON.parse(json) as { delegate: string; delegator: string }
+      const remainingAtomic =
+        d.delegate.toLowerCase() === B_DELEGATE_ACCOUNT.toLowerCase()
+          ? grant
+          : d.delegator.toLowerCase() === A_DELEGATE_ACCOUNT.toLowerCase()
+            ? parentChild
+            : root
+      return { remainingAtomic, fromChain: true }
+    })
+  }
+  const payThroughGrant = () => {
+    primeDb(
+      AUTH, RAIL_STATE, NO_IDEMPOTENCY_REPLAY, A_BUDGET_DELEGATION,
+      grantLookup(grantRow()), parentChildLookup(parentChildRow()), INSERT_INTENT,
+    )
+    return app.inject({
+      method: 'POST', url: '/payments', headers: { authorization: 'Bearer sk_agent_test' }, payload: body(),
+    })
+  }
+
+  for (const [link, remaining] of [
+    ['B\u2019s own grant', ['500', '9000000', '9000000']],
+    ['A\u2019s parent-child link', ['9000000', '500', '9000000']],
+    ['A\u2019s budget delegation (the root)', ['9000000', '9000000', '500']],
+  ] as const) {
+    it(`#3503: refuses 403 delegation_budget_exceeded when ${link} cannot cover the payment`, async () => {
+      remainingByLink(remaining[0], remaining[1], remaining[2])
+      const res = await payThroughGrant()
+      expect(res.statusCode).toBe(403)
+      expect(res.json()).toMatchObject({ error_code: 'delegation_budget_exceeded', remaining_atomic: '500' })
+      expect(mockReadRemaining).toHaveBeenCalledTimes(3)
+      expect(mockCreateRail).not.toHaveBeenCalled()
+    })
+  }
+
+  it('#3503: an unreadable link does not disable the others — a readable short link still refuses', async () => {
+    mockReadRemaining.mockImplementation(async (_chain: number, json: string) => {
+      const d = JSON.parse(json) as { delegate: string; delegator: string }
+      if (d.delegate.toLowerCase() === B_DELEGATE_ACCOUNT.toLowerCase()) throw new Error('rpc down')
+      if (d.delegator.toLowerCase() === A_DELEGATE_ACCOUNT.toLowerCase()) return { remainingAtomic: '500', fromChain: true }
+      return { remainingAtomic: '9000000', fromChain: true }
+    })
+    const res = await payThroughGrant()
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error_code: 'delegation_budget_exceeded', remaining_atomic: '500' })
+  })
+
+  it('#3503: pays when every link covers it, and an unreadable link is skipped (fail open per link)', async () => {
+    mockReadRemaining.mockImplementation(async (_chain: number, json: string) => {
+      const d = JSON.parse(json) as { delegate: string }
+      if (d.delegate.toLowerCase() === B_DELEGATE_ACCOUNT.toLowerCase()) throw new Error('rpc down')
+      return { remainingAtomic: '1000000', fromChain: true } // exactly the 1 USDC asked
+    })
+    const res = await payThroughGrant()
+    expect(res.statusCode).toBe(201)
+    expect(mockReadRemaining).toHaveBeenCalledTimes(3)
   })
 
   it('an open grant is refused when A\u2019s budget delegation (the chain root) is revoked', async () => {

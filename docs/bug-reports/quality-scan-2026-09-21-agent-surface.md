@@ -40,7 +40,7 @@ covers:
   - packages/core/src/machine-payment-lifecycle.ts
   - packages/sdk/src/payment-mappers.ts
   - docs/bug-reports/quality-scan-2026-09-17-agent-surface.md
-last-verified: "2026-09-21"
+last-verified: "2026-09-30"
 ---
 
 # Quality scan 2026-09-21 — agent surface, third pass
@@ -237,3 +237,38 @@ docs:coupling` green.
 
 1. File D1 (one PR, `area:mcp`), D2 (one PR, money-path by file), C1 (one PR, docs) — or drop any of them with a reason. **Decided 2026-09-21: file all three → #3213 (D1), #3214 (D2), #3215 (C1, at the corrected figure); D1 and D2 are money-path by file (`packages/mcp-server/src/**`).**
 2. The proposal-1 success half (N4) has been pending since 2026-09-13; a decision either way lets the next run stop carrying it. **Decided 2026-09-21: dropped — `rejected`; the next run does not carry it.**
+
+## 7. Dispositions re-checked 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`)
+
+The report body above is left as written. All three filed findings landed and
+are in the tree at this head; none is open:
+
+- **D1 → #3213, PR #3217 (`52515ed7`), CLOSED COMPLETED.** In code:
+  `haven_check_funds`'s schema now describes `token` as "ERC-20 contract
+  address (0x…) or the symbol of one of this agent's allowances"
+  (`tools/contracts.ts:161`), the symbol resolves against the agent's
+  allowances case-insensitively (`state-direct-recovery.ts`
+  `resolveTokenAddressFromAllowances`, with a refusal that names the address
+  as the remedy when no allowance matches), and the no-cap refusal no longer
+  borrows the paid-call copy.
+- **D2 → #3214, PR #3220 (`b71602f8`), CLOSED COMPLETED.** In code:
+  `tools/support/errors.ts`'s generic branches carry next steps at this head —
+  the `HavenApiError` branch says a 5xx is usually transient and to re-run the
+  same tool with the same arguments (the comment cites #3214 and the live 500
+  that filed it), with `UNKNOWN_ERROR` and the rail-unavailable branch
+  emitting omitted-reason steps; `nextStepWireFields` spreads on all of them.
+- **C1 → #3215, PR #3219 (`2aebd981`), CLOSED COMPLETED.** In code: the
+  runtime doc's `covers:` block now reaches all seven cited paths
+  (`agent-guidance.ts`, `connector-channel.ts`, `skill-content.ts`,
+  `useAgentConnectionSetupStatus.ts`, `scripts/README.md`,
+  `release-bump.test.mjs`, `verify-connect-bundle.mjs` are all inside the
+  declared globs or listed entries at this head); the doc's own
+  `last-verified` moved to 2026-09-29 by later covered work.
+- **N4** stays dropped per decision 2; the check-funds success step is still
+  prose-shaped at this head, which is now a decision rather than a debt.
+- §4's instrument claims were not re-run; §5's ledger reconciliation is
+  untouched. The intervening landings on the covered files (#3444 sub-budgets
+  tools, #3423 slices, #3479, #3465, #3476, #3485) postdate and supersede
+  nothing measured here — the findings were about absence (a missing
+  resolution, a missing step, a missing covers entry), and each absence is
+  filled.

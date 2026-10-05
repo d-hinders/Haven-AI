@@ -5,6 +5,8 @@ import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { useEffect, useState } from 'react'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Button } from '../ui/Button'
+import { isNewSiteVisible } from '@/lib/site-gate'
+import { Header } from './site/Header'
 
 const NAV = [
   { label: 'How it works', href: '/how-it-works' },
@@ -12,7 +14,13 @@ const NAV = [
   { label: 'MPP', href: '/protocols/mpp' },
 ]
 
+// The redesigned site's gate (#3573, epic #3572): until the switch-over, the
+// legacy header below renders wherever the gate is off — production.
 export function SiteHeader() {
+  return isNewSiteVisible() ? <Header /> : <LegacySiteHeader />
+}
+
+function LegacySiteHeader() {
   const [onDarkSection, setOnDarkSection] = useState(false)
 
   useEffect(() => {

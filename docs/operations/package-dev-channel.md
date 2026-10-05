@@ -29,6 +29,24 @@ covers:
 last-verified: "2026-09-25"
 ---
 
+> **Re-verification (#3496, tombstone-before-identity doctor selection,
+> 2026-09-30):** this doc is coupled through `packages/connect/src/doctor.ts`.
+> The change is `discoverCredentialDirectory`'s candidate selection: the
+> `TOMBSTONE.json` tell is now checked BEFORE the `identity.json` stat, so a
+> retired directory that kept `identity.json` is never selected as the primary
+> candidate — before, it could be picked whenever its identity file was the
+> newest on disk — while staying reportable as retired (#1681 semantics
+> unchanged); the missing-identity catch narrows to the rekey-pending tell. No
+> channel, dist-tag, snapshot, build-order or runtime-spec-override behaviour
+> moves, and the credential-path rules this loop relies on are unchanged
+> (#3412's `--credentials-dir` requirement, the `identity.json` /
+> `TOMBSTONE.json` layout) — the only movement is which directories may be
+> selected as primary. `last-verified` deliberately NOT bumped, per the
+> precedent notes in `docs/contributing/branch-and-release-flow.md`: nothing
+> this document claims was made false or stale, and #1366 rates a
+> rubber-stamped date worse than a stale one. Scope of this note: that
+> selection change — nothing else in this document was re-verified.
+
 > **Re-verification (#3332, 2026-09-28):** coupled through
 > `packages/backend/src/config.ts`, which is in this doc's `covers:` — the
 > edit is a comment-only re-wording of `ownerCompanyDetailsEnabled`'s own
@@ -207,6 +225,18 @@ and the `release` skill.
 > today**, and a scoped check of one constant is not a re-verification of this
 > document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
+> **Re-verification (0.8.0-alpha.0 release, 2026-10-05):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.7.0-alpha.0` → `0.8.0-alpha.0`. `HAVEN_CONNECTOR_CHANNEL` stays `alpha`.
+> - **Publish path.** Re-measured at `origin/dev` `97a330aa`: `git log
+>   origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+>   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **0**
+>   commits. The bump's own diff touches none of them.
+> - **Live dist-tags read during this release.** `dev` =
+>   `0.0.0-dev.202610051128.d0e0c97`, below `alpha`/`latest` = `0.7.0-alpha.0`.
+>
+> `last-verified` is not bumped.
+
 > **Re-verification (0.7.0-alpha.0 release, 2026-09-29):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
 > `0.6.0-alpha.0` → `0.7.0-alpha.0`. `HAVEN_CONNECTOR_CHANNEL` stays `alpha`,
@@ -265,6 +295,22 @@ and the `release` skill.
 > nothing about that. `last-verified` deliberately NOT bumped — it already
 > reads 2026-09-24 from an earlier change, and this note re-reads only
 > `CONNECTOR_VERSION` and the channel constant's value.
+>
+> **Re-verification (#3509):** coupled because `packages/backend/src/config.ts`
+> is in this doc's `covers:`. The only change there adds one field, `config.ops`
+> (the ops console's settings, parsed by `config/ops.ts`), plus its import, and
+> adds `ops_auth` to the two TRUST_PROXY_HOPS boot-warning strings.
+> `connectorChannel` / `parseConnectorChannel` and `requestValidationMode`, the
+> two `config.ts` claims this document makes, have no diff
+> (`git diff origin/dev -- packages/backend/src/config.ts`). `last-verified` is
+> not bumped. Scope of this note: the config claims — nothing else in this
+> document was re-verified.
+>
+> **Re-verification (#3510):** coupled for the same reason. The only change to
+> `packages/backend/src/config.ts` adds one field, `opsDatabaseUrl` (parsed by
+> `parseOpsDatabaseUrl` in `config/ops.ts`) and its comment, plus its import.
+> `connectorChannel` / `parseConnectorChannel` and `requestValidationMode` have
+> no diff. `last-verified` is not bumped; nothing else here was re-verified.
 >
 > **Re-verification (#3304):** coupled because `packages/core/src/client-compat.ts`
 > is in this doc's `covers:`. The only edit there is a comment: the sentence

@@ -61,8 +61,16 @@
       "note": "packages/core (#3005). The shared kernel frontend and backend consume — the one entry that is a DEPENDENCY of other packages without importing any itself. Declares no @haven_ai/* dependency, so nothing fans out to it; frontend and backend list it below, so a core change runs their suites through the edges they declare."
     },
     "frontend": {
-      "dependsOn": ["core"],
-      "note": "Consumes @haven_ai/core and declares it, so a core change runs this suite (the packages/* catch-all that used to cover that ran cli and signer jobs that cannot see core)."
+      "dependsOn": ["core", "ui"],
+      "note": "Consumes @haven_ai/core and declares it, so a core change runs this suite (the packages/* catch-all that used to cover that ran cli and signer jobs that cannot see core). Consumes @haven_ai/ui since #3508 — the shared design system compiles through transpilePackages, so a ui change re-runs this suite."
+    },
+    "ops": {
+      "dependsOn": ["core", "ui"],
+      "note": "packages/ops (#3515). The private operations console: a Next.js app on @haven_ai/ui and its Tailwind preset, consuming @haven_ai/core api-types for the /ops/* wire. A ui change re-runs this suite through transpilePackages; a core change re-runs it through the api-types it reads. Declares no other internal dependency."
+    },
+    "ui": {
+      "dependsOn": [],
+      "note": "packages/ui (#3508). The private shared design system (@haven_ai/ui): tokens, Tailwind preset, the primitives the ops console consumes. Declares no @haven_ai/* dependency — its peers are react/react-dom/next/lucide-react — so nothing fans out to it; the frontend lists it below, so a ui change runs the frontend suite through the edge the frontend declares."
     },
     "backend": {
       "dependsOn": ["core", "sdk"],

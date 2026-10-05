@@ -1,0 +1,16 @@
+# What the haven-ai-frontend Vercel project is built from (#3594). Read by
+# scripts/vercel/ignore-build.sh, one repo-relative path per line; `#` starts a
+# comment. packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
+# checks it against the build's real inputs, so a missing one fails CI.
+packages/frontend
+packages/ui
+packages/core
+tsconfig.base.json
+package.json
+package-lock.json
+.nvmrc
+# The docs next.config.ts serves under /docs/ (packages/frontend/scripts/serve-docs.mjs ALLOWLIST).
+docs/product/account-recovery.md
+docs/product/agent-key-rotation.md
+docs/product/agent-passport.md
+docs/security/delegation-rail-security-model.md

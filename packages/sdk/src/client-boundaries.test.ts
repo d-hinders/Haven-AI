@@ -23,6 +23,7 @@ const boundary: ClientBoundary = {
   publicMethods: [
     'authorizeX402',
     'clientUpdate', // #3303
+    'closeSubBudget', // #3506
     'closeTaskBudget', // #3329
     'completeX402MerchantCall',
     'createIntent',
@@ -46,6 +47,7 @@ const boundary: ClientBoundary = {
     'getTaskBudget', // #3329
     'getTaskBudgetSignContext', // #3329
     'getX402MerchantCallContext',
+    'listPendingSubBudgetSignatures', // #3506
     'listReceipts',
     'listReceiptsPage', // #3128
     'listTaskBudgets', // #3329
@@ -66,6 +68,7 @@ const boundary: ClientBoundary = {
     'submitCatalogEntry',
     'submitSignature',
     'submitSweep',
+    'submitSubBudget', // #3506
     'submitTaskBudget', // #3329
     'submitX402Erc7710',
     'sweepDelegate',
@@ -74,6 +77,7 @@ const boundary: ClientBoundary = {
   ],
   publicMembers: [
     "async authorizeX402(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Receipt>",
+    "async closeSubBudget(id: string): Promise<CloseSubBudgetResult>",
     "async closeTaskBudget(id: string): Promise<CloseTaskBudgetResult>",
     "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; }>",
     "async createIntent(request: PaymentRequest): Promise<PaymentIntent>",
@@ -97,13 +101,14 @@ const boundary: ClientBoundary = {
     "async getTaskBudget(id: string): Promise<HavenTaskBudget>",
     "async getTaskBudgetSignContext(id: string): Promise<TaskBudgetSignContext>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
+    "async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",
     "async listReceiptsPage(options: { limit?: number; cursor?: string; compact?: boolean; } = {}): Promise<HavenPaymentReceiptsPage>", // #3423 compact
     "async listTaskBudgets(options: { status?: 'open' | 'all'; } = {}): Promise<HavenTaskBudget[]>",
     "async openTaskBudget(request: { tokenAddress?: string; maxAmountAtomic: string; ttlSeconds: number; recipientAddress?: string; label?: string; }): Promise<OpenTaskBudgetResult>",
     "async pay(request: PaymentRequest): Promise<PaymentResult>",
     "async payX402Quote(quote: X402Quote, options: X402AuthorizationOptions = {}): Promise<Response>",
-    "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; }>",
+    "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; idempotencyKey?: string; }): Promise<BudgetPrecheckResult>", // #3492, #3518
     "async prepareSweep(): Promise<SweepPrepareResponse>",
     // #3329: taskBudgetId added — build the settlement child under an open task budget's own
     // child delegation ([settlement, task, budget]) instead of the agent's budget delegation
@@ -120,6 +125,7 @@ const boundary: ClientBoundary = {
     "async submitCatalogEntry(resourceUrl: string, options: { website?: string; } = {}): Promise<HavenCatalogSubmission>",
     "async submitSignature(paymentId: string, signature: string): Promise<{ status: string; txHash?: string; }>",
     "async submitSweep(authorization: SweepAuthorization, signature: string): Promise<SweepSubmitResponse>",
+    "async submitSubBudget(id: string, signature: string): Promise<SubmitSubBudgetResult>",
     "async submitTaskBudget(id: string, signature: string): Promise<SubmitTaskBudgetResult>",
     "async submitX402Erc7710(paymentId: string, signature: string): Promise<string>",
     "async sweepDelegate(): Promise<SweepResult>",
@@ -149,6 +155,7 @@ const boundary: ClientBoundary = {
   localImports: [
     './account-reads.js',
     './client-identity.js', // #3303: the HavenClientUpdate type clientUpdate() returns
+    './client-tax-declaration.js', // #3427: the buyer tax declaration resolution the paid EIP-3009 retry attaches
     './delegate-sweep.js',
     './direct-payment-guard.js', // #3283: the signing-surface allowlist signForData runs
     './haven-api-transport.js',
@@ -606,6 +613,7 @@ describe('HavenClient structural boundary', () => {
       'AgentPaymentSummary',
       'AgentPaymentWarning',
       'AgentPurchaseSummary',
+      'BudgetPrecheckResult',
       'CatalogSubmissionAccepted',
       'ClaudeTool',
       'EvidenceReportOutcome', // #2970

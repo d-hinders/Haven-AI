@@ -28,9 +28,14 @@ import { describe, expect, it } from 'vitest'
  */
 
 const FRONTEND = resolve(__dirname, '../..')
-const css = readFileSync(join(FRONTEND, 'src/app/globals.css'), 'utf8')
+// The palette moved to @haven_ai/ui (#3508): tokens.css and the Tailwind
+// preset now live in packages/ui, imported by the app layout before
+// globals.css. Button moved with it; its dedicated assertions below read the
+// moved file directly.
+const UI = resolve(FRONTEND, '..')
+const css = readFileSync(join(UI, 'ui', 'src', 'tokens.css'), 'utf8')
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const tailwindConfig = require(join(FRONTEND, 'tailwind.config.js'))
+const tailwindConfig = require(join(UI, 'ui', 'tailwind.preset.js'))
 
 /** Booting real Tailwind is a real compile; vitest's 5s default would flake. */
 const COMPILE_TIMEOUT = 60_000
@@ -68,7 +73,7 @@ type RGB = [number, number, number]
 
 function tokenRgb(name: string): RGB {
   const m = css.match(new RegExp(`--v2-${name}:\\s*(#[0-9a-fA-F]{6})`))
-  if (!m) throw new Error(`token --v2-${name} not found in globals.css`)
+  if (!m) throw new Error(`token --v2-${name} not found in tokens.css`)
   return [0, 2, 4].map((i) => parseInt(m[1].slice(1 + i, 3 + i), 16)) as RGB
 }
 
@@ -361,7 +366,7 @@ describe('brand-filled controls carry a ring offset (#1741)', () => {
     //   (a) the base string still carries ring-offset-2, and
     //   (b) primary is still the brand-filled variant that needs it.
     // Without the offset, brand-on-brand composites to ~1.0:1 (#1741).
-    const button = readFileSync(join(FRONTEND, 'src/components/ui/Button.tsx'), 'utf8')
+    const button = readFileSync(join(UI, 'ui/src/Button.tsx'), 'utf8')
     const base = button.match(/const classes = `[^`]*`/)?.[0] ?? ''
     expect(base, 'Button base class string not found — did Button.tsx get restructured?').not.toEqual(
       '',
@@ -477,7 +482,7 @@ describe('destructive controls focus in their own tone (#1792)', () => {
     // assertion pins that arrangement, so moving the colour back into the base
     // template string to deduplicate it fails here rather than silently
     // restoring the blind spot that hid the defect for months.
-    const button = readFileSync(join(FRONTEND, 'src/components/ui/Button.tsx'), 'utf8')
+    const button = readFileSync(join(UI, 'ui/src/Button.tsx'), 'utf8')
     const variants = button.match(/const VARIANT_CLASS[^}]+}/)?.[0] ?? ''
     expect(variants, 'VARIANT_CLASS not found — did Button.tsx get restructured?').not.toEqual('')
     expect(

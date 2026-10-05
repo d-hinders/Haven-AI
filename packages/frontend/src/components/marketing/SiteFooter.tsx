@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { isNewSiteVisible } from '@/lib/site-gate'
+import { Footer } from './site/Footer'
 
 const COLS = [
   {
@@ -30,7 +32,13 @@ const COLS = [
   },
 ]
 
+// The redesigned site's gate (#3573, epic #3572): until the switch-over, the
+// legacy footer below renders wherever the gate is off — production.
 export function SiteFooter() {
+  return isNewSiteVisible() ? <Footer /> : <LegacySiteFooter />
+}
+
+function LegacySiteFooter() {
   return (
     <footer className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]">
       <div className="max-w-6xl mx-auto px-6 py-14 grid grid-cols-2 md:grid-cols-4 gap-10">

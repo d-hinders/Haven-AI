@@ -657,6 +657,93 @@ export const JOB_LOOKUP_BUDGET = 24
 /** At most this many 100-run pages per counted event per evaluation (#3340). */
 export const RUN_PAGE_CAP = 8
 
+/**
+ * #3321. Re-read of the incident history (2026-09-30, review round 1): 8 of 9
+ * guard-freshness reopens were qa-dev.yml reading the IDENTICAL frozen page —
+ * 100 `deployment_status` rows, newest `2026-09-19T16:20:14Z`, oldest
+ * `2026-09-18T21:18:20Z` — printed verbatim by runs 36542205451, 36548966124,
+ * 36565011143 and 36692820874, and matched by the `✗ qa-dev.yml — last
+ * success none since 2026-09-18T21:18:20Z (budget 4d)` line (followed by a
+ * separate `never-run:` line) of the four 09-28 runs that predate the #3409
+ * diagnostics (36393133139, 36426594058, 36440588919, 36449044291). The 9th
+ * (36570505601, 09-29 12:47) was a DIFFERENT guard reading a DIFFERENT frozen
+ * page: `db-concurrency-proof.yml`'s `schedule` page 1 frozen at
+ * `2026-09-18T07:36:48Z` ("11.2d ago"), while that job in fact succeeds
+ * nightly (verified success 2026-09-30T09:00:02Z) — so the defect is not
+ * specific to `deployment_status`, the Deployments index, or a guard with
+ * `provenance`; both counted guards in `SCHEDULED_GUARDS` hit it.
+ *
+ * The endpoint sets `Cache-Control: private, max-age=60, s-maxage=60`
+ * (measured live, 2026-09-30) — proof the response is ALLOWED to be
+ * cache-served, but a 60 s directive cannot by itself explain an 11-day-old
+ * snapshot, so the deeper cause is GitHub's own read path for this listing
+ * (cache or search-index replica) occasionally serving a stale snapshot.
+ *
+ * What the evidence shows, from `guard-freshness.yml`'s own CI run logs
+ * (each run's `❌ A scheduled guard has gone stale.` / `✅ Every scheduled
+ * guard is fresh.` summary line): of the 57 evaluations from 09-27 to 09-30,
+ * 12 came back stale. On 09-28 three consecutive evaluations were stale
+ * (15:02:50, 15:22:17, 15:39:50), spanning 37 minutes and bracketed by fresh
+ * ones at 14:58:20 and 15:41:17; nothing was sampled between them, so
+ * continuity is inferred, not observed. The other stale evaluations were
+ * single, apart from two in a row on 09-29 that hit different guards
+ * (12:47:37 db-concurrency-proof.yml, 13:09:04 qa-dev.yml); each was followed
+ * by a fresh evaluation, the shortest gap about a minute (16:09:59 →
+ * 16:11:04). Those gaps are upper bounds set by
+ * when the next push arrived — the actual recovery time is unmeasured.
+ * Whether varying the request shape (`per_page`, a `created=>` filter) dodges
+ * the stale read was tried by hand and was inconclusive; it is not recorded
+ * anywhere reproducible.
+ *
+ * A single read of this listing is therefore not ground truth for ANY
+ * counted-event guard, which is exactly the shape coherence check 1 already
+ * detects for a provenance guard (page 1 does not open near "now"). The fix:
+ * page 1 of every counted event is now retried up to `PAGE1_RETRY_ATTEMPTS`
+ * times, `PAGE1_RETRY_DELAY_MS` apart, whenever it could change the answer —
+ * no qualifying success found yet, AND (for a provenance guard) the
+ * Deployments index shows an in-window deploy, or (for a guard with no
+ * provenance, e.g. `db-concurrency-proof.yml`) unconditionally, since page 1
+ * being stale there is indistinguishable from the guard being about to fail
+ * either way and the retry only costs time on that already-losing path. A
+ * page with no rows at all (a workflow that has genuinely never run) is
+ * "stale" by the same test (no `newest` to compare) and is retried too, up to
+ * the same bound — the extra reads are wasted but cost is capped, and a
+ * truly-empty history stays empty on every retry, so the verdict is
+ * unaffected. The first retry that opens near "now" replaces the stale read;
+ * a genuinely dead trigger cannot self-correct on retry — every attempt
+ * stays old — so the guard still exhausts every attempt and still escalates
+ * that case exactly as before.
+ *
+ * Staleness is per-request, not per-workflow-run or per-cluster. Every
+ * isolated stale read observed was cleared by a later evaluation, and the
+ * retry window below is sized for that case; the 09-28 run of stale
+ * evaluations spanned 37 minutes, longer than any in-evaluation retry budget
+ * can reasonably cover. For that case the mitigation is NOT the retry: it is
+ * the next evaluation. `guard-freshness.yml` runs on every push to
+ * `dev`/`main` (124 push-triggered runs 2026-09-24..30, measured), but the
+ * next push can be minutes or hours away — the 2026-09-30T08:56Z reopen
+ * waited 6 h 20 min for it. `3 × PAGE1_RETRY_DELAY_MS` is a judgement call
+ * sized for the isolated-read case, not a claim that it covers a cluster;
+ * the `(retried Nx — #3321)` diagnostic line is what will show whether a
+ * future occurrence outlasts it.
+ */
+// Worst case ~60 s per stale page 1, per counted event, per guard (3 attempts
+// × 20 s between them). One evaluation can sleep on MULTIPLE page-1 retries —
+// qa-dev.yml has one counted event (up to ~60 s) and db-concurrency-proof.yml
+// has two, schedule and workflow_dispatch (up to ~60 s each, ~120 s) — so a
+// single evaluation's worst case is ~180 s (~3 min), inside
+// guard-freshness.yml's own `timeout-minutes: 5`. Sized for an isolated
+// stale read (a later evaluation cleared every one observed), not for the
+// longer clusters the next push-triggered evaluation covers instead
+// — see the JSDoc above.
+export const PAGE1_RETRY_ATTEMPTS = 3
+export const PAGE1_RETRY_DELAY_MS = 20000
+
+/** Synchronous sleep (Node allows `Atomics.wait` on the main thread). */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
 function boundedCheckRunReader(budget, jobName, shaOfRun, gh = defaultGh) {
   const repo = process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
   const bySha = new Map() // sha → Map(runId → [{ name, conclusion }])
@@ -755,7 +842,7 @@ function readRunPage(guard, event, page, gh) {
  * success): the `::warning::` line and the diagnostics still print, but the
  * verdict is `fresh`, not `unconfirmed`.
  */
-export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT } = {}) {
+export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT, sleep = sleepSync } = {}) {
   const workflowPath = path.join(root, '.github', 'workflows', guard.workflow)
   const fileExists = existsSync(workflowPath)
   if (!fileExists) return { fileExists: false, triggerPresent: false, lastSuccessAt: null, lastRunAt: null }
@@ -776,6 +863,10 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     // N2 (#3340 review): a Deployments index that does not reach the horizon
     // silently drops older runs at the provenance check; say so.
     const indexShort = Boolean(index?.__oldest && index.__oldest > horizon)
+    // #3321: computed BEFORE paging, from the index alone, so page 1's retry
+    // decision (below) does not depend on the very listing read it is
+    // deciding whether to trust.
+    const earlyHasInWindowDeploy = Boolean(index?.__deployments?.some((d) => d.created_at >= horizon))
     const shaOfRun = new Map()
     const jobsFor = guard.requiredJob
       ? boundedCheckRunReader(JOB_LOOKUP_BUDGET, guard.requiredJob, shaOfRun, gh)
@@ -809,13 +900,42 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
           markIncomplete('page-cap')
           break
         }
-        const batch = readRunPage(guard, event, page, gh)
+        let batch = readRunPage(guard, event, page, gh)
+        // #3321: page 1 is the one page every evaluation always reads, and
+        // measurably the one GitHub hands back stale — both a provenance
+        // guard (qa-dev.yml) and a guard with none (db-concurrency-proof.yml)
+        // hit it. Retried when it could still change the answer: no
+        // qualifying success found yet (a success already in hand needs no
+        // rescue — S2), AND either the guard has no provenance (page 1 being
+        // stale is itself the only signal available, so any staleness here is
+        // worth a retry — B1) or it does and the Deployments index shows an
+        // in-window deploy (the narrower, already-proven condition). A
+        // genuinely dead trigger cannot self-correct on retry — every attempt
+        // stays old — so the guard still exhausts every attempt and still
+        // escalates exactly as before; only a transient stale read is
+        // cleared.
+        const foundSuccessSoFar = qualifying.some((r) => r.conclusion === 'success')
+        const page1RetryEligible = page === 1 && !foundSuccessSoFar && (guard.provenance ? earlyHasInWindowDeploy : true)
+        let page1RetryCount = 0
+        if (page1RetryEligible) {
+          while (page1RetryCount < PAGE1_RETRY_ATTEMPTS) {
+            const batchDates = batch.map((r) => r.createdAt).filter(Boolean).sort()
+            const batchNewest = batchDates.at(-1)
+            if (batchNewest && batchNewest >= horizon) break
+            sleep(PAGE1_RETRY_DELAY_MS)
+            batch = readRunPage(guard, event, page, gh)
+            page1RetryCount += 1
+          }
+        }
         for (const r of batch) shaOfRun.set(r.databaseId, r.headSha)
         runs.push(...batch)
         const dates = batch.map((r) => r.createdAt).filter(Boolean).sort()
         const oldest = dates[0]
         const newest = dates.at(-1)
-        pageStats.push({ event, page, count: batch.length, newest: newest ?? null, oldest: oldest ?? null })
+        pageStats.push({
+          event, page, count: batch.length, newest: newest ?? null, oldest: oldest ?? null,
+          ...(page1RetryCount > 0 ? { retried: page1RetryCount } : {}),
+        })
         if (page === 1 && newest && page1Newest === null) page1Newest = newest
 
         // Coherence check 2: contiguous and newest-first. Page N's newest row
@@ -936,7 +1056,10 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     if (nonFresh) {
       console.error(`guard-freshness diagnostics for ${guard.workflow}:`)
       for (const p of pageStats) {
-        console.error(`  page ${p.page} (${p.event}): ${p.count} rows, newest=${p.newest}, oldest=${p.oldest}`)
+        console.error(
+          `  page ${p.page} (${p.event}): ${p.count} rows, newest=${p.newest}, oldest=${p.oldest}` +
+            (p.retried ? ` (retried ${p.retried}x — #3321)` : ''),
+        )
       }
       // The size counts SHAs from every creator (the index is not filtered to
       // Railway's), so it is comparable across guards; the oldest entry and

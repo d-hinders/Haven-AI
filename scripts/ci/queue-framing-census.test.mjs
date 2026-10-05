@@ -9,7 +9,8 @@
  * retired_allowance`) — enforces budget, recipient and expiry ON-CHAIN during
  * prepare, so an out-of-policy payment is DECLINED before any money moves and
  * before anything is written (`routes/payments.ts`: no active delegation → 403,
- * caveat rejection → 502; `modules/x402/delegation-authorize.ts`: over-budget →
+ * over-budget → 403 `delegation_budget_exceeded` since #3503, other caveat
+ * rejection → 502; `modules/x402/delegation-authorize.ts`: over-budget →
  * 403 `delegation_budget_exceeded`). Both retired rails answer HTTP 410 at every
  * agent-payment entry point (#1986), #2020 retired the `agent_allowances`
  * surface, and #2055 dropped `approval_requests` outright — the table the
@@ -106,6 +107,10 @@ const GUARDED_FILES = [
   // listed here (haven-reviewer, #2809 round 3).
   'packages/mcp-server/src/tools/catalog-purchase.ts',
   'packages/mcp-server/src/tools/plain-http-x402.ts',
+  // #3497 item 4: the delegation-rail allowance block moved here from the
+  // plain-HTTP capability — its warning strings are the budget-visibility
+  // prose an agent reads beside a payment, so it is guarded like the rest.
+  'packages/mcp-server/src/tools/support/allowance-block.ts',
   'packages/mcp-server/src/tools/contracts.ts',
   'packages/mcp-server/src/tools/parsing.ts',
   'packages/mcp-server/src/tools/registry.ts',

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 import {
   AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_CLIENT_UPDATE_SENTENCE,
   AGENT_COMMAND_MODIFICATION_SENTENCE,
   AGENT_SECRET_HYGIENE_SENTENCE,
   AGENT_WIRING_COLLISION_RELAY_SENTENCE,
+  HAVEN_AGENT_RUNBOOK_MD,
 } from './agent-guidance.js'
 
 describe('generic skill content', () => {
@@ -57,6 +59,13 @@ describe('generic skill content', () => {
   it('names haven_get_agent as the one-shot bootstrap with a readiness signal', () => {
     expect(HAVEN_SKILL_MD).toContain('recommended first call')
     expect(HAVEN_SKILL_MD).toContain('needs_approval')
+  })
+
+  it('tells a later session what to do with client_update, in the runbook\'s own words', () => {
+    // The runbook is read once at onboarding; the skill loads every session.
+    // Without this, an agent past setup meets client_update with no instruction.
+    expect(HAVEN_SKILL_MD).toContain(AGENT_CLIENT_UPDATE_SENTENCE)
+    expect(HAVEN_AGENT_RUNBOOK_MD).toContain(AGENT_CLIENT_UPDATE_SENTENCE)
   })
 
   it('has valid skill frontmatter and the expected folder name', () => {
@@ -371,5 +380,18 @@ describe('onboarding and setup section (#2537)', () => {
     // allow-listed briefly and removed by the owner on 2026-09-05.
     expect(section).toContain('allow-list')
     expect(section).toMatch(/cannot approve a\s+budget, rotate a key, change a signer or move money/)
+  })
+})
+
+describe('plain-HTTP settlement report (#3475)', () => {
+  it("tells the agent to hand the merchant's PAYMENT-RESPONSE transaction to haven_report_settlement_evidence", () => {
+    const start = HAVEN_SKILL_MD.indexOf('**Direct transfer / non-MCP paywall:**')
+    const end = HAVEN_SKILL_MD.indexOf('**Catalog tool arguments:**')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const paragraph = HAVEN_SKILL_MD.slice(start, end)
+    expect(paragraph).toContain('PAYMENT-RESPONSE')
+    expect(paragraph).toContain('mcp__haven__haven_report_settlement_evidence')
+    expect(paragraph).toContain('settlement_tx_hash')
   })
 })

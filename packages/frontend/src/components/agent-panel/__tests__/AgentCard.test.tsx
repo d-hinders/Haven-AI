@@ -16,7 +16,9 @@ function escapeRe(value: string): string {
 }
 
 vi.mock('../RemoveAgentDialog', () => ({
-  RemoveAgentDialog: () => <div data-testid="remove-agent-dialog" />,
+  RemoveAgentDialog: ({ mode }: { mode?: string }) => (
+    <div data-testid="remove-agent-dialog" data-mode={mode ?? 'remove'} />
+  ),
 }))
 
 const { AgentCard } = await import('../AgentCard')
@@ -52,11 +54,9 @@ function renderCard(
   } = {},
 ) {
   const onRestore = vi.fn()
-  const onViewDetails = vi.fn()
   const { container } = render(
     <AgentCard
       agent={agent}
-      onViewDetails={onViewDetails}
       onPause={vi.fn()}
       onResume={vi.fn()}
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
@@ -67,7 +67,7 @@ function renderCard(
       organizations={organizations}
     />,
   )
-  return { onRestore, onViewDetails, container }
+  return { onRestore, container }
 }
 
 /**
@@ -110,6 +110,14 @@ describe('AgentCard stranded-funds notice (#2195)', () => {
   it('shows nothing when the agent has no open reconciliation event', () => {
     renderCard(agentFixture())
     expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
+  })
+
+  it('keeps the recovery instruction plain text inside the stretched-link card', () => {
+    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
+    const copy = screen.getByText(/Open the agent to recover these funds\./)
+    expect(copy).toBeInTheDocument()
+    expect(copy.closest('a')).toBeNull()
+    expect(screen.queryByText('View agent to recover these funds.')).toBeNull()
   })
 
 })
@@ -246,13 +254,9 @@ describe('AgentCard paused notice copy (#2230)', () => {
 })
 
 describe('AgentCard action-row matrix (#1402)', () => {
-  // #3168: the first action is "Details" on every operational card — the
-  // Edit/Details fork is gone, so the old "Edit <name>" button no longer
-  // renders anywhere on the card.
-  it('active delegation agent: Details first, Remove shown, Safe Revoke hidden', () => {
+  it('active delegation agent: linked name, Remove shown, Safe Revoke hidden', () => {
     renderCard(agentFixture())
     const actions = [
-      screen.getByRole('button', { name: 'Open details for Research agent' }),
       screen.getByRole('button', { name: 'Pause Research agent' }),
       screen.getByRole('button', { name: 'Remove Research agent' }),
     ]
@@ -261,29 +265,30 @@ describe('AgentCard action-row matrix (#1402)', () => {
       expect(action.className).toContain('min-h-11')
       expect(action.className).toContain('min-w-11')
     }
+    expect(screen.getByRole('link', { name: 'Research agent' })).toHaveAttribute(
+      'href',
+      '/agents/agent-1',
+    )
+    expect(screen.queryByRole('button', { name: /Open details/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Edit Research agent' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
   })
 
-  /**
-   * #3168: "Details" navigates via onViewDetails — the same handler the
-   * `canUseWalletActions === false` branch always used — and navigation is
-   * disabled while a card action is in flight, so the user cannot leave
-   * mid-action. The hook half (router.push) is asserted in
-   * `useAgentPanelState.test.tsx`.
-   */
-  it('Details navigates to the agent detail page (#3168)', () => {
-    const { onViewDetails } = renderCard(agentFixture())
-    const details = screen.getByRole('button', { name: 'Open details for Research agent' })
-    fireEvent.click(details)
-    expect(onViewDetails).toHaveBeenCalledTimes(1)
-    expect(onViewDetails).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-1' }))
+  it('keeps the stretched name link live while an action is in flight', () => {
+    renderCard(agentFixture(), { busyAction: 'pause' })
+    const link = screen.getByRole('link', { name: 'Research agent' })
+    expect(link).toHaveAttribute('href', '/agents/agent-1')
+    expect(link.className).toContain('after:absolute')
+    expect(link).not.toHaveAttribute('aria-disabled')
   })
 
-  it('Details is disabled while an action is in flight (#3168 busy state)', () => {
-    renderCard(agentFixture(), { busyAction: 'pause' })
-    const details = screen.getByRole('button', { name: 'Open details for Research agent' })
-    expect(details).toBeDisabled()
+  it('renders no interactive descendant inside the stretched name link', () => {
+    const { container } = renderCard(agentFixture({ labels: [
+      { id: 'label-1', name: 'prod', color: 'brand' },
+    ] } as Partial<Agent>))
+    const link = screen.getByRole('link', { name: 'Research agent' })
+    expect(link.querySelector('a, button')).toBeNull()
+    expect(container.querySelector('a a, a button')).toBeNull()
   })
 
   it('keeps the live delegation budget row and does not render the historical meter', () => {
@@ -343,6 +348,99 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(screen.queryByTestId('remove-agent-dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Research agent' }))
     expect(screen.getByTestId('remove-agent-dialog')).toBeTruthy()
+  })
+})
+
+/**
+ * #3542 (D): "revoked" is only half true while a budget delegation is still
+ * redeemable on-chain. The card must say so and offer the one action that ends
+ * it, for revoked AND archived agents — and say nothing new when the count is 0.
+ */
+describe('AgentCard half-revoked marker (#3542)', () => {
+  const ARCHIVED = '2026-06-01T00:00:00Z'
+  const MARKER = /its budget is still active on.chain/i
+
+  it('revoked + live budget: warning marker replaces "Network access already revoked", with Finish revoking', () => {
+    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }))
+    expect(screen.getByText(MARKER)).toBeTruthy()
+    expect(screen.queryByText('Network access already revoked')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeTruthy()
+    // Remove stays: it runs the same budget-first sequence.
+    expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
+  })
+
+  it('revoked + count 0 (or absent): unchanged — no marker, no Finish revoking', () => {
+    for (const live of [0, undefined]) {
+      const { unmount } = render(
+        <AgentCard
+          agent={agentFixture({ status: 'revoked', live_delegation_count: live })}
+          onPause={vi.fn()}
+          onResume={vi.fn()}
+          onRevokeCredential={vi.fn()}
+          onArchive={vi.fn()}
+          onRestore={vi.fn()}
+          onMoveToOrganization={vi.fn()}
+          busyAction={null}
+        />,
+      )
+      expect(screen.queryByText(MARKER)).toBeNull()
+      expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
+      expect(screen.getByText('Network access already revoked')).toBeTruthy()
+      unmount()
+    }
+  })
+
+  it('an active agent with live budgets is NOT half-revoked', () => {
+    renderCard(agentFixture({ status: 'active', live_delegation_count: 2 }))
+    expect(screen.queryByText(MARKER)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
+  })
+
+  it('archived + live budget: marker and Finish revoking sit beside Restore, and the restore promise is not repeated', () => {
+    renderCard(
+      agentFixture({ status: 'revoked', archived_at: ARCHIVED, live_delegation_count: 1 }),
+    )
+    expect(screen.getByText(MARKER)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Restore Research agent to the list' })).toBeTruthy()
+    // "restoring never re-enables spending" would read as the budget being dead.
+    expect(screen.queryByText(/restoring never re-enables spending/i)).toBeNull()
+    expect(screen.getByText(/restoring to the list does not end its budget/i)).toBeTruthy()
+  })
+
+  it('archived + count 0: unchanged', () => {
+    renderCard(agentFixture({ status: 'revoked', archived_at: ARCHIVED, live_delegation_count: 0 }))
+    expect(screen.queryByText(MARKER)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
+    expect(screen.getByText(/restoring never re-enables spending/i)).toBeTruthy()
+  })
+
+  it('Finish revoking opens the dialog in finish mode (not remove mode)', () => {
+    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }))
+    fireEvent.click(screen.getByRole('button', { name: 'Finish revoking Research agent' }))
+    expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('finish')
+  })
+
+  it('an unlinked agent gets the marker and NO action', () => {
+    renderCard(
+      agentFixture({ status: 'revoked', account_id: null, live_delegation_count: 1 }),
+    )
+    expect(screen.getByText(MARKER)).toBeTruthy()
+    expect(screen.getByText(/cannot end it from here/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
+
+    // Archived and unlinked: same.
+    renderCard(
+      agentFixture({
+        id: 'agent-2',
+        name: 'Other agent',
+        status: 'revoked',
+        archived_at: ARCHIVED,
+        account_id: null,
+        live_delegation_count: 1,
+      }),
+    )
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
   })
 })
 
@@ -408,7 +506,7 @@ describe('AgentCard organization actions (#3222 re-review)', () => {
     const { container } = renderCard(agentFixture({ status: 'paused' }), { organizations: [ORG] })
     const row = container.querySelector('[data-testid="agent-card-actions"]') as HTMLElement
     const pipes = [...row.querySelectorAll('span')].filter((el) => el.textContent === '|')
-    expect(pipes.length).toBe(3)
+    expect(pipes.length).toBe(1)
     for (const pipe of pipes) {
       expect(pipe.className).toMatch(/(^|\s)hidden(\s|$)/)
       expect(pipe.className).toMatch(/(^|\s)lg:inline(\s|$)/)

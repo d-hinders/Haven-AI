@@ -80,6 +80,9 @@ const BASELINE_PATH = join(REPO_ROOT, 'packages', 'frontend', 'copy-lint-baselin
 const SCAN_DIRS = [
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'app'),
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'components'),
+  // The shared design system (#3508): the primitives moved here still render
+  // product copy, so their strings stay linted after the move.
+  join(REPO_ROOT, 'packages', 'ui', 'src'),
 ]
 
 // Individual prose-bearing files OUTSIDE those directories (#2317). The bar is
@@ -145,6 +148,12 @@ export const SCAN_FILES = [
   // this allowlist's own defect: a copy the gate cannot see.
   'packages/sdk/src/agent-guidance.ts',
   'packages/frontend/public/for-agents.md',
+  // `/demo.md`'s body (#3477): served verbatim by
+  // `src/app/demo.md/route.ts`, a Route Handler under `src/app` that the
+  // directory scan DOES cover — but the route handler only imports this
+  // constant, so the actual prose lives here, one level outside SCAN_DIRS,
+  // exactly like the skill bundle and onboarding prompt above.
+  'packages/frontend/src/lib/demo-md-content.ts',
 ]
 
 // ── The naming convention behind the allowlist (#2333) ───────────────────────

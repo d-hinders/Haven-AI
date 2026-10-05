@@ -143,3 +143,108 @@ describe('the typed rail-unavailable 503 is a stop with its own code (#3416)', (
     expect(out.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
   })
 })
+
+describe('the typed task-budget 403 is a stop with its own code (#3500)', () => {
+  const taskBudgetExceeded = () =>
+    new HavenApiError('This payment of 0.0005 USDC exceeds what is left of task budget tb_1 (0 USDC left).', 403, {
+      error: 'This payment of 0.0005 USDC exceeds what is left of task budget tb_1 (0 USDC left).',
+      error_code: 'task_budget_exceeded',
+      task_budget_id: 'tb_1',
+      remaining_atomic: '0',
+    })
+
+  it('carries TASK_BUDGET_EXCEEDED with the task budget id and remainder, not the generic API_ERROR', () => {
+    const out = normalizeError(taskBudgetExceeded()) as unknown as Record<string, unknown>
+    expect(out.code).toBe('TASK_BUDGET_EXCEEDED')
+    expect(out.statusCode).toBe(403)
+    expect(out.task_budget_id).toBe('tb_1')
+    expect(out.remaining_atomic).toBe('0')
+  })
+
+  it('says stop and names the close-and-reopen remedy, never a retry', () => {
+    const out = normalizeError(taskBudgetExceeded()) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/close it and open a new one/)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/retrying cannot succeed/)
+  })
+
+  it('any other 403 keeps the generic API_ERROR stop', () => {
+    const out = normalizeError(new HavenApiError('forbidden', 403, { error: 'forbidden', error_code: 'unknown_rule' }))
+    expect(out.code).toBe('API_ERROR')
+  })
+})
+
+describe('the typed delegation-budget 403 is fund_account_or_raise_allowance with the figures (#3504)', () => {
+  const delegationBudgetExceeded = () =>
+    new HavenApiError(
+      "This x402 payment of 0.001 USDC exceeds the agent's remaining budget for this period (0.0005 USDC, short by 0.0005 USDC).",
+      403,
+      {
+        error:
+          "This x402 payment of 0.001 USDC exceeds the agent's remaining budget for this period (0.0005 USDC, short by 0.0005 USDC). There is no approval queue on the delegation rail — an over-budget redemption reverts on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.",
+        error_code: 'delegation_budget_exceeded',
+        phase: 'insufficient_funds',
+        next_action: 'fund_account_or_raise_allowance',
+        rail: 'x402',
+        remaining: '0.0005',
+        remaining_atomic: '500',
+        shortfall: '0.0005',
+        shortfall_atomic: '500',
+      },
+    )
+
+  it('carries DELEGATION_BUDGET_EXCEEDED — the code the catalog path already emits — with the atomic figures', () => {
+    const out = normalizeError(delegationBudgetExceeded()) as unknown as Record<string, unknown>
+    expect(out.code).toBe('DELEGATION_BUDGET_EXCEEDED')
+    expect(out.statusCode).toBe(403)
+    expect(out.remaining_atomic).toBe('500')
+    expect(out.shortfall_atomic).toBe('500')
+    expect(out.phase).toBe('insufficient_funds')
+    expect(out.rail).toBe('x402')
+  })
+
+  it('uses the backend next_action and names the remedy (owner raises the budget, or the period resets)', () => {
+    const out = normalizeError(delegationBudgetExceeded()) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe(AgentPaymentNextAction.FundAccountOrRaiseAllowance)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/raise the budget in Haven/)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/period to reset/)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/retrying cannot succeed/)
+  })
+})
+
+describe('the typed prepare 502s split on whether the simulation reverted (#3609)', () => {
+  const prepareReverted = () =>
+    new HavenApiError(
+      'The payment reverted during on-chain simulation: UserOperation reverted during simulation with reason: 0x08c379a0…',
+      502,
+      {
+        error: 'The payment reverted during on-chain simulation',
+        error_code: 'prepare_reverted',
+        refusal_reason: 'delegation_expired',
+        revert_reason: 'TimestampEnforcer:expired-delegation',
+        details: 'UserOperation reverted during simulation with reason: 0x08c379a0…',
+      },
+    )
+
+  it('prepare_reverted is PREPARE_REVERTED, a stop — never the generic 5xx "retry once" — with the reason fields', () => {
+    const out = normalizeError(prepareReverted()) as unknown as Record<string, unknown>
+    expect(out.code).toBe('PREPARE_REVERTED')
+    expect(out.statusCode).toBe(502)
+    expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(out.revert_reason).toBe('TimestampEnforcer:expired-delegation')
+    expect(out.refusal_reason).toBe('delegation_expired')
+    expect(String(out.next_tool_omitted_reason)).toMatch(/reverts again/)
+  })
+
+  it('prepare_failed (not a revert) keeps the generic 5xx retry-once step — the transient case it was written for', () => {
+    const out = normalizeError(
+      new HavenApiError('Delegation-rail authorization failed (bundler or RPC): fetch failed', 502, {
+        error: 'Delegation-rail authorization failed (bundler or RPC)',
+        error_code: 'prepare_failed',
+        details: 'fetch failed',
+      }),
+    ) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+    expect(out.revert_reason).toBeUndefined()
+  })
+})

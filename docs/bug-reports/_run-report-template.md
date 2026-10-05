@@ -22,7 +22,7 @@ covers:
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
   - .claude/commands/qa-explore-agent-onboarding.md
-last-verified: "2026-09-21"
+last-verified: "2026-09-30"
 ---
 
 <!--
@@ -107,13 +107,19 @@ npm run qa:dev -w packages/qa-agent
 ```
 
 The commands and artifact paths in this template were re-verified against the
-repos on 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the five
-script names above in `packages/frontend/package.json` and
+repos on 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`; previous
+verification 2026-09-21, audit #3206 at `7f17c9f3`): the five script names
+above in `packages/frontend/package.json` and
 `packages/qa-agent/package.json`, and both Playwright `outputDir` values in
-`playwright.config.ts` / `playwright.live.config.ts`. The intervening commits
-(#3204/#3205 analytics e2e, #3173 connect cold start, #3194 ci.yml docs notes)
-changed the suites and covered code, not the template's fields, tables or
-artifact layout.
+`playwright.config.ts` / `playwright.live.config.ts` — all unchanged as
+documented (the `output/playwright*/` paths are gitignored working dirs). The
+intervening commits (#3484 /demo page env wiring, #3455 CLI manifest command,
+#3448 verify-receipt, #3435 company details, #3394 releases visual spec,
+#3377 failure classes, #3374/#3373 qa-freshness) changed the suites and
+covered code, not the template's fields, tables or artifact layout. The
+scenario table's over-budget claims still match the code: the typed HTTP 403
+`delegation_budget_exceeded` pre-check covers both the EIP-3009 leg and the
+erc7710 direct-settlement scheme (`modules/x402/delegation-authorize.ts`).
 
 ## Agent Connection — When In Scope
 
@@ -134,7 +140,7 @@ Record one row per deterministic or manual scenario.
 | Scenario | Expected invariant | Result | Payment ID | Status/error code | Funding/settlement/sweep evidence | Notes |
 |---|---|---|---|---|---|---|
 | within-budget direct settle | Settles and is logged | pass/fail/skip | | | | |
-| over-budget direct refusal | Refused by the on-chain caveat enforcer before it becomes signable; never auto-executed (#2016 — there is no approval queue on the delegation rail) | pass/fail/skip | | | Record the enforcer named in the revert reason, not just the 502 | |
+| over-budget direct refusal | Refused before it becomes signable; never auto-executed (#2016 — there is no approval queue on the delegation rail). Since #3503 a typed **HTTP 403 `delegation_budget_exceeded`** at a period-budget pre-check, not the enforcer's 502 | pass/fail/skip | | | Record `error_code` and `remaining_atomic`, not just the 403 — a bare 403 is also what a MISSING delegation returns. A 502 carrying an enforcer name means the pre-check failed open on a degraded budget read | |
 | x402 over-budget reject | Rejects with no signable intent, on the EIP-3009 funding leg (#2016). Since #2706 (PR #2719) this is a typed **HTTP 403 `delegation_budget_exceeded`** at a pre-check before any prepare, not the enforcer's 502 — same as the erc7710 row below | pass/fail/skip | | | Record `error_code` and `remaining_atomic`. There is normally NO revert reason to record: the pre-check refuses before the chain is asked. A 502 carrying an enforcer name means the pre-check failed open on a degraded budget read (by design) — record that too, it is a flapping RPC before it is a regression | |
 | x402 erc7710 over-budget reject | Rejects with no signable intent on the erc7710 direct-settlement scheme too — HTTP 403 `delegation_budget_exceeded` before a settlement child, an intent row or a relayer-paid delegate deploy exists (#2082). Until then erc7710 did NOT refuse at authorize and the budget was reached only at merchant redemption | pass/fail/skip | | | Record `error_code` and `remaining_atomic`, not just the 403 — a bare 403 is also what a MISSING delegation returns | |
 | x402 settle | Funding and merchant settlement complete | pass/fail/skip | | | | |

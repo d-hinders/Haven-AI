@@ -96,18 +96,40 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // above/between these sites, shifting them progressively by +116 to +147
     // on top of #3416's shifts (the sub-budget refusals are 404/409 — never
     // census policy statuses).
-    { line: 412, code: 403, ledger: 'row' }, // 3009 funding-leg pre-check: over budget (#2706)
-    { line: 503, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
-    { line: 512, code: 502, ledger: 'row' }, // 3009 prepare catch: classified caveat revert (slice 1's writer)
-    { line: 551, code: 403, ledger: 'row' }, // 3009 no open budget delegation (slice 1's writer)
-    { line: 701, code: 403, ledger: 'row' }, // erc7710 no active budget delegation (#2945)
-    { line: 818, code: 403, ledger: 'row' }, // erc7710 pre-check: over budget (#2082)
-    { line: 888, code: 400, ledger: 'skipped' }, // #3117 caller/challenge skew — malformed request, allowlisted
-    { line: 957, code: 502, ledger: 'skipped' }, // settlement-delegation build failure — infrastructure, allowlisted
-    { line: 994, code: 429, ledger: 'skipped' }, // relayer sponsorship budget exhausted — capacity, allowlisted
-    { line: 998, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
+    // #3500 added `taskBudgetCapRefusal` (the ONE task-budget cap writer
+    // both legs and the funding revert fallback share, at 210) below
+    // resolveTaskBudgetOrRefusal, then the funding leg's cap input + pre-check
+    // and revert fallback, and the erc7710 pre-check — shifting every refuse(
+    // site below by +71 to +93 (and the raw 429 allowlist entry by +56).
+    { line: 114, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — shared by both legs' pre-checks and the funding revert fallback
+    { line: 346, code: 403, ledger: 'row' }, // 3009 funding-leg pre-check: over budget (#2706)
+    { line: 408, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
+    // #3609 split the 3009 prepare catch's 502 in two: the unbooked
+    // prepare_failed (616, infrastructure) and the booked classified-revert
+    // branch (618); with its two imports and the operator log, every site
+    // shifted by +1 to +16. #3610 then added the description write on both
+    // legs, shifting every site by +3 to +8 more.
+    // #3617 moved both legs onto the shared budget-scope resolver
+    // (modules/budget-scope): the local task/sub-budget refusal tables and
+    // resolve*OrRefusal helpers were deleted and each leg's period pre-check
+    // collapsed into evaluatePeriodPrecheck, shifting every site by −100 to
+    // −193 (and the raw 429 allowlist entry by −151). No refuse( site was
+    // added or removed.
+    { line: 442, code: 502, ledger: 'skipped' }, // #3609 3009 prepare catch: not a revert (bundler/RPC) — prepare_failed, allowlisted
+    { line: 444, code: 502, ledger: 'row' }, // 3009 prepare catch: classified revert (slice 1's writer) — prepare_reverted, or prepare_failed for a non-execution revert, since #3609
+    { line: 477, code: 403, ledger: 'row' }, // 3009 no open budget delegation (slice 1's writer)
+    { line: 650, code: 403, ledger: 'row' }, // erc7710 no active budget delegation (#2945)
+    { line: 756, code: 403, ledger: 'row' }, // erc7710 pre-check: over budget (#2082)
+    { line: 811, code: 400, ledger: 'skipped' }, // #3117 caller/challenge skew — malformed request, allowlisted
+    { line: 880, code: 502, ledger: 'skipped' }, // settlement-delegation build failure — infrastructure, allowlisted
+    { line: 918, code: 429, ledger: 'skipped' }, // relayer sponsorship budget exhausted — capacity, allowlisted
+    { line: 922, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
   ],
   'src/routes/payments.ts': [
+    // #3531 added the recipient-history import and the `classifyRecipient`
+    // helper (+46 above the create handler, with the replay-branch hunk),
+    // then the pre-insert classification in the create handler (+11 more
+    // below it): every site below shifts by +46 or +57.
     // #3271 shifted every line below by +3: `replayIntentBody`'s delegation
     // branch now shares `buildDirectSignData` (`modules/payments/
     // direct-sign-context.ts`) with the new GET /:id/sign-context route,
@@ -130,11 +152,60 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // resolution) then shifted every site below by +121, and the sites below
     // the sub_budget resolution block by +123 — the #3416 503 row (inside the
     // prepare catch) and the 502/403 pair ride the same +121.
-    { line: 648, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
-    { line: 653, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 677, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 976, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 1003, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    // #3500 added the task-budget cap pre-check (605) after the task budget
+    // resolves and the transfer-cap revert fallback (708) inside the prepare
+    // catch, shifting every site below by +52 to +62.
+    // #3503 added two imports (+2) and the period budget pre-check (770)
+    // before the UserOp is built, plus its revert fallback (811) inside the
+    // prepare catch, shifting every site below by +93 to +102.
+    // #3528 added the self-transfer domain import pair and the prepare
+    // success response's additive self-transfer warning block, then #3560
+    // REVERTED #3528 entirely — net zero shift from that round-trip, so the
+    // pins below are the #3503 baseline numbers again.
+    // #3494 added imports for isAccountValidationRevert/boundFailureMessage
+    // and new refuse( sites inside the sign route's failure catch
+    // (signature-rejected, account-validation-failed, task-budget and
+    // period-budget reverts confirmed at submit, and the generic fallback) —
+    // all 502, all routed through refuse(..., null): the catch already books
+    // the failure on the intent row via failSubmittedIntent before
+    // classifying, so none of these is a policy refusal the ledger owns.
+    // Review round 1 (#3494) widened the delegation-rail import to include
+    // SubmittedUserOpFailedError — net +5 above every site below.
+    // #3564 reworked that same catch: the receipt-unconfirmed variant now
+    // books outcome-PENDING and answers its own 502 BEFORE the terminal
+    // booking (so the #3494 submission-outcome-unknown site is GONE, not
+    // moved), and the typed sites below it shift by the classification
+    // block's +40; the other four #3494 sites keep their relative order.
+    // #3564 review round 2 hoisted `boundedFailureMessage(errorMsg)` above
+    // the booking split (+6) and added the outcome-pending body's fixed
+    // remedy `message` (+5) — the outcome-pending site shifts +6 and every
+    // typed site below it +12; no site was added or removed.
+    // #3618 rewired the authorize-time path onto the #3616 resolver: the
+    // inline task-budget/sub-budget resolution, the duplicated refusal
+    // tables, the link pre-check, the period 403 body and both ledger
+    // `detail` objects moved into the budget-scope module — refuse( calls
+    // stay in THIS file, so TARGET_FILES is unchanged. The five sites at the
+    // guarded head shift up by −55 (task-cap pre-check row) and −135 (period
+    // pre-check row); every site below shifts by −135.
+    { line: 613, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — pre-check before the UserOp is built
+    { line: 695, code: 403, ledger: 'row' }, // #3503 period budget exhausted — pre-check before the UserOp is built
+    { line: 719, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
+    { line: 728, code: 403, ledger: 'row' }, // #3500 transfer-cap revert confirmed against the task budget's own spent figure
+    { line: 737, code: 403, ledger: 'row' }, // #3503 period-budget revert confirmed by a fresh remaining-budget read
+    // #3609 split the prepare catch's 502 in two: the unbooked
+    // prepare_failed (896, infrastructure) and the booked classified-revert
+    // branch (898); with the one-line import and the operator log every site
+    // shifts by +1 to +22.
+    { line: 761, code: 502, ledger: 'skipped' }, // #3609 prepare catch: not a revert (bundler/RPC) — prepare_failed, allowlisted
+    { line: 763, code: 502, ledger: 'row' }, // prepare catch: classified revert (#2945) — prepare_reverted, or prepare_failed for a non-execution revert, since #3609
+    { line: 784, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 1094, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 1139, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
+    { line: 1191, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
+    { line: 1217, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
+    { line: 1266, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 1305, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 1359, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
   ],
 }
 
@@ -153,7 +224,7 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
 const RAW_ALLOWLIST: Record<(typeof TARGET_FILES)[number], { line: number; code: number; reason: string }[]> = {
   'src/modules/x402/delegation-authorize.ts': [
     {
-      line: 314,
+      line: 227,
       code: 429,
       reason: 'per-agent hourly x402 cap — spend-velocity protection with its own retry_after_seconds contract; owner decision keeps it unrecorded (a rate_limited reason would be a migration-086 CHECK widening on its own)',
     },
@@ -163,20 +234,45 @@ const RAW_ALLOWLIST: Record<(typeof TARGET_FILES)[number], { line: number; code:
 
 const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; reason: string }[]> = {
   'src/modules/x402/delegation-authorize.ts': [
-    { line: 503, reason: '#3416 DelegationRailChainUnavailableError — this deployment has no bundler credential for the chain (configuration), not a guardrail refusal' },
-    { line: 888, reason: '#3117 the caller\'s decomposed fields disagree with the paymentRequired it sent — a malformed request, not a guardrail refusal' },
-    { line: 957, reason: 'buildSettlementDelegation threw — child-construction infrastructure failure, not spend policy' },
-    { line: 994, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
-    { line: 998, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
+    { line: 408, reason: '#3416 DelegationRailChainUnavailableError — this deployment has no bundler credential for the chain (configuration), not a guardrail refusal' },
+    { line: 442, reason: '#3609 the funding prepare failed without a revert (bundler/RPC/transport) — prepare_failed, infrastructure, not a guardrail refusal' },
+    { line: 811, reason: '#3117 the caller\'s decomposed fields disagree with the paymentRequired it sent — a malformed request, not a guardrail refusal' },
+    { line: 880, reason: 'buildSettlementDelegation threw — child-construction infrastructure failure, not spend policy' },
+    { line: 918, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
+    { line: 922, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
   ],
   'src/routes/payments.ts': [
     {
-      line: 648,
+      line: 719,
       reason: '#3416 DelegationRailChainUnavailableError — this deployment has no bundler credential for the chain (configuration), not a guardrail refusal',
     },
     {
-      line: 1003,
-      reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
+      line: 761,
+      reason: '#3609 the prepare failed without a revert (bundler/RPC/transport) — prepare_failed, infrastructure, not a guardrail refusal',
+    },
+    {
+      line: 1139,
+      reason: '#3564 the receipt-unconfirmed submit — the row is booked outcome-pending (never failed) and the submission reconciler resolves it from the chain, so the 502 is a poll instruction, not a policy refusal',
+    },
+    {
+      line: 1191,
+      reason: '#3494 AA24 signature rejection — deliberately not booked: the failed intent row is the record',
+    },
+    {
+      line: 1217,
+      reason: '#3494 other AA2x account-validation failure — deliberately not booked: the failed intent row is the record',
+    },
+    {
+      line: 1266,
+      reason: '#3494 task-budget transfer-cap revert confirmed at submit — deliberately not booked: the failed intent row is the record',
+    },
+    {
+      line: 1305,
+      reason: '#3494 period-budget revert confirmed at submit — deliberately not booked: the failed intent row is the record',
+    },
+    {
+      line: 1359,
+      reason: 'on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — deliberately not booked: the failed intent row is the record',
     },
   ],
 }
@@ -356,8 +452,10 @@ describe('refusal census — every policy refusal in the enumerated files goes t
       const source = ts.createSourceFile(rel, src, ts.ScriptTarget.Latest, true)
       rows += analyze(source).refuseCalls.filter((r) => r.ledger === 'row').length
     }
-    // 8 ledger writers (5 in delegation-authorize + 3 in payments.ts) plus 7
-    // wrapped no-writer sites (#3416 added two) = 15 refuse( call sites total.
-    expect(rows).toBe(8)
+    // 13 ledger writers (6 in delegation-authorize + 7 in payments.ts; #3500
+    // added three, #3503 two) plus 14 no-writer sites (6 + 8: #3416, the
+    // #3494/#3564 sign-failure answers and #3609's two prepare_failed
+    // branches among them) = 27 refuse( call sites total.
+    expect(rows).toBe(13)
   })
 })

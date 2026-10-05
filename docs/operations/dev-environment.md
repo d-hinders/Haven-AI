@@ -10,8 +10,10 @@ covers:
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
   - .env.dev.example
+  - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
+  - packages/frontend/src/lib/site-gate.ts
   - packages/backend/src/config.ts
   - packages/backend/src/modules/catalog/marketplace-scope.ts
   - packages/backend/src/routes/merchants.ts
@@ -25,8 +27,57 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-28"
+  - packages/frontend/src/lib/demo-gate.ts
+  - packages/frontend/playwright.config.ts
+  - packages/frontend/vercel.json
+  - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
+  - scripts/vercel/**
+last-verified: "2026-10-02"
 ---
+
+> **Re-verified #3632 (2026-10-05):** `.env.dev.example` drops "Gnosis Chiado"
+> from its testnet line, which now names Base Sepolia only, and annotates
+> `RPC_URL` and `GNOSISSCAN_API_KEY` as "chain 100 only; unused by the delegation
+> rail". `config.ts` still reads both variables. This matches this doc's own
+> lines that call chain 100 legacy and dead; no variable, value or deploy step
+> changes. Nothing else in this document was re-verified, and `last-verified` is
+> not bumped.
+
+> **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
+> `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
+> agents join the pixel gate with the same seed-before-navigation dark
+> convention the other specs use (its spec reads `testInfo.project.name`; the
+> light desktop/mobile shots ride the chromium-desktop project's viewport
+> loop, and mobile dark is skipped — no mobile dark baseline). The new
+> `/developers` and `/for-agents` pages are frontend pages behind the
+> existing site gate; no environment variable this document describes changes
+> name, meaning, surface, or where it is set, and no backend route file is
+> added or moved. Nothing else in this file's coverage was touched; this note
+> is the only edit.
+
+> **Re-verified #3574 (2026-10-02):** `playwright.config.ts`'s dark-project
+> `testMatch` gains `home.visual.spec.ts` — the redesigned home page joins the
+> pixel gate with the same seed-before-navigation dark convention the other
+> specs use (its spec reads `testInfo.project.name`; the light desktop/mobile
+> shots ride the chromium-desktop project's viewport loop). No environment
+> variable this document describes changes name, meaning, surface, or where it
+> is set: the gate section above already covers the site-preview variable and
+> the e2e/visual build surfaces, unchanged by this slice. No route file is
+> added or moved. Nothing else in this file's coverage was touched; this note
+> and the `last-verified` date are the only edits.
+
+> **Re-verified #3564 (2026-10-02):** `index.ts` gains one more
+> leader-gated background tick beside the settlement sweep — the submission
+> reconciler (`modules/payments/submission-reconciler.ts`, lock key
+> `submissionReconcile`), every 60 s, `unref`'d like the sweep's own
+> interval. It resolves the direct payments whose sign submit was SENT but
+> whose receipt was never confirmed (the rows #3564 books outcome-pending):
+> one bundler receipt read per candidate row, terminal writes via CAS, and
+> a per-candidate try/catch so one poison row cannot silence the queue. No
+> route file is added or moved, `enforcedModules` is untouched, and the
+> shadow/enforce semantics this document describes are unchanged. Nothing
+> else in this file's coverage was touched; this note and the
+> `last-verified` date are the only edits.
 
 # Dev environment
 
@@ -48,7 +99,7 @@ how to configure it. For the branch workflow that feeds it, see
 
 | Service | Platform | Deploys from | Notes |
 |---|---|---|---|
-| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, always the newest `dev` build). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
+| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, serving the newest `dev` build — and a push that changes nothing the frontend is built from normally builds nothing; see [Which pushes rebuild the frontend](#which-pushes-rebuild-the-frontend)). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend via its own `HAVEN_API_URL`. ⚠️ Was found wired to `main` with a dead upstream on 2026-08-06 — [verify before trusting it](#verifying-a-dev-service-actually-works). |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. Advertises EIP-3009 first by default; the ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
@@ -66,8 +117,11 @@ deployed that way today.
 
 - Frontend (Vercel): `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
   — the **branch-tracking preview of `dev`**: a stable hostname that Vercel
-  re-points at the newest `dev` deployment, so it is always current without ever
-  changing. Verified 2026-08-06: it serves the same build as the immutable
+  re-points at the newest `dev` deployment without ever changing. Since #3594
+  that deployment is of the newest `dev` commit *that changed the frontend's
+  inputs*: a push that changes none of them normally skips its build
+  ([below](#which-pushes-rebuild-the-frontend), including when it builds anyway). Verified 2026-08-06, before
+  that change: it serves the same build as the immutable
   deployment of `dev` HEAD, and proxies to the dev backend. Per-PR preview links
   exist alongside it (the PR's Vercel check) and are what you use to test *that
   PR's build* — they are a different domain each time.
@@ -101,6 +155,25 @@ deployed that way today.
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public and carries only status, timestamp, and database health; `/health/ops` is operator-only).
+  The ops console's backend routes (`/ops/*`, #3509, epic #3507) answer 404
+  on any backend that does not set all six `OPS_*` variables documented in
+  [`.env.dev.example`](../../.env.dev.example); a partly-configured backend is
+  the same as an unconfigured one. Setting them on a deployed service is an
+  operator step tracked on the epic's promotion checklist. The data routes
+  also need `OPS_DATABASE_URL`, the read-only role's login — see
+  [`ops-readonly-role.md`](ops-readonly-role.md). The customer on-chain view
+  (`GET /ops/users/{id}/onchain`, #3513) additionally needs the chain
+  readers, which `index.ts` wires whenever the read-only role is configured;
+  without them that one route answers 404 while the rest of `/ops` works.
+  The system-health read (`GET /ops/health`, #3514) needs no extra
+  configuration: it embeds the same payload the operator-token `/health/ops`
+  serves (built by the same function, wired in `index.ts` whenever the
+  read-only role is configured — without it this route answers 404 like the
+  other data reads) plus monitor-derived problem lists. The delegate-balance
+  section reflects the delegate monitor's last in-memory report, so a
+  replica that does not hold the monitor's leader lock answers
+  `not_available_on_this_replica` instead of figures; there is never a scan
+  on request.
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
@@ -121,6 +194,49 @@ deployed that way today.
   set as repo variables (or secrets of the same name); missing either one skips
   the leg, which the blocking Coverage completeness step reports as a failure.
   See [`agent-qa.md`](agent-qa.md) § *The hosted-MCP leg*.
+
+### Which pushes rebuild the frontend
+
+`packages/frontend/vercel.json` carries the frontend project's repo-expressible
+Vercel settings (#3594): the framework, the install command, the build command
+and the **Ignored Build Step**. Vercel reads it only because the project's
+**Root Directory** is `packages/frontend`; leave the install command, build
+command and Ignored Build Step unset in the dashboard, so the file is the one
+source. The step runs the shared `scripts/vercel/ignore-build.sh` with the
+watch file `scripts/vercel/watch/frontend.txt`, which lists the paths the
+frontend is built from: `packages/frontend`, `packages/ui`, `packages/core`,
+`tsconfig.base.json`, the root install inputs (`package.json`,
+`package-lock.json`, `.nvmrc`) and the docs `next.config.ts` serves under
+`/docs/` (the frontend's served-docs `ALLOWLIST`). A build is skipped only
+when none of them changed since the commit the project last **deployed**; the
+rule and its edge cases are described once, in
+[`ops-console.md` § Ignored Build Step](ops-console.md#1-the-vercel-project),
+since the ops project runs the same script. For this project that means:
+
+- A push that changes none of those paths (backend, SDK, CI, or a doc other
+  than the served ones) shows `Vercel – haven-ai-frontend`: "Canceled by
+  Ignored Build Step" and builds nothing, provided the commit the project last
+  deployed is in Vercel's clone; when it is not, the step builds. The `dev`
+  host then keeps serving the last build, which is current, because nothing it
+  serves changed.
+- A PR's first preview compares the branch with its merge base with `dev`,
+  fetching `dev` when Vercel's clone lacks it, so a frontend PR gets a preview
+  even when its newest push is docs-only. If no merge base can be found, the
+  preview builds. Whether that fetch succeeds inside Vercel's build is not yet
+  observed; the build log's `vercel ignore-build:` line says which branch the
+  rule took.
+- A push to `dev` or `main` with no recorded previous deployment always builds.
+- The list is checked against the real build inputs by
+  `packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts`; a new
+  workspace dependency, transpiled package or served doc that the list misses
+  fails it.
+
+**Rebuilding an unchanged commit.** A changed `NEXT_PUBLIC_*` value (Next
+inlines them at build time) needs a rebuild that no git change triggers, so the
+step would skip it. Set the project environment variable `FRONTEND_FORCE_BUILD`
+to `1` in the scope you are changing (Preview for the dev host, Production for
+production), redeploy the latest deployment of that branch, then delete
+`FRONTEND_FORCE_BUILD`; left in place it makes every build in that scope run.
 
 ### Verifying a dev service actually works
 
@@ -236,6 +352,7 @@ Isolation rules that are non-negotiable for a payments product:
 
 - **Separate Postgres** from prod (`DATABASE_URL` points at the dev instance).
 - **Dev-only `JWT_SECRET`** — prevents cross-environment token confusion.
+- **Dev-only `OPS_JWT_SECRET` and GitHub OAuth App** — the ops console (#3509) gets its own dev values, never the prod ones, for the same reason.
 - **`RELAYER_PRIVATE_KEY`** — since the #908 owner decision (2026-07-19) the
   SAME relayer EOA (`0xC825…9D7E`) serves Base mainnet and Base Sepolia,
   funded on both; it is gas-only either way (customer funds are unreachable
@@ -253,8 +370,13 @@ Isolation rules that are non-negotiable for a payments product:
   [`delegation-rail-vendor-ops.md` §2](delegation-rail-vendor-ops.md). Every
   secret here still MUST differ from production.
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
-  chain 100 is dead per above), `RPC_URL_BASE` → **Base Sepolia**. Swap to
-  mainnet RPCs only if a test genuinely needs mainnet state.
+  chain 100 is dead per above), `RPC_URL_BASE_SEPOLIA` → **Base Sepolia**
+  (chain 84532, the chain dev's accounts and the money-flow harness use).
+  `RPC_URL_BASE` always names a Base **mainnet** (8453) endpoint, on dev too:
+  dev reads it every hour for the relayer balance monitor's 8453 entry (the
+  same relayer key serves both chains) and for any other chain-8453 read.
+  Unset, it falls back to the public mainnet node with a boot warning; a
+  Sepolia URL there is a mismatch that reports a Sepolia balance as 8453.
 - **Two Base Sepolia RPCs, and they must stay two** (#2511). The backend
   WRITES through `RPC_URL_BASE_SEPOLIA`; the QA harness OBSERVES through
   `QA_RPC_URL_BASE_SEPOLIA` (a GitHub Actions **secret**, since a provider URL
@@ -271,9 +393,33 @@ Isolation rules that are non-negotiable for a payments product:
   ethers providers batch up to 100 calls per ~10 ms), the `pending` block tag,
   `eth_sendRawTransaction` accepted as a method (a zero-balance throwaway key,
   refused for funds, never mined) and a burst of 20 without a 429. dRPC's free
-  plan, the September 2026 dev primary, fails the batch and the `pending` tag;
-  the shared public node can fail the burst — it is what a dedicated endpoint
-  replaces.
+  plan (the dev primary 2026-09-24 → 2026-09-28) failed the batch and the
+  `pending` tag; the shared public node can fail the burst — it is what a
+  dedicated endpoint replaces. The probe measures per-second behaviour, never
+  monthly quota: a 5/5 endpoint can still run out of compute units mid-month.
+
+  **The dev arrangement since 2026-10-01 (#3489, #3456):**
+
+  | Variable | Where | Provider | Burst of 20 |
+  |---|---|---|---|
+  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) |
+  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) |
+  | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed |
+
+  **Two owner-accepted exceptions to the probe rule above** (2026-10-01):
+  - **The fallback fails the burst.** Infura's free plan is kept as a
+    fallback only, never admitted as a primary
+    ([#3489](https://github.com/d-hinders/Haven-AI/issues/3489)). It failed
+    even after epic #3457 cut Haven's own usage, so the limit is the plan's
+    per-second cap. Prod's `RPC_URL_BASE_FALLBACK` is the same Infura key and
+    is presumed to fail the bar too; it was not probed separately
+    ([#3456](https://github.com/d-hinders/Haven-AI/issues/3456)).
+  - **The QA observer was not probed.** It moved to a new Alchemy app; the
+    first money-flow run after the move passed 14/14 on attempt 1.
+
+  Every Alchemy app draws on one account-wide monthly compute-unit allowance,
+  prod's app included. An Alchemy burn-alert email reopens #3489.
+
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over
   in order: `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA`, then the optional
@@ -436,7 +582,11 @@ Isolation rules that are non-negotiable for a payments product:
   auth, one uuid path parameter, no body) and the PUT (owner auth) were both
   added to `enforcedModules` in their first commit; the request schema comes
   from the OpenAPI spec, so a body that is not exactly
-  `{ tax_declaration_enabled: boolean }` is refused before the handler. The
+  `{ tax_declaration_enabled: boolean }` is refused before the handler. #3509's
+  `routes/ops.ts` did the same; its plugin answers 404 before validation
+  when the ops console is unconfigured. #3512's data routes
+  (`GET /ops/overview`, `/ops/search`, `/ops/users/{id}`) joined that module,
+  so they were enforced from their first commit too. The
   `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are
@@ -787,6 +937,75 @@ the answer — so the convention this section describes is now the helper's
 contract, not three separate interpretations of it: unset, empty, `production`
 and `prod` are production; any other value is the deployment's own name.
 
+### `HAVEN_DEMO_PAGE_VISIBLE` (#3477)
+
+`/demo` and `/demo.md`'s production/testnet gate
+(`packages/frontend/src/lib/demo-gate.ts`) has one override: the server-only
+`HAVEN_DEMO_PAGE_VISIBLE` variable, read for the Playwright visual-regression
+server, which otherwise builds like production (no `NEXT_PUBLIC_HAVEN_ENV`)
+and would 404 the page it needs to screenshot. **Never set
+`HAVEN_DEMO_PAGE_VISIBLE` in either Vercel project.** Nothing in the dev or
+production Vercel env configuration sets it today, and `isDemoPageVisible`
+additionally ignores the override whenever Vercel's own `VERCEL` variable is
+present — belt-and-suspenders against it ever doing anything on a Vercel
+deployment even if that changed.
+
+### `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright builds (#3483)
+
+The Add funds modal reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
+(`packages/frontend/src/components/AddFundsModal.tsx`), so the app a visual
+spec's server serves shows the "Buy with card" onramp card only when the BUILD
+that produced it carried the id. Every CI surface that builds or serves the app
+for Playwright therefore sets it: `ci.yml`'s frontend_checks build (whose
+uploaded artifact the design_visual job downloads),
+`update-visual-baselines.yml`'s build and both regenerate steps (under `CI=1`
+the webServer boots that standalone build; the non-CI branch runs `next dev`,
+which inlines the constant from `playwright.config.ts`'s `webServer.env`). All
+of them set the same fixed synthetic literal, `e2e-onramp-app-id-placeholder`.
+**It is CI-only by construction: nothing in the repo sets it anywhere else** —
+no `.env*` file, no other workflow, no Docker or hosting config (the literal is
+grep-unique, so the leak check is mechanical), and it is not a secret: the id
+is never rendered, only its PRESENCE gates the card, so a fixed value keeps
+renders deterministic across key rotations.
+
+### `NEXT_PUBLIC_HAVEN_SITE_PREVIEW` — the redesigned public site (#3573)
+
+The redesigned public site (epic #3572) is built in slices behind a build-time
+gate, `isNewSiteVisible()` in `packages/frontend/src/lib/site-gate.ts`. It is
+**on outside production and off in production**: the dev Vercel project sets
+`NEXT_PUBLIC_HAVEN_ENV=dev`, so the dev deployment shows the new site, and
+production, which sets nothing, keeps today's pages until the switch-over slice
+removes the gate. `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1` turns it on in a
+production-shaped build. Every surface that builds or serves the app for the e2e
+and visual suites sets it — the CI builds, the baseline regeneration,
+Playwright's `webServer.env` for `next dev`, and the frontend's built-suite
+scripts, so a local run matches CI.
+**Neither Vercel project sets it, and neither should**: on production it would
+publish the half-built site.
+
+Some new routes exist **only** with the gate on and answer 404 without it,
+production included — the routes the site-redesign slices add, such as
+`/how-it-works/protocols` (#3576). They join `PUBLIC_SURFACES` with the
+switch-over slice (#3579), not before.
+
+It is build-time on purpose, unlike `HAVEN_DEMO_PAGE_VISIBLE` above. The `/demo`
+gate guards a page that hands out test funds, so it is server-only and read per
+request, and never reaches a client bundle. This gate guards presentation only,
+its readers include client components (the site header, and later `/login` and
+`/signup`), and an inlined constant answers the same on the server and the
+client without making any page dynamic.
+
+**To see the new site locally**, run the frontend with either variable set. A
+local `next dev` with no `.env` sets no environment name and so counts as
+production, with the gate off:
+
+```bash
+NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1 npm run dev -w packages/frontend
+```
+
+`/demo` also needs `HAVEN_DEMO_PAGE_VISIBLE=1` on a local server for the same
+reason.
+
 ## Inspecting the dev environment
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
@@ -912,3 +1131,10 @@ project owner — collaborators have Viewer access, not env-var write access.
 > schema's). The shadow/enforce semantics this document describes are
 > unchanged. Nothing else in this file's coverage was touched; the note and
 > the `last-verified` date are the only edits.
+
+> **Re-verified PR #3587 (2026-10-02):** `playwright.config.ts` changed only
+> in comments — the `chromium-desktop-dark` project's opening comment now
+> points at its `testMatch` instead of naming specs. `webServer.env`
+> (`HAVEN_DEMO_PAGE_VISIBLE`, `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`), the
+> projects and their `testMatch` lists are untouched, so the Playwright-build
+> claims above still hold. This note is the only edit.

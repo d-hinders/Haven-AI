@@ -109,20 +109,32 @@ delegation in step 5.
 
 ## Direct payment
 
+> **Re-verified #3495 (2026-09-30):** step 2's result shape and step 3's
+> recovery route, for the compact-by-default result and its opt-in relay.
+> Nothing else in this file was re-verified in this pass.
+
 1. `haven_pay` asks the backend to construct a payment intent.
-2. Within the remaining budget, it returns `payment_id`, `payload_hash`, and
-   expiry — plus, since #3277, the signing handoff itself:
-   `next_tool: haven_sign`, `next_arguments: { payment_id }`, and a
-   `signer_compatibility` notice. Above the remaining budget it is **declined
-   before any money moves** — nothing is queued and no one is asked to review
-   it, because there is no approval queue on the delegation rail
-   (`approval_requests` went with #2055).
+2. Within the remaining budget, it returns a COMPACT result (#3495, mirroring
+   the x402 quote tools' #1272 contract) — `payment_id`, `status`, an
+   `idempotency_key` (generated fresh when the caller passed none, and
+   echoed), `payload_hash`, `expires_at`, `signature_scheme` — plus, since
+   #3277, the signing handoff itself: `next_tool: haven_sign`,
+   `next_arguments: { payment_id }`, and a `signer_compatibility` notice.
+   `typed_data` / `typed_data_b64` do NOT ride this result by default. Above
+   the remaining budget it is **declined before any money moves** — nothing
+   is queued and no one is asked to review it, because there is no approval
+   queue on the delegation rail (`approval_requests` went with #2055).
 3. `haven_sign` signs the payload locally — by `payment_id` (the signer
-   fetches the exact bytes itself, #3271). On a pre-#3271 signer the call
-   refuses `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` having signed
-   nothing; the result's notice then says to re-sign with
-   `{ payload_hash, typed_data_b64 }` from the result, unchanged, and update
-   the connector.
+   fetches the exact bytes itself, #3271). On a refusal carrying `fallback:
+   'typed_data_b64'` (any code — a currently-published signer's transport
+   failure, malformed body, or a 404 on an older backend) or
+   `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` (a signer predating
+   #3271, which has no fallback of its own to try) having signed nothing: the
+   result's notice says to re-run `haven_pay` with the SAME `idempotency_key`
+   plus `include_signing_payload: true` — the backend replays the stored
+   payment rather than creating a second one — then re-sign with
+   `{ payload_hash, typed_data_b64 }` from THAT re-run's result, unchanged,
+   and update the connector.
 4. `haven_submit` relays the signature; the backend verifies the delegate and
    submits the sponsored UserOp that redeems the budget delegation.
 
@@ -152,6 +164,9 @@ haven_quote_x402 / haven_pay_x402_quote
   → haven_x402_sign_header
   → merchant retry or haven_complete_mcp_tool
   → haven_report_x402_outcome          (only when YOU did the retry)
+  → haven_report_settlement_evidence   (#3475 follow-up: only on an accepted outcome
+                                         with no settlement recorded yet, and only if the
+                                         merchant returned PAYMENT-RESPONSE.transaction)
 
 erc7710 direct settlement (delegation rail + merchant advertises it)
 haven_quote_x402 / haven_pay_x402_quote
@@ -159,6 +174,14 @@ haven_quote_x402 / haven_pay_x402_quote
   → haven_submit { settlement_scheme: "erc7710" }  → payment_header
   → merchant retry
 ```
+
+> **Re-verified (#3475 follow-up, 2026-09-30, passage only).** The added
+> `haven_report_settlement_evidence` step above is the hosted next-step
+> answer, not a new tool: `haven_report_x402_outcome`'s response names it
+> when the fact warrants it (eip3009, accepted, unsettled), and the tool
+> itself now accepts a bare `payment_id` as a well-formed no-op when the
+> merchant returned no hash. `last-verified` unchanged — nothing else in this
+> file's scope was re-checked.
 
 **Why the last EIP-3009 step exists at all
 ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).** The two

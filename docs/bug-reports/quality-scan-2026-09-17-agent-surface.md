@@ -19,7 +19,7 @@ covers:
   - packages/signer/src/tools.ts
   - scripts/ci/safe-account-rename-census.mjs
   - scripts/retired-rail-prose-ratchet.mjs
-last-verified: "2026-09-17"
+last-verified: "2026-09-30"
 ---
 
 # Quality scan 2026-09-17 — agent surface, second pass (safe-retirement, hosted + local MCP, signer, demo merchant)
@@ -263,3 +263,38 @@ Refused as a second finding (one-PR remedies, recorded as candidates): C1–C2 b
 3. **C1, C2, D2** → file as `new-task`s now? (B10 turned out shipped — #2997.)
 4. **Proposals 4/7/8/9 from 09-13** → still undecided; a yes/no per item
    would let the next pass stop re-listing them.
+
+## 9. Dispositions re-checked 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`)
+
+The report body above is left as written. The filed findings' outcomes,
+verified against the tree at this head:
+
+- **§0/§1 F1 (party model)** — shipped (#2960) and still live: discovery on
+  both runtimes carries `suggested_arguments` in the suggested tool's own
+  vocabulary (`packages/mcp/src/tools.ts:63-65,601`,
+  `packages/mcp-server/src/tools/catalog-purchase.ts`), the typed `NextStep`
+  family is the #3100–#3105 epic's shipped state, and `parties` remains on
+  receipts and status reads.
+- **§4 D1 (plaintext retry target)** — shipped as #3097 (PR #3112, 2026-09-18):
+  the hosted pay/pay-quote paths carry `resource_url_differs_from_request`
+  and refuse a public `http://` retry with `INSECURE_RETRY_TARGET`
+  (`tools/plain-http-x402.ts:425,783`, `tools/support/mcp-context.ts:242`,
+  SDK `INSECURE_RETRY_TARGET_CODE`); the SDK/local path applies the same rule
+  at its own seam. Not open.
+- **§4 D2 (discovery hands `resource_url`, tool takes `url`)** — resolved by
+  the same slice: discovery now hands `suggested_arguments: { url }` on HTTP
+  rows on both runtimes, and the strict refusal names declared keys and
+  aliases (#3100). Not open.
+- **§3 C1 (two money-path perimeters)** — resolved: `#3098` added
+  `packages/demo-merchant-mcp/src/**` to `.github/money-path-globs.json`
+  (the JSON records the addition with its date and reasoning), with the
+  labeler↔JSON lockstep the scan's remedy asked for (verified by running the
+  lockstep test once at audit time). Not open.
+- **§3 C2 (unguarded settled-cache cleanup)** — resolved: the untestable
+  `&& !settled.has(productKey)` guard is GONE from `demo-merchant-mcp/src/x402.ts`
+  with a #3099 comment proving the unreachability, and the observable delete
+  is mutation-pinned. Not open.
+- **§4 D3** — recorded as live evidence for the `haven_signer_status`
+  proposal; that proposal remains owner-pending (not re-decided here).
+- The §7 probe numbers and §5 safe-retirement census were not re-run; §2's
+  F2 and §1's live observations are historical records of that run.

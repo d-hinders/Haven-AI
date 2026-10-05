@@ -11,11 +11,14 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// Button moved to @haven_ai/ui (#3508) — the pin follows the implementation.
 const BUTTON = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',
-  'components',
+  '..',
+  '..',
   'ui',
+  'src',
   'Button.tsx',
 )
 

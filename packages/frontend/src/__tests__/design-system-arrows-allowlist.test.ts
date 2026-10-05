@@ -78,7 +78,7 @@ function isExemptSurface(file: string): boolean {
   return (
     /(^|\/)components\/(brand|marketing)\//.test(file) ||
     file === 'packages/frontend/src/app/page.tsx' ||
-    /^packages\/frontend\/src\/app\/(protocols|how-it-works)\//.test(file)
+    /^packages\/frontend\/src\/app\/(protocols|how-it-works|developers|for-agents)\//.test(file)
   )
 }
 

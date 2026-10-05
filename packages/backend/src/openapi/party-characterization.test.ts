@@ -41,10 +41,16 @@ function loadFixture(slug: string): { _base: string; body: unknown } {
  *   - `parties` — #2960 (this file's own change)
  *   - `funding_tx_hash` / `settlement_tx_hash` — #2998, the two hashes
  *     named beside the unlabeled `tx_hash`; asserted separately below.
+ *   - `settlement_scheme` / `merchant_settlement_recorded` — #3475 follow-up,
+ *     the additive `getAgentPaymentStatus` fields read from the same
+ *     `machine_metadata` the party model already reads.
  */
 const ADDITIVE_SINCE_BASE = new Set([
   // #3128: the receipts envelope gained page fields; the receipts themselves are unchanged.
-  'total', 'has_more', 'next_cursor','parties', 'funding_tx_hash', 'settlement_tx_hash'])
+  'total', 'has_more', 'next_cursor','parties', 'funding_tx_hash', 'settlement_tx_hash',
+  'settlement_scheme', 'merchant_settlement_recorded',
+  // #3564: additive outcome-pending visibility on the machine-payment status.
+  'submission_outcome_pending'])
 
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)

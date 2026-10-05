@@ -146,7 +146,9 @@ so this is a rule to point at rather than a question to ask the release runner.
       `CREATE INDEX CONCURRENTLY`, so the deploy's `IF NOT EXISTS` is a no-op,
       or use a low-traffic deployment window.
 - [ ] **No dev-only config leaks into prod:** production leaves
-      `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge) and keeps its own
+      `NEXT_PUBLIC_HAVEN_ENV` unset (no `DEV` badge) and
+      `NEXT_PUBLIC_HAVEN_SITE_PREVIEW` unset (it would publish the half-built
+      redesigned site while #3572 is open), and keeps its own
       secrets / relayer key / RPCs (these live on the platforms, not in code —
       just confirm nothing dev-specific was hardcoded).
 - [ ] **Sweep recovery floor:** set the production backend's
@@ -209,7 +211,10 @@ so this is a rule to point at rather than a question to ask the release runner.
       PR goes DIRTY with mass conflicts (this happened with #1152 → #1172, and
       took a `-s ours` reconcile merge, #1173, to repair).
 - [ ] Watch the **prod deploys** finish (Railway backend / MCP, Vercel frontend)
-      and confirm the **migrations applied cleanly** to the prod DB. A backend
+      — a promotion that changes nothing the frontend is built from shows the
+      Vercel frontend as "Canceled by Ignored Build Step", which is expected
+      ([`dev-environment.md` § Which pushes rebuild the frontend](dev-environment.md#which-pushes-rebuild-the-frontend))
+      — and confirm the **migrations applied cleanly** to the prod DB. A backend
       that refuses to boot with *"Migration … was left INCOMPLETE by an earlier
       run"* means a **non-transactional** migration (#2150) died part-way: its
       statements were not rolled back, and the error itself carries the two
@@ -240,6 +245,18 @@ so this is a rule to point at rather than a question to ask the release runner.
 
       Use a key distinct from the dev/QA ones, so usage is attributable and
       either can be rotated alone.
+
+      **One accepted exception (owner, 2026-09-29, #3456):** prod's
+      `RPC_URL_BASE_FALLBACK` and dev's `RPC_URL_BASE_SEPOLIA_FALLBACK` share
+      one Infura free Core key, because the free plan allows one key, and
+      that key fails the #3336 burst of 20. Both are fallbacks, but the two
+      **primaries** are apps on one Alchemy account with one account-wide
+      monthly compute-unit allowance. If that allowance runs out, both
+      primaries fail together and both environments land on the one Infura
+      key at once, where the shared budget will throttle. Alchemy's usage
+      alerts are the early warning. The owner re-confirmed the acceptance with
+      that failure mode stated on 2026-10-01. Revisit when a paid RPC plan is
+      considered.
 
       **Before any of these variables — or `RPC_URL_BASE_FALLBACK` /
       `RPC_URL_BASE_SEPOLIA_FALLBACK` (#3255) — points at a new endpoint, run

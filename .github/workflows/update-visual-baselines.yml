@@ -137,6 +137,18 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
+          # #3483: the Add funds modal reads the Coinbase onramp id at BUILD
+          # time, so the app this job serves must be built WITH it or the new
+          # add-funds-modal.visual.spec.ts baselines would render the
+          # onramp-less variant. Same fixed synthetic literal as ci.yml's
+          # frontend_checks build (which design_visual's downloaded build
+          # comes from) — see the rationale there. CI-only env: no deployment
+          # config reads this literal.
+          NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
+          # #3573: the redesigned public site's gate on, as in ci.yml's
+          # frontend_checks build (epic #3572: one e2e build, gate on —
+          # src/lib/site-gate.ts). CI-only: no deployment sets it.
+          NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'
 
       - name: Restore Playwright browser cache
         id: playwright-cache
@@ -178,6 +190,17 @@ jobs:
           CI: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1
+          # #3483: build-time env is not what the SERVER needs — this run
+          # plays BOTH roles, because the CI=1 webServer boots the standalone
+          # build made above rather than rebuilding here (the non-CI branch
+          # of playwright.config.ts would run `next dev`, which inlines
+          # NEXT_PUBLIC_* from THIS step's env). Set on both regenerate steps
+          # so either server path carries the same bundle constant the build
+          # above baked in.
+          NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
+          # #3573: same reasoning as the onramp id — the gate is a bundle
+          # constant, so either server path must carry it.
+          NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'
 
       # #2929: the dark scheme's baselines regenerate in the SAME dispatch, on
       # the SAME runner image, from the SAME cached browser — the light and
@@ -193,6 +216,13 @@ jobs:
           CI: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1
+          # Same as the light regenerate step above (#3483): the dark project
+          # compares against the SAME worktree's app, so it needs the same
+          # build-time constant present however its server is produced.
+          NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
+          # #3573: same reasoning as the onramp id — the gate is a bundle
+          # constant, so either server path must carry it.
+          NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'
 
       # #2218. Runs BEFORE the commit, so a baseline this dispatch did not come
       # for is never pushed in the first place.

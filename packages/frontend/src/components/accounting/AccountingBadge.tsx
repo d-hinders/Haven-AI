@@ -26,7 +26,7 @@
  * small display map, so a second provider does not read as "In Fortnox".
  */
 import Link from 'next/link'
-import type { KeyboardEvent, MouseEvent } from 'react'
+import type { MouseEvent } from 'react'
 import type { ApiSchema } from '@haven_ai/core'
 import { useT } from '@/context/LocaleContext'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
@@ -66,13 +66,14 @@ const TONE: Record<TransactionAccounting['status'], StatusTone> = {
 }
 
 /**
- * The badge sits inside a row that is itself a `role="button"` (the table
- * row opens the detail drawer on click AND on Enter/Space). Both must stop
- * here: a click that bubbles opens the drawer under the navigation, and the
- * row's keydown handler calls `preventDefault()` on Enter, which would cancel
- * the link's own activation.
+ * The table row's `onClick` is a mouse convenience that opens the detail
+ * drawer; the accessible path is the title button, a SIBLING of this link.
+ * The click must still stop here, and not only for the mouse: Enter on an
+ * `<a>` fires a synthetic click that bubbles to the row's `onClick`, which
+ * would open the drawer under the navigation. There is no keydown stop any
+ * more — the row has no key handler to cancel the link's own activation.
  */
-function stopRowActivation(event: MouseEvent | KeyboardEvent) {
+function stopRowActivation(event: MouseEvent) {
   event.stopPropagation()
 }
 
@@ -123,7 +124,6 @@ function PresentAccountingBadge({
       href={ACCOUNTING_PAGE_HREF}
       aria-label={t.accountingBadge.openAccounting(label)}
       onClick={stopRowActivation}
-      onKeyDown={stopRowActivation}
       className={`inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 ${className}`}
       data-testid="accounting-badge"
       data-status={accounting.status}

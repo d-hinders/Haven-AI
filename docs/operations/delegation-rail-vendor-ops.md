@@ -136,7 +136,7 @@ run no estimation, so recovery retries cost nothing.
   - A chain with no usable credential throws `DelegationRailChainUnavailableError`.
     The x402 funding leg and `POST /payments` answer it as a typed, non-retryable
     **503 `rail_unavailable_for_chain`** (with `chain_id`, never the URL), not
-    the generic "authorization failed" 502. The hosted MCP turns it into
+    the generic prepare 502 (`prepare_failed`, #3609). The hosted MCP turns it into
     `RAIL_UNAVAILABLE_FOR_CHAIN` / `stop_and_tell_user`. Other bundler
     consumers (task budgets, grant activation, re-key, hybrid transfers) still
     surface it through their own error paths.
@@ -152,8 +152,9 @@ run no estimation, so recovery retries cost nothing.
 **Sponsorship exhaustion / bundler outage degrades to "payments pause" —
 never to "policy weakens".** The caveat stack is enforced on-chain at
 redemption regardless of who pays gas; when sponsorship declines,
-prepare/submit throw and the payment route 502s cleanly with a redacted
-error. There is no fallback signer, no retry-with-Haven-funds path, and none
+prepare/submit throw and the payment route 502s cleanly with a redacted,
+bounded error (`prepare_failed` at prepare since #3609 — the hosted step still
+says retry once). There is no fallback signer, no retry-with-Haven-funds path, and none
 may be added (red line — see the security model).
 
 Blast radius since #946: `/payments` and **3009-mode** x402 pause; **erc7710

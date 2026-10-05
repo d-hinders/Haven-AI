@@ -420,6 +420,27 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('the budget-scope period pre-check is RUNTIME money-path — a change to it gates promotion (#3649)', () => {
+    // The #1892 shape inside the backend. The #2099 fail-open period pre-check
+    // lived inline in modules/x402/delegation-authorize.ts (matched by
+    // modules/x402/**) until #3616 created modules/budget-scope/ and #3617
+    // deleted the inline copy. PR #3622 (#3616) then touched only the new
+    // module and carried no money-path label. Runtime, not control: both x402
+    // authorize legs and POST /payments decide through it inside the deployed
+    // backend, so a green money-flow run does exercise it. The labeler and
+    // SKILL.md pins read the UNION of both lists, so without this test the
+    // glob could drift into controlGlobs silently. Mutation: move the glob to
+    // controlGlobs (or drop it) and this fails by name.
+    const runtime = loadMoneyPathGlobs()
+    for (const f of ['packages/backend/src/modules/budget-scope/precheck.ts', 'packages/backend/src/modules/budget-scope/resolver.ts']) {
+      assert.ok(
+        moneyPathFiles([f], runtime).length === 1,
+        `${f} must be matched by a RUNTIME money-path glob — it decides whether a payment ` +
+          'fits the remaining budget, and the money-flow harness exercises it (#3649)',
+      )
+    }
+  })
+
   test('every package-wide glob in the CASP perimeter doc is on the money-path list, or named here as doc-only (#3098)', () => {
     // The FOURTH copy, read in the OTHER direction. The test above this
     // block's #1899 twin asks "is every money-path file in `covers:`?" and

@@ -563,7 +563,7 @@ test('a bump-only release diff still FAILS the strict gate — no shard, no gree
     'packages/connect/src/runtime-manifest.ts',
     'packages/connect/src/runtime.ts',
     'packages/mcp/src/server.ts',
-    'packages/signer/src/server.ts',
+    'packages/signer/src/tools.ts', // #3454: SIGNER_VERSION moved here from server.ts
     'packages/mcp-server/src/server.ts',
     'packages/cli/src/commands.ts',
     'packages/sdk/src/client-identity.ts', // #3303: SDK_VERSION

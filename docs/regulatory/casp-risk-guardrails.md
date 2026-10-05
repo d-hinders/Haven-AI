@@ -1053,13 +1053,15 @@ not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300, #3098, #3283).**
-Measured at `c3df5b19`, the pin asserts **37 of the 54 globs**: the 39 runtime
-`globs` minus the two `EXEMPT` entries above, and none of the 15
-`controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**` and #3283
-(PR #3286) the four `packages/sdk/src/` signing-guard files and
-`userop-binding.ts`; all were already
-covered here, so the pin was satisfied on arrival each time. The addition #2300 made
+**The floor is measured, and the number moves (#2300, #3098, #3283, #3649).**
+Measured at `f032d0aa` with #3649 applied, the pin asserts **38 of the 55
+globs**: the 40 runtime `globs` minus the two `EXEMPT` entries above, and
+none of the 15 `controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**`,
+#3283 (PR #3286) the four `packages/sdk/src/` signing-guard files and
+`userop-binding.ts`, and #3649 `packages/backend/src/modules/budget-scope/**`
+(the #2099 period pre-check, moved out of `modules/x402/` by #3616/#3617);
+all were already covered here — the last since #3648 — so the pin was
+satisfied on arrival each time. The addition #2300 made
 was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
 capability modules decide whether a funding userop is relayed and in what
 order (the completion capability, `src/tools/paid-mcp-completion.ts`, carries

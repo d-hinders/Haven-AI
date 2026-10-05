@@ -136,9 +136,9 @@ the `dev` or `main` branch. A preview with no earlier deployment (a PR
 branch's first push) instead compares the branch with its merge base with
 `dev`. Vercel clones the deployed branch alone, so the script first fetches
 `dev`'s recent history. It tries `origin`, then the repository's public
-GitHub URL, because the clone's `origin` fetch failed on every first preview
-observed (#3594). If the shallow histories share no commit, it deepens both
-sides once. It skips only when that yields a merge base and nothing watched
+GitHub URL. If the shallow histories share no commit, it deepens the clone
+once. The first log after #3601 could not tell a failed fetch from a missing
+shared commit, so the script covers both (#3594). It skips only when that yields a merge base and nothing watched
 changed on the branch, and builds on any failure. The build log's
 `vercel ignore-build:` line names the step that failed. So a frontend-only PR
 can skip its ops preview, while an ops PR always gets one. The rule

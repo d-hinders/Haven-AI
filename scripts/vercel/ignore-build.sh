@@ -29,8 +29,9 @@
 #     deployed branch only, so when no dev ref is present the script fetches
 #     dev's recent history: from origin, else from the repository's public
 #     GitHub URL (Vercel's clone may carry no usable origin, #3594). If the
-#     shallow histories share no commit it deepens both sides once. If all of
-#     that fails it builds, and its log line names the step that failed.
+#     shallow histories share no commit it deepens the clone once from its
+#     shallow boundary. If all of that fails it builds, and its log line names
+#     the step that failed.
 #   - No previous deployment otherwise (production, an unset or empty
 #     VERCEL_ENV, or the dev and main branches, whose deployments are the dev
 #     host and production): build.
@@ -98,16 +99,22 @@ quiet_fetch() {
 
 # Where dev can be fetched from, one per line: the clone's origin, then the
 # repository's public GitHub URL from Vercel's system variables. The first
-# build log after #3601 showed the origin fetch failing on every first
-# preview; the repository is public, so the URL needs no credentials.
-# IGNORE_BUILD_DEV_URL replaces that URL (the tests point it at a local
-# repository). A non-GitHub provider gets no URL.
+# build log after #3601 (PR #3622's first preview) could not tell a failed
+# fetch from histories that share no commit, so the script now addresses
+# both and logs which one it hit. The repository is public, so the URL needs
+# no credentials. IGNORE_BUILD_DEV_URL replaces that URL; it is a test hook
+# (the tests point it at a local repository), and a value with whitespace or
+# a leading `-` is ignored rather than handed to git. A non-GitHub provider
+# gets no URL.
 dev_sources() {
   if git remote get-url origin >/dev/null 2>&1; then
     echo origin
   fi
   if [ -n "${IGNORE_BUILD_DEV_URL:-}" ]; then
-    echo "$IGNORE_BUILD_DEV_URL"
+    case "$IGNORE_BUILD_DEV_URL" in
+      -* | *[[:space:]]*) ;;
+      *) echo "$IGNORE_BUILD_DEV_URL" ;;
+    esac
   elif [ -n "${VERCEL_GIT_REPO_OWNER:-}" ] && [ -n "${VERCEL_GIT_REPO_SLUG:-}" ] &&
     { [ -z "${VERCEL_GIT_PROVIDER:-}" ] || [ "${VERCEL_GIT_PROVIDER}" = github ]; }; then
     echo "https://github.com/${VERCEL_GIT_REPO_OWNER}/${VERCEL_GIT_REPO_SLUG}.git"
@@ -117,8 +124,10 @@ dev_sources() {
 # Sets `base` to the merge base of HEAD with dev and returns 0, or sets `why`
 # to the step that failed and returns 1 (the caller builds). Tries the refs the
 # clone has, then one shallow fetch of dev from each source in turn, then, if
-# the shallow histories share no commit, one deepening of dev and of the
-# deployed branch ($1) from the source that answered.
+# the shallow histories share no commit, one deepening from the source that
+# answered. `--deepen` extends the clone's existing shallow boundary, HEAD's
+# side included, so no branch refspec is needed (one would only make the
+# deepen fail for a fork PR or a deleted branch).
 find_dev_base() {
   base=''
   why=''
@@ -129,7 +138,7 @@ find_dev_base() {
   done
   sources=$(dev_sources)
   if [ -z "$sources" ]; then
-    why='no dev ref in the clone, no origin remote, and no public repository URL (VERCEL_GIT_REPO_OWNER/VERCEL_GIT_REPO_SLUG unset)'
+    why="no dev ref in the clone, no origin remote, and no public repository URL (provider '${VERCEL_GIT_PROVIDER:-unset}', owner '${VERCEL_GIT_REPO_OWNER:-unset}', slug '${VERCEL_GIT_REPO_SLUG:-unset}')"
     return 1
   fi
   fetched=''
@@ -144,10 +153,9 @@ find_dev_base() {
     return 1
   fi
   base=$(git merge-base HEAD origin/dev 2>/dev/null) && [ -n "$base" ] && return 0
-  if [ -n "$1" ] &&
-    quiet_fetch --deepen=200 "$fetched" "+refs/heads/dev:refs/remotes/origin/dev" "+refs/heads/$1:refs/remotes/ignore-build/branch"; then
+  if quiet_fetch --deepen=200 "$fetched" "+refs/heads/dev:refs/remotes/origin/dev"; then
     base=$(git merge-base HEAD origin/dev 2>/dev/null) && [ -n "$base" ] && return 0
-    why="dev fetched from ${fetched}, but it shares no commit with the branch even after deepening both"
+    why="dev fetched from ${fetched}, but it shares no commit with the clone even after deepening it"
     return 1
   fi
   why="dev fetched from ${fetched}, but it shares no commit with the shallow clone, and deepening failed"
@@ -162,7 +170,7 @@ if [ -z "$prev" ]; then
     echo "vercel ignore-build: no previous deployment recorded (env '${VERCEL_ENV:-unset}', branch '${ref:-unset}'); building."
     exit 1
   fi
-  if ! find_dev_base "$ref"; then
+  if ! find_dev_base; then
     echo "vercel ignore-build: first preview of '${ref:-unset}' and no merge base with dev found (${why}); building."
     exit 1
   fi

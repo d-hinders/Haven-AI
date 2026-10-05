@@ -171,8 +171,9 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
       }
     })
 
-    // Vercel's clone has no usable origin: the first build log after #3601
-    // read "fetching dev failed" on every first preview (#3594, PR #3622's).
+    // The first build log after #3601 (PR #3622's first preview, #3594) read
+    // "no merge base with dev found (none in the clone, and fetching dev failed
+    // or shares no commit)": these cases cover each cause it lumped together.
     const withClone = (opts: { withOrigin?: boolean; depth?: number }, body: (dir: string) => void) => {
       const dir = r.shallowClone(opts)
       try {
@@ -217,11 +218,11 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
       withClone({ depth: 3 }, (dir) => {
         const { status, log } = r.runLog({ ...preview(), ...vercel, ...mapped, VERCEL_GIT_PROVIDER: 'gitlab' }, dir)
         expect(status).toBe(BUILD)
-        expect(log).toContain('no origin remote, and no public repository URL')
+        expect(log).toContain("no origin remote, and no public repository URL (provider 'gitlab', owner 'acme', slug 'haven')")
       })
     })
 
-    it('deepens both sides once when the shallow histories share no commit', () => {
+    it('deepens the clone once when the shallow histories share no commit', () => {
       r.commit('packages/ops/src/a.ts') // on dev, before the branch
       r.git('checkout', '-q', '-b', 'feature')
       r.commit('docs/guide.md')
@@ -231,6 +232,25 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
       withClone({ withOrigin: true, depth: 1 }, (dir) => expect(r.run(preview(), dir)).toBe(SKIP))
       r.commit('packages/ops/src/b.ts')
       withClone({ withOrigin: true, depth: 1 }, (dir) => expect(r.run(preview(), dir)).toBe(BUILD))
+    })
+
+    it('deepens from the public repository URL when that is the source that answered', () => {
+      r.commit('packages/ops/src/a.ts') // on dev, before the branch
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      r.commit('docs/more.md')
+      const url = { IGNORE_BUILD_DEV_URL: `file://${r.repo}` }
+      withClone({ depth: 1 }, (dir) => expect(r.run({ ...preview(), ...url }, dir)).toBe(SKIP))
+    })
+
+    it('ignores an override URL git would read as an option', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      withClone({ depth: 1 }, (dir) => {
+        const { status, log } = r.runLog({ ...preview(), IGNORE_BUILD_DEV_URL: '--upload-pack=touch /tmp/x' }, dir)
+        expect(status).toBe(BUILD)
+        expect(log).toContain('no public repository URL')
+      })
     })
 
     it('names the step that failed when it cannot find a merge base', () => {

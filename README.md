@@ -433,11 +433,6 @@ Response on success:
 | `npm run docker:down` | Stop PostgreSQL container |
 | `npm run docker:logs` | Tail PostgreSQL logs |
 
-From `packages/backend/`:
-
-| Command | What it does |
-|---|---|
-
 ## Project Structure
 
 ```

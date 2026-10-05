@@ -1,8 +1,8 @@
 /**
  * Minimal typed client for the Haven money-movement API, used by the
  * deterministic QA scenarios (#575). The direct-payment flow:
- *   POST /payments → sign the returned hash with the delegate key →
- *   POST /payments/:id/sign → poll GET /payments/:id.
+ *   POST /payments → sign `sign_data.typed_data` (EIP-712) with the delegate
+ *   key → POST /payments/:id/sign → poll GET /payments/:id.
  *
  * Server-to-server (Node → API, Bearer agent key) — no browser, no CORS.
  */

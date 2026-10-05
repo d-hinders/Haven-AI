@@ -274,7 +274,7 @@ export function HomeDevelopers() {
             <span className="text-[rgba(230,233,255,0.5)]">← 402 · pay 0.30 USDC</span>
             {'\n\n'}
             <span className="text-[rgba(230,233,255,0.5)]">
-              {'# Haven checks the budget,\n# agent signs, Haven pays'}
+              {'# Haven checks the budget,\n# the agent signs locally'}
             </span>
             {'\n'}
             <span className="text-[#a5b4fc]">haven_quote_x402</span>

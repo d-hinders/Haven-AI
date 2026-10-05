@@ -90,9 +90,18 @@ export function boundedProvider(url: string = BASE_SEPOLIA_RPC): ethers.JsonRpcP
 
 type FaucetRequest = typeof requestCdpEvmFaucet
 
-function deterministicClaimId(runId: string | undefined, claim: number): string {
+function deterministicClaimId(
+  runId: string | undefined,
+  runAttempt: string | undefined,
+  claim: number,
+): string {
   if (!runId) return randomUUID()
-  const hex = createHash('sha256').update(`qa-relayer-topup:${runId}:${claim}`).digest('hex').slice(0, 32).split('')
+  const attempt = runAttempt?.trim() || '1'
+  const hex = createHash('sha256')
+    .update(`qa-relayer-topup:${runId}:${attempt}:${claim}`)
+    .digest('hex')
+    .slice(0, 32)
+    .split('')
   hex[12] = '4'
   hex[16] = '8'
   const s = hex.join('')
@@ -143,7 +152,7 @@ export async function topUpRelayer(
         chainId: 84532,
         apiKeyId,
         apiKeySecret,
-        idempotencyKey: deterministicClaimId(env.GITHUB_RUN_ID, claim),
+        idempotencyKey: deterministicClaimId(env.GITHUB_RUN_ID, env.GITHUB_RUN_ATTEMPT, claim),
         timeoutMs: RELAYER_TOPUP_CALL_TIMEOUT_MS,
       })
       claimsMade++

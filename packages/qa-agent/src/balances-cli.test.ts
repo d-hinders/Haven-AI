@@ -159,6 +159,25 @@ describe('relayer faucet top-up loop', () => {
     expect(result).toMatchObject({ claimsMade: RELAYER_TOPUP_MAX_CLAIMS, stopReason: 'claim-cap-reached' })
   })
 
+  it('uses distinct idempotency keys for GitHub re-run attempts', async () => {
+    const { readings, report } = topUpFixture(
+      'critical',
+      RELAYER_TOPUP_TARGET_WEI - CDP_FAUCET_CLAIM_WEI,
+    )
+    const keys: string[] = []
+    for (const attempt of ['1', '2']) {
+      await topUpRelayer(readings, report, { ...env, GITHUB_RUN_ATTEMPT: attempt }, {
+        requestFaucet: async ({ idempotencyKey }) => {
+          keys.push(idempotencyKey!)
+          return { transactionHash: `0x${'ab'.repeat(32)}` }
+        },
+        sleep: async () => {},
+      })
+    }
+    expect(keys).toHaveLength(2)
+    expect(keys[0]).not.toBe(keys[1])
+  })
+
   for (const band of ['ok', 'unknown'] as const) {
     it(`${band}: makes no faucet request`, async () => {
       const { readings, report } = topUpFixture(band, 0n)

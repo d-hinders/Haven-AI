@@ -35,6 +35,14 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3632 (2026-10-05):** `.env.dev.example` drops "Gnosis Chiado"
+> from its testnet line, which now names Base Sepolia only, and annotates
+> `RPC_URL` and `GNOSISSCAN_API_KEY` as "chain 100 only; unused by the delegation
+> rail". `config.ts` still reads both variables. This matches this doc's own
+> lines that call chain 100 legacy and dead; no variable, value or deploy step
+> changes. Nothing else in this document was re-verified, and `last-verified` is
+> not bumped.
+
 > **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
 > agents join the pixel gate with the same seed-before-navigation dark

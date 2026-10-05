@@ -76,12 +76,13 @@ done
 
 ## Scope notes
 
-- Current registries support **Base (8453)**, **Base Sepolia (84532)**, and
-  **Gnosis Chain (100)**. Base is primary production, Base Sepolia is dev/QA,
-  and Gnosis remains for existing configured flows. Standard exact-scheme USDC
-  x402 supports Base and Base Sepolia. Re-verified against
-  `packages/core/src/chains.ts`, `packages/backend/src/domain/chains.ts` and
-  `packages/frontend/src/lib/chains.ts` on 2026-09-21.
+- Haven's networks are **Base (8453)**, primary production, and **Base
+  Sepolia (84532)**, dev/QA. Gnosis Chain (100) is not a Haven network
+  (owner, 2026-10-05; #3632); the registries still carry it (historical rows
+  render through it). Standard exact-scheme USDC x402 supports Base and Base Sepolia.
+  Re-verified against `packages/core/src/chains.ts`,
+  `packages/backend/src/domain/chains.ts` and
+  `packages/frontend/src/lib/chains.ts` on 2026-10-05.
 - **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
   removed — it is no longer part of the codebase.)
 - **One live policy rail.** Docs 1–5 primarily describe the

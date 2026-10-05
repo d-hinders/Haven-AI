@@ -68,7 +68,7 @@ export interface HavenClientConfig {
 // ── Payment Types ────────────────────────────────────────────────
 
 export interface PaymentRequest {
-  /** Token symbol: "EURe", "USDC.e", or "xDAI" */
+  /** Token symbol: "USDC" (agent budgets are USDC on Base and Base Sepolia) */
   token: string
 
   /** Amount as a decimal string, e.g. "5.00" */

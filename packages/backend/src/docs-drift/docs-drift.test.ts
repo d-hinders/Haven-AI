@@ -69,11 +69,23 @@ describe('CLAUDE.md chain claims match the chains registry', () => {
     }
   })
 
-  it('pins the documented primary (Base) and secondary (Gnosis) chains', () => {
-    // CLAUDE.md: "Base (chain ID 8453) is the primary / default network;
-    // Gnosis Chain (chain ID 100) is also supported".
+  // #3632: Gnosis Chain is no longer a Haven network. CLAUDE.md names Base as
+  // primary and Base Sepolia as dev/QA, and this pins both the sentence and
+  // the registry facts it mirrors. Whitespace is collapsed so a re-wrap of
+  // the paragraph does not redden it.
+  const claudeProse = CLAUDE_MD.replace(/\s+/g, ' ')
+
+  it('pins the documented primary (Base) and dev/QA (Base Sepolia) chains', () => {
+    expect(claudeProse).toContain('Base (chain ID 8453) is the primary / default network')
+    expect(claudeProse).toContain('Base Sepolia (84532) is dev/QA')
     expect(getChain(8453).name).toBe('Base')
     expect(getChain(8453).shortName).toBe('base')
-    expect(getChain(100).name).toBe('Gnosis Chain')
+    expect(getChain(84532).name).toBe('Base Sepolia')
+  })
+
+  it('never claims Gnosis Chain (100) is supported', () => {
+    expect(claudeProse).not.toMatch(/Gnosis Chain \(chain ID 100\) is also supported/i)
+    expect(claudeProse).not.toMatch(/Gnosis[^.]{0,60}\bsupported\b/i)
+    expect(claudeProse).toContain('Gnosis Chain (chain ID 100) is not a Haven network')
   })
 })

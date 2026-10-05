@@ -85,7 +85,7 @@ flowchart LR
   end
   class AGENT,SIGNER agentCustody
 
-  subgraph CHAIN["Supported chains — Base, Gnosis, Base Sepolia"]
+  subgraph CHAIN["Supported chains — Base, Base Sepolia"]
     SAFE["Haven wallet<br/>Safe smart account"]
     AM["AllowanceModule"]
     DELEGATE["Delegate EOA<br/>temporary x402 funds"]
@@ -212,9 +212,10 @@ flowchart LR
   [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md)
   ([delegation rail](../../packages/backend/src/rails/delegation-rail.ts),
   [agent auth](../../packages/backend/src/middleware/agentAuth.ts)).
-- **Supported chains are Base (8453), Gnosis Chain (100), and Base Sepolia
-  (84532).** Base is the primary production network; Base Sepolia is the dev/QA
-  testnet. Per-chain facts (token addresses, Safe contracts, explorers) live in
+- **Supported chains are Base (8453) and Base Sepolia (84532).** Base is the
+  primary production network; Base Sepolia is the dev/QA testnet. Gnosis Chain
+  (100) is not a Haven network; the registry still carries it (historical rows
+  render through it). Per-chain facts (token addresses, Safe contracts, explorers) live in
   the shared `@haven_ai/core` registry; the backend layers RPC endpoints and
   relayer configuration over it per chain
   ([core registry](../../packages/core/src/chains.ts),

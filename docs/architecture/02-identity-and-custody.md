@@ -106,7 +106,7 @@ flowchart TB
   end
   class AGENT,SIGNER agentZone
 
-  subgraph CHAIN["On-chain — Base, Gnosis, Base Sepolia"]
+  subgraph CHAIN["On-chain — Base, Base Sepolia"]
     direction TB
     SAFE[Safe smart account]
     OWNERS_LIST[Safe owners + threshold]

@@ -110,7 +110,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3503: the decline paragraph re-read against `routes/payments.ts` —
     // over-budget is now a 403 delegation_budget_exceeded on POST /payments too.
     // Scope: that paragraph.
-    'last-verified': '2026-09-30',
+    'last-verified': '2026-10-05',
   },
   {
     doc: 'packages/signer/README.md',

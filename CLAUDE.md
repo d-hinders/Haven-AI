@@ -203,8 +203,9 @@ All of these must fail for funds to be at risk.
 
 ## Tech Stack
 
-- **Chain:** **Base (chain ID 8453) is the primary / default network**; Gnosis
-  Chain (chain ID 100) is also supported. Chain and token FACTS live in
+- **Chain:** **Base (chain ID 8453) is the primary / default network** and
+  Base Sepolia (84532) is dev/QA; Gnosis Chain (chain ID 100) is not a Haven
+  network. Chain and token FACTS live in
   `packages/core/src/chains.ts`, with backend env wiring and frontend viem
   construction pinned to it. `DEFAULT_CHAIN_ID` is the single home for the
   default; a guard test flags new bare numeric fallbacks.

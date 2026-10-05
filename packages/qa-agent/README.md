@@ -20,7 +20,9 @@ delegation-rail suite. `run.ts` is the source of truth for the list and its
 order; the canonical per-scenario table lives in
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md). The
 **balances check** (`npm run qa:balances`, `src/balances-cli.ts`, #3631) reads
-the QA wallets read-only for the daily `qa-balances.yml` workflow; see that
+the QA wallets for the daily `qa-balances.yml` workflow. It is read-only except
+for bounded CDP Base Sepolia faucet requests for a low dev relayer; it never
+signs or moves Haven or customer funds and receives no wallet secret. See that
 doc's § QA wallet balances.
 
 ⚠️ The seed's **on-chain steps are not exercised in CI** (no funded testnet

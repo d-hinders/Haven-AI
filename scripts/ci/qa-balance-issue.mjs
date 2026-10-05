@@ -111,6 +111,25 @@ function fmtRunway(row) {
   return row.basis === 'observed' ? 'no observed burn' : '—'
 }
 
+function fmtWei(atomic) {
+  try {
+    const value = BigInt(atomic ?? '0')
+    const whole = value / 1_000_000_000_000_000_000n
+    const fraction = (value % 1_000_000_000_000_000_000n).toString().padStart(18, '0').replace(/0+$/, '')
+    return fraction ? `${whole}.${fraction}` : String(whole)
+  } catch {
+    return '0'
+  }
+}
+
+function topUpSummary(topUp) {
+  if (!topUp) return null
+  if (topUp.stopReason === 'missing-credentials') return 'Testnet faucet top-up: skipped: no CDP credentials.'
+  if (topUp.stopReason === 'not-needed') return 'Testnet faucet top-up: not requested; the relayer was not `warn` or `critical`.'
+  const reason = topUp.reason ? ` — ${publicReason(topUp.reason)}` : ''
+  return `Testnet faucet top-up: ${Number(topUp.claimsMade) || 0} accepted claim(s), ${fmtWei(topUp.amountReceivedAtomic)} ETH received; stop: \`${topUp.stopReason}\`${reason}.`
+}
+
 /** The issue body: one row per wallet, the top-up links, the time and the run. */
 export function buildBody(report, { runUrl, repo, bands }) {
   const docBase = `https://github.com/${repo}/blob/dev/${DOCS}`
@@ -130,6 +149,8 @@ export function buildBody(report, { runUrl, repo, bands }) {
       `| ${row.name} | ${band} | ${row.address ? `\`${row.address}\`` : '—'} | ${balance} | ${burn} | ${fmtRunway(row)} | ${asset} | [how](${docBase}#${TOP_UP_ANCHOR[row.key]}) |`,
     )
   }
+  const topUp = topUpSummary(report.topUp)
+  if (topUp) lines.push('', topUp)
   lines.push(
     '',
     `Runway is the balance divided by the median observed daily drop over the last 14 daily readings; until 7 ` +

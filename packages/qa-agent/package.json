@@ -25,6 +25,7 @@
   ],
   "license": "UNLICENSED",
   "dependencies": {
+    "@coinbase/cdp-sdk": "^1.46.1",
     "@haven_ai/sdk": "*",
     "@haven_ai/signer": "*",
     "@metamask/smart-accounts-kit": "^1.6.0",

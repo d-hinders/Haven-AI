@@ -58,14 +58,14 @@ function row(key, band, extra = {}) {
   return { key, band, balance: '0.5', basis: 'observed', burnPerDay: '0.1', runwayDays: 5, ...meta, ...extra }
 }
 
-const report = (rows) => ({ checkedAt: '2026-10-05T06:00:00.000Z', rows, history: [], configMissing: false })
+const report = (rows, topUp) => ({ checkedAt: '2026-10-05T06:00:00.000Z', rows, history: [], configMissing: false, ...(topUp ? { topUp } : {}) })
 
-function run({ rows, issues = [], listFail = false }) {
+function run({ rows, issues = [], listFail = false, topUp }) {
   const dir = mkdtempSync(join(tmpdir(), 'qa-balance-issue-'))
   makeStub(dir)
   const log = join(dir, 'gh.log')
   const reportPath = join(dir, 'report.json')
-  writeFileSync(reportPath, JSON.stringify(report(rows)))
+  writeFileSync(reportPath, JSON.stringify(report(rows, topUp)))
   const result = spawnSync(process.execPath, [SCRIPT, '--report', reportPath], {
     encoding: 'utf8',
     env: {
@@ -105,6 +105,34 @@ test('a treasury below 7 days opens the standing issue, naming address, balance,
   assert.match(create.input, /\| 5 days \|/)
   assert.match(create.input, /agent-qa\.md#top-up-the-delegation-treasury/)
   assert.match(create.input, /actions\/runs\/7/)
+})
+
+test('the issue body records a scrubbed faucet failure and accepted amount', () => {
+  const topUp = {
+    status: 'attempted', claimsMade: 2, amountReceivedAtomic: '200000000000000', stopReason: 'rate-limited',
+    reason: 'faucet request failed: https://api.cdp.coinbase.com?key=SUPERSECRETKEY1234567',
+  }
+  const rows = [row('treasury', 'ok'), row('merchant', 'ok'), row('relayer', 'critical')]
+  const { calls } = run({ rows, topUp })
+  const body = calls.at(-1).input
+  assert.match(body, /2 accepted claim\(s\), 0\.0002 ETH received/)
+  assert.match(body, /rate-limited/)
+  assert.doesNotMatch(body, /SUPERSECRETKEY/)
+  assert.doesNotMatch(body, /api\.cdp\.coinbase\.com/)
+})
+
+test('missing CDP credentials is an informational top-up line, not an unknown row', () => {
+  const topUp = { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'missing-credentials' }
+  const rows = [row('treasury', 'ok'), row('merchant', 'ok'), row('relayer', 'critical')]
+  const { calls } = run({ rows, topUp })
+  assert.match(calls.at(-1).input, /top-up: skipped: no CDP credentials/)
+  assert.doesNotMatch(calls.at(-1).input, /unknown/)
+})
+
+test('a post-top-up relayer reading of ok does not open the standing issue', () => {
+  const topUp = { status: 'attempted', claimsMade: 250, amountReceivedAtomic: '25000000000000000', stopReason: 'target-requests-complete' }
+  const { verbs } = run({ rows: ok, topUp })
+  assert.deepEqual(verbs, ['label create', 'issue list'])
 })
 
 test('a closed standing issue is reopened, not duplicated, and a band change comments once', () => {

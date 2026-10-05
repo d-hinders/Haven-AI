@@ -2,7 +2,8 @@
  * #3620 (epic #3615 S-E) — the `delegation_budget_exceeded` refusal body has
  * ONE builder.
  *
- * Before the #3616 module the body was hand-built at nine sites in three files.
+ * Before the #3616 module the literal was written at nine sites in three files:
+ * five response bodies and four refusal-ledger `detail` objects.
  * #3616–#3619 moved every authorize-time site onto the module's builders
  * (`buildPeriodExceededBody`, `periodExceededLedgerDetail`). The literal
  * `error_code: 'delegation_budget_exceeded'` may now appear in non-test
@@ -23,6 +24,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const SRC = fileURLToPath(new URL('../../..', import.meta.url))
+// The exact single-quoted spelling the issue defines (#3620). A double-quoted
+// or computed error code would slip past; the codebase writes neither today.
 const LITERAL = "error_code: 'delegation_budget_exceeded'"
 
 /** Every allowed site, with its exact count. A stale entry fails too. */

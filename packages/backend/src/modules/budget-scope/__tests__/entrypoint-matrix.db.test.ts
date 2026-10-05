@@ -2,7 +2,7 @@
  * #3620 (epic #3615 S-E) — runs every applicable cell of `ENTRYPOINT_MATRIX`
  * through the real route against a real database.
  *
- * Each (entrypoint, scope) pair gets its own world: a paying agent B on the
+ * Each cell gets its own world: a paying agent B on the
  * delegation rail with its own open grant, a recipient-pinned grant, a task
  * budget whose parent is a separate grant, and a sub-budget chain from agent
  * A (A's budget → A's parent-child → B's grant). Real SQL resolves every scope:
@@ -12,7 +12,9 @@
  * bundler-backed prepare, the hybrid-account derivation and deploy, and the
  * fiat price for the refusal ledger.
  *
- * Every replay state is made by the entrypoint itself: a fresh request under
+ * Every replay state on the three authorize rows is made by the entrypoint
+ * itself (the pre-check's rows are seeded directly: it creates none): a fresh
+ * request under
  * an ample budget creates the real `pending_signature` row, which is then
  * replayed, moved to `failed`, or confirmed with a `tx_hash`. Every link is
  * made short before each replay, so an answer that consulted the budget
@@ -218,7 +220,10 @@ async function seedWorld(label: string): Promise<World> {
 const NARROWEST: Record<MatrixScope, LinkName> = {
   none: 'own',
   taskBudget: 'taskParent',
-  subBudget: 'grant',
+  // The MIDDLE link, not B's grant: periodPrecheckLinks returns the grant
+  // first and A's budget last, so a short middle link is what both a
+  // first-link-decides and a last-link-decides pre-check let through.
+  subBudget: 'parentChild',
   merchantPin: 'pinned',
 } as Record<MatrixScope, LinkName>
 

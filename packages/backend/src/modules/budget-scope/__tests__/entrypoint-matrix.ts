@@ -12,14 +12,15 @@
  * Request states, as the executor builds them:
  *
  * - `fresh`: a new idempotency key, and a request OVER the narrowest link the
- *   scope redeems while every other link is ample: B's grant for a
- *   sub-budget, the task budget's parent for a task budget, the selected
+ *   scope redeems while every other link is ample: A's parent-child (the
+ *   middle link) for a sub-budget, the task budget's parent for a task budget, the selected
  *   (token, recipient) grant otherwise. A pre-check that reads the wrong link,
  *   or the wrong scope, lets it through.
  * - `settledReplay`: the same key as a row that CONFIRMED with a `tx_hash`,
  *   replayed after every link went short.
  * - `pendingReplay`: the same key as an unexpired `pending_signature` row the
- *   entrypoint itself created, replayed after every link went short.
+ *   entrypoint itself created (seeded directly for the pre-check, which
+ *   creates none), replayed after every link went short.
  * - `terminalReplay`: the same key as a row that is neither pending nor
  *   confirmed (`failed`), replayed after every link went short.
  *
@@ -40,8 +41,8 @@ export type MatrixState = (typeof MATRIX_STATES)[number]
 /**
  * An applicable cell's observed answer, normalised by `observe()` in the
  * executor: `"<status> <error_code>"` for a typed refusal,
- * `"200 sufficient"` / `"200 sufficient replay"` / `"403 delegation_budget_exceeded"`
- * for the pre-check, `"201 sign_data"` for a signable answer,
+ * `"200 sufficient=true"` / `"200 sufficient=true replay"` /
+ * `"403 delegation_budget_exceeded"` for the pre-check, `"201 sign_data"` for a signable answer,
  * `"200 stored"` for a stored settled result, else `"<status>"`.
  */
 export interface MatrixCell {
@@ -112,7 +113,7 @@ export const ENTRYPOINT_MATRIX: Partial<
     {
       none: fresh('the selected (token, recipient) grant', '#3503'),
       taskBudget: fresh("the task budget's parent, read by hash", '#3503, #3329 finding E'),
-      subBudget: fresh("B's grant, every link read and the smallest deciding", '#3503, #3330'),
+      subBudget: fresh("A's parent-child (the middle link); every link is read and the smallest decides", '#3503, #3330'),
       merchantPin: fresh('the recipient-pinned grant, which the selection prefers', '#3503, #3331'),
     } as Record<MatrixScope, MatrixCell>,
     {
@@ -131,7 +132,7 @@ export const ENTRYPOINT_MATRIX: Partial<
     {
       none: fresh('the selected (token, payTo) grant', '#2082'),
       taskBudget: fresh("the task budget's parent, read by hash", '#2082, #3329 finding E'),
-      subBudget: fresh("B's grant, every link read and the smallest deciding", '#3617'),
+      subBudget: fresh("A's parent-child (the middle link); every link is read and the smallest decides", '#3617'),
       merchantPin: fresh('the recipient-pinned grant, which the selection prefers', '#2082, #3331'),
     } as Record<MatrixScope, MatrixCell>,
     X402_REPLAY,
@@ -140,7 +141,7 @@ export const ENTRYPOINT_MATRIX: Partial<
     {
       none: fresh('the selected (token, payTo) grant', '#2706'),
       taskBudget: fresh("the task budget's parent, read by hash", '#3617, epic #3615 decision 3 default'),
-      subBudget: fresh("B's grant, every link read and the smallest deciding", '#3617, epic #3615 decision 1 default'),
+      subBudget: fresh("A's parent-child (the middle link); every link is read and the smallest decides", '#3617, epic #3615 decision 1 default'),
       merchantPin: {
         outcome: '201 sign_data',
         why:

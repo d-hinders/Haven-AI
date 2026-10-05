@@ -778,10 +778,14 @@ describe('#3620 — budget-scope keys are the same on both runtimes, or the diff
   const SCOPE_KEYS = ['task_budget_id', 'sub_budget_id'] as const
   const scopesOf = (shape: Record<string, unknown>) => SCOPE_KEYS.filter((k) => k in shape)
 
-  // Equivalent tools registered under different names: hosted `haven_pay`
-  // (the hosted x402 one-shot) ↔ local `haven_pay_x402`.
+  // Equivalent tools registered under different names. Hosted `haven_pay` is
+  // the direct wallet payment (token/amount/to → POST /payments), the same
+  // operation as local `haven_send` (asset/recipient/amount). #3620's issue
+  // body paired it with local `haven_pay_x402`, but that is the x402
+  // fetch-and-pay; the hosted x402 path is `haven_pay_x402_quote`, already
+  // paired by name below.
   const DIFFERENT_NAME_PAIRS: ReadonlyArray<readonly [hosted: HostedToolName, local: string]> = [
-    ['haven_pay', 'haven_pay_x402'],
+    ['haven_pay', 'haven_send'],
   ]
 
   // Keyed by HOSTED tool name. `missingOnHosted` / `missingOnLocal` must
@@ -810,7 +814,7 @@ describe('#3620 — budget-scope keys are the same on both runtimes, or the diff
       'haven_get_task_budget↔haven_get_task_budget',
       'haven_close_task_budget↔haven_close_task_budget',
       'haven_pay_x402_quote↔haven_pay_x402_quote',
-      'haven_pay↔haven_pay_x402',
+      'haven_pay↔haven_send',
     ]) {
       expect(pairNames).toContain(expected)
     }
@@ -819,6 +823,10 @@ describe('#3620 — budget-scope keys are the same on both runtimes, or the diff
       expect(Object.keys(toolSchemas)).toContain(hosted)
       expect(Object.keys(localToolSchemas)).toContain(local)
     }
+    // The key probe can say yes: a schema-shape change that made `k in shape`
+    // always false would otherwise pass every pair below as "equal".
+    expect(scopesOf(toolSchemas.haven_send as Record<string, unknown>)).toEqual(['task_budget_id', 'sub_budget_id'])
+    expect(scopesOf(localToolSchemas.haven_send as Record<string, unknown>)).toEqual(['task_budget_id', 'sub_budget_id'])
     // And the allowlist names only real pairs.
     for (const name of Object.keys(SCOPE_PARITY_ALLOWLIST)) {
       expect(pairs.map(([hosted]) => hosted as string)).toContain(name)

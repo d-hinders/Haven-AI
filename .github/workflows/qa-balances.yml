@@ -1,0 +1,114 @@
+name: QA wallet balances
+
+# #3631. Money-flow QA failed in preflight for ~3.5 days (2026-10-01 →
+# 2026-10-05) because the delegation treasury ran dry and nothing warned
+# beforehand. Once a day this reads every wallet the QA flows depend on
+# (delegation treasury USDC, demo-merchant settlement ETH, dev relayer ETH on
+# 84532), computes a runway from the observed daily burn, and keeps ONE
+# standing issue — "QA wallet balances low", label `qa-funding` — open while
+# any wallet is within 7 days of running dry (scripts/ci/qa-balance-issue.mjs).
+#
+# Read-only: it never signs or moves funds, and it deliberately receives no
+# delegate private key. Owner decisions (2026-10-05): a GitHub issue is the
+# only channel, once a day, 7 days ahead; Pimlico credit is out of scope.
+#
+# Not a money-path control: it touches neither qa-dev.yml nor qa-freshness.mjs.
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # daily 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: qa-balances
+  cancel-in-progress: false
+
+jobs:
+  balances:
+    name: QA wallet balances
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # The runway needs the last 14 daily readings. They live in this
+      # workflow's own artifact; the newest run that still has one supplies it.
+      # Missing (first run, expired artifact) → start empty, and the fallback
+      # floors decide until 7 readings exist.
+      - name: Fetch the previous balance history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p history
+          # A failed listing must be VISIBLE: silently starting empty would hand
+          # the bands to the fallback floors for about a week.
+          if ! ids=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow qa-balances.yml --limit 10 \
+                       --json databaseId --jq '.[].databaseId'); then
+            echo "::warning::could not list earlier qa-balances runs; starting with an empty history"
+            ids=""
+          fi
+          for id in $ids; do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            if gh run download "$id" --repo "$GITHUB_REPOSITORY" -n qa-balances-history -D history 2>/dev/null; then
+              echo "history from run $id"; break
+            fi
+          done
+          ls -la history
+
+      - name: Read the wallet balances
+        id: balances
+        env:
+          QA_HAVEN_API_URL: ${{ secrets.QA_HAVEN_API_URL }}
+          QA_DELEGATION_AGENT_API_KEY: ${{ secrets.QA_DELEGATION_AGENT_API_KEY }}
+          QA_DEMO_MERCHANT_URL: ${{ secrets.QA_DEMO_MERCHANT_URL }}
+          QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}
+          # A non-secret repo VARIABLE (owner decision on #3631): the deliberate
+          # exception to preflight's "derive, never restate" rule.
+          QA_DEV_RELAYER_ADDRESS: ${{ vars.QA_DEV_RELAYER_ADDRESS }}
+        run: |
+          set +e
+          npm run qa:balances -w packages/qa-agent -- \
+            --history "$GITHUB_WORKSPACE/history/qa-balances-history.json" \
+            --out "$GITHUB_WORKSPACE/qa-balances.json"
+          code=$?
+          set -e
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+          # 1 = a config value is missing (the run must end red, after the
+          # issue sync below); anything else non-zero is a crash.
+          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then exit "$code"; fi
+          node -e "const r=require('$GITHUB_WORKSPACE/qa-balances.json');require('fs').writeFileSync('$GITHUB_WORKSPACE/qa-balances-history.json', JSON.stringify(r.history,null,2))"
+
+      - name: Keep the history for tomorrow
+        if: always() && hashFiles('qa-balances-history.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-balances-history
+          path: qa-balances-history.json
+          retention-days: 30
+          overwrite: true # a re-run attempt replaces, not collides with, the same-name artifact
+
+      - name: Sync the standing issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/ci/qa-balance-issue.mjs --report qa-balances.json
+
+      - name: Fail when a required config value is missing
+        if: steps.balances.outputs.exit == '1'
+        run: |
+          echo "::error::A QA wallet could not be checked because a config value is missing — see the unknown rows above (docs/operations/agent-qa.md § QA wallet balances)."
+          exit 1

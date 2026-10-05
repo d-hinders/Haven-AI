@@ -57,8 +57,10 @@ export interface ResourceCheck {
    * #2490: `true` when the resource is usable but below its WARNING floor —
    * reported loudly on every run (rule 2 below) with the top-up action, but
    * never counted toward `blocked`. Only the merchant settlement check
-   * produces this today; the band is the merchant's own, carried on
-   * `/healthz` (`status` + both floors), not re-derived here (rule 1).
+   * produces it in preflight; the band is the merchant's own, carried on
+   * `/healthz` (`status` + both floors), not re-derived here (rule 1). The
+   * treasury's early warning is a runway, not a per-run band: the daily
+   * `qa:balances` check (`balances.ts`, #3631) warns ~7 days ahead.
    */
   warn?: boolean
   /** Why, when `ok` is not `true`. */

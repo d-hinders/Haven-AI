@@ -184,6 +184,9 @@ export function safeReason(prefix: string, error: unknown): string {
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'`)\]}]+/gi, '<url>')
     .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?\/[^\s"'`)\]}]*/gi, '<url>')
     .replace(/\(\s*(?:request|info)=.*$/s, '')
+    // A key in a non-URL form: `dkey=…`, `apikey: …`, `api key <16+ chars>`.
+    .replace(/\b([a-z_-]*key)\s*[=:]\s*[^\s"',;)\]}]+/gi, '$1=<redacted>')
+    .replace(/\b(key)\s+[A-Za-z0-9_-]{16,}/gi, '$1 <redacted>')
     .trim()
   const body = code && !text.includes(code) ? `${code}: ${text}` : text
   const bounded = body.length > 160 ? `${body.slice(0, 159)}…` : body

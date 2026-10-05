@@ -273,6 +273,9 @@ describe('safeReason (#3631 review H1: the RPC URL carries its API key, and the 
     expect(out).toMatch(/^read failed: SERVER_ERROR: boom/)
     expect(out).not.toContain('SECRET')
     expect(safeReason('x', new Error('see https://h.example/p?apikey=S3CR3TS3CR3TS3CR3T now'))).toBe('x: see <url> now')
+    // Non-URL key forms (re-review): never echoed.
+    expect(safeReason('x', new Error('invalid dkey=S3CR3TS3CR3TS3CR3T supplied'))).toBe('x: invalid dkey=<redacted> supplied')
+    expect(safeReason('x', new Error('api key S3CR3TS3CR3TS3CR3T rejected'))).toBe('x: api key <redacted> rejected')
   })
 })
 

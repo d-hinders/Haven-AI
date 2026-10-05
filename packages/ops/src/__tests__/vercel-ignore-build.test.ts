@@ -8,11 +8,13 @@
  * (packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts) runs the
  * same script with its own list.
  */
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   BUILD,
   SKIP,
+  hermeticEnv,
   makeRepo,
   parseIgnoreCommand,
   readIgnoreCommand,
@@ -167,6 +169,83 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
         rmSync(unchanged, { recursive: true, force: true })
         rmSync(changed, { recursive: true, force: true })
       }
+    })
+
+    // Vercel's clone has no usable origin: the first build log after #3601
+    // read "fetching dev failed" on every first preview (#3594, PR #3622's).
+    const withClone = (opts: { withOrigin?: boolean; depth?: number }, body: (dir: string) => void) => {
+      const dir = r.shallowClone(opts)
+      try {
+        body(dir)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+
+    it('fetches dev from the public repository URL when the clone has no origin', () => {
+      r.commit('packages/ops/src/a.ts') // on dev, before the branch
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      const url = { IGNORE_BUILD_DEV_URL: `file://${r.repo}` }
+      withClone({ depth: 3 }, (dir) => expect(r.run({ ...preview(), ...url }, dir)).toBe(SKIP))
+      r.commit('packages/ops/src/b.ts')
+      withClone({ depth: 3 }, (dir) => expect(r.run({ ...preview(), ...url }, dir)).toBe(BUILD))
+    })
+
+    it('falls back to the public repository URL when fetching from origin fails', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      withClone({ withOrigin: true, depth: 3 }, (dir) => {
+        execFileSync('git', ['remote', 'set-url', 'origin', `file://${dir}-gone`], { cwd: dir, env: hermeticEnv() })
+        expect(r.run({ ...preview(), IGNORE_BUILD_DEV_URL: `file://${r.repo}` }, dir)).toBe(SKIP)
+      })
+    })
+
+    it('derives that URL from Vercel\'s GitHub owner and slug', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      // Map the derived https URL onto the local repository, so the test
+      // proves the exact URL the script asks for without the network.
+      const mapped = {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: `url.file://${r.repo}.insteadOf`,
+        GIT_CONFIG_VALUE_0: 'https://github.com/acme/haven.git',
+      }
+      const vercel = { VERCEL_GIT_PROVIDER: 'github', VERCEL_GIT_REPO_OWNER: 'acme', VERCEL_GIT_REPO_SLUG: 'haven' }
+      withClone({ depth: 3 }, (dir) => expect(r.run({ ...preview(), ...vercel, ...mapped }, dir)).toBe(SKIP))
+      // Another provider gets no URL, and says so.
+      withClone({ depth: 3 }, (dir) => {
+        const { status, log } = r.runLog({ ...preview(), ...vercel, ...mapped, VERCEL_GIT_PROVIDER: 'gitlab' }, dir)
+        expect(status).toBe(BUILD)
+        expect(log).toContain('no origin remote, and no public repository URL')
+      })
+    })
+
+    it('deepens both sides once when the shallow histories share no commit', () => {
+      r.commit('packages/ops/src/a.ts') // on dev, before the branch
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      r.commit('docs/more.md')
+      // Depth 1: the clone holds the tip alone, so dev's fetched history and
+      // the clone meet nowhere until the branch side is deepened.
+      withClone({ withOrigin: true, depth: 1 }, (dir) => expect(r.run(preview(), dir)).toBe(SKIP))
+      r.commit('packages/ops/src/b.ts')
+      withClone({ withOrigin: true, depth: 1 }, (dir) => expect(r.run(preview(), dir)).toBe(BUILD))
+    })
+
+    it('names the step that failed when it cannot find a merge base', () => {
+      r.git('checkout', '-q', '-b', 'feature')
+      r.commit('docs/guide.md')
+      withClone({ depth: 1 }, (dir) => {
+        const { status, log } = r.runLog(preview(), dir)
+        expect(status).toBe(BUILD)
+        expect(log).toContain('no dev ref in the clone, no origin remote, and no public repository URL')
+      })
+      withClone({ depth: 1 }, (dir) => {
+        const { status, log } = r.runLog({ ...preview(), IGNORE_BUILD_DEV_URL: `file://${r.repo}-gone` }, dir)
+        expect(status).toBe(BUILD)
+        expect(log).toContain(`fetching dev failed from: file://${r.repo}-gone`)
+      })
     })
 
     it('never applies to the dev or main branches, whose deployments must never be stale', () => {

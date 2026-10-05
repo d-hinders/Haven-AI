@@ -1381,8 +1381,9 @@ document was not re-read for it, and `last-verified` is not bumped. The
 app's Vercel ignore-build step (#3591; since #3594 a script shared with
 the dashboard's Vercel project, each with its own watch file) decides
 only *when* the console or the dashboard redeploys, from what changed since
-its last deployment; it moves no authority either, and the same scope note
-holds. The console's CI render
+its last deployment. That includes a PR's first preview fetching `dev` from
+the repository's public URL, which is read-only and needs no credential. It
+moves no authority either, and the same scope note holds. The console's CI render
 smoke (#3583) only proves, in a browser, that the console renders under that
 CSP and that the CSP refuses an un-nonced inline script; it moves no
 authority, and the same scope note holds.

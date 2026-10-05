@@ -429,7 +429,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // `routes/payments.ts` — `over-budget-refused` is now refused at the period
     // pre-check (typed 403), so no live leg watches the enforcer revert. Scope:
     // those rows, that paragraph and the "Still uncovered" note.
-    'last-verified': '2026-09-30',
+    // #3655: the balances-check paragraphs re-read against the automatic CDP
+    // Base Sepolia faucet exception, including the API-key-only/no-wallet-secret
+    // credential boundary. Other QA scenario prose was not re-read.
+    'last-verified': '2026-10-05',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',

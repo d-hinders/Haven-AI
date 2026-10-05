@@ -16,7 +16,8 @@
  * animated states are height-stable passes here and fails loudly if a
  * future edit makes one wrap. The hero's row swap is the exception: its
  * grid tracks do move layout, in real time, so that test pauses the page
- * clock once the loop runs and lets each swap finish before it measures.
+ * clock, finds the loop's phase to within 100 ms, and lets each swap
+ * finish before it measures.
  */
 import { expect, test } from '@playwright/test'
 
@@ -44,45 +45,61 @@ test.describe('/ motion: layout stability across cycles', () => {
     // The settled frame, before the loop's first step.
     const settled = await heightOf(page, 'hero-animated')
 
+    // Paused, the page clock only moves on `runFor`, so the real-time waits
+    // below cannot move the loop. Sampled DURING the cycle, not only across
+    // it (#3644): the list once grew to four rows at the pending insert and
+    // shrank back at the reset, which a before/after pair at the same phase
+    // could not see.
+    await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000))
+
+    // Find the loop's phase exactly: step 100 ms at a time until the pending
+    // row appears (the 3000 ms step, index.html:105). If it is already
+    // showing, wait it out first so the edge is the next cycle's.
+    const rowTexts = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid="hero-activity"] > div:not([data-leaving])')].map(
+          (row) => row.textContent ?? '',
+        ),
+      )
+    const pending = async () => (await rowTexts()).some((text) => text.includes('Paying research.example'))
+    for (let steps = 0; await pending(); steps++) {
+      if (steps > 400) throw new Error('the pending row never cleared')
+      await page.clock.runFor(100)
+    }
+    for (let steps = 0; !(await pending()); steps++) {
+      if (steps > 400) throw new Error('the pending row never appeared')
+      await page.clock.runFor(100)
+    }
+    // The loop is now within 100 ms after its 3000 ms step.
+
     // The row swap is a CSS animation (motion.module.css `grow`/`shrink`):
-    // it runs on real time while `page.clock` drives the JS steps, so each
-    // sample first lets the 0.4 s swap finish. Sub-pixel rounding of the two
-    // tracks is tolerated (`toBeCloseTo(…, 0)`, < 0.5 px); the bug this
-    // guards against is a whole extra row (~62 px).
+    // it runs on real time while the paused clock holds the JS steps, so
+    // each sample lets the 0.4 s swap finish first. Sub-pixel rounding of
+    // the two tracks is tolerated (`toBeCloseTo(…, 0)`, < 0.5 px); the bug
+    // this guards against is a whole extra row (~62 px).
     const settledAfterSwap = async () => {
       await page.waitForTimeout(600)
       return heightOf(page, 'hero-animated')
     }
 
-    // 3000 ms in, the mockup's pending step proves the loop is running
-    // (index.html:105) — the IntersectionObserver has delivered. Sampled
-    // DURING the cycle, not only across it (#3644): the list once grew to
-    // four rows here and shrank back at the reset, which a before/after pair
-    // at the same phase could not see.
-    await page.clock.runFor(3100)
-    await expect(hero.getByText('Pending')).toBeVisible()
-    expect(await settledAfterSwap(), 'hero height moved at the pending insert').toBeCloseTo(settled, 0)
-
-    // From here the clock is paused, so it only moves on `runFor` and the
-    // real-time waits cannot drift the samples. The loop's phase at the
-    // pause is known to within a few hundred ms (after the 3000 ms step, the
-    // pause adds 300), so each sample sits mid-phase with that much margin
-    // either side: settle 5200, badge 6800, refusal 11000 (its displaced
+    // Each sample names what the FIRST row shows in its phase and what it
+    // must not show yet, so a sample that slid into a neighbouring phase
+    // fails instead of passing quietly. Phases (AnimatedHeroFrame.tsx):
+    // pending 3000, settle 5200, badge 6800, refusal 11000 (the displaced
     // row dropped at 11420), fade 17500, reset 18100, next pending 22000.
-    await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 300))
-    // Each sample also names a text only its phase shows, so a sample that
-    // drifted into a neighbouring phase fails instead of passing quietly.
-    const activity = hero.getByTestId('hero-activity')
-    for (const [advance, label, shows] of [
-      [2200, 'settled payment', 'Paid research.example over x402'],
-      [2100, 'accounting badge', 'Paid research.example over x402 · In Fortnox'],
-      [3900, 'refusal, around its displaced row’s drop', 'Refused: over budget'],
-      [6300, 'fade-out or reset', 'Paid'],
-      [1700, 'next cycle, before its pending step', 'Paid api.example over x402'],
+    for (const [advance, label, shows, notYet] of [
+      [0, 'pending insert, mid-swap', 'Paying research.example', 'Paid research.example'],
+      [2700, 'settled payment', 'Paid research.example', 'In Fortnox'],
+      [1800, 'accounting badge', 'In Fortnox', 'Refused'],
+      [4000, 'refusal, its displaced row dropped', 'Refused: over budget', 'Paid data.example'],
+      [7300, 'reset to the settled rows', 'Paid data.example', 'research.example'],
     ] as const) {
       await page.clock.runFor(advance)
       expect(await settledAfterSwap(), `hero height moved at: ${label}`).toBeCloseTo(settled, 0)
-      await expect(activity, `sample drifted out of: ${label}`).toContainText(shows)
+      const [first, ...rest] = await rowTexts()
+      expect(first, `first row at: ${label}`).toContain(shows)
+      expect(first, `first row at: ${label}`).not.toContain(notYet)
+      expect(rest, `in-flow rows at: ${label}`).toHaveLength(2)
     }
   })
 

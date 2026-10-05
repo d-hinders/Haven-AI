@@ -35,6 +35,15 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3645 (2026-10-05):** `.env.dev.example`'s comments on the
+> hosted-MCP URL now match the backend: `NEXT_PUBLIC_HAVEN_MCP_URL` is a legacy
+> name the frontend no longer reads (#1823) and the backend reads only as a
+> fallback, and an unset `HAVEN_HOSTED_MCP_URL` makes `/resolve` and
+> `/register` answer 500 naming the variable rather than handing out
+> production's URL (#1129). Comments only; no variable or value changes.
+> Nothing else in this document was re-verified, and `last-verified` is not
+> bumped.
+>
 > **Re-verified #3632 (2026-10-05):** `.env.dev.example` drops "Gnosis Chiado"
 > from its testnet line, which now names Base Sepolia only, and annotates
 > `RPC_URL` and `GNOSISSCAN_API_KEY` as "chain 100 only; unused by the delegation

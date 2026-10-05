@@ -5,7 +5,12 @@ covers:
   - packages/mcp/**
   - packages/mcp-server/**
   - packages/signer/**
-last-verified: "2026-09-26"
+  - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/sdk/src/direct-payment-guard.ts
+  - packages/backend/src/routes/discovery.ts
+  - packages/connect/src/api.ts
+  - packages/backend/src/middleware/agentAuth.ts
+last-verified: "2026-10-05"
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -76,8 +81,11 @@ enforcement.
 
 For new agents, Connect Agent 2 can create this split automatically: Haven
 creates a pending setup, the local connector generates the signing key and API
-key on the user's machine, and Haven receives only the public signing address,
-proof, API-key hash/prefix, and install status before wallet approval. This
+key on the user's machine, and Haven receives the public signing address, a
+proof signature, the API-key hash/prefix, and non-secret setup metadata (runtime and
+connector version, server name, run mode, install capabilities, then install
+status), never the signing key or the plaintext API
+key, before wallet approval. This
 migration guide still applies to existing agents and manual hosted-MCP setups.
 
 ## Step-By-Step Migration
@@ -126,11 +134,14 @@ For JSON-configured runtimes, remove the old stdio block:
 
 ### 3. Add Hosted MCP
 
-Use the hosted URL shown in the Haven app's **Connect your agent** flow. The
-production URL below is a built-in default only on the production deployment
-itself (#1129); every other environment sets its own endpoint via
-`NEXT_PUBLIC_HAVEN_MCP_URL` (frontend) / `HAVEN_HOSTED_MCP_URL` (backend), and
-shows a not-configured state instead of another environment's URL when unset.
+Use the hosted URL shown in the Haven app's **Connect your agent** flow; the
+dashboard and the connector both get it from the backend. The production URL
+below is a built-in default only on the production backend itself (#1129).
+Every other environment sets its own endpoint in the backend's
+`HAVEN_HOSTED_MCP_URL` (`NEXT_PUBLIC_HAVEN_MCP_URL` is still read there as a
+fallback name). When neither is set, connector setup fails with an error naming
+the variable, and the discovery document reports no hosted MCP. It never hands
+out another environment's URL.
 
 Claude Code:
 
@@ -185,7 +196,8 @@ curl -X POST "$HAVEN_MCP_URL" \
 
 The hosted connection should list Haven tools such as `haven_get_agent`,
 `haven_get_allowances`, `haven_pay`, `haven_submit`, and
-`haven_pay_x402_quote`.
+`haven_pay_x402_quote`. A tool list alone does not prove the key works —
+`haven_get_agent` is the first call that checks it.
 
 ### 4. Add Local Signing
 
@@ -206,17 +218,22 @@ The signer exposes local stdio MCP tools:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign a delegation-rail payment from EIP-712 `typed_data`/`typed_data_b64`, or just `payment_id` (#1263 — the signer fetches the exact payload itself). A `payload_hash` on its own is REFUSED (`BARE_HASH_REFUSED`, #3169); it is still accepted alongside `typed_data` / `typed_data_b64` or `x402_expected`. Typed data without an x402 context is signed only when it is a direct-payment UserOp from the agent's own delegate account whose only call redeems a delegation made to it — anything else answers `TYPED_DATA_NOT_ALLOWED` (#3272). With an x402 context it signs only a funding leg of that same shape paying the agent's own delegate EOA, or a settlement child from the agent's own account (#3281). |
+| `haven_sign` | Sign a delegation-rail payment from EIP-712 `typed_data`/`typed_data_b64`, or just `payment_id` (#1263 — the signer fetches the exact payload itself). A `payload_hash` on its own is REFUSED (`BARE_HASH_REFUSED`, #3169); it is still accepted alongside `typed_data` / `typed_data_b64` or `x402_expected`. Outside the budget paths below, typed data without an x402 context is signed only when it is a direct-payment UserOp from the agent's own delegate account whose only call redeems a delegation made to it — anything else answers `TYPED_DATA_NOT_ALLOWED` (#3272). With an x402 context it signs only a funding leg of that same shape paying the agent's own delegate EOA, or a settlement child from the agent's own account (#3281). With `task_budget_id` or `sub_budget_id` alone (#3329/#3330, never together with `payment_id`), it fetches and verifies that budget's own child delegation or early-close UserOp, signs it, and names `haven_submit` with `{ task_budget_id | sub_budget_id, signature }` as the next step. |
 | `haven_sign_x402` | One-call x402 fast path: funding signature + merchant payment header; signs by `payment_id` ALONE (#1355 — Haven's sign-context re-serves `payment_required`); a caller-supplied `payment_required` is the fallback for pre-#1355 backends |
 | `haven_x402_sign_header` | Build and sign the x402 merchant payment header after the Haven funding leg succeeds (decomposed flow) |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → the agent's account (Haven wallet) only) |
 
-The signer's ONE network use (#1263) is a read-only fetch of a pending
-payment's signing context from Haven by `payment_id`, authenticated with the
-agent credential (`identity.json`) the connector stores next to the signer's
-key file — this is what lets the agent relay a small id instead of multi-KB
-signing payloads. It never sends the key, a signature, or anything else
-outbound; without `identity.json` the fetch path refuses and names the
+The signer's ONE network use (#1263) is a read-only fetch of a signing context
+from Haven. It fetches by `payment_id` for a payment
+(`GET /x402/:id/sign-context`, then `GET /payments/:id/sign-context` for a
+direct payment), and by `task_budget_id` / `sub_budget_id` for a budget's own
+delegation (`GET /task-budgets/:id/sign-context`,
+`GET /sub-budgets/:id/sign-context`). It authenticates with the agent
+credential (`identity.json`) that the connector stores next to the signer's key
+file. This is what lets the agent relay a small id instead of multi-KB signing
+payloads. The request carries the agent API key and the signer's version
+header, never the delegate key or a signature. Without `identity.json` the
+fetch path refuses; on the `payment_id` path it also names the
 `typed_data_b64` fallback. The signer core itself remains network-free.
 
 ### 5. Verify The Connection
@@ -267,10 +284,14 @@ Then test a tiny in-budget payment. The expected direct payment sequence is:
 4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.
 5. Haven relays the independently valid signed transaction.
 
-If `haven_pay` does not return a hash, the payment was **declined** — it is not
-waiting for anyone. An over-budget request is refused before it becomes
+If `haven_pay` refuses instead of returning a payment to sign (for example
+`DELEGATION_BUDGET_EXCEEDED`), the payment was **declined**: it is not waiting
+for anyone. An over-budget request is normally refused before it becomes
 signable, so the fix is for the wallet owner to grant or raise the budget in
-Haven and the agent to retry, never to poll.
+Haven (or wait for the period to reset) and the agent to retry, never to poll.
+A result with `payload_hash: null` is different. Its `idempotency_key` already
+belongs to an earlier payment that is not awaiting a signature, and it carries that payment's real `status`
+(and `tx_hash` once recorded), so there is nothing left to sign.
 
 ## What You Can Remove
 
@@ -291,7 +312,7 @@ Haven and the agent to retry, never to poll.
 | `HAVEN_MCP_URL` | SDK/curl examples | Hosted MCP endpoint |
 | `HAVEN_CREDENTIALS` | `@haven_ai/signer` / local `@haven_ai/mcp` | Path to Haven credential JSON |
 | `HAVEN_DELEGATE_KEY` | `@haven_ai/signer` fallback | Delegate signing key when not using a credential file |
-| `NEXT_PUBLIC_HAVEN_MCP_URL` | Frontend | Hosted MCP URL rendered in connect-agent snippets |
+| `HAVEN_HOSTED_MCP_URL` | Backend | Hosted MCP URL handed to the connector and dashboard at setup time and in the discovery document; required outside production (falls back to `NEXT_PUBLIC_HAVEN_MCP_URL`, then to the production-only default) |
 
 ## Custody Invariant
 
@@ -314,15 +335,19 @@ Haven and the agent to retry, never to poll.
 Confirm the Bearer token is the `api_key`, not the delegate key. If the full
 API key was lost, rotate it in Haven and update the runtime config.
 
-**Tools list is empty**
+**Tools are listed but every call fails**
 
-The token may be invalid, revoked, or tied to an inactive agent. Rotate the API
-key or create a new agent credential.
+The hosted server lists its tools for any well-formed Bearer token; the key is
+checked only when a tool call reaches Haven. A call failing with
+`statusCode: 401` (`Invalid or revoked API key`) means the token is invalid or
+revoked: rotate the API key or create a new agent credential. A 403
+`agent_pending_approval` means the agent is still waiting for its first budget
+grant in Haven; `agent_paused` means the owner paused it.
 
 **Payment is declined as over budget**
 
 The request is outside the remaining on-chain agent budget, so it was refused
-before it became signable — **nothing is queued and nothing is waiting for
+(normally before it became signable) — **nothing is queued and nothing is waiting for
 you**. Have the wallet owner grant or raise the budget in Haven, then retry.
 Polling will not help: there is no pending state to poll.
 
@@ -337,6 +362,20 @@ own secret store. Do not send the delegate key to hosted MCP.
 Keep the signing key under the agent operator's control and get product, legal,
 and security review before introducing any hosted signing arrangement. Haven
 must not become the party that holds or operates agent private keys.
+
+Re-verified 2026-10-05 (weekly docs audit #3645, at dev `cdb91d86`), a full
+re-read. Changed: the hosted-URL handout (step 3 and the variables table) now
+says the backend's `HAVEN_HOSTED_MCP_URL` serves both the dashboard and the
+connector — the frontend variable and its not-configured state went with #1823
+— which also matches `hosted-mcp.md`; the signer table and its network use name
+the task- and sub-budget sign-contexts (#3329/#3330); the decline paragraph
+separates a refusal from the #3495 `payload_hash: null` replay; the
+troubleshooting entry no longer says a bad key empties the tool list (a live
+probe of the dev hosted MCP listed every tool for an invalid key, and the first
+call answered 401); and Connect Agent 2's registration names its non-secret
+setup metadata. Re-checked without change: the package tags, the signer flags
+and variables, the production URL default, the tool names, the erc7710
+`haven_submit` header, the hosted boot refusal, step 2, and the rest of steps 3–4.
 
 ## Related Docs
 

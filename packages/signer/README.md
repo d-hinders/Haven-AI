@@ -381,7 +381,7 @@ The delegate key is read from `HAVEN_DELEGATE_KEY` or a `--credentials` file's
 `delegate_key` (with a permissive-file warning). It stays in this process, and
 is never transmitted.
 
-**The signer makes at most two kinds of network call, both reads.** Since
+**The signer's network calls are all reads of a signing context.** Since
 [#1263](https://github.com/d-hinders/Haven-AI/issues/1263) the `{ payment_id }`
 form of `haven_sign` and `haven_sign_x402` performs an authenticated,
 read-only `GET /x402/:payment_id/sign-context` against Haven, so that agents
@@ -389,13 +389,16 @@ never have to relay multi-KB EIP-712 payloads through a model's context
 window. Since #3271, `haven_sign` (never `haven_sign_x402`) falls back to a
 second read — `GET /payments/:payment_id/sign-context` — only when that first
 fetch answers the backend's 409 `sign_context_unavailable`, i.e. this
-`payment_id` names a direct payment rather than an x402 intent. **Only the
-Bearer API key goes out on either read; the delegate key is never part of
-either request or response.** Since #2985 both reads are bounded: each aborts
+`payment_id` names a direct payment rather than an x402 intent. Since
+#3329/#3330, `haven_sign` given a `task_budget_id` or `sub_budget_id` reads
+`GET /task-budgets/:id/sign-context` or `GET /sub-budgets/:id/sign-context`.
+**Only the Bearer API key and the signer's `X-Haven-Client` version header go
+out on any read; the delegate key is never part of a request or response.** Since #2985 the two payment reads are bounded (the budget reads use the same
+15 s bound): each payment read aborts
 after `SIGN_CONTEXT_TIMEOUT_MS` (15 s) and reports a `HavenSignContextError`
 naming the timeout and the `typed_data_b64` fallback, so a hung backend cannot
 hang the signer — and the agent — past the funding window. Every refusal on
-either fetch (timeout, unreachable host, a non-ok backend response, a
+any of these fetches (timeout, unreachable host, a non-ok backend response, a
 malformed body) is structured the same way, not just prose — see
 [Sign-context refusal codes](#sign-context-refusal-codes) below.
 Nothing else in the package reaches the

@@ -125,9 +125,10 @@ dev_sources() {
 # to the step that failed and returns 1 (the caller builds). Tries the refs the
 # clone has, then one shallow fetch of dev from each source in turn, then, if
 # the shallow histories share no commit, one deepening from the source that
-# answered. `--deepen` extends the clone's existing shallow boundary, HEAD's
-# side included, so no branch refspec is needed (one would only make the
-# deepen fail for a fork PR or a deleted branch).
+# answered. Whether `--deepen` extends HEAD's shallow boundary when only dev
+# is fetched differs between git versions (git 2.43 does, CI's newer git did
+# not), so it fetches the deployed branch ($1) alongside dev, and falls back
+# to dev alone when that fails (a fork PR, or a branch deleted since).
 find_dev_base() {
   base=''
   why=''
@@ -153,7 +154,9 @@ find_dev_base() {
     return 1
   fi
   base=$(git merge-base HEAD origin/dev 2>/dev/null) && [ -n "$base" ] && return 0
-  if quiet_fetch --deepen=200 "$fetched" "+refs/heads/dev:refs/remotes/origin/dev"; then
+  if { [ -n "$1" ] &&
+    quiet_fetch --deepen=200 "$fetched" "+refs/heads/dev:refs/remotes/origin/dev" "+refs/heads/$1:refs/remotes/ignore-build/branch"; } ||
+    quiet_fetch --deepen=200 "$fetched" "+refs/heads/dev:refs/remotes/origin/dev"; then
     base=$(git merge-base HEAD origin/dev 2>/dev/null) && [ -n "$base" ] && return 0
     why="dev fetched from ${fetched}, but it shares no commit with the clone even after deepening it"
     return 1
@@ -170,7 +173,7 @@ if [ -z "$prev" ]; then
     echo "vercel ignore-build: no previous deployment recorded (env '${VERCEL_ENV:-unset}', branch '${ref:-unset}'); building."
     exit 1
   fi
-  if ! find_dev_base; then
+  if ! find_dev_base "$ref"; then
     echo "vercel ignore-build: first preview of '${ref:-unset}' and no merge base with dev found (${why}); building."
     exit 1
   fi

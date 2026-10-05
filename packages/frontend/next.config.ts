@@ -54,9 +54,29 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
+      // #3579: the three protocol pages retired with the site switch-over;
+      // their content lives on How it works → Protocols. `/demo/x402` (the
+      // older route the x402 page replaced) goes straight there in one hop
+      // rather than through `/protocols/x402`. Exact sources, so `/demo` and
+      // `/demo.md` match nothing here.
+      {
+        source: '/protocols',
+        destination: '/how-it-works/protocols',
+        permanent: true,
+      },
+      {
+        source: '/protocols/x402',
+        destination: '/how-it-works/protocols',
+        permanent: true,
+      },
+      {
+        source: '/protocols/mpp',
+        destination: '/how-it-works/protocols',
+        permanent: true,
+      },
       {
         source: '/demo/x402',
-        destination: '/protocols/x402',
+        destination: '/how-it-works/protocols',
         permanent: true,
       },
       // #3024: the custody page is deleted, not kept on disk as a redirect

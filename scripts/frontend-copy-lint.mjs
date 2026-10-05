@@ -338,9 +338,9 @@ export const BANNED = [
   // 8-entry SCAN_FILES allowlist) before landing: ZERO occurrences of either,
   // and each fires on the pre-fix file. Two nearby generalisations were
   // REJECTED on the same measurement rather than on taste, because each has a
-  // true-sentence false positive: `signs and settles` hits
-  // `app/protocols/x402/page.tsx` ("Client signs and settles on-chain" — the
-  // client does), and `haven signs` hits `components/AccountSignersCard.tsx`
+  // true-sentence false positive: `signs and settles` hit the x402 protocol
+  // page then on the site ("Client signs and settles on-chain" — the client
+  // does; the page was retired in #3579), and `haven signs` hits `components/AccountSignersCard.tsx`
   // ("Haven signs nothing." — the correct non-custody claim, which this gate
   // must never penalise).
   //

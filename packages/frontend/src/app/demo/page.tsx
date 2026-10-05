@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { ExternalLink } from 'lucide-react'
-import { SiteHeader } from '@/components/marketing/SiteHeader'
-import { SiteFooter } from '@/components/marketing/SiteFooter'
+import { Header } from '@/components/marketing/site/Header'
+import { Footer } from '@/components/marketing/site/Footer'
 import { Section } from '@/components/marketing/Section'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -21,7 +21,7 @@ import { isDemoPageVisible } from '@/lib/demo-gate'
  *
  * Semi-private: not advertised — the team hands the link to invited
  * investors. It is deliberately absent from `PUBLIC_SURFACES`, `robots.txt`,
- * `SiteHeader`, `SiteFooter`, `llms.txt` and `for-agents.md` — see
+ * the site header and footer, `llms.txt` and `for-agents.md` — see
  * `src/app/demo/__tests__/not-listed.test.ts`, which pins that absence with
  * explicit assertions rather than the count-only "lists nothing else" guard
  * in `discovery-surfaces.test.ts`.
@@ -31,7 +31,7 @@ import { isDemoPageVisible } from '@/lib/demo-gate'
  * an `<h2>`, which left this page — like every other page that reaches for
  * `Section` for its hero — with no `<h1>` at all. `/how-it-works` avoids the
  * same trap by not using `Section` for its hero either; this page keeps
- * `Section`'s plain styling (no `HeroBackdrop`) but borrows its title/lede
+ * `Section`'s plain styling but borrows its title/lede
  * classes verbatim so the visual result is unchanged, only the tag.
  */
 export const metadata: Metadata = {
@@ -84,7 +84,7 @@ export default function DemoPage() {
 
   return (
     <div className="min-h-screen bg-[var(--v2-bg)]">
-      <SiteHeader />
+      <Header />
       <main>
         <Section>
           {/* Reading column (design review round 4): max-w-6xl at 1280px runs
@@ -297,7 +297,7 @@ export default function DemoPage() {
           </div>
         </Section>
       </main>
-      <SiteFooter />
+      <Footer />
     </div>
   )
 }

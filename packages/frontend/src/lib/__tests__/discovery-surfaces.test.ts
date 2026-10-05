@@ -235,16 +235,22 @@ describe('the hooks are actually wired into the app', () => {
    * (`docs/operations/qa-explore-ui-cadence.md` § Second scenario). Scoring it
    * weekly in a report is worth having; catching it here is better.
    */
-  it('a landing-HTML hook actually REACHES the agent runbook, not just some file', () => {
+  it('a landing-HTML hook actually REACHES the agent runbook, not just some file', async () => {
     const layout = read('src/app/layout.tsx')
-    const page = read('src/app/page.tsx')
-    const footer = read('src/components/marketing/SiteFooter.tsx')
+    // The home page's hook, read from what the page RENDERS: the sentence's
+    // own link. (The footer's hook has its own test below, #3573.)
+    const { createElement } = await import('react')
+    const { render } = await import('@testing-library/react')
+    const { NewSiteHome } = await import('@/components/marketing/site/home/HomeSections')
+    const { container } = render(createElement(NewSiteHome))
+    const sentence = Array.from(container.querySelectorAll('p')).find((p) =>
+      (p.textContent ?? '').includes('If you are an AI agent reading this for your user'),
+    )
 
     // Each hook's destination, taken from the hook rather than assumed.
     const destinations = [
       layout.match(/rel="alternate"[\s\S]{0,200}?href="(\/[^"]+)"/)?.[1],
-      page.match(/If you are an AI agent[\s\S]{0,300}?href="(\/[^"]+)"/)?.[1],
-      footer.match(/'For agents',\s*href: '(\/[^']+)'/)?.[1],
+      sentence?.querySelector('a')?.getAttribute('href') ?? undefined,
     ]
     for (const destination of destinations) {
       expect(destination, 'a landing hook lost its destination').toBeTruthy()
@@ -272,11 +278,11 @@ describe('the hooks are actually wired into the app', () => {
   })
 
   /**
-   * The redesigned footer's own hook (#3573). The chain test above reads only
-   * the legacy `SiteFooter.tsx` and passes on the layout's hook alone, so the
-   * new footer could lose its "For agents" entry with that test still green.
-   * This one requires the NEW footer's own destination to reach the runbook,
-   * taken from the exported column data that `Footer` renders.
+   * The footer's own hook (#3573). The chain test above follows the layout's
+   * and the home sentence's hooks, so the footer could lose its "For agents"
+   * entry with that test still green. This one requires the footer's own
+   * destination to reach the runbook, taken from the exported column data
+   * that `Footer` renders.
    *
    * #3577 retargeted the entry at the `/for-agents` page, so the hop is now
    * TWO hops: the footer names the page, and the page (a component, not a
@@ -331,33 +337,22 @@ describe('the hooks are actually wired into the app', () => {
     expect(html.split(SIGNUP_402).length - 1).toBe(2)
   })
 
-  it('the landing page carries the agent sentence in server-rendered content', () => {
-    const page = read('src/app/page.tsx')
-    expect(page).not.toContain("'use client'")
-    expect(page).toContain('If you are an AI agent reading this for your user')
-    expect(page).toContain('href="/llms.txt"')
+  it('the landing page and its sections are server components, so the agent sentence is in the HTML', () => {
+    expect(read('src/app/page.tsx')).not.toContain("'use client'")
+    expect(read('src/components/marketing/site/home/HomeSections.tsx')).not.toContain("'use client'")
   })
 
-  it('the redesigned home carries the same agent sentence, emitted not pasted (#3574)', async () => {
-    // The legacy pin above reads SOURCE, which cannot see what the gate-on
-    // branch actually emits: the sentence could sit only in the legacy hero
-    // while the new page went out without it. This one imports the new
-    // section tree and asserts over its RENDERED text, the same posture
-    // `app/__tests__/new-home.test.tsx` argues for in its header. It keeps
-    // the legacy assertion above unchanged, as the slice requires.
-    // createElement, not JSX: this file is .ts.
+  it('the home page carries the agent sentence, emitted not pasted (#3574)', async () => {
+    // Asserted over the RENDERED section tree, the posture
+    // `app/__tests__/new-home.test.tsx` argues for: a source read cannot see
+    // what a component actually emits (the sentence also wraps across source
+    // lines). createElement, not JSX: this file is .ts.
     const { createElement } = await import('react')
     const { render } = await import('@testing-library/react')
     const { NewSiteHome } = await import('@/components/marketing/site/home/HomeSections')
     const { container } = render(createElement(NewSiteHome))
     expect(container.textContent).toContain('If you are an AI agent reading this for your user')
     expect(container.querySelector('a[href="/llms.txt"]')).not.toBeNull()
-  })
-
-  it('the footer links to the agent entry point', () => {
-    const footer = read('src/components/marketing/SiteFooter.tsx')
-    expect(footer).toContain('For agents')
-    expect(footer).toContain("href: '/llms.txt'")
   })
 
   it('the authenticated layout is a server component that emits the auth marker', () => {

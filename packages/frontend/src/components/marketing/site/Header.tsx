@@ -8,8 +8,7 @@ import { SITE_FONT_VARIABLES } from './fonts'
 import { SITE_WRAP } from './SiteSection'
 
 /**
- * The redesigned public header (#3573, epic #3572), rendered by `SiteHeader`
- * when `isNewSiteVisible()` is on.
+ * The public header (#3573, epic #3572).
  *
  * Entries land with their destination (epic rule "Entries land with their
  * page"): For developers and For agents arrived with their pages in #3577.

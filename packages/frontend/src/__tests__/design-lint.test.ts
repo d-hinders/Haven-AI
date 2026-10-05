@@ -39,8 +39,10 @@ describe('design-lint scanner (#855)', () => {
       'src/components/marketing/Hero.tsx',
       'src/components/brand/Logo.tsx',
       'src/app/page.tsx',
-      'src/app/protocols/x402/page.tsx',
+      'src/app/how-it-works/protocols/page.tsx',
       'src/app/how-it-works/page.tsx',
+      'src/app/developers/page.tsx',
+      'src/app/for-agents/page.tsx',
     ]) {
       expect(scan(file, src)).toEqual([])
     }

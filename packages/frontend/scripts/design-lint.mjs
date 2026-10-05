@@ -73,7 +73,6 @@ const MARKETING_SURFACES = [
   'components/brand/',
   'components/marketing/',
   'src/app/page.tsx',
-  'src/app/protocols/',
   'src/app/how-it-works/',
   // #3577: the two new public pages, marketing-family by construction —
   // their sections live under components/marketing/site/ (already covered by

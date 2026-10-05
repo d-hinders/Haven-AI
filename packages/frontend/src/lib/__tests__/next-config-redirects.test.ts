@@ -54,4 +54,47 @@ describe('next.config redirects (#3024)', () => {
       permanent: true,
     })
   })
+
+  // #3579: the protocol pages retired with the site switch-over.
+  it.each(['/protocols', '/protocols/x402', '/protocols/mpp'])(
+    'answers a permanent redirect from %s to /how-it-works/protocols',
+    async (source) => {
+      const config = (await import('../../../next.config')).default
+      const redirects = await config(PHASE as never).redirects!()
+      expect(redirects.find((r) => r.source === source)).toMatchObject({
+        source,
+        destination: '/how-it-works/protocols',
+        permanent: true,
+      })
+    },
+  )
+
+  it('sends /demo/x402 to /how-it-works/protocols in one hop', async () => {
+    const config = (await import('../../../next.config')).default
+    const redirects = await config(PHASE as never).redirects!()
+    const demoX402 = redirects.find((r) => r.source === '/demo/x402')
+    expect(demoX402).toMatchObject({ destination: '/how-it-works/protocols', permanent: true })
+    // One hop: the destination is not itself a redirect source.
+    expect(redirects.find((r) => r.source === demoX402!.destination)).toBeUndefined()
+  })
+
+  it('leaves /demo and /demo.md alone: no redirect rule matches either', async () => {
+    const config = (await import('../../../next.config')).default
+    const redirects = await config(PHASE as never).redirects!()
+    // Each source compiled the way Next matches it (path-to-regexp:
+    // `:name*` spans segments, `:name` one segment, the rest literal).
+    const toRegExp = (source: string) =>
+      new RegExp(
+        `^${source
+          .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/:[A-Za-z]+\*/g, '.*')
+          .replace(/:[A-Za-z]+/g, '[^/]+')}$`,
+      )
+    for (const path of ['/demo', '/demo.md']) {
+      const matching = redirects.filter((r) => toRegExp(r.source).test(path))
+      expect(matching, `${path} matched ${matching.map((r) => r.source).join(', ')}`).toEqual([])
+    }
+    // Positive control: the same matcher does find the rule for /demo/x402.
+    expect(redirects.filter((r) => toRegExp(r.source).test('/demo/x402'))).toHaveLength(1)
+  })
 })

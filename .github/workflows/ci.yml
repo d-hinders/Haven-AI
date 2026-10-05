@@ -862,12 +862,6 @@ jobs:
           # this literal (grepped the repo: nothing outside these two
           # workflows and the e2e spec references it).
           NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: e2e-onramp-app-id-placeholder
-          # #3573: the e2e and visual suites run against ONE build with the
-          # redesigned public site's gate on (epic #3572 — src/lib/site-gate.ts).
-          # This build sets no NEXT_PUBLIC_HAVEN_ENV, so it is production-shaped
-          # and the gate would otherwise be off. Build-time (NEXT_PUBLIC_ is
-          # inlined), CI-only: no deployment sets it.
-          NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'
 
       - name: Upload frontend build
         uses: actions/upload-artifact@v4

@@ -4,18 +4,14 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 /**
- * The login page's assertions under the REDESIGNED shell (#3578, epic #3572).
- *
- * These are the same four assertions `page.test.tsx` pins for the legacy
- * screen — the form contract (fields, submission, error copy, hand-off line)
- * survives the reshell unchanged — plus one structural check per test run
- * (via `renderNewShell`): the public footer that only the new shell renders
- * is present, so a silently-off gate cannot let these pass against the
- * legacy branch and prove nothing.
- *
- * The gate is turned on through its preview flag (the production-shaped path
- * `site-gate.test.ts` covers), stubbed per test and unstubbed after, so no
- * case reads the runner's own environment.
+ * The login page's assertions inside the site's auth shell (#3578, epic
+ * #3572). These are the four form-contract assertions `page.test.tsx` also
+ * pins (fields, submission, error copy, hand-off line), plus one structural
+ * check per test run (via `renderNewShell`): the public footer the shell
+ * renders is present. Written while a build-time gate chose between this
+ * shell and the legacy screen; since the switch-over (#3579) the shell is the
+ * only screen, in a production-shaped environment too, which is what the
+ * empty `NEXT_PUBLIC_HAVEN_ENV` below asserts.
  */
 
 const mockPush = vi.fn()
@@ -66,11 +62,10 @@ vi.mock('@/lib/api', async () => {
 import LoginPage from '@/app/login/page'
 import { ApiRequestError } from '@/lib/api'
 
-describe('LoginPage (site gate on, #3578)', () => {
+describe('LoginPage (site auth shell, #3578)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
-    vi.stubEnv('NEXT_PUBLIC_HAVEN_SITE_PREVIEW', '1')
   })
 
   afterEach(() => {

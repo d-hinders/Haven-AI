@@ -200,7 +200,7 @@ interface RingUse {
  * Every `focus:`/`focus-visible:` ring utility in the product source.
  *
  * Deliberately NOT matched: unconditional `ring-*` with no focus variant. Those
- * are decorative halos (EmptyState icon discs, FlowCard,
+ * are decorative halos (EmptyState icon discs,
  * RecoveryNudge, the onboarding check icons) — tonal brand tints on matching
  * `-soft` fills, not focus indicators. #1741 scopes them out explicitly and
  * 2.4.11 does not apply to them.

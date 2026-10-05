@@ -17,7 +17,7 @@ import {
 /**
  * The redesigned For developers page (#3577, epic #3572), built from
  * `docs/product/site-mockup/developers.html` and rendered by
- * `app/developers/page.tsx` when `isNewSiteVisible()` is on.
+ * `app/developers/page.tsx`.
  *
  * Copy follows the mockup except where the code corrected it, each marked at
  * its fixture: the connector command carries its required `--api` flag (the

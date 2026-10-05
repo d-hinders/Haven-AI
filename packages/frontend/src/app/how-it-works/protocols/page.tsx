@@ -1,7 +1,5 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
 import { ProtocolsPage } from '@/components/marketing/site/how-it-works/ProtocolsPage'
-import { isNewSiteVisible } from '@/lib/site-gate'
 
 export const metadata: Metadata = {
   title: 'Protocols — Haven',
@@ -9,12 +7,10 @@ export const metadata: Metadata = {
 }
 
 /**
- * `/how-it-works/protocols` (#3576, epic #3572). It exists only where the
- * build-time site gate is on and 404s everywhere else, production included,
- * until the switch-over (#3579) removes the gate and redirects the three
- * `/protocols*` pages here. It is not in `PUBLIC_SURFACES` until then.
+ * `/how-it-works/protocols` (#3576, epic #3572). Since the switch-over (#3579)
+ * it is a public surface, and the three retired `/protocols*` pages and
+ * `/demo/x402` redirect here (`next.config.ts`).
  */
 export default function Protocols() {
-  if (!isNewSiteVisible()) notFound()
   return <ProtocolsPage />
 }

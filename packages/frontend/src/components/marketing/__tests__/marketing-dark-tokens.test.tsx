@@ -1,11 +1,8 @@
 import { readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { HeroBackdrop } from '../HeroBackdrop'
-import { SiteHeader } from '../SiteHeader'
 import { BrandBandButton } from '../BrandBandButton'
-import { FlowCard } from '../FlowCard'
 
 /**
  * The marketing surface joined the dark token system (#3139).
@@ -23,9 +20,14 @@ import { FlowCard } from '../FlowCard'
  *   - the dark forms of those tokens must exist in BOTH dark declaration
  *     blocks of globals.css, byte-identically — the same invariant
  *     `theme-tokens.test.ts` holds for the rest of the palette;
- *   - the fixed-on-fixed pairings (dark-band header, white band CTA) must
- *     keep their fixed ink classes rather than drifting back to `--v2-ink`,
- *     which flips near-white in the dark palette.
+ *   - the fixed-on-fixed pairing (the white band CTA) must keep its fixed
+ *     ink class rather than drifting back to `--v2-ink`, which flips
+ *     near-white in the dark palette.
+ *
+ * The legacy chrome's own cases (the hero backdrop's wash, the resting and
+ * dark-section header, the live-payment card) went with that chrome in the
+ * switch-over (#3579); the redesigned header's dark-band behaviour is pinned
+ * in `site/__tests__/site-chrome.test.tsx`.
  */
 
 const FRONTEND = resolve(__dirname, '../../../..')
@@ -78,35 +80,6 @@ describe('the marketing canvas tokens resolve per theme (#3139)', () => {
     }
   })
 
-  it('HeroBackdrop paints the wash and dot tokens, never a hard-coded white ground', () => {
-    const { container } = render(<HeroBackdrop />)
-    const wash = container.querySelector('.v2-mesh-drift') as HTMLElement
-    expect(wash).not.toBeNull()
-    expect(wash.style.background).toContain('var(--v2-marketing-canvas-wash)')
-    expect(wash.style.background).not.toContain('#ffffff')
-    expect(wash.style.background).not.toContain('rgba(255,255,255')
-
-    const dots = container.querySelector('[style*="22px 22px"]') as HTMLElement
-    expect(dots).not.toBeNull()
-    expect(dots.style.backgroundImage).toContain('var(--v2-marketing-dot)')
-    expect(dots.style.backgroundImage).not.toContain('rgba(26, 31, 54')
-  })
-
-  it('the resting header ground is the page token, not a fixed white bar', () => {
-    const { container } = render(<SiteHeader />)
-    const header = container.querySelector('[data-v2-header]') as HTMLElement
-    expect(header.className).toContain('bg-bg/95')
-    expect(header.className).not.toContain('bg-white/95')
-  })
-
-  it('the dark-section header keeps its fixed white ink over the fixed band', () => {
-    // `useState(false)` renders the resting state; the fixed-ink classes of the
-    // dark state are asserted in source so a drift back to a theme token —
-    // which flips near-white in the dark palette — cannot ship silently.
-    const source = readFileSync(join(FRONTEND, 'src/components/marketing/SiteHeader.tsx'), 'utf8')
-    expect(source).toContain("onDarkSection ? 'text-white' : 'text-[var(--v2-ink)]'")
-  })
-
   it('the band CTA keeps a fixed ink on its fixed white fill', () => {
     const { container } = render(
       <BrandBandButton href="/signup">Create your account</BrandBandButton>,
@@ -114,13 +87,5 @@ describe('the marketing canvas tokens resolve per theme (#3139)', () => {
     const link = container.querySelector('a') as HTMLElement
     expect(link.className).toContain('text-[#1a1f36]')
     expect(link.className).not.toContain('text-[var(--v2-ink)]')
-  })
-
-  it('the live-payment card fill is the theme ground, not hard-coded white', () => {
-    const { container } = render(<FlowCard />)
-    const card = container.querySelector('.rounded-\\[14px\\]') as HTMLElement
-    expect(card).not.toBeNull()
-    expect(card.className).toContain('bg-bg')
-    expect(card.className).not.toContain('bg-white')
   })
 })

@@ -2,8 +2,6 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SiteHeader } from '../../SiteHeader'
-import { SiteFooter } from '../../SiteFooter'
 import { Header, SITE_NAV, crossesDarkSection } from '../Header'
 import { Footer, SITE_FOOTER_COLUMNS } from '../Footer'
 import { SITE_NAVY, SiteSection } from '../SiteSection'
@@ -19,33 +17,6 @@ afterEach(() => {
   vi.unstubAllEnvs()
   document.documentElement.removeAttribute('data-theme')
   document.body.innerHTML = ''
-})
-
-describe('the site gate picks the header and footer', () => {
-  it('renders the legacy header and footer with the gate off (unit-test default: production)', () => {
-    render(
-      <>
-        <SiteHeader />
-        <SiteFooter />
-      </>,
-    )
-    expect(document.querySelector('[data-v2-header]')).not.toBeNull()
-    expect(document.querySelector('[data-site-header]')).toBeNull()
-    expect(screen.getAllByRole('link', { name: 'x402' }).length).toBeGreaterThan(0)
-  })
-
-  it('renders the new header and footer with the gate on', () => {
-    vi.stubEnv('NEXT_PUBLIC_HAVEN_SITE_PREVIEW', '1')
-    render(
-      <>
-        <SiteHeader />
-        <SiteFooter />
-      </>,
-    )
-    expect(document.querySelector('[data-site-header]')).not.toBeNull()
-    expect(document.querySelector('[data-v2-header]')).toBeNull()
-    expect(screen.queryByRole('link', { name: 'x402' })).toBeNull()
-  })
 })
 
 describe('header entries', () => {

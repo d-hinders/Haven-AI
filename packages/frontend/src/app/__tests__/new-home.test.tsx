@@ -6,13 +6,10 @@ import { NewSiteHome } from '../../components/marketing/site/home/HomeSections'
 import { CONNECTOR_TERMINAL } from '../../components/marketing/site/home/fixtures'
 
 /**
- * The redesigned home page, rendered with the gate ON (#3574, epic #3572).
- *
- * `app/__tests__/page.test.tsx` keeps pinning the LEGACY page (unit tests run
- * with the gate off — the gate branch there never activates). This file is its
- * counterpart for the new page, and it asserts over the RENDERED page, the
- * same posture that file's header argues for: a source-level grep cannot see
- * what a component actually emitted.
+ * The home page (#3574, epic #3572). It asserts over the RENDERED page, the
+ * posture the legacy page's test argued for (#1954, removed with that page by
+ * the switch-over, #3579): a source-level grep cannot see what a component
+ * actually emitted.
  *
  * The mockup is `docs/product/site-mockup/index.html`; the epic's decided
  * deviations are listed on `HomeSections.tsx` and cited per assertion below.
@@ -112,8 +109,7 @@ describe('the new home page (#3574)', () => {
   it('hides every svg inside a link from the accessibility tree (the arrow guard’s equivalent)', () => {
     const { container } = render(<NewSiteHome />)
     const glyphs = Array.from(container.querySelectorAll('a svg'))
-    // Guard the guard, the same way page.test.tsx does: an empty set would
-    // pass the loop below in silence. The hero CTA ships one trailing arrow.
+    // Guard the guard: an empty set would pass the loop below in silence. The hero CTA ships one trailing arrow.
     expect(glyphs.length).toBeGreaterThanOrEqual(1)
     for (const glyph of glyphs) {
       expect(glyph).toHaveAttribute('aria-hidden', 'true')

@@ -20,10 +20,11 @@ import localFont from 'next/font/local'
  * `@fontsource-variable/jetbrains-mono`), licences beside them; the variable
  * axis covers every weight the type roles use.
  *
- * `preload: false` while the site gate exists: `SiteHeader` imports this
- * module whichever branch renders, so a preload would put a `<link
- * rel="preload">` for an unused face on every legacy page in production.
- * The switch-over slice (#3579) is where preloading becomes right.
+ * Preloaded: since the switch-over (#3579) only the public site imports
+ * this module (its header, footer, sections and the auth shell), and every
+ * page that does renders both faces, so the `<link rel="preload">` is never
+ * for an unused face. While the site gate existed the legacy pages imported
+ * it too, which is why it was off until then.
  */
 const display = localFont({
   src: './font-files/inter-tight-latin-wght-normal.woff2',
@@ -31,7 +32,7 @@ const display = localFont({
   style: 'normal',
   variable: '--font-site-display',
   display: 'swap',
-  preload: false,
+  preload: true,
 })
 
 const mono = localFont({
@@ -40,7 +41,7 @@ const mono = localFont({
   style: 'normal',
   variable: '--font-site-mono',
   display: 'swap',
-  preload: false,
+  preload: true,
 })
 
 /** Put on every new-site root element; defines the two font variables below it. */

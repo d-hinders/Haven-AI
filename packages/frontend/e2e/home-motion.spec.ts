@@ -1,9 +1,7 @@
 /**
  * `/` motion: no layout shift across a full cycle (#3575).
  *
- * The page under this harness is the new home with the gate ON
- * (playwright.config.ts sets `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`), so all
- * four animated regions are live. Each test installs Playwright's
+ * All four animated regions of the home page are live under this harness. Each test installs Playwright's
  * controlled clock, waits until the region's loop is demonstrably running
  * (a loop-driven text state is visible — which also proves the
  * IntersectionObserver delivered), then advances the clock through one

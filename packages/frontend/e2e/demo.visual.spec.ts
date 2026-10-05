@@ -10,8 +10,7 @@
  *
  * Desktop and mobile in the light theme, plus desktop in the dark theme
  * (#3573): the page wears the redesigned public header and footer, which
- * follow the visitor's theme, in the build this harness serves (the site
- * gate is on there — `src/lib/site-gate.ts`). Same footprint as `/releases`.
+ * follow the visitor's theme. Same footprint as `/releases`.
  * Baselines are Linux-rendered by the *Update visual baselines* dispatch,
  * never locally (frontend playbook §4) — `expected` there must name
  * `demo-desktop.png`, `demo-mobile.png` and `demo-desktop-dark.png` exactly.

@@ -69,12 +69,12 @@ function LoginForm() {
   const card: ReactNode = (
     <>
       <h1 className={headingClass}>Welcome back</h1>
-      <p className={subClass}>Log in to your Haven account.</p>
+      <p className={subClass}>Sign in to your Haven account.</p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {justRegistered && !error && (
           <div className="rounded-md border border-success/20 bg-[var(--v2-success-soft)] px-4 py-3 text-sm text-[var(--v2-success)]">
-            Account created. Log in to continue.
+            Account created. Sign in to continue.
           </div>
         )}
 
@@ -118,7 +118,7 @@ function LoginForm() {
           disabled={submitting}
           className="w-full"
         >
-          {submitting ? 'Logging in...' : 'Log in'}
+          {submitting ? 'Signing in...' : 'Sign in'}
         </Button>
       </form>
 

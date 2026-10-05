@@ -3260,7 +3260,7 @@ export const SCENARIOS = {
       await gotoAuth('/login')
       setAuthApiStage('error')
       await fillLogin()
-      await page.getByRole('button', { name: 'Log in', exact: true }).click()
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
       await page.getByText('Invalid email or password.').waitFor({ timeout: 20_000 })
       await shootCard('login-api-error')
 
@@ -3268,13 +3268,13 @@ export const SCENARIOS = {
       await gotoAuth('/login')
       setAuthApiStage('loading')
       await fillLogin()
-      await page.getByRole('button', { name: 'Log in', exact: true }).click()
-      await page.getByRole('button', { name: 'Logging in...' }).waitFor({ timeout: 20_000 })
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await page.getByRole('button', { name: 'Signing in...' }).waitFor({ timeout: 20_000 })
       await shootCard('login-loading')
 
       // ── sign-in: the registered banner ───────────────────────────────────
       await gotoAuth('/login?registered=1')
-      await page.getByText('Account created. Log in to continue.').waitFor({ timeout: 20_000 })
+      await page.getByText('Account created. Sign in to continue.').waitFor({ timeout: 20_000 })
       await shootCard('login-registered')
 
       // ── sign-up: client validation (email rule + confirm mismatch) ──────

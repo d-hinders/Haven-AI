@@ -65,7 +65,7 @@ describe('LoginPage', () => {
 
     expect(screen.getByLabelText('Email')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Log in' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
   })
 
   it('calls login on submission', async () => {
@@ -81,7 +81,7 @@ describe('LoginPage', () => {
 
     await user.type(screen.getByLabelText('Email'), 'test@example.com')
     await user.type(screen.getByLabelText('Password'), 'password123')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith('test@example.com', 'password123')
@@ -96,7 +96,7 @@ describe('LoginPage', () => {
 
     await user.type(screen.getByLabelText('Email'), 'test@example.com')
     await user.type(screen.getByLabelText('Password'), 'wrongpassword')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
     await waitFor(() => {
       expect(screen.getByText('Invalid email or password.')).toBeInTheDocument()

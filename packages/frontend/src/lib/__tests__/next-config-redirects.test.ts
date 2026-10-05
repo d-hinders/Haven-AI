@@ -97,5 +97,4 @@ describe('next.config redirects (#3024)', () => {
     expect(matches('/demo/:path*', '/demo')).toBe(true)
     expect(matches('/demo(.*)', '/demo.md')).toBe(true)
   })
-
 })

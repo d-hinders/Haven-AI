@@ -254,7 +254,7 @@ function SignupForm() {
           href="/login"
           className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
         >
-          Log in
+          Sign in
         </Link>
       </p>
     </>

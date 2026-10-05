@@ -77,7 +77,7 @@ export function HeroAgentsFrame({ state }: { state?: HeroFrameState } = {}) {
             {atlas.name}
             <span className="ml-1.5 font-normal text-[var(--v2-ink-3)]">{atlas.role}</span>
           </div>
-          <div className="mt-2">
+          <div className="mt-1.5">
             <div className="mb-1.5 flex items-center justify-between gap-4 text-[12.5px]">
               <b className={`font-semibold text-[var(--v2-ink)] ${SITE_TYPE.mono}`} data-testid="hero-used">
                 {state?.atlasUsed ?? atlas.used} of {atlas.total} USDC
@@ -104,7 +104,7 @@ export function HeroAgentsFrame({ state }: { state?: HeroFrameState } = {}) {
             {iris.name}
             <span className="ml-1.5 font-normal text-[var(--v2-ink-3)]">{iris.role}</span>
           </div>
-          <div className="mt-2">
+          <div className="mt-1.5">
             <div className="mb-1.5 flex items-center justify-between gap-4 text-[12.5px]">
               <b className={`font-semibold text-[var(--v2-ink)] ${SITE_TYPE.mono}`}>
                 {iris.used} of {iris.total} USDC

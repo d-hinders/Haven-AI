@@ -177,7 +177,8 @@ export function HomeHowItWorks() {
         From md each step is a four-row subgrid of this grid (#3630): label,
         heading, paragraph and card rows line up across the three columns, so
         the three cards share one height and top edge however the text wraps.
-        Each card fills its row; the confirmation stays at its bottom.
+        Each card fills its row; card 1 centres its content and card 2 keeps
+        its action row (control or confirmation) at the bottom, as the mockup does.
       */}
       <div className="mt-12 grid grid-cols-1 gap-7 md:grid-cols-3 md:grid-rows-[auto_auto_auto_1fr] md:gap-y-0">
         <div className="flex min-w-0 flex-col md:row-span-4 md:grid md:grid-rows-subgrid">

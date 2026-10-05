@@ -518,18 +518,19 @@ describe('#3410 whole-token budget display', () => {
 
   it('resolves decimals per chain through the same registry the SDK reads', () => {
     // 18-decimals ETH on Base mainnet proves this is a real conversion, not a
-    // USDC-only special case; Gnosis registers USDC.e, not USDC, so a plain
-    // USDC budget on Gnosis must NOT be silently converted with guessed decimals.
+    // USDC-only special case; a token the chain does not register (DAI on Base)
+    // must NOT be silently converted with guessed decimals. (#3638: this case
+    // used USDC on Gnosis, which no longer resolves at all.)
     const eth = renderConsentBlock(
       { ...input, chainId: 8453, allowanceSummary: [{ token: 'ETH', amount: '500000000000000000', resetMinutes: 10080 }] },
       'irrelevant',
     )
     expect(eth).toContain('up to 0.5 ETH per 10080 min')
-    const gnosisUsdc = renderConsentBlock(
-      { ...input, chainId: 100, allowanceSummary: [{ token: 'USDC', amount: '1000000', resetMinutes: 1440 }] },
+    const unregistered = renderConsentBlock(
+      { ...input, chainId: 8453, allowanceSummary: [{ token: 'DAI', amount: '1000000', resetMinutes: 1440 }] },
       'irrelevant',
     )
-    expect(gnosisUsdc).toContain('up to 1000000 USDC (atomic units) per 1440 min')
+    expect(unregistered).toContain('up to 1000000 DAI (atomic units) per 1440 min')
   })
 
   it('pins the consent hash literally — the hash keeps covering the ATOMIC string', () => {

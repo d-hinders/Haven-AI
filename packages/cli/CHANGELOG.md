@@ -17,6 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Fixed
 
+- **`haven wallets list` and `haven wallets balances` name Base Sepolia, and no longer name Gnosis (#3638, epic #3634).** The chain-name table held Gnosis (100) and Base (8453) only, so a Base Sepolia account printed `chain 84532`. It now prints `Base Sepolia`; a legacy chain-100 account prints `chain 100`, the existing fallback for an unknown chain. No update needed.
 - **`haven guide`'s bundled runbook reworded three cross-references for the new agent-skills step files (#3596).** The canonical runbook (`packages/sdk/src/agent-guidance.ts`) is now also served, split into small linked files, at `/agent-skills/<step>.md` — one `## ` section's cross-reference to another ("in that prompt (below)") assumed proximity it no longer has once split, a "Steps 1-3" reference gained a short gloss of what those steps are (and lost a trailing ", as above"), and "the setup above" now names "The sequence". Regenerated with `sync-agent-guidance.mjs`; no command, flag or output shape changed. No update needed.
 
 ## 0.7.0-alpha.0 — 2026-09-29

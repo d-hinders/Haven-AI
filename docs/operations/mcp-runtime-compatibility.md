@@ -76,6 +76,17 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3638 (2026-10-05, SDK networks and explorer links):** the SDK's
+> x402 network and token tables drop chain 100. The public `selectPaymentOption`
+> no longer selects an `eip155:100` option (the payment paths already refused one
+> through `selectStandardPaymentOption`), and `resolveTokenFromAddress` /
+> `resolveTokenBySymbol` no longer know the chain-100 tokens. Explorer links map
+> 84532 to `sepolia.basescan.org` (they fell back to mainnet basescan); chain 100
+> and any other chain get none. The CLI's chain names gain Base Sepolia. No tool, schema,
+> expected-context version or consent hash moves, and an installed runtime keeps
+> paying on Base and Base Sepolia unchanged. `last-verified` stays 2026-10-02.
+> Nothing else in this document was re-verified.
+
 > **Re-verified #3632 (2026-10-05, SDK text drops Gnosis Chain):** the
 > `@haven_ai/sdk` tool descriptions and the `PaymentRequest.token` JSDoc now
 > name USDC on Base (`eip155:8453`) and Base Sepolia (`eip155:84532`) only;

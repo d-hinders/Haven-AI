@@ -1762,8 +1762,9 @@ signer imports:
   AMENDMENT of the §10 one-delegation-per-redeem invariant — never a silent
   loosening: the allowlist grows from "exactly one or two links" (#3329) to
   "exactly one, two or three" with every link's shape pinned, issuance stays
-  owner-governed (decision log 2026-09-27: the owner co-signs each sub-budget;
-  A's delegate key only signs within the owner-approved envelope), and a
+  owner-governed (decision log 2026-09-27, 2026-10-01: the owner issues each
+  sub-budget from the dashboard session, with no owner signature; A's
+  delegate key only signs within the owner-approved envelope), and a
   sub-budget child can only **narrow** what its parent's caveats already
   allow — periodAmount ≤ the parent's on the same window, expiry ≤ the
   parent's, recipient pin never unpinned — so the three-link chain is never
@@ -1771,6 +1772,11 @@ signer imports:
   authority-reducing `disableDelegation` UserOp for a sub-budget child
   (`assertOwnSubBudgetCloseUserOp`), byte-shape-identical to the task
   budget's.
+
+  > **Corrected (#3645, 2026-10-05):** the issuance parenthetical above said
+  > the owner "co-signs" each sub-budget; the owner's act is a
+  > dashboard-session call with no owner signature (decision log
+  > 2026-10-01). `last-verified` is not bumped.
 
 - **The x402 buyer tax declaration (#3427)** — a new EIP-712 shape, signed
   in-process by the SDK's `HavenClient` through a builder on the

@@ -80,7 +80,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-27"
+last-verified: "2026-10-05"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -140,7 +140,8 @@ x402 delegate-to-merchant leg (EIP-3009 bridge, #946)
   -> agent-held delegate key
   + exact authenticated merchant/amount/asset/network/resource context
   + delegate's available token balance
-    (put there only by redeeming the same owner-signed budget delegation)
+    (put there only by redeeming an owner-signed budget delegation, directly
+     or through an agent-signed task- or sub-budget child of one)
 ```
 
 The source of payment authority must never be:
@@ -367,7 +368,7 @@ Preserve these facts as non-negotiable implementation invariants:
 - Haven never operates an unrestricted server-side signer.
 - Haven cannot unilaterally move funds.
 - Haven cannot bypass the account's signers, the DelegationManager's caveat enforcers, or any other on-chain constraint — and holds no code path to the account's UUPS upgrade authority (security model invariant 11).
-- Agent spend authority is created or changed only through delegations signed by the account owner.
+- Agent spend authority is created or widened only through delegations signed by the account owner. An agent may only narrow authority it already holds, by signing a child of its owner-signed budget delegation: a task budget for itself (#3329), or a sub-budget slice for another of the owner's agents (#3330). A sub-budget is issued only from the owner's dashboard session (decision log 2026-09-27; the owner CLI's allow-list does not reach it), never by an agent alone, and the owner's act there is a session call, not a signature (#3506). Either child is redeemable only through a chain whose root is that owner-signed budget, and every caveat of every link runs in the same redemption, so it can never allow more than its parent.
 - Every account-originated transfer is a redemption of an owner-signed delegation, enforced by the caveat stack during execution. An EIP-3009 x402 merchant leg is a separate agent-signed transfer from the delegate's available balance, bound to the exact authenticated payment context; the funding that put that balance there was itself a delegation redemption.
 - Budget, recipient and expiry limits are enforced on-chain by the caveat enforcers, not only by Haven.
 - Agent-initiated transactions, including the EIP-3009 x402 merchant leg, are signed by an agent private key held by the agent or user, not by Haven.
@@ -382,7 +383,7 @@ Preserve these facts as non-negotiable implementation invariants:
 
 **Delegation rail (epic #821) — the only live rail (epic #1440, 2026-08; roster
 pinned by [`packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts`](../../packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts),
-#2680):** the MetaMask Hybrid DeleGator account type carries every invariant above one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two formerly Safe-specific formulations generalised rather than weakened: "Safe-compatible UIs" became the independent exit path (#832, DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" became owner-signed delegations. The payment path (#829) moves funds ONLY via the agent's owner-signed delegation, redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
+#2680):** the MetaMask Hybrid DeleGator account type carries every invariant above one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two formerly Safe-specific formulations generalised rather than weakened: "Safe-compatible UIs" became the independent exit path (#832, DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" became owner-signed delegations. The payment path (#829) moves funds ONLY via an owner-signed budget delegation (the agent's own, or, for a sub-budget, the delegating agent's, reached through its signed narrowing children), redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
 
 **The legacy Safe AllowanceModule rail is RETIRED (epic #1440, owner decision 2026-08-14, phasing approved 2026-08-24).** The closure sequence — inflow, spend, machinery, activation, the allowance read surface, the approval queue, and finally rendering — is recorded once in the [decision log](../archive/decision-log.md) and is not restated here (#2640). Two of its entries are recorded in a later section than the others: the [retire the Safe rail entirely (#1440)](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440) section carries inflow, spend, machinery, activation and the approval queue, while the allowance read surface (#2020) and rendering (#2413) are under [retirement is deletion, not accommodation](../archive/decision-log.md#2026-09-02--retirement-is-deletion-not-accommodation-2413) — the log is ordered newest-first, so a reader following one anchor alone sees five of the seven. The dates this document must carry are the owner decisions themselves: **2026-08-14** to retire the rail, phasing approved **2026-08-24**, and **2026-09-02** that retirement is deletion rather than accommodation — the last of which is why six list queries filter to `account_type = 'delegator_hybrid'`. What survives is deliberate and narrow: existing Safe accounts stay user-owned, and their rows are untouched and still readable to a direct database query — but no account, agent or dashboard surface displays them, so "readable" is a statement about the data and about a narrow, named set of surfaces — never a blanket claim in either direction. The transactions surface is deliberately NOT among those six: `LIST_BASIC_ACCOUNTS_FOR_USER_SQL` (renamed from `LIST_BASIC_SAFES_FOR_USER_SQL` in #2932, query unchanged) **and** `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` (both in `infra/repositories/transaction-history.ts`, which carries no rail predicate anywhere) mean `GET /transactions`, `GET /transactions/filters` and — since #2871 — `GET /transactions/export.csv` still span every account **and agent** row a user owns, legacy included: a legacy account's name and its agents' names still render in that screen's account and initiator picklists, and since the export reads the same unfiltered account list, that history is downloadable as a file and not merely rendered. Stated with the agent half because a first pass named only the account half, which understated the exception. `POST /safe/exec` — owner-signed execution relayed for gas (owner authority, not a policy rail — it also carried #1229 passkey recovery) — stayed open as the rail's last live behaviour until **#2847 (2026-09-11, owner decision 2026-09-10) deleted it outright with the passkey signer deployer, the Safe details read, the `/user/owners` directory and `POST /passkeys` enrolment**, so no Safe-rail address answers with live behaviour any more: the six tombstones, the fail-closed middleware and `infra/chain/relayer-reads.ts` — named `rails/allowance-module.ts` until #2850 renamed it to what it is — as shared reads only, with no code path able to execute an AllowanceModule spend, are what remains. Where this document names Safe mechanics below, it is describing that retired baseline, never a live agent-spend control.
 
@@ -691,7 +692,7 @@ Implementation rule:
 
 Agent authority should only be created through:
 
-- A user signature that is itself the authority: an owner-signed delegation. (On the retired AllowanceModule rail this was a user-signed Safe transaction — the generalisation recorded above under "Hard Architecture Invariants".)
+- A user signature that is itself the authority: an owner-signed delegation. (On the retired AllowanceModule rail this was a user-signed Safe transaction — the generalisation recorded above under "Hard Architecture Invariants".) The one agent-signed exception is a task- or sub-budget child (#3329/#3330), which only narrows an owner-signed delegation; see Hard Architecture Invariants.
 - Clear UI explaining spender, token, amount, reset period, expiry, and revocation.
 - On-chain registration of the relevant spender or agent authority.
 - Audit log of user consent.
@@ -900,11 +901,11 @@ Before merging any payment-related, agent-authority, account, SDK, x402/MPP, or 
 - [ ] Every automated payment requires an agent-held or user-held key signature.
 - [ ] Every automated spend redeems an owner-signed delegation constrained by the on-chain caveat enforcers; any EIP-3009 x402 merchant leg carries the agent-held delegate signature and matches exact authenticated payment context.
 - [ ] Haven database policy is not the only spend control.
-- [ ] A user signature establishes or modifies agent authority — an owner-signed delegation.
+- [ ] A user signature establishes or widens agent authority — an owner-signed delegation; an agent-signed task- or sub-budget child only narrows the owner-signed budget it hangs from, and a sub-budget is issued only from the owner's dashboard session.
 - [ ] Users can revoke agent authority on-chain.
 - [ ] On the live delegation rail, users can enumerate and revoke every delegation on their account without Haven (the exit story).
 - [ ] Haven cannot block or freeze user funds.
-- [ ] Haven cannot expand an agent's budget without an owner signature.
+- [ ] Haven cannot expand the authority over an account's funds without an owner signature; a sub-budget moves a slice of a budget the owner already signed to another of the owner's agents, issued from the owner's dashboard session and signed by the delegating agent, and never exceeds that budget.
 - [ ] Haven cannot change recipient, amount, token, route, or timing after signature.
 - [ ] Haven does not perform swaps, ramps, fiat payments, card issuing, yield, advice, or merchant settlement.
 - [ ] Logs clearly show user or agent signature, on-chain policy state, transaction hash, and relay status.
@@ -1321,7 +1322,7 @@ is still re-derived server-side from the authenticated subject, whether API-key
 generation stays server-side, where the user JWT is stored and sent, and whether
 anything in the client began deciding rather than relaying.
 
-## Scope of the current `last-verified` (2026-08-30, #2244)
+## Scope of the current `last-verified` (2026-10-05, #3645)
 
 The front-matter date is date-only by the #1496 chain reset, which leaves it
 unable to say **how much** of the document a re-verification covered. That
@@ -1331,14 +1332,21 @@ is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
-**Re-read against the code on `46a0f580`, claim by claim** (the enumeration and
-its evidence are in PR #2248's body): Core Design Principle and every inline
-*Current state* note; Hard Architecture Invariants; Red Lines 1–11 including
-#4's two executable-proof suites; every subsection of Required Architecture
-Patterns; Feature Review Triggers; Third-Party On-Ramp Integration; the
-Payment-Related Merge Checklist; Product Copy Rules; the Preferred Architecture
-Summary; and *What `covers:` must span* with its pinning test in
-`scripts/ci/money-path.test.mjs`.
+**Re-read against the code on `c3df5b19`, claim by claim** (weekly audit
+#3645; the corrections landed in PR #3648 and this section's PR). The
+2026-09-27 stamp it replaces was set by feature PR #3408 and left this section
+describing the 2026-08-30 pass on `46a0f580`. Covered: Core Design Principle
+and every inline *Current state* note; Hard Architecture Invariants; Red Lines
+1–11 including #4's two executable-proof suites; every subsection of Required
+Architecture Patterns; Feature Review Triggers and the #3333 counsel note;
+Third-Party On-Ramp Integration; the Payment-Related Merge Checklist; Product
+Copy Rules; the Preferred Architecture Summary; *What `covers:` must span* with
+its pinning tests in `scripts/ci/money-path.test.mjs`; and the release-plumbing
+and agent-authority subsections, with the release-bump table re-measured with
+`scripts/docs/coupling-gate.mjs`. The owner-signature invariants were reworded
+to the task- and sub-budget children (#3329/#3330) on an owner decision taken
+2026-10-05; that rewording records how the code behaves and is not itself the
+legal and product review the Hard Architecture Invariants call for.
 
 **Deliberately NOT covered by this date, each for a reason that is not
 laziness:**
@@ -1355,6 +1363,8 @@ laziness:**
 - **The #832 exit story's live demonstration** — cross-referenced to
   `docs/exit/README.md`, not re-executed. The claim that it *was* demonstrated
   stands on that document, not on this pass.
+- **The #3333 receive-side counsel position** — recorded, not asserted;
+  whether counsel has confirmed it is outside a code re-read.
 
 ## Verification log
 

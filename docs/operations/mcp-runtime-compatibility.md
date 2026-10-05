@@ -76,6 +76,18 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3620 (2026-10-05, budget-scope guards):** this diff touches
+> two covered files, and neither change moves a runtime contract.
+> `packages/backend/src/middleware/client-compat.ts` gets a comment-only fix:
+> the mirrored `findPaymentReplay` lookup skips `failed` and `expired` rows,
+> which free the key. The hosted server's cross-runtime test suite gets a
+> test-only parity block. Every tool name both runtimes register, plus
+> hosted `haven_pay` ↔ local `haven_send`, must declare the same budget-scope
+> keys. The one allowlisted difference is hosted `haven_pay_x402_quote`
+> without `sub_budget_id` (the #3617 entry below). No tool, schema,
+> description, version-skew or consent-hash contract moves. `last-verified`
+> stays 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3617 (2026-10-04, hosted `sub_budget_id` forwarding
 > deleted):** `packages/mcp-server/src/tools/plain-http-x402.ts` no longer
 > forwards `sub_budget_id` to `prepareX402Erc7710` or `createX402Intent`.

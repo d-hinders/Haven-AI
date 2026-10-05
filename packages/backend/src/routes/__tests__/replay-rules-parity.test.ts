@@ -496,8 +496,9 @@ describeDb('#3619 — one settled-replay rule, three readings (parity table)', (
     const mpp = await precheckDecision(seeded, { idempotencyKey: key })
     expect(mpp.code).toBe(403)
 
-    // Rule 3: ANY non-pending status replays its stored status — submitted is
-    // a 409 (in progress), not a 200.
+    // Rule 3: any non-pending status the key lookup finds replays its stored
+    // status — submitted is a 409 (in progress), not a 200. (failed/expired
+    // rows are skipped by the lookup and free the key; #3620's matrix.)
     const payments = await paymentsReplayDecision(seeded.apiKey, { idempotency_key: key })
     expect(payments.code).toBe(409)
     expect(payments.body).toMatchObject({ idempotent_replay: true, payment_id: rowId, status: 'submitted' })

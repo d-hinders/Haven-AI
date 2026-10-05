@@ -183,8 +183,10 @@ function settlementSchemeOf(machineMetadata: unknown): string | null {
  *    (also unmatched by `delegationReplay` on confirmed rows).
  *  - `findPaymentReplay` (`routes/payments.ts`, NOT edited in this slice —
  *    #3618 owns that file) is the BROADEST reading: any row no longer
- *    `pending_signature` answers its stored status with no `tx_hash`, scheme
- *    or match-field condition (its pin runs as a key-collision 409 first).
+ *    `pending_signature` that its key lookup still finds answers its stored
+ *    status with no `tx_hash`, scheme or match-field condition (its pin runs
+ *    as a key-collision 409 first). The lookup skips `failed` and `expired`
+ *    rows (`FIND_SEND_INTENT_BY_KEY_SQL`), so those free the key (#3620).
  *    A confirmed row with a `tx_hash` therefore replays there too — but
  *    nothing about a replay decision is refused as over-budget on that
  *    surface, so the false-ledger-row hazard the first bullet guards does

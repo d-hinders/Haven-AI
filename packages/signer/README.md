@@ -398,7 +398,7 @@ out on any read; the delegate key is never part of a request or response.** Sinc
 after `SIGN_CONTEXT_TIMEOUT_MS` (15 s) and reports a `HavenSignContextError`
 naming the timeout and the `typed_data_b64` fallback, so a hung backend cannot
 hang the signer — and the agent — past the funding window. Every refusal on
-either fetch (timeout, unreachable host, a non-ok backend response, a
+any of these fetches (timeout, unreachable host, a non-ok backend response, a
 malformed body) is structured the same way, not just prose — see
 [Sign-context refusal codes](#sign-context-refusal-codes) below.
 Nothing else in the package reaches the

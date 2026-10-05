@@ -6,6 +6,9 @@ covers:
   - docker-compose.yml
   - packages/backend/src/middleware/agentToolAudit.ts
   - packages/sdk/src/connector-channel.ts
+  - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/routes/discovery.ts
+  - packages/sdk/src/x402-funding-leg.ts
 last-verified: "2026-10-05"
 ---
 
@@ -65,11 +68,13 @@ for the wire contract and the custody invariant.
      agent performs it, and nothing in this repository records which
      deployments have it set.
    - `BASE_RPC_URL` (optional) = a read-only Base mainnet RPC URL. When it is
-     set, a paid MCP call waits for one on-chain confirmation of the funding
-     transaction (up to 30 s) before the payment header reaches the merchant;
-     unset, that wait is skipped.
+     set, a paid MCP call with a funding leg (EIP-3009) on Base mainnet waits
+     for one on-chain confirmation of the funding transaction (up to 30 s)
+     before the payment header reaches the merchant; unset, that wait is
+     skipped. A delegation-rail (ERC-7710) payment has no funding leg and
+     never waits.
    - **Do not set** `HAVEN_DELEGATE_KEY`. The process refuses to start if it
-     is set to a non-empty value; this is intentional defense-in-depth.
+     is set to a non-blank value; this is intentional defense-in-depth.
    - `PORT` is provided by Railway automatically.
 4. **Networking → Generate Domain.** You get a `*.up.railway.app` domain
    straight away (Railway-issued TLS); production's is the host in the
@@ -143,9 +148,11 @@ does leave one.
   every backend request a tool dispatch makes. The backend writes an
   `agent_tool_invocations` row only for an agent-authenticated request whose
   name is on its allowlist (`MCP_TOOL_NAMES` in
-  `packages/backend/src/middleware/agentToolAudit.ts`): the x402
-  quote/pay/resume tools and the read tools. Other tools, including
-  `haven_pay`, `haven_send` and `haven_submit`, leave no row. The agent
+  `packages/backend/src/middleware/agentToolAudit.ts`): the three x402
+  quote/pay/resume tools and five reads (`haven_get_payment_status`,
+  `haven_get_resume_state`, `haven_get_agent`, `haven_get_allowances`,
+  `haven_list_receipts`). Other tools, including `haven_pay`, `haven_send`,
+  `haven_submit` and the other reads, leave no row. The agent
   activity feed in the dashboard reads from there.
 - **Railway HTTP metrics** — request counts, latencies, status mix.
 
@@ -192,9 +199,10 @@ steps, #3126 `haven_check_funds`) changed the tool surface behind the same
 HTTP and custody posture this doc describes; nothing here needed rewriting.
 
 Re-verified 2026-10-05 (weekly docs audit #3645, at dev `c3df5b19`), a full
-re-read, 50 covered commits after the last verification. The 2026-09-21 note
-above was wrong in one respect, and none of these errors came from the
-intervening commits; each was already wrong at `7f17c9f3`:
+re-read, 50 covered commits after the last verification. The 2026-09-21
+note's "every operational claim above still matches the code" was wrong; each
+error below was already wrong at `7f17c9f3`, and none came from the
+intervening commits:
 
 - **Audit rows.** The doc said every tool dispatch leaves an
   `agent_tool_invocations` row. The backend records only an allowlist
@@ -206,5 +214,8 @@ intervening commits; each was already wrong at `7f17c9f3`:
 - **Domain names.** The predicted domain `havenmcp-production-*` matches no
   deployed host.
 - **Dist-tag pattern.** It lacked its 32-character cap.
+- **`docker:up`.** It does not rebuild the image; `--build` does.
+- **`HAVEN_DELEGATE_KEY`.** The boot refusal fires on a non-blank value, not
+  on the variable merely being set.
 
-`covers:` gains the two backend/SDK files those claims rest on.
+`covers:` gains the backend and SDK files those claims rest on.

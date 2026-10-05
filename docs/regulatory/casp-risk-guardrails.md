@@ -15,6 +15,7 @@ covers:
   - packages/backend/src/modules/mpp/**
   - packages/backend/src/domain/payment-token.ts
   - packages/backend/src/domain/redact-vendor-secrets.ts
+  - packages/backend/src/modules/payments/prepare-failure.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/accounting.ts
@@ -479,7 +480,7 @@ alone:
 
 | suite | what it proves |
 |---|---|
-| `packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts` | Haven performs **no** off-chain coverage arithmetic on the delegation rail — the legacy coverage functions are not even *bound* into `routes/payments.ts`; its only budget comparison is the fail-open period pre-check (#3503), which narrows as the #2099 paragraph above describes — and a refusal from the chain is forwarded as the chain's own verdict (since #3609 a typed `prepare_reverted`, the enforcer's reason named and the raw error bounded) with nothing written |
+| `packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts` | Haven performs **no** off-chain coverage arithmetic on the delegation rail — the legacy coverage functions are not even *bound* into `routes/payments.ts`; its only budget comparisons are two fail-open pre-checks, the task-budget cap (#3500) and the period budget (#3503), which narrow as the #2099 paragraph above describes — and a refusal from the chain is forwarded as the chain's own verdict (since #3609 a typed `prepare_reverted`, the enforcer's reason named and the raw error bounded) with nothing written |
 | `packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts` | the **deployed** caveat enforcers at Haven's pinned addresses actually refuse: an over-budget redemption, a wrong-recipient redemption against a pinned delegation, and an expired delegation each revert on-chain on terms produced by Haven's own caveat compiler, each paired with an in-policy positive control on the same enforcer |
 
 The second suite is testnet-only and key-less: it `eth_call`s each enforcer's
@@ -1056,7 +1057,8 @@ same way.
 Measured at `c3df5b19`, the pin asserts **37 of the 54 globs**: the 39 runtime
 `globs` minus the two `EXEMPT` entries above, and none of the 15
 `controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**` and #3283
-(PR #3286) five `packages/sdk/src/` signing-guard files; all were already
+(PR #3286) the four `packages/sdk/src/` signing-guard files and
+`userop-binding.ts`; all were already
 covered here, so the pin was satisfied on arrival each time. The addition #2300 made
 was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
 capability modules decide whether a funding userop is relayed and in what

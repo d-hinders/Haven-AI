@@ -14,6 +14,10 @@ covers:
   - packages/backend/src/routes/task-budgets.ts
   - packages/backend/src/routes/sub-budgets.ts
   - packages/backend/src/rails/delegation-budget-view.ts
+  - packages/backend/src/modules/mpp/allowances.ts
+  - packages/backend/src/modules/mpp/budget-precheck.ts
+  - packages/backend/src/modules/mpp/balance-coverage.ts
+  - packages/mcp-server/src/tools/catalog-purchase.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/machine-payments.ts
@@ -314,8 +318,8 @@ dedicated `OpenAPI drift check` step in
   the spec's own schema with ajv — see *What the response-shape assertion can
   and cannot catch* below
 - the security scheme states the authority boundary
-- `/openapi.json` serves the spec the tests inspect, except `servers[0]`, which
-  is derived from the request (#2530)
+- `/openapi.json` serves the spec the tests inspect, except `servers`, where
+  the request's own origin is prepended and de-duplicated (#2530)
 
 This is the current round-trip tolerance: generated clients should treat the
 OpenAPI enum values and response field names as stable, while SDK-only helpers
@@ -602,7 +606,7 @@ Two things follow that a reader should not have to derive:
   `GET /agents`, `GET /agents/{id}`, `PUT /agents/{id}`, `GET /dashboard/overview`
   and `GET /machine-payments/allowances` (`POST /machine-payments/budget-precheck`
   and `GET /machine-payments/balance-coverage` also call the view, but read its
-  atomic `budget_atomic` and emit no `allowance_amount`; #2392 corrected the view's own header,
+  atomic `budget_atomic` and emit none of its human-decimal value; #2392 corrected the view's own header,
   which named a `PATCH /agents/{id}` that never existed). `GET /dashboard/overview`
   carries the same value as `allowanceAmount`, which since #2400 is the named
   `allowanceHumanAmount` on `DashboardAgentAllowance` rather than a bare

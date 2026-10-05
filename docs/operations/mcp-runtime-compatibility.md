@@ -1653,8 +1653,9 @@ last-verified: "2026-10-02"
 >
 > **Recent re-verification (#3645):** `packages/mcp/README.md`'s *Audit log*
 > section now states what the backend already does: an `agent_tool_invocations`
-> row is written only for the tools on the backend's audit allowlist, so
-> `haven_pay`, `haven_send` and `haven_submit` leave none. The README previously said every
+> row is written only for the eight tools on the backend's audit allowlist,
+> so `haven_send`, `haven_submit`, the local `haven_pay_x402` and the hosted
+> `haven_pay` leave none. The README previously said every
 > call was recorded. Text only: no tool, argument, schema, description or
 > consent input changes on either runtime, and the version-skew and
 > consent-hash contracts do not move. `last-verified` is not re-stamped: this

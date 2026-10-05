@@ -28,7 +28,7 @@ export function ConnectorTerminal({ state }: { state?: TerminalRevealState } = {
   return (
     <div
       data-connector-terminal=""
-      className={`overflow-x-auto rounded-lg bg-[#0e1230] p-3.5 text-[12.5px] leading-[1.7] text-[#e6e9ff] ${SITE_TYPE.mono}`}
+      className={`flex-1 overflow-x-auto rounded-lg bg-[#0e1230] p-3.5 text-[12.5px] leading-[1.7] text-[#e6e9ff] ${SITE_TYPE.mono}`}
     >
       <pre className="whitespace-pre">
         <span className="text-[rgba(230,233,255,0.5)]">{CONNECTOR_TERMINAL.comment}</span>

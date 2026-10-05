@@ -23,8 +23,9 @@ export function PasskeyMiniCard({ state }: { state?: PasskeyCardState } = {}) {
   const done = state?.done ?? false
   const scanning = (state?.scanning ?? false) && !done
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3.5 text-[13px] shadow-card">
-      <div className="grid gap-2.5 py-1.5 text-center">
+    <div className="flex flex-1 flex-col rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3.5 text-[13px] shadow-card">
+      {/* Centred in a card stretched to the row's height, as the mockup does (`site.css:133`). */}
+      <div className="my-auto grid gap-2.5 py-1.5 text-center">
         <div
           aria-hidden
           className={`relative mx-auto grid h-11 w-11 place-items-center rounded-xl ${
@@ -101,7 +102,7 @@ export function BudgetMiniCard({ state }: { state?: BudgetCardState } = {}) {
   const preType = phase === 'waiting'
 
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3.5 text-[13px] shadow-card">
+    <div className="flex flex-1 flex-col rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3.5 text-[13px] shadow-card">
       <div className="grid grid-cols-[1.4fr_1fr] gap-2.5">
         <div>
           <label className="mb-1 block text-[11.5px] text-[var(--v2-ink-3)]">Budget</label>
@@ -131,7 +132,7 @@ export function BudgetMiniCard({ state }: { state?: BudgetCardState } = {}) {
           </span>
         </div>
       </div>
-      <div className="flex justify-end pt-3">
+      <div className="mt-auto flex justify-end pt-3">
         <span className="inline-flex min-h-[36px] items-center">
           {phase === 'approved' ? (
             <Confirmation text="Budget approved" />

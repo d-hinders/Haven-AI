@@ -63,14 +63,21 @@ export function HeroAgentsFrame({ state }: { state?: HeroFrameState } = {}) {
   return (
     <ProductFrame env="Operations" screen="Agents">
       <div>
+        {/*
+          Each budget row stacks the name over a full-width budget block, as
+          the mockup does (`site.css:99`, `.budget{grid-column:1/-1}`), so the
+          two bars share their left edge and width by construction (#3630).
+          The earlier side-by-side grid sized each row's bar column to that
+          row's own content, so the bars started and ended at different x.
+        */}
         {/* Atlas's budget row — the one the loop moves (mockup `index.html:40-48`). */}
-        <div className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1.5 border-t border-[var(--v2-border)] py-3 first:border-t-0 first:pt-0">
-          <div className="justify-self-start whitespace-nowrap text-[14px] font-semibold text-[var(--v2-ink)]">
+        <div className="border-t border-[var(--v2-border)] py-3 first:border-t-0 first:pt-0">
+          <div className="whitespace-nowrap text-[14px] font-semibold text-[var(--v2-ink)]">
             <span aria-hidden className="mr-[7px] inline-block h-2 w-2 rounded-full bg-[var(--v2-success)] align-[1px]" />
             {atlas.name}
             <span className="ml-1.5 font-normal text-[var(--v2-ink-3)]">{atlas.role}</span>
           </div>
-          <div>
+          <div className="mt-2">
             <div className="mb-1.5 flex items-center justify-between gap-4 text-[12.5px]">
               <b className={`font-semibold text-[var(--v2-ink)] ${SITE_TYPE.mono}`} data-testid="hero-used">
                 {state?.atlasUsed ?? atlas.used} of {atlas.total} USDC
@@ -91,13 +98,13 @@ export function HeroAgentsFrame({ state }: { state?: HeroFrameState } = {}) {
         </div>
 
         {/* Iris's budget row — static, as in the mockup (index.html:49-57). */}
-        <div className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1.5 border-t border-[var(--v2-border)] py-3">
-          <div className="justify-self-start whitespace-nowrap text-[14px] font-semibold text-[var(--v2-ink)]">
+        <div className="border-t border-[var(--v2-border)] py-3">
+          <div className="whitespace-nowrap text-[14px] font-semibold text-[var(--v2-ink)]">
             <span aria-hidden className="mr-[7px] inline-block h-2 w-2 rounded-full bg-[var(--v2-success)] align-[1px]" />
             {iris.name}
             <span className="ml-1.5 font-normal text-[var(--v2-ink-3)]">{iris.role}</span>
           </div>
-          <div>
+          <div className="mt-2">
             <div className="mb-1.5 flex items-center justify-between gap-4 text-[12.5px]">
               <b className={`font-semibold text-[var(--v2-ink)] ${SITE_TYPE.mono}`}>
                 {iris.used} of {iris.total} USDC

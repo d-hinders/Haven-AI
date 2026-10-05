@@ -173,36 +173,42 @@ export function HomeHowItWorks() {
         Three steps. Your agent pays for what it needs, within a budget you set.
       </h2>
 
-      <div className="mt-12 grid grid-cols-1 gap-7 md:grid-cols-3">
-        <div className="flex flex-col">
+      {/*
+        From md each step is a four-row subgrid of this grid (#3630): label,
+        heading, paragraph and card rows line up across the three columns, so
+        the three cards share one height and top edge however the text wraps.
+        Each card fills its row; the confirmation stays at its bottom.
+      */}
+      <div className="mt-12 grid grid-cols-1 gap-7 md:grid-cols-3 md:grid-rows-[auto_auto_auto_1fr] md:gap-y-0">
+        <div className="flex min-w-0 flex-col md:row-span-4 md:grid md:grid-rows-subgrid">
           <span className={`text-[12px] text-[var(--v2-brand)] ${SITE_TYPE.mono}`}>Step 1</span>
           <h3 className={`${SITE_TYPE.h3} mb-2 mt-3.5`}>Create your account with a passkey</h3>
           <p className="text-[15px] text-[var(--v2-ink-2)]">
             One Face ID prompt creates an account only you control. No seed phrase, no credit card.
           </p>
-          <div aria-hidden="true" className="mt-2 flex-1">
+          <div aria-hidden="true" className="mt-2 flex min-w-0 flex-1 flex-col">
             <AnimatedPasskeyMiniCard />
           </div>
         </div>
 
-        <div className="flex flex-col">
+        <div className="flex min-w-0 flex-col md:row-span-4 md:grid md:grid-rows-subgrid">
           <span className={`text-[12px] text-[var(--v2-brand)] ${SITE_TYPE.mono}`}>Step 2</span>
           <h3 className={`${SITE_TYPE.h3} mb-2 mt-3.5`}>Give each agent a budget</h3>
           <p className="text-[15px] text-[var(--v2-ink-2)]">
             An amount and a period per agent. It refills itself and can be revoked at any time.
           </p>
-          <div aria-hidden="true" className="mt-2 flex-1">
+          <div aria-hidden="true" className="mt-2 flex min-w-0 flex-1 flex-col">
             <AnimatedBudgetMiniCard />
           </div>
         </div>
 
-        <div className="flex flex-col">
+        <div className="flex min-w-0 flex-col md:row-span-4 md:grid md:grid-rows-subgrid">
           <span className={`text-[12px] text-[var(--v2-brand)] ${SITE_TYPE.mono}`}>Step 3</span>
           <h3 className={`${SITE_TYPE.h3} mb-2 mt-3.5`}>Connect any agent</h3>
           <p className="text-[15px] text-[var(--v2-ink-2)]">
             One command wires in Claude, Codex, Cursor or any other agent harness.
           </p>
-          <div className="mt-2 flex-1">
+          <div className="mt-2 flex min-w-0 flex-1 flex-col">
             <AnimatedConnectorTerminal />
           </div>
         </div>

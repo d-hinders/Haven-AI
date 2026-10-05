@@ -78,7 +78,7 @@ export function AnimatedPasskeyMiniCard() {
     : undefined
 
   return (
-    <div ref={ref} data-testid="passkey-animated">
+    <div ref={ref} data-testid="passkey-animated" className="flex min-w-0 flex-1 flex-col">
       <PasskeyMiniCard state={state} />
     </div>
   )
@@ -113,7 +113,7 @@ export function AnimatedBudgetMiniCard() {
     phase === undefined ? undefined : { phase, typedAmount: typed }
 
   return (
-    <div ref={ref} data-testid="budget-animated">
+    <div ref={ref} data-testid="budget-animated" className="flex min-w-0 flex-1 flex-col">
       <BudgetMiniCard state={state} />
     </div>
   )
@@ -134,7 +134,7 @@ export function AnimatedConnectorTerminal() {
     : undefined
 
   return (
-    <div ref={ref} data-testid="terminal-animated">
+    <div ref={ref} data-testid="terminal-animated" className="flex min-w-0 flex-1 flex-col">
       <ConnectorTerminal state={state} />
     </div>
   )

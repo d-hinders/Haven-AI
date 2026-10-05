@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import Home from '../page'
 import { NewSiteHome } from '../../components/marketing/site/home/HomeSections'
 import { CONNECTOR_TERMINAL } from '../../components/marketing/site/home/fixtures'
 
@@ -42,6 +43,11 @@ const HEADINGS_IN_ORDER = [
 ]
 
 describe('the new home page (#3574)', () => {
+  it('the / route renders the home page (no gate since the switch-over, #3579)', () => {
+    const { container } = render(<Home />)
+    expect(container.querySelector('h1')?.textContent).toBe('Give your agent a budget, not your credit card.')
+  })
+
   it('renders the nine sections in the mockup’s order', () => {
     const { container } = render(<NewSiteHome />)
     const ids = Array.from(container.querySelectorAll('section[data-site-ground]')).map(

@@ -42,6 +42,13 @@ last-verified: "2026-10-02"
 > changes. Nothing else in this document was re-verified, and `last-verified` is
 > not bumped.
 
+> **Re-verified #3579 (2026-10-05):** the site switch-over deleted the
+> public site's gate module (dropped from `covers:`) and with it every reader
+> of its preview flag; § "The public site's former gate" replaces the flag's
+> section, and the local-`/demo` sentence it carried moved to
+> § `HAVEN_DEMO_PAGE_VISIBLE`. Nothing else in this document was re-verified,
+> and `last-verified` is not bumped.
+
 > **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
 > agents join the pixel gate with the same seed-before-navigation dark
@@ -979,12 +986,12 @@ renders deterministic across key rotations.
 ### The public site's former gate (#3573, removed by #3579)
 
 From #3573 to #3579 the redesigned public site (epic #3572) was built in
-slices behind a build-time gate, read from `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`
-and `NEXT_PUBLIC_HAVEN_ENV`, so production kept the legacy pages. The
-switch-over (#3579) deleted the gate with those pages: every build renders the
-new site, the variable is read by nothing, and the CI builds and Playwright no
-longer set it. A deployment that still sets it is unaffected; deleting it from
-a project's settings is tidying, not a fix.
+slices behind a build-time gate that read `NEXT_PUBLIC_HAVEN_ENV` and a
+`NEXT_PUBLIC_HAVEN_*` preview flag the CI builds set, so production kept the
+legacy pages. The switch-over (#3579) deleted the gate with those pages: every
+build renders the new site, the flag is read by nothing, and the CI builds and
+Playwright no longer set it. A deployment that still sets the flag is
+unaffected; deleting it from a project's settings is tidying, not a fix.
 
 ## Inspecting the dev environment
 

@@ -1,3 +1,4 @@
+import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -81,20 +82,20 @@ describe('next.config redirects (#3024)', () => {
   it('leaves /demo and /demo.md alone: no redirect rule matches either', async () => {
     const config = (await import('../../../next.config')).default
     const redirects = await config(PHASE as never).redirects!()
-    // Each source compiled the way Next matches it (path-to-regexp:
-    // `:name*` spans segments, `:name` one segment, the rest literal).
-    const toRegExp = (source: string) =>
-      new RegExp(
-        `^${source
-          .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-          .replace(/:[A-Za-z]+\*/g, '.*')
-          .replace(/:[A-Za-z]+/g, '[^/]+')}$`,
-      )
+    // Next's OWN matcher (the one its router applies to `redirects()`), not a
+    // hand-rolled regex: a `/demo/:path*` source matches `/demo` itself, which
+    // an approximation of path-to-regexp gets wrong (haven-reviewer, #3579).
+    const matches = (source: string, path: string) =>
+      getPathMatch(source, { removeUnnamedParams: true, strict: true })(path) !== false
     for (const path of ['/demo', '/demo.md']) {
-      const matching = redirects.filter((r) => toRegExp(r.source).test(path))
+      const matching = redirects.filter((r) => matches(r.source, path))
       expect(matching, `${path} matched ${matching.map((r) => r.source).join(', ')}`).toEqual([])
     }
-    // Positive control: the same matcher does find the rule for /demo/x402.
-    expect(redirects.filter((r) => toRegExp(r.source).test('/demo/x402'))).toHaveLength(1)
+    // Positive controls: the matcher finds the real /demo/x402 rule, and a
+    // catch-all under /demo — the likeliest regression — would match /demo.
+    expect(redirects.filter((r) => matches(r.source, '/demo/x402'))).toHaveLength(1)
+    expect(matches('/demo/:path*', '/demo')).toBe(true)
+    expect(matches('/demo(.*)', '/demo.md')).toBe(true)
   })
+
 })

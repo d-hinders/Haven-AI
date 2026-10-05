@@ -93,7 +93,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-02"
+last-verified: "2026-10-05"
 ---
 
 # Haven Design System
@@ -759,9 +759,10 @@ grep -rn "rounded-md font-medium tracking-tight" src --include='*.tsx' \
   | grep -v 'src/components/ui/Button.tsx'
 ```
 
-**Clean output today is 1 line** — the surviving `BrandBandButton` primitive at
-`components/marketing/BrandBandButton.tsx:75`. More than 1 is a new hand-copy;
-zero means the scanner lost its last live subject. The retired investor page was
+**Clean output today is 2 lines** — the surviving `BrandBandButton` primitive at
+`components/marketing/BrandBandButton.tsx:75`, and the home hero's CTA at
+`components/marketing/site/home/HeroCta.tsx:20` (#3574). More than 2 is a new
+hand-copy; zero means the scanner lost its live subjects. The retired investor page was
 the second member until #2468 deleted it.
 
 It was **4** until [#1867](https://github.com/d-hinders/Haven-AI/issues/1867), and the two
@@ -1471,7 +1472,8 @@ Standard rhythm:
 Sections alternate background:
 - Default: white (`--v2-bg`)
 - Surface band: `bg-[var(--v2-surface)] border-t border-[var(--v2-border)]`
-- Color band: see below
+
+The public site's own grounds, navy and indigo bands included, are `SiteSection`'s (§ Public site below).
 
 ### Code blocks (`CodeBlock`)
 
@@ -1481,7 +1483,7 @@ Long lines scroll sideways by default. Pass `wrap` for a **single-line copy comm
 
 ### Public site
 
-The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/3572)) was built from an approved mockup, and since the switch-over (#3579) the production routes are its design reference, as for every marketing page. The mockup and its README of decided deviations were deleted with the switch-over; code comments that cite `site.css:<line>`, `index.html:<line>` or another mockup file refer to `docs/product/site-mockup/` as it stood at commit `caed1ffb` (`git show caed1ffb:docs/product/site-mockup/<file>`). Its components live in `packages/frontend/src/components/marketing/site/`; `Section` above is the one older marketing component still in use (`/demo`, `/releases`).
+The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/3572)) was built from an approved mockup, and since the switch-over (#3579) the production routes are its design reference, as for every marketing page. The mockup and its README of decided deviations were deleted with the switch-over; code comments that cite `site.css:<line>`, `index.html:<line>` or another mockup file refer to `docs/product/site-mockup/` as it stood at commit `caed1ffb` (`git show caed1ffb:docs/product/site-mockup/<file>`). Its components live in `packages/frontend/src/components/marketing/site/`; `Section` above is the one older marketing *page-layout* component still in use (`/demo`, `/releases`); `BrandBandButton` and `TrailingArrow` are shared with the new site.
 
 **No gate.** Until the switch-over a build-time gate (`isNewSiteVisible()`, `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`) kept production on the legacy pages while the site was built in slices. #3579 removed it with the legacy pages: every public route renders the new site in every build, and the three `/protocols*` routes and `/demo/x402` redirect permanently to `/how-it-works/protocols` (`next.config.ts`).
 

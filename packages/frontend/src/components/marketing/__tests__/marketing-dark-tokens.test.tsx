@@ -15,8 +15,6 @@ import { BrandBandButton } from '../BrandBandButton'
  * the ink diverged. These assertions are the headless equivalent for exactly
  * that divergence:
  *
- *   - the wash and the dot grid must read TOKENS, not hard-coded whites
- *     (the shapes that put dark ink on a light page);
  *   - the dark forms of those tokens must exist in BOTH dark declaration
  *     blocks of globals.css, byte-identically — the same invariant
  *     `theme-tokens.test.ts` holds for the rest of the palette;

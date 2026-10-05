@@ -1650,6 +1650,17 @@ last-verified: "2026-10-02"
 > unchanged like every other — same schemas, same strict-input policy, no
 > route, migration, or signer change, and nothing about when the settle gate
 > itself decides `settled`.
+>
+> **Recent re-verification (#3645):** `packages/mcp/README.md`'s *Audit log*
+> section now states what the backend already does: an `agent_tool_invocations`
+> row is written only for the eight tools on the backend's audit allowlist,
+> so `haven_send`, `haven_submit`, the local `haven_pay_x402` and the hosted
+> `haven_pay` leave none. The README previously said every
+> call was recorded. Text only: no tool, argument, schema, description or
+> consent input changes on either runtime, and the version-skew and
+> consent-hash contracts do not move. `last-verified` is not re-stamped: this
+> block is the scope. Nothing else in this document was re-verified in this
+> pass.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

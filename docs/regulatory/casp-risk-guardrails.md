@@ -6,6 +6,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
+  - packages/backend/src/modules/budget-scope/**
   - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/openapi/request-validation.ts
   - packages/backend/src/routes/payments.ts
@@ -13,6 +14,8 @@ covers:
   - packages/backend/src/routes/machine-payments-reconciliation-events.ts
   - packages/backend/src/modules/mpp/**
   - packages/backend/src/domain/payment-token.ts
+  - packages/backend/src/domain/redact-vendor-secrets.ts
+  - packages/backend/src/modules/payments/prepare-failure.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/accounting.ts
@@ -71,6 +74,7 @@ covers:
   - packages/demo-merchant-mcp/src/**
   - scripts/release-bump.mjs
   - scripts/release-version-order.mjs
+  - scripts/release-version-constants.mjs
   - .github/workflows/publish.yml
   - packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts
   - packages/sdk/src/merchant-discovery.test.ts
@@ -380,7 +384,7 @@ Preserve these facts as non-negotiable implementation invariants:
 pinned by [`packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts`](../../packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts),
 #2680):** the MetaMask Hybrid DeleGator account type carries every invariant above one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two formerly Safe-specific formulations generalised rather than weakened: "Safe-compatible UIs" became the independent exit path (#832, DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" became owner-signed delegations. The payment path (#829) moves funds ONLY via the agent's owner-signed delegation, redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
 
-**The legacy Safe AllowanceModule rail is RETIRED (epic #1440, owner decision 2026-08-14, phasing approved 2026-08-24).** The closure sequence — inflow, spend, machinery, activation, the allowance read surface, the approval queue, and finally rendering — is recorded once in the [decision log](../archive/decision-log.md) and is not restated here (#2640). Two of its entries are recorded in a later section than the others: the [retire the Safe rail entirely (#1440)](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440) section carries inflow, spend, machinery, activation and the approval queue, while the allowance read surface (#2020) and rendering (#2413) are under [retirement is deletion, not accommodation](../archive/decision-log.md#2026-09-02--retirement-is-deletion-not-accommodation-2413) — the log is ordered newest-first, so a reader following one anchor alone sees five of the seven. The dates this document must carry are the owner decisions themselves: **2026-08-14** to retire the rail, phasing approved **2026-08-24**, and **2026-09-02** that retirement is deletion rather than accommodation — the last of which is why six list queries filter to `account_type = 'delegator_hybrid'`. What survives is deliberate and narrow: existing Safe accounts stay user-owned, and their rows are untouched and still readable to a direct database query — but no account, agent or dashboard surface displays them, so "readable" is a statement about the data and about a narrow, named set of surfaces — never a blanket claim in either direction. The transactions surface is deliberately NOT among those six: `LIST_BASIC_SAFES_FOR_USER_SQL` **and** `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` (both in `infra/repositories/transaction-history.ts`, which carries no rail predicate anywhere) mean `GET /transactions`, `GET /transactions/filters` and — since #2871 — `GET /transactions/export.csv` still span every account **and agent** row a user owns, legacy included: a legacy account's name and its agents' names still render in that screen's account and initiator picklists, and since the export reads the same unfiltered account list, that history is downloadable as a file and not merely rendered. Stated with the agent half because a first pass named only the account half, which understated the exception. `POST /safe/exec` — owner-signed execution relayed for gas (owner authority, not a policy rail — it also carried #1229 passkey recovery) — stayed open as the rail's last live behaviour until **#2847 (2026-09-11, owner decision 2026-09-10) deleted it outright with the passkey signer deployer, the Safe details read, the `/user/owners` directory and `POST /passkeys` enrolment**, so no Safe-rail address answers with live behaviour any more: the six tombstones, the fail-closed middleware and `infra/chain/relayer-reads.ts` — named `rails/allowance-module.ts` until #2850 renamed it to what it is — as shared reads only, with no code path able to execute an AllowanceModule spend, are what remains. Where this document names Safe mechanics below, it is describing that retired baseline, never a live agent-spend control.
+**The legacy Safe AllowanceModule rail is RETIRED (epic #1440, owner decision 2026-08-14, phasing approved 2026-08-24).** The closure sequence — inflow, spend, machinery, activation, the allowance read surface, the approval queue, and finally rendering — is recorded once in the [decision log](../archive/decision-log.md) and is not restated here (#2640). Two of its entries are recorded in a later section than the others: the [retire the Safe rail entirely (#1440)](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440) section carries inflow, spend, machinery, activation and the approval queue, while the allowance read surface (#2020) and rendering (#2413) are under [retirement is deletion, not accommodation](../archive/decision-log.md#2026-09-02--retirement-is-deletion-not-accommodation-2413) — the log is ordered newest-first, so a reader following one anchor alone sees five of the seven. The dates this document must carry are the owner decisions themselves: **2026-08-14** to retire the rail, phasing approved **2026-08-24**, and **2026-09-02** that retirement is deletion rather than accommodation — the last of which is why six list queries filter to `account_type = 'delegator_hybrid'`. What survives is deliberate and narrow: existing Safe accounts stay user-owned, and their rows are untouched and still readable to a direct database query — but no account, agent or dashboard surface displays them, so "readable" is a statement about the data and about a narrow, named set of surfaces — never a blanket claim in either direction. The transactions surface is deliberately NOT among those six: `LIST_BASIC_ACCOUNTS_FOR_USER_SQL` (renamed from `LIST_BASIC_SAFES_FOR_USER_SQL` in #2932, query unchanged) **and** `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` (both in `infra/repositories/transaction-history.ts`, which carries no rail predicate anywhere) mean `GET /transactions`, `GET /transactions/filters` and — since #2871 — `GET /transactions/export.csv` still span every account **and agent** row a user owns, legacy included: a legacy account's name and its agents' names still render in that screen's account and initiator picklists, and since the export reads the same unfiltered account list, that history is downloadable as a file and not merely rendered. Stated with the agent half because a first pass named only the account half, which understated the exception. `POST /safe/exec` — owner-signed execution relayed for gas (owner authority, not a policy rail — it also carried #1229 passkey recovery) — stayed open as the rail's last live behaviour until **#2847 (2026-09-11, owner decision 2026-09-10) deleted it outright with the passkey signer deployer, the Safe details read, the `/user/owners` directory and `POST /passkeys` enrolment**, so no Safe-rail address answers with live behaviour any more: the six tombstones, the fail-closed middleware and `infra/chain/relayer-reads.ts` — named `rails/allowance-module.ts` until #2850 renamed it to what it is — as shared reads only, with no code path able to execute an AllowanceModule spend, are what remains. Where this document names Safe mechanics below, it is describing that retired baseline, never a live agent-spend control.
 
 **Disclosed custody artifact — four relayer-owned dust Safes (#1985, owner-accepted 2026-08-26).** The custody claims above carry one bounded, deliberately disclosed exception rather than an asserted purity: the production relayer key is an on-chain owner of four retired test Safes on Base mainnet holding ~$0.14 USDC in total (largest single balance 0.109114 USDC; the two Safes with the AllowanceModule still enabled bound delegate-extractable value at $0.02). These are Haven-deployed test Safes, not traced to any external holder (the #1985 re-verification's on-chain reads show all four owned solely by the relayer, apart from the externally-owned population the epic #1440 census recorded), and the wind-down originally scoped in #1985 was waived by owner decision: no transaction is worth more than the dust it would move. Full addresses, per-Safe balances and per-delegate allowance state are recorded in [#1985's closing evidence comment](https://github.com/d-hinders/Haven-AI/issues/1985#issuecomment-5421759537); the Gnosis pilot import named there is externally owned and is not a Haven custody surface. Anything that would grow this set — a new relayer-owned account, or funding one of these — is a feature-review trigger, not routine.
 
@@ -476,7 +480,7 @@ alone:
 
 | suite | what it proves |
 |---|---|
-| `packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts` | Haven performs **no** off-chain spend arithmetic on the delegation rail — the legacy coverage functions are not even *bound* into `routes/payments.ts` — and a refusal from the chain is forwarded verbatim with nothing written |
+| `packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts` | Haven performs **no** off-chain coverage arithmetic on the delegation rail — the legacy coverage functions are not even *bound* into `routes/payments.ts`; its only budget comparisons are two fail-open pre-checks, the task-budget cap (#3500) and the period budget (#3503), which narrow as the #2099 paragraph above describes — and a refusal from the chain is forwarded as the chain's own verdict (since #3609 a typed `prepare_reverted`, the enforcer's reason named and the raw error bounded) with nothing written |
 | `packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts` | the **deployed** caveat enforcers at Haven's pinned addresses actually refuse: an over-budget redemption, a wrong-recipient redemption against a pinned delegation, and an expired delegation each revert on-chain on terms produced by Haven's own caveat compiler, each paired with an in-policy positive control on the same enforcer |
 
 The second suite is testnet-only and key-less: it `eth_call`s each enforcer's
@@ -1011,9 +1015,12 @@ runtime list now, and `money-path.test.mjs` fails when a package-wide entry
 here is on neither list unless it is named **doc-only with its reason**:
 `packages/cli/src/**`, `packages/connect/src/**` and `packages/mcp/src/**` are
 client packages the deployed harness never runs, and `packages/sdk/src/**` is
-doc-only apart from `packages/sdk/src/signer.ts`, which is on the runtime list
-because it is spend authority (the harness does build and drive the SDK; the
-rest of it is transport). Since #3173 `packages/sdk/src/edge-signing.ts` is
+doc-only apart from the six files on the runtime list because they are spend
+authority — `signer.ts` (the signing schemes), `userop-binding.ts` (the #3271
+binding check), and the signing-surface guard #3283 moved in from the signer
+(`delegate-account.ts`, `direct-payment-guard.ts`, `redemption-guard.ts`,
+`settlement-child.ts`). The harness does build and drive the SDK; the rest of
+it is transport. Since #3173 `packages/sdk/src/edge-signing.ts` is
 spend authority by the same reasoning — it is the viem-based implementation
 of `addressFromKey` / `signHash` / `verifySignature` the shipped signer
 actually calls, pinned byte-equivalent to `signer.ts` — and is deliberately
@@ -1046,11 +1053,13 @@ not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300, #3098).** As of #3098
-the pin asserts **32 of the 49 globs**: the 34 runtime `globs` minus the two
-`EXEMPT` entries above, and none of the 15 `controlGlobs` (#3098 added
-`packages/demo-merchant-mcp/src/**`, already covered here, so the pin was
-satisfied on arrival). The addition #2300 made
+**The floor is measured, and the number moves (#2300, #3098, #3283).**
+Measured at `c3df5b19`, the pin asserts **37 of the 54 globs**: the 39 runtime
+`globs` minus the two `EXEMPT` entries above, and none of the 15
+`controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**` and #3283
+(PR #3286) the four `packages/sdk/src/` signing-guard files and
+`userop-binding.ts`; all were already
+covered here, so the pin was satisfied on arrival each time. The addition #2300 made
 was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
 capability modules decide whether a funding userop is relayed and in what
 order (the completion capability, `src/tools/paid-mcp-completion.ts`, carries
@@ -1141,11 +1150,11 @@ decline to re-verify the shards of the work it carries. That holds. It answered
 "what does a *release* owe"; it never spoke to "what does changing the *releaser*
 owe". Release PRs already write shards today (`casp-changelog/README.md`'s
 release-shard convention, #1789) — forced not by these two entries but by the
-version constants a bump rewrites in `mcp/`, `signer/`, `connect/` and
-`mcp-server/src/`.
+version constants a bump rewrites in `mcp/`, `signer/`, `connect/`, `cli/`,
+`sdk/` and `mcp-server/src/`.
 
 **Naming them here makes a load-bearing dependency deliberate.** Since #1790 the
-bump *writes* one of the **three** release contract docs, and the coupling gate
+bump *writes* one of the **five** release contract docs, and the coupling gate
 excuses a doc on **file presence alone** — so the only thing still forcing a
 human-written *argument* into a release PR is this doc's `covers:` breadth. That
 is pinned by a test (`scripts/docs/coupling-gate.test.mjs`, which this sentence
@@ -1153,9 +1162,10 @@ now names as its pin, #2680), but the entries it rests on exist
 for unrelated reasons and nothing in the list said so. Now the release path is
 named in the list that guarantees it.
 
-**This paragraph said "two" until 2026-09-17, and the correction sharpens the
-claim rather than only counting better.** A release bump implicates three
-contract docs, forced three different ways. Measured with the gate's own
+**This paragraph said "two" until 2026-09-17 and "three" until 2026-10-05;
+each correction sharpens the claim rather than only counting better.** A
+release bump implicates five contract docs. #3454 moved `SIGNER_VERSION` into
+`packages/signer/src/tools.ts`, which two more contract docs cover. Measured with the gate's own
 reckoning over **every path `release-bump.mjs` writes** — the six
 `package.json`, the five `CHANGELOG.md`, the six source version constants (#3303 added
 `SDK_VERSION`; the gate's verdict over the full set is unchanged),
@@ -1170,11 +1180,13 @@ not over a sample:
 | `mcp-runtime-compatibility.md` | the bump writes the manifest table (#1790) | nothing — the bump's own write satisfies it by presence |
 | `package-dev-channel.md` | a hand edit; the bump writes no part of it | an **edit**, which presence lets be a bare date bump |
 | this document | a new `casp-changelog/` shard | a **new file** — see the limit below |
+| `delegation-rail-security-model.md` | a hand edit; `SIGNER_VERSION` sits in `packages/signer/src/tools.ts`, in that doc's `covers:` (#3454) | an **edit**, which presence lets be a bare date bump |
+| `04-x402-payment-sequence.md` | the same `casp-changelog/` shard as row 3, via its own `satisfied-by` | nothing beyond row 3 |
 
-Run over the bump's **code** writes the gate names all three; add the manifest
-doc the bump itself writes and it names **two**, because that doc is then
-already touched. That drop from three to two IS row 1, observable rather than
-argued.
+Run over the bump's **code** writes the gate names all five; add the manifest
+doc the bump itself writes and it names **four**, because that doc is then
+already touched. That drop from five to four IS row 1, observable rather than
+argued (measured at `c3df5b19`).
 
 `package-dev-channel.md` is the one the old sentence dropped: the bump rewrites
 `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which sits in that
@@ -1193,15 +1205,15 @@ so mechanically row 3 forces a **new dated file**, not an argument. What makes
 that file carry an argument is the blockquote below: a shard is authored by a
 human and nothing generates one. So the honest form of this section's claim is
 that the shard is the only release artifact whose satisfaction the gate cannot
-reduce to a value the bump already wrote — the first two rows are pure
-presence, and the third is presence plus an authorship rule this document
+reduce to a value the bump already wrote — rows 1, 2 and 4 are pure presence,
+row 5 rides on row 3's shard, and the third is presence plus an authorship rule this document
 maintains by hand. That is a weaker guarantee than "the gate forces an
 argument", and it is the one that is true.
 
-**Do not confuse this three with the other three above.** The earlier bullet
+**Do not confuse these five with the three above.** The earlier bullet
 names `publish.yml`'s three contract docs — `branch-and-release-flow.md`,
-`mcp-runtime-compatibility.md`, `package-dev-channel.md`. Same number,
-different set: `branch-and-release-flow.md` is in that one and not in this one,
+`mcp-runtime-compatibility.md`, `package-dev-channel.md`. Overlapping but
+different sets: `branch-and-release-flow.md` is in that one and not in this one,
 because a release *runs* `release-bump.mjs` rather than editing it, and this
 section's own rule is that `covers:` gates *edits to a file*, never *runs* of
 it. Its exclusion here is correct, not an oversight.
@@ -1291,10 +1303,13 @@ not be added without widening that list first. The binding above is a **floor,
 not a ceiling** — it says adding a file *to the money-path list* without adding
 it here re-opens the hole; it never said this list may contain nothing else.
 Empirically it already contains a great deal else: `connect/**`, `mcp/**`,
-`signer/**`, `mcp-server/**`, `demo-merchant-mcp/**`, the whole of `sdk/**`
-(the money-path list names only `sdk/src/signer.ts`), `routes/passkeys.ts`,
+most of `sdk/**` (the money-path list names six `sdk/src/` files, the signing
+schemes and the signing-surface guard), `routes/passkeys.ts`,
 `routes/catalog.ts`, `routes/accounting-feed.ts`, `routes/accounting.ts` and
-`config.ts` — none of them on that list. Absence from it was never a bar, so no
+`config.ts` — none of them on that list. `signer/**`, `mcp-server/**` and
+`demo-merchant-mcp/**` were in the same position when #1826 was decided and
+have since joined it (`packages/signer/**`; `src/**` for the other two, #2300
+and #3098). Absence from it was never a bar, so no
 new judgement about the money-path list is required and none is made here.
 `routes/agents.ts` is a reasonable future candidate for that list, but it is a
 separate question with a separate blast radius (it changes the *testing bar* for

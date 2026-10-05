@@ -167,6 +167,44 @@ export function readingsFor(history: readonly HistoryEntry[], key: WalletKey): b
 
 // ── Readers ───────────────────────────────────────────────────────────────
 
+/**
+ * A failure's text that is SAFE to publish. ethers v6 error messages embed the
+ * full `requestUrl`, and `QA_RPC_URL_BASE_SEPOLIA` is a provider URL with the
+ * API key in it; a row's `reason` ends up in a PUBLIC GitHub issue (#3631
+ * review H1 — the 2026-09-25 dRPC key leak class). So: the ethers `code` plus
+ * its `shortMessage` when there is one, every URL redacted, bounded.
+ * `qa-balance-issue.mjs` scrubs again before posting (defence in depth).
+ */
+export function safeReason(prefix: string, error: unknown): string {
+  const e = error as { code?: unknown; shortMessage?: unknown; message?: unknown; name?: unknown }
+  const code = typeof e?.code === 'string' ? e.code : null
+  const short = typeof e?.shortMessage === 'string' ? e.shortMessage : null
+  const raw = short ?? (typeof e?.message === 'string' ? e.message : String(error))
+  const text = raw
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'`)\]}]+/gi, '<url>')
+    .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?\/[^\s"'`)\]}]*/gi, '<url>')
+    .replace(/\(\s*(?:request|info)=.*$/s, '')
+    .trim()
+  const body = code && !text.includes(code) ? `${code}: ${text}` : text
+  const bounded = body.length > 160 ? `${body.slice(0, 159)}…` : body
+  return `${prefix}: ${bounded}`
+}
+
+/** Per-wallet read deadline: a hanging RPC or `/healthz` becomes `unknown`, never a job timeout. */
+export const READ_TIMEOUT_MS = 30_000
+
+export async function withDeadline<T>(work: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(onTimeout()), ms)
+  })
+  try {
+    return await Promise.race([work, deadline])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 /** What a reader returns: the raw balance, or why there is none. */
 export type Reading =
   | { ok: true; address: string; atomic: bigint; criticalFloor: bigint; fallbackFloor: bigint }
@@ -205,27 +243,28 @@ export async function readTreasury(src: BalanceSources): Promise<Reading> {
       fallbackFloor: TREASURY_FALLBACK_FLOOR_ATOMIC,
     }
   } catch (error) {
-    return { ok: false, reason: `read failed: ${error instanceof Error ? error.message : String(error)}` }
+    return { ok: false, reason: safeReason('read failed', error) }
   }
 }
 
 /**
  * The demo merchant's settlement wallet, via its own `/healthz` (the address
  * derives from a key only the merchant holds). The merchant's floors are in
- * SETTLEMENTS; they are converted to wei at the merchant's own per-settlement
- * cost (balance ÷ settlements_remaining), so every floor here is one unit.
+ * SETTLEMENTS; they are converted to wei with the merchant's own
+ * `cost_per_settlement_wei`, so every floor here is one unit. A `/healthz`
+ * missing any of those fields is `unknown`, not a guess.
  */
 export async function readMerchant(src: BalanceSources): Promise<Reading> {
   if (!src.demoMerchantUrl) return { ok: false, reason: 'config missing: QA_DEMO_MERCHANT_URL', configMissing: true }
   const fetchImpl = src.fetchImpl ?? fetch
   try {
-    const res = await fetchImpl(`${src.demoMerchantUrl}/healthz`)
+    const res = await fetchImpl(`${src.demoMerchantUrl}/healthz`, { signal: AbortSignal.timeout(READ_TIMEOUT_MS) })
     if (!res.ok) return { ok: false, reason: `/healthz returned HTTP ${res.status}` }
     const body = (await res.json()) as {
       settlement?: {
         address?: string
         native_balance_wei?: string
-        settlements_remaining?: number
+        cost_per_settlement_wei?: string
         warn_floor?: number
         fail_floor?: number
         error?: string
@@ -233,35 +272,23 @@ export async function readMerchant(src: BalanceSources): Promise<Reading> {
     }
     const s = body.settlement
     if (!s) return { ok: false, reason: 'merchant /healthz reports no settlement block' }
-    if (s.error || !s.address || !s.native_balance_wei) {
-      return { ok: false, address: s.address, reason: s.error ?? 'merchant could not read its balance' }
+    if (s.error) return { ok: false, address: s.address, reason: safeReason('merchant could not read its balance', s.error) }
+    const missing = (['address', 'native_balance_wei', 'cost_per_settlement_wei', 'warn_floor', 'fail_floor'] as const).filter(
+      (k) => s[k] === undefined || s[k] === null || s[k] === '',
+    )
+    if (missing.length > 0) {
+      return { ok: false, address: s.address, reason: `merchant /healthz lacks ${missing.join(', ')}` }
     }
-    const atomic = BigInt(s.native_balance_wei)
-    const remaining = s.settlements_remaining ?? 0
-    if (remaining <= 0 || typeof s.warn_floor !== 'number' || typeof s.fail_floor !== 'number') {
-      // No per-settlement cost to convert the floors with: the merchant's own
-      // band is still the authority, so an empty wallet reads as critical.
-      return {
-        ok: true,
-        address: s.address,
-        atomic,
-        criticalFloor: remaining <= 0 ? atomic + 1n : 0n,
-        fallbackFloor: remaining <= 0 ? atomic + 1n : 0n,
-      }
-    }
-    const perSettlement = atomic / BigInt(remaining)
+    const cost = BigInt(s.cost_per_settlement_wei!)
     return {
       ok: true,
-      address: s.address,
-      atomic,
-      criticalFloor: perSettlement * BigInt(s.fail_floor),
-      fallbackFloor: perSettlement * BigInt(s.warn_floor),
+      address: s.address!,
+      atomic: BigInt(s.native_balance_wei!),
+      criticalFloor: cost * BigInt(s.fail_floor!),
+      fallbackFloor: cost * BigInt(s.warn_floor!),
     }
   } catch (error) {
-    return {
-      ok: false,
-      reason: `could not reach ${src.demoMerchantUrl}/healthz: ${error instanceof Error ? error.message : String(error)}`,
-    }
+    return { ok: false, reason: safeReason(`could not reach ${src.demoMerchantUrl}/healthz`, error) }
   }
 }
 
@@ -284,7 +311,7 @@ export async function readRelayer(src: BalanceSources): Promise<Reading> {
     return {
       ok: false,
       address: src.relayerAddress,
-      reason: `read failed: ${error instanceof Error ? error.message : String(error)}`,
+      reason: safeReason('read failed', error),
     }
   }
 }
@@ -351,6 +378,7 @@ export async function collectBalances(
   src: BalanceSources,
   history: readonly HistoryEntry[],
   now: Date = new Date(),
+  deadlineMs: number = READ_TIMEOUT_MS,
 ): Promise<BalancesReport> {
   const readers: Record<WalletKey, (s: BalanceSources) => Promise<Reading>> = {
     treasury: readTreasury,
@@ -358,7 +386,12 @@ export async function collectBalances(
     relayer: readRelayer,
   }
   const readingsByKey = {} as Record<WalletKey, Reading>
-  for (const key of WALLET_KEYS) readingsByKey[key] = await readers[key](src)
+  for (const key of WALLET_KEYS) {
+    readingsByKey[key] = await withDeadline(readers[key](src), deadlineMs, () => ({
+      ok: false,
+      reason: `read timed out after ${Math.round(deadlineMs / 1000)} s`,
+    }))
+  }
 
   const today = now.toISOString().slice(0, 10)
   const todays: Partial<Record<WalletKey, bigint>> = {}

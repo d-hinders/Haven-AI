@@ -135,13 +135,15 @@ delegation's** period budget and period length. `SEED_RPC_URL` is no longer read
 |---|---|---|
 | Owner EOA | **No on-chain funding required** | Signs the budget delegation off-chain. Hybrid provisioning is counterfactual — zero transactions (#2007) |
 | Hybrid account | Base Sepolia test USDC | The treasury every QA payment spends from |
-| Dev relayer | Base Sepolia ETH | Sponsors the UserOps, including the counterfactual account's first deployment, and gasless sweep recovery |
+| Dev relayer | Base Sepolia ETH | Pays gas for activations, passport attestations, revocations, sweeps, and the outbound queue's fee bumps and lane cancels. Agent payment UserOps are paymaster-sponsored and never use it (#3264) |
 | Delegate EOA | No on-chain funding required | Signs payment and EIP-3009 sweep authorizations off-chain |
 | **Demo-merchant settlement wallet** | **Base Sepolia ETH** | **Submits `transferWithAuthorization` / `redeemDelegations`. Derived from the merchant's `SETTLEMENT_PRIVATE_KEY`; NOT the receiving wallet** |
 
 Ordinary payments and sweep recovery do not require delegate gas. The delegate
-signs off-chain; the relayer sponsors the payment UserOps and submits the
-gasless EIP-3009 USDC sweep. Keep the dev relayer funded with Base Sepolia ETH.
+signs off-chain; payment UserOps are paymaster-sponsored, and the relayer submits
+the gasless EIP-3009 USDC sweep. Keep the dev relayer funded with Base Sepolia ETH
+(the daily [QA wallet balances](#qa-wallet-balances-standing-issue) check warns
+before it runs dry).
 
 > **The settlement wallet was missing from this table until
 > [#1530](https://github.com/d-hinders/Haven-AI/issues/1530).** On 2026-08-17 it
@@ -770,8 +772,8 @@ command.
 [#3631](https://github.com/d-hinders/Haven-AI/issues/3631). Money-flow QA failed in
 preflight for about 3.5 days (2026-10-01T19:24Z → 2026-10-05T06:08Z, ~40 runs)
 because the delegation treasury ran out of Base Sepolia USDC, and nothing warned
-beforehand. Preflight has only a FAIL floor (one run's cost), and its output
-reaches only a run log.
+beforehand. Preflight's treasury check has only a FAIL floor (one run's cost),
+and preflight output reaches only a run log.
 
 `qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
 calls `npm run qa:balances -w packages/qa-agent`, which reads three wallets on
@@ -828,14 +830,17 @@ treasury address the issue names, from any source. It is the same address as
 
 Send Base Sepolia ETH to the settlement address the issue names (the merchant's
 `/healthz` reports the same one). That wallet pays the gas for the merchant's own
-settlements. The preflight section above explains the merchant's warn and fail
-floors, which are counted in settlements.
+settlements. The merchant's warn and fail floors are counted in settlements;
+[the preflight section](#preflight-resources-every-run-consumes-1530) explains them, and the
+[demo-merchant README](../../packages/demo-merchant-mcp/README.md) covers its
+settlement wallet.
 
 ### Top up the dev relayer
 
 Send Base Sepolia ETH to the relayer address the issue names (the
-`QA_DEV_RELAYER_ADDRESS` variable). It is the dev backend's single relayer EOA.
-It pays for activations, passport attestations, revocations, sweeps, and the
+`QA_DEV_RELAYER_ADDRESS` variable). It is the one relayer EOA that dev AND
+prod share on Base mainnet and Base Sepolia, so its 84532 burn includes
+non-QA traffic. It pays for activations, passport attestations, revocations, sweeps, and the
 outbound queue's fee bumps and lane cancels; agent payments are
 paymaster-sponsored and never use it
 ([`dev-environment.md`](dev-environment.md)). The backend's own low-balance floor

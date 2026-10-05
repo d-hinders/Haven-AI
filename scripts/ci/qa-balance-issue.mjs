@@ -38,6 +38,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { BOT_AUTHOR } from './standing-issue-upsert.mjs'
+import { scrubFull } from './qa-retry.mjs'
 
 export const ISSUE_TITLE = 'QA wallet balances low'
 export const LABEL = 'qa-funding'
@@ -94,6 +95,16 @@ export function bandChanges(previous, rows) {
   return changes
 }
 
+/**
+ * A row's reason, safe for a PUBLIC issue: scrubbed again here although the
+ * harness already writes a safe one (balances.ts `safeReason`) — a provider
+ * URL carries its API key, and this repo is public (#3631 review H1).
+ */
+export function publicReason(reason) {
+  const s = scrubFull(String(reason ?? ''))
+  return s.length > 160 ? `${s.slice(0, 159)}…` : s
+}
+
 function fmtRunway(row) {
   if (row.basis === 'fallback') return 'fallback floor'
   if (row.runwayDays !== undefined) return `${row.runwayDays} days`
@@ -114,7 +125,7 @@ export function buildBody(report, { runUrl, repo, bands }) {
     const asset = row.token ? `${row.unit} \`${row.token}\`` : 'native ETH'
     const balance = row.balance !== undefined ? `${row.balance} ${row.unit}` : '—'
     const burn = row.burnPerDay !== undefined ? `${row.burnPerDay} ${row.unit}` : '—'
-    const band = row.band === 'unknown' ? `unknown — ${row.reason ?? 'no reading'}` : `**${row.band}**`
+    const band = row.band === 'unknown' ? `unknown — ${row.reason ? publicReason(row.reason) : 'no reading'}` : `**${row.band}**`
     lines.push(
       `| ${row.name} | ${band} | ${row.address ? `\`${row.address}\`` : '—'} | ${balance} | ${burn} | ${fmtRunway(row)} | ${asset} | [how](${docBase}#${TOP_UP_ANCHOR[row.key]}) |`,
     )
@@ -140,9 +151,13 @@ function buildChangeComment(changes, runUrl) {
 
 function buildCloseComment(report, runUrl) {
   const items = report.rows.map(
-    (r) => `- ${r.name}: ${r.balance !== undefined ? `${r.balance} ${r.unit}` : '—'} (${r.band}${r.band === 'unknown' && r.reason ? ` — ${r.reason}` : ''})`,
+    (r) => `- ${r.name}: ${r.balance !== undefined ? `${r.balance} ${r.unit}` : '—'} (${r.band}${r.band === 'unknown' && r.reason ? ` — ${publicReason(r.reason)}` : ''})`,
   )
-  return [`No wallet is \`warn\` or \`critical\` any more ([run](${runUrl})). Closing.`, '', ...items].join('\n')
+  const unknown = report.rows.some((r) => r.band === 'unknown')
+  const head = unknown
+    ? `No wallet is known to be \`warn\` or \`critical\` ([run](${runUrl})); a wallet that could not be read is listed as unknown. Closing.`
+    : `No wallet is \`warn\` or \`critical\` any more ([run](${runUrl})). Closing.`
+  return [head, '', ...items].join('\n')
 }
 
 function parseList(json) {

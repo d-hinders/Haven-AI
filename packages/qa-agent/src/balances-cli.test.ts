@@ -26,7 +26,7 @@ const healthz = (async () => ({
   ok: true,
   status: 200,
   json: async () => ({
-    settlement: { address: '0x' + 'cd'.repeat(20), native_balance_wei: '10000000000000000', settlements_remaining: 100, warn_floor: 25, fail_floor: 12 },
+    settlement: { address: '0x' + 'cd'.repeat(20), native_balance_wei: '10000000000000000', settlements_remaining: 100, cost_per_settlement_wei: '100000000000000', warn_floor: 25, fail_floor: 12 },
   }),
 })) as unknown as typeof fetch
 

@@ -54,6 +54,19 @@ export function sourcesFromEnv(env: NodeJS.ProcessEnv, provider: ethers.Provider
   }
 }
 
+/**
+ * A provider that fails FAST. ethers' defaults (a 300 s request timeout, up to
+ * 12 retries on a 429 with backoff) let one rate-limited RPC outlast the
+ * job's 10-minute budget (#3631 review M1); a read failure must become an
+ * `unknown` row and a green run, not a killed job with no history upload.
+ */
+export function boundedProvider(url: string = BASE_SEPOLIA_RPC): ethers.JsonRpcProvider {
+  const req = new ethers.FetchRequest(url)
+  req.timeout = 20_000
+  req.setThrottleParams({ maxAttempts: 2 })
+  return new ethers.JsonRpcProvider(req, 84532, { staticNetwork: true })
+}
+
 export async function runBalances(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
@@ -63,7 +76,7 @@ export async function runBalances(
     const i = argv.indexOf(`--${name}`)
     return i === -1 ? undefined : argv[i + 1]
   }
-  const provider = deps.provider ?? new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC)
+  const provider = deps.provider ?? boundedProvider()
   const src = sourcesFromEnv(env, provider, deps.fetchImpl)
   const api = deps.api !== undefined ? deps.api : src.api
   const report = await collectBalances({ ...src, api: src.apiMissing ? null : api }, readHistory(arg('history')), deps.now)

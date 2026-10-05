@@ -47,8 +47,12 @@ const api = (address = TREASURY) => ({ getAgent: async () => ({ ok: true, status
 function healthz(body: unknown, status = 200): typeof fetch {
   return (async () => ({ ok: status < 400, status, json: async () => body })) as unknown as typeof fetch
 }
+const COST = 100_000_000_000_000n // 1e14 wei per settlement
 const merchantOk = healthz({
-  settlement: { address: SETTLEMENT, native_balance_wei: ETH(0.01).toString(), settlements_remaining: 100, warn_floor: 25, fail_floor: 12 },
+  settlement: {
+    address: SETTLEMENT, native_balance_wei: ETH(0.01).toString(), settlements_remaining: 100,
+    cost_per_settlement_wei: COST.toString(), warn_floor: 25, fail_floor: 12,
+  },
 })
 
 /** A falling series of `days` daily readings ending at `end`, dropping `perDay` each day. */
@@ -62,8 +66,10 @@ describe('burnPerDay', () => {
     expect(burnPerDay([100n, 90n, 70n, 60n, 30n])).toBe(15n) // drops 10, 20, 10, 30 → (10+20)/2
   })
 
-  it('ignores top-ups: a refill never reads as negative burn or shortens the median', () => {
-    expect(burnPerDay([100n, 90n, 500n, 490n, 480n])).toBe(10n)
+  it('ignores top-ups: a refill never reads as negative burn or shifts the median', () => {
+    // Drops are 10 and 10. Counting the two rises (+210, +200) as burn would
+    // move the median to (10+200)/2 = 105 — so this fixture can fail.
+    expect(burnPerDay([100n, 90n, 300n, 500n, 490n])).toBe(10n)
   })
 
   it('is null with no negative delta (flat or only topped up)', () => {
@@ -183,7 +189,10 @@ describe('collectBalances', () => {
 
   it('the merchant floors convert from settlements: below its fail floor is critical', async () => {
     const lowMerchant = healthz({
-      settlement: { address: SETTLEMENT, native_balance_wei: '1100', settlements_remaining: 11, warn_floor: 25, fail_floor: 12 },
+      settlement: {
+        address: SETTLEMENT, native_balance_wei: (COST * 11n).toString(), settlements_remaining: 11,
+        cost_per_settlement_wei: COST.toString(), warn_floor: 25, fail_floor: 12,
+      },
     })
     const src: BalanceSources = { api: api(), demoMerchantUrl: 'https://m.test', relayerAddress: RELAYER, provider: provider(USDC(5), { [RELAYER]: ETH(1) }), fetchImpl: lowMerchant }
     const report = await collectBalances(src, [], now)
@@ -203,5 +212,76 @@ describe('collectBalances', () => {
     expect(report.rows.every((r) => typeof r.reason === 'string' && r.reason.length > 0)).toBe(true)
     expect(report.configMissing).toBe(false)
     expect(report.history[0]!.balances).toEqual({})
+  })
+
+  it('a /healthz missing any floor or cost field is unknown, never a guessed band', async () => {
+    for (const drop of ['cost_per_settlement_wei', 'warn_floor', 'fail_floor', 'native_balance_wei']) {
+      const settlement: Record<string, unknown> = {
+        address: SETTLEMENT, native_balance_wei: ETH(0.01).toString(), cost_per_settlement_wei: COST.toString(), warn_floor: 25, fail_floor: 12,
+      }
+      delete settlement[drop]
+      const src: BalanceSources = { api: api(), demoMerchantUrl: 'https://m.test', relayerAddress: RELAYER, provider: provider(USDC(5), { [RELAYER]: ETH(1) }), fetchImpl: healthz({ settlement }) }
+      const row = (await collectBalances(src, [], now)).rows.find((r) => r.key === 'merchant')!
+      expect(row, drop).toMatchObject({ band: 'unknown' })
+      expect(row.reason, drop).toContain(drop)
+    }
+  })
+
+  it('a reader that hangs becomes unknown at the deadline, never a job timeout', async () => {
+    const hanging = {
+      call: () => new Promise(() => {}),
+      getBalance: () => new Promise(() => {}),
+    } as unknown as ethers.Provider
+    const never = (() => new Promise(() => {})) as unknown as typeof fetch
+    const src: BalanceSources = { api: api(), demoMerchantUrl: 'https://m.test', relayerAddress: RELAYER, provider: hanging, fetchImpl: never }
+    const report = await collectBalances(src, [], now, 50)
+    expect(report.rows.map((r) => [r.band, r.reason])).toEqual([
+      ['unknown', 'read timed out after 0 s'],
+      ['unknown', 'read timed out after 0 s'],
+      ['unknown', 'read timed out after 0 s'],
+    ])
+  })
+})
+
+describe('safeReason (#3631 review H1: the RPC URL carries its API key, and the issue is public)', () => {
+  it('a real ethers failure against a keyed URL never leaks the key', async () => {
+    const { createServer } = await import('node:http')
+    const server = createServer((_req, res) => {
+      res.writeHead(403, { 'content-type': 'text/plain' })
+      res.end('forbidden')
+    })
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+    const port = (server.address() as { port: number }).port
+    try {
+      const { boundedProvider } = await import('../balances-cli.js')
+      const keyed = boundedProvider(`http://127.0.0.1:${port}/ogrpc?network=base-sepolia&dkey=SUPERSECRETKEY123`)
+      const src: BalanceSources = { api: api(), demoMerchantUrl: undefined, relayerAddress: RELAYER, provider: keyed }
+      const report = await collectBalances(src, [], new Date('2026-10-05T06:00:00Z'), 15_000)
+      const text = JSON.stringify(report.rows)
+      expect(report.rows.find((r) => r.key === 'treasury')!.band).toBe('unknown')
+      expect(text).not.toContain('SUPERSECRETKEY123')
+      expect(text).not.toContain('dkey=')
+    } finally {
+      server.close()
+    }
+  }, 30_000)
+
+  it('redacts URLs and bounds the text, keeping the ethers code', async () => {
+    const { safeReason } = await import('./balances.js')
+    const err = Object.assign(new Error('boom (info={"requestUrl":"https://rpc.example/v2/abc?key=SECRETSECRETSECRET"})'), { code: 'SERVER_ERROR' })
+    const out = safeReason('read failed', err)
+    expect(out).toMatch(/^read failed: SERVER_ERROR: boom/)
+    expect(out).not.toContain('SECRET')
+    expect(safeReason('x', new Error('see https://h.example/p?apikey=S3CR3TS3CR3TS3CR3T now'))).toBe('x: see <url> now')
+  })
+})
+
+describe('relayer floor parity', () => {
+  it('RELAYER_FALLBACK_FLOOR_WEI equals the backend RELAYER_LOW_BALANCE_WEI (read as text — the backend file is money-path)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const text = readFileSync(new URL('../../../backend/src/infra/relayer.ts', import.meta.url), 'utf8')
+    const m = text.match(/RELAYER_LOW_BALANCE_WEI\s*=\s*(?:ethers\.)?parseEther\(\s*['"]([0-9.]+)['"]\s*\)/)
+    expect(m, 'RELAYER_LOW_BALANCE_WEI = parseEther(...) not found in backend relayer.ts').not.toBeNull()
+    expect(ethers.parseEther(m![1]!)).toBe(RELAYER_FALLBACK_FLOOR_WEI)
   })
 })

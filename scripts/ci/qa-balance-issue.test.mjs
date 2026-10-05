@@ -183,3 +183,15 @@ test('every top-up link resolves to a heading in agent-qa.md (the body cannot li
     assert.ok(anchors.has(anchor), `agent-qa.md has no heading for #${anchor}`)
   }
 })
+
+test('a keyed provider URL in a reason never reaches the body or the close comment (#3631 review H1)', () => {
+  const leak = 'read failed: server response 403 (info={"requestUrl":"https://base-sepolia.g.alchemy.com/v2/SUPERSECRETKEY1234567?dkey=SUPERSECRETKEY1234567"})'
+  const rows = [row('treasury', 'unknown', { balance: undefined, reason: leak }), row('merchant', 'warn'), row('relayer', 'ok')]
+  const open = run({ rows })
+  assert.ok(!open.calls.some((c) => JSON.stringify(c).includes('SUPERSECRETKEY')), 'key leaked into the created issue')
+  const closing = [row('treasury', 'unknown', { balance: undefined, reason: leak }), row('merchant', 'ok'), row('relayer', 'ok')]
+  const close = run({ rows: closing, issues: [standing('OPEN', { treasury: 'warn', merchant: 'warn', relayer: 'ok' })] })
+  assert.deepEqual(close.verbs, ['label create', 'issue list', 'issue edit', 'issue comment', 'issue close'])
+  assert.ok(!close.calls.some((c) => JSON.stringify(c).includes('SUPERSECRETKEY')), 'key leaked into the close')
+  assert.match(close.calls.find((c) => c.args[1] === 'comment').args.join(' '), /known to be/)
+})

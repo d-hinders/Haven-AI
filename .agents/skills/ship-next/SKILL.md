@@ -757,6 +757,13 @@ you need the reasoning. Never edit one without the other — CI will not let you
   STAYS on this list: it was rails/allowance-module.ts until #2850 renamed
   that file to `infra/chain/relayer-reads.ts` — the AllowanceModule filename
   was the last false claim the retired rail left behind);
+- `modules/budget-scope/` (#3649 — the #2099 fail-open period pre-check, the
+  task cap and the typed refusal. The pre-check lived inline in
+  `modules/x402/delegation-authorize.ts` until #3616 created this module and
+  #3617 deleted the inline copy; both x402 authorize legs and POST /payments
+  now decide through it. The move took the decision off the perimeter —
+  #1892's accident of location again: where the comparison lives is not what
+  makes it a spend decision);
 - `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
   `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,

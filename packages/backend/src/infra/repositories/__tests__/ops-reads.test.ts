@@ -11,6 +11,7 @@ import {
   seedOpsAccount,
   seedOpsAgent,
   seedOpsDelegation,
+  seedOpsFeedback,
   seedOpsIntent,
   seedOpsRefusal,
   seedOpsSystemTx,
@@ -19,7 +20,9 @@ import {
 import {
   escapeLikePrefix,
   OPS_DETAIL_LIST_LIMIT,
+  OPS_FEEDBACK_LIST_LIMIT,
   OPS_SEARCH_LIMIT,
+  readOpsFeedbackList,
   readOpsOverview,
   readOpsUserDetail,
   searchOpsAccountsByAddress,
@@ -166,5 +169,30 @@ describeDb('ops console data reads (#3512)', () => {
     expect(d!.refusals[0]).toMatchObject({ reason: 'delegation_budget_exceeded', source: 'payment' })
 
     expect(await readOpsUserDetail(db, '00000000-0000-4000-8000-000000000000')).toBeNull()
+  })
+
+  it('the feedback list is newest first, only unexpired rows, and respects the page cap (#3602)', async () => {
+    const u = await seedOpsUser('grace@customer.example')
+    const other = await seedOpsUser()
+    const first = await seedOpsFeedback(u, { text: 'first', createdAt: '2026-10-01T09:00:00Z' })
+    const second = await seedOpsFeedback(u, { text: 'second', createdAt: '2026-10-02T09:00:00Z' })
+    const third = await seedOpsFeedback(u, { text: 'third', createdAt: '2026-10-03T09:00:00Z' })
+    await seedOpsFeedback(other, { text: 'another customer', createdAt: '2026-09-30T09:00:00Z' })
+    const expired = await seedOpsFeedback(u, {
+      text: 'already expired',
+      createdAt: '2020-01-01T00:00:00Z',
+      expiresAt: '2020-01-08T00:00:00Z',
+    })
+
+    const rows = await readOpsFeedbackList(db)
+    expect(rows.map((r) => r.id)).toEqual([third, second, first, expect.any(String)])
+    expect(rows.map((r) => r.text)).toEqual(['third', 'second', 'first', 'another customer'])
+    expect(rows.map((r) => r.id)).not.toContain(expired)
+    // The submitter joins through users — the module masks the email.
+    expect(rows[0]).toMatchObject({ user_id: u, email: 'grace@customer.example' })
+    expect(Object.keys(rows[0]).sort()).toEqual(['created_at', 'email', 'expires_at', 'id', 'text', 'user_id'])
+
+    for (let i = 0; i < OPS_FEEDBACK_LIST_LIMIT + 3; i++) await seedOpsFeedback(u, { text: `bulk ${i}` })
+    expect(await readOpsFeedbackList(db)).toHaveLength(OPS_FEEDBACK_LIST_LIMIT)
   })
 })

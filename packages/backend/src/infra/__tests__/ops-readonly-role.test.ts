@@ -411,6 +411,12 @@ describeDb('ops read-only role (#3510)', () => {
            VALUES (84532, 'sweep', $1, '0x', '0', 'failed', $2)`,
           ['0x' + '11'.repeat(20), leak],
         )
+      } else if (table === 'feedback') {
+        // #3597's table: only a user and the text are NOT NULL (migration 106).
+        await db.query(
+          `INSERT INTO feedback (user_id, text) VALUES ($1, $2)`,
+          [users[0].id, leak],
+        )
       } else {
         await db.query(
           `INSERT INTO agent_passports (agent_id, chain_id, status, ${column}) VALUES ($1, 84532, 'failed', $2)`,

@@ -12,6 +12,7 @@ export interface OpsNavItem {
 
 export const OPS_NAV_ITEMS: OpsNavItem[] = [
   { href: '/overview', label: 'Overview', match: (p) => p === '/overview' },
+  { href: '/feedback', label: 'Feedback', match: (p) => p === '/feedback' },
   { href: '/search', label: 'Search', match: (p) => p === '/search' },
   { href: '/health', label: 'Health', match: (p) => p === '/health' },
   { href: '/doc-health', label: 'Doc health', match: (p) => p === '/doc-health' },

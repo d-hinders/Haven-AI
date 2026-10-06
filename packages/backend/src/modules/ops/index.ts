@@ -26,9 +26,10 @@ export {
   type GithubUser,
 } from './github.js'
 
-export { maskEmail, maskHex, maskName, maskSearchTerm } from './masking.js'
+export { maskEmail, maskFreeText, maskHex, maskName, maskSearchTerm } from './masking.js'
 
 export { buildOpsOverview, type OpsOverview } from './overview.js'
+export { buildOpsFeedbackList, type OpsFeedbackList } from './feedback.js'
 export {
   detectOpsSearchKey,
   runOpsSearch,

@@ -19,6 +19,7 @@
  */
 import { opsFetch } from './api'
 import type {
+  OpsFeedbackList,
   OpsHealth,
   OpsMe,
   OpsOnchainView,
@@ -88,6 +89,7 @@ async function readText(response: Response): Promise<OpsRead<string>> {
 /** The GET readers, the audited reveal and the sign-in navigation. Nothing else. */
 export interface OpsClient {
   overview: () => Promise<OpsRead<OpsOverview>>
+  feedback: () => Promise<OpsRead<OpsFeedbackList>>
   search: (query: string) => Promise<OpsRead<OpsSearchResponse>>
   user: (id: string) => Promise<OpsRead<OpsUserDetail | null>>
   onchain: (userId: string) => Promise<OpsRead<OpsOnchainView | null>>
@@ -121,6 +123,7 @@ export function createOpsClient(storage: Storage, origin: string, onUnauthorized
 
   return {
     overview: () => get<OpsOverview>('/ops/overview'),
+    feedback: () => get<OpsFeedbackList>('/ops/feedback'),
     search: (query) => {
       // The backend detects the key type from the raw term (#3512); nothing
       // is normalized here — a mangled UUID is the customer's problem to

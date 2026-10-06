@@ -1881,6 +1881,28 @@ export const openapiSpec = {
         },
       },
     },
+    '/ops/feedback': {
+      get: {
+        tags: ['Ops'],
+        operationId: 'getOpsFeedback',
+        summary: 'The last 7 days of CLI feedback, masked, one page.',
+        description:
+          'The console\u2019s Feedback page (#3602): messages sent with `haven feedback submit` (#3597), newest first, capped at 50. ' +
+          'Only unexpired rows are listed (every feedback read filters expires_at > now(); retention is 7 days). The message text is masked to a character count — no content — and the submitter\u2019s email is masked; the unmasked text leaves only through POST /ops/reveal (target_type feedback, field text), audited. ' +
+          'Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. ' +
+          'Returns 404 while the deployment has no read-only ops database configured.',
+        security: [{ OpsJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The masked feedback page.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/OpsFeedbackList' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The ops console (or its read-only database) is not configured.' },
+          '503': { ...errorResponse, description: 'The read could not be audited, so nothing was returned.' },
+        },
+      },
+    },
     '/ops/search': {
       get: {
         tags: ['Ops'],
@@ -10126,13 +10148,40 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      OpsFeedbackList: {
+        type: 'object',
+        required: ['feedback', 'generated_at'],
+        properties: {
+          feedback: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/OpsFeedback' },
+          },
+          generated_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      OpsFeedback: {
+        type: 'object',
+        required: ['id', 'email', 'text', 'created_at', 'expires_at'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          email: { type: 'string', description: 'The submitter, masked.' },
+          text: {
+            type: 'string',
+            description: 'The masked message: a character count only. The unmasked text leaves only through POST /ops/reveal (target_type feedback, field text).',
+          },
+          created_at: isoDateTime,
+          expires_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
       OpsRevealRequest: {
         type: 'object',
         required: ['target_type', 'target_id', 'field'],
         properties: {
-          target_type: { type: 'string', enum: ['user'] },
+          target_type: { type: 'string', enum: ['user', 'feedback'] },
           target_id: { type: 'string', pattern: `^${UUID_PATTERN}$` },
-          field: { type: 'string', enum: ['email', 'name'] },
+          field: { type: 'string', enum: ['email', 'name', 'text'] },
         },
         additionalProperties: false,
       },

@@ -262,6 +262,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/ops/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The last 7 days of CLI feedback, masked, one page.
+         * @description The console’s Feedback page (#3602): messages sent with `haven feedback submit` (#3597), newest first, capped at 50. Only unexpired rows are listed (every feedback read filters expires_at > now(); retention is 7 days). The message text is masked to a character count — no content — and the submitter’s email is masked; the unmasked text leaves only through POST /ops/reveal (target_type feedback, field text), audited. Reads through the read-only ops database role and writes one audit row before answering; a failed audit write answers 503 with nothing returned. Returns 404 while the deployment has no read-only ops database configured.
+         */
+        get: operations["getOpsFeedback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/search": {
         parameters: {
             query?: never;
@@ -4284,12 +4304,29 @@ export type components = {
             /** Format: date-time */
             generated_at: string;
         };
+        OpsFeedbackList: {
+            feedback: components["schemas"]["OpsFeedback"][];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        OpsFeedback: {
+            /** Format: uuid */
+            id: string;
+            /** @description The submitter, masked. */
+            email: string;
+            /** @description The masked message: a character count only. The unmasked text leaves only through POST /ops/reveal (target_type feedback, field text). */
+            text: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
         OpsRevealRequest: {
             /** @enum {string} */
-            target_type: "user";
+            target_type: "user" | "feedback";
             target_id: string;
             /** @enum {string} */
-            field: "email" | "name";
+            field: "email" | "name" | "text";
         };
         OpsRevealResponse: {
             target_type: string;
@@ -6728,6 +6765,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsOverview"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The ops console (or its read-only database) is not configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The read could not be audited, so nothing was returned. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOpsFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The masked feedback page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsFeedbackList"];
                 };
             };
             /** @description Error response */

@@ -66,7 +66,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-01"
+last-verified: "2026-10-06"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1431,6 +1431,26 @@ authority, and the same scope note holds.
 > and fail the strict equality. No route, read, reveal or ops-auth file
 > changes, so the no-rail-authority claim above holds verbatim. Scope of this
 > re-read: this section only; `last-verified` is not bumped.
+
+> **Re-verified #3602 (2026-10-06, console Feedback page):** the change adds
+> one read route (`GET /ops/feedback` in `routes/ops.ts`) and one allowlisted
+> reveal field (`feedback.text`) to the surface this section describes.
+> Re-read against the paragraph above: the new route sits behind the same
+> `opsAuth` bearer hook (no new auth path), reads only the read-only
+> Postgres role's newly granted `feedback` columns, writes its
+> `ops_access_log` row before answering, and masks every field server-side —
+> the unmasked message text still leaves only through the audited
+> `POST /ops/reveal`, which returns that one column after the same
+> audit-first write, and an expired row (`expires_at > NOW()`) answers 404
+> like a missing one. `POST /ops/reveal` still only reads one allowlisted
+> column and records the read first; no route under `/ops` moves funds,
+> signs, redeems, changes a signer, delegation or credential, or acts as a
+> user, so the no-rail-authority claim holds verbatim. Scope of this re-read:
+> the ops-console section above and the files this change touches
+> (`routes/ops.ts`, `modules/ops/**`, `infra/repositories/ops-*.ts`,
+> `infra/ops-readonly-role.ts`); the invariant, custody, redemption and
+> settlement sections were NOT re-read (the diff touches no file that
+> implements them). `last-verified` is bumped for exactly this coverage.
 
 ## 9. Owner CLI sessions — the device-code login (#2526)
 

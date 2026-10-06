@@ -75,6 +75,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "GET /openapi.json": "routes/openapi.ts",
   "GET /ops/auth/github/callback": "routes/ops.ts",
   "GET /ops/auth/github/start": "routes/ops.ts",
+  "GET /ops/feedback": "routes/ops.ts",
   "GET /ops/health": "routes/ops.ts",
   "GET /ops/me": "routes/ops.ts",
   "GET /ops/overview": "routes/ops.ts",

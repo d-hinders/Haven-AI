@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import { useAgentConnectionSetup } from '@/hooks/useAgentConnectionSetup'
 import { ConnectStep } from './connect-agent/ConnectStep'
 import { DetailsStep } from './connect-agent/DetailsStep'
@@ -34,6 +35,16 @@ interface Props {
 }
 
 /**
+ * A touch-first pointer (#3687, owner decision 2026-10-06): focusing a text
+ * field there opens the on-screen keyboard over the dialog (the installed
+ * iPhone web app, #2736), so the name input is never auto-focused on one.
+ */
+function isCoarsePointer(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia('(pointer: coarse)').matches
+}
+
+/**
  * The connect-agent flow's shell: dialog chrome, stepper, and step dispatch.
  *
  * All state and orchestration live in `useAgentConnectionSetup` (#989) so the
@@ -59,6 +70,27 @@ export default function ConnectAgentModal({
     resumeSetupId,
   })
 
+  // #3687: open with the caret in *Agent name* (fine pointer only). Read once:
+  // a changing `initialFocusRef` would re-run Modal's focus-on-open effect.
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const [coarsePointer] = useState(isCoarsePointer)
+
+  // #3687, after #3331 F11 (FundMerchantModal): every step change unmounts the
+  // button that triggered it, dropping focus to <body> — outside the dialog.
+  // Move it into the new step on a CHANGE, never on a step's first render
+  // (Modal places the open-time focus). Back to details focuses the name
+  // input; anything else focuses the step region, so a screen-reader user
+  // hears where they landed.
+  const stepRegionRef = useRef<HTMLDivElement>(null)
+  const previousStepRef = useRef(flow.step)
+  useEffect(() => {
+    if (previousStepRef.current !== flow.step) {
+      if (flow.step === 'details' && !coarsePointer) nameInputRef.current?.focus()
+      else stepRegionRef.current?.focus()
+    }
+    previousStepRef.current = flow.step
+  }, [flow.step, coarsePointer])
+
   if (!open) return null
 
   return (
@@ -80,6 +112,7 @@ export default function ConnectAgentModal({
         ) : undefined
       }
       showCloseButton
+      initialFocusRef={coarsePointer ? undefined : nameInputRef}
       closeButtonDisabled={flow.busy}
       width="xl"
       maxHeight="tight"
@@ -97,15 +130,28 @@ export default function ConnectAgentModal({
        * change, the same way ConnectStepShell keys its body by `stateKey`.
        * Step 4 stays OUTSIDE this wrapper and keeps its own shell/rhythm —
        * changing it is explicitly out of scope for #1411.
+       *
+       * Both wrappers are the step-change focus target (#3687): `tabIndex=-1`
+       * keeps them out of the Tab order and Modal's first-focusable query,
+       * `outline-none` keeps a programmatic focus from drawing a ring.
        */}
       {flow.step !== 'connect' && (
-        <div key={flow.step} className="v2-animate-step-rise flex flex-col gap-5">
-          {flow.step === 'details' && <DetailsStep flow={flow} />}
+        <div
+          key={flow.step}
+          ref={stepRegionRef}
+          tabIndex={-1}
+          className="v2-animate-step-rise flex flex-col gap-5 outline-none"
+        >
+          {flow.step === 'details' && <DetailsStep flow={flow} nameInputRef={nameInputRef} />}
           {flow.step === 'policy' && <PolicyStep flow={flow} />}
           {flow.step === 'review' && <ReviewStep flow={flow} />}
         </div>
       )}
-      {flow.step === 'connect' && <ConnectStep flow={flow} />}
+      {flow.step === 'connect' && (
+        <div ref={stepRegionRef} tabIndex={-1} className="outline-none">
+          <ConnectStep flow={flow} />
+        </div>
+      )}
     </Modal>
   )
 }

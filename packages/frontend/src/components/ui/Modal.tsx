@@ -1,7 +1,7 @@
 'use client'
 
 import { X } from 'lucide-react'
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { useScrollEdgeCue } from '@/hooks/useScrollEdgeCue'
 
@@ -106,6 +106,23 @@ export function Modal({
    * correct without any caller opting in.
    */
 
+  // #3687: the latest `onClose` / `closeOnEscape`, read by the keydown handler
+  // at event time. They used to be deps of the focus effect below, so every
+  // parent re-render that minted a new `onClose` (the 10 s agents/dashboard
+  // polls) or toggled `closeOnEscape` (`!busy`) re-ran it: the cleanup restored
+  // the opener and the re-run focused the first focusable — the Close X —
+  // mid-typing. Synced in a LAYOUT effect, not a passive one, so there is no
+  // window after commit in which Escape reads a stale `closeOnEscape`.
+  const onCloseRef = useRef(onClose)
+  const closeOnEscapeRef = useRef(closeOnEscape)
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose
+    closeOnEscapeRef.current = closeOnEscape
+  })
+
+  // Initial focus and restore-on-close run on OPEN only (and on a new
+  // `initialFocusRef`). The focus call stays synchronous — ConfirmDialog's
+  // "Cancel focused on open" and the frontend playbook rely on that.
   useEffect(() => {
     if (!open) return
 
@@ -118,8 +135,8 @@ export function Modal({
     focusTarget?.focus()
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && closeOnEscape) {
-        onClose()
+      if (event.key === 'Escape' && closeOnEscapeRef.current) {
+        onCloseRef.current()
         return
       }
 
@@ -149,7 +166,7 @@ export function Modal({
       document.removeEventListener('keydown', onKeyDown)
       previousActiveElement?.focus()
     }
-  }, [closeOnEscape, initialFocusRef, onClose, open])
+  }, [initialFocusRef, open])
 
   if (!open) return null
 

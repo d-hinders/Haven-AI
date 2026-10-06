@@ -3199,6 +3199,9 @@ function setAuthApiStage(next) {
   authApiStage = next
 }
 
+/** GET counter for the `connect-agent-focus` poll hold (#3687). */
+const connectAgentFocusGets = { count: 0 }
+
 export const SCENARIOS = {
   'auth-shell-states': {
     description:
@@ -4545,6 +4548,104 @@ export const SCENARIOS = {
       await dialog.getByRole('heading', { name: 'Remove this approval?' }).waitFor({ timeout: 15_000 })
       await dialog.getByText(/this account will have no recovery/i).waitFor({ timeout: 15_000 })
       await shoot(dialog, 'confirmation')
+    },
+  },
+  // #3687: where focus lands in the Connect agent modal. Open → the caret is in
+  // *Agent name* (its focus ring is the evidence); a step change → the step
+  // region holds focus with NO ring; Back → the caret is in the name input
+  // again. Each shot asserts the focus target first, so a capture of the wrong
+  // state fails the run instead of photographing it.
+  'connect-agent-focus': {
+    description:
+      'Connect agent modal focus: name input on open, step region after a step change, name input after Back, and held across a 10 s poll on /agents and /dashboard (#3687)',
+    // Counts every fixture-answered GET, so a hold can prove a poll actually
+    // landed while it waited — a wait that saw no poll proves nothing. A
+    // module-level counter, not `this`: the runner wraps each scenario object.
+    api(apiPath, method) {
+      if (method === 'GET') connectAgentFocusGets.count += 1
+      // The dashboard's Connect agent button renders only in the empty
+      // connected-agents card. Reachable: an account whose agents are all
+      // disconnected (`hasAnyAgents` true → "No connected agents right now").
+      if (apiPath === '/dashboard/overview') return { ...FIXTURE_OVERVIEW, agents: [] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      const scenario = connectAgentFocusGets
+      // The reported defect: focus jumped to the Close X on the 10 s poll's
+      // re-render. Hold past one poll interval and require the focused element
+      // to be the same node afterwards, with at least one GET seen meanwhile.
+      const holdAcrossPoll = async (where) => {
+        await page.evaluate(() => { window.__focusBeforeHold = document.activeElement })
+        const before = scenario.count
+        await page.waitForTimeout(11_000)
+        const polled = scenario.count - before
+        const same = await page.evaluate(() => document.activeElement === window.__focusBeforeHold)
+        if (polled === 0) throw new Error(`connect-agent-focus: no GET during the ${where} hold — nothing re-rendered`)
+        if (!same) throw new Error(`connect-agent-focus: focus moved during the ${where} hold (${polled} GETs)`)
+        console.log(`connect-agent-focus: [${vp.name}] ${where} focus held across ${polled} GET(s) in 11 s`)
+      }
+
+      // The harness's 390px context is a narrow DESKTOP window: a fine pointer,
+      // no touch. Turn touch emulation on for the mobile shots so they render
+      // the coarse-pointer branch — the input deliberately NOT focused, because
+      // the phone keyboard would cover the dialog — and fail if it did not take.
+      // Before `goto`: the modal reads the pointer once, when it mounts.
+      const wantCoarse = vp.name === 'mobile'
+      if (wantCoarse) {
+        const cdp = await page.context().newCDPSession(page)
+        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+      }
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      const name = dialog.getByLabel('Agent name')
+      await name.waitFor({ timeout: 10_000 })
+      const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches)
+      if (coarse !== wantCoarse) {
+        throw new Error(`connect-agent-focus: (pointer: coarse) is ${coarse} on ${vp.name}, expected ${wantCoarse}`)
+      }
+      const nameFocused = () => name.evaluate((el) => el === document.activeElement)
+      if ((await nameFocused()) === coarse) {
+        throw new Error(`connect-agent-focus: name input focus=${!coarse} expected on ${coarse ? 'coarse' : 'fine'} pointer`)
+      }
+      await shoot(dialog, 'open')
+
+      await name.pressSequentially('Research agent')
+      await holdAcrossPoll('/agents')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').waitFor({ timeout: 10_000 })
+      const inRegion = await page.evaluate(
+        () => document.activeElement?.getAttribute('tabindex') === '-1' && !!document.activeElement.closest('[role="dialog"]'),
+      )
+      if (!inRegion) throw new Error('connect-agent-focus: focus is not on the step region after Set agent budget')
+      await shoot(dialog, 'policy')
+      // A field that is NOT the initial-focus target: on a fine pointer the old
+      // re-run re-focused *Agent name* itself, which masked the jump there.
+      await dialog.getByPlaceholder('Amount').click()
+      await dialog.getByPlaceholder('Amount').pressSequentially('25')
+      await holdAcrossPoll('/agents budget step')
+
+      await dialog.getByRole('button', { name: 'Back' }).click()
+      await name.waitFor({ timeout: 10_000 })
+      // Park the pointer off the dialog: Cancel now sits where Back was clicked,
+      // and a resting cursor would photograph its hover fill.
+      await page.mouse.move(0, 0)
+      if ((await nameFocused()) === coarse) {
+        throw new Error('connect-agent-focus: wrong focus target after Back')
+      }
+      await shoot(dialog, 'back')
+
+      // The dashboard entry point passes an inline onClose and polls too.
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dashName = page.getByRole('dialog').getByLabel('Agent name')
+      await dashName.waitFor({ timeout: 10_000 })
+      await page.getByRole('dialog').getByLabel(/Description/).click()
+      await page.getByRole('dialog').getByLabel(/Description/).pressSequentially('Pays for research APIs')
+      await holdAcrossPoll('/dashboard')
     },
   },
   'connect-agent': {

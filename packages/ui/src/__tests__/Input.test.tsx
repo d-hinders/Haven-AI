@@ -1,8 +1,16 @@
+import { createRef } from 'react'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Input } from '../Input'
 
 describe('Input', () => {
+  it('forwards a ref to the <input> itself, not its wrapper (#3687)', () => {
+    const ref = createRef<HTMLInputElement>()
+    render(<Input ref={ref} aria-label="Name" helperText="Shown to you only" />)
+
+    expect(ref.current).toBe(screen.getByLabelText('Name'))
+  })
+
   it('draws a visible border by default', () => {
     render(<Input aria-label="Email" />)
 

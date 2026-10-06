@@ -1,19 +1,21 @@
 'use client'
 
 import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
+import { budgetPeriodLabel } from '@/lib/budget-period'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
+import { InlineErrorNote, WarningCallout } from './SetupNotices'
 
 /**
  * Step 2: wallet choice, the agent's single USDC budget, and the passport
  * opt-in. #1377 B: one budget by design — USDC is a fixed chip (no token
  * select) and a valid amount alone enables Continue. #1381: the inputs ARE
- * the draft — nothing mounts below them mid-typing (the old live draft card
- * caused a content shift on the first keystroke), and the Review step is
- * where the budget is restated before anything is signed. Additional tokens
- * for legacy multi-token accounts are added later from the agent's page.
+ * the draft — nothing mounts below them mid-typing, so the confirmation the
+ * old Review step carried is a single summary LINE, always mounted with
+ * reserved height, under the fields (#3688). Additional tokens for legacy
+ * multi-token accounts are added later from the agent's page.
  *
  * #1411: no rhythm of its own — see DetailsStep's note. Root is a Fragment;
  * the shared `flex flex-col gap-5` wrapper in ConnectAgentModal owns the
@@ -31,6 +33,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
             id="connect-agent-safe"
             value={flow.selectedAccountId ?? ''}
             onChange={(event) => flow.setSelectedAccountId(event.target.value)}
+            disabled={flow.creating}
           >
             {flow.selectableAccounts.map((account) => (
               <option key={account.id} value={account.id}>
@@ -60,11 +63,13 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
             invalid={Boolean(flow.addAmountMessage)}
             helperText={flow.addAmountMessage || undefined}
             className="v2-tabular"
+            disabled={flow.creating}
           />
           <Select
             aria-label="Budget reset period"
             value={flow.addReset}
             onChange={(event) => flow.setAddReset(Number(event.target.value))}
+            disabled={flow.creating}
           >
             {flow.resetPeriodOptions.map((period) => (
               <option key={period.value} value={period.value}>
@@ -84,8 +89,8 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           on-chain attestation, a real decision, not a footnote — but the copy
           tightens to one outcome-first sentence plus one short helper line,
           matching every other helper in the flow instead of a three-line
-          explainer. */}
-      {/* ink-2, NOT ink-3: the Checkbox primitive renders helperText at ink-3
+          explainer. */
+      /* ink-2, NOT ink-3: the Checkbox primitive renders helperText at ink-3
           by design, so the label must sit one tier darker for the built-in
           label/helper hierarchy to read — an on-chain attestation is a
           decision, not a footnote (design review, #1411). */}
@@ -95,18 +100,54 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         className="py-1 text-xs text-[var(--v2-ink-2)]"
         label="Issue an Agent Passport — a signed, revocable record that Haven issued this agent."
         helperText="Optional. Haven covers the small on-chain fee."
+        disabled={flow.creating}
       />
 
+      {/* #3688: the confirmation the deleted ReviewStep carried, as one
+          always-mounted summary line — #1381 forbids anything mounting below
+          the inputs mid-typing, so the box reserves its height even when
+          empty and the TEXT swaps in place instead. Built from
+          `flow.allowances` — the exact entries the create request sends —
+          not the in-progress amount string. Plain text, not an
+          AgentRulesSummary. */}
+      <div className="min-h-10 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+        {flow.allowances.length === 0 ? (
+          <p>Set a budget to see what you are approving.</p>
+        ) : (
+          flow.allowances.map((allowance) => (
+            <p key={allowance.tokenSymbol}>
+              {allowance.amount} {allowance.tokenSymbol} {budgetPeriodLabel(allowance.resetTimeMin)} from{' '}
+              {flow.walletName} on {flow.walletNetworkName}. Nothing can spend until you approve this budget, and
+              payments above it are declined on-chain.
+            </p>
+          ))
+        )}
+      </div>
+
+      {flow.createError && <InlineErrorNote>{flow.createError}</InlineErrorNote>}
+
+      {flow.walletUnavailable && !flow.createError && (
+        <WarningCallout
+          title="Haven wallet unavailable"
+          body="Create or select a Haven wallet before creating the setup prompt."
+        />
+      )}
+
       <div className="flex gap-3">
-        <Button variant="ghost" onClick={() => flow.setStep('details')} className="flex-1">
+        <Button variant="ghost" onClick={() => flow.setStep('details')} className="flex-1" disabled={flow.creating}>
           Back
         </Button>
         <Button
-          onClick={() => flow.setStep('review')}
-          disabled={flow.allowances.length === 0 || (flow.hasMultipleAccounts && !flow.selectedAccountId)}
+          onClick={flow.handleCreateSetup}
+          disabled={
+            flow.creating ||
+            flow.walletUnavailable ||
+            flow.allowances.length === 0 ||
+            (flow.hasMultipleAccounts && !flow.selectedAccountId)
+          }
           className="flex-1"
         >
-          Review agent budget
+          {flow.creating ? 'Creating setup...' : 'Create setup prompt'}
         </Button>
       </div>
     </>

@@ -18,7 +18,7 @@ import { Textarea } from '../ui/Textarea'
  *
  * #1411: no rhythm of its own — the vertical gap between fields comes from
  * the shared `flex flex-col gap-5` wrapper ConnectAgentModal renders around
- * whichever of steps 1-3 is current (the same 20px rhythm step 4's shell
+ * whichever of steps 1-2 is current (the same 20px rhythm step 3's shell
  * body carries), not a local `space-y-*`. This component's root is a
  * Fragment so every field is a direct sibling in that flex column.
  *

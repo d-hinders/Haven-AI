@@ -64,7 +64,7 @@ function resumedFlow(overrides: Record<string, unknown> = {}): AgentConnectionSe
     handleCancelSetup: vi.fn(),
     handleClose: vi.fn(),
     handleDelegationApproved: vi.fn(),
-    restartFromReview: vi.fn(),
+    restartFromPolicy: vi.fn(),
     approvalChainId: 84532,
     approvalWalletLabel: 'Operating wallet',
     isWrongChain: false,
@@ -146,21 +146,21 @@ describe('ConnectStep resumed from a hand-off link (#2522)', () => {
   it.each(['expired', 'cancelled', 'failed'] as const)(
     '%s on a resumed link offers Close, never "Create a new setup"',
     (kind) => {
-      // "Create a new setup" drops the user on the REVIEW step, and a resumed
+      // "Create a new setup" drops the user on the POLICY step, and a resumed
       // session never filled in details or policy — it would post an unnamed,
       // budget-less setup against whichever wallet the viewer defaults to.
-      const restartFromReview = vi.fn()
+      const restartFromPolicy = vi.fn()
       render(
         <ConnectStep
           flow={resumedFlow({
             setupStatus: { ...STATUS, status: kind },
             connectView: { kind },
-            restartFromReview,
+            restartFromPolicy,
           })}
         />,
       )
       expect(screen.queryByRole('button', { name: /Create a new setup/i })).not.toBeInTheDocument()
-      expect(restartFromReview).not.toHaveBeenCalled()
+      expect(restartFromPolicy).not.toHaveBeenCalled()
     },
   )
 

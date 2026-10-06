@@ -15,7 +15,7 @@ import { ConnectionVerificationFooter } from './ConnectionVerificationFooter'
 import { WarningCallout } from './SetupNotices'
 
 /**
- * Step 4 on the DELEGATION rail (#1073).
+ * Step 3 on the DELEGATION rail (#1073).
  *
  * Same step, same position in the stepper, same summary-then-approve shape as
  * the retired legacy Safe approval step — only the instrument differs: a passkey

@@ -1,5 +1,5 @@
 /**
- * #1377 C: step 4's no-content-shift contract.
+ * #1377 C: step 3's no-content-shift contract.
  *
  * Polling (`statusLoading` flips on every tick) must not change any rendered
  * text or the container's size, and every sub-state renders inside the one
@@ -60,7 +60,7 @@ function renderWaiting(
   )
 }
 
-describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
+describe('step 3 poll ticks cause no content shift (#1377 C)', () => {
   it('WaitingForConnector renders IDENTICAL text and structure across loading true → false → true', () => {
     const { container, rerender } = render(renderWaiting(true))
     const first = container.innerHTML

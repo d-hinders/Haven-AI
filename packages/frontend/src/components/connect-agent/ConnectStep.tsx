@@ -8,7 +8,7 @@ import { SupersededAgentsCard } from './SupersededAgentsCard'
 import { WaitingForConnector } from './WaitingForConnector'
 
 /**
- * Step 4: everything after the setup prompt exists. Which body renders is
+ * Step 3: everything after the setup prompt exists. Which body renders is
  * decided by the flow hook (`resolveConnectStepView`) — including the
  * #1069/#1070 rail branch between the delegation budget grant and the retired
  * Safe rail refusal.
@@ -184,7 +184,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           body="Create a new setup prompt, then paste the fresh prompt into your agent environment."
           tone="warning"
           primaryLabel={terminalPrimary?.label ?? 'Create a new setup'}
-          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromReview())}
+          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromPolicy())}
           secondaryLabel="Close"
           onSecondary={flow.handleClose}
         />
@@ -197,7 +197,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           body="This setup can no longer connect an agent. Create a new setup prompt when you are ready."
           tone="neutral"
           primaryLabel={terminalPrimary?.label ?? 'Create a new setup'}
-          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromReview({ clearCancelled: true }))}
+          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromPolicy({ clearCancelled: true }))}
           secondaryLabel="Close"
           onSecondary={flow.handleClose}
         />
@@ -210,7 +210,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           body={setupStatus?.failure_reason ?? 'Create a new setup prompt and try again.'}
           tone="danger"
           primaryLabel={terminalPrimary?.label ?? 'Create a new setup'}
-          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromReview())}
+          onPrimary={terminalPrimary?.onPress ?? (() => flow.restartFromPolicy())}
           secondaryLabel="Close"
           onSecondary={flow.handleClose}
         />

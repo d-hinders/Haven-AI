@@ -28,6 +28,8 @@ covers:
   - packages/frontend/src/components/sidebar/**
   - packages/frontend/src/components/TopBar.tsx
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
+  - packages/frontend/src/components/haven/BudgetMeter.tsx
+  - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
   - packages/frontend/src/components/haven/LabelChip.tsx
@@ -93,7 +95,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-05"
+last-verified: "2026-10-06"
 ---
 
 # Haven Design System
@@ -584,6 +586,14 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
 - Optional uppercase eyebrow.
 - One compact h1 using `.v2-text-h1`.
 - Optional subtitle using `.v2-text-body`.
+- Optional quiet metadata line under the subtitle (`meta`): `v2-text-meta` in
+  ink-3, for the "My account · Base · Created … · Last activity …" register on
+  detail pages ([#3692](https://github.com/d-hinders/Haven-AI/issues/3692)).
+  It wraps as text alongside the header actions at phone width — the #2821
+  390 px header regression is the constraint it is designed against — because
+  a quiet identity line is text that can break, not a control that must stay
+  whole.
+  Additive — a `PageHeader` without `meta` renders exactly as before.
 - Right-side actions that wrap on narrow viewports — and **stack onto their own
   row below `sm`**, which is right for a row of labelled buttons and wrong for a
   single icon-only control.
@@ -600,6 +610,49 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   the primitive owns what to do about it.
 
 Do not use marketing hero typography for normal authenticated pages.
+
+### Detail-page section rule (#3692)
+
+On an **entity detail page** — an agent or an account — the page is a stack of
+labelled sections, and every section is assembled the same way. The rule is
+scoped to entity detail pages: not list pages, not settings, not modals (a
+modal keeps its own callout vocabulary — see #3690's in-modal neutral callout,
+which this rule does not touch).
+
+- Each section's heading (`v2-text-h3`) and its one-line description sit
+  **above** its `Card`, not inside it. The card holds the content — rows,
+  `Card.Section` groups and their dividers — so the card can load, swap or be
+  replaced without moving its heading, and a skimming reader gets every section
+  name from the heading scan alone. (This retires the mix the agent page had:
+  "Agent budgets" was headed from inside its card while "Recent activity" was
+  headed from above — epic #3691's later slices apply the rule there.)
+- State banners (`ApprovalRequiredBanner`) do not scatter through the page.
+  They stack in ONE slot directly under the `PageHeader`, ordered by severity:
+  `danger` first (the next action cannot be undone), then `warning` (something
+  needs attention — a half-revoked credential, stranded funds, an exhausted
+  budget), then `neutral` (informational — paused, snapshot reads). Within a
+  tone, the banner that asks the user for a decision comes first. The slot
+  opens the page on the thing that needs doing, before any content card.
+- The `PageHeader`'s own `meta` line (above) carries the entity's quiet
+  identity row — account, network, created, last activity — so the section
+  headings below stay about their sections.
+
+### BudgetMeter (#3692)
+
+`components/haven/BudgetMeter` is the ONE progress bar for a budget
+measurement — "how much of a delegation's own period is spent". An `h-1.5`
+`--v2-surface-2` track with a `--v2-brand` fill; `role="progressbar"` with the
+full ARIA contract (`aria-valuemin`, `aria-valuemax`, `aria-valuenow`,
+`aria-label`). It takes `usedPercent` — **clamped to 0–100**, so an overdrawn
+or malformed read can never push the fill past its track or the ARIA value
+outside its own declared range — and a `label`; an optional `caption` slot
+renders the "1.20 of 3.00 USDC used · refills …" line. The label row above the
+bar (token value, percentage) belongs to the caller: it is the caller's tabular
+typography, not part of the measurement. The fill is a token surface colour,
+never a series colour — a budget bar measures one delegation against its own
+period, it is not a category to be keyed against a legend. Recorded on
+`/design-system` → *BudgetMeter*; the analytics agents table renders through
+it.
 
 ### Buttons
 

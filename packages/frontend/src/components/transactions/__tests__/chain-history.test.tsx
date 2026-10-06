@@ -87,7 +87,9 @@ describe('rows on a chain the registry does not know', () => {
   it('detail panel renders the transaction hash as plain text and a fallback pill', () => {
     render(<TransactionDetailPanel transaction={tx(999999)} open onClose={vi.fn()} />)
     expect(screen.getByText('Unknown network')).toBeTruthy()
-    expect(screen.getByTitle('0xabc123')).toBeTruthy()
+    // Plain text, not a link: ExplorerLink also sets title= on its <a>.
+    expect(screen.getByTitle('0xabc123').tagName).toBe('SPAN')
+    expect(screen.queryByRole('link', { name: /0xabc123/ })).toBeNull()
   })
 
   it('filter bar names a selected token on an unknown chain generically', () => {

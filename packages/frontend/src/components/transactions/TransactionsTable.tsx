@@ -536,7 +536,10 @@ export default function TransactionsTable({
                     className={`w-8 px-2 ${padY} text-center md:px-4`}
                     onClick={selectable ? (e) => e.stopPropagation() : undefined}
                   >
-                    {rowExplorerHref(tx) ? <ExternalDetailsLink href={rowExplorerHref(tx)!} /> : null}
+                    {(() => {
+                      const href = rowExplorerHref(tx)
+                      return href ? <ExternalDetailsLink href={href} /> : null
+                    })()}
                   </td>
                 ) : null}
               </tr>

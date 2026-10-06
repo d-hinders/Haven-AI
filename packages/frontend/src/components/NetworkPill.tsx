@@ -57,6 +57,7 @@ export default function NetworkPill({ chainId, size = 'sm', className = '' }: Ne
   return (
     <span
       className={`inline-flex items-center gap-1.5 ${padding} rounded-full border ${style.border} ${style.bg} ${className}`}
+      title={`Chain ${chainId}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
       <span className={`${textSize} font-medium ${style.text} leading-none`}>{name}</span>

@@ -113,6 +113,7 @@ export default function AccountDetailClient() {
   const account = user?.accounts?.find((s) => s.id === accountId)
   const accountAddress = account?.account_address ?? null
   const chainId = account?.chain_id ?? DEFAULT_CHAIN_ID
+  const accountExplorerHref = accountAddress ? getExplorerUrlOrNull(chainId, 'address', accountAddress) : null
 
   // Keep the active account in sync with the route. Runs as an effect so we
   // never call setState during render.
@@ -588,7 +589,7 @@ export default function AccountDetailClient() {
                 <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
               )}
               {accountAddress && <CopyButton value={accountAddress} label="address" />}
-              {accountAddress && getExplorerUrlOrNull(chainId, 'address', accountAddress) && <ExternalDetailsLink href={getExplorerUrlOrNull(chainId, 'address', accountAddress)!} label="Open wallet address externally" />}
+              {accountExplorerHref && <ExternalDetailsLink href={accountExplorerHref} label="Open wallet address externally" />}
             </div>
           </div>
           {/* #2413: "Required approvals" and "Approvers" lived here. Both were

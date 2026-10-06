@@ -66,6 +66,14 @@ last-verified: "2026-10-02"
 > changes. Nothing else in this document was re-verified, and `last-verified` is
 > not bumped.
 
+> **Re-verified #3669 (2026-10-06, supported vs known chains):**
+> - **Supported narrows.** The backend's supported chain set is now an explicit 8453 and 84532. With `HAVEN_DEPLOY_CHAIN_IDS` unset, deploys, the outbound bump loop, the relayer balance monitor, prices, `GET /chains` and discovery `supported` cover Base and Base Sepolia only. Chain 100 is not one of them.
+> - **Known stays.** Chain 100 is still resolved for history (transactions, explorer links) and stays read-only. That matches this doc's lines calling chain 100 dead.
+> - **Boot check widens.** The passport receipt-key boot check in `index.ts` now compares against every `RELAYER_PRIVATE_KEY` / `RELAYER_PRIVATE_KEY_<n>` variable set, not only the supported chains' keys.
+> - **No variable changes.** No variable, value or deploy step changes; `RPC_URL` and `GNOSISSCAN_API_KEY` are slice #3671.
+>
+> Nothing else in this document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
 > agents join the pixel gate with the same seed-before-navigation dark

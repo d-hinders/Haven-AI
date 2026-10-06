@@ -54,6 +54,7 @@ import {
   readRevocationAnchor,
   setAnchorUidRepair,
   setReceiptSigningKey,
+  relayerKeysFromEnv,
   passportReadiness,
   logPassportReadiness,
   retryPendingPassports,
@@ -488,7 +489,7 @@ setAnchorUidRepair(repairAnchorUidFromReceipt)
 // source, so only a runtime check can catch that operator copy-paste.
 setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null, [
   config.relayerPrivateKey,
-  ...SUPPORTED_CHAIN_IDS.map((id) => process.env[`RELAYER_PRIVATE_KEY_${id}`]),
+  ...relayerKeysFromEnv(),
 ])
 // Warn — once, at boot — when this deployment anchors passports it cannot
 // verify (#1151). Silent in every other combination. Must run AFTER the signer

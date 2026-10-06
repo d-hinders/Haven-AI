@@ -8,7 +8,7 @@ import {
   listBasicAccountsForUser,
 } from '../infra/repositories/transaction-history.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
-import { getChain, isSupportedChain } from '../domain/chains.js'
+import { getChain, isKnownChain } from '../domain/chains.js'
 import {
   aggregateAccountTransactions,
   buildAccountTransactionsPage,
@@ -271,7 +271,7 @@ export default async function transactionRoutes(
     const direction = request.query.direction
 
     const chainId = parseChainId(request.query.chainId)
-    if (chainId !== null && !isSupportedChain(chainId)) {
+    if (chainId !== null && !isKnownChain(chainId)) {
       return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
     }
 
@@ -406,7 +406,7 @@ export default async function transactionRoutes(
     const fresh = parseFreshFlag(request.query.fresh)
     const requestedChainId = parseChainId(request.query.chain_id)
 
-    if (requestedChainId !== null && !isSupportedChain(requestedChainId)) {
+    if (requestedChainId !== null && !isKnownChain(requestedChainId)) {
       return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })
     }
 

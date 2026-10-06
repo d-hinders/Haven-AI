@@ -79,6 +79,12 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verified unchanged (#3669, 2026-10-06, backend supported vs known chains):**
+> - **What changed.** `routes/agent-connection-setups.ts` loses its chain-100 network-name branch. A setup can only be created on a supported chain (Base or Base Sepolia), so no connector-handed command or setup response changes.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this doc is coupled through `routes/agent-connection-setups.ts` and
 > `middleware/retired-safe-names.ts`. The route's change is one internal

@@ -274,7 +274,7 @@ export function getRelayer(chainId: number): Wallet {
 
 /**
  * Low-water mark shared with the relayer balance monitor — enough native
- * balance for hundreds of transfers on Gnosis/Base at typical fees.
+ * balance for hundreds of transfers on Base at typical fees.
  */
 export const RELAYER_LOW_BALANCE_WEI = parseEther('0.01')
 

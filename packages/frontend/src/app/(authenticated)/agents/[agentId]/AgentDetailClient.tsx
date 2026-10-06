@@ -800,34 +800,13 @@ export default function AgentDetailClient({ agentId }: Props) {
         />
       </div>
 
-      {/* #3426: the per-agent x402 tax declaration opt-in. Renders ONLY when
-          company details are VIES-valid (the component reads
-          `GET /user/company-details` itself — a 404 there means the flag is
-          off, and hides the card). The opt-in is settings, not authority: it
+      {/* #3426: the per-agent x402 tax declaration opt-in moved into the
+          "Identity and settings" card below (#3697) — the toggle owns its own
+          row and divider there. The opt-in is settings, not authority: it
           changes no budget, no rule, and no key. */}
-      <div className="mt-6">
-        <TaxDeclarationToggle
-          agentId={agentId}
-          taxDeclarationEnabled={currentAgent.tax_declaration_enabled}
-          onAgentsChanged={() => void refetch()}
-        />
-      </div>
 
-      <>
-          {/* #1089: backup & recovery moved to the account page — it's an
-              account capability, not an agent one. This is a pointer, not a
-              second copy of the controls. */}
-          {account ? (
-            <Card hover={false} className="mt-6 p-2">
-              <Row
-                href={`/accounts/${account.id}`}
-                title="Backup & recovery"
-                subtitle="Manage the ways this account can be approved"
-                trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
-              />
-            </Card>
-          ) : null}
-      </>
+      {/* #3697: the old standalone Backup & recovery card moved into the
+          "Identity and settings" card below — same link, new wording. */}
 
       {/* #3696: the two stat cards ("All-time transactions" / "Today") are
           gone — their figures read as the summary line on the Activity section
@@ -841,10 +820,6 @@ export default function AgentDetailClient({ agentId }: Props) {
           ever read 0 is removed rather than re-labelled. The wire field
           survives per the #2055 compatibility convention; nothing in the UI
           reads it. */}
-      <AgentPassportCard
-        agentId={agentId}
-        agentRevoked={isRevoked}
-      />
 
       <div className="mt-6 space-y-6">
           <div id={AGENT_ACTIVITY_SECTION_ID} className="scroll-mt-24">
@@ -900,6 +875,48 @@ export default function AgentDetailClient({ agentId }: Props) {
           </div>
 
       </div>
+
+      {/* #3697: the page's optional and account-level items — the Agent
+          Passport row, the tax declaration row (rendered only when company
+          details are VIES-valid; the toggle owns its own row and divider) and
+          the Backup & recovery pointer — as ONE quiet card at the bottom. The
+          detail-page section rule (#3692): the heading sits above the card;
+          the card holds the rows. Each row renders its own `Card.Section`
+          divided wrapper so a hidden row leaves no orphan divider. */}
+      <section className="mt-6" data-testid="identity-settings-section">
+        <div className="mb-4">
+          <h2 className="text-base font-semibold text-[var(--v2-ink)]">Identity and settings</h2>
+          <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+            Optional records and account-level settings for this agent.
+          </p>
+        </div>
+        <Card hover={false}>
+          <AgentPassportCard
+            agentId={agentId}
+            agentRevoked={isRevoked}
+          />
+
+          <TaxDeclarationToggle
+            agentId={agentId}
+            taxDeclarationEnabled={currentAgent.tax_declaration_enabled}
+            onAgentsChanged={() => void refetch()}
+          />
+
+          {/* #1089: backup & recovery moved to the account page — it's an
+              account capability, not an agent one. This is a pointer, not a
+              second copy of the controls. */}
+          {account ? (
+            <Card.Section divided>
+              <Row
+                href={`/accounts/${account.id}`}
+                title="Backup & recovery"
+                subtitle={`Managed on ${account.name}: it covers every agent on it`}
+                trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
+              />
+            </Card.Section>
+          ) : null}
+        </Card>
+      </section>
 
       {removeOpen && currentAgent ? (
         <RemoveAgentDialog

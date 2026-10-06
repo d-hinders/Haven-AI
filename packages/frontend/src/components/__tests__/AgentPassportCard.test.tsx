@@ -229,4 +229,56 @@ describe('AgentPassportCard (#1072)', () => {
     render(<AgentPassportCard agentId="agent-1" />)
     expect(screen.getByText('Passports are not issued on chain 8453')).toBeTruthy()
   })
+
+  // ── Row layout (#3697) ──────────────────────────────────────────────────
+  // The passport is a ROW in the "Identity and settings" card, not a
+  // standalone Card — every state renders inside one padded row block
+  // (`data-testid="agent-passport-row"`), with no card chrome of its own.
+
+  it('renders the loading state inside the row — no card-shaped skeleton', () => {
+    mockUseAgentPassport.mockReturnValue(state({ loading: true }))
+    render(<AgentPassportCard agentId="agent-1" />)
+    const row = document.querySelector('[data-testid="agent-passport-row"]')
+    expect(row).toBeTruthy()
+    expect(row!.querySelector('.animate-pulse, [class*="animate"]')).toBeTruthy()
+    // No standalone card box around the skeleton.
+    expect(row!.className).not.toContain('rounded-[10px]')
+    expect(row!.className).not.toContain('shadow-card')
+  })
+
+  it('renders the load error inside the row, not a standalone error box', () => {
+    const refetch = vi.fn()
+    mockUseAgentPassport.mockReturnValue(state({ loadError: true, refetch }))
+    render(<AgentPassportCard agentId="agent-1" />)
+    const row = document.querySelector('[data-testid="agent-passport-row"]')
+    expect(row).toBeTruthy()
+    expect(row!.textContent).toMatch(/Couldn.t load passport status/)
+    expect(row!.querySelector('button')).toBeTruthy()
+    expect(row!.className).not.toContain('rounded-[10px]')
+    expect(row!.className).not.toContain('shadow-card')
+  })
+
+  it('renders the issued details inside the same row block', () => {
+    mockUseAgentPassport.mockReturnValue(state({
+      passport: {
+        status: 'anchored', assurance_level: 0,
+        attestation_uid: '0x' + '11'.repeat(32),
+        tx_hash: '0x' + 'aa'.repeat(32), chain_id: 84532,
+        attempts: 1, last_error: null,
+        requested_at: '2026-06-02T10:00:00.000Z', anchored_at: '2026-06-02T10:00:12.000Z',
+      },
+      standing: {
+        agentId: 'agent-1', standing: 'active', anchor: 'anchored',
+        attestationUid: '0x' + '11'.repeat(32), chainLagging: false, revocationConfirmedAt: null,
+      },
+    }))
+    render(<AgentPassportCard agentId="agent-1" />)
+    const row = document.querySelector('[data-testid="agent-passport-row"]')
+    expect(row).toBeTruthy()
+    // Standing, assurance, attestation link — all inside the one row block.
+    expect(row!.textContent).toContain('Standing')
+    expect(row!.textContent).toContain('Assurance level')
+    expect(row!.querySelector('a[href*="basescan"]')).toBeTruthy()
+    expect(row!.className).not.toContain('rounded-[10px]')
+  })
 })

@@ -4347,16 +4347,16 @@ export const SCENARIOS = {
   },
   'passport-reanchoring': {
     description:
-      'Agent Passport card during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
+      'Agent Passport row in the Identity and settings card during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
     // No URL reaches this: `re_anchoring` is a transient backend state between
     // the retire and the re-issue, so nothing a route-based capture can wait
     // for produces it. Without a fixture the state has ZERO rendered evidence,
     // which is precisely the gap #1894's design pass found on the neighbouring
     // re-key flow and #1890 had to close afterwards. Cheaper to seed it here.
     //
-    // What a reviewer is judging: whether the card keeps the two layers apart
+    // What a reviewer is judging: whether the row keeps the two layers apart
     // when they DISAGREE. Standing is `active` and the anchor is behind, so a
-    // card that collapsed them would have to pick one and would be wrong
+    // badge that collapsed them would have to pick one and would be wrong
     // either way — "Issued" claims a retired key's credential is current,
     // "Revoking…" tells the owner a live agent lost its authority.
     api(apiPath) {
@@ -4373,7 +4373,7 @@ export const SCENARIOS = {
             agentId: FIXTURE_AGENTS[0].id, standing: 'active', anchor: 're_anchoring',
             attestationUid: '0x' + '22'.repeat(32),
             // False on purpose, and it is an assertion rather than a default:
-            // `chainLagging` is the REVOKED-agent warning, and a card that
+            // `chainLagging` is the REVOKED-agent warning, and a row that
             // showed "treat the agent as revoked now" here would invert the
             // meaning of the whole state.
             chainLagging: false, revocationConfirmedAt: null,
@@ -4389,19 +4389,76 @@ export const SCENARIOS = {
       })
       await dismissMobileSidebar(page, vp)
 
-      const heading = page.getByRole('heading', { name: 'Agent Passport' })
+      // #3697: the passport is a ROW inside the "Identity and settings" card,
+      // not a standalone card — capture the card that holds it.
+      const heading = page.getByRole('heading', { name: 'Identity and settings' })
       await heading.waitFor({ timeout: 15_000 })
-      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
-
-      // Wait for the BADGE and the NOTE, not just the heading. The heading
-      // renders in the loading skeleton and the load-error branch too, so
-      // waiting on it alone would happily accept either as the evidence —
-      // the same trap the Backup & recovery scenario documents above.
+      // The heading sits ABOVE the card (#3692's section rule: heading, then
+      // card), so the Card root cannot be located by containing it — that
+      // locator resolves to nothing and every wait below silently times out.
+      // The card is the one that CONTAINS the passport row.
+      const card = page.locator('div.rounded-\\[10px\\]', {
+        has: page.getByTestId('agent-passport-row'),
+      })
+      // Wait for the passport ROW's badge and note, not just the section
+      // heading. The row's own heading renders in the loading skeleton and the
+      // load-error branch too, so waiting on it alone would happily accept
+      // either as the evidence — the same trap the Backup & recovery scenario
+      // documents above.
+      await card.getByText('Agent Passport').waitFor({ timeout: 15_000 })
       await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
       await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
 
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'card')
+      // Shoot the SECTION (heading + card), not the Card root: the reviewer
+      // judges the title AND the card, and the title sits above the card by
+      // design (#3692) — a card-only capture would crop it off.
+      const section = page.getByTestId('identity-settings-section')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'card')
+    },
+  },
+  'identity-settings-not-issued': {
+    description:
+      'The Identity and settings card with the passport NOT issued — the opt-in row and the Backup & recovery pointer, no tax row (flag off)',
+    // No URL reaches a clean not-issued capture of the card: agent-research
+    // carries an anchored passport, so the only fixture agent without one is
+    // the revoked one — which is exactly the state worth photographing, since
+    // a revoked agent shows the row WITHOUT the issue action.
+    api(apiPath) {
+      if (apiPath === '/agents/agent-retired/passport') {
+        return { passport: null, standing: null }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents/agent-retired`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByRole('heading', { name: 'Identity and settings' })
+      await heading.waitFor({ timeout: 15_000 })
+      // Same #3692 geometry: the heading is above the card, so the Card root
+      // is the one that CONTAINS the passport row.
+      const card = page.locator('div.rounded-\\[10px\\]', {
+        has: page.getByTestId('agent-passport-row'),
+      })
+      // Both rows: the passport row reads its opt-in state, the backup row
+      // carries the account pointer. The tax row must NOT render (the shared
+      // fixture answers /user/company-details with a 404 — flag off).
+      await card.getByText('Not issued').waitFor({ timeout: 15_000 })
+      await card.getByText(/This agent has no passport/).waitFor({ timeout: 15_000 })
+      await card.getByText(/Managed on /).waitFor({ timeout: 15_000 })
+      await card.getByText('Tax declaration').waitFor({ state: 'detached', timeout: 5_000 }).catch(() => {
+        throw new Error('tax row rendered with the flag off — the visibility rule broke')
+      })
+
+      // Shoot the SECTION (heading + card) for the same reason as above: the
+      // title is part of the evidence.
+      const section = page.getByTestId('identity-settings-section')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'card')
     },
   },
   'replace-signing-key': {

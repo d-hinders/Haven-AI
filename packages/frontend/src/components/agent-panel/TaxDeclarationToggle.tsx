@@ -6,7 +6,7 @@
  * ── Visibility ───────────────────────────────────────────────────────────
  * The toggle renders ONLY when `GET /user/company-details` answers a row
  * with VIES `valid` (via `useCompanyDetails`). A 404 — which on that route
- * means ONLY "the flag is off" — hides the whole card: that is how the
+ * means ONLY "the flag is off" — hides the whole row: that is how the
  * frontend learns the deployment has no such surface. `null` (nothing
  * saved), a non-valid VIES status, an error, and the first load all hide it
  * too: an owner whose VAT number is not VIES-valid right now has nothing to
@@ -33,6 +33,7 @@
 import { useState } from 'react'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
+import { Card } from '@/components/ui/Card'
 import { api, ApiRequestError } from '@/lib/api'
 import { useCompanyDetails } from '@/hooks/useCompanyDetails'
 
@@ -80,34 +81,41 @@ export function TaxDeclarationToggle({
   }
 
   return (
-    <div className="mt-6 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5 shadow-card md:p-6">
-      <h2 className="v2-text-h3 mb-2 text-[var(--v2-ink)]">Tax declaration</h2>
-      <Checkbox
-        label="Send a tax declaration with payments"
-        helperText={
-          <>
-            When this is on, your saved VAT number, checked against the
-            EU&apos;s VIES register, can be declared to merchants that ask
-            for it, with payments your agent signs under a budget. Nothing is
-            submitted to an authority, and you can switch it off here at any
-            time.
-          </>
-        }
-        disabled={saving}
-        checked={taxDeclarationEnabled}
-        onChange={(event) => {
-          void setTaxDeclaration(event.target.checked)
-        }}
-      />
-      {saveFailed ? (
-        <div className="mt-3">
-          <InlineAlert>
-            The tax declaration setting could not be saved. The state shown now
-            is what the server has — try again in a moment.
-          </InlineAlert>
-        </div>
-      ) : null}
-    </div>
+    // #3697: the toggle OWNS its row and its divider in the "Identity and
+    // settings" card — the wrapper is a `Card.Section divided` (hairline top
+    // border, content padded by the inner block). When the visibility rule
+    // hides the toggle (above), nothing renders: no orphan divider, no empty
+    // gap, and the row below it keeps its own divider.
+    <Card.Section divided>
+      <div className="px-4 py-4 md:px-6 md:py-5" data-testid="tax-declaration-row">
+        <h3 className="text-base font-semibold text-[var(--v2-ink)]">Tax declaration</h3>
+        <Checkbox
+          label="Send a tax declaration with payments"
+          helperText={
+            <>
+              When this is on, your saved VAT number, checked against the
+              EU&apos;s VIES register, can be declared to merchants that ask
+              for it, with payments your agent signs under a budget. Nothing is
+              submitted to an authority, and you can switch it off here at any
+              time.
+            </>
+          }
+          disabled={saving}
+          checked={taxDeclarationEnabled}
+          onChange={(event) => {
+            void setTaxDeclaration(event.target.checked)
+          }}
+        />
+        {saveFailed ? (
+          <div className="mt-3">
+            <InlineAlert>
+              The tax declaration setting could not be saved. The state shown now
+              is what the server has — try again in a moment.
+            </InlineAlert>
+          </div>
+        ) : null}
+      </div>
+    </Card.Section>
   )
 }
 

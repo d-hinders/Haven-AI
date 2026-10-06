@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Menu, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { HavenMark } from '@/components/brand/HavenMark'
-import { Icon } from '@/components/ui/Icon'
+import { Icon } from '@haven_ai/ui/Icon'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { SITE_FONT_VARIABLES } from './fonts'
 import { SITE_WRAP } from './SiteSection'
@@ -176,7 +176,9 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
             >
               {/* The mockup's row (logo, Sign in, full CTA) is ~330px of content;
                   a phone's padded row is 272–312px. Below `sm` the CTA takes
-                  the short label so the row fits at 320 without dropping Sign in. */}
+                  the short label so the row — menu button included (#3579;
+                  measured: its last edge at 302px of 320) — fits at 320
+                  without dropping Sign in. */}
               <span className="sm:hidden">Sign up</span>
               <span className="hidden sm:inline">Create your account</span>
             </Link>

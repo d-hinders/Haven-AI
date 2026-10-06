@@ -303,7 +303,7 @@ export function SupersededAgentsCard({
         <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
           {offered.length === 1
             ? 'It still has its own key and budget. Revoking ends its key, and one signature from you ends its budget.'
-            : 'They still have their own keys and budgets. Revoking ends their keys, and one signature from you ends their budgets.'}
+            : 'They still have their own keys and budgets. Revoking each one ends its key, and one signature from you ends its budget.'}
         </p>
         {/* `divide-y` draws between siblings, so it sits on the list whose
             children are the rows — on a wrapper around the list it drew none. */}

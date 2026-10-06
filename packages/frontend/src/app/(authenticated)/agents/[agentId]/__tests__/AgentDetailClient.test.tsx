@@ -246,7 +246,14 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByText('Payments waiting on you')).not.toBeInTheDocument()
   })
 
-  it('keeps the two stat tiles that count something real (#2106)', () => {
+  /**
+   * #3696: the two stat cards are gone. Their figures read as the summary
+   * line on the Activity section header, drawn from the SAME `stats` source
+   * the cards used (all_time/today are per-token aggregates summed by
+   * tx_count). The "All-time transactions" label no longer appearing is the
+   * check that fails on the pre-slice tree — the card carried that label.
+   */
+  it('folds the stat cards into the Activity header summary line (#3696)', () => {
     mockUseAgentActivity.mockReturnValue({
       activity: [],
       stats: {
@@ -259,9 +266,56 @@ describe('AgentDetailClient last-activity metadata', () => {
     })
     render(<AgentDetailClient agentId="agent-1" />)
 
-    expect(screen.getByText('All-time transactions')).toBeInTheDocument()
-    expect(screen.getByText('37')).toBeInTheDocument()
-    expect(screen.getByText('Today')).toBeInTheDocument()
+    expect(screen.getByText(/1 today · 37 all time/)).toBeInTheDocument()
+    expect(screen.queryByText('All-time transactions')).not.toBeInTheDocument()
+    expect(screen.queryByText('Confirmed agent payments')).not.toBeInTheDocument()
+  })
+
+  it('links the Activity summary line to the agent-filtered transactions view (#3696)', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const link = screen.getByRole('link', { name: 'View in Transactions' })
+    expect(link).toHaveAttribute('href', '/transactions?agentId=agent-1')
+  })
+
+  /**
+   * #3696: no unit test exists for McpToolCallsPanel itself, so its placement
+   * contract is asserted at page level: the panel renders INSIDE the
+   * #agent-activity anchor section (the #2196 scroll target) and BELOW the
+   * transactions table in DOM order.
+   */
+  it('renders the MCP tool calls panel inside the Activity section, below the table (#3696)', () => {
+    mockUseAgentActivity.mockReturnValue({
+      activity: [
+        {
+          type: 'mcp_tool_call',
+          id: 'mcp-1',
+          agent_id: 'agent-1',
+          tool_name: 'get_payment_status',
+          payment_id: null,
+          result_status: 'ok',
+          next_action: null,
+          error_code: null,
+          status_code: 200,
+          created_at: '2026-06-01T10:00:00Z',
+        },
+      ],
+      stats: null,
+      loading: false,
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const section = document.getElementById('agent-activity')
+    expect(section).not.toBeNull()
+
+    const panelHeading = screen.getByText('MCP tool calls')
+    expect(section!.contains(panelHeading)).toBe(true)
+
+    // DOM order: the mocked table's marker precedes the panel heading.
+    const table = screen.getByText('Transactions table')
+    expect(
+      table.compareDocumentPosition(panelHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it('renders last activity in the header meta without a default connected badge', () => {

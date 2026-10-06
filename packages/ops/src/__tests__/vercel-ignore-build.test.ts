@@ -336,7 +336,12 @@ describe('exclude entries, on a synthetic watch list (#3681)', () => {
 describe('ops Vercel project deploys from dev only (#3681)', () => {
   const config = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'vercel.json'), 'utf8'))
   const rules = Object.entries(config.git?.deploymentEnabled ?? {}) as Array<[string, boolean]>
-  const deploys = (branch: string) => rules.some(([glob, on]) => on === true && globToRegExp(glob).test(branch))
+  // Vercel deploys a branch that matches no rule, so the `**: false` rule is
+  // what keeps a feature branch from deploying.
+  const deploys = (branch: string) => {
+    const matched = rules.filter(([glob]) => globToRegExp(glob).test(branch))
+    return matched.length === 0 || matched.some(([, on]) => on === true)
+  }
 
   it('turns every branch off and dev on', () => {
     expect(config.git.deploymentEnabled).toEqual({ '**': false, dev: true })

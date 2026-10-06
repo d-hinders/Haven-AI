@@ -259,8 +259,8 @@ frontend is built from: `packages/frontend`, `packages/ui`, `packages/core`,
 `package-lock.json`, `.nvmrc`) and the docs `next.config.ts` serves under
 `/docs/` (the frontend's served-docs `ALLOWLIST`), minus three `!` exclude
 globs (#3681): `packages/frontend/e2e/**` (Playwright specs and screenshot
-baselines), `packages/**/__tests__/**` and `packages/**/*.test.*`. No file the
-build reads imports one of those (the test checks it), so a change to them
+baselines), `packages/**/__tests__/**` and `packages/**/*.test.*`. No source file
+the build bundles statically imports one of those (the test checks it), so a change to them
 alone deploys the same site; CI still runs and type-checks them on every push.
 A build is skipped only
 when none of them changed since the commit the project last **deployed**; the
@@ -290,10 +290,13 @@ since the ops project runs the same script. For this project that means:
 - **A skipped build still counts toward the Hobby plan's cap of 100
   deployments a day** (#3681): the step saves build minutes and keeps the
   host current, not deployments. Each push creates a frontend deployment,
-  built or skipped; the ops console deploys from `dev` only. When the cap is
-  hit, Vercel refuses the deployment outright — it is missing from the
-  Deployments list rather than skipped — and the `dev` host keeps serving the
-  last build until the cap resets.
+  built or skipped; the ops console deploys from `dev` only (see
+  [`ops-console.md` § 1](ops-console.md#1-the-vercel-project)). When the cap is
+  hit, Vercel refuses the deployment: its status reads "Resource is limited"
+  (`api-deployments-free-per-day`), where a skip reads "Canceled by Ignored
+  Build Step". The `dev` host keeps serving the last build, and the refused
+  commit does not deploy by itself once the cap resets: it goes live with the
+  next push, or through Deployments → Create Deployment.
 - The list is checked against the real build inputs by
   `packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts`; a new
   workspace dependency, transpiled package or served doc that the list misses

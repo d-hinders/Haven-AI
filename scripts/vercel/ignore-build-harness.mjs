@@ -54,6 +54,15 @@ export function readWatchFile(watchFile) {
   for (const entry of entries) {
     if (/\s/.test(entry)) throw new Error(`${watchFile}: entry "${entry}" contains whitespace; the script word-splits the list`)
   }
+  // The harness models excludes as `*` / `?` / `**` globs only. git also
+  // excludes everything under a wildcard-free exclude and reads `[...]` as a
+  // class, which this model would call watched while the script skips it, so
+  // both are refused rather than modelled (#3681 review).
+  for (const entry of entries.filter((e) => e.startsWith('!'))) {
+    if (!/[*?]/.test(entry) || /[[\]]/.test(entry)) {
+      throw new Error(`${watchFile}: exclude "${entry}" must use * or ** and no [ ]; the harness cannot model it`)
+    }
+  }
   // An exclude-only list would make git watch EVERYTHING but the excludes.
   if (!entries.some((entry) => !entry.startsWith('!'))) throw new Error(`${watchFile}: lists no include entry`)
   return entries

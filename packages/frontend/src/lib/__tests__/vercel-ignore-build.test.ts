@@ -112,7 +112,7 @@ describe('frontend Vercel ignore step — the watched list covers every build in
 
   it('no file the build reads imports an excluded one (#3681)', () => {
     const root = join(FRONTEND, '..', '..')
-    const files = execFileSync('git', ['ls-files', 'packages/frontend/src', 'packages/frontend/next.config.ts', 'packages/ui/src', 'packages/core/src'], {
+    const files = execFileSync('git', ['ls-files', 'packages/frontend/src', 'packages/frontend/scripts', 'packages/frontend/next.config.ts', 'packages/ui/src', 'packages/core/src'], {
       cwd: root,
       encoding: 'utf8',
     })
@@ -120,7 +120,7 @@ describe('frontend Vercel ignore step — the watched list covers every build in
       .filter((path) => /\.(tsx?|mjs|js)$/.test(path) && isWatched(path))
     expect(files.length).toBeGreaterThan(100)
     const offenders = files.filter((path) =>
-      /from\s+['"][^'"]*(?:\/e2e\/|__tests__|\.test)[^'"]*['"]/.test(readFileSync(join(root, path), 'utf8')),
+      /(?:from|import|import\(|require\()\s*['"][^'"]*(?:\/e2e\/|__tests__|\.test)[^'"]*['"]/.test(readFileSync(join(root, path), 'utf8')),
     )
     expect(offenders).toEqual([])
   })
@@ -231,6 +231,9 @@ describe('frontend Vercel ignore step — the rule (#3594)', () => {
     'packages/frontend/src/lib/testing.ts',
     'packages/frontend/src/app/page.tsx',
     'packages/frontendx/a.ts',
+    // `*` must stay inside one directory (glob magic): without it git's `*`
+    // crosses `/` and `*.test.*` would exclude this real source file.
+    'packages/frontend/src/a.test.d/b.ts',
   ])('the harness and the script agree on %s (#3681)', (path) => {
     const deployed = r.commit('packages/backend/a.ts')
     r.commit(path)

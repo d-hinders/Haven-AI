@@ -175,8 +175,19 @@ export function SetupDoneState({
           the confirmation — deleting the sentence would have undone #1394.
           Width: no `max-w-sm` cap. The column is set by the `Done` button
           below (w-full inside a max-w-xl modal), and a 384px cap left the
-          button overhanging everything above it by ~150px. */}
-      <div className="text-center">
+          button overhanging everything above it by ~150px.
+
+          #3690: left-aligned, like the checklist below it — a centred line
+          over a left-aligned list split the screen into two columns. The
+          success mark is icon only, so the "no third status copy" rule above
+          holds: it says the flow ended well without restating "Approved". */}
+      <div>
+        <div
+          aria-hidden="true"
+          className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-success-soft)]"
+        >
+          <Icon icon={Check} className="h-5 w-5 text-[var(--v2-success)]" />
+        </div>
         {/* text-balance: this line is the money-clarity payoff, and its length
             depends on the agent name, the amount and the WALLET name — a
             rendered review caught "…from Operating wallet." stranding
@@ -202,7 +213,7 @@ export function SetupDoneState({
         </h3>
       </div>
 
-      <ul className="space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+      <ul className="space-y-2.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
         <li className="flex items-start gap-1.5">
           <Icon icon={Check} className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]" />
           <span>Haven tools wired into your agent environment</span>

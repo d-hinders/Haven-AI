@@ -700,7 +700,7 @@ its *text* colour on hover (`ink-2` → `ink`), pinned by
 That difference has a shipped consequence, and it is the rule to take from it: **tertiary
 needs surrounding structure to be legible as pressable.** It works inside a dialog's action
 row or at the end of a card, where position tells you it is a control. It fails in running
-content — `connect-agent/SetupStates.tsx:219` records the case where a tertiary button
+content — `connect-agent/SetupStates.tsx:234` records the case where a tertiary button
 "rendered as stray bold text in the middle of a checklist rather than a control", and was
 changed to ghost for the border alone while keeping secondary weight. Reach for ghost when
 the control has to announce itself; tertiary when its context already has.
@@ -1632,7 +1632,7 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
   | Line | Why it is there |
   |---|---|
   | `components/haven/TransactionMovement.tsx:55` | The **one allowlisted raw arrow** — the `From <a> → To <b>` movement glyph described above |
-  | `components/haven/TransactionMovement.tsx:38`, `components/connect-agent/SetupStates.tsx:163`, `components/connect-agent/WaitingForConnector.tsx:100` and `:115` | **Continuation lines of multi-line `{/* … */}` JSX comments.** The check strips a comment line by its *opening* delimiter, which a continuation line does not carry, so a line-based search cannot tell them from markup. Four false positives is the price of not parsing JSX, and it is the right price |
+  | `components/haven/TransactionMovement.tsx:38`, `components/connect-agent/SetupStates.tsx:167`, `components/connect-agent/WaitingForConnector.tsx:100` and `:115` | **Continuation lines of multi-line `{/* … */}` JSX comments.** The check strips a comment line by its *opening* delimiter, which a continuation line does not carry, so a line-based search cannot tell them from markup. Four false positives is the price of not parsing JSX, and it is the right price |
 
   So the check's clean state is **5, not 0**. A run returning more than 5 has found a new defect; a run returning fewer means an expected line moved and the table above is stale.
 

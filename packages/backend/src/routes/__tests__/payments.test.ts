@@ -662,7 +662,7 @@ describe('payment routes', () => {
     expect(response.json().fee).toEqual({ amount: '0', token: 'xDAI', basis_points: 0, applied: false })
   })
 
-  it('#3669: GET /:id on a legacy chain-100 intent answers 200 with a Gnosis explorer link (history stays readable)', async () => {
+  it('#3669: GET /:id on a legacy chain-100 intent answers 200 with a Gnosis explorer link (history-only chain)', async () => {
     // AGENT is a legacy chain-100 agent with no execution-rail state: the read
     // has no rail gate, so the known registry entry alone must carry the link.
     expect(AGENT.chain_id).toBe(100)

@@ -48,7 +48,8 @@
  *
  * `chromium-mobile` declares `testMatch: ['**\/*.mobile.spec.ts']`, so this file
  * runs under `chromium-desktop` alone in `test:e2e:gate`. Stated because the
- * band's controls DO reflow at 390px (`flex-wrap`), and this spec makes no
+ * band's controls DO reflow at 390px (the CTA row stacks below `sm`, its
+ * buttons spanning the column, #3685), and this spec makes no
  * claim about that width — #1797's rule is that a desktop proof may not be
  * reused where it was not taken. The property under test is a computed colour
  * rather than a layout, so it is width-independent in a way a capture would not

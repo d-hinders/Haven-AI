@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { SiteCtaRow } from '../blocks'
 import { SiteSection, SITE_TYPE } from '../SiteSection'
 import { Header } from '../Header'
 import { Footer } from '../Footer'
@@ -80,14 +81,14 @@ export function HomeHero() {
           </h1>
           <p className={`${SITE_TYPE.lede} mt-[22px]`}>Each agent gets its own budget. You keep custody.</p>
 
-          <div className="mt-8 flex flex-wrap gap-3">
+          <SiteCtaRow>
             <HeroCta href="/signup" variant="solid" trailingArrow>
               Create your account
             </HeroCta>
             <HeroCta href="/how-it-works" variant="ghost">
               See how it works
             </HeroCta>
-          </div>
+          </SiteCtaRow>
 
           {/*
             Addressed to agents, server-rendered, real page content (#2521).
@@ -358,11 +359,11 @@ export function HomeClosing() {
       <p className={`${SITE_TYPE.lede} mx-auto mt-[18px] text-center`}>
         One passkey, one budget, one command. Nothing spends without your signature.
       </p>
-      <div className="mt-8 flex flex-wrap justify-center gap-3">
+      <SiteCtaRow center>
         <BrandBandButton href="/signup" trailingArrow>
           Create your account
         </BrandBandButton>
-      </div>
+      </SiteCtaRow>
       <div className="mt-9 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[rgba(255,255,255,0.7)]">
         <span className="before:mr-2 before:inline-block before:h-1.5 before:w-1.5 before:rounded-full before:bg-[rgba(255,255,255,0.4)] before:align-[1px]">
           Built in Stockholm

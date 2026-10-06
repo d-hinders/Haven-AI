@@ -64,7 +64,15 @@ import {
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
   selectDelegationRowForAgentByHash,
+  listDelegationJsonByIds,
 } from '../infra/repositories/delegation-budgets.js'
+import {
+  readRemainingBudget,
+  currentPeriodBounds,
+  mapWithConcurrency,
+  BUDGET_READ_CONCURRENCY,
+  type RemainingBudget,
+} from '../infra/chain/delegation-budget-reader.js'
 import { getMerchantBySlug, listMerchantFundingTargets } from '../infra/repositories/merchants.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
@@ -85,6 +93,29 @@ function safeDetails(err: unknown): string {
 
 const MAX_UINT96 = (1n << 96n) - 1n
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * One row of the GET /:id/delegations SELECT, as the driver returns it —
+ * BIGINT `start_date`/`expires_at` as digit strings, `created_at` a Date,
+ * and (since #3693) the remaining-this-period enrichment on top.
+ */
+interface AgentDelegationListRow {
+  id: string
+  chain_id: number
+  token_address: string
+  recipient_address: string | null
+  delegation_hash: string
+  version: number
+  status: string
+  budget_atomic: string
+  period_seconds: number
+  start_date: string
+  expires_at: string
+  created_at: string | Date
+  merchant_id: string | null
+  merchant_slug: string | null
+  merchant_name: string | null
+}
 
 // Serialize a prepared UserOperation to wire JSON: bigint → "123n" string,
 // revived by the nSuffixStringToBigintReplacer on the submit routes. A named
@@ -194,7 +225,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     // #3331: a merchant-locked budget names its merchant (the agent page's
     // budget card shows it). LEFT JOIN — most rows carry no merchant, and a
     // deleted merchant only drops the label (migration 101, ON DELETE SET NULL).
-    const result = await pool.query(
+    const result = await pool.query<AgentDelegationListRow>(
       `SELECT d.id, d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
               d.version, d.status, d.budget_atomic, d.period_seconds, d.start_date,
               d.expires_at, d.created_at,
@@ -205,8 +236,44 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
        ORDER BY d.created_at DESC`,
       [request.params.id],
     )
-    // delegation_json intentionally NOT in the list — fetch is explicit.
-    return { delegations: result.rows }
+    // delegation_json intentionally NOT in the list — fetch is explicit (#3693:
+    // the remaining-this-period read needs it, so it is read SERVER-SIDE only,
+    // for the ACTIVE rows, and never reaches the response).
+    const activeIds = result.rows.filter((r) => r.status === 'active').map((r) => r.id)
+    const jsonById = await listDelegationJsonByIds(activeIds)
+    const nowSec = Math.floor(Date.now() / 1000)
+    // #3693: each ACTIVE row reports what the chain will still allow this
+    // period. Reads share analytics' worker pool (`BUDGET_READ_CONCURRENCY` in
+    // flight) and the reader's own per-read timeouts, so a slow RPC can slow
+    // the page by at most one read — never hang it, never fire N RPCs at once.
+    const delegations = await mapWithConcurrency(result.rows, BUDGET_READ_CONCURRENCY, async (row) => {
+      if (row.status !== 'active') {
+        return { ...row, remaining_atomic: null, remaining_from_chain: null, period_end: null }
+      }
+      // `readRemainingBudget` already degrades to the full budget on failure;
+      // a rejection here would be a contract break, so degrade identically
+      // rather than 500 a lifecycle list (the response is still served).
+      let remaining: RemainingBudget
+      try {
+        remaining = await readRemainingBudget(
+          row.chain_id,
+          jsonById.get(row.id) ?? '',
+          row.budget_atomic,
+        )
+      } catch {
+        remaining = { remainingAtomic: row.budget_atomic, fromChain: false }
+      }
+      // period_end comes from the SAME helper the analytics budget views use —
+      // one `currentPeriodBounds`, two consumers, no drift (#3693).
+      const { end } = currentPeriodBounds(Number(row.start_date), row.period_seconds, nowSec)
+      return {
+        ...row,
+        remaining_atomic: remaining.remainingAtomic,
+        remaining_from_chain: remaining.fromChain,
+        period_end: new Date(end * 1000).toISOString(),
+      }
+    })
+    return { delegations }
   })
 
   // ── GET /:id/account-signers — the treasury's signer set (#887) ───────────

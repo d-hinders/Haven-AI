@@ -9,6 +9,9 @@ import { encodeFunctionData, encodeAbiParameters } from 'viem'
 import { expectMatchesSpec, expectRejectsOffSpec } from '../../openapi/response-shape.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 import { DelegationManager, DeleGatorCore } from '@metamask/delegation-abis'
+// #3693: the shared helpers stay REAL through the reader mock above — the pins
+// below assert the route computes with exactly what analytics computes with.
+import { BUDGET_READ_CONCURRENCY, currentPeriodBounds } from '../../infra/chain/delegation-budget-reader.js'
 
 const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed, mockReadDisabled, mockMerchantBySlug, mockFundingTargets } = vi.hoisted(() => ({
   mockMerchantBySlug: vi.fn(),
@@ -58,6 +61,20 @@ vi.mock('../../infra/repositories/merchants.js', () => ({
   getMerchantBySlug: (...a: unknown[]) => mockMerchantBySlug(...a),
   listMerchantFundingTargets: (...a: unknown[]) => mockFundingTargets(...a),
 }))
+
+// #3693: the on-chain remaining read is the seam — its own fallback contract is
+// proven in delegation-budget-reader.test.ts; here the route's USE of the
+// answer (and its own degradation when the reader breaks) is what is under
+// test. Everything else in the module (currentPeriodBounds, the worker pool)
+// stays real so the shared helpers are exercised as shipped.
+const { mockReadRemaining } = vi.hoisted(() => ({ mockReadRemaining: vi.fn() }))
+vi.mock('../../infra/chain/delegation-budget-reader.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/chain/delegation-budget-reader.js')>()
+  return {
+    ...actual,
+    readRemainingBudget: (...a: unknown[]) => mockReadRemaining(...a),
+  }
+})
 
 const agentDelegationRoutes = (await import('../agent-delegations.js')).default
 const { getDelegationContracts } = await import('../../rails/delegation-contracts.js')
@@ -197,6 +214,12 @@ function mockDb(opts: {
   waiverAt?: string | null
   list?: Array<Record<string, unknown>>
   /**
+   * #3693: what `listDelegationJsonByIds` answers for the ACTIVE rows. Unset
+   * (the default for every pre-#3693 test) means no json rows come back, so
+   * the reader receives '' and the mocked reader decides.
+   */
+  jsonByIds?: Array<{ id: string; delegation_json: string }>
+  /**
    * #2415: the delegate key the LOCKING `SELECT ... FOR UPDATE` sees, which is
    * not always the one the pre-lock read saw — a re-key can commit in between.
    * Opt-in: when unset, the locking read falls through to the ordinary agents
@@ -253,6 +276,12 @@ function mockDb(opts: {
     if (/single_signer_waiver_at/.test(s)) {
       return Promise.resolve({ rows: [{ single_signer_waiver_at: opts.waiverAt ?? null }] })
     }
+    // #3693: the explicit delegation_json fetch for the ACTIVE rows
+    // (`listDelegationJsonByIds`) — distinct from the per-hash stored reads
+    // answered by the `/SELECT id, delegation_json/` branch below.
+    if (/WHERE id = ANY\(\$1\)/.test(s)) {
+      return Promise.resolve({ rows: opts.jsonByIds ?? [] })
+    }
     if (/SELECT delegation_json, status/.test(s) || /SELECT id, delegation_json/.test(s)) {
       return Promise.resolve({ rows: opts.stored === null ? [] : [opts.stored ?? {
         id: 'row-1',
@@ -294,6 +323,13 @@ describe('delegation lifecycle API (#828)', () => {
     // #1423 default: nothing already disabled on-chain.
     mockReadDisabled.mockReset()
     mockReadDisabled.mockResolvedValue(new Set())
+    // #3693 default: the reader's OWN failure contract — fall back to the
+    // budget. Tests that care pin their own implementation.
+    mockReadRemaining.mockReset()
+    mockReadRemaining.mockImplementation(async (_c: number, _j: string, budgetAtomic: string) => ({
+      remainingAtomic: budgetAtomic,
+      fromChain: false,
+    }))
   })
 
   describe('POST /:id/delegations/build — grant step 1', () => {
@@ -1633,6 +1669,124 @@ describe('delegation lifecycle API (#828)', () => {
       mockDb({ list: [{ ...DELEGATION_ROW, recipient_address: null, status: 'pending' }] })
       const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
       expectMatchesSpec('GET', '/agents/{id}/delegations', res.json())
+    })
+
+    // ── #3693: remaining-this-period per active budget ──────────────────────
+    it('an ACTIVE row carries the reader answer, keyed to its own server-side json', async () => {
+      vi.useFakeTimers({ now: new Date('2026-10-06T12:00:00.000Z') })
+      try {
+        mockDb({
+          list: [DELEGATION_ROW],
+          jsonByIds: [{ id: DELEGATION_ROW.id, delegation_json: storedJson }],
+        })
+        mockReadRemaining.mockImplementation(async () => ({ remainingAtomic: '1200000', fromChain: true }))
+        const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+        expect(res.statusCode).toBe(200)
+        expect(res.json().delegations[0]).toMatchObject({
+          remaining_atomic: '1200000',
+          remaining_from_chain: true,
+        })
+        // The reader got the row's OWN signed delegation (fetched server-side)
+        // and the budget as its fallback input.
+        expect(mockReadRemaining).toHaveBeenCalledTimes(1)
+        expect(mockReadRemaining).toHaveBeenCalledWith(84532, storedJson, '5000000')
+        // period_end is the SHARED helper's answer for the same row and now —
+        // the exact computation analytics' budget views use.
+        const nowSec = Math.floor(Date.parse('2026-10-06T12:00:00.000Z') / 1000)
+        const { end } = currentPeriodBounds(
+          Number(DELEGATION_ROW.start_date),
+          DELEGATION_ROW.period_seconds,
+          nowSec,
+        )
+        expect(res.json().delegations[0].period_end).toBe(new Date(end * 1000).toISOString())
+        // The response still never carries the signed delegation object.
+        expect(JSON.stringify(res.json())).not.toContain('delegation_json')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('non-ACTIVE rows carry nulls and are never read from the chain', async () => {
+      const active = { ...DELEGATION_ROW, id: 'aaaaaaaa-1111-4222-8333-444444444444', status: 'active' }
+      mockDb({
+        list: [
+          { ...DELEGATION_ROW, id: 'bbbbbbbb-1111-4222-8333-444444444444', status: 'revoked' },
+          { ...DELEGATION_ROW, id: 'cccccccc-1111-4222-8333-444444444444', status: 'replaced' },
+          { ...DELEGATION_ROW, id: 'dddddddd-1111-4222-8333-444444444444', status: 'pending' },
+          active,
+        ],
+        jsonByIds: [{ id: active.id, delegation_json: storedJson }],
+      })
+      mockReadRemaining.mockImplementation(async () => ({ remainingAtomic: '77', fromChain: true }))
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expect(res.statusCode).toBe(200)
+      const rows = res.json().delegations as Array<Record<string, unknown>>
+      for (const row of rows.filter((r) => r.status !== 'active')) {
+        expect(row).toMatchObject({ remaining_atomic: null, remaining_from_chain: null, period_end: null })
+      }
+      expect(rows.find((r) => r.status === 'active')).toMatchObject({
+        remaining_atomic: '77',
+        remaining_from_chain: true,
+      })
+      expect(mockReadRemaining).toHaveBeenCalledTimes(1)
+    })
+
+    it('a failed read answers the full budget with from_chain false and still 200', async () => {
+      mockDb({
+        list: [DELEGATION_ROW],
+        jsonByIds: [{ id: DELEGATION_ROW.id, delegation_json: storedJson }],
+      })
+      // Exactly what readRemainingBudget itself reports on a failed RPC.
+      mockReadRemaining.mockImplementation(async (_c: number, _j: string, budgetAtomic: string) => ({
+        remainingAtomic: budgetAtomic,
+        fromChain: false,
+      }))
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().delegations[0]).toMatchObject({
+        remaining_atomic: '5000000',
+        remaining_from_chain: false,
+      })
+    })
+
+    it('a reader that REJECTS degrades to the same fallback instead of a 500', async () => {
+      mockDb({
+        list: [DELEGATION_ROW],
+        jsonByIds: [{ id: DELEGATION_ROW.id, delegation_json: storedJson }],
+      })
+      mockReadRemaining.mockImplementation(async () => {
+        throw new Error('RPC unreachable')
+      })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().delegations[0]).toMatchObject({
+        remaining_atomic: '5000000',
+        remaining_from_chain: false,
+      })
+    })
+
+    it('the reads are concurrency-bounded at BUDGET_READ_CONCURRENCY, not fanned out', async () => {
+      const rows = Array.from({ length: 10 }, (_, i) => ({
+        ...DELEGATION_ROW,
+        id: `eeeeeeee-1111-4222-8333-${String(i).padStart(12, '0')}`,
+        status: 'active',
+      }))
+      mockDb({ list: rows, jsonByIds: rows.map((r) => ({ id: r.id, delegation_json: storedJson })) })
+      let inFlight = 0
+      let maxInFlight = 0
+      mockReadRemaining.mockImplementation(async () => {
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        inFlight -= 1
+        return { remainingAtomic: '1', fromChain: true }
+      })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expect(res.statusCode).toBe(200)
+      expect(mockReadRemaining).toHaveBeenCalledTimes(10)
+      // The shared worker pool (analytics' pattern): four in flight at most,
+      // and with 10 pending reads exactly four — never 10 at once.
+      expect(maxInFlight).toBe(BUDGET_READ_CONCURRENCY)
     })
   })
 

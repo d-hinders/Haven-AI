@@ -90,6 +90,14 @@ export interface DelegationBudget {
   merchant_id?: string | null
   merchant_slug?: string | null
   merchant_name?: string | null
+  /**
+   * #3693: remaining-this-period for ACTIVE rows. `remaining_from_chain: false`
+   * means the on-chain read failed and `remaining_atomic` is the full budget.
+   * All three are null for non-active rows.
+   */
+  remaining_atomic?: string | null
+  remaining_from_chain?: boolean | null
+  period_end?: string | null
 }
 
 interface BuildResponse {

@@ -124,3 +124,51 @@ export async function readRemainingBudget(
     return { remainingAtomic: budgetAtomic, fromChain: false }
   }
 }
+
+// ── Shared period + bounded-concurrency helpers (#3693) ─────────────────────
+// Moved here from `infra/repositories/analytics.ts` so the delegations list
+// route computes `period_end` with the SAME helper the analytics budget views
+// use, and bounds its reads with the SAME worker pool — one definition, two
+// consumers, no drift.
+
+/**
+ * `start_date`/`period_seconds` are Unix SECONDS (`routes/agent-delegations.ts`'s `startDate: nowSec - 60`).
+ */
+export function currentPeriodBounds(startDateSec: number, periodSeconds: number, nowSec: number): { start: number; end: number } {
+  if (periodSeconds <= 0 || nowSec < startDateSec) return { start: startDateSec, end: startDateSec + periodSeconds }
+  const elapsed = nowSec - startDateSec
+  const periodsElapsed = Math.floor(elapsed / periodSeconds)
+  const start = startDateSec + periodsElapsed * periodSeconds
+  return { start, end: start + periodSeconds }
+}
+
+/**
+ * Bounded-concurrency map: runs `fn` over `items` with at most
+ * `concurrency` in flight at once, preserving no particular order among
+ * results (order does not matter to `shapeBudgets` — each result carries its
+ * own `agent_id`). A plain `Promise.all(items.map(fn))` would fire every
+ * on-chain read at once; a plain sequential loop (the previous shape) pays
+ * N times the per-read timeout in the worst case. Four in flight is enough
+ * to collapse that to roughly one timeout for the common delegation counts
+ * this endpoint sees, without unbounded RPC fan-out.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = next++
+      if (i >= items.length) return
+      results[i] = await fn(items[i])
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  await Promise.all(workers)
+  return results
+}
+
+export const BUDGET_READ_CONCURRENCY = 4

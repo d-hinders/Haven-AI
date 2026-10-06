@@ -2711,7 +2711,7 @@ export const openapiSpec = {
         operationId: 'listAgentDelegations',
         summary: "List an agent's budget delegations with lifecycle status.",
         description:
-          "Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.",
+          "Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). ACTIVE rows additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -9049,6 +9049,18 @@ export const openapiSpec = {
           },
           merchant_slug: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'That merchant\u2019s slug, or null.' },
           merchant_name: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'That merchant\u2019s display name, or null.' },
+          remaining_atomic: {
+            anyOf: [{ type: 'string', pattern: '^[0-9]+$' }, { type: 'null' }],
+            description: 'Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows (#3693). When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows.',
+          },
+          remaining_from_chain: {
+            anyOf: [{ type: 'boolean' }, { type: 'null' }],
+            description: 'False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it (#3693). null for non-active rows.',
+          },
+          period_end: {
+            anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }],
+            description: 'When the current period refills (ISO 8601), computed the same way as the analytics budget views (#3693). null for non-active rows.',
+          },
         },
       },
       /**

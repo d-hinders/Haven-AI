@@ -12,6 +12,13 @@ import { Input } from '@/components/ui/Input'
 import { AgentHandoffNote } from '@/components/onboarding/AgentHandoffNote'
 import { AuthShell, AuthCard } from '@/components/auth/AuthShell'
 
+// #3660: login validates like signup. Email shape is signup's rule; the
+// backend lowercases before the lookup (auth.ts normalizeEmail), so nothing
+// here needs to.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+type FieldErrors = Partial<Record<'email' | 'password', string>>
+
 function LoginForm() {
   const { login, user, loading } = useAuth()
   const router = useRouter()
@@ -19,6 +26,7 @@ function LoginForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
 
   const justRegistered = searchParams.get('registered') === '1'
@@ -37,13 +45,40 @@ function LoginForm() {
     }
   }, [loading, user, router, nextPath])
 
+  // #3660: the same contract as signup — errors computed on submit from the
+  // current fields, no focus moves, each error cleared as its field is
+  // edited. Email is validated trimmed (the trimmed value is what would be
+  // sent); the password is never trimmed (the backend refuses only an empty
+  // one, auth.ts:184) and has no length rule here.
+  function validateForm(): { valid: boolean; email: string } {
+    const nextErrors: FieldErrors = {}
+    const trimmedEmail = email.trim()
+
+    if (!trimmedEmail) {
+      nextErrors.email = 'Enter your email address.'
+    } else if (!EMAIL_RE.test(trimmedEmail)) {
+      nextErrors.email = 'Enter a valid email address.'
+    }
+
+    if (!password) {
+      nextErrors.password = 'Enter your password.'
+    }
+
+    setFieldErrors(nextErrors)
+    return { valid: Object.keys(nextErrors).length === 0, email: trimmedEmail }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+
+    const validation = validateForm()
+    if (!validation.valid) return
+
     setSubmitting(true)
 
     try {
-      const u = await login(email, password)
+      const u = await login(validation.email, password)
       router.push(postAuthDestination(Boolean(u.account_address), nextPath))
     } catch (err) {
       // Generic message — don't surface raw backend errors here (prevents
@@ -71,7 +106,7 @@ function LoginForm() {
       <h1 className={headingClass}>Welcome back</h1>
       <p className={subClass}>Sign in to your Haven account.</p>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
         {justRegistered && !error && (
           <div className="rounded-md border border-success/20 bg-[var(--v2-success-soft)] px-4 py-3 text-sm text-[var(--v2-success)]">
             Account created. Sign in to continue.
@@ -94,9 +129,19 @@ function LoginForm() {
             required
             autoComplete="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              setFieldErrors((prev) => ({ ...prev, email: undefined }))
+            }}
             placeholder="you@example.com"
+            aria-invalid={Boolean(fieldErrors.email)}
+            aria-describedby={fieldErrors.email ? 'email-error' : undefined}
           />
+          {fieldErrors.email && (
+            <p id="email-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+              {fieldErrors.email}
+            </p>
+          )}
         </div>
 
         <div>
@@ -109,8 +154,18 @@ function LoginForm() {
             required
             autoComplete="current-password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value)
+              setFieldErrors((prev) => ({ ...prev, password: undefined }))
+            }}
+            aria-invalid={Boolean(fieldErrors.password)}
+            aria-describedby={fieldErrors.password ? 'password-error' : undefined}
           />
+          {fieldErrors.password && (
+            <p id="password-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+              {fieldErrors.password}
+            </p>
+          )}
         </div>
 
         <Button

@@ -3264,6 +3264,17 @@ export const SCENARIOS = {
       await page.getByText('Invalid email or password.').waitFor({ timeout: 20_000 })
       await shootCard('login-api-error')
 
+      // ── sign-in: client validation (#3660) ───────────────────────────────
+      // The inline field errors: `a@b` is a valid `type=email` value, so no
+      // browser bubble would ever fire for it, and the empty password proves
+      // the second field's error renders independently of the first.
+      await gotoAuth('/login')
+      await page.getByLabel('Email').fill('a@b')
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await page.getByText('Enter a valid email address.').waitFor({ timeout: 20_000 })
+      await page.getByText('Enter your password.').waitFor({ timeout: 20_000 })
+      await shootCard('login-validation')
+
       // ── sign-in: in-flight submit ────────────────────────────────────────
       await gotoAuth('/login')
       setAuthApiStage('loading')

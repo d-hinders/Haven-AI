@@ -14,12 +14,6 @@ export function formatAgentLastActivity(lastSeenAt: string | null | undefined): 
   return `Last activity ${timeAgo(ms)}`
 }
 
-export function formatAgentLastActivityValue(lastSeenAt: string | null | undefined): string {
-  const ms = parseLastSeenMs(lastSeenAt)
-  if (ms === null) return NO_ACTIVITY_COPY
-  return timeAgo(ms)
-}
-
 export function formatAgentLastActivityTitle(lastSeenAt: string | null | undefined): string | undefined {
   const ms = parseLastSeenMs(lastSeenAt)
   if (ms === null) return undefined

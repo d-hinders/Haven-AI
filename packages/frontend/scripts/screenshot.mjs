@@ -2862,11 +2862,39 @@ const BACKUP_RECOVERY_STAGES = {
  *               `httpError(500)` rather than a cleverer payload.
  *   loading     the fetch stays pending. The skeleton has to hold the card's
  *               shape, which is a claim only a render can settle.
+ *   two-budgets two ACTIVE budgets (#3695) — each row's meter and caption,
+ *               the grant form collapsed behind "Add budget", and (shot
+ *               after clicking it) the form opened in place.
  */
+const AGENT_BUDGET_TWO_ROWS = [
+  {
+    id: 'dlg-abc-1', chain_id: FIXTURE_ACCOUNT.chain_id,
+    token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    recipient_address: null,
+    delegation_hash: '0x' + '6a'.repeat(32),
+    version: 1, status: 'active',
+    budget_atomic: '250000000', period_seconds: 604_800,
+    start_date: '2026-06-02T10:00:00.000Z',
+    expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+    created_at: '2026-06-02T10:00:00.000Z',
+  },
+  {
+    id: 'dlg-abc-2', chain_id: FIXTURE_ACCOUNT.chain_id,
+    token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    recipient_address: ADDR.merchant,
+    delegation_hash: '0x' + '6b'.repeat(32),
+    version: 1, status: 'active',
+    budget_atomic: '20000000', period_seconds: 86_400,
+    start_date: '2026-06-02T10:00:00.000Z',
+    expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+    created_at: '2026-06-02T10:00:00.000Z',
+  },
+]
 const AGENT_BUDGET_STAGES = {
   'no-budget': { kind: 'ok', delegations: [] },
   'load-error': { kind: 'error' },
   loading: { kind: 'pending' },
+  'two-budgets': { kind: 'ok', delegations: AGENT_BUDGET_TWO_ROWS },
 }
 
 let agentBudgetStage = 'no-budget'
@@ -5592,12 +5620,30 @@ export const SCENARIOS = {
     /** Exposed so the fixture-contract test can pin each stage (#1409). */
     stage: setAgentBudgetStage,
     api(apiPath) {
-      if (apiPath === `/agents/agent-research/delegations`) {
+      // Matched on the PATH: the card asks with `?include=remaining` (#3695),
+      // and an exact-string match on the bare path silently fell through to
+      // the shared fixture once #3693 added the query — the scenario then
+      // captured an agent WITH a budget under every stage name.
+      const [pathname, query = ''] = apiPath.split('?')
+      if (pathname === `/agents/agent-research/delegations`) {
         const stage = AGENT_BUDGET_STAGES[agentBudgetStage]
         if (stage.kind === 'error') return httpError(500)
         // Long enough to capture, short enough not to stall the run.
         if (stage.kind === 'pending') return delayedHttp(20_000, { delegations: [] })
-        return { delegations: stage.delegations }
+        const includeRemaining = new URLSearchParams(query).get('include') === 'remaining'
+        // Same opt-in contract as the shared fixture: two different usage
+        // levels so the two meters are told apart in the capture.
+        const usedShare = [1n, 3n]
+        return {
+          delegations: includeRemaining
+            ? stage.delegations.map((r, i) => ({
+                ...r,
+                remaining_atomic: (BigInt(r.budget_atomic) * (4n - usedShare[i % 2]) / 4n).toString(),
+                remaining_from_chain: true,
+                period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString(),
+              }))
+            : stage.delegations,
+        }
       }
       // The agent's own `allowances` is a VIEW over active delegations
       // (#1090), so a no-budget agent whose allowances still listed a token
@@ -5619,7 +5665,7 @@ export const SCENARIOS = {
       // wrong state under the right name.
       setAgentBudgetStage('no-budget')
 
-      const heading = page.getByRole('heading', { name: 'Agent budgets' })
+      const heading = page.getByRole('heading', { name: 'Spending' })
 
       const settle = async (navigate) => {
         await navigate()
@@ -5636,8 +5682,10 @@ export const SCENARIOS = {
         }),
       )
 
-      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
-      const emptyCopy = card.getByText(/No budget yet/)
+      // #3695: the heading sits ABOVE the card, so the capture target is the
+      // section holding both.
+      const card = page.locator('section', { has: heading })
+      const emptyCopy = card.getByText('Set its first budget')
       const errorCopy = card.getByText(/could not load this agent.s current budgets/)
       const setBudget = card.getByRole('button', { name: 'Set budget' })
 
@@ -5674,6 +5722,22 @@ export const SCENARIOS = {
       await refuseIfPresent(emptyCopy, 'agent-budget-card · loading · empty copy')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'loading')
+
+      // ── two budgets (#3695) ───────────────────────────────────────────────
+      // Collapsed first: the form must NOT be on screen, the meters must be.
+      await openStage('two-budgets')
+      const addBudget = card.getByRole('button', { name: 'Add budget' })
+      await addBudget.waitFor({ timeout: 15_000 })
+      await card.getByRole('progressbar').nth(1).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(setBudget, 'agent-budget-card · two-budgets · form open before Add budget')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'two-budgets')
+
+      // ...then the form opened in place.
+      await addBudget.click()
+      await setBudget.waitFor({ timeout: 15_000 })
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'form-open')
     },
   },
   // 'send-review' (#1856) is DELETED with its subject (#1989, epic #1440): it

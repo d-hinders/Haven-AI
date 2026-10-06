@@ -81,6 +81,9 @@ test.describe('retired agent budget card visual regression (#3549)', () => {
       // Nothing that grants authority.
       await expect(card.getByText(state.reason)).toBeVisible()
       await expect(card.getByRole('button', { name: 'Set budget' })).toHaveCount(0)
+      // #3695: a live agent with a budget shows "Add budget", not "Set budget",
+      // so "Set budget" absent alone no longer proves the retired gate.
+      await expect(card.getByRole('button', { name: 'Add budget' })).toHaveCount(0)
       await expect(card.getByRole('button', { name: /^Edit budget / })).toHaveCount(0)
       await expect(card.getByRole('button', { name: 'Issue sub-budget' })).toHaveCount(0)
       await expect(card.getByLabel('Budget amount')).toHaveCount(0)

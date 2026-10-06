@@ -2364,48 +2364,37 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Card with action footer (manage pattern)"
-        description="When a card has both content and contextual actions, use `AgentRulesSummary`'s `footer` slot (or any card with a `border-t` action row) instead of a separate aside card. Keeps related actions adjacent to the data they affect and avoids empty right-rail real estate."
+        title="Section with a collapsed add (manage pattern)"
+        description="How a detail-page section manages a list (#3695, the agent page's Spending section). The heading and one-line description sit ABOVE the card; each row carries its own actions (Edit, Stop) beside the thing they change; and once one item exists, adding another is a collapsed control that opens the form in place — never a permanent second form competing with the rows. With no item yet, the form is the section's content. This replaced the action-footer pattern, whose buttons sat away from the data they affected."
       >
-        <AgentRulesSummary
-          title="Agent budget"
-          description="What this agent can spend, where the money comes from, and how you stay in control."
-          items={[
-            {
-              label: 'Agent name',
-              value: 'Research assistant',
-              helper: 'Connected via Haven credential.',
-            },
-            {
-              label: 'Spend from',
-              value: 'Operating wallet on Base',
-              helper: 'Payments come from this Haven account only.',
-            },
-            {
-              label: 'Budget',
-              value: '250 USDC per day',
-              helper: 'Payments within budget run automatically. Larger payments are declined by the agent rules.',
-            },
-          ]}
-          footer={
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-[var(--v2-ink-3)]">
-                Pause the agent or remove its budget if you need to stop access.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="ghost" size="sm">
-                  Update budget
-                </Button>
-                <Button variant="ghost" size="sm">
-                  Pause agent
-                </Button>
-                <Button variant="danger" size="sm">
-                  Revoke agent budget
-                </Button>
+        <div>
+          <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
+          <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
+            What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
+          </p>
+          <Card hover={false} className="p-5 md:p-6">
+            <div className="flex items-start justify-between gap-3 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
+                <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
+                <div className="mt-2 max-w-sm">
+                  <BudgetMeter
+                    usedPercent={25}
+                    label="USDC budget used"
+                    caption="62.5 of 250 USDC used this period · refills in 3 days"
+                  />
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button size="sm" variant="ghost">Edit</Button>
+                <Button size="sm" variant="ghost">Stop</Button>
               </div>
             </div>
-          }
-        />
+            <div className="mt-3">
+              <Button size="sm" variant="ghost">Add budget</Button>
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section

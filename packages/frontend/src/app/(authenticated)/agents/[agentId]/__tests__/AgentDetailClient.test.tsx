@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -22,6 +22,12 @@ const {
 }))
 
 const { mockRouterPush } = vi.hoisted(() => ({ mockRouterPush: vi.fn() }))
+
+const { mockUseCompanyDetails } = vi.hoisted(() => ({ mockUseCompanyDetails: vi.fn() }))
+
+vi.mock('@/hooks/useCompanyDetails', () => ({
+  useCompanyDetails: () => mockUseCompanyDetails(),
+}))
 
 // #1402: the component navigates to /agents after a completed remove.
 vi.mock('next/navigation', () => ({
@@ -146,6 +152,17 @@ import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { HALF_REVOKED_TITLE } from '@/lib/half-revoked'
 import AgentDetailClient from '../AgentDetailClient'
 
+const VIES_VALID_ROW = {
+  legal_name: 'Acme AB',
+  country: 'SE',
+  org_number: '556677-8899',
+  vat_number: 'SE556677889901',
+  vies_status: 'valid',
+  vies_checked_at: '2026-09-28T12:00:00.000Z',
+  created_at: '2026-09-28T10:00:00.000Z',
+  updated_at: '2026-09-28T12:00:00.000Z',
+} as const
+
 const SAFE = {
   id: 'safe-1',
   name: 'Main account',
@@ -216,6 +233,9 @@ describe('AgentDetailClient last-activity metadata', () => {
       issuePassport: vi.fn(),
       refetch: vi.fn(),
     })
+    // Default: the tax row's visibility rule reads "flag off" — deterministic
+    // for every test that does not care; the #3697 tests override it.
+    mockUseCompanyDetails.mockReturnValue({ status: 'off', details: null })
   })
 
   afterEach(() => {
@@ -770,6 +790,84 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(link).toHaveAttribute('href', '/accounts/safe-1')
     // No enrollment controls on the agent page — those live only on the account page now.
     expect(screen.queryByRole('button', { name: /Add a backup/ })).not.toBeInTheDocument()
+  })
+
+  // ── Identity and settings card (#3697) ──────────────────────────────────
+  // The page's optional and account-level items — the Agent Passport row, the
+  // tax declaration row (when VIES-valid) and the Backup & recovery pointer —
+  // are ONE quiet card at the bottom. No standalone Passport or Tax card.
+
+  it('groups the passport row, the tax row and Backup & recovery into one Identity and settings card (#3697)', () => {
+    mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
+    mockDelegationAgent()
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const section = screen.getByTestId('identity-settings-section')
+    // Exactly ONE card in the section — no standalone Passport or Tax card.
+    const cards = section.querySelectorAll('.rounded-\\[10px\\]')
+    expect(cards.length).toBe(1)
+    const card = cards[0]
+
+    // All three rows live inside that one card.
+    expect(within(card as HTMLElement).getByTestId('agent-passport-row')).toBeTruthy()
+    expect(within(card as HTMLElement).getByTestId('tax-declaration-row')).toBeTruthy()
+    expect(
+      within(card as HTMLElement).getByRole('link', { name: /Backup & recovery/ }),
+    ).toHaveAttribute('href', '/accounts/safe-1')
+
+    // The tax row keeps its own wording rules: the copy did not change, only
+    // the wrapper.
+    expect(within(card as HTMLElement).getByRole('checkbox')).toBeInTheDocument()
+  })
+
+  it('hides the tax row without leaving a stray divider or empty gap (#3697)', () => {
+    // 'off' — the flag-off answer the route gives when HAVEN_OWNER_COMPANY_DETAILS is unset.
+    mockUseCompanyDetails.mockReturnValue({ status: 'off', details: null })
+    mockDelegationAgent()
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
+    const card = screen
+      .getByTestId('identity-settings-section')
+      .querySelector('.rounded-\\[10px\\]') as HTMLElement
+    // The card's direct rows are the passport row and the Backup section —
+    // exactly two, so the tax row's divider left no orphan and no gap.
+    expect(card.children.length).toBe(2)
+    expect(card.textContent).not.toContain('Tax declaration')
+
+    // ...and the non-valid VIES state hides it too.
+    mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: { ...VIES_VALID_ROW, vies_status: 'invalid' } })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
+  })
+
+  it('orders the page: header, banner slot, Spending, Activity, Identity and settings (#3697)', () => {
+    mockDelegationAgent()
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const header = document.querySelector('header')
+    const banner = screen.getByTestId('agent-banner-slot')
+    const budget = document.getElementById('delegation-budget-card')
+    const activity = document.getElementById('agent-activity')
+    const identity = screen.getByTestId('identity-settings-section')
+    expect(header).toBeTruthy()
+    expect(budget).toBeTruthy()
+    expect(activity).toBeTruthy()
+
+    // Each pair FOLLOWING in document order — the section rule's final page
+    // shape, asserted structurally rather than by pixel position.
+    const pairs: [Element, Element][] = [
+      [header!, banner],
+      [banner, budget!],
+      [budget!, activity!],
+      [activity!, identity],
+    ]
+    for (const [before, after] of pairs) {
+      expect(
+        before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
+        `${before.nodeName} must precede ${after.nodeName}`,
+      ).toBeTruthy()
+    }
   })
 
   it('reads the delegate balance for REVOKED agents too — the recovery banner must reach them (#1403)', () => {

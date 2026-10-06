@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ACCOUNTING_CYCLE_MS,
+  DEV_CYCLE_MS,
+  DEV_STEPS_MS,
   HERO_BUDGET_CAP,
   HERO_CYCLE_MS,
   HERO_PAYMENT,
@@ -16,6 +18,8 @@ import {
  *  module). */
 export {
   ACCOUNTING_CYCLE_MS,
+  DEV_CYCLE_MS,
+  DEV_STEPS_MS,
   HERO_BUDGET_CAP,
   HERO_CYCLE_MS,
   HERO_PAYMENT,
@@ -112,6 +116,14 @@ export function useDocumentVisible(): boolean {
 }
 
 export type CycleStep = { at: number; act: () => void }
+
+/** The gate every loop shares: animate only in view, visible, unimpeded. */
+export function useLoopGate() {
+  const reduced = usePrefersReducedMotion()
+  const visible = useDocumentVisible()
+  const { ref, inView } = useInView<HTMLDivElement>()
+  return { ref, looping: !reduced && visible && inView }
+}
 
 /**
  * Run `steps` on a cycle of `cycleMs` — the mockup's `run()`/`reset()` pair

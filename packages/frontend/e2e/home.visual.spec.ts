@@ -36,11 +36,12 @@ test.describe('/ (new home) visual regression', () => {
     testInfo.project.name === 'chromium-desktop-dark' ? 'dark' : 'light'
 
   test.beforeEach(async ({ page }, testInfo) => {
-    // The baselines are the SETTLED page (slice 2, #3574). This slice added
-    // the mockup's loops (#3575); every one falls back to its settled state
-    // under `prefers-reduced-motion: reduce` (home-motion.test.tsx asserts
-    // it), so the capture emulates reduce and no loop can run into a
-    // baseline — belt to `animations: 'disabled'`'s braces.
+    // The baselines are the SETTLED page (slice 2, #3574). The slices since
+    // added the mockup's loops (#3575, #3684): every one falls back to its
+    // settled state under `prefers-reduced-motion: reduce`
+    // (home-motion.test.tsx asserts it), so the capture emulates reduce and
+    // no loop can run into a baseline — belt to `animations: 'disabled'`'s
+    // braces.
     await page.emulateMedia({ reducedMotion: 'reduce' })
     if (schemeOf(testInfo) === 'dark') {
       await page.addInitScript((themeKey: string) => {
@@ -95,6 +96,17 @@ test.describe('/ (new home) visual regression', () => {
       })
       expect(terminal, 'step 3 terminal rendered').not.toBeNull()
       expect(terminal!.scrollWidth, 'step 3 terminal scrolls sideways').toBeLessThanOrEqual(terminal!.clientWidth + 1)
+
+      // The developers transcript wraps too (#3684): its longest line is 27
+      // characters, which fits the block even at 320px.
+      const devTerminal = await page.evaluate(() => {
+        const node = document.querySelector('[data-dev-terminal]')
+        return node ? { scrollWidth: node.scrollWidth, clientWidth: node.clientWidth } : null
+      })
+      expect(devTerminal, 'developers terminal rendered').not.toBeNull()
+      expect(devTerminal!.scrollWidth, 'developers terminal scrolls sideways').toBeLessThanOrEqual(
+        devTerminal!.clientWidth + 1,
+      )
 
       await page.evaluate(() => document.fonts.ready)
       await page.waitForLoadState('networkidle')

@@ -1,7 +1,7 @@
 /**
  * `/` motion: no layout shift across a full cycle (#3575).
  *
- * All four animated regions of the home page are live under this harness. Each test installs Playwright's
+ * All five animated regions of the home page are live under this harness. Each test installs Playwright's
  * controlled clock, waits until the region's loop is demonstrably running
  * (a loop-driven text state is visible — which also proves the
  * IntersectionObserver delivered), then advances the clock through one
@@ -132,6 +132,68 @@ test.describe('/ motion: layout stability across cycles', () => {
     await page.clock.runFor(11_000)
     const after = await heightOf(page, 'accounting-animated')
     expect(after, 'accounting frame height moved across one cycle').toBe(before)
+  })
+
+  test('the developers transcript holds its height at every step of the 13 s 402 session', async ({ page }) => {
+    const dev = page.getByTestId('dev-animated')
+    await dev.scrollIntoViewIfNeeded()
+    const settled = await heightOf(page, 'dev-animated')
+
+    // Paused, the page clock only moves on `runFor`, so nothing below can
+    // run on real time. Like the hero case above, this samples DURING the
+    // cycle — the reveal is opacity-only, which a single before/after pair
+    // at the same phase could not see a mid-cycle break in (#3684).
+    await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000))
+
+    const cursorCount = () => page.evaluate(() => document.querySelectorAll('[data-dev-cursor]').length)
+    const cursorLine = () =>
+      page.evaluate(() => document.querySelector('[data-dev-cursor]')?.closest('[data-dev-line]')?.textContent ?? null)
+
+    // Find the loop's phase: step 100 ms until a cursor exists (the loop is
+    // running), then until it vanishes — the 9400 ms cursor-off step — so
+    // the boundary is at most a lap away.
+    let sawCursor = false
+    for (let steps = 0; steps < 200; steps++) {
+      if ((await cursorCount()) > 0) {
+        sawCursor = true
+        break
+      }
+      await page.clock.runFor(100)
+    }
+    expect(sawCursor, 'the developers loop never started').toBe(true)
+    for (let steps = 0; steps < 200; steps++) {
+      if ((await cursorCount()) === 0) break
+      await page.clock.runFor(100)
+    }
+    // Within 100 ms after 9400. Cross the 13000 ms boundary into a fresh
+    // cycle, then walk its twelve reveal steps, sampling the height and the
+    // cursor's line at each (mockup V19, `index.html:289-298`).
+    await page.clock.runFor(3_700)
+    const expectedCursorLines = [
+      '# An agent hits a paywall',
+      'GET api.example/v1/enrich',
+      '← 402 · pay 0.30 USDC',
+      '# the agent signs locally',
+      'haven_quote_x402',
+      '  → within budget',
+      'haven_sign_x402',
+      '  → signed on its machine',
+      'haven_pay_x402',
+      '  → settled on Base',
+      '← 200 OK',
+      '# policy, on-chain proof',
+    ]
+    const gaps = [700, 800, 1100, 700, 600, 700, 600, 700, 600, 1000, 700, 1200]
+    for (const [index, line] of expectedCursorLines.entries()) {
+      if (index > 0) await page.clock.runFor(gaps[index - 1])
+      expect(await heightOf(page, 'dev-animated'), `dev height moved at reveal step ${index}`).toBeCloseTo(settled, 0)
+      expect(await cursorCount(), `cursor count at reveal step ${index}`).toBe(1)
+      expect(await cursorLine(), `cursor line at reveal step ${index}`).toBe(line)
+    }
+    // The thirteenth step removes the cursor; the height still holds.
+    await page.clock.runFor(gaps[gaps.length - 1])
+    expect(await heightOf(page, 'dev-animated'), 'dev height moved at the cursor-off step').toBeCloseTo(settled, 0)
+    expect(await cursorCount(), 'cursor survived the cursor-off step').toBe(0)
   })
 
   test('the refusal receipt holds its height through a replay', async ({ page }) => {

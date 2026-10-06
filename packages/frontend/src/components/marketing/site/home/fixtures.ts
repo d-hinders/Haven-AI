@@ -108,3 +108,55 @@ export const CONNECTOR_TERMINAL = {
   ],
   tailComment: ['# or paste the setup prompt from', '# your dashboard into your agent'],
 } as const
+
+/**
+ * The developers band's 402-session transcript (mockup V19, artifact version
+ * `1791288451-c24e`, `index.html:212-227`): the live session the mockup
+ * plays, whose settled state is the full transcript the band has shown since
+ * #3574 (#3684; owner decision of 2026-10-06 — a line-by-line transcript,
+ * not character typing, not a scrolling log, not a glowing border). V19 was
+ * never in `docs/product/site-mockup/`, so comments cite the artifact
+ * version rather than the repo convention (`design-system.md:1486`).
+ *
+ * `steps` are the twelve reveal steps in reveal order; a step's lines appear
+ * together (one step, one cursor, on the step's last line). Tones:
+ *
+ * - Comments keep the half-white the band already used, and the three
+ *   `haven_*` calls keep the brand-soft tool colour.
+ * - The 402 lands in the warning tone and the 200 OK in the success tone —
+ *   hard-coded, because the navy band is fixed in both themes and
+ *   `--v2-warning` / `--v2-success` resolve to dark orange and green on navy
+ *   in the light theme (`SiteSection.tsx` pins the navy ground).
+ *
+ * `blankAfter` marks the two blank lines (after the 402 and after "settled
+ * on Base"), which the component renders as margins so the settled pixels
+ * are the band's. The band's #3579 constraint still holds: every line is at
+ * most 27 characters, so the block fits a 320px phone without a sideways
+ * scroller.
+ */
+export type DevTone = 'comment' | 'tool' | 'warning' | 'success'
+
+export type DevStep = {
+  /** The step's line(s); a multi-line step reveals them together. */
+  lines: string[]
+  tone?: DevTone
+  /** A blank line follows this step, kept as a margin, not a text line. */
+  blankAfter?: boolean
+}
+
+export const DEV_TERMINAL: { steps: DevStep[] } = {
+  steps: [
+    { lines: ['# An agent hits a paywall'], tone: 'comment' },
+    { lines: ['GET api.example/v1/enrich'] },
+    { lines: ['← 402 · pay 0.30 USDC'], tone: 'warning', blankAfter: true },
+    { lines: ['# Haven checks the budget,', '# the agent signs locally'], tone: 'comment' },
+    { lines: ['haven_quote_x402'], tone: 'tool' },
+    { lines: ['  → within budget'] },
+    { lines: ['haven_sign_x402'], tone: 'tool' },
+    { lines: ['  → signed on its machine'] },
+    { lines: ['haven_pay_x402'], tone: 'tool' },
+    { lines: ['  → settled on Base'], blankAfter: true },
+    { lines: ['← 200 OK'], tone: 'success' },
+    { lines: ['# Receipt: agent, purchase,', '# policy, on-chain proof'], tone: 'comment' },
+  ],
+}

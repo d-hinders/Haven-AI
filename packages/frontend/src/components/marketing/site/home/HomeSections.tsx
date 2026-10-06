@@ -6,25 +6,27 @@ import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 import { HeroCta } from './HeroCta'
 import { AnimatedHeroFrame } from './AnimatedHeroFrame'
 import { AnimatedAccountingFrame } from './AnimatedAccountingFrame'
+import { AnimatedDevTerminal } from './AnimatedDevTerminal'
 import { AnimatedPasskeyMiniCard, AnimatedBudgetMiniCard, AnimatedConnectorTerminal } from './HowItWorksAnimated'
 import { AnimatedRefusalReceipt } from './AnimatedRefusalReceipt'
 
 /**
  * The redesigned home page's seven sections, in both themes (#3574), with the
- * mockup's motion on the four animated regions (#3575). The order follows a
- * buyer's questions rather than the pitch (owner decisions of 2026-10-06,
- * #3676; mockup V17, artifact version `1791276240-c0f5`): hero, how it works,
- * spending limits, accounting, developers, three questions, closing band. The
- * problem points moved to the top of How it works; why-now and Why Haven left
- * the page.
+ * mockup's motion on the five animated regions (#3575, #3684). The order
+ * follows a buyer's questions rather than the pitch (owner decisions of
+ * 2026-10-06, #3676; mockup V17, artifact version `1791276240-c0f5`): hero,
+ * how it works, spending limits, accounting, developers, three questions,
+ * closing band. The problem points moved to the top of How it works;
+ * why-now and Why Haven left the page.
  *
  * Every animated region renders its settled state here unless its loop is
  * running: the controllers (`AnimatedHeroFrame`, `AnimatedPasskeyMiniCard`,
  * `AnimatedBudgetMiniCard`, `AnimatedConnectorTerminal`,
- * `AnimatedAccountingFrame`, `AnimatedRefusalReceipt`) pass no state under
- * reduced motion, out of view, or before their loop starts, so the settled
- * markup below — slice 2's, in `HeroAgentsFrame`, `StepMiniCards`,
- * `ConnectorTerminal`, `AccountingFrame`, `RefusalReceipt` — is what renders.
+ * `AnimatedDevTerminal`, `AnimatedAccountingFrame`,
+ * `AnimatedRefusalReceipt`) pass no state under reduced motion, out of
+ * view, or before their loop starts, so the settled markup below — slice
+ * 2's, in `HeroAgentsFrame`, `StepMiniCards`, `ConnectorTerminal`,
+ * `DevTerminal`, `AccountingFrame`, `RefusalReceipt` — is what renders.
  * This file stays a server component; only the controllers are client
  * components. Headings and body copy follow the mockup except the epic's
  * decided deviations, each marked where it applies:
@@ -291,36 +293,12 @@ export function HomeDevelopers() {
           </div>
         </div>
 
-        {/* Storytelling, not a transcript: every line stays within 28
-            characters so the block fits a 320px phone without a sideways
-            scroller (owner, #3579). `pre-wrap` is the backstop if a fallback
-            mono face runs wider. */}
-        <div
-          className={`min-w-0 rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] text-[13px] leading-[1.7] text-[#e6e9ff] ${SITE_TYPE.mono}`}
-          style={{ padding: '18px 20px' }}
-        >
-          <pre className="whitespace-pre-wrap break-words">
-            <span className="text-[rgba(230,233,255,0.5)]"># An agent hits a paywall</span>
-            {'\n'}GET api.example/v1/enrich{'\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">← 402 · pay 0.30 USDC</span>
-            {'\n\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">
-              {'# Haven checks the budget,\n# the agent signs locally'}
-            </span>
-            {'\n'}
-            <span className="text-[#a5b4fc]">haven_quote_x402</span>
-            {'\n  → within budget\n'}
-            <span className="text-[#a5b4fc]">haven_sign_x402</span>
-            {'\n  → signed on its machine\n'}
-            <span className="text-[#a5b4fc]">haven_pay_x402</span>
-            {'\n  → settled on Base\n\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">← 200 OK</span>
-            {'\n'}
-            <span className="text-[rgba(230,233,255,0.5)]">
-              {'# Receipt: agent, purchase,\n# policy, on-chain proof'}
-            </span>
-          </pre>
-        </div>
+        {/* The 402 session (mockup V19, artifact version `1791288451-c24e`,
+            `index.html:212-227`): the transcript prints line by line while
+            the loop runs (#3684) and settles to the full transcript — the
+            band's slice-2 block, kept to 27 characters a line so it fits a
+            320px phone without a sideways scroller (owner, #3579). */}
+        <AnimatedDevTerminal />
       </div>
     </SiteSection>
   )

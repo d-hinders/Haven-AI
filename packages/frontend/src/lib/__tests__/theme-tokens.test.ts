@@ -52,7 +52,8 @@ describe('the three palette blocks of globals.css', () => {
 
   it('every colour-valued token in :root is redeclared in both dark blocks', () => {
     const lightColours = colourValued(blocks.light)
-    expect(lightColours.length).toBeGreaterThanOrEqual(45)
+    // 44 since #3670 removed --v2-chain-gnosis (45 after #3658/#3674).
+    expect(lightColours.length).toBeGreaterThanOrEqual(44)
     for (const darkName of ['mediaDark', 'explicitDark'] as const) {
       const dark = blocks[darkName]
       for (const name of lightColours) {

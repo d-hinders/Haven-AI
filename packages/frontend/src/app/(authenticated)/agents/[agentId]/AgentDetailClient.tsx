@@ -230,8 +230,8 @@ interface Props {
 }
 
 /**
- * Anchor for the "Activity" section (#2196), mirroring
- * `DELEGATION_BUDGET_CARD_ID`'s scroll-don't-open pattern in this same file.
+ * Anchor for the "Activity" section (#2196): the recoverable-funds banner
+ * scrolls here rather than opening anything (scroll-don't-open).
  *
  * **What this link claims, and what it deliberately does not.** The
  * recoverable-funds banner sits near the top of the page; the rows that carry
@@ -335,7 +335,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   const closeEdit = () => {
     setEditOpen(false)
   }
-  // #2196: scroll-don't-open, the same mechanism as the budget card anchor.
+  // #2196: scroll-don't-open — see AGENT_ACTIVITY_SECTION_ID.
   const scrollToActivity = () => {
     document
       .getElementById(AGENT_ACTIVITY_SECTION_ID)
@@ -533,7 +533,9 @@ export default function AgentDetailClient({ agentId }: Props) {
           // BETWEEN facts — never "· Last / activity 2h ago" (#3694 design
           // review, at 390px).
           <>
-            <span className="whitespace-nowrap">{walletName}</span> ·{' '}
+            {/* The wallet name is user-chosen and can be long, so it may
+                wrap; the short facts after it stay whole. */}
+            <span>{walletName}</span> ·{' '}
             <span className="whitespace-nowrap">{networkName}</span> ·{' '}
             <span className="whitespace-nowrap">
               Created{' '}

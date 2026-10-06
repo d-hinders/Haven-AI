@@ -594,6 +594,49 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 
+  // #3695 review S1: an `active` row past its `expires_at` cannot spend — it
+  // must not count down "expires in 1m" forever, nor carry a usage meter.
+  it('a budget past its expiry says it has expired — no meter, no countdown', () => {
+    mockGet.mockReturnValue([
+      budget({
+        remaining_atomic: '4000000',
+        remaining_from_chain: true,
+        period_end: '2026-09-01T10:00:00Z',
+        expires_at: Math.floor(Date.parse('2026-08-31T00:00:00Z') / 1000),
+      }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('This budget has expired and can no longer be spent.')).toBeTruthy()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(document.body.textContent).not.toMatch(/expires in|refills in|used this period/)
+  })
+
+  // #3695 review S2: opening and collapsing swap the pressed control for
+  // another, so focus is placed deliberately instead of falling to <body>.
+  it('Add budget moves focus to the amount field; Cancel returns it to Add budget', () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(document.activeElement).toBe(screen.getByLabelText('Budget amount'))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+  })
+
+  it('Cancel sits in the submit row beside Set budget', () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    const setBudget = screen.getByRole('button', { name: 'Set budget' })
+    expect(cancel.parentElement).toBe(setBudget.parentElement)
+  })
+
+  it('a ?grant=-free page load moves no focus — only an owner toggle does', () => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.activeElement).toBe(document.body)
+  })
+
   it('a successful grant collapses the form again', async () => {
     vi.useRealTimers()
     mockGet.mockReturnValue([budget()])
@@ -604,5 +647,7 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     fireEvent.click(screen.getByText('Set budget'))
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByLabelText('Budget amount')).toBeNull())
+    // ...and focus lands on Add budget, not <body> (#3695 review S2).
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
   })
 })

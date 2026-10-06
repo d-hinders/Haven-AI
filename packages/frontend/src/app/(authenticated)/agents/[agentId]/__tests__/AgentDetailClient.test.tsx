@@ -737,9 +737,6 @@ describe('AgentDetailClient last-activity metadata', () => {
     })
   }
 
-  // #3694: the "Update budget" button and menu item only scrolled to the card
-  // below them, so both went. The empty-state "Add budget" keeps the route
-  // until #3695 replaces that empty state.
   // #3695: ONE budget surface. The read-only "Agent budget" summary (and its
   // "No agent budget set" empty state with a scroll-to-card "Add budget") is
   // gone; budgets change only in the Spending card, which also owns Add

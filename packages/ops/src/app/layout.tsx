@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import '@haven_ai/ui/tokens.css'
 import './globals.css'
+import '@haven_ai/ui/type.css'
 import { deploymentRegistry } from '../lib/deployment'
 import { OpsApp } from '../components/OpsApp'
 

@@ -1452,6 +1452,18 @@ authority, and the same scope note holds.
 > settlement sections were NOT re-read (the diff touches no file that
 > implements them). `last-verified` is bumped for exactly this coverage.
 
+> **Re-verified #3611 (2026-10-06, console type ramp):** the change touches
+> `packages/ops/src/app/layout.tsx` (one more stylesheet import,
+> `@haven_ai/ui/type.css`, the type ramp and `v2-tabular` moved verbatim out
+> of the dashboard's `globals.css`), adds a test under
+> `packages/ops/src/__tests__/`, and adds a local-only computed-style probe
+> to the screenshot script (`packages/ops/scripts/screenshot.mjs`). Plain
+> CSS bundled at build time from a workspace package: no script, no network
+> origin, so the CSP is unchanged.
+> No client method, read, reveal, sign-in navigation or backend file
+> changes, so the no-rail-authority claim above holds verbatim. Scope of
+> this re-read: this section only; `last-verified` is not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a

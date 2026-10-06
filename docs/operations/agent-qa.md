@@ -30,7 +30,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-05"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -777,8 +777,9 @@ and preflight output reaches only a run log.
 
 `qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
 calls `npm run qa:balances -w packages/qa-agent`, which reads three wallets on
-Base Sepolia, and `scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**,
-`QA wallet balances low` (label `qa-funding`):
+Base Sepolia and may request testnet faucet ETH for the dev relayer. Then
+`scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**, `QA wallet
+balances low` (label `qa-funding`):
 
 | Wallet | Unit | Where the address comes from |
 |---|---|---|
@@ -802,6 +803,12 @@ for the relayer. `unknown` means a missing config value or a failed read.
 
 **How the issue behaves.**
 
+- **Before reporting:** a `warn` or `critical` dev relayer triggers bounded CDP
+  Base Sepolia ETH faucet requests toward a 0.03 ETH target, at most 300 claims.
+  Each accepted claim is 0.0001 ETH; a 429 or any faucet error stops the loop.
+  The job then re-reads the relayer and builds the report and history from that
+  post-top-up reading. A shared daily faucet cap can therefore produce a partial
+  top-up without making the workflow red.
 - **Any wallet `warn` or `critical`:** the body is rewritten, and the issue is
   reopened (or created once). Each row carries the full address, balance, burn
   per day, runway and a link to the matching top-up heading below.
@@ -815,8 +822,9 @@ for the relayer. `unknown` means a missing config value or a failed read.
   `standing-issue-upsert.mjs` rule (#3341). A human issue with the same label,
   or one whose title contains the words, is never edited or closed.
 
-The check is read-only. It never signs or moves funds, and it receives no
-delegate private key.
+The check is read-only except for testnet faucet requests for the dev relayer.
+It never signs or moves Haven or customer funds, and it receives neither a
+delegate private key nor a CDP Wallet Secret.
 
 ### Top up the delegation treasury
 
@@ -837,18 +845,43 @@ settlement wallet.
 
 ### Top up the dev relayer
 
-Send Base Sepolia ETH to the relayer address the issue names (the
-`QA_DEV_RELAYER_ADDRESS` variable). It is the one relayer EOA that dev AND
-prod share on Base mainnet and Base Sepolia, so its 84532 burn includes
-non-QA traffic. It pays for activations, passport attestations, revocations, sweeps, and the
-outbound queue's fee bumps and lane cancels; agent payments are
-paymaster-sponsored and never use it
+When the row is `warn` or `critical`, the job requests Base Sepolia ETH from
+CDP until the live starting balance plus accepted 0.0001 ETH claims reaches
+0.03 ETH, 300 claims are accepted, the six-minute loop budget expires, or CDP
+returns an error or 429. It re-reads the chain afterwards; that reading, not the
+number of accepted requests, decides the row and the history artifact. The
+standing issue records the accepted claim count, amount, stop reason, and a
+scrubbed failure reason.
+
+CDP's faucet endpoint needs `QA_CDP_API_KEY_ID` and
+`QA_CDP_API_KEY_SECRET`; it does **not** need `CDP_WALLET_SECRET`. Coinbase's
+public documentation does not describe a faucet-only API-key permission, so use
+a dedicated CDP project/key with no wallets or other product configuration and
+reserve it for this workflow. If either secret is absent, the job prints and
+reports `top-up skipped: no CDP credentials`; the relayer row keeps its real
+band, no row becomes `unknown`, and that absence alone never makes the job red.
+
+Manual fallback: send Base Sepolia ETH to the address in
+`QA_DEV_RELAYER_ADDRESS` with the [Alchemy Base Sepolia faucet](https://www.alchemy.com/faucets/base-sepolia)
+or the [Superchain faucet](https://console.optimism.io/faucet). The relayer EOA
+is shared by dev and prod on Base mainnet and Base Sepolia, but a faucet request
+on chain 84532 cannot change its chain 8453 balance. It pays for activations,
+passport attestations, revocations, sweeps, and the outbound queue's fee bumps
+and lane cancels; agent payments are paymaster-sponsored and never use it
 ([`dev-environment.md`](dev-environment.md)). The backend's own low-balance floor
 is 0.01 ETH.
 
-**Operator step (once):** set the repo variable `QA_DEV_RELAYER_ADDRESS`
-(Settings → Secrets and variables → Actions → Variables). Until it is set, the
-relayer row is `unknown` and every run is red.
+**Operator steps (once):**
+
+1. Set the repo variable `QA_DEV_RELAYER_ADDRESS` (Settings → Secrets and
+   variables → Actions → Variables). Until it is set, the relayer row is
+   `unknown` and every run is red.
+2. Create the dedicated CDP project/key described above and add its ID and
+   secret as `QA_CDP_API_KEY_ID` and `QA_CDP_API_KEY_SECRET` Actions secrets.
+   Do not add a Wallet Secret.
+3. With the Base Sepolia relayer below 0.03 ETH, manually dispatch **QA wallet
+   balances** and require a `relayer top-up:` log line plus a post-top-up
+   reading in the run's report before closing the implementation issue.
 
 ## Automation & gating
 

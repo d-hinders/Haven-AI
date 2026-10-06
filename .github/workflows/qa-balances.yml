@@ -8,8 +8,9 @@ name: QA wallet balances
 # standing issue — "QA wallet balances low", label `qa-funding` — open while
 # any wallet is within 7 days of running dry (scripts/ci/qa-balance-issue.mjs).
 #
-# Read-only: it never signs or moves funds, and it deliberately receives no
-# delegate private key. Owner decisions (2026-10-05): a GitHub issue is the
+# Read-only except for testnet faucet requests for the dev relayer: it never
+# signs or moves Haven or customer funds, and receives no delegate private key
+# or CDP wallet secret. Owner decisions (2026-10-05): a GitHub issue is the
 # only channel, once a day, 7 days ahead; Pimlico credit is out of scope.
 #
 # Not a money-path control: it touches neither qa-dev.yml nor qa-freshness.mjs.
@@ -76,6 +77,10 @@ jobs:
           QA_DELEGATION_AGENT_API_KEY: ${{ secrets.QA_DELEGATION_AGENT_API_KEY }}
           QA_DEMO_MERCHANT_URL: ${{ secrets.QA_DEMO_MERCHANT_URL }}
           QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}
+          # API-key auth only. The faucet endpoint does not require a CDP
+          # wallet secret, and this job must never receive one.
+          QA_CDP_API_KEY_ID: ${{ secrets.QA_CDP_API_KEY_ID }}
+          QA_CDP_API_KEY_SECRET: ${{ secrets.QA_CDP_API_KEY_SECRET }}
           # A non-secret repo VARIABLE (owner decision on #3631): the deliberate
           # exception to preflight's "derive, never restate" rule.
           QA_DEV_RELAYER_ADDRESS: ${{ vars.QA_DEV_RELAYER_ADDRESS }}

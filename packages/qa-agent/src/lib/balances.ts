@@ -5,16 +5,17 @@
  * 2026-10-05T06:08Z, about 40 runs) because the delegation treasury ran dry
  * and nothing warned beforehand: the treasury check has only a FAIL floor
  * (one run's cost), and preflight output only reaches a run log. This module
- * is the read-only half of the fix — one row per wallet the QA flows depend
- * on, with a runway in days — and `scripts/ci/qa-balance-issue.mjs` turns the
- * rows into one standing GitHub issue.
+ * is read-only except for the dev relayer's Base Sepolia faucet requests —
+ * one row per wallet the QA flows depend on, with a runway in days — and
+ * `scripts/ci/qa-balance-issue.mjs` turns the rows into one standing issue.
  *
  * Runway comes from OBSERVED burn, not an assumed run rate: the dev relayer is
  * shared with non-QA dev traffic, and retries and run counts vary, so a
  * per-run cost is the wrong denominator. Until {@link MIN_READINGS} daily
  * readings exist, each wallet falls back to a fixed floor and says so.
  *
- * Read-only: nothing here signs or moves funds.
+ * Nothing here signs or moves Haven or customer funds. The caller may request
+ * testnet ETH for the dev relayer between the first reading and final report.
  */
 import { ethers } from 'ethers'
 import { ERC20_BALANCE_ABI, SEPOLIA_USDC, USDC_DECIMALS } from './chain.js'
@@ -44,6 +45,9 @@ export const HISTORY_DAYS = 14
  * edit it (#3631). Keep the two equal.
  */
 export const RELAYER_FALLBACK_FLOOR_WEI = 10_000_000_000_000_000n
+
+/** The automatic faucet target: three times the relayer's 0.01 ETH floor. */
+export const RELAYER_TOPUP_TARGET_WEI = 30_000_000_000_000_000n
 
 /** The treasury's warn floor until enough history exists: 1.0 USDC, ~30 runs. */
 export const TREASURY_FALLBACK_FLOOR_ATOMIC = 1_000_000n
@@ -374,15 +378,30 @@ export interface BalancesReport {
   history: HistoryEntry[]
   /** True when any row is `unknown` for a missing config — the run goes red. */
   configMissing: boolean
+  /** The dev-relayer Base Sepolia faucet outcome, when the CLI evaluated it. */
+  topUp?: {
+    status: 'skipped' | 'attempted'
+    claimsMade: number
+    amountReceivedAtomic: string
+    stopReason:
+      | 'not-needed'
+      | 'missing-credentials'
+      | 'target-requests-complete'
+      | 'claim-cap-reached'
+      | 'rate-limited'
+      | 'faucet-error'
+      | 'run-budget-exhausted'
+    reason?: string
+  }
 }
 
-/** Read every wallet, fold today into the history, and classify. */
-export async function collectBalances(
+export type BalanceReadings = Record<WalletKey, Reading>
+
+/** Read every wallet without writing history, so top-up can precede the final report. */
+export async function collectBalanceReadings(
   src: BalanceSources,
-  history: readonly HistoryEntry[],
-  now: Date = new Date(),
   deadlineMs: number = READ_TIMEOUT_MS,
-): Promise<BalancesReport> {
+): Promise<BalanceReadings> {
   const readers: Record<WalletKey, (s: BalanceSources) => Promise<Reading>> = {
     treasury: readTreasury,
     merchant: readMerchant,
@@ -396,6 +415,15 @@ export async function collectBalances(
     }))
   }
 
+  return readingsByKey
+}
+
+/** Fold one final set of readings into today's history and classify it. */
+export function buildBalancesReport(
+  readingsByKey: BalanceReadings,
+  history: readonly HistoryEntry[],
+  now: Date = new Date(),
+): BalancesReport {
   const today = now.toISOString().slice(0, 10)
   const todays: Partial<Record<WalletKey, bigint>> = {}
   for (const key of WALLET_KEYS) {
@@ -410,4 +438,14 @@ export async function collectBalances(
     history: nextHistory,
     configMissing: rows.some((r) => r.configMissing === true),
   }
+}
+
+/** Read every wallet, fold today into the history, and classify. */
+export async function collectBalances(
+  src: BalanceSources,
+  history: readonly HistoryEntry[],
+  now: Date = new Date(),
+  deadlineMs: number = READ_TIMEOUT_MS,
+): Promise<BalancesReport> {
+  return buildBalancesReport(await collectBalanceReadings(src, deadlineMs), history, now)
 }

@@ -33,7 +33,31 @@ import {
  * per the epic's rule that an entry ships with its destination. The frames
  * are pictures of the product, so their text is fixture data and their
  * controls are non-interactive (`ProductFrame`'s body is `inert`).
+ *
+ * The page opens with the problem the steps answer (#3676): the three points
+ * the home page used to carry, moved here when the home page went
+ * product-first (mockup V17, artifact version `1791276240-c0f5`), in the
+ * home section's `01/02/03` grid. On a tint ground, so the page alternates
+ * navy, tint, white, tint from the hero down.
  */
+
+const PROBLEM_POINTS: ReadonlyArray<{ n: string; title: string; body: string }> = [
+  {
+    n: '01',
+    title: 'Agents hit a paywall and stop',
+    body: 'A per-use fee, an API that needs an account, a checkout. The workflow stalls until someone steps in.',
+  },
+  {
+    n: '02',
+    title: 'Cards and API keys were not built for agents',
+    body: 'Handing them to an agent means unbounded authority and no way to say what it may buy.',
+  },
+  {
+    n: '03',
+    title: 'Nobody can tell which agent bought what',
+    body: 'Finance sees a provider total, attributed to agents in a spreadsheet after the money is gone.',
+  },
+]
 
 /**
  * The one payment walked through in section 4. Scheme-neutral on purpose:
@@ -94,6 +118,31 @@ export function HowItWorksPage() {
           title="From an empty account to an agent that pays for what it needs."
           lede="Five steps. None of them hands anyone your keys."
         />
+
+        <SiteSection ground="tint" id="problem" aria-labelledby="how-problem">
+          <div className="grid grid-cols-1 gap-12 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+            <div>
+              <div className={SITE_TYPE.eyebrow}>The problem, as it shows up</div>
+              <h2 id="how-problem" className={SITE_TYPE.h2}>
+                Autonomy ends at the point of payment.
+              </h2>
+              <p className={`${SITE_TYPE.lede} mt-[18px]`}>
+                Agents plan, browse and call APIs on their own, right up to the moment something costs money.
+              </p>
+            </div>
+            <div className="grid gap-[22px] md:pt-2">
+              {PROBLEM_POINTS.map((point) => (
+                <div key={point.n} className="grid grid-cols-[28px_1fr] gap-4">
+                  <span className={`pt-[5px] text-[12px] text-[var(--v2-ink-3)] ${SITE_TYPE.mono}`}>{point.n}</span>
+                  <div>
+                    <h3 className={`${SITE_TYPE.h3} mb-1.5`}>{point.title}</h3>
+                    <p className="text-[15.5px] text-[var(--v2-ink-2)]">{point.body}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </SiteSection>
 
         <SiteSection aria-labelledby="how-account">
           <SiteSplit>

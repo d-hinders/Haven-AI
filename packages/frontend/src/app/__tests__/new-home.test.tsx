@@ -12,33 +12,22 @@ import { CONNECTOR_TERMINAL } from '../../components/marketing/site/home/fixture
  * the switch-over, #3579): a source-level grep cannot see what a component
  * actually emitted.
  *
- * The mockup is `docs/product/site-mockup/index.html`; the epic's decided
- * deviations are listed on `HomeSections.tsx` and cited per assertion below.
+ * The design source is the mockup's V17 (artifact version `1791276240-c0f5`,
+ * #3676): seven sections in a buyer's order. The epic's decided deviations
+ * are listed on `HomeSections.tsx` and cited per assertion below.
  */
 
-/** The mockup's nine sections in order, by their ids. */
-const SECTION_IDS = [
-  'hero',
-  'problem',
-  'how',
-  'dev',
-  'accounting',
-  'why-now',
-  'enforce',
-  'why-haven',
-  'close',
-]
+/** The mockup's seven sections in order, by their ids (#3676). */
+const SECTION_IDS = ['hero', 'how', 'enforce', 'accounting', 'dev', 'faq', 'close']
 
 /** The mockup's headings, in order, with the decided deviations applied. */
 const HEADINGS_IN_ORDER = [
   'Give your agent a budget, not your credit card.',
-  'Autonomy ends at the point of payment.',
   'Three steps. Your agent pays for what it needs, within a budget you set.',
-  'Bring your own agent. Bring your own harness.',
+  'An agent can only spend what its budget allows.',
   'Every payment appears in your bookkeeping tool.',
-  'The rails for agent payments are being built right now.',
-  'An over-budget payment reverts automatically.',
-  'Any agent. Any rail. Every payment accounted for.',
+  'Bring your own agent. Bring your own harness.',
+  'The things people ask before they sign up.',
   'Give your agent a budget.',
 ]
 
@@ -48,7 +37,7 @@ describe('the new home page (#3574)', () => {
     expect(container.querySelector('h1')?.textContent).toBe('Give your agent a budget, not your credit card.')
   })
 
-  it('renders the nine sections in the mockup’s order', () => {
+  it('renders the seven sections in the mockup’s order', () => {
     const { container } = render(<NewSiteHome />)
     const ids = Array.from(container.querySelectorAll('section[data-site-ground]')).map(
       (section) => section.id,
@@ -209,7 +198,7 @@ describe('the new home page (#3574)', () => {
     // Accounting: the mockup's retry returns the row to Failed — the state
     // the section settles on.
     expect(text).toContain('Fortnox answered 503 · will retry')
-    // Enforcement: the receipt fully assembled, refusal box at the end.
+    // Spending limits: the receipt fully assembled, refusal box at the end.
     expect(text).toContain('Refused: over budget')
     // Budget mini card: settled at the fixture budget, not the animation's
     // 0.00 start.
@@ -222,21 +211,73 @@ describe('the new home page (#3574)', () => {
     const { container } = render(<NewSiteHome />)
     const darkOf = (id: string) =>
       container.querySelector<HTMLElement>(`section[id="${id}"]`)?.hasAttribute('data-v2-dark-section')
+    // Grounds top to bottom: navy, tint, navy, white, navy, white, indigo —
+    // no two dark bands touch (#3676).
     expect(darkOf('hero')).toBe(true)
-    expect(darkOf('problem')).toBe(false)
     expect(darkOf('how')).toBe(false)
-    expect(darkOf('dev')).toBe(true)
-    expect(darkOf('accounting')).toBe(false)
-    expect(darkOf('why-now')).toBe(false)
     expect(darkOf('enforce')).toBe(true)
-    expect(darkOf('why-haven')).toBe(false)
+    expect(darkOf('accounting')).toBe(false)
+    expect(darkOf('dev')).toBe(true)
+    expect(darkOf('faq')).toBe(false)
     expect(darkOf('close')).toBe(true)
+    const grounds = Array.from(container.querySelectorAll('section[data-site-ground]')).map((section) =>
+      section.getAttribute('data-site-ground'),
+    )
+    expect(grounds).toEqual(['navy', 'tint', 'navy', 'white', 'navy', 'white', 'indigo'])
   })
 
-  it('MPP is described as next, never as live (decision 4)', () => {
+  it('MPP is described as next, never as live (decision 4): the home page no longer mentions it', () => {
     const { container } = render(<NewSiteHome />)
     const text = (container.textContent ?? '').replace(/\s+/g, ' ')
-    expect(text).toContain('Stripe’s MPP is next')
-    expect(text).not.toMatch(/MPP gives agents/)
+    expect(text).not.toContain('MPP')
+  })
+
+  it('the spending-limits band says the budget message in plain words (#3676 decision 3)', () => {
+    const { container } = render(<NewSiteHome />)
+    const band = container.querySelector<HTMLElement>('section[id="enforce"]')!
+    const text = (band.textContent ?? '').replace(/\s+/g, ' ')
+    expect(text).toContain('Spending limits')
+    // Scoped to payments from the user's account (copy-guidelines).
+    expect(text).toContain(
+      'Every payment from your account is checked against the agent’s budget before anything is paid. Over the limit, it is refused: nothing is charged, and nothing waits for your approval.',
+    )
+    expect(Array.from(band.querySelectorAll('h3')).map((h) => h.textContent)).toEqual([
+      'Your money stays yours',
+      'The limit holds even if Haven doesn’t',
+      'Change it whenever you like',
+    ])
+    expect(text).toContain(
+      'If an agent’s credential leaks, it still cannot spend your account past its budget.',
+    )
+    expect(text).toContain('Nothing was paid. Nothing is waiting for your approval.')
+    // No chain or mechanism vocabulary in the band, and nothing describes a
+    // refused payment as pending or queued.
+    // Word boundaries: "spending" must not count as "pending".
+    expect(text).not.toMatch(/\bon-chain\b|\brevert|\bexecution\b|\bqueued\b|\bpending\b/i)
+  })
+
+  it('carries the three questions as h3 cards on a white ground (#3676 decision 4)', () => {
+    const { container } = render(<NewSiteHome />)
+    const faq = container.querySelector<HTMLElement>('section[id="faq"]')!
+    expect(faq.getAttribute('data-site-ground')).toBe('white')
+    expect(faq.textContent).toContain('Three questions')
+    const questions = Array.from(faq.querySelectorAll('h3')).map((h) => h.textContent)
+    expect(questions).toEqual([
+      'Do you hold my money?',
+      'Which agents work with Haven?',
+      'What can an agent pay for?',
+    ])
+    const text = (faq.textContent ?? '').replace(/\s+/g, ' ')
+    expect(text).toContain(
+      'No. Funds stay in an account only you control. Haven prepares payments within the budgets you set and cannot move money on its own.',
+    )
+    expect(text).toContain(
+      'Any agent that can run a command: Claude, Codex, Cursor or any other agent harness. One command connects it, and you approve its budget with your passkey.',
+    )
+    expect(text).toContain(
+      'Anything sold over x402 today: APIs, data, compute, paywalled content. Every purchase gets a receipt and lands in your bookkeeping tool.',
+    )
+    // Haven is never the one holding, transferring or relaying.
+    expect(text).not.toMatch(/relay/i)
   })
 })

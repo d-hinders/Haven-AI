@@ -1,5 +1,6 @@
 /**
- * `/` visual regression (#3574): the nine sections of the home page, static.
+ * `/` visual regression (#3574): the seven sections of the home page, static
+ * (#3676 reordered them product-first).
  *
  * Desktop and mobile in the light theme, plus desktop in the dark theme:
  * white and tinted sections and the product frames take their dark forms;
@@ -67,15 +68,13 @@ test.describe('/ (new home) visual regression', () => {
         page.getByRole('heading', { level: 1, name: 'Give your agent a budget, not your credit card.' }),
       ).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
 
-      // The nine sections, in the mockup's order.
+      // The six sections that follow the h1, in the mockup's V17 order (#3676).
       for (const heading of [
-        'Autonomy ends at the point of payment.',
         'Three steps. Your agent pays for what it needs, within a budget you set.',
-        'Bring your own agent. Bring your own harness.',
+        'An agent can only spend what its budget allows.',
         'Every payment appears in your bookkeeping tool.',
-        'The rails for agent payments are being built right now.',
-        'An over-budget payment reverts automatically.',
-        'Any agent. Any rail. Every payment accounted for.',
+        'Bring your own agent. Bring your own harness.',
+        'The things people ask before they sign up.',
         'Give your agent a budget.',
       ]) {
         await expect(page.getByRole('heading', { name: heading })).toHaveCount(1)

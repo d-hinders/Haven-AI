@@ -1457,21 +1457,26 @@ export default function DesignSystemPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => toast.info('Edit agent')}>Edit agent</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => toast.info('Update budget')}>Update budget</DropdownMenuItem>
-                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => toast.info('Manage labels')}>Manage labels</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => toast.info('Payment credentials')}>
                   Payment credentials
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => toast.info('Replace signing key')}>
+                  Replace signing key
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem tone="danger" onSelect={() => toast.error('Remove (demo only)')}>
-                  Remove agent
+                  Remove agent…
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <p className="max-w-md text-xs leading-relaxed text-[var(--v2-ink-3)]">
               Used on `/agents/[id]` and `/accounts/[id]` page headers. Click-outside + Escape dismiss,
               arrow-key roving focus, ARIA roles wired. Use sparingly — visible CTAs are still preferred
-              when there are only one or two actions.
+              when there are only one or two actions. The terminal action (Remove, or Restore once
+              archived) goes last, after a separator, and Remove uses the danger tone. On
+              `/agents/[id]` the frequent state toggle (Pause / Resume) stays a visible button beside the
+              menu, not an item in it.
             </p>
           </div>
         </Card>

@@ -153,6 +153,13 @@ const SAFE = {
   chain_id: 100,
 }
 
+// #3694: Remove, Restore and the rest live in the ⋮ menu. Opens it and
+// returns the item labels in render order — the order is part of the claim.
+function openAgentMenu(): string[] {
+  fireEvent.click(screen.getByRole('button', { name: 'Agent options' }))
+  return screen.getAllByRole('menuitem').map((item) => item.textContent ?? '')
+}
+
 describe('AgentDetailClient last-activity metadata', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -648,21 +655,26 @@ describe('AgentDetailClient last-activity metadata', () => {
     })
   }
 
-  it('routes Update budget to the budget card — NOT EditAgentModal — on a delegation agent', () => {
+  // #3694: the "Update budget" button and menu item only scrolled to the card
+  // below them, so both went. The empty-state "Add budget" keeps the route
+  // until #3695 replaces that empty state.
+  it('routes Add budget to the budget card — NOT EditAgentModal — on a delegation agent', () => {
     mockDelegationAgent()
     const scrollIntoView = vi.fn()
     window.HTMLElement.prototype.scrollIntoView = scrollIntoView
 
     render(<AgentDetailClient agentId="agent-1" />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Update budget' }))
-
-    expect(screen.queryByTestId('edit-agent-modal')).not.toBeInTheDocument()
-    expect(scrollIntoView).toHaveBeenCalled()
-
-    // The empty-state "Add budget" affordance takes the same route.
     fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
     expect(screen.queryByTestId('edit-agent-modal')).not.toBeInTheDocument()
+    expect(scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('offers no Update budget entry point anywhere — button or menu item (#3694)', () => {
+    mockDelegationAgent()
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('button', { name: 'Update budget' })).not.toBeInTheDocument()
+    expect(openAgentMenu()).not.toContain('Update budget')
   })
 
   // ── Backup & recovery pointer, not a second copy (#1089) ────────────────
@@ -793,12 +805,15 @@ describe('AgentDetailClient last-activity metadata', () => {
       expect(
         callout.compareDocumentPosition(budgetCard) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy()
-      // The rules footer no longer implies access fully ended.
+      // The page no longer implies access fully ended.
       expect(screen.queryByText('This agent no longer has access through Haven.')).not.toBeInTheDocument()
-      expect(screen.getByText(/credential is revoked, but its budget is still active/i)).toBeInTheDocument()
+      // #3694: the footer's "credential is revoked, but its budget is still
+      // active" line went with the footer. Its claim is the banner's title,
+      // one element away, so it is asserted there instead of being repeated.
+      expect(callout).toHaveTextContent(/its budget is still active/i)
     })
 
-    it('revoked + count 0: unchanged — no callout, the old footer line stands', () => {
+    it('revoked + count 0: no callout, the retired status line stands (moved under the header, #3694)', () => {
       mockAgentWith({ status: 'revoked', live_delegation_count: 0 })
       render(<AgentDetailClient agentId="agent-1" />)
       expect(screen.queryByTestId('half-revoked-callout')).not.toBeInTheDocument()
@@ -821,7 +836,7 @@ describe('AgentDetailClient last-activity metadata', () => {
       render(<AgentDetailClient agentId="agent-1" />)
       expect(screen.getByTestId('half-revoked-callout')).toHaveTextContent(MARKER)
       expect(screen.getByRole('button', { name: 'Finish revoking' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
+      expect(openAgentMenu()).toContain('Restore to list')
     })
 
     it('an unlinked agent gets the callout and NO action', () => {
@@ -861,7 +876,8 @@ describe('AgentDetailClient last-activity metadata', () => {
     it('plain Remove still lands on /agents after archiving (#1402, unchanged)', async () => {
       mockAgentWith({})
       render(<AgentDetailClient agentId="agent-1" />)
-      fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+      openAgentMenu()
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Remove agent…' }))
       expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('remove')
       fireEvent.click(screen.getByRole('button', { name: 'stub: archive' }))
       await vi.waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith('/agents'))
@@ -871,8 +887,9 @@ describe('AgentDetailClient last-activity metadata', () => {
   it('shows Remove agent for an operational delegation agent, never Restore (#1402)', () => {
     mockAgentWith({})
     render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('button', { name: 'Remove agent' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Restore to list' })).not.toBeInTheDocument()
+    const items = openAgentMenu()
+    expect(items).toContain('Remove agent…')
+    expect(items).not.toContain('Restore to list')
   })
 
   /**
@@ -897,16 +914,18 @@ describe('AgentDetailClient last-activity metadata', () => {
   it('an archived agent gets Restore to list and no Remove (#1402)', () => {
     mockAgentWith({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
     render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
+    const items = openAgentMenu()
+    expect(items).not.toContain('Remove agent…')
+    expect(items).toContain('Restore to list')
   })
 
   it('offers Restore to list for an archived legacy record without adding authority (#2258)', () => {
     mockAgentWith({ account_type: undefined, status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
     render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Unlink agent' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
+    const items = openAgentMenu()
+    expect(items).toContain('Restore to list')
+    expect(items).not.toContain('Unlink agent')
+    expect(items).not.toContain('Remove agent…')
   })
 
   // #3549: every page-level "Update/Add budget" scrolls to the card; on a
@@ -920,12 +939,13 @@ describe('AgentDetailClient last-activity metadata', () => {
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.queryByRole('button', { name: 'Update budget' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add budget' })).not.toBeInTheDocument()
+    expect(openAgentMenu()).not.toContain('Update budget')
   })
 
-  it('the same agent un-archived still offers Update budget (#3549 control)', () => {
+  it('the same agent un-archived still offers Add budget (#3549 control)', () => {
     mockAgentWith({ account_id: null, status: 'active', archived_at: null })
     render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getAllByRole('button', { name: /Update budget|Add budget/ }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Add budget' })).toBeInTheDocument()
   })
 
   // #3549: the card hides set/edit/issue-sub-budget for a retired agent — the
@@ -945,7 +965,10 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(budgetCardRetired.at(-1)).toBe(expected)
   })
 
-  it('double-clicking Restore fires unarchive ONCE — pendingAction guards it (#1402)', async () => {
+  // #3694: Restore moved into the ⋮ menu, which closes on select. A second
+  // Restore therefore needs the menu reopened, and pendingAction disables the
+  // trigger while the first is in flight — the same guard, one control up.
+  it('a second Restore cannot fire while the first is in flight — pendingAction guards it (#1402)', async () => {
     let release!: () => void
     const unarchiveAgent = vi.fn(
       () => new Promise<void>((resolve) => { release = resolve }),
@@ -953,12 +976,163 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockAgentWith({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
     mockUseAgents.mockReturnValue({ ...mockUseAgents(), unarchiveAgent })
     render(<AgentDetailClient agentId="agent-1" />)
-    const restore = screen.getByRole('button', { name: 'Restore to list' })
-    fireEvent.click(restore)
-    fireEvent.click(restore)
+    openAgentMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Restore to list' }))
+    const trigger = screen.getByRole('button', { name: 'Agent options' })
+    expect(trigger).toBeDisabled()
+    fireEvent.click(trigger)
+    expect(screen.queryByRole('menuitem', { name: 'Restore to list' })).not.toBeInTheDocument()
     release()
     await Promise.resolve()
     expect(unarchiveAgent).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * #3694: the per-state action matrix. Every state keeps a terminal action
+   * in the ⋮ menu — Remove, or Restore once archived — and Pause/Resume sit in
+   * the header only for a live, un-archived agent. Archived dominates: the
+   * archived-unlinked shape is still `active` (ARCHIVE_AGENT_SQL lets an
+   * unlinked agent be archived unrevoked) and must not be offered Pause or
+   * Remove. The menu order is asserted whole, so a reorder or a stray item
+   * fails here.
+   */
+  const ARCHIVED_AT = '2026-06-01T00:00:00Z'
+  it.each([
+    ['active', { status: 'active' }, 'Pause agent',
+      ['Edit agent', 'Manage labels', 'Payment credentials', 'Replace signing key', 'Remove agent…']],
+    ['paused', { status: 'paused' }, 'Resume agent',
+      ['Edit agent', 'Manage labels', 'Payment credentials', 'Replace signing key', 'Remove agent…']],
+    ['pending_approval', { status: 'pending_approval' }, null,
+      ['Edit agent', 'Manage labels', 'Payment credentials', 'Replace signing key', 'Remove agent…']],
+    ['revoked', { status: 'revoked', live_delegation_count: 0 }, null,
+      ['Remove agent…']],
+    ['half-revoked', { status: 'revoked', live_delegation_count: 1 }, null,
+      ['Remove agent…']],
+    ['archived', { status: 'revoked', archived_at: ARCHIVED_AT }, null,
+      ['Restore to list']],
+    ['archived-unlinked', { status: 'active', account_id: null, archived_at: ARCHIVED_AT }, null,
+      ['Edit agent', 'Manage labels', 'Restore to list']],
+  ] as const)('action matrix — %s (#3694)', (_state, overrides, headerAction, menuItems) => {
+    mockAgentWith(overrides)
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    for (const name of ['Pause agent', 'Resume agent'] as const) {
+      if (name === headerAction) {
+        expect(screen.getByRole('button', { name })).toBeInTheDocument()
+      } else {
+        expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
+      }
+    }
+    // No terminal action survives outside the menu (the old footer).
+    expect(screen.queryByRole('button', { name: /^Remove agent/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Restore to list' })).not.toBeInTheDocument()
+
+    expect(openAgentMenu()).toEqual([...menuItems])
+  })
+
+  it('styles Remove agent as the danger item, last, after a separator (#3694)', () => {
+    mockAgentWith({})
+    render(<AgentDetailClient agentId="agent-1" />)
+    openAgentMenu()
+    const menu = screen.getByRole('menu')
+    const last = menu.lastElementChild as HTMLElement
+    expect(last).toHaveTextContent('Remove agent…')
+    expect(last.className).toContain('text-[var(--v2-danger)]')
+    expect(last.previousElementSibling).toHaveAttribute('role', 'separator')
+  })
+
+  it('Pause in the header pauses; Resume in the header resumes (#3694)', () => {
+    const pauseAgent = vi.fn().mockResolvedValue(undefined)
+    const resumeAgent = vi.fn().mockResolvedValue(undefined)
+
+    mockAgentWith({ status: 'active' })
+    mockUseAgents.mockReturnValue({ ...mockUseAgents(), pauseAgent, resumeAgent })
+    const { unmount } = render(<AgentDetailClient agentId="agent-1" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Pause agent' }))
+    expect(pauseAgent).toHaveBeenCalledWith('agent-1')
+    unmount()
+
+    mockAgentWith({ status: 'paused' })
+    mockUseAgents.mockReturnValue({ ...mockUseAgents(), pauseAgent, resumeAgent })
+    render(<AgentDetailClient agentId="agent-1" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Resume agent' }))
+    expect(resumeAgent).toHaveBeenCalledWith('agent-1')
+  })
+
+  it('renders Pause and Resume inside the page header (#3694)', () => {
+    mockAgentWith({ status: 'active' })
+    const { unmount } = render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('banner')).toContainElement(screen.getByRole('button', { name: 'Pause agent' }))
+    unmount()
+    mockAgentWith({ status: 'paused' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('banner')).toContainElement(screen.getByRole('button', { name: 'Resume agent' }))
+  })
+
+  describe('banner slot (#3694)', () => {
+    const RECOVERABLE = {
+      balance: {
+        delegate_address: '0x2222222222222222222222222222222222222222',
+        account_address: SAFE.account_address,
+        chain_id: 8453,
+        eth: '0',
+        eth_atomic: '0',
+        usdc: '8.00',
+        usdc_atomic: '8000000',
+        usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
+      },
+      hasStranded: true,
+      hasRecoverableUsdc: true,
+      hasBelowMinimumUsdc: false,
+      loading: false,
+      refetch: vi.fn(),
+    }
+
+    function slotOrder(): string[] {
+      const slot = screen.getByTestId('agent-banner-slot')
+      const markers: Array<[string, HTMLElement | null]> = [
+        ['half-revoked', screen.queryByTestId('half-revoked-callout')],
+        ['refresh-error', screen.queryByText(/Agent data could not refresh/)],
+        ['paused', screen.queryByRole('heading', { name: AGENT_PAUSED_TITLE })],
+        ['recoverable', screen.queryByText('Recoverable funds in agent wallet')],
+      ]
+      return markers
+        .filter(([, el]) => el !== null)
+        .map(([name, el]) => {
+          expect(slot).toContainElement(el)
+          return [name, el] as const
+        })
+        .sort(([, a], [, b]) => (a!.compareDocumentPosition(b!) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+        .map(([name]) => name)
+    }
+
+    it('stacks paused above recoverable funds, both in the one slot under the header', () => {
+      mockAgentWith({ status: 'paused' })
+      mockUseDelegateBalance.mockReturnValue(RECOVERABLE)
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(slotOrder()).toEqual(['paused', 'recoverable'])
+      // The slot sits before the budget card: banners lead the page.
+      const slot = screen.getByTestId('agent-banner-slot')
+      expect(
+        slot.compareDocumentPosition(screen.getByText('DelegationBudgetCard')) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    })
+
+    it('puts the refresh-error alert after half-revoked and before paused', () => {
+      mockAgentWith({ status: 'revoked', live_delegation_count: 1 })
+      mockUseAgents.mockReturnValue({ ...mockUseAgents(), error: new Error('offline') })
+      mockUseDelegateBalance.mockReturnValue(RECOVERABLE)
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(slotOrder()).toEqual(['half-revoked', 'refresh-error', 'recoverable'])
+    })
+
+    it('renders the refresh-error alert in the slot for a paused agent too', () => {
+      mockAgentWith({ status: 'paused' })
+      mockUseAgents.mockReturnValue({ ...mockUseAgents(), error: new Error('offline') })
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(slotOrder()).toEqual(['refresh-error', 'paused'])
+    })
   })
 })
 

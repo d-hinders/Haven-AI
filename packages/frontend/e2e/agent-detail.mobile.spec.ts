@@ -36,7 +36,7 @@
  *   "Recipient address" is asserted present so the fix cannot regress into a
  *   re-truncating long placeholder unnoticed... the scrollWidth comparison is
  *   the real instrument; the text pin only names the field.
- * - **≥44px targets:** the three footer actions and the kebab trigger, via
+ * - **≥44px targets:** the header's Pause button and the kebab trigger, via
  *   `getBoundingClientRect` — these controls have no vertical `::after`
  *   overlay to inherit (the kebab does, via `min-h-11 min-w-11`), so the
  *   painted box IS the target and must clear the floor outright.
@@ -238,8 +238,9 @@ test.describe('agent detail at 390px (#2733)', () => {
     ).toBe(false)
 
     // ── 4. Actions row and kebab clear the 44px floor ──────────────────────
-    // Two mechanisms, matching the design system (#1726): the three labelled
-    // footer actions are `sm` Buttons — 36px PAINTED with a transparent
+    // Two mechanisms, matching the design system (#1726): the header's Pause
+    // action (#3694 moved it out of the old rules footer, with Update budget
+    // deleted and Remove moved into the kebab) is an `sm` Button — 36px PAINTED with a transparent
     // `::after` overlay extending the HIT target to 44px vertically — so they
     // are measured the `accounts-card-tap-target` way (walk outward from the
     // centre until elementFromPoint leaves the control). The kebab is an icon
@@ -269,10 +270,11 @@ test.describe('agent detail at 390px (#2733)', () => {
         return { painted: b.height, hit: walk(0, -1) + walk(0, 1) + 1 }
       }, name)
 
-    for (const name of ['Update budget', 'Pause agent', 'Remove agent'] as const) {
-      // elementFromPoint is viewport-relative: the actions row sits far below
-      // the 844px fold, so each target is scrolled into view before the walk
-      // or the probe reports a phantom 1px target.
+    for (const name of ['Pause agent'] as const) {
+      // elementFromPoint is viewport-relative, so each target is scrolled into
+      // view before the walk or the probe reports a phantom 1px target. (The
+      // header sits at the top today; the scroll keeps the probe honest if it
+      // ever moves.)
       await page.getByRole('button', { name, exact: true }).scrollIntoViewIfNeeded()
       const t = await hitHeight(name)
       expect(
@@ -289,31 +291,34 @@ test.describe('agent detail at 390px (#2733)', () => {
     expect(kebabBox!.height).toBeGreaterThanOrEqual(TOUCH_TARGET_FLOOR)
     expect(kebabBox!.width).toBeGreaterThanOrEqual(TOUCH_TARGET_FLOOR)
 
-    // ── 4b. The kebab shares the title's row (#2821) ───────────────────────
-    // Below `sm` the header used to stack, and the actions slot on this page
-    // usually holds the kebab ALONE — the badge beside it renders `null` while
-    // the agent is active — so a lone bordered icon sat on its own line,
-    // left-aligned, belonging visually to nothing.
+    // ── 4b. Pause and the kebab share one row under the title (#2821, #3694) ─
+    // #2821 put a LONE kebab on the title's row, because a single icon on its
+    // own stacked line belonged visually to nothing. #3694 put Pause beside it,
+    // and two controls are the case #2821 says want the default stacking: on
+    // the title's row they would squeeze a 342px title to ~170px. So the claim
+    // moves with the design — the two controls read as one group, on one row,
+    // below the title rather than competing with it.
     //
-    // Asserted as a vertical OVERLAP with the H1's box, not as "same y": the
-    // two have different heights and are aligned to the top of the row, so an
-    // equality would pin a coincidence. Overlap is the claim — they are on one
-    // row — and it fails the moment the header stacks again.
+    // Overlap, not "same y", for the reason #2821 gave: the two boxes have
+    // different heights, so an equality would pin a coincidence.
     const titleBox = await page
       .getByRole('heading', { name: 'Research agent', exact: true })
       .boundingBox()
     expect(titleBox, 'the agent title rendered').not.toBeNull()
+    const pauseBox = await page.getByRole('button', { name: 'Pause agent', exact: true }).boundingBox()
+    expect(pauseBox, 'the header Pause action rendered').not.toBeNull()
     const overlaps =
-      titleBox!.y < kebabBox!.y + kebabBox!.height && kebabBox!.y < titleBox!.y + titleBox!.height
+      pauseBox!.y < kebabBox!.y + kebabBox!.height && kebabBox!.y < pauseBox!.y + pauseBox!.height
     expect(
       overlaps,
       `kebab at y=${Math.round(kebabBox!.y)}..${Math.round(kebabBox!.y + kebabBox!.height)} ` +
-        `must share a row with the title at y=${Math.round(titleBox!.y)}..` +
-        `${Math.round(titleBox!.y + titleBox!.height)}`,
+        `must share a row with Pause at y=${Math.round(pauseBox!.y)}..` +
+        `${Math.round(pauseBox!.y + pauseBox!.height)}`,
     ).toBe(true)
-    // ...and to the RIGHT of it, so "shares a row" cannot be satisfied by the
-    // two overlapping in the same column.
-    expect(kebabBox!.x).toBeGreaterThan(titleBox!.x)
+    // ...to its RIGHT, so "shares a row" cannot be met by stacking in a column...
+    expect(kebabBox!.x).toBeGreaterThan(pauseBox!.x)
+    // ...and the pair sits below the title, leaving the title the full width.
+    expect(pauseBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height)
 
     // ── 4c. The budget leads the first screen, and desktop does not ────────
     // The reorder is #2821's headline change and had NO coverage: removing

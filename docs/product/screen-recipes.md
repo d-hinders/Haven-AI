@@ -452,10 +452,12 @@ done, and how to stop it (#3691, epic). Sections, in order:
    exists, adding another is a collapsed affordance (an Add budget
    control in the card), never a permanent second form rendering by default — unless
    `?grant=` asks for the form, in which case it opens expanded.
-5. Recent activity — heading and description above the card, payments-only
-   rows (`TransactionsTable` in card variant), empty state
-   "No activity yet".
-6. MCP tool calls, if the agent has any.
+5. Activity — heading and description above the card, payments-only rows
+   (`TransactionsTable` in card variant), empty state "No activity yet". The
+   header's right side carries the counts summary — "{n} today · {m} all
+   time · View in Transactions", the link to `/transactions?agentId={id}` —
+   in place of stat cards (#3696). MCP tool calls, if the agent has any,
+   render directly under the table as part of this section.
 
 Money and risk clarity:
 - The budget section leads: it is the reason to open an agent at all. The

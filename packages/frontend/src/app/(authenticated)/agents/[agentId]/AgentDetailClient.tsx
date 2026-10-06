@@ -4,6 +4,7 @@ import { ArrowRight, EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents } from '@/hooks/useAgents'
 import {
@@ -241,36 +242,18 @@ function McpToolCallsPanel({
   )
 }
 
-function StatBlock({
-  label,
-  value,
-  helper,
-}: {
-  label: string
-  value: string
-  helper?: string
-}) {
-  return (
-    <Card hover={false} className="p-4">
-      <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
-      <p className="mt-3 text-2xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">{value}</p>
-      {helper ? <p className="mt-2 text-xs text-[var(--v2-ink-2)]">{helper}</p> : null}
-    </Card>
-  )
-}
-
 interface Props {
   agentId: string
 }
 
 /**
- * Anchor for the "Recent activity" section (#2196), mirroring
+ * Anchor for the "Activity" section (#2196), mirroring
  * `DELEGATION_BUDGET_CARD_ID`'s scroll-don't-open pattern in this same file.
  *
  * **What this link claims, and what it deliberately does not.** The
  * recoverable-funds banner sits near the top of the page; the rows that carry
- * the `Needs attention` badge are ~1200px below it at 1280, past two stat
- * cards, the passport card and the whole budget card. Nothing connected them.
+ * the `Needs attention` badge are ~1200px below it at 1280, past the passport
+ * card and the whole budget card. Nothing connected them.
  *
  * The connection drawn here is NAVIGATIONAL — "the payments this warning is
  * about are down there, and there are N of them". It is NOT attributive, and
@@ -325,6 +308,17 @@ export default function AgentDetailClient({ agentId }: Props) {
     }
   }, [chainId])
   const { activity, stats, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
+
+  // #3696: the figures the former stat cards showed, now read as the summary
+  // line on the Activity section header. Same `stats` source — all_time/today
+  // rows are per-token aggregates, so tx_count is summed across them; 0 until
+  // the stats response lands (the cards rendered '0' the same way).
+  const allTimeTransactions = stats
+    ? stats.all_time.reduce((sum, item) => sum + item.tx_count, 0)
+    : 0
+  const todayTransactions = stats
+    ? stats.today.reduce((sum, item) => sum + item.tx_count, 0)
+    : 0
   const unsettledPayments = useMemo(
     () => activity
       .filter(isPaymentActivityItem)
@@ -852,28 +846,18 @@ export default function AgentDetailClient({ agentId }: Props) {
           ) : null}
       </>
 
-      {/* #2106: the third tile was "Pending approvals", fed by a backend
-          constant of 0 (`routes/agent-activity.ts` — "pending approvals are
-          structurally zero — the queue died with the AllowanceModule rail").
-          Rendered as a counter it told the user a queue exists and happens to
-          be empty; on the delegation rail no queue exists at all — an
-          out-of-budget payment REVERTS on-chain, it is never held for
-          approval. A tile that can only ever read 0 is removed rather than
-          re-labelled. The wire field survives per the #2055 compatibility
-          convention; nothing in the UI reads it. */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <StatBlock
-          label="All-time transactions"
-          value={stats ? String(stats.all_time.reduce((sum, item) => sum + item.tx_count, 0)) : '0'}
-          helper="Confirmed agent payments"
-        />
-        <StatBlock
-          label="Today"
-          value={stats ? String(stats.today.reduce((sum, item) => sum + item.tx_count, 0)) : '0'}
-          helper="Payments started today"
-        />
-      </div>
-
+      {/* #3696: the two stat cards ("All-time transactions" / "Today") are
+          gone — their figures read as the summary line on the Activity section
+          header below. #2106 already removed the third tile: the
+          "Pending approvals" counter was fed by a backend constant of 0
+          (`routes/agent-activity.ts` — "pending approvals are structurally
+          zero — the queue died with the AllowanceModule rail"). Rendered as a
+          counter it told the user a queue exists and happens to be empty; on
+          the delegation rail no queue exists at all — an out-of-budget payment
+          REVERTS on-chain, it is never held for approval. A tile that can only
+          ever read 0 is removed rather than re-labelled. The wire field
+          survives per the #2055 compatibility convention; nothing in the UI
+          reads it. */}
       <AgentPassportCard
         agentId={agentId}
         agentRevoked={isRevoked}
@@ -926,12 +910,26 @@ export default function AgentDetailClient({ agentId }: Props) {
           ) : null}
 
           <div id={AGENT_ACTIVITY_SECTION_ID} className="scroll-mt-24">
-            <div className="mb-4">
-              <h2 className="text-base font-semibold text-[var(--v2-ink)]">Recent activity</h2>
-              {/* #2120: was "Payments and approval requests from this agent." This list
-                  has been payments-only since #2055 removed the approval feed entries,
-                  so the subtitle promised a row kind the section can never show. */}
-              <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Payments made by this agent.</p>
+            {/* #3696: the section header carries the counts the stat cards
+                used to show. The `stats` source is unchanged — all_time/today
+                are per-token aggregates, so tx_count is summed across them. */}
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+              <div>
+                <h2 className="text-base font-semibold text-[var(--v2-ink)]">Activity</h2>
+                {/* #2120: was "Payments and approval requests from this agent." This list
+                    has been payments-only since #2055 removed the approval feed entries,
+                    so the subtitle promised a row kind the section can never show. */}
+                <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Payments made by this agent.</p>
+              </div>
+              <p className="text-sm text-[var(--v2-ink-3)] v2-tabular">
+                {todayTransactions} today · {allTimeTransactions} all time ·{' '}
+                <Link
+                  href={`/transactions?agentId=${agentId}`}
+                  className="font-medium text-[var(--v2-ink)] underline decoration-[var(--v2-divider)] underline-offset-4 hover:decoration-[var(--v2-ink)]"
+                >
+                  View in Transactions
+                </Link>
+              </p>
             </div>
             <Card hover={false}>
               <TransactionsTable
@@ -951,12 +949,17 @@ export default function AgentDetailClient({ agentId }: Props) {
                 }}
               />
             </Card>
-          </div>
 
-          <McpToolCallsPanel
-            items={activity.filter(isMcpToolCallActivityItem)}
-            loading={activityLoading}
-          />
+            {/* #3696: the panel is part of the Activity section — directly
+                under the table — rather than a sibling of it. Its audit-trail
+                wording is unchanged. */}
+            <div className="mt-6">
+              <McpToolCallsPanel
+                items={activity.filter(isMcpToolCallActivityItem)}
+                loading={activityLoading}
+              />
+            </div>
+          </div>
 
       </div>
 

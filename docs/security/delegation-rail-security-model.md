@@ -2344,3 +2344,25 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > a verbatim copy of a value it neither computes nor validates. The rest of
 > this document was not re-read for it, and `last-verified` is not bumped.
 
+> **#3597 (2026-10-02).** This diff touches one file in this document's
+> coverage list, `packages/backend/src/middleware/owner-cli.ts` —
+> `OWNER_CLI_ALLOWED_ROUTES` gains two entries for the CLI feedback channel:
+> `POST /feedback` (writes one row under the caller's own `user_id`; no
+> delegation, no agent, no account authority) and `GET
+> /accounts/hybrid/{address}/signers` — the FIRST signer-set READ this
+> allow-list has ever granted an owner_cli session (`GET
+> /agents/{id}/account-signers`, the agent-scoped twin, is NOT on the list).
+> It returns the owner's account address, chain_id, `owner_address` and each
+> passkey's `key_id`/`x`/`y`/`created_at` — public key material only,
+> ownership-scoped by `user_id` (`resolveOwnedHybridAccount`) — nothing
+> secret, no signer-set CHANGE. Neither entry grants a SIGNATURE step,
+> a key rotation, a signer-set write, a delegation activation or anything
+> that moves funds — the `owner-cli-route-census.test.ts` independent-opinion
+> check (the `forbidden` pattern list, including the `^/accounts` and
+> `signers?` patterns this file's own comment names) still refuses every
+> authority-shaped path by construction; the new GET survives it only
+> through a named, commented exemption for this one read. No signature, key,
+> delegation graph, caveat enforcer or on-chain redemption path changes. The
+> rest of this document was not re-read for it, and `last-verified` is not
+> bumped.
+

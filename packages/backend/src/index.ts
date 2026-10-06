@@ -10,6 +10,7 @@ import rateLimit from '@fastify/rate-limit'
 import { rateLimitKeyFor } from './middleware/rate-limit.js'
 import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware/shared-rate-limit-store.js'
 import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
+import { deleteExpiredFeedback } from './infra/repositories/feedback.js'
 import { probeDatabase } from './infra/repositories/health-probe.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
@@ -67,6 +68,7 @@ import {
 import passportVerifyRoutes from './routes/passport-verify.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
+import feedbackRoutes from './routes/feedback.js'
 import paymentRoutes from './routes/payments.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
@@ -298,6 +300,10 @@ installRequestValidation(app, {
     // 404 from an onRequest hook when ops is unconfigured, so validation never
     // runs on a backend that does not serve the console.
     'routes/ops.ts',
+    // #3597: `routes/feedback.ts` is a BRAND NEW module with no live caller
+    // yet — born ENFORCED, same rule as `routes/receive.ts` / `routes/ops.ts`
+    // above (no existing caller a stricter schema could break).
+    'routes/feedback.ts',
   ],
 })
 
@@ -535,6 +541,7 @@ await app.register(agentOrganizationRoutes, { prefix: '/organizations' })
 await app.register(passportVerifyRoutes, { prefix: '/passport' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
+await app.register(feedbackRoutes, { prefix: '/feedback' })
 await app.register(paymentRoutes, { prefix: '/payments' })
 // #2055: /approvals is deregistered — the approval queue died with the
 // AllowanceModule rail and its table is dropped; the routes went with it.
@@ -630,6 +637,14 @@ async function sendCatalogOpsAlert(text: string): Promise<'delivered' | 'failed'
  * table small without adding a chatty query to a busy database.
  */
 const RATE_LIMIT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+/**
+ * #3597: same reasoning as the rate-limit sweep immediately above — every
+ * read already filters `expires_at > NOW()`, so a late run only costs dead
+ * rows, never a wrong read. Feedback volume is far lower than rate-limit
+ * counters (one submission per CLI call, rate-limited per user), so there is
+ * no pressure to run this more often.
+ */
+const FEEDBACK_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 const DELEGATE_MONITOR_INTERVAL_MS = 60 * 60 * 1000 // hourly (#714)
 // Every 5 minutes, not hourly: this sweep carries revocation reconciliation,
 // and the backoff schedule it drives starts at 30s. An hourly tick would flatten
@@ -741,6 +756,22 @@ const start = async () => {
     }
     void runRateLimitSweep()
     setInterval(runRateLimitSweep, RATE_LIMIT_SWEEP_INTERVAL_MS).unref()
+
+    // Expired feedback rows (#3597): nothing else removes them. Leader-gated
+    // like every tick here; a missed run only leaves dead rows, never a wrong
+    // read, because every reader filters `expires_at > NOW()` itself.
+    const runFeedbackSweep = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.feedbackSweep, async () => {
+          const deleted = await deleteExpiredFeedback()
+          if (deleted > 0) app.log.debug({ deleted }, 'Swept expired feedback rows')
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Feedback sweep failed')
+      }
+    }
+    void runFeedbackSweep()
+    setInterval(runFeedbackSweep, FEEDBACK_SWEEP_INTERVAL_MS).unref()
 
     // Delegate balance monitor (#714): hourly read-only scan of every active
     // agent's delegate USDC balance — WARNs on lingering (sweepable) balances

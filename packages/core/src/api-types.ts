@@ -3387,6 +3387,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit feedback or a bug report from the CLI.
+         * @description `haven feedback submit "<text>"` (#3597). User JWT only — no agent API key, no anonymous caller. Retention is 7 days; there is no reader route yet (the founders-only ops console read is #3602). The backend re-runs the CLI's own secret-check layers 1 (labelled secrets), 3 (key-backed-address derivation, against this database) and 4 (recovery phrases) before writing, and refuses with `text_refused` + a `reason` when one matches — the CLI's own check already refuses before sending, so this is the backstop for a caller that bypasses it.
+         */
+        post: operations["submitFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/contacts/{id}": {
         parameters: {
             query?: never;
@@ -3713,6 +3733,17 @@ export type components = {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        Feedback: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Retention is 7 days from `created_at` (#3597).
+             */
+            expires_at: string;
         };
         CatalogEntryMerchant: {
             /** Format: uuid */
@@ -21556,6 +21587,62 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    submitFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    text: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Stored. The response never echoes the text back. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Feedback"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

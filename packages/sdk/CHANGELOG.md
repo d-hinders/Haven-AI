@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **The bundled agent runbook's "If something breaks" section names `haven feedback submit "<text>"` (#3597).** It needs `haven login`, and the sentence repeats the rule never to put a credential in that text. Text-only addition to the copy `haven guide` / `/for-agents.md` serve; no SDK method, no API change. No update needed.
+
 ## 0.8.0-alpha.0 — 2026-10-05
 
 ### Fixed

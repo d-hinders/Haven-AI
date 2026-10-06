@@ -226,7 +226,7 @@ describe('the new home page (#3574)', () => {
     expect(grounds).toEqual(['navy', 'tint', 'navy', 'white', 'navy', 'white', 'indigo'])
   })
 
-  it('MPP is described as next, never as live (decision 4): the home page no longer mentions it', () => {
+  it('the home page no longer mentions MPP, so it cannot describe it as live (decision 4)', () => {
     const { container } = render(<NewSiteHome />)
     const text = (container.textContent ?? '').replace(/\s+/g, ' ')
     expect(text).not.toContain('MPP')

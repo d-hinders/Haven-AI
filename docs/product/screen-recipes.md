@@ -449,8 +449,8 @@ done, and how to stop it (#3691, epic). Sections, in order:
    rows and `Card.Section` dividers, with each row measured by `BudgetMeter`.
    **Add budget is collapsed once a budget exists**: with no budget the card
    is an empty state whose explicit action is Add budget; once a budget
-   exists, adding another is a collapsed affordance (Update budget in the
-   card / kebab), never a permanent second form rendering by default — unless
+   exists, adding another is a collapsed affordance (an Add budget
+   control in the card), never a permanent second form rendering by default — unless
    `?grant=` asks for the form, in which case it opens expanded.
 5. Recent activity — heading and description above the card, payments-only
    rows (`TransactionsTable` in card variant), empty state

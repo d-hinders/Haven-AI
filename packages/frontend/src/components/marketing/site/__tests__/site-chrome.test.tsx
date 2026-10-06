@@ -51,6 +51,59 @@ describe('header entries', () => {
     expect(within(cta).getByText('Create your account').className).toContain('hidden sm:inline')
   })
 
+  it('discloses the nav on phones from a menu button (#3579)', async () => {
+    render(<Header />)
+    const button = screen.getByRole('button', { name: 'Open menu' })
+    // Phones only: the inline nav takes over from `md`.
+    expect(button.className).toContain('md:hidden')
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('navigation', { name: 'Menu' })).toBeNull()
+
+    await act(async () => button.click())
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(button).toHaveAccessibleName('Close menu')
+    const menu = screen.getByRole('navigation', { name: 'Menu' })
+    expect(button).toHaveAttribute('aria-controls', menu.id)
+    expect(menu.className).toContain('md:hidden')
+    // The same entries as the inline nav, from the one list.
+    expect(
+      within(menu)
+        .getAllByRole('link')
+        .map((a) => [a.textContent, a.getAttribute('href')]),
+    ).toEqual(SITE_NAV.map((item) => [item.label, item.href]))
+
+    // Following an entry closes it.
+    await act(async () => within(menu).getByRole('link', { name: 'For agents' }).click())
+    expect(screen.queryByRole('navigation', { name: 'Menu' })).toBeNull()
+  })
+
+  it('closes the phone menu on Escape, returning focus, and on a press outside', async () => {
+    render(<Header />)
+    const button = screen.getByRole('button', { name: 'Open menu' })
+
+    await act(async () => button.click())
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    })
+    expect(screen.queryByRole('navigation', { name: 'Menu' })).toBeNull()
+    expect(document.activeElement).toBe(button)
+
+    await act(async () => button.click())
+    expect(screen.getByRole('navigation', { name: 'Menu' })).toBeInTheDocument()
+    await act(async () => {
+      document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    })
+    expect(screen.queryByRole('navigation', { name: 'Menu' })).toBeNull()
+
+    // A press inside the header (the panel itself) does not close it.
+    await act(async () => button.click())
+    const menu = screen.getByRole('navigation', { name: 'Menu' })
+    await act(async () => {
+      menu.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    })
+    expect(screen.getByRole('navigation', { name: 'Menu' })).toBeInTheDocument()
+  })
+
   it('keeps the installed-app safe-area band as the header’s first child (#2819)', () => {
     render(<Header />)
     const header = document.querySelector('[data-site-header]')!

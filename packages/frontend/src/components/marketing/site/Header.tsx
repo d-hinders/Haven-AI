@@ -1,8 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { Menu, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { Icon } from '@/components/ui/Icon'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { SITE_FONT_VARIABLES } from './fonts'
 import { SITE_WRAP } from './SiteSection'
@@ -62,6 +64,9 @@ function readTone(): 'dark' | 'light' {
  */
 export function Header({ overlay = false }: { overlay?: boolean }) {
   const [tone, setTone] = useState<'dark' | 'light'>('light')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const headerRef = useRef<HTMLElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     const update = () => setTone(readTone())
@@ -74,6 +79,34 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
     }
   }, [])
 
+  // The phone menu is a disclosure, not a dialog: no focus trap, nothing
+  // behind it made inert. It closes on Escape (focus back to its button), on
+  // a press outside the header, and once the viewport is wide enough for the
+  // inline nav to show again.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setMenuOpen(false)
+      menuButtonRef.current?.focus()
+    }
+    const onPointer = (event: PointerEvent) => {
+      if (!headerRef.current?.contains(event.target as Node)) setMenuOpen(false)
+    }
+    const wide = window.matchMedia?.('(min-width: 768px)')
+    const onWide = () => {
+      if (wide?.matches) setMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointer)
+    wide?.addEventListener?.('change', onWide)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointer)
+      wide?.removeEventListener?.('change', onWide)
+    }
+  }, [menuOpen])
+
   const dark = tone === 'dark'
   const ground = dark
     ? overlay
@@ -84,6 +117,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
 
   return (
     <header
+      ref={headerRef}
       data-site-header=""
       data-tone={tone}
       className={`${SITE_FONT_VARIABLES} ${position} z-30 transition-colors duration-200 ${ground}`}
@@ -146,9 +180,57 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
               <span className="sm:hidden">Sign up</span>
               <span className="hidden sm:inline">Create your account</span>
             </Link>
+            {/* Below `md` the inline nav is hidden (as in the mockup), so the
+                pages it names would only be reachable from the footer. This
+                button discloses them (owner, #3579). */}
+            <button
+              ref={menuButtonRef}
+              type="button"
+              aria-expanded={menuOpen}
+              aria-controls="site-menu"
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              onClick={() => setMenuOpen((open) => !open)}
+              className={`${TAP_TARGET} -mr-1.5 inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors md:hidden ${
+                dark
+                  ? `text-white hover:bg-[rgba(255,255,255,0.1)] ${FOCUS_ON_DARK}`
+                  : `text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] ${FOCUS_ON_LIGHT}`
+              }`}
+            >
+              <Icon icon={menuOpen ? X : Menu} className="h-5 w-5" />
+            </button>
           </div>
         </div>
       </div>
+      {menuOpen && (
+        <nav
+          id="site-menu"
+          aria-label="Menu"
+          // Under the bar, over the page: opening never pushes content down.
+          className={`absolute inset-x-0 top-full border-y shadow-[0_12px_24px_rgba(14,18,48,0.18)] md:hidden ${
+            dark
+              ? 'border-[rgba(255,255,255,0.08)] bg-[#0e1230]'
+              : 'border-[var(--v2-border)] bg-bg'
+          }`}
+        >
+          <ul className={`${SITE_WRAP} py-2`}>
+            {SITE_NAV.map((item) => (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  onClick={() => setMenuOpen(false)}
+                  className={`flex min-h-11 items-center rounded-[4px] text-[16px] font-medium transition-colors ${
+                    dark
+                      ? `text-[rgba(255,255,255,0.85)] hover:text-white ${FOCUS_ON_DARK}`
+                      : `text-[var(--v2-ink)] hover:text-[var(--v2-brand)] ${FOCUS_ON_LIGHT}`
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
     </header>
   )
 }

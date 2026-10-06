@@ -31,3 +31,15 @@ export const PRINT_START_MS = 5800
 
 /** The stagger between the terminal's output lines (the mockup printed two). */
 export const PRINT_STAGGER_MS = 550
+
+/**
+ * The developers band's 402-session offsets (mockup V19, artifact version
+ * `1791288451-c24e`, script `index.html:289-298`): twelve reveal steps plus
+ * the thirteenth, cursor-off step. V19 was never in
+ * `docs/product/site-mockup/`, so this cites the artifact version, not the
+ * repo convention (`design-system.md:1486`).
+ */
+export const DEV_STEPS_MS = [0, 700, 1500, 2600, 3300, 3900, 4600, 5200, 5900, 6500, 7500, 8200, 9400]
+
+/** The 402 session's full cycle (mockup V19's script, `index.html:298`). */
+export const DEV_CYCLE_MS = 13_000

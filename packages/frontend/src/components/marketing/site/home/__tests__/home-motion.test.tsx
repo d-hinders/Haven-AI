@@ -8,8 +8,9 @@ import {
   AnimatedBudgetMiniCard,
   AnimatedConnectorTerminal,
 } from '../HowItWorksAnimated'
+import { AnimatedDevTerminal } from '../AnimatedDevTerminal'
 import { AnimatedHeroFrame } from '../AnimatedHeroFrame'
-import { CONNECTOR_TERMINAL } from '../fixtures'
+import { CONNECTOR_TERMINAL, DEV_TERMINAL } from '../fixtures'
 import { PRINT_STAGGER_MS } from '../motion-timings'
 import motionStyles from '../motion.module.css'
 import { AnimatedAccountingFrame } from '../AnimatedAccountingFrame'
@@ -88,6 +89,19 @@ describe('the home page motion, settled (#3575)', () => {
     expect(text).toContain('Refused: over budget')
     // Terminal: every scripted output line settled ("on").
     expect(text).toContain('✓ Setup complete')
+    // Developers: the transcript is the settled render — classes, not text:
+    // the text is in the DOM in every state, so a text assertion proves
+    // nothing. No line carries the hidden class, no cursor anywhere (#3684).
+    const devLines = container.querySelectorAll('[data-dev-line]')
+    expect(devLines.length).toBe(DEV_TERMINAL.steps.flatMap((step) => [...step.lines]).length)
+    for (const line of devLines) expect(line.classList.contains(motionStyles.dline)).toBe(false)
+    expect(container.querySelectorAll('[data-dev-cursor]')).toHaveLength(0)
+  })
+
+  it('the developers transcript renders exactly the fixture text, in order', () => {
+    const { container } = render(<NewSiteHome />)
+    const lines = [...container.querySelectorAll('[data-dev-line]')].map((node) => node.textContent)
+    expect(lines).toEqual(DEV_TERMINAL.steps.flatMap((step) => [...step.lines]))
   })
 
   it('nothing announces: no live region, no role="status" on the page', () => {
@@ -113,6 +127,11 @@ describe('the home page motion, settled (#3575)', () => {
     const terminal = container.querySelector('[data-connector-terminal]')
     expect(terminal).not.toBeNull()
     expect(terminal!.closest('[aria-hidden="true"]')).toBeNull()
+    // The developers transcript stays real content too (#3684), for the
+    // same reason: its reveal is opacity-only.
+    const devTerminal = container.querySelector('[data-dev-terminal]')
+    expect(devTerminal).not.toBeNull()
+    expect(devTerminal!.closest('[aria-hidden="true"]')).toBeNull()
     // And no animated region inserts or removes rows settled: the hero shows
     // exactly the mockup's three activity rows.
     expect(container.querySelectorAll('[data-testid="hero-activity"] > div')).toHaveLength(3)
@@ -147,6 +166,12 @@ describe('the home page motion, settled (#3575)', () => {
     expect(motion).toContain('row-by-row assembly')
     expect(motion).toContain('Banned everywhere')
     expect(motion).toContain('hero product frame')
+    // The developers transcript is a named allowance (#3684), the step 3
+    // terminal is named too, and the assistive-tech sentence carves the two
+    // terminals out of the hidden-frames rule.
+    expect(motion).toContain('402-session transcript')
+    expect(motion).toContain("step 3's terminal")
+    expect(motion).toContain('stay real content')
   })
 })
 
@@ -345,6 +370,49 @@ describe('the mockup’s loops, driven by fake timers', () => {
     expect(status()).toBe('Failed')
     expect(text()).toContain('Fortnox answered 503 · will retry')
     expect(lastPush()).toBe('Last push 2 minutes ago')
+  })
+
+  it('developers: the 402 session prints line by line, loses its cursor, and loops on 13 s', () => {
+    vi.useFakeTimers()
+    allowMotion()
+    const { container } = render(<AnimatedDevTerminal />)
+
+    const lines = () => [...container.querySelectorAll('[data-dev-line]')]
+    const onFlags = () => lines().map((node) => node.classList.contains(motionStyles.dlineOn))
+    const cursors = () => container.querySelectorAll('[data-dev-cursor]')
+    const cursorLine = () => cursors()[0]?.closest('[data-dev-line]')?.textContent ?? null
+    const allOn = DEV_TERMINAL.steps.flatMap((step) => [...step.lines]).map(() => true)
+
+    // Pre-first-step: every line still hidden (the reveal is class-driven;
+    // the text is in the DOM from the start, so text proves nothing).
+    expect(onFlags().every((on) => !on)).toBe(true)
+
+    // 1500 — the 402 line is on and nothing after it; the one cursor sits
+    // on it (mockup V19, artifact version `1791288451-c24e`, :289-298).
+    act(() => vi.advanceTimersByTime(1500))
+    expect(onFlags()).toEqual([...Array(3).fill(true), ...Array(11).fill(false)])
+    expect(cursors()).toHaveLength(1)
+    expect(cursorLine()).toBe('← 402 · pay 0.30 USDC')
+
+    // 6500 — the three results are on; 200 OK is not. The cursor has moved
+    // to the last revealed line.
+    act(() => vi.advanceTimersByTime(6500 - 1500))
+    expect(onFlags()).toEqual([...Array(11).fill(true), ...Array(3).fill(false)])
+    expect(cursors()).toHaveLength(1)
+    expect(cursorLine()).toBe('  → settled on Base')
+
+    // 9400 — the thirteenth step: everything is on, no cursor.
+    act(() => vi.advanceTimersByTime(9400 - 6500))
+    expect(onFlags()).toEqual(allOn)
+    expect(cursors()).toHaveLength(0)
+
+    // 13000 — the boundary resets, and the first step is current again.
+    // The refired step-0 timer (setTimeout 0) lands on the tick after the
+    // boundary's own, so the advance crosses it by a millisecond.
+    act(() => vi.advanceTimersByTime(13000 - 9400 + 1))
+    expect(onFlags()).toEqual([true, ...Array(13).fill(false)])
+    expect(cursors()).toHaveLength(1)
+    expect(cursorLine()).toBe('# An agent hits a paywall')
   })
 
   it('the refusal receipt assembles with the mockup’s 110 ms stagger and remounts per entry', () => {

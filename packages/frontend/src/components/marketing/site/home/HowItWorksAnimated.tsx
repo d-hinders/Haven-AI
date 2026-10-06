@@ -1,14 +1,6 @@
 'use client'
 
-import {
-  HOW_CYCLE_MS,
-  useCycle,
-  useDocumentVisible,
-  useInView,
-  usePrefersReducedMotion,
-  useTyping,
-  type CycleStep,
-} from './motion'
+import { HOW_CYCLE_MS, useCycle, useLoopGate, useTyping, type CycleStep } from './motion'
 import { PRINT_START_MS, PRINT_STAGGER_MS } from './motion-timings'
 import { PasskeyMiniCard, BudgetMiniCard, type PasskeyCardState, type BudgetCardState } from './StepMiniCards'
 import { ConnectorTerminal, type TerminalRevealState } from './ConnectorTerminal'
@@ -50,14 +42,6 @@ import { CONNECTOR_TERMINAL } from './fixtures'
  * moment, and nothing announces (no live region, nothing inserted or
  * removed).
  */
-
-/** The gate every loop shares: animate only in view, visible, unimpeded. */
-function useLoopGate() {
-  const reduced = usePrefersReducedMotion()
-  const visible = useDocumentVisible()
-  const { ref, inView } = useInView<HTMLDivElement>()
-  return { ref, looping: !reduced && visible && inView }
-}
 
 /** Step 1's controller. Offsets: scan (:278), complete (:279). */
 export function AnimatedPasskeyMiniCard() {

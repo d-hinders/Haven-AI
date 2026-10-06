@@ -4556,6 +4556,16 @@ export const SCENARIOS = {
     description:
       'Connect agent modal focus: name input on open, step region after a step change, name input after Back (#3687)',
     async run({ page, vp, shoot }) {
+      // The harness's 390px context is a narrow DESKTOP window: a fine pointer,
+      // no touch. Turn touch emulation on for the mobile shots so they render
+      // the coarse-pointer branch — the input deliberately NOT focused, because
+      // the phone keyboard would cover the dialog — and fail if it did not take.
+      // Before `goto`: the modal reads the pointer once, when it mounts.
+      const wantCoarse = vp.name === 'mobile'
+      if (wantCoarse) {
+        const cdp = await page.context().newCDPSession(page)
+        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+      }
       await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
       await dismissMobileSidebar(page, vp)
 
@@ -4563,9 +4573,10 @@ export const SCENARIOS = {
       const dialog = page.getByRole('dialog')
       const name = dialog.getByLabel('Agent name')
       await name.waitFor({ timeout: 10_000 })
-      // Playwright's mobile emulation is a coarse pointer, where the input is
-      // deliberately NOT focused (the phone keyboard would cover the dialog).
       const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches)
+      if (coarse !== wantCoarse) {
+        throw new Error(`connect-agent-focus: (pointer: coarse) is ${coarse} on ${vp.name}, expected ${wantCoarse}`)
+      }
       const nameFocused = () => name.evaluate((el) => el === document.activeElement)
       if ((await nameFocused()) === coarse) {
         throw new Error(`connect-agent-focus: name input focus=${!coarse} expected on ${coarse ? 'coarse' : 'fine'} pointer`)
@@ -4583,6 +4594,9 @@ export const SCENARIOS = {
 
       await dialog.getByRole('button', { name: 'Back' }).click()
       await name.waitFor({ timeout: 10_000 })
+      // Park the pointer off the dialog: Cancel now sits where Back was clicked,
+      // and a resting cursor would photograph its hover fill.
+      await page.mouse.move(0, 0)
       if ((await nameFocused()) === coarse) {
         throw new Error('connect-agent-focus: wrong focus target after Back')
       }

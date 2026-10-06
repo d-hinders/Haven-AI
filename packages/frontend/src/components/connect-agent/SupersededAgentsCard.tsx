@@ -1,9 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import { useAgents, type Agent } from '@/hooks/useAgents'
@@ -20,6 +19,24 @@ type Unfinished = 'signature' | 'too_many' | 'unlinked'
 interface BudgetSigner {
   revokeAll: () => Promise<BudgetResult>
   ready: boolean
+}
+
+/**
+ * The surface this offer sits on (#3690). A neutral callout, not a `Card`: it
+ * renders inside the connect modal, where a filled card is the nested tier
+ * `CLAUDE.md` § UI Surface Hierarchy rules out — and `Card.Section` assumes a
+ * padded parent this modal does not give it, which put the text on the border.
+ * Neutral rather than warning-soft because the per-row `Unfinished` alerts are
+ * warning-toned text and would lose contrast on an amber fill; neutral rather
+ * than brand-soft because the restart `ActionCallout` above it is the screen's
+ * to-do, and this is a decision the owner may decline.
+ */
+function OfferCallout({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+      {children}
+    </div>
+  )
 }
 
 function RevokeConfirmBody({ linked }: { linked: boolean }) {
@@ -187,36 +204,34 @@ export function SupersededAgentsCard({
   // card started keeps it on screen.
   if (offered.length === 0 && reportedAny && (error || retrying)) {
     return (
-      <Card>
-        <Card.Section>
-          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-            This setup may have replaced an earlier agent
-          </h3>
-          <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Your agent list could not be loaded, so Haven cannot show which — or offer to revoke
-            them here. Nothing has changed either way.
-          </p>
-          <div className="mt-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={retrying}
-              onClick={() => {
-                setRetrying(true)
-                // `Promise.resolve(...)` because `refetch()`'s return is not
-                // this component's to assume. Calling `.finally` on it threw a
-                // TypeError for any caller whose refetch returns nothing —
-                // and the local suite still reported 1472 passing while doing
-                // it, because an unhandled rejection inside an onClick is not
-                // a failed assertion. CI was stricter and right.
-                void Promise.resolve(refetch()).finally(() => setRetrying(false))
-              }}
-            >
-              {retrying ? 'Checking…' : 'Try again'}
-            </Button>
-          </div>
-        </Card.Section>
-      </Card>
+      <OfferCallout>
+        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+          This setup may have replaced an earlier agent
+        </h3>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+          Your agent list could not be loaded, so Haven cannot show which — or offer to revoke
+          them here. Nothing has changed either way.
+        </p>
+        <div className="mt-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={retrying}
+            onClick={() => {
+              setRetrying(true)
+              // `Promise.resolve(...)` because `refetch()`'s return is not
+              // this component's to assume. Calling `.finally` on it threw a
+              // TypeError for any caller whose refetch returns nothing —
+              // and the local suite still reported 1472 passing while doing
+              // it, because an unhandled rejection inside an onClick is not
+              // a failed assertion. CI was stricter and right.
+              void Promise.resolve(refetch()).finally(() => setRetrying(false))
+            }}
+          >
+            {retrying ? 'Checking…' : 'Try again'}
+          </Button>
+        </div>
+      </OfferCallout>
     )
   }
 
@@ -275,80 +290,79 @@ export function SupersededAgentsCard({
 
   return (
     <>
-      <Card>
-        <Card.Section>
-          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-            {offered.length === 1
-              ? 'This setup replaced an earlier agent'
-              : `This setup replaced ${offered.length} earlier agents`}
-          </h3>
-          <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            {offered.length === 1 ? 'It is' : 'They are'} still active with{' '}
-            {offered.length === 1 ? 'its' : 'their'} own key, and anything that was already
-            running keeps spending as {offered.length === 1 ? 'it' : 'them'}. Revoking ends{' '}
-            {offered.length === 1 ? 'its' : 'their'} key, and one signature from you ends{' '}
-            {offered.length === 1 ? 'its' : 'their'} budget. You can also leave{' '}
-            {offered.length === 1 ? 'it' : 'them'} — nothing here happens on its own.
-          </p>
-        </Card.Section>
-        <Card.Section divided>
-          <ul className="flex flex-col gap-3">
-            {offered.map((agent) => (
-              <li key={agent.id} className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
-                  {failed[agent.id] && (
-                    <p role="alert" className="text-xs text-[var(--v2-danger)]">
-                      {failed[agent.id]}
-                    </p>
-                  )}
-                  {unfinished[agent.id] && (
-                    <p role="alert" className="text-xs text-[var(--v2-warning)]">
-                      {unfinished[agent.id] === 'unlinked'
-                        ? 'Its key is revoked. Its budget may still be active on the account it was removed from, and Haven cannot end it from here.'
-                        : unfinished[agent.id] === 'too_many'
-                          ? 'Its key is revoked, but its budget is still active — it holds too many budgets to end in one signature. Stop them one by one on the agent’s budget card.'
-                          : 'Its key is revoked, but its budget is still active. Finish revoking to end it.'}
-                    </p>
-                  )}
-                </div>
-                {unfinished[agent.id] === 'signature' ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 whitespace-nowrap"
-                    aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
-                    disabled={busyId !== null}
-                    onClick={() => setFinishId(agent.id)}
-                  >
-                    {FINISH_REVOKING_LABEL}
-                  </Button>
-                ) : unfinished[agent.id] === 'too_many' ? (
-                  <Link
-                    href={`/agents/${agent.id}`}
-                    className="text-xs text-[var(--v2-brand)] underline-offset-2 hover:underline"
-                  >
-                    Open budget card
-                  </Link>
-                ) : unfinished[agent.id] === 'unlinked' ? null : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    // Named per agent: a list of buttons all reading "Revoke" is
-                    // ambiguous in a screen reader's forms list, and the sibling
-                    // `AgentCard` already carries this exact fix.
-                    aria-label={`Revoke ${agent.name}`}
-                    disabled={busyId !== null}
-                    onClick={() => setPendingId(agent.id)}
-                  >
-                    Revoke
-                  </Button>
+      <OfferCallout>
+        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+          {offered.length === 1
+            ? 'This setup replaced an earlier agent'
+            : `This setup replaced ${offered.length} earlier agents`}
+        </h3>
+        {/* #3690: two sentences, and the agents are named only in the rows.
+            Both halves of the revoke stay (#3542) — the key, and the budget
+            only the owner's signature ends. What breaks when they go is the
+            confirm dialog's to say, at the moment it applies. */}
+        <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+          {offered.length === 1
+            ? 'It still has its own key and budget. Revoking ends its key, and one signature from you ends its budget.'
+            : 'They still have their own keys and budgets. Revoking ends their keys, and one signature from you ends their budgets.'}
+        </p>
+        {/* `divide-y` draws between siblings, so it sits on the list whose
+            children are the rows — on a wrapper around the list it drew none. */}
+        <ul className="mt-3 divide-y divide-[var(--v2-border)] border-t border-[var(--v2-border)]">
+          {offered.map((agent) => (
+            <li key={agent.id} className="flex items-center justify-between gap-3 py-2.5 last:pb-0">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
+                {failed[agent.id] && (
+                  <p role="alert" className="text-xs text-[var(--v2-danger)]">
+                    {failed[agent.id]}
+                  </p>
                 )}
-              </li>
-            ))}
-          </ul>
-        </Card.Section>
-      </Card>
+                {unfinished[agent.id] && (
+                  <p role="alert" className="text-xs text-[var(--v2-warning)]">
+                    {unfinished[agent.id] === 'unlinked'
+                      ? 'Its key is revoked. Its budget may still be active on the account it was removed from, and Haven cannot end it from here.'
+                      : unfinished[agent.id] === 'too_many'
+                        ? 'Its key is revoked, but its budget is still active — it holds too many budgets to end in one signature. Stop them one by one on the agent’s budget card.'
+                        : 'Its key is revoked, but its budget is still active. Finish revoking to end it.'}
+                  </p>
+                )}
+              </div>
+              {unfinished[agent.id] === 'signature' ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 whitespace-nowrap"
+                  aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
+                  disabled={busyId !== null}
+                  onClick={() => setFinishId(agent.id)}
+                >
+                  {FINISH_REVOKING_LABEL}
+                </Button>
+              ) : unfinished[agent.id] === 'too_many' ? (
+                <Link
+                  href={`/agents/${agent.id}`}
+                  className="text-xs text-[var(--v2-brand)] underline-offset-2 hover:underline"
+                >
+                  Open budget card
+                </Link>
+              ) : unfinished[agent.id] === 'unlinked' ? null : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  // Named per agent: a list of buttons all reading "Revoke" is
+                  // ambiguous in a screen reader's forms list, and the sibling
+                  // `AgentCard` already carries this exact fix.
+                  aria-label={`Revoke ${agent.name}`}
+                  disabled={busyId !== null}
+                  onClick={() => setPendingId(agent.id)}
+                >
+                  Revoke
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </OfferCallout>
 
       {pending &&
         (pending.account_id && pending.account_chain_id != null ? (

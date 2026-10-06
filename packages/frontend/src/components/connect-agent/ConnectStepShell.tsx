@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 
 /**
  * #1377 C: the one persistent frame for everything after the setup prompt
- * exists. Step 4 used to swap between structurally unrelated bodies exactly
+ * exists. Step 3 used to swap between structurally unrelated bodies exactly
  * when the user was looking for reassurance; this shell keeps one silhouette
  * — a stable progress header (Waiting → Connected → Approved) and a reserved
  * body height — while the sub-states swap IN PLACE beneath it.

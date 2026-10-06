@@ -1317,7 +1317,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
     it('answers the setup CREATE that the shared fixture does not key', () => {
       // Without this the modal's create step falls into the empty fallback and
-      // never reaches step 4 — the capture would silently shoot the wrong screen.
+      // never reaches step 3 — the capture would silently shoot the wrong screen.
       const created = connect.api('/agent-connection-setups', 'POST')
       expect(created).toMatchObject({
         setup_id: SETUP_ID,

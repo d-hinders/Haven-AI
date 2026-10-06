@@ -2871,11 +2871,11 @@ export default function DesignSystemPage() {
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title="Confirm agent budget"
-        subtitle="Review the agent budget before connecting this agent."
+        title="Set agent budget"
+        subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={4} currentStep={2} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

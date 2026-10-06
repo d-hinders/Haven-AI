@@ -20,10 +20,6 @@ vi.mock('@/components/connect-agent/PolicyStep', () => ({
   PolicyStep: () => <div>Agent policy</div>,
 }))
 
-vi.mock('@/components/connect-agent/ReviewStep', () => ({
-  ReviewStep: () => <div>Review agent</div>,
-}))
-
 vi.mock('@/components/connect-agent/ConnectStep', () => ({
   ConnectStep: () => <div>Connect step</div>,
 }))
@@ -36,7 +32,7 @@ function flow(overrides: Record<string, unknown> = {}) {
     isRetiredRail: false,
     headerSubtitleText: 'Name the agent and describe what it does',
     step: 'details',
-    setupStepCount: 4,
+    setupStepCount: 3,
     currentStepIndex: 0,
     busy: false,
     ...overrides,

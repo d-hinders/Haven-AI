@@ -52,7 +52,7 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 - Lead with what the user controls, not the crypto mechanism underneath.
 - Prefer `Haven account`, `Haven wallet`, `agent rules`, and `agent budget`.
 - One name for one gate: the connect flow's approval gate is the `agent budget`
-  (`Review agent budget` → `Confirm agent budget` → the approval screen's
+  (`Create setup prompt` on the budget step → the approval screen's
   subtitle `Approve the agent budget`, matching the connector's own "approve
   the budget" narration, #1572). Say it ONCE per viewport: the approval screen
   carried the name as the modal subtitle *and* as the summary card's heading
@@ -109,7 +109,9 @@ Structure:
 2. Primary configuration card for the agent name, Haven wallet, token, amount, and reset period.
 3. Agent rules summary showing the budget in human terms.
 4. Risk explainer that states when Haven will ask for approval.
-5. Primary action: `Review agent budget` for creation or `Review changes` for edits.
+5. Primary action: `Create setup prompt` for creation — the budget summary
+   lives on the same step as an always-mounted summary line, not a separate
+   review step (#3688) — or `Review changes` for edits.
 
 Money and risk clarity:
 - Show the selected Haven wallet before the user reviews.
@@ -127,14 +129,16 @@ States:
 
 ## Review Agent Budget
 
-Use immediately before creating or changing an agent's spending authority.
+Use before changing an agent's spending authority. Creation no longer has a
+separate review step (#3688): the budget step carries the summary inline and
+its primary action is `Create setup prompt`.
 
 Structure:
-1. Page header: `Confirm agent budget` (creation) or `Review changes` (edits).
+1. Page header: `Review changes`.
 2. Summary card answering who can spend, from which Haven wallet, how much, and how often.
 3. Approval note explaining what will happen when a request exceeds the budget.
 4. Secondary technical disclosure only if needed, collapsed or visually subordinate.
-5. Primary action: `Create setup prompt` for creation; for edits, `Update
+5. Primary action: `Update
    budget`/`Add budget` when the budget changed or `Save details` otherwise.
    Budget editing here is for delegation-rail agents — they manage budgets
    per-budget on the agent detail page, while legacy Safe accounts have no

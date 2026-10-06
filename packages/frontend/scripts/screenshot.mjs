@@ -3014,7 +3014,6 @@ function connectorRepairHintScenarios() {
       await dialog.getByLabel('Agent name').fill('Research agent')
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()
       await dialog.getByPlaceholder('Amount').fill('25')
-      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
       await dialog.getByRole('button', { name: 'Approve budget' }).waitFor({ timeout: 30_000 })
@@ -3898,7 +3897,6 @@ export const SCENARIOS = {
       await connect.getByLabel('Agent name').fill('New agent')
       await connect.getByRole('button', { name: 'Set agent budget' }).click()
       await connect.getByPlaceholder('Amount').fill('25')
-      await connect.getByRole('button', { name: 'Review agent budget' }).click()
       await connect.getByRole('button', { name: 'Create setup prompt' }).click()
       await connect.getByText(/This setup replaced /).waitFor({ timeout: 30_000 })
 
@@ -4549,7 +4547,7 @@ export const SCENARIOS = {
   },
   'connect-agent': {
     description:
-      'Connect agent modal, step 4, at each connection stage (starting → slow → recovery)',
+      'Connect agent modal, step 3, at each connection stage (starting → slow → recovery)',
     // The setup is PINNED at awaiting_connection for the whole run. The e2e
     // fixture deliberately flips to connected_local after the first status
     // read, which would end the waiting screen before it can be captured.
@@ -4633,7 +4631,7 @@ export const SCENARIOS = {
       const dialog = page.getByRole('dialog')
       await dialog.getByLabel('Agent name').fill('Research agent')
 
-      // Steps 1-3 are captured too: they carry form controls (description
+      // Steps 1-2 are captured too: they carry form controls (description
       // Textarea, the local-MCP and Agent Passport Checkboxes) that no other
       // capture reaches. Disclosures are opened first — a control nobody can
       // see is a control nobody reviewed (#1410).
@@ -4650,8 +4648,6 @@ export const SCENARIOS = {
       await dialog.getByPlaceholder('Amount').fill('25')
       await shoot(dialog, 'step2-policy')
 
-      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
-      await shoot(dialog, 'step3-review')
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
       await dialog.getByText('Connect your agent').waitFor({ timeout: 30_000 })
@@ -4697,7 +4693,7 @@ export const SCENARIOS = {
     },
   },
   'connect-agent-approve': {
-    description: 'Connect agent modal, step 4, manual credential fallback at the owner-signed approval rail (#2472)',
+    description: 'Connect agent modal, step 3, manual credential fallback at the owner-signed approval rail (#2472)',
     // The third pin the other two connect scenarios cannot hold: `connect-agent`
     // pins awaiting_connection for its whole run and `connect-agent-approved`
     // pins active, so the screen BETWEEN them — where the user actually grants
@@ -4777,7 +4773,6 @@ export const SCENARIOS = {
       await dialog.getByLabel('Agent name').fill('Research agent')
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()
       await dialog.getByPlaceholder('Amount').fill('25')
-      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
       // Confirmed by the money-authority action itself, not a bare timeout — a
@@ -4860,7 +4855,7 @@ export const SCENARIOS = {
     'Could not load recovery balance',
   ),
   'connect-agent-approved': {
-    description: 'Connect agent modal, step 4, the APPROVED ending (#1394)',
+    description: 'Connect agent modal, step 3, the APPROVED ending (#1394)',
     // Separate scenario rather than a stage of `connect-agent`: that one pins
     // the setup at awaiting_connection for its whole run, which is what makes
     // the three waiting stages capturable at all. The ending needs the
@@ -4929,7 +4924,6 @@ export const SCENARIOS = {
       await dialog.getByLabel('Agent name').fill('Research agent')
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()
       await dialog.getByPlaceholder('Amount').fill('25')
-      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
       // Confirmed by the sentence this issue exists to produce, not by a bare
@@ -5037,7 +5031,6 @@ export const SCENARIOS = {
           await dialog.getByLabel('Agent name').fill('Research agent')
           await dialog.getByRole('button', { name: 'Set agent budget' }).click()
           await dialog.getByPlaceholder('Amount').fill('25')
-          await dialog.getByRole('button', { name: 'Review agent budget' }).click()
           await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
           // Waited on by the sentence each variant exists to produce, never a

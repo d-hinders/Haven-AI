@@ -142,6 +142,10 @@ on both (owner decision on #908, 2026-07-19) — the per-chain
 `RELAYER_PRIVATE_KEY_<chainId>` mechanism *permits* split keys but is not
 deployed that way today.
 
+Each Railway service's start command, sleep setting and build source live in
+Railway rather than the repo; they are recorded in
+[`railway-services.md`](railway-services.md), with how to read the bill.
+
 **URLs** (no custom domain — we test against the platform URLs):
 
 - Frontend (Vercel): `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
@@ -206,6 +210,7 @@ deployed that way today.
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
+  The service sleeps (Railway serverless): the first call after idle cold-starts.
 - Hosted MCP (Railway): `https://haven-ai-hosted-mcp-dev-25c7.up.railway.app/v1` —
   confirmed by probe 2026-08-06 (`GET /v1` → 405 POST-only MCP, `/healthz` → 200).
   The service sleeps (Railway serverless): the first call after idle cold-starts.

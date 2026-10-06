@@ -444,14 +444,21 @@ done, and how to stop it (#3691, epic). Sections, in order:
    one quiet status line under the header instead ("This agent no longer has
    access through Haven.").
 3. No separate "About this agent" card: its facts are the header's `meta`.
-4. Agent budgets — heading and one-line description ABOVE the card (see the
-   detail-page section rule in design-system.md); the card holds the budget
-   rows and `Card.Section` dividers, with each row measured by `BudgetMeter`.
-   **Add budget is collapsed once a budget exists**: with no budget the card
-   is an empty state whose explicit action is Add budget; once a budget
-   exists, adding another is a collapsed affordance (an Add budget
-   control in the card), never a permanent second form rendering by default — unless
-   `?grant=` asks for the form, in which case it opens expanded.
+4. Spending — the ONE budget surface (#3695): heading "Spending" and a
+   one-line description (budgets are enforced on-chain) ABOVE the card (see
+   the detail-page section rule in design-system.md). The card holds one row
+   per active budget — amount, period, recipient or merchant, Edit and Stop —
+   each measured by `BudgetMeter` from the read's remaining-this-period:
+   "{used} of {budget} {token} used this period · refills in …" (or
+   "· expires in …" when the budget ends first). When the chain read failed
+   the row shows no meter and says usage couldn't be read — never "0 used".
+   **Add budget is collapsed once a budget exists**: with no budget the grant
+   form is the section's content, headed "Set its first budget"; once one
+   exists, adding another is an "Add budget" control that opens the form in
+   place (Cancel collapses it), never a permanent second form — unless
+   `?grant=` asks for the form, in which case it opens expanded. A revoked or
+   removed agent's section is read-only plus Stop (#3549). There is no
+   second, read-only budget summary on the page.
 5. Activity — heading and description above the card, payments-only rows
    (`TransactionsTable` in card variant), empty state "No activity yet". The
    header's right side carries the counts summary — "{n} today · {m} all

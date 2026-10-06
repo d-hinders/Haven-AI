@@ -2422,3 +2422,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `infra/repositories/delegation-budgets.ts`); `last-verified` already reads
 > 2026-10-06 and the date is accurate for this re-read.
 
+> **Re-verified #3695 (2026-10-06, Spending section):** the covered file this
+> diff touches is `hooks/useDelegationBudget.ts`, on its READ path only: the
+> `?include=remaining` enrichment becomes a per-caller opt-in
+> (`includeRemaining`, default off). #3693 had every caller of the hook ask
+> for it; now only the agent page's budget card does, so the other callers
+> (connect approval, remove, superseded-agent, fund-merchant, edit) go back to
+> the plain lifecycle list and no longer trigger the server-side chain read on
+> each poll. Which delegations are listed, and every build, activate, edit and
+> revoke call, are unchanged — no signing path, ceremony or refusal moves, and
+> budget, recipient and expiry stay enforced on-chain by the caveat
+> enforcers. The card renders the remaining figure as display only ("used this
+> period"); a failed chain read (`remaining_from_chain: false`) is shown as
+> unread, never as a measurement. Scope of this note: the hook's read path.
+> Nothing else in this document was re-read for it, and `last-verified` is not
+> bumped.
+

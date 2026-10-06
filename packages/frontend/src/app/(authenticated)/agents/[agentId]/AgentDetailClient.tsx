@@ -19,7 +19,7 @@ import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
-import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
+import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import {
   FINISH_REVOKING_LABEL,
@@ -566,6 +566,19 @@ export default function AgentDetailClient({ agentId }: Props) {
     <div className="max-w-5xl">
       <PageHeader
         title={currentAgent.name}
+        subtitle={currentAgent.description || undefined}
+        // #3694: the identity row that was the "About this agent" card —
+        // wallet, network, created, last activity — as the header's quiet
+        // meta line (#3692's slot). "Last activity" stays `mcp_last_seen_at`:
+        // the agents read carries no last-payment field.
+        meta={
+          <>
+            {walletName} · {networkName} · Created {timeAgo(currentAgent.created_at)} ·{' '}
+            <span className="v2-tabular" title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}>
+              {formatAgentLastActivity(currentAgent.mcp_last_seen_at)}
+            </span>
+          </>
+        }
         inlineActions={inlineHeaderActions}
         actions={
           <div className="flex flex-wrap items-center gap-3">
@@ -663,16 +676,26 @@ export default function AgentDetailClient({ agentId }: Props) {
         <p className="mt-1.5 v2-text-meta text-[var(--v2-ink-3)]">{retiredStatusLine}</p>
       ) : null}
 
-      {/* #3694: ONE banner slot, directly under the header, in priority order —
-          the thing that needs doing first, then what the page can and cannot
-          show, then state, then money waiting to be recovered, then the
-          last action's failure. Tones and copy are unchanged; only the
+      {/* #3694: ONE banner slot, directly under the header, ordered by the
+          detail-page rule in docs/product/design-system.md (#3692): danger,
+          then warning, then neutral; within a tone, the banner asking for a
+          decision first. So: the last action's failure (it answers the click
+          the user just made in the header), half-revoked (Finish revoking),
+          recoverable funds (Recover funds), the refresh error, paused, then
+          the recovery minimum. Tones and copy are unchanged; only the
           position moved. `empty:hidden` drops the slot's margin when no
           banner applies (React renders nothing for each null child). */}
       <div className="mb-6 mt-4 flex flex-col gap-4 empty:hidden" data-testid="agent-banner-slot">
+      {errorMessage ? (
+        <div className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
+          <p className="text-sm font-medium text-[var(--v2-danger)]">Action failed</p>
+          <p className="mt-1 text-sm text-[var(--v2-danger)]">{errorMessage}</p>
+        </div>
+      ) : null}
+
       {/* #3542: revoked or removed, but a budget delegation is still redeemable
           on-chain — the status badge says "Revoked", which is only half true.
-          First in the slot so the page opens on the thing that needs doing. */}
+          First warning in the slot: it carries the one action that ends it. */}
       {halfRevoked ? (
         <div data-testid="half-revoked-callout">
           <ApprovalRequiredBanner title={HALF_REVOKED_TITLE} tone="warning" density="compact">
@@ -689,32 +712,6 @@ export default function AgentDetailClient({ agentId }: Props) {
                 </Button>
               </div>
             ) : null}
-          </ApprovalRequiredBanner>
-        </div>
-      ) : null}
-
-      {agentsError ? (
-        <div
-          role="alert"
-          className="rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
-        >
-          Agent data could not refresh. This page is showing the last loaded record.
-          <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetch()}>
-            Try again
-          </Button>
-        </div>
-      ) : null}
-
-      {isPaused ? (
-        <div>
-          {/* #2230: title and body come from `lib/agent-pause-copy.ts`, shared
-              with `AgentCard`'s banner one click away. This page's wording is
-              the one that was TAKEN — the card said "network permissions" for
-              the same fact; see that module for why this one is the settled
-              phrasing. The rendered sentence here is byte-identical to what
-              stood before. */}
-          <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
-            {AGENT_PAUSED_BODY}
           </ApprovalRequiredBanner>
         </div>
       ) : null}
@@ -774,6 +771,32 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
+      {agentsError ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
+        >
+          Agent data could not refresh. This page is showing the last loaded record.
+          <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetch()}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
+
+      {isPaused ? (
+        <div>
+          {/* #2230: title and body come from `lib/agent-pause-copy.ts`, shared
+              with `AgentCard`'s banner one click away. This page's wording is
+              the one that was TAKEN — the card said "network permissions" for
+              the same fact; see that module for why this one is the settled
+              phrasing. The rendered sentence here is byte-identical to what
+              stood before. */}
+          <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
+            {AGENT_PAUSED_BODY}
+          </ApprovalRequiredBanner>
+        </div>
+      ) : null}
+
       {hasBelowMinimumUsdc && delegateBalance ? (
         <div>
           <ApprovalRequiredBanner title="Recovery minimum not met" tone="neutral" density="compact">
@@ -781,100 +804,20 @@ export default function AgentDetailClient({ agentId }: Props) {
           </ApprovalRequiredBanner>
         </div>
       ) : null}
-
-      {errorMessage ? (
-        <div className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
-          <p className="text-sm font-medium text-[var(--v2-danger)]">Action failed</p>
-          <p className="mt-1 text-sm text-[var(--v2-danger)]">{errorMessage}</p>
-        </div>
-      ) : null}
       </div>
 
-      {/* Second on a phone, first from `lg` (#2821).
-
-          The identity rows — wallet, network, created, last activity — took
-          essentially the whole first screen on a 390pt viewport, so the budget,
-          which is the reason to open an agent at all, was the last thing on it
-          and pinned against the tab bar. That is desktop information density on
-          a phone.
-
-          Reordered rather than hidden or collapsed, which were the other two
-          candidates on #2821. At `lg` the grid is four columns wide and costs
-          nothing, so desktop keeps the composition it had.
-
-          The trade, stated as a trade rather than as a safeguard: `order`
-          changes paint order, not DOM order, so below `lg` a screen-reader
-          user still hears the metadata first and the budget second — they do
-          not get the reordering sighted users get (WCAG 1.3.2 territory). An
-          earlier version of this comment presented that as a mitigation, which
-          it is not. It is small here because both cards are self-labelled by
-          headings and nothing focusable sits between them, and reordering the
-          DOM instead would move the desktop composition too. Recorded so the
-          next person weighs it rather than rediscovers it. */}
-      {/* The pair, and ONLY the pair, is the flex context (#2821).
-
-          A first attempt put `flex flex-col` on the page root and ordered these
-          two against it. That is wrong and the measurement said so immediately:
-          `order` is relative to every sibling, all of which default to 0, so
-          two positive orders pushed BOTH cards below the whole rest of the page
-          — the budget row went from y=655 to y=2241. Confining the flex context
-          to the two elements being swapped is what makes the reorder local. */}
-      <div className="flex flex-col gap-6 lg:gap-0">
-        <Card hover={false} className="order-2 p-5 md:p-6 lg:order-1">
-        {/* A heading, because the reorder took this card's identity away
-            (#2821 design review). It leads with the muted description, which
-            read as the page's subtitle while this was card #1 directly under
-            the H1. As card #2 the same grey paragraph belongs to nothing. One
-            line restores it. */}
-        <h2 className="v2-text-h3 mb-2 text-[var(--v2-ink)]">About this agent</h2>
-        <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          {currentAgent.description || 'This agent can make payments within the rules you set.'}
-        </p>
-        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
-            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{networkName}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
-            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Last activity</dt>
-            <dd
-              className="mt-1 font-medium text-[var(--v2-ink)] v2-tabular"
-              title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}
-            >
-              {formatAgentLastActivityValue(currentAgent.mcp_last_seen_at)}
-            </dd>
-          </div>
-        </dl>
-        </Card>
-        {/* `-mt-6` below `lg` cancels `DelegationBudgetCard`'s own leading
-            margin (#2821 review). The 24px rhythm on this page lives on the
-            CARDS, not on a container, so swapping the order moved the pair's
-            only margin from BETWEEN them to ABOVE the stack: measured at
-            390px the two card borders touched (gap 0) while the budget card
-            started 24px lower than the metadata card used to — spending the
-            above-the-fold room this issue exists to buy. The wrapper owns the
-            gap below `lg` and hands it back at `lg`, where the child margin is
-            the original rhythm and nothing moves. */}
-        <div
-          id={DELEGATION_BUDGET_CARD_ID}
-          className="order-1 scroll-mt-24 max-lg:-mt-6 lg:order-2"
-        >
-          <DelegationBudgetCard
-            agentId={agentId}
-            chainId={chainId}
-            tokens={budgetTokenOptions}
-            onBudgetChange={refetch}
-            retired={isRevoked ? 'revoked' : isArchived ? 'archived' : undefined}
-          />
-        </div>
+      {/* #3694: the budget card leads the content. #2821 reordered it above an
+          "About this agent" card on phones with `order-*` classes; that card's
+          facts now live in the header's meta line, so there is nothing left to
+          reorder and DOM order is reading order again at every width. */}
+      <div id={DELEGATION_BUDGET_CARD_ID} className="scroll-mt-24">
+        <DelegationBudgetCard
+          agentId={agentId}
+          chainId={chainId}
+          tokens={budgetTokenOptions}
+          onBudgetChange={refetch}
+          retired={isRevoked ? 'revoked' : isArchived ? 'archived' : undefined}
+        />
       </div>
 
       {/* #3426: the per-agent x402 tax declaration opt-in. Renders ONLY when

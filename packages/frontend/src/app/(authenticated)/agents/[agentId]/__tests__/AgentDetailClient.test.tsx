@@ -264,13 +264,41 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByText('Today')).toBeInTheDocument()
   })
 
-  it('renders the compact last-activity field without a default connected badge', () => {
+  it('renders last activity in the header meta without a default connected badge', () => {
     render(<AgentDetailClient agentId="agent-1" />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Research agent' })).toBeInTheDocument()
-    expect(screen.getByText('Last activity')).toBeInTheDocument()
-    expect(screen.getByText('2h ago')).toBeInTheDocument()
+    expect(screen.getByText('Last activity 2h ago')).toBeInTheDocument()
     expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+  })
+
+  // #3694: the "About this agent" card's four facts moved into the header's
+  // meta line (#3692's PageHeader slot); the card is gone.
+  it('carries wallet, network, created and last activity in the header meta, with no About card (#3694)', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('heading', { name: 'About this agent' })).not.toBeInTheDocument()
+    const header = screen.getByRole('banner')
+    expect(header).toHaveTextContent('Main account · Gnosis Chain · Created 1mo ago · Last activity 2h ago')
+  })
+
+  it('says "No activity yet" in the meta when the agent was never seen (#3694)', () => {
+    const base = mockUseAgents()
+    mockUseAgents.mockReturnValue({
+      ...base,
+      agents: base.agents.map((a: Record<string, unknown>) => ({ ...a, mcp_last_seen_at: null })),
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('banner')).toHaveTextContent('Created 1mo ago · No activity yet')
+  })
+
+  it('shows the description as the header subtitle (#3694)', () => {
+    const base = mockUseAgents()
+    mockUseAgents.mockReturnValue({
+      ...base,
+      agents: base.agents.map((a: Record<string, unknown>) => ({ ...a, description: 'Buys research data' })),
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('banner')).toHaveTextContent('Buys research data')
   })
 
   it('hides the recover-funds prompt when the delegate wallet is empty', () => {
@@ -1125,11 +1153,13 @@ describe('AgentDetailClient last-activity metadata', () => {
         .map(([name]) => name)
     }
 
-    it('stacks paused above recoverable funds, both in the one slot under the header', () => {
+    // Order is design-system.md's detail-page rule (#3692): warning before
+    // neutral, and within a tone the banner asking for a decision first.
+    it('stacks the recoverable-funds warning above the neutral paused banner, in the one slot under the header', () => {
       mockAgentWith({ status: 'paused' })
       mockUseDelegateBalance.mockReturnValue(RECOVERABLE)
       render(<AgentDetailClient agentId="agent-1" />)
-      expect(slotOrder()).toEqual(['paused', 'recoverable'])
+      expect(slotOrder()).toEqual(['recoverable', 'paused'])
       // The slot sits before the budget card: banners lead the page.
       const slot = screen.getByTestId('agent-banner-slot')
       expect(
@@ -1137,12 +1167,25 @@ describe('AgentDetailClient last-activity metadata', () => {
       ).toBeTruthy()
     })
 
-    it('puts the refresh-error alert after half-revoked and before paused', () => {
+    it('puts the decision-asking warnings (half-revoked, recoverable) before the refresh error', () => {
       mockAgentWith({ status: 'revoked', live_delegation_count: 1 })
       mockUseAgents.mockReturnValue({ ...mockUseAgents(), error: new Error('offline') })
       mockUseDelegateBalance.mockReturnValue(RECOVERABLE)
       render(<AgentDetailClient agentId="agent-1" />)
-      expect(slotOrder()).toEqual(['half-revoked', 'refresh-error', 'recoverable'])
+      expect(slotOrder()).toEqual(['half-revoked', 'recoverable', 'refresh-error'])
+    })
+
+    it('puts a failed header action first, above every other banner', async () => {
+      const pauseAgent = vi.fn().mockRejectedValue(new Error('network down'))
+      mockAgentWith({ status: 'active' })
+      mockUseAgents.mockReturnValue({ ...mockUseAgents(), pauseAgent })
+      mockUseDelegateBalance.mockReturnValue(RECOVERABLE)
+      render(<AgentDetailClient agentId="agent-1" />)
+      fireEvent.click(screen.getByRole('button', { name: 'Pause agent' }))
+      const failure = await vi.waitFor(() => screen.getByText('Action failed'))
+      const slot = screen.getByTestId('agent-banner-slot')
+      expect(slot.firstElementChild).toContainElement(failure)
+      expect(slot).toHaveTextContent('network down')
     })
 
     it('renders the refresh-error alert in the slot for a paused agent too', () => {

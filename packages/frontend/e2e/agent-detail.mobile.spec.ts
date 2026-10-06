@@ -319,35 +319,36 @@ test.describe('agent detail at 390px (#2733)', () => {
     // ...and the pair sits below the title, leaving the title the full width.
     expect(pauseBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height)
 
-    // ── 4c. The budget leads the first screen, and desktop does not ────────
-    // The reorder is #2821's headline change and had NO coverage: removing
-    // both `order-*` classes left every assertion green, because the fold
-    // check clears by 150px even unreordered. This is the assertion that
-    // notices, and it is asserted in BOTH directions — the `lg:order-*` half
-    // is a claim about desktop that was equally unguarded.
-    const cardTops = async () =>
+    // ── 4c. The budget is the first content card, at every width (#3694) ───
+    // #2821 swapped an "About this agent" card below the budget on phones with
+    // `order-*` classes and restored it above at `lg`. #3694 moved that card's
+    // facts into the header's meta line and deleted the card, so the claim is
+    // simpler and holds at both widths: no About card renders, and the budget
+    // card is the first content below the header and its banner slot — in DOM
+    // order, which is now also reading order for a screen reader.
+    const layout = async () =>
       page.evaluate(() => {
         const budget = document.getElementById('delegation-budget-card')
         const about = Array.from(document.querySelectorAll('h2')).find(
           (h) => (h.textContent ?? '').trim() === 'About this agent',
         )
-        if (!budget || !about) return null
+        const header = document.querySelector('#main-content header')
+        if (!budget || !header) return null
         return {
-          budget: Math.round(budget.getBoundingClientRect().top + window.scrollY),
-          about: Math.round(about.getBoundingClientRect().top + window.scrollY),
+          about: Boolean(about),
+          headerBottom: Math.round(header.getBoundingClientRect().bottom + window.scrollY),
+          budgetTop: Math.round(budget.getBoundingClientRect().top + window.scrollY),
+          meta: (header.textContent ?? '').includes('Created'),
         }
       })
 
-    const mobileOrder = await cardTops()
-    expect(mobileOrder, 'both cards rendered').not.toBeNull()
-    expect(
-      mobileOrder!.budget,
-      `at ${MOBILE_WIDTH}px the budget must lead: budget y=${mobileOrder!.budget}, ` +
-        `about y=${mobileOrder!.about}`,
-    ).toBeLessThan(mobileOrder!.about)
+    const mobileLayout = await layout()
+    expect(mobileLayout, 'header and budget card rendered').not.toBeNull()
+    expect(mobileLayout!.about, 'no "About this agent" card renders').toBe(false)
+    expect(mobileLayout!.meta, 'the header carries the identity meta line').toBe(true)
+    expect(mobileLayout!.budgetTop).toBeGreaterThan(mobileLayout!.headerBottom)
 
-    // ...and the desktop composition is restored at `lg`, where the metadata
-    // grid is four columns and costs nothing.
+    // ...and the same composition at desktop width.
     await page.setViewportSize({ width: 1280, height: 900 })
     // Waits for the bar to stop RENDERING, not to leave the DOM: `lg:hidden` is
     // `display: none`, so `querySelector` still finds it and a presence check
@@ -356,13 +357,10 @@ test.describe('agent detail at 390px (#2733)', () => {
       const bar = document.querySelector('nav[data-mobile-tab-bar]')
       return !bar || getComputedStyle(bar).display === 'none'
     })
-    const desktopOrder = await cardTops()
-    expect(desktopOrder, 'both cards rendered at 1280').not.toBeNull()
-    expect(
-      desktopOrder!.about,
-      `at 1280px the metadata must lead again: about y=${desktopOrder!.about}, ` +
-        `budget y=${desktopOrder!.budget}`,
-    ).toBeLessThan(desktopOrder!.budget)
+    const desktopLayout = await layout()
+    expect(desktopLayout, 'header and budget card rendered at 1280').not.toBeNull()
+    expect(desktopLayout!.about).toBe(false)
+    expect(desktopLayout!.budgetTop).toBeGreaterThan(desktopLayout!.headerBottom)
     await page.setViewportSize({ width: MOBILE_WIDTH, height: MOBILE_HEIGHT })
 
     // ── 5. No horizontal overflow, both metrics (#1771) ────────────────────

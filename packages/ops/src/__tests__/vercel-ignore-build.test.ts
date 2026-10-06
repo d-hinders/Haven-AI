@@ -9,11 +9,13 @@
  * same script with its own list.
  */
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   BUILD,
   SKIP,
+  globToRegExp,
   hermeticEnv,
   makeRepo,
   parseIgnoreCommand,
@@ -56,6 +58,8 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
         '.nvmrc',
       ]),
     )
+    // #3681 added `!` excludes for the frontend only; the console's list has none.
+    expect(watched.filter((entry: string) => entry.startsWith('!'))).toEqual([])
   })
 
   it('skips when nothing the console builds from changed since the last deployment', () => {
@@ -290,5 +294,61 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
     expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, OPS_FORCE_BUILD: '0' })).toBe(SKIP)
     // The other project's force variable does not force this one.
     expect(r.run({ VERCEL_GIT_PREVIOUS_SHA: deployed, FRONTEND_FORCE_BUILD: '1' })).toBe(SKIP)
+  })
+})
+
+describe('exclude entries, on a synthetic watch list (#3681)', () => {
+  let s: ReturnType<typeof makeRepo>
+  const withList = (watchContent: string) => {
+    s = makeRepo({ project: 'ops', command: ignoreCommand, watchContent })
+    return s
+  }
+  afterEach(() => s?.cleanup())
+
+  it('a `!` glob excludes matching files under an include, and only those', () => {
+    const t = withList('packages/ops\n!packages/ops/**/__tests__/**\n')
+    const deployed = t.commit('packages/ops/src/a.ts')
+    t.commit('packages/ops/src/__tests__/setup.ts') // not test-named: the __tests__ glob alone excludes it
+    expect(t.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(SKIP)
+    t.commit('packages/ops/src/__testsx/a.ts')
+    expect(t.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(BUILD)
+  })
+
+  it.each([
+    ['a bare `!`', 'packages/ops\n!\n'],
+    ['a `!` followed by whitespace', 'packages/ops\n! packages/ops/a\n'],
+    ['excludes only', '!packages/ops/**/__tests__/**\n'],
+  ])('builds on %s, which would otherwise skip every change', (_name, list) => {
+    const t = withList(list)
+    const deployed = t.commit('packages/backend/a.ts')
+    t.commit('packages/ops/src/__tests__/b.ts') // each malformed list would skip this
+    expect(t.run({ VERCEL_GIT_PREVIOUS_SHA: deployed })).toBe(BUILD)
+  })
+})
+
+/**
+ * #3681: every push to any branch used to create a haven-ops deployment, a
+ * skipped one included, and skipped deployments count toward Vercel Hobby's
+ * daily cap. A preview of the console cannot sign in anyway
+ * (docs/operations/ops-console.md), so only `dev`, its Production Branch,
+ * deploys. Vercel deploys a branch when ANY `true` rule matches it.
+ */
+describe('ops Vercel project deploys from dev only (#3681)', () => {
+  const config = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'vercel.json'), 'utf8'))
+  const rules = Object.entries(config.git?.deploymentEnabled ?? {}) as Array<[string, boolean]>
+  const deploys = (branch: string) => rules.some(([glob, on]) => on === true && globToRegExp(glob).test(branch))
+
+  it('turns every branch off and dev on', () => {
+    expect(config.git.deploymentEnabled).toEqual({ '**': false, dev: true })
+  })
+
+  it.each([
+    ['dev', true],
+    ['main', false],
+    ['feat/1234-x', false],
+    ['release/0.5.0', false],
+    ['development', false],
+  ])('branch %s deploys: %s', (branch, expected) => {
+    expect(deploys(branch)).toBe(expected)
   })
 })

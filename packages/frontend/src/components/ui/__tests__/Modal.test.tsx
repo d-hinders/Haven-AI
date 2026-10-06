@@ -90,6 +90,58 @@ describe('Modal', () => {
 })
 
 /**
+ * #3687: a parent re-render must not move focus. The agents page re-renders
+ * every 10 s (its poll) and hands `Modal` a NEW `onClose` each time; a
+ * `closeOnEscape={!busy}` caller toggles mid-dialog. Either one used to re-run
+ * the focus effect, which focused the first focusable — the Close X.
+ */
+describe('Modal focus across parent re-renders (#3687)', () => {
+  function renderWithInput(props: { onClose: () => void; closeOnEscape?: boolean }) {
+    return (
+      <Modal open title="Connect agent" showCloseButton {...props}>
+        <input aria-label="Agent name" />
+      </Modal>
+    )
+  }
+
+  it('keeps focus in the input when the parent passes a new onClose', () => {
+    const { rerender } = render(renderWithInput({ onClose: () => {} }))
+    const input = screen.getByLabelText('Agent name')
+    input.focus()
+
+    rerender(renderWithInput({ onClose: () => {} }))
+
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('calls the LATEST onClose on Escape after that re-render', () => {
+    const first = vi.fn()
+    const latest = vi.fn()
+    const { rerender } = render(renderWithInput({ onClose: first }))
+    screen.getByLabelText('Agent name').focus()
+
+    rerender(renderWithInput({ onClose: latest }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(latest).toHaveBeenCalledTimes(1)
+    expect(first).not.toHaveBeenCalled()
+  })
+
+  it('keeps focus when closeOnEscape toggles, and honours the new value on Escape', () => {
+    const onClose = vi.fn()
+    const { rerender } = render(renderWithInput({ onClose, closeOnEscape: true }))
+    const input = screen.getByLabelText('Agent name')
+    input.focus()
+
+    rerender(renderWithInput({ onClose, closeOnEscape: false }))
+    expect(document.activeElement).toBe(input)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+/**
  * The scroll continuation cue (#1893).
  *
  * ## Why this suite drives geometry by hand

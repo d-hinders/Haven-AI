@@ -7,8 +7,8 @@ import { spawn } from 'node:child_process'
  * ## The command is not ours to edit
  *
  * The backend builds `connector_command` and the setup prompt states the rule
- * an agent must follow: the command may be changed in exactly two ways, and
- * appending `--json` is one of them. So this splits the printed command and
+ * an agent must follow: the command may be changed in only the ways it
+ * lists, and appending `--json` is one of them. So this splits the printed command and
  * appends `--json` — nothing else. It does not add `--replace`, it does not add
  * `--name`, it does not rewrite `--api`, and it never composes a command of its
  * own. `haven agents connect` has no flags for those on purpose: a wiring

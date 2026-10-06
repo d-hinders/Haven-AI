@@ -70,6 +70,7 @@ import {
   BalanceFreshnessIndicator,
   WhenBalanceDegraded,
   BudgetAmountRow,
+  BudgetMeter,
 } from '@/components/haven'
 
 /**
@@ -2870,14 +2871,69 @@ export default function DesignSystemPage() {
         </div>
       </Section>
 
+      <Section
+        title="BudgetMeter"
+        description="How much of a delegation's own period is spent — the ONE progress bar for a budget measurement (#3692). An h-1.5 `--v2-surface-2` track with a `--v2-brand` fill and a progressbar ARIA contract. `usedPercent` is clamped to 0–100, `label` is the accessible name, and an optional `caption` slot carries the “1.20 of 3.00 USDC used · refills …” line. The label row above the bar belongs to the caller — it is the caller's tabular typography, not part of the measurement."
+      >
+        <div className="max-w-md space-y-6">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="v2-tabular text-xs font-medium text-[var(--v2-ink)]">
+                1.20 of 3.00 USDC
+              </span>
+              <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">40%</span>
+            </div>
+            <BudgetMeter usedPercent={40} label="USDC budget used" caption="Refills in 12 days" />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              The analytics agents table renders exactly this shape — its “resets …” line is the
+              caption slot.
+            </p>
+          </div>
+          <div>
+            <BudgetMeter usedPercent={100} label="ETH budget used" />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              Exhausted — clamped at 100. A malformed or overdrawn read can never push the fill
+              past the track or the ARIA value outside its own declared range.
+            </p>
+          </div>
+          <div>
+            <BudgetMeter usedPercent={0} label="USDC budget used" caption="Nothing spent yet" />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">Untouched — clamped at 0.</p>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="PageHeader meta"
+        description="The quiet metadata line under the subtitle (#3692): `v2-text-meta` in ink-3, for the “My account · Base · Created … · Last activity …” register on detail pages. Shown here WITH actions, because the constraint it is designed against is the #2821 phone-width header: at 390 px the meta line wraps as text while the actions keep their row. Optional and additive — a PageHeader without `meta` renders exactly as before."
+      >
+        <div className="max-w-2xl">
+          <PageHeader
+            title="Ampersand"
+            subtitle="Research agent connected through the Haven credential."
+            meta="My account · Base · Created 2 months ago · Last activity 3 minutes ago"
+            actions={
+              <>
+                <Button variant="tertiary" size="sm">
+                  Pause agent
+                </Button>
+                <Button variant="ghost" size="sm" aria-label="More actions">
+                  ⋮
+                </Button>
+              </>
+            }
+          />
+        </div>
+      </Section>
+
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title="Confirm agent budget"
-        subtitle="Review the agent budget before connecting this agent."
+        title="Set agent budget"
+        subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={4} currentStep={2} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

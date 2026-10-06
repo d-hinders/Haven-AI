@@ -46,10 +46,10 @@ describe('AgentRulesSummary labels are one set everywhere (#1431)', () => {
 
   it('finds every call site (the guard is worthless if it only sees the ones we fixed)', () => {
     const sites = callSites()
-    // 4 today: connect Review, connect approval, agent detail, and design-system
-    // examples. A NEW call site should make someone read
+    // 3 today: the connect approval step, the agent detail page, and the
+    // design-system examples. A NEW call site should make someone read
     // this test and decide, not silently inherit whatever labels it copied.
-    expect(sites.length).toBeGreaterThanOrEqual(4)
+    expect(sites.length).toBeGreaterThanOrEqual(3)
   })
 
   it.each(callSites().map((p) => [p.replace(FRONTEND_SRC, 'src'), p]))(

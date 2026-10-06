@@ -38,7 +38,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-20"
+last-verified: "2026-10-06"
 ---
 
 # Haven Screen Recipes
@@ -52,7 +52,7 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 - Lead with what the user controls, not the crypto mechanism underneath.
 - Prefer `Haven account`, `Haven wallet`, `agent rules`, and `agent budget`.
 - One name for one gate: the connect flow's approval gate is the `agent budget`
-  (`Review agent budget` → `Confirm agent budget` → the approval screen's
+  (`Create setup prompt` on the budget step → the approval screen's
   subtitle `Approve the agent budget`, matching the connector's own "approve
   the budget" narration, #1572). Say it ONCE per viewport: the approval screen
   carried the name as the modal subtitle *and* as the summary card's heading
@@ -109,7 +109,9 @@ Structure:
 2. Primary configuration card for the agent name, Haven wallet, token, amount, and reset period.
 3. Agent rules summary showing the budget in human terms.
 4. Risk explainer that states when Haven will ask for approval.
-5. Primary action: `Review agent budget` for creation or `Review changes` for edits.
+5. Primary action: `Create setup prompt` for creation — the budget summary
+   lives on the same step as an always-mounted summary line, not a separate
+   review step (#3688) — or `Review changes` for edits.
 
 Money and risk clarity:
 - Show the selected Haven wallet before the user reviews.
@@ -127,14 +129,16 @@ States:
 
 ## Review Agent Budget
 
-Use immediately before creating or changing an agent's spending authority.
+Use before changing an agent's spending authority. Creation no longer has a
+separate review step (#3688): the budget step carries the summary inline and
+its primary action is `Create setup prompt`.
 
 Structure:
-1. Page header: `Confirm agent budget` (creation) or `Review changes` (edits).
+1. Page header: `Review changes`.
 2. Summary card answering who can spend, from which Haven wallet, how much, and how often.
 3. Approval note explaining what will happen when a request exceeds the budget.
 4. Secondary technical disclosure only if needed, collapsed or visually subordinate.
-5. Primary action: `Create setup prompt` for creation; for edits, `Update
+5. Primary action: `Update
    budget`/`Add budget` when the budget changed or `Save details` otherwise.
    Budget editing here is for delegation-rail agents — they manage budgets
    per-budget on the agent detail page, while legacy Safe accounts have no
@@ -409,6 +413,48 @@ Rules:
 - The budget facet offers only what `GET /agents` can prove from `allowances`: recurring, one-time, none. Exhausted, near-limit and pending-signature need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
 - Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind).
 - Filtering is client-side over the loaded list; the API is unpaginated, so this holds until an account has enough agents for `GET /agents` itself to need paging.
+
+## Agent Detail
+
+Use for `/agents/[agentId]`: one managed agent — what it can spend, what it has
+done, and how to stop it (#3691, epic). Sections, in order:
+
+1. `PageHeader` with the agent name. The actions slot sits beside the title:
+   the status badge (renders nothing while active), then the kebab menu —
+   Edit agent, Manage labels, Update budget, Payment credentials, Replace
+   signing key. The per-state action matrix (owned by #3694): **Pause/Resume
+   lives beside the header** — Pause while active, Resume while paused — where
+   the authority action belongs, not buried in a card footer; **Remove is the
+   LAST item in the ⋮ menu**, the danger-styled entry, behind its own confirm
+   dialog, so the irreversible step is the one the user reaches last and reads
+   twice; **Restore appears beside the header when the agent is archived**.
+2. State-banner slot: directly under the `PageHeader`, ONE slot stacking
+   `ApprovalRequiredBanner`s by severity — danger (the next action cannot be
+   undone) → warning (half-revoked credential, stranded funds, exhausted
+   budget) → neutral (paused, snapshot reads); within a tone, the banner that
+   asks for a decision first. Never scatter banners between sections.
+3. About this agent — description and the identity rows (wallet, network,
+   created, last activity).
+4. Agent budgets — heading and one-line description ABOVE the card (see the
+   detail-page section rule in design-system.md); the card holds the budget
+   rows and `Card.Section` dividers, with each row measured by `BudgetMeter`.
+   **Add budget is collapsed once a budget exists**: with no budget the card
+   is an empty state whose explicit action is Add budget; once a budget
+   exists, adding another is a collapsed affordance (Update budget in the
+   card / kebab), never a permanent second form rendering by default — unless
+   `?grant=` asks for the form, in which case it opens expanded.
+5. Recent activity — heading and description above the card, payments-only
+   rows (`TransactionsTable` in card variant), empty state
+   "No activity yet".
+6. MCP tool calls, if the agent has any.
+
+Money and risk clarity:
+- The budget section leads: it is the reason to open an agent at all. The
+  identity rows are context, not the payload.
+- Every banner names what happens on the next request (declined before money
+  moves), never just a state name.
+- Remove copy states the on-chain fact: revoking takes effect whether or not
+  Haven is reachable, and finish mode ends any remaining budget.
 
 ## Agent Activity
 

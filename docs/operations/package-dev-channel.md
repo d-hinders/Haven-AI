@@ -79,6 +79,12 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verified unchanged (#3689, 2026-10-06, the wiring_collision re-run clause):**
+> - **What changed.** Comments only in `routes/agent-connection-setups.ts` and `connect/src/runtime.ts`: both now say the setup prompt permits a third command change — after the user answers a `wiring_collision` relay, one re-run with the `--name` or `--replace` flag the user chose. The connector command the route builds, and the refusal the connector emits, are unchanged.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves, and the `--replace` / `--name` guidance in The loop still holds.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3669, 2026-10-06, backend supported vs known chains):**
 > - **What changed.** `routes/agent-connection-setups.ts` loses its chain-100 network-name branch. A setup can only be approved on a delegation-rail account (Base or Base Sepolia), so the only visible change is that a historic chain-100 setup row's `network` reads "Chain 100" instead of "Gnosis". No connector-handed command changes.
 > - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.

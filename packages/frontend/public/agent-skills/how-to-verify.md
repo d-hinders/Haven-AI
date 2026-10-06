@@ -6,7 +6,7 @@ Call `haven_get_agent`, one of the Haven MCP tools the connector wires into your
 - `needs_approval` — the connector finished, nobody approved yet. Ask your user again, in their Haven tab; there is no queue to wait in.
 - `revoked` — the credential is not active; ask your user to create a new agent.
 
-`ready` covers hosted identity and the budget only, not your local signer. Check that with `npx -y @haven_ai/connect@<channel> --doctor`, the same tag your prompt named — a separate command, so the two-changes rule does not bind it.
+`ready` covers hosted identity and the budget only, not your local signer. Check that with `npx -y @haven_ai/connect@<channel> --doctor`, the same tag your prompt named — a separate command, so the command-modification rule does not bind it.
 
 
 

@@ -321,19 +321,29 @@ describe('agent connection setup routes', () => {
     expect(body.setup_prompt).toContain('update the local agent MCP config when supported')
     expect(body.setup_prompt).toContain('Run this exact command:')
     expect(body.setup_prompt).toContain(
-      'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.',
+      'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a command modification.',
     )
     expect(body.setup_prompt).toContain(
-      'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
+      'Only three changes to the command above are permitted, and no others: appending --json; re-running it once with --runtime <name> added, only if the connector refuses because it could not determine the agent runtime, naming the harness you are running in and using one of the values that refusal lists; and re-running it once with the one flag I chose added, only after I have answered a wiring_collision relay — --name <the suggested_name or a name I gave> to add alongside, or --replace to replace — keeping any change already made. If that re-run is refused too, relay the refusal to me and stop. Never invent a runtime name and never change anything else.',
     )
     // #1545: the backend is the source of truth for the prompt — pin the
     // --json discoverability sentence and the gate's one name here, not only
     // in the frontend/e2e mirrors.
     // #1719: the permitted-changes sentence now names the --runtime retry the
     // connector asks an agent for by name, and still forbids everything else.
-    expect(body.setup_prompt).toContain('Only two changes to the command above are permitted, and no others: appending --json')
+    expect(body.setup_prompt).toContain('Only three changes to the command above are permitted, and no others: appending --json')
     expect(body.setup_prompt).toContain('could not determine the agent runtime')
     expect(body.setup_prompt).toContain('Never invent a runtime name')
+    // #3689: the third change is the re-run the wiring_collision refusal asks
+    // for. Pinned on a phrase only the modification sentence carries — the
+    // relay sentence names wiring_collision and --name too, so a pin on those
+    // words alone would pass with the clause deleted.
+    expect(body.setup_prompt).toContain(
+      'only after I have answered a wiring_collision relay — --name <the suggested_name or a name I gave> to add alongside, or --replace to replace',
+    )
+    expect(body.setup_prompt).toContain('If that re-run is refused too, relay the refusal to me and stop.')
+    // The user still chooses; the agent never does.
+    expect(body.setup_prompt).toContain('Never pick for me by adding --replace or --name yourself.')
     // #2523: the rule sentences are imported from @haven_ai/sdk, so the prompt
     // and the /for-agents.md runbook cannot say two different things about the
     // same command. The literals above still pin the wording; these pin the
@@ -844,7 +854,7 @@ describe('agent connection setup routes', () => {
 
     // The universal guardrails still stand.
     expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
-    expect(body.setup_prompt).toContain('Only two changes to the command above are permitted')
+    expect(body.setup_prompt).toContain('Only three changes to the command above are permitted')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_|hermes_cli\.mcp_config|npm install -g/)
 
     await app.close()

@@ -5620,29 +5620,27 @@ export const SCENARIOS = {
     /** Exposed so the fixture-contract test can pin each stage (#1409). */
     stage: setAgentBudgetStage,
     api(apiPath) {
-      // Matched on the PATH: the card asks with `?include=remaining` (#3695),
-      // and an exact-string match on the bare path silently fell through to
-      // the shared fixture once #3693 added the query — the scenario then
-      // captured an agent WITH a budget under every stage name.
-      const [pathname, query = ''] = apiPath.split('?')
-      if (pathname === `/agents/agent-research/delegations`) {
+      // A scenario hook sees the request PATH only (the router strips the
+      // query before calling `api()`), so `?include=remaining` is not visible
+      // here. The budget card is the one caller of this path on the page and
+      // it always asks (#3695), so the remaining fields are served
+      // unconditionally — the shared fixture, which does see the query,
+      // keeps the opt-in contract.
+      if (apiPath === `/agents/agent-research/delegations`) {
         const stage = AGENT_BUDGET_STAGES[agentBudgetStage]
         if (stage.kind === 'error') return httpError(500)
         // Long enough to capture, short enough not to stall the run.
         if (stage.kind === 'pending') return delayedHttp(20_000, { delegations: [] })
-        const includeRemaining = new URLSearchParams(query).get('include') === 'remaining'
-        // Same opt-in contract as the shared fixture: two different usage
-        // levels so the two meters are told apart in the capture.
+        // Two different usage levels, so the two meters are told apart in
+        // the capture.
         const usedShare = [1n, 3n]
         return {
-          delegations: includeRemaining
-            ? stage.delegations.map((r, i) => ({
-                ...r,
-                remaining_atomic: (BigInt(r.budget_atomic) * (4n - usedShare[i % 2]) / 4n).toString(),
-                remaining_from_chain: true,
-                period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString(),
-              }))
-            : stage.delegations,
+          delegations: stage.delegations.map((r, i) => ({
+            ...r,
+            remaining_atomic: (BigInt(r.budget_atomic) * (4n - usedShare[i % 2]) / 4n).toString(),
+            remaining_from_chain: true,
+            period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString(),
+          })),
         }
       }
       // The agent's own `allowances` is a VIEW over active delegations

@@ -296,7 +296,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         </div>
       ) : null}
 
-      <div className="divide-y divide-[var(--v2-divider)]">
+      <div className="divide-y divide-[var(--v2-border)]">
         {budgetsError ? (
           <div className="flex flex-wrap items-center justify-between gap-3 py-3">
             <p className="text-sm text-[var(--v2-ink-2)]">
@@ -355,7 +355,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           </Button>
         </div>
       ) : tokens.length > 0 ? (
-        <div className={hasActive ? 'mt-4 space-y-2 border-t border-[var(--v2-divider)] pt-4' : 'space-y-2'}>
+        <div className={hasActive ? 'mt-4 space-y-2' : 'space-y-2'}>
           {hasActive ? (
             <p className="text-sm font-medium text-[var(--v2-ink)]">Add a budget</p>
           ) : (

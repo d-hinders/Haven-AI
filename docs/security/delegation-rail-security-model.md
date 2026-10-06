@@ -1455,8 +1455,9 @@ authority, and the same scope note holds.
 > **Re-verified #3611 (2026-10-06, console type ramp):** the change touches
 > `packages/ops/src/app/layout.tsx` (one more stylesheet import,
 > `@haven_ai/ui/type.css`, the type ramp and `v2-tabular` moved verbatim out
-> of the dashboard's `globals.css`) and adds a test under
-> `packages/ops/src/__tests__/`. Plain CSS bundled at build time from a
+> of the dashboard's `globals.css`), adds a test under
+> `packages/ops/src/__tests__/`, and adds a local-only computed-style probe
+> to the screenshot script (`packages/ops/scripts/screenshot.mjs`). Plain CSS bundled at build time from a
 > workspace package: no script, no network origin, so the CSP is unchanged.
 > No client method, read, reveal, sign-in navigation or backend file
 > changes, so the no-rail-authority claim above holds verbatim. Scope of

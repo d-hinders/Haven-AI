@@ -658,7 +658,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Typography"
-        description="The type ramp lives in globals.css as v2-text-* utility classes (size + leading + weight + tracking in one class). Rule: page and section headings go through the ramp; within components, body copy uses Tailwind's text-sm and metadata uses text-xs — those two map to the ramp's body and meta steps. Ad-hoc pixel sizes (text-[Npx]) are off-system; the design-lint gate blocks new ones."
+        description="The type ramp lives in @haven_ai/ui/type.css as v2-text-* utility classes (size + leading + weight + tracking in one class). Rule: page and section headings go through the ramp; within components, body copy uses Tailwind's text-sm and metadata uses text-xs — those two map to the ramp's body and meta steps. Ad-hoc pixel sizes (text-[Npx]) are off-system; the design-lint gate blocks new ones."
       >
         <Card hover={false} className="space-y-4 p-5">
           {[

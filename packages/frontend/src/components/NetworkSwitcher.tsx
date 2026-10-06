@@ -5,7 +5,7 @@ import { Icon } from '@/components/ui/Icon'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useActiveChainId } from '@/hooks/useActiveChain'
-import { getChainConfig } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -22,12 +22,11 @@ import {
  * architecture B (#626) this is pure client state — no backend switch.
  */
 
-// Per-chain dot colour (display only). Base blue, Gnosis teal, Sepolia amber to
-// flag it as a testnet.
+// Per-chain dot colour (display only). Base blue, Sepolia amber to flag it as a
+// testnet; any other chain falls back to neutral grey.
 const CHAIN_DOT: Record<number, string> = {
   8453: 'var(--v2-chain-base)',
   84532: 'var(--v2-chain-testnet)',
-  100: 'var(--v2-chain-gnosis)',
 }
 
 function chainDotColor(chainId: number): string {
@@ -35,11 +34,7 @@ function chainDotColor(chainId: number): string {
 }
 
 function chainName(chainId: number): string {
-  try {
-    return getChainConfig(chainId).name
-  } catch {
-    return `Chain ${chainId}`
-  }
+  return resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
 }
 
 function ChainDot({ chainId }: { chainId: number }) {

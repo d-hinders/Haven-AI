@@ -5,7 +5,8 @@ import { SidePanel } from '@/components/ui/SidePanel'
 import { Amount } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AccountingBadge } from '@/components/accounting/AccountingBadge'
-import { getExplorerUrl } from '@/lib/chains'
+import { getExplorerUrlOrNull } from '@/lib/chains'
+import NetworkPill from '@/components/NetworkPill'
 import { truncate } from '@/lib/format'
 import { parseX402Hostname } from '@/lib/transaction-labels'
 import {
@@ -59,9 +60,18 @@ function ExplorerLink({
   value: string
   label?: string
 }) {
+  const href = getExplorerUrlOrNull(chainId, type, value)
+  // A persisted row on a chain the registry does not know: show the value, no link.
+  if (!href) {
+    return (
+      <span className="v2-tabular" title={value}>
+        {label ?? truncate(value)}
+      </span>
+    )
+  }
   return (
     <a
-      href={getExplorerUrl(chainId, type, value)}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
       className="v2-tabular text-[var(--v2-brand)] underline-offset-2 hover:underline"
@@ -233,7 +243,7 @@ export default function TransactionDetailPanel({
         <DetailRow label="Token" value={tx.tokenSymbol ?? tx.asset} />
         {tx.tokenAddress ? <DetailRow label="Token address" value={addr(tx.tokenAddress)} /> : null}
         <DetailRow label="Account" value={addr(tx.accountAddress)} />
-        <DetailRow label="Network" value={`Chain ${tx.chainId}`} />
+        <DetailRow label="Network" value={<NetworkPill chainId={tx.chainId} />} />
         <DetailRow label="Transaction" value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.hash} />} />
         <DetailRow label="Date" value={new Date(tx.timestamp * 1000).toLocaleString()} />
       </Section>

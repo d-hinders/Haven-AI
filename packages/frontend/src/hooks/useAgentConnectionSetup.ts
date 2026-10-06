@@ -14,7 +14,7 @@ import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
 } from '@/hooks/useAgentConnectionSetupStatus'
-import { getChainConfig, getChainTokens, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
+import { getChainConfig, resolveChainOrNull, getChainTokens, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
@@ -377,7 +377,7 @@ export function useAgentConnectionSetup({
   const chainId = selectedAccount?.chain_id ?? activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
   const walletName = selectedAccount?.name ?? activeAccount?.name ?? 'Selected Haven wallet'
-  const walletNetworkName = getChainConfig(chainId).name
+  const walletNetworkName = resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
   // A setup created in THIS session wins over a resumed id: the user who just
   // clicked through the wizard is looking at their own new setup, not at
   // whatever id happened to be in the URL that opened the page.
@@ -442,7 +442,6 @@ export function useAgentConnectionSetup({
   // the add-then-continue two-step are gone. The pinned token:
   const budgetToken =
     tokenOptions.find((token) => token.symbol === 'USDC') ??
-    tokenOptions.find((token) => token.symbol === 'USDC.e') ??
     tokenOptions[0]
 
   // The draft budget derives LIVE from the amount/reset inputs. `allowances`

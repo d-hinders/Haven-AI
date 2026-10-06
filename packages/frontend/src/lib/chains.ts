@@ -75,10 +75,10 @@ function buildFrontendChain(chainId: number): FrontendChainConfig {
 // ── Registry ──────────────────────────────────────────────────────
 
 /**
- * Full registry of every chain Haven *knows about*. `getChainConfig` reads
- * from here, so data created on any of these chains (e.g. a Safe a user
- * imported on Gnosis before we went Base-only) still renders without
- * crashing.
+ * Full registry of every chain Haven *knows about*. `getChainConfig` and
+ * `resolveChainOrNull` read from here, so history created on any of these
+ * chains (e.g. Gnosis, now history-only, #3634) still renders without
+ * crashing. Only Base and Base Sepolia are *offered* (`SUPPORTED_CHAINS`).
  */
 const CHAINS: Record<number, FrontendChainConfig> = Object.fromEntries(
   Object.keys(FRONTEND_CHAIN_LAYER).map((id) => [Number(id), buildFrontendChain(Number(id))]),
@@ -169,6 +169,20 @@ export function getExplorerUrl(
 ): string {
   const chain = getChainConfig(chainId)
   return `${chain.explorerUrl}/${type}/${hash}`
+}
+
+/**
+ * `getExplorerUrl`'s non-throwing companion: `null` when the chain is not in
+ * the registry. For a PERSISTED row's chain (a transaction, a passport, an
+ * account) — render no link rather than take the screen down.
+ */
+export function getExplorerUrlOrNull(
+  chainId: number | null | undefined,
+  type: 'tx' | 'address',
+  hash: string,
+): string | null {
+  const chain = resolveChainOrNull(chainId)
+  return chain ? `${chain.explorerUrl}/${type}/${hash}` : null
 }
 
 export function getTokensForChain(chainId: number): Record<string, FrontendTokenConfig> {

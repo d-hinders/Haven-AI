@@ -111,7 +111,6 @@ const TOKEN_USE: Record<string, string> = {
   'series-6': 'Chart series 6: the sixth agent; a seventh wraps to 1.',
   'modal-backdrop': 'Modal scrim.',
   'chain-base': 'Base identity dot.',
-  'chain-gnosis': 'Gnosis identity dot.',
   'chain-testnet': 'Testnet flag colour.',
   'chain-base-dot': 'NetworkPill Base dot (sky family).',
   'chain-base-fg': 'NetworkPill Base text.',
@@ -479,7 +478,7 @@ export default function DesignSystemPage() {
             </p>
             <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
               <code className="rounded bg-[var(--v2-surface)] px-1">--v2-chain-*</code> tells networks
-              apart (Base, Gnosis, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>{' '}
+              apart (Base, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>{' '}
               and <code className="rounded bg-[var(--v2-surface)] px-1">NetworkSwitcher</code>. These are{' '}
               <span className="font-medium text-[var(--v2-ink)]">identity</span> colours, deliberately outside the
               semantic rules — never reuse a chain colour for success/warning meaning, and never route money
@@ -488,7 +487,6 @@ export default function DesignSystemPage() {
             <div className="mt-3 flex flex-wrap items-center gap-4">
               {[
                 { label: 'Base', dot: 'var(--v2-chain-base)' },
-                { label: 'Gnosis', dot: 'var(--v2-chain-gnosis)' },
                 { label: 'Testnet', dot: 'var(--v2-chain-testnet)' },
               ].map((chain) => (
                 <span key={chain.label} className="inline-flex items-center gap-1.5 text-xs text-[var(--v2-ink-2)]">

@@ -3,7 +3,7 @@
 import { ChevronDown } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { getChainConfig } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import type {
   TransactionFilterAgentOption,
@@ -36,7 +36,8 @@ function directionLabel(direction: 'in' | 'out' | undefined): string {
 }
 
 function chainLabel(chainId: number): string {
-  return getChainConfig(chainId).name.replace(/\s+Chain$/, '')
+  const chain = resolveChainOrNull(chainId)
+  return chain ? chain.name.replace(/\s+Chain$/, '') : `Chain ${chainId}`
 }
 
 function tokenLabel(token: TransactionFilterTokenOption): string {

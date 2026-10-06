@@ -4021,6 +4021,43 @@ export const SCENARIOS = {
       await shoot(card, 'card')
     },
   },
+  'design-system-chain-identity': {
+    description:
+      'The Chain identity block on /design-system — the --v2-chain-* swatches after #3670 removed the Gnosis token',
+    // Element capture for the same reason as design-system-buttons: the page
+    // is far past Chromium's full-page surface cap, and this block sits below it.
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const label = page.getByText('Chain identity', { exact: true })
+      await label.waitFor({ timeout: 20_000 })
+      // The bordered sub-block that owns the label: label, copy and swatches.
+      const block = page.locator('div.border-t', { has: label }).last()
+      await block.scrollIntoViewIfNeeded()
+      await shoot(block, 'block')
+    },
+  },
+  'transactions-detail-network': {
+    description:
+      'The /transactions detail drawer for the first fixture row — its Network row now renders the NetworkPill (#3670)',
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const select = page.locator('button[data-row-select]').first()
+      await select.waitFor({ timeout: 30_000 })
+      await select.click()
+      const drawer = page.getByRole('dialog').first()
+      await drawer.waitFor({ timeout: 20_000 })
+      await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
+      await shoot(drawer, 'drawer')
+    },
+  },
   /**
    * #2882: the transactions page when the feed is capped at the explorer
    * window. Unreachable by a plain route capture — the default fixture

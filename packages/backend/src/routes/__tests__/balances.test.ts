@@ -137,7 +137,9 @@ describe('balance routes', () => {
 
   it('#3669: refuses an implicit chain resolved to a history-only chain-100 account, with no RPC read', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'safe-gnosis', chain_id: 100 }] })
+    // One ownership row, order-independent: this pins the route's chain gate,
+    // not database behaviour (#1227 ratchet).
+    mockQuery.mockResolvedValue({ rows: [{ id: 'safe-gnosis', chain_id: 100 }] })
 
     const response = await app.inject({
       method: 'GET',

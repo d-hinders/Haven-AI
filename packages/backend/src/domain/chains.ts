@@ -15,7 +15,6 @@ import { config } from '../config.js'
 import {
   CHAIN_REGISTRY,
   getChainData,
-  isRegisteredChain,
   type CoreChainConfig,
   type CoreTokenConfig,
 } from '@haven_ai/core'
@@ -134,7 +133,35 @@ const CHAINS: Record<number, ChainConfig> = Object.fromEntries(
   Object.values(CHAIN_REGISTRY).map((core) => [core.chainId, buildChainConfig(core)]),
 )
 
-export const SUPPORTED_CHAIN_IDS = Object.keys(CHAINS).map(Number)
+/**
+ * Every chain whose FACTS Haven can resolve — the KNOWN set. It includes
+ * history-only chains (Gnosis, 100), so persisted rows, explorer links and the
+ * explorer history read keep resolving through `getChain`.
+ */
+export const KNOWN_CHAIN_IDS: readonly number[] = Object.keys(CHAINS).map(Number)
+
+/**
+ * The chains Haven RUNS on — explicit, not derived from the registry keys
+ * (decision (c), #3635; epic #3634). Chain 100 (Gnosis) is known but
+ * history-only and read-only: it is deliberately absent here. The runtime loops
+ * (prices, relayer monitor, the bump loop via deploys) and discovery skip it,
+ * and balances, portfolio, receive and the delegate-balance read refuse it.
+ * Payments and budget grants refuse it upstream, through the retired-rail 410
+ * and `DELEGATION_RAIL_CHAIN_IDS`. Lives in the backend
+ * (not core) because core's registry is also the frontend's known set (#3671).
+ */
+export const SUPPORTED_CHAIN_IDS: readonly number[] = [8453, 84532]
+
+for (const id of SUPPORTED_CHAIN_IDS) {
+  if (!CHAINS[id]) {
+    throw new Error(`chains: supported chain ${id} is not in the known registry`)
+  }
+}
+
+/** Known to the registry (history may render) — NOT necessarily supported. */
+export function isKnownChain(chainId: number): boolean {
+  return Object.prototype.hasOwnProperty.call(CHAINS, chainId)
+}
 
 export function getChain(chainId: number): ChainConfig {
   const chain = CHAINS[chainId]
@@ -175,7 +202,7 @@ export function getExplorerUrl(
 }
 
 export function isSupportedChain(chainId: number): boolean {
-  return isRegisteredChain(chainId)
+  return SUPPORTED_CHAIN_IDS.includes(chainId)
 }
 
 /**
@@ -193,7 +220,7 @@ export function isDeployableChain(chainId: number): boolean {
 /** The chains this environment serves deploys on — for the frontend picker. */
 export function deployableChainIds(): number[] {
   const allow = config.deployChainIds
-  return allow.length === 0 ? SUPPORTED_CHAIN_IDS : allow.filter(isSupportedChain)
+  return allow.length === 0 ? [...SUPPORTED_CHAIN_IDS] : allow.filter(isSupportedChain)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────

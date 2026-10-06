@@ -1441,7 +1441,6 @@ function appLogSafeError(err: unknown): void {
 
 function networkName(chainId: number): string {
   if (chainId === 8453) return 'Base'
-  if (chainId === 100) return 'Gnosis'
   return `Chain ${chainId}`
 }
 

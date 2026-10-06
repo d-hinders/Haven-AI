@@ -23,6 +23,11 @@ describe('isValueBearingChain (#908)', () => {
     expect(isValueBearingChain(100)).toBe(true) // Gnosis
   })
 
+  it('classifies Gnosis Chiado (10200) as value-bearing — no longer a known testnet (#3669)', () => {
+    expect(isValueBearingChain(10200)).toBe(true)
+    expect(needsBackupSignerRecommendation({ chainId: 10200, signerCount: 1 })).toBe(true)
+  })
+
   it('FAILS CLOSED for unknown chain ids — ungated chains do not exist', () => {
     expect(isValueBearingChain(424242)).toBe(true)
   })

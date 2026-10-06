@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { Wallet, verifyMessage } from 'ethers'
+import { relayerKeysFromEnv } from '../../../infra/relayer-env-keys.js'
 import {
   canonicalize,
   signReceipt,
@@ -257,5 +258,24 @@ describe('fail-closed when signing is unconfigured', () => {
   it('accepts a distinct key alongside a configured relayer key', () => {
     setReceiptSigningKey(SIGNER.privateKey, [OTHER.privateKey])
     expect(receiptIssuerAddress()?.toLowerCase()).toBe(SIGNER.address.toLowerCase())
+  })
+})
+
+describe('relayerKeysFromEnv — the boot guard compares EVERY relayer key (#3669)', () => {
+  it('collects RELAYER_PRIVATE_KEY and every RELAYER_PRIVATE_KEY_<n>, including a retired chain 100', () => {
+    const keys = relayerKeysFromEnv({
+      RELAYER_PRIVATE_KEY: 'k-global',
+      RELAYER_PRIVATE_KEY_8453: 'k-base',
+      RELAYER_PRIVATE_KEY_100: 'k-gnosis',
+      RELAYER_PRIVATE_KEY_FALLBACK: 'ignored',
+      OTHER: 'ignored',
+    })
+    expect(keys.sort()).toEqual(['k-base', 'k-global', 'k-gnosis'])
+  })
+
+  it('a still-set RELAYER_PRIVATE_KEY_100 is refused as the receipt signing key', () => {
+    const forbidden = relayerKeysFromEnv({ RELAYER_PRIVATE_KEY_100: SIGNER.privateKey })
+    expect(() => setReceiptSigningKey(SIGNER.privateKey, forbidden)).toThrow(/must not be the relayer key/)
+    setReceiptSigningKey(null)
   })
 })

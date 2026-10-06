@@ -19,10 +19,12 @@
  *   - `@haven_ai/core`: `CHAIN_REGISTRY[100]` is deleted, so `getChainData`,
  *     `getTokenBySymbol` and `isRegisteredChain` behave as after removal
  *     (restored in `afterAll`).
- * NOT covered: values snapshotted at module load (`SUPPORTED_CHAIN_IDS`,
- * `REGISTRY_CHAIN_IDS`, `deployableChainIds()`); those are slice 2b's
- * known-vs-supported split. The switch flips in `beforeAll` so the snapshot
- * values above are built from the full registry, as in a pre-removal boot.
+ * NOT covered: values snapshotted at module load. Since #3669,
+ * `SUPPORTED_CHAIN_IDS` is an explicit [8453, 84532] and `deployableChainIds()`
+ * derives from it, so neither ever held 100 after that change; only
+ * `REGISTRY_CHAIN_IDS` and the backend's `KNOWN_CHAIN_IDS` are registry-derived.
+ * The switch flips in `beforeAll` so those are built from the full registry,
+ * as in a pre-removal boot.
  * (Until #3642, `domain/tokens.ts` also read chain 100 at load; that is gone,
  * and `domain/__tests__/boot-without-chain-100.test.ts` pins it.)
  */

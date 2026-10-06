@@ -105,6 +105,12 @@ export default async function balanceRoutes(
       }
 
       const chainId = requestedChainId ?? ownedAccounts[0].chain_id
+      // #3669: an implicit chain resolves from the owned account, so a legacy
+      // history-only account (chain 100) is refused here exactly like an
+      // explicit chain_id=100 above — no RPC read on a chain Haven no longer runs on.
+      if (!isSupportedChain(chainId)) {
+        return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
+      }
       const chain = getChain(chainId)
 
       const reads = await fetchBalanceReads(chainId, accountAddress)

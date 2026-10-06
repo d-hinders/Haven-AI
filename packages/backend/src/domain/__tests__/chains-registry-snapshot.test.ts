@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { SUPPORTED_CHAIN_IDS, getChain } from '../chains.js'
+import { KNOWN_CHAIN_IDS, getChain } from '../chains.js'
 
 /**
  * Registry purity snapshot (#986). The chain/token registry is load-bearing
@@ -19,7 +19,7 @@ import { SUPPORTED_CHAIN_IDS, getChain } from '../chains.js'
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'chains-registry.json')
 
 function serializeRegistry(): string {
-  const chains = SUPPORTED_CHAIN_IDS.slice().sort((a, b) => a - b).map((id) => {
+  const chains = KNOWN_CHAIN_IDS.slice().sort((a, b) => a - b).map((id) => {
     const chain = getChain(id)
     return { ...chain, rpcUrl: '<env>', explorerApiKey: '<env>' }
   })

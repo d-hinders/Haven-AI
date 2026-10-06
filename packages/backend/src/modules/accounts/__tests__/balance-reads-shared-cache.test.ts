@@ -55,6 +55,7 @@ vi.mock('../../../infra/prices.js', () => ({
 
 import balanceRoutes from '../../../routes/balances.js'
 import { fetchPortfolioForAccount, isPortfolioUnpriceable } from '../index.js'
+import { fetchBalanceReads } from '../balance-reads.js'
 
 // Chain 84532 (Base Sepolia) registry: ETH native + USDC.
 const CHAIN = 84532
@@ -232,18 +233,17 @@ describe('shared balance-read cache (#3460)', () => {
     expect(mockNativeReads).toHaveBeenCalledTimes(1)
 
     // The reads were good and STAY cached — the next portfolio call
-    // re-prices the same reads (bounded by the price backoff), and /balances
-    // is unaffected: no new reads, no degradation markers.
+    // re-prices the same reads (bounded by the price backoff), and the shared
+    // read-set is unaffected: no new reads, the cached native read intact.
     const again = await fetchPortfolioForAccount(100, addr)
     expect(isPortfolioUnpriceable(again)).toBe(true)
     expect(mockNativeReads).toHaveBeenCalledTimes(1)
 
-    mockFindAccountOwnership.mockResolvedValue({
-      rows: [{ id: 'safe-1', chain_id: 100 }],
-    })
-    const res = await getBalances(addr, 100)
+    // #3669: /balances now refuses chain 100 (history-only), so the shared
+    // cache is read directly — the same read-set the route serves from.
+    const reads = await fetchBalanceReads(100, addr)
     expect(mockNativeReads).toHaveBeenCalledTimes(1)
-    expect(res.json().balances[0].balanceFreshness).toBeUndefined()
-    expect(res.json().balances[0].balance).toBe('1000000000000000000')
+    expect(reads.native.status).toBe('fulfilled')
+    expect((reads.native as PromiseFulfilledResult<bigint>).value.toString()).toBe('1000000000000000000')
   })
 })

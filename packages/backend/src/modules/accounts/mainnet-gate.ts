@@ -45,7 +45,6 @@ const RECOMMENDED_SIGNER_FLOOR = 2
 const KNOWN_TESTNET_CHAIN_IDS: ReadonlySet<number> = new Set([
   84532, // Base Sepolia — the delegation rail's dev/QA chain
   11155111, // Ethereum Sepolia
-  10200, // Gnosis Chiado
 ])
 
 /** A chain where real funds move — fail-closed: unknown chains count. */

@@ -75,7 +75,7 @@ describe('portfolio routes', () => {
 
   it('keeps the legacy address-only lookup when no chain is requested', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'safe-gnosis', chain_id: 100 }] })
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'safe-base', chain_id: 8453 }] })
 
     const response = await app.inject({
       method: 'GET',
@@ -88,7 +88,24 @@ describe('portfolio routes', () => {
       expect.not.stringContaining('AND chain_id = $3'),
       ['user-1', SAFE_ADDRESS],
     )
-    expect(mockFetchPortfolioForAccount).toHaveBeenCalledWith(100, SAFE_ADDRESS)
+    expect(mockFetchPortfolioForAccount).toHaveBeenCalledWith(8453, SAFE_ADDRESS)
+  })
+
+  it('#3669: refuses an implicit chain resolved to a history-only chain-100 account', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    // One ownership row, order-independent: this pins the route's chain gate,
+    // not database behaviour (#1227 ratchet).
+    mockQuery.mockResolvedValue({ rows: [{ id: 'safe-gnosis', chain_id: 100 }] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/portfolio/${SAFE_ADDRESS}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('Unsupported chain: 100')
+    expect(mockFetchPortfolioForAccount).not.toHaveBeenCalled()
   })
 
   it('requires chain_id for legacy reads that match multiple owned chains', async () => {

@@ -2284,6 +2284,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > gate run unchanged. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3669, 2026-10-06, backend supported vs known chains):**
+> - **Supported narrows.** The backend's supported set narrows to 8453 and 84532. Gnosis (100) becomes known and history-only: no deploy, relayer, monitor or ingest runs on it.
+> - **The rail drops Gnosis.** `VIEM_CHAINS` drops Gnosis. The rail itself already refused chain 100 through `DELEGATION_RAIL_CHAIN_IDS`.
+> - **Chiado now fails closed.** Chiado (10200) leaves the mainnet gate's testnet list, so it is classified value-bearing. The §7 recommendation logic is unchanged.
+> - **Receipt-key check widens.** The passport receipt-key boot check now compares against every configured relayer key.
+> - **Nothing else moves.** No delegation shape, caveat, signer, allowlist or redemption guard in this document moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **#3542 (2026-10-01).** Re-verified unchanged except the archive guard
 > above. The archive guard and the account-delete guard
 > (`HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL`) now count `replaced` rows as live,

@@ -76,6 +76,13 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3669 (2026-10-06, backend supported vs known chains):**
+> - **The wire value narrows.** `GET /chains` and discovery `chains.supported` now list 8453 and 84532 only; chain 100 leaves. No key or field is removed.
+> - **History filters keep working.** `GET /transactions` still accepts a `chainId=100` history filter, through the new known-chain gate.
+> - **No contract moves.** No MCP tool, schema, expected-context version or consent hash moves. No installed runtime reads `supported` to pay; the SDK already refuses chain 100 (#3638).
+>
+> `last-verified` stays 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3638 (2026-10-05, SDK networks and explorer links):** the SDK's
 > x402 network and token tables drop chain 100. The public `selectPaymentOption`
 > no longer selects an `eip155:100` option (the payment paths already refused one

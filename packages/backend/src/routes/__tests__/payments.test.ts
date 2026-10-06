@@ -6,6 +6,7 @@ vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
 import { getAddress } from 'ethers'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
+import { getChain } from '../../domain/chains.js'
 // #3031: production wiring for the enforced module (see beforeAll).
 import { installRequestValidation } from '../../openapi/request-validation.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
@@ -659,6 +660,30 @@ describe('payment routes', () => {
     expect(response.statusCode).toBe(200)
     // Dark today: zero + not applied — but always present.
     expect(response.json().fee).toEqual({ amount: '0', token: 'xDAI', basis_points: 0, applied: false })
+  })
+
+  it('#3669: GET /:id on a legacy chain-100 intent answers 200 with a Gnosis explorer link (history-only chain)', async () => {
+    // AGENT is a legacy chain-100 agent with no execution-rail state: the read
+    // has no rail gate, so the known registry entry alone must carry the link.
+    expect(AGENT.chain_id).toBe(100)
+    primeDb(
+      AUTH,
+      [/FROM payment_intents WHERE id/, () => ({
+        rows: [pendingIntent({ status: 'confirmed', tx_hash: TX_HASH })],
+      })],
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/payments/${PAYMENT_ID}`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body).toMatchObject({ chain_id: 100, tx_hash: TX_HASH })
+    expect(body.explorer_url).toBe(`${getChain(100).explorerUrl}/tx/${TX_HASH}`)
+    expect(body.explorer_url.startsWith('https://gnosisscan.io/')).toBe(true)
   })
 
   it('expires stale pending signature intents before listing payments', async () => {

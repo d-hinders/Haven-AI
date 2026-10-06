@@ -14,8 +14,8 @@
  *   3. the public node (`PUBLIC_RPC_BASE` / `PUBLIC_RPC_BASE_SEPOLIA`).
  *
  * De-duplicated in that order, so an unset dedicated variable (which already
- * resolves to the public node) does not list the public node twice. Chains
- * with no public node here (Gnosis, chain 100) get their one endpoint.
+ * resolves to the public node) does not list the public node twice. A chain
+ * with no second provider or public node configured gets its one endpoint.
  *
  * ## What falls through and what does not
  *

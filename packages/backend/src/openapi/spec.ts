@@ -6073,7 +6073,7 @@ export const openapiSpec = {
         operationId: 'getChains',
         summary: 'PUBLIC: which chains this deployment serves.',
         description:
-          'Two different lists, and the difference matters: `supported` is every chain the code knows, while `deployable` is the subset this environment will actually provision accounts on (#679). Onboarding pickers must offer `deployable`, not `supported`, or they will offer a chain the deployment refuses. No authentication — it is configuration, not data.',
+          'Two different lists, and the difference matters: `supported` is every chain Haven runs on (Base and Base Sepolia; Gnosis is history-only and not listed), while `deployable` is the subset this environment will actually provision accounts on (#679). Onboarding pickers must offer `deployable`, not `supported`, or they will offer a chain the deployment refuses. No authentication — it is configuration, not data.',
         security: [],
         responses: {
           '200': {
@@ -6085,7 +6085,7 @@ export const openapiSpec = {
                   required: ['deployable', 'supported'],
                   properties: {
                     deployable: { type: 'array', items: { type: 'integer' }, description: 'Chains this environment will provision on.' },
-                    supported: { type: 'array', items: { type: 'integer' }, description: 'Chains the code knows about at all.' },
+                    supported: { type: 'array', items: { type: 'integer' }, description: 'Chains Haven runs on (Base and Base Sepolia). History-only chains such as Gnosis are not listed.' },
                   },
                 },
               },

@@ -21,6 +21,7 @@ import { sendDelegateAlertFromEnv } from './infra/delegate-alert-webhook.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
+import { relayerKeysFromEnv } from './infra/relayer-env-keys.js'
 import discoveryRoutes from './routes/discovery.js'
 import { buildApiRootDocument } from './routes/root-document.js'
 import authRoutes from './routes/auth.js'
@@ -488,7 +489,7 @@ setAnchorUidRepair(repairAnchorUidFromReceipt)
 // source, so only a runtime check can catch that operator copy-paste.
 setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null, [
   config.relayerPrivateKey,
-  ...SUPPORTED_CHAIN_IDS.map((id) => process.env[`RELAYER_PRIVATE_KEY_${id}`]),
+  ...relayerKeysFromEnv(),
 ])
 // Warn — once, at boot — when this deployment anchors passports it cannot
 // verify (#1151). Silent in every other combination. Must run AFTER the signer

@@ -36,8 +36,8 @@ export interface DelegationMessage {
   salt: string
 }
 
-// The delegation rail is pinned to Base / Base Sepolia (#821); Gnosis is
-// history-only (#3634), so no signing config for it lives here (#1079).
+// The delegation rail is pinned to Base / Base Sepolia (#821); Gnosis was
+// dead config here that could only mislead (#1079).
 const VIEM_CHAINS = { 8453: base, 84532: baseSepolia } as const
 const RPC_URLS: Record<number, string> = {
   8453: 'https://mainnet.base.org',

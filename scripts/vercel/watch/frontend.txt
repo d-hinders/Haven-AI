@@ -1,7 +1,8 @@
 # What the haven-ai-frontend Vercel project is built from (#3594). Read by
 # scripts/vercel/ignore-build.sh, one repo-relative path per line; `#` starts a
-# comment. packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
-# checks it against the build's real inputs, so a missing one fails CI.
+# comment, and a `!` line is an exclude glob.
+# packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts checks it
+# against the build's real inputs, so a missing one fails CI.
 packages/frontend
 packages/ui
 packages/core
@@ -14,3 +15,9 @@ docs/product/account-recovery.md
 docs/product/agent-key-rotation.md
 docs/product/agent-passport.md
 docs/security/delegation-rail-security-model.md
+# Tests and Playwright screenshots under the watched packages: the deployed
+# site never imports them, so a change to them alone skips the build (#3681).
+# CI still type-checks and runs them on every push.
+!packages/frontend/e2e/**
+!packages/**/__tests__/**
+!packages/**/*.test.*

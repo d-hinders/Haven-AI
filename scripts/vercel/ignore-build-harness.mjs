@@ -54,7 +54,53 @@ export function readWatchFile(watchFile) {
   for (const entry of entries) {
     if (/\s/.test(entry)) throw new Error(`${watchFile}: entry "${entry}" contains whitespace; the script word-splits the list`)
   }
+  // The harness models excludes as `*` / `?` / `**` globs only. git also
+  // excludes everything under a wildcard-free exclude and reads `[...]` as a
+  // class, which this model would call watched while the script skips it, so
+  // both are refused rather than modelled (#3681 review).
+  for (const entry of entries.filter((e) => e.startsWith('!'))) {
+    if (!/[*?]/.test(entry) || /[[\]]/.test(entry)) {
+      throw new Error(`${watchFile}: exclude "${entry}" must use * or ** and no [ ]; the harness cannot model it`)
+    }
+  }
+  // An exclude-only list would make git watch EVERYTHING but the excludes.
+  if (!entries.some((entry) => !entry.startsWith('!'))) throw new Error(`${watchFile}: lists no include entry`)
   return entries
+}
+
+/**
+ * A git `glob` pathspec as a RegExp: `**` crosses directories (a leading
+ * `**\/` and an inner `/**\/` may match none), `*` and `?` stay inside one.
+ */
+export function globToRegExp(glob) {
+  let out = ''
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]
+    if (glob.startsWith('**/', i)) {
+      out += '(?:.*/)?'
+      i += 2
+    } else if (glob.startsWith('**', i)) {
+      out += '.*'
+      i += 1
+    } else if (c === '*') out += '[^/]*'
+    else if (c === '?') out += '[^/]'
+    else out += c.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  }
+  return new RegExp(`^${out}$`)
+}
+
+/**
+ * Whether a change to `path` (repo-relative) rebuilds the project under the
+ * `watched` list, as the script's pathspecs decide it: an include entry (a
+ * path prefix) matches it and no `!` exclude glob does (#3681).
+ */
+export function isWatched(watched, path) {
+  const includes = watched.filter((entry) => !entry.startsWith('!'))
+  const excludes = watched.filter((entry) => entry.startsWith('!')).map((entry) => globToRegExp(entry.slice(1)))
+  return (
+    includes.some((entry) => path === entry || path.startsWith(`${entry}/`)) &&
+    !excludes.some((re) => re.test(path))
+  )
 }
 
 /**
@@ -76,8 +122,10 @@ export function hermeticEnv(extra = {}) {
 /**
  * A throwaway repository on branch `dev` with the shared script committed and
  * one unrelated commit. `run` executes `command` from `packages/<project>`.
+ * `watchContent`, when given, replaces the project's real watch file, so the
+ * script's general behaviour can be tested on a synthetic list.
  */
-export function makeRepo({ project, command }) {
+export function makeRepo({ project, command, watchContent = /** @type {string | undefined} */ (undefined) }) {
   const repo = mkdtempSync(join(tmpdir(), `${project}-ignore-`))
   const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', env: hermeticEnv() }).trim()
   git('init', '-q', '-b', 'dev')
@@ -97,7 +145,8 @@ export function makeRepo({ project, command }) {
   mkdirSync(join(repo, 'scripts', 'vercel', 'watch'), { recursive: true })
   copyFileSync(SCRIPT_SOURCE, join(repo, SCRIPT_IN_REPO))
   const { watchFile } = parseIgnoreCommand(command)
-  copyFileSync(join(REPO_ROOT, watchFile), join(repo, watchFile))
+  if (watchContent === undefined) copyFileSync(join(REPO_ROOT, watchFile), join(repo, watchFile))
+  else writeFileSync(join(repo, watchFile), watchContent)
   // The project's Root Directory must exist in every clone, shallow ones
   // included, so the seed commit carries a file in it.
   commit(`packages/${project}/vercel.json`, '{}')

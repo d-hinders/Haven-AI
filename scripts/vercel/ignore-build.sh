@@ -8,7 +8,10 @@
 # <FORCE_VARIABLE> names an environment variable that, set to 1, forces one
 # build. <watch file> is a repo-relative file (scripts/vercel/watch/*.txt)
 # listing, one per line, the repo-relative paths the project is built from;
-# `#` starts a comment. Paths may not contain whitespace (the list is
+# `#` starts a comment. A line starting with `!` is an EXCLUDE: a glob
+# (`**` crosses directories) naming files under a watched path that the
+# deployed site never reads, such as tests, so a change to them alone skips
+# (#3681). Paths may not contain whitespace (the list is
 # word-split); the harness refuses such an entry. The list lives in a file, not in vercel.json, so the
 # ignoreCommand stays short. Each project's test reads the same file.
 #
@@ -19,7 +22,9 @@
 # deployment cap, a failed build) the change never deployed (#3591).
 #
 # It skips ONLY when it can prove nothing watched changed. Anything uncertain
-# builds: a wasted build costs one deployment, a wrong skip leaves a stale site.
+# builds: a wasted build costs build minutes, a wrong skip leaves a stale site.
+# (A skip saves minutes, not deployments: a skipped deployment still counts
+# toward Vercel's daily cap, #3681.)
 #
 #   - Previous deployment known and in the clone: skip iff nothing watched
 #     changed since it.
@@ -66,15 +71,38 @@ if [ -z "$WATCHED" ]; then
   echo "vercel ignore-build: watch file ${watch_file} lists no paths; building." >&2
   exit 1
 fi
+# An empty exclude (`!` alone) excludes the whole repository, and a list of
+# excludes alone watches everything else; either would make every build skip or
+# build for the wrong reason, so both build (#3681).
+has_include=
+for path in $WATCHED; do
+  case "$path" in
+    '!')
+      echo "vercel ignore-build: watch file ${watch_file} has an empty exclude; building." >&2
+      exit 1
+      ;;
+    '!'*) ;;
+    *) has_include=1 ;;
+  esac
+done
+if [ -z "$has_include" ]; then
+  echo "vercel ignore-build: watch file ${watch_file} lists only excludes; building." >&2
+  exit 1
+fi
 
 # `:(top)` pathspecs: Vercel runs this from the project's Root Directory
 # (packages/<project>), where a relative pathspec would match nothing and
-# always skip.
+# always skip. An `!` entry becomes an exclude glob, which git applies after
+# the includes: a path is watched when an include matches it and no exclude
+# does.
 watched_unchanged() {
   base=$1
   set --
   for path in $WATCHED; do
-    set -- "$@" ":(top)$path"
+    case "$path" in
+      '!'*) set -- "$@" ":(top,exclude,glob)${path#!}" ;;
+      *) set -- "$@" ":(top)$path" ;;
+    esac
   done
   git diff --quiet "$base" HEAD -- "$@"
 }

@@ -9,7 +9,7 @@ import {
   type Provider,
 } from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
-import { getChain } from '../domain/chains.js'
+import { rpcUrlForChain } from '../domain/chains.js'
 import { secondaryRpcUrl, secretSegments } from './chain/rpc-transport.js'
 
 const providers = new Map<number, JsonRpcProvider>()
@@ -125,7 +125,7 @@ export async function getRelayerFeeOverrides(
 export function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)
   if (!provider) {
-    provider = newEthersProvider(getChain(chainId).rpcUrl)
+    provider = newEthersProvider(rpcUrlForChain(chainId))
     providers.set(chainId, provider)
   }
   return provider

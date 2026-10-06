@@ -11,7 +11,7 @@
  * Run: npm run ops:check-delegation -w @haven/backend
  */
 
-import { getChain } from '../src/domain/chains.js'
+import { rpcUrlForChain } from '../src/domain/chains.js'
 import {
   DELEGATION_RAIL_CHAIN_IDS,
   getDelegationContracts,
@@ -31,7 +31,7 @@ async function hasCode(rpcUrl: string, address: string): Promise<boolean> {
 async function main(): Promise<void> {
   let failures = 0
   for (const chainId of DELEGATION_RAIL_CHAIN_IDS) {
-    const { rpcUrl } = getChain(chainId)
+    const rpcUrl = rpcUrlForChain(chainId)
     const pins = getDelegationContracts(chainId)
     const targets: Array<[string, string]> = [
       ['DelegationManager', pins.delegationManager],

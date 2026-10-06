@@ -46,7 +46,7 @@ const endpoints = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../domain/chains.js', () => ({
-  getChain: () => ({ rpcUrl: endpoints.dedicated }),
+  rpcUrlForChain: () => endpoints.dedicated,
 }))
 vi.mock('../../../config.js', () => ({
   PUBLIC_RPC_BASE: 'https://mainnet.base.org',

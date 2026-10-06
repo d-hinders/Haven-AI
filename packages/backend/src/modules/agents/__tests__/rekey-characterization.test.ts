@@ -119,7 +119,7 @@ describe('#1698 characterization — readRemainingBudget reads the enforcer, key
       return { ...actual, createPublicClient: () => ({}) }
     })
     vi.doMock('../../../domain/chains.js', () => ({
-      getChain: () => ({ rpcUrl: 'https://rpc.invalid' }),
+      rpcUrlForChain: () => 'https://rpc.invalid',
     }))
     vi.doMock('../../../rails/delegation-contracts.js', () => ({
       chainForId: () => ({ id: BASE_SEPOLIA }),

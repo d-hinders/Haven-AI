@@ -80,6 +80,14 @@ last-verified: "2026-10-02"
 >
 > Nothing else in this document was re-verified, and `last-verified` is not bumped.
 
+> **Re-verified #3671 (2026-10-06, `RPC_URL` removed):** the backend no longer
+> reads `RPC_URL`; RPC is resolved only for supported chains, so chain 100 has
+> none. Delete the variable from any environment that still sets it (it is
+> ignored). `GNOSISSCAN_API_KEY` stays, history only (decision (c), #3635): it
+> serves the chain-100 explorer history read. The "Testnet RPCs by default"
+> bullet drops its Chiado line. Nothing else in this document was re-verified,
+> and `last-verified` is not bumped.
+
 > **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
 > agents join the pixel gate with the same seed-before-navigation dark
@@ -416,8 +424,7 @@ Isolation rules that are non-negotiable for a payments product:
   usable credential answers is in
   [`delegation-rail-vendor-ops.md` §2](delegation-rail-vendor-ops.md). Every
   secret here still MUST differ from production.
-- **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
-  chain 100 is dead per above), `RPC_URL_BASE_SEPOLIA` → **Base Sepolia**
+- **Testnet RPCs by default** — `RPC_URL_BASE_SEPOLIA` → **Base Sepolia**
   (chain 84532, the chain dev's accounts and the money-flow harness use).
   `RPC_URL_BASE` always names a Base **mainnet** (8453) endpoint, on dev too:
   dev reads it every hour for the relayer balance monitor's 8453 entry (the

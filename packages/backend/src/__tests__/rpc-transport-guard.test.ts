@@ -136,7 +136,7 @@ describe('every backend viem RPC transport goes through rpcTransport (#3255)', (
   })
 
   it('the patterns flag the shapes they exist to flag (self-test)', () => {
-    expect(HTTP_CALL.test("transport: http(getChain(chainId).rpcUrl),")).toBe(true)
+    expect(HTTP_CALL.test("transport: http(rpcUrlForChain(chainId)),")).toBe(true)
     expect(HTTP_CALL.test('  http(rpcUrl, { timeout })')).toBe(true)
     expect(HTTP_CALL.test('fetchhttp(x)')).toBe(false)
     expect(HTTP_CALL.test('client.http(x)')).toBe(false)

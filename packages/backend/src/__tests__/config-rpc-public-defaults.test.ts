@@ -53,9 +53,9 @@ describe('warnPublicBaseSepoliaRpc (#2511)', () => {
 
 /**
  * #2615: the same signal for Base MAINNET, which had none. Production ran on
- * the shared public node with no evidence of any kind — `RPC_URL` was set
- * (Gnosis only) and looked like "RPC is configured", which is the trap the
- * issue names.
+ * the shared public node with no evidence of any kind — a Gnosis-only RPC
+ * variable was set and looked like "RPC is configured", which is the trap the
+ * issue names (that variable was removed in #3671).
  *
  * These assert the MAINNET consequence specifically, not just "a warning
  * fired". A generalised function that silently reused the Sepolia prose would

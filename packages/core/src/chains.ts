@@ -89,6 +89,13 @@ export interface CoreChainConfig {
 }
 
 // ── Gnosis Chain (100) ────────────────────────────────────────────
+//
+// HISTORY-ONLY (decision (c), #3635; epic #3634). Haven no longer runs on
+// Gnosis: this entry stays so persisted chain-100 rows, explorer links, token
+// labels and the frontend's known-chain set keep resolving (the frontend
+// builds its chain list from this registry at load, #3670; prod still holds
+// chain-100 passkeys). Core carries no RPC for any chain; the backend wires
+// RPC for SUPPORTED chains only (`rpcUrlForChain`), so chain 100 has none.
 
 const GNOSIS: CoreChainConfig = {
   chainId: 100,

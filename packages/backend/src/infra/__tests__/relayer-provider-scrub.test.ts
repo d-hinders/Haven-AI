@@ -12,7 +12,7 @@
  * constructs (`ScrubbingJsonRpcProvider`), against a REAL ethers provider
  * talking to a local HTTP server whose URL carries a key — not a hand-built
  * imitation of ethers' error shape — and for BOTH providers `relayer.ts`
- * builds: the primary (`getProvider`, via a mocked `getChain`) and the
+ * builds: the primary (`getProvider`, via a mocked `rpcUrlForChain`) and the
  * fallback (`getFallbackBroadcastProvider`, via a mocked `secondaryRpcUrl`,
  * mirroring `outbound-fallback-send.test.ts`). Calling `.send()` directly —
  * not `sendRawViaFallback` — shows the scrub protects every caller of either
@@ -62,9 +62,8 @@ beforeAll(async () => {
       ...real,
       // Only this suite's CHAIN_ID is ever requested here; a real chain
       // config carries many more fields, but `newEthersProvider` only
-      // reads `.rpcUrl`.
-      getChain: (chainId: number) =>
-        chainId === CHAIN_ID ? ({ rpcUrl: baseUrl } as ReturnType<typeof real.getChain>) : real.getChain(chainId),
+      // reads the URL `rpcUrlForChain` returns.
+      rpcUrlForChain: (chainId: number) => (chainId === CHAIN_ID ? baseUrl : real.rpcUrlForChain(chainId)),
     }
   })
   vi.doMock('../chain/rpc-transport.js', async (importOriginal) => ({

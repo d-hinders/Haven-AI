@@ -85,6 +85,12 @@ and the `release` skill.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3671, 2026-10-06, `RPC_URL` removed):**
+> - **What changed.** `config.ts` drops `rpcUrl` (the Gnosis-only `RPC_URL` variable). No connector, dist-tag or channel variable is touched.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this doc is coupled through `routes/agent-connection-setups.ts` and
 > `middleware/retired-safe-names.ts`. The route's change is one internal

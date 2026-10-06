@@ -2492,12 +2492,14 @@ key, no credential, and the token still unused — the resolve is not what
 consumes it. The check reads only the local credential root, in the doctor's
 own terms: `retired`, `orphaned`, `parked` and **named** directories never
 trigger it, and a `--name` run is never asked, because a named pair displaces
-nothing (#1695). Two things it deliberately is not. It is not a third
-permitted change to the dashboard's command: the setup prompt still allows an
-agent exactly `--json` and, after a runtime refusal, `--runtime`, and the
-refusal's own message says so — *relay this to your user; do not add a flag
-yourself* — which is why the two artifacts do not contradict even though the
-prompt does not name this case.
+nothing (#1695). Two things it deliberately is not. It is not a flag an
+agent may add on its own initiative: the refusal's own message says *relay
+this to your user; do not add a flag yourself*, and the setup prompt agrees.
+Since #3689 the prompt names this case: once the user has answered the relay,
+the agent may re-run once with the one flag the user chose (`--name` or
+`--replace`), keeping `--json` and any `--runtime` already added. Before
+#3689 the prompt allowed only `--json` and the runtime retry, so it forbade
+the re-run the refusal asked for.
 
 **A connector run invoked by `haven agents connect --run` (#2527) adds exactly
 `--json` and nothing else** (pinned by

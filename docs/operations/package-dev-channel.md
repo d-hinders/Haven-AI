@@ -81,7 +81,7 @@ and the `release` skill.
 
 > **Re-verified unchanged (#3689, 2026-10-06, the wiring_collision re-run clause):**
 > - **What changed.** Comments only in `routes/agent-connection-setups.ts` and `connect/src/runtime.ts`: both now say the setup prompt permits a third command change — after the user answers a `wiring_collision` relay, one re-run with the `--name` or `--replace` flag the user chose. The connector command the route builds, and the refusal the connector emits, are unchanged.
-> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves, and the `--replace` guidance in step 2 still holds.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves, and the `--replace` / `--name` guidance in The loop still holds.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 

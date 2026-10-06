@@ -199,8 +199,9 @@ describe('/for-agents.md (#2523)', () => {
     // permitted change — the one re-run, with the flag the user chose, that the
     // connector's own wiring_collision refusal asks for. The prompt that
     // authorised the command forbade it, so a user who chose "alongside" saw
-    // the agent's harness block the re-run. That clause is the +304 bytes;
-    // nothing unrelated was trimmed to fit.
+    // the agent's harness block the re-run. That clause is +295 bytes and the
+    // rename to "the command-modification rule" +9; nothing unrelated was
+    // trimmed to fit.
     expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11500)
   })
 

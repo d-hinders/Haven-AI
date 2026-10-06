@@ -1181,9 +1181,9 @@ function supersededIds(collision: WiringCollision): string {
  * prompt permits an agent `--json`, `--runtime` after a `runtime_undetermined`
  * refusal, and — only once the user has answered this refusal — one re-run
  * with the flag the user chose (#3689), so the refusal tells the agent to hand
- * the choice to its user rather than to add a flag on its own initiative. Never a default: replacing retires a working agent's
- * local key material, and installing alongside changes the server names
- * every host sees.
+ * the choice to its user rather than to add a flag on its own initiative.
+ * Never a default: replacing retires a working agent's local key material,
+ * and installing alongside changes the server names every host sees.
  */
 async function resolveWiringCollision(
   collision: WiringCollision,

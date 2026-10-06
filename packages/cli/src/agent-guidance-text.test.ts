@@ -92,8 +92,14 @@ describe('haven guide text (#2525)', () => {
     // text (the command's own secret check already refuses one, but cannot
     // catch every shape). Merged on top of #3596's 10914/10827, landing at
     // 11126/11037.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11126)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11037)
+    //
+    // #3689: +304 bytes / +304 units — the command-modification rule gains
+    // its third permitted change (the user-chosen --name/--replace re-run
+    // after a wiring_collision relay), the network sentence drops "third",
+    // and "the two-changes rule" becomes "the command-modification rule".
+    // Lands at 11430/11341.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11430)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11341)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

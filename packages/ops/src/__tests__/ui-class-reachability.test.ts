@@ -24,6 +24,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 const OPS_ROOT = join(__dirname, '..', '..')
@@ -78,63 +79,32 @@ function reachableClasses(sheets: string[]): Set<string> {
   return classes
 }
 
-/** Comments are prose, not class strings: drop them before scanning. */
-function stripCodeComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[\s;{}(),])\/\/[^\n]*/g, '$1')
-}
-
 /**
- * The text of every string literal in `source` — `'…'`, `"…"` and template
- * literals, including the literals INSIDE a template's `${…}` expressions
- * (`${compact ? 'v2-text-h3' : 'v2-text-h2'}`, the usual conditional-class
- * shape), with nested braces balanced.
+ * The text of every string literal in `source`, read from the TypeScript AST:
+ * `'…'`, `"…"`, plain template literals, and a template's head and every span
+ * between its `${…}` expressions — the expressions themselves are visited too,
+ * so `${compact ? 'v2-text-h3' : 'v2-text-h2'}` yields both classes. Comments,
+ * JSX text and regex literals are not string literals, so an apostrophe in
+ * prose or a `/*` inside a string cannot hide or invent a class.
  */
 function stringLiterals(source: string): string[] {
   const out: string[] = []
-  let i = 0
-  while (i < source.length) {
-    const ch = source[i]
-    if (ch === "'" || ch === '"') {
-      let j = i + 1
-      while (j < source.length && source[j] !== ch && source[j] !== '\n') j += source[j] === '\\' ? 2 : 1
-      out.push(source.slice(i + 1, j))
-      i = j + 1
-    } else if (ch === '`') {
-      let text = ''
-      let j = i + 1
-      while (j < source.length && source[j] !== '`') {
-        if (source[j] === '\\') {
-          text += source.slice(j, j + 2)
-          j += 2
-        } else if (source[j] === '$' && source[j + 1] === '{') {
-          let depth = 1
-          let k = j + 2
-          while (k < source.length && depth > 0) {
-            if (source[k] === '{') depth++
-            else if (source[k] === '}') depth--
-            k++
-          }
-          out.push(...stringLiterals(source.slice(j + 2, k - 1)))
-          text += ' '
-          j = k
-        } else {
-          text += source[j]
-          j++
-        }
-      }
-      out.push(text)
-      i = j + 1
-    } else {
-      i++
+  const visit = (node: ts.Node) => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) out.push(node.text)
+    else if (ts.isTemplateExpression(node)) {
+      out.push(node.head.text)
+      for (const span of node.templateSpans) out.push(span.literal.text)
     }
+    ts.forEachChild(node, visit)
   }
+  visit(ts.createSourceFile('ui.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX))
   return out
 }
 
 /** Class tokens in a source file's string literals. */
 function classTokens(source: string): Set<string> {
   const out = new Set<string>()
-  for (const raw of stringLiterals(stripCodeComments(source))) {
+  for (const raw of stringLiterals(source)) {
     const literal = raw.replace(/\[[^\]]*\]/g, ' ').replace(/var\([^)]*\)/g, ' ')
     for (const word of literal.split(/\s+/)) {
       const token = word.slice(word.lastIndexOf(':') + 1).replace(/^!/, '')
@@ -186,6 +156,15 @@ describe('@haven_ai/ui classes reach the ops console (#3611)', () => {
     )
     // Comments are not class strings.
     expect(classTokens("// see 'v2-text-display'\nconst a = 'flex'").has('v2-text-display')).toBe(false)
+    // Prose and other strings cannot hide a real class: an apostrophe in JSX
+    // text, a `/*` inside a string before a later comment, ` // ` in a string.
+    const tricky = [
+      "const GLOB = 'src/*.tsx'",
+      "export const A = () => <p>don't <span className=\"v2-text-h2\">x</span></p>",
+      "const B = 'a // b v2-text-h3'",
+      '/** a later comment */',
+    ].join('\n')
+    expect([...classTokens(tricky)]).toEqual(expect.arrayContaining(['v2-text-h2', 'v2-text-h3']))
     // The scan reaches the real primitives: PageHeader's title class is found.
     const pageHeader = uiSources().find((f) => f.endsWith('PageHeader.tsx'))
     expect(pageHeader, 'PageHeader.tsx not found under packages/ui/src').toBeTruthy()

@@ -136,6 +136,10 @@ on both (owner decision on #908, 2026-07-19) — the per-chain
 `RELAYER_PRIVATE_KEY_<chainId>` mechanism *permits* split keys but is not
 deployed that way today.
 
+Each Railway service's start command, sleep setting and build source live in
+Railway rather than the repo; they are recorded in
+[`railway-services.md`](railway-services.md), with how to read the bill.
+
 **URLs** (no custom domain — we test against the platform URLs):
 
 - Frontend (Vercel): `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`

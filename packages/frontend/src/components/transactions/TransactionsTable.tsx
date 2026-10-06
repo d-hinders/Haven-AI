@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { getExplorerUrl } from '@/lib/chains'
+import { getExplorerUrlOrNull } from '@/lib/chains'
 import { timeAgo } from '@/lib/format'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import {
@@ -101,6 +101,12 @@ interface TransactionsTableProps {
 }
 
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
+
+/** `null` = the row has no explorer link (explicitly, or its chain is unknown). */
+function rowExplorerHref(tx: AggregatedTransaction): string | null {
+  if (tx.explorerUrl === null) return null
+  return tx.explorerUrl ?? getExplorerUrlOrNull(tx.chainId, 'tx', tx.hash)
+}
 
 function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY: string }) {
   const renders: Record<TransactionColumnId, (key: string) => ReactNode> = {
@@ -530,9 +536,7 @@ export default function TransactionsTable({
                     className={`w-8 px-2 ${padY} text-center md:px-4`}
                     onClick={selectable ? (e) => e.stopPropagation() : undefined}
                   >
-                    {tx.explorerUrl !== null ? (
-                      <ExternalDetailsLink href={tx.explorerUrl ?? getExplorerUrl(tx.chainId, 'tx', tx.hash)} />
-                    ) : null}
+                    {rowExplorerHref(tx) ? <ExternalDetailsLink href={rowExplorerHref(tx)!} /> : null}
                   </td>
                 ) : null}
               </tr>

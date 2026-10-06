@@ -74,7 +74,6 @@ export const THEME_TOKENS: TokenSpec[] = [
   { name: 'series-6', light: '#a01a63', dark: '#e878b5' },
   // Chain identity — pills flip to translucent-border-on-deep-fill.
   { name: 'chain-base', light: '#0052ff', dark: '#3395ff' },
-  { name: 'chain-gnosis', light: '#3e9b8f', dark: '#3e9b8f' },
   { name: 'chain-testnet', light: '#f59e0b', dark: '#fbbf24' },
   { name: 'chain-base-dot', light: '#0ea5e9', dark: '#0ea5e9' },
   { name: 'chain-base-fg', light: '#0369a1', dark: '#7dd3fc' },

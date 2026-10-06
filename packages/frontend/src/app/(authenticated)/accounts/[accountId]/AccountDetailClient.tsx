@@ -38,7 +38,7 @@ import { ExternalDetailsLink } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
 import { ReceivePanel } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
-import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/lib/chains'
 // #3127 (finding 6): the shared formatter — this page's inline copy was the
 // third drift site that let /accounts render `kr13,000.50` while this page
 // rendered `13 000,50 kr` for the same figure.
@@ -168,7 +168,7 @@ export default function AccountDetailClient() {
   // headline and per-token rows read the SEK figures the endpoint prices —
   // never a USD value relabelled "kr".
   const totalFiat = currency === 'EUR' ? totalEur : currency === 'SEK' ? totalSek : totalUsd
-  const chain = getChainConfig(chainId)
+  const chain = resolveChainOrNull(chainId)
   const formattedTotal = formatFiat(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
   // #3295: a token whose balance read failed renders its last-known value
@@ -290,7 +290,7 @@ export default function AccountDetailClient() {
             {account.is_default && (user?.accounts?.length ?? 0) > 1 ? (
               <StatusBadge tone="brand">Default</StatusBadge>
             ) : null}
-            <StatusBadge>{chain.name}</StatusBadge>
+            <StatusBadge>{chain?.name ?? `Chain ${chainId}`}</StatusBadge>
             {accountAddress && (
               <>
                 {/* #1083 gave Send to BOTH rails. #1989 (epic #1440) took it
@@ -588,7 +588,7 @@ export default function AccountDetailClient() {
                 <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
               )}
               {accountAddress && <CopyButton value={accountAddress} label="address" />}
-              {accountAddress && <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', accountAddress)} label="Open wallet address externally" />}
+              {accountAddress && getExplorerUrlOrNull(chainId, 'address', accountAddress) && <ExternalDetailsLink href={getExplorerUrlOrNull(chainId, 'address', accountAddress)!} label="Open wallet address externally" />}
             </div>
           </div>
           {/* #2413: "Required approvals" and "Approvers" lived here. Both were

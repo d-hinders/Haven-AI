@@ -99,7 +99,6 @@
      Base carries both a brand dot (#0052FF) and a softer sky pill — unifying
      the two into one Base hue is a deliberate follow-up, not done here. */
   --v2-chain-base: #0052ff; /* NetworkSwitcher solid dot — Coinbase Base blue */
-  --v2-chain-gnosis: #3e9b8f; /* NetworkSwitcher solid dot — Gnosis teal */
   --v2-chain-testnet: #f59e0b; /* Base Sepolia — amber, flags a testnet (dot, both surfaces) */
   /* NetworkPill soft-pill — Base (sky family) */
   --v2-chain-base-dot: #0ea5e9;
@@ -439,7 +438,6 @@
     --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
     --v2-chain-base: #3395ff;
-    --v2-chain-gnosis: #3e9b8f;
     --v2-chain-testnet: #fbbf24;
     --v2-chain-base-dot: #0ea5e9;
     --v2-chain-base-fg: #7dd3fc;
@@ -575,7 +573,6 @@
   --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   --v2-chain-base: #3395ff;
-  --v2-chain-gnosis: #3e9b8f;
   --v2-chain-testnet: #fbbf24;
   --v2-chain-base-dot: #0ea5e9;
   --v2-chain-base-fg: #7dd3fc;

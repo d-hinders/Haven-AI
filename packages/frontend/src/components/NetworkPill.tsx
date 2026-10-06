@@ -1,15 +1,16 @@
 'use client'
 
-import { getChainConfig } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 
 /**
  * Small coloured pill identifying which chain a Haven account lives on. Designed to
  * sit next to an account name or address — compact, quiet, but enough to tell
- * Gnosis and Base apart at a glance on the Accounts list.
+ * networks apart at a glance. Resolves a PERSISTED row's chain, so it covers
+ * history-only Gnosis (100) as well as the offered Base chains.
  */
 
 const CHAIN_STYLES: Record<number, { dot: string; text: string; border: string; bg: string }> = {
-  // Gnosis — green
+  // Gnosis — green. History-only (#3634): rows persisted before the removal.
   100: {
     dot: 'bg-[var(--v2-success)]',
     text: 'text-[var(--v2-success)]',
@@ -47,12 +48,7 @@ interface NetworkPillProps {
 
 export default function NetworkPill({ chainId, size = 'sm', className = '' }: NetworkPillProps) {
   // Resolve safely so an unknown chain doesn't crash the UI.
-  let name = 'Unknown network'
-  try {
-    name = getChainConfig(chainId).name
-  } catch {
-    // fall through to fallback styling
-  }
+  const name = resolveChainOrNull(chainId)?.name ?? 'Unknown network'
 
   const style = CHAIN_STYLES[chainId] ?? FALLBACK_STYLE
   const padding = size === 'md' ? 'px-2 py-0.5' : 'px-1.5 py-0.5'

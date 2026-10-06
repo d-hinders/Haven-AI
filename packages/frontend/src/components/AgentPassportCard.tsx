@@ -25,7 +25,7 @@
  */
 
 import { useAgentPassport, type PassportAnchorState } from '@/hooks/useAgentPassport'
-import { getExplorerUrl } from '@/lib/chains'
+import { getExplorerUrlOrNull } from '@/lib/chains'
 import { timeAgo } from '@/lib/format'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
@@ -109,7 +109,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
   // gated to a specific chain (currently Base Sepolia only) that can differ
   // from the account's chain.
   const explorerHref =
-    passport?.tx_hash ? getExplorerUrl(passport.chain_id, 'tx', passport.tx_hash) : null
+    passport?.tx_hash ? getExplorerUrlOrNull(passport.chain_id, 'tx', passport.tx_hash) : null
 
   return (
     <Card hover={false} className="mt-6 p-5 md:p-6">

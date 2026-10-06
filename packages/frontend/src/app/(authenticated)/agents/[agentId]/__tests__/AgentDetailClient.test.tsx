@@ -980,6 +980,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Restore to list' }))
     const trigger = screen.getByRole('button', { name: 'Agent options' })
     expect(trigger).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Restoring…')
     fireEvent.click(trigger)
     expect(screen.queryByRole('menuitem', { name: 'Restore to list' })).not.toBeInTheDocument()
     release()
@@ -1028,6 +1029,23 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByRole('button', { name: 'Restore to list' })).not.toBeInTheDocument()
 
     expect(openAgentMenu()).toEqual([...menuItems])
+  })
+
+  // The retired line follows `isHalfRevoked`'s meaning of "ended": revoked OR
+  // archived. An archived agent that was never revoked (still `active`) is
+  // ended too — before #3694 the footer told it "Pause the agent…".
+  it.each([
+    ['revoked', { status: 'revoked', live_delegation_count: 0 }, true],
+    ['archived-unlinked', { status: 'active', account_id: null, archived_at: ARCHIVED_AT }, true],
+    ['active', { status: 'active' }, false],
+    ['paused', { status: 'paused' }, false],
+    ['half-revoked', { status: 'revoked', live_delegation_count: 1 }, false],
+  ] as const)('retired status line — %s (#3694)', (_state, overrides, shown) => {
+    mockAgentWith(overrides)
+    render(<AgentDetailClient agentId="agent-1" />)
+    const line = screen.queryByText('This agent no longer has access through Haven.')
+    if (shown) expect(line).toBeInTheDocument()
+    else expect(line).not.toBeInTheDocument()
   })
 
   it('styles Remove agent as the danger item, last, after a separator (#3694)', () => {

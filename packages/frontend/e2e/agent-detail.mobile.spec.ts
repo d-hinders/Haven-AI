@@ -238,14 +238,13 @@ test.describe('agent detail at 390px (#2733)', () => {
     ).toBe(false)
 
     // ── 4. Actions row and kebab clear the 44px floor ──────────────────────
-    // Two mechanisms, matching the design system (#1726): the header's Pause
-    // action (#3694 moved it out of the old rules footer, with Update budget
-    // deleted and Remove moved into the kebab) is an `sm` Button — 36px PAINTED with a transparent
-    // `::after` overlay extending the HIT target to 44px vertically — so they
-    // are measured the `accounts-card-tap-target` way (walk outward from the
-    // centre until elementFromPoint leaves the control). The kebab is an icon
-    // square on the both-axes variant (`min-h-11 min-w-11`) — its PAINTED box
-    // must clear 44 outright.
+    // The header's Pause action (#3694 moved it out of the old rules footer,
+    // deleted Update budget and put Remove in the kebab) is an `lg` Button,
+    // 44px painted. It is still measured the `accounts-card-tap-target` way
+    // (walk outward from the centre until elementFromPoint leaves the
+    // control), so a later drop to `sm` must keep #1726's overlay to pass.
+    // The kebab is an icon square on the both-axes variant
+    // (`min-h-11 min-w-11`) — its PAINTED box must clear 44 outright.
     const hitHeight = async (name: string) =>
       page.evaluate((label) => {
         const el = Array.from(document.querySelectorAll('button')).find(

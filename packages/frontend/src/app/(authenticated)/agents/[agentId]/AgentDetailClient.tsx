@@ -579,7 +579,9 @@ export default function AgentDetailClient({ agentId }: Props) {
                 onClick={() => void handlePause()}
                 disabled={pendingAction !== null}
                 variant="ghost"
-                size="sm"
+                // `lg` (44px) so the pair matches the kebab beside it; `sm`
+                // painted 36px next to a 44px square (#3694 design review).
+                size="lg"
               >
                 {pendingAction === 'pause' ? 'Pausing…' : 'Pause agent'}
               </Button>
@@ -588,10 +590,18 @@ export default function AgentDetailClient({ agentId }: Props) {
               <Button
                 onClick={() => void handleResume()}
                 disabled={pendingAction !== null}
-                size="sm"
+                size="lg"
               >
                 {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
               </Button>
+            ) : null}
+            {/* Restore runs from a menu that closes on select, so the old
+                footer button's "Restoring…" label has no control to live on.
+                Announced here instead, beside the (disabled) trigger. */}
+            {pendingAction === 'restore' ? (
+              <span role="status" className="v2-text-meta text-[var(--v2-ink-3)]">
+                Restoring…
+              </span>
             ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger

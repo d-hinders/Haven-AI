@@ -2,6 +2,8 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - packages/ui/src/tokens.css
+  - packages/ui/tailwind.preset.js
   - .github/workflows/publish.yml
   - .github/workflows/morning-report-note.yml
   - .github/workflows/claim-assignee.yml
@@ -44,9 +46,9 @@ If `/design-system` exists, inspect it before editing UX and reuse the visual la
 
 ## UI Implementation Rules
 
-- Inspect existing primitives in `packages/frontend/src/components/ui` and Haven-domain components in `packages/frontend/src/components/haven` before creating new UI. The shared primitives and shims of @haven_ai/ui live at packages/ui
+- Inspect existing primitives in `packages/frontend/src/components/ui` and Haven-domain components in `packages/frontend/src/components/haven` before creating new UI. The shared primitives and shims of `@haven_ai/ui` live at `packages/ui` (moved since #3508).
 - Prefer composition over new visual patterns. Do not invent new card styles, spacing systems, shadows, radius, or typography unless the existing system cannot express the need.
-- Use the v2 tokens from packages/ui/src/tokens.css (imported by the app layout before globals.css) and the shared Tailwind preset packages/ui/tailwind.preset.js consumed by the frontend config.
+- Use the v2 tokens from `packages/ui/src/tokens.css` (imported by the app layout before `globals.css`) and the shared Tailwind preset `packages/ui/tailwind.preset.js` consumed by the frontend config.
 - Do not install or introduce a second UI framework for ordinary product work.
 - Keep domain components small and grounded in real Haven flows. Avoid building theoretical component inventory.
 - Product UI should say `Haven account`, `Haven wallet`, `agent rules`, `agent budget`, `approve actions`, and `connect your agent`.

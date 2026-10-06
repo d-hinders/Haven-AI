@@ -5,7 +5,7 @@ import { useDocumentVisible, useInView, usePrefersReducedMotion } from './motion
 import { RefusalReceipt, type ReceiptAssemblyState } from './RefusalReceipt'
 
 /**
- * The enforcement band's receipt, with the mockup's assembly animation
+ * The spending-limits band's receipt, with the mockup's assembly animation
  * (`docs/product/site-mockup/index.html:298-305`) — (#3575).
  *
  * The mockup replays the assembly EVERY time the receipt scrolls into view

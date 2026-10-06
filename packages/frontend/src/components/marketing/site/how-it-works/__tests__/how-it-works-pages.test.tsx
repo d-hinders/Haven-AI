@@ -89,6 +89,7 @@ describe('How it works', () => {
       'From an empty account to an agent that pays for what it needs.',
     )
     expect(within(main).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Autonomy ends at the point of payment.',
       'An account only you control.',
       'A budget per agent, not a card for all of them.',
       'One command wires any agent in.',

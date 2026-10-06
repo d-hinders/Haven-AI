@@ -1473,10 +1473,7 @@ export default function DesignSystemPage() {
             <p className="max-w-md text-xs leading-relaxed text-[var(--v2-ink-3)]">
               Used on `/agents/[id]` and `/accounts/[id]` page headers. Click-outside + Escape dismiss,
               arrow-key roving focus, ARIA roles wired. Use sparingly — visible CTAs are still preferred
-              when there are only one or two actions. The terminal action (Remove, or Restore once
-              archived) goes last, after a separator, and Remove uses the danger tone. On
-              `/agents/[id]` the frequent state toggle (Pause / Resume) stays a visible button beside the
-              menu, not an item in it.
+              when there are only one or two actions.
             </p>
           </div>
         </Card>

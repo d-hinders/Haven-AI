@@ -148,6 +148,17 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   // #2946 (epic #2944 slice B): read-only owner data, same class as the
   // dashboard and agent-activity reads above — no authority, no write.
   { method: 'GET', path: '/analytics/overview' },
+  // #3597: `haven feedback submit` IS the thing an owner_cli session needs
+  // to reach — it writes a feedback row, nothing else, under the caller's
+  // own user id, and carries no agent, delegation or account authority.
+  { method: 'POST', path: '/feedback' },
+  // #3597: the CLI's own secret check (layer 3) reads this to collect the
+  // caller's key-backed addresses before deciding whether to send — public
+  // key material only ("an address and P256 public-key coordinates" per the
+  // route's own description), never a signer-set change. See the owner-cli
+  // route census's `ACCOUNT_READ_EXEMPT` for why this one survives the
+  // `^/accounts` and `signers?` forbidden-pattern checks.
+  { method: 'GET', path: '/accounts/hybrid/{address}/signers' },
 ] as const
 
 /** Is this route one an `owner_cli` token may reach? Default: no. */

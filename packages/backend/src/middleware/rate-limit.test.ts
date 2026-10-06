@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { rateLimitKeyFor } from './rate-limit.js'
+import { feedbackSubmitRateLimit, rateLimitKeyFor } from './rate-limit.js'
 
 function req(headers: Record<string, string | string[] | undefined>, ip = '203.0.113.7') {
   return { headers, ip }
@@ -41,5 +41,41 @@ describe('rateLimitKeyFor', () => {
   it('never embeds the raw credential in the bucket key', () => {
     const key = rateLimitKeyFor(req({ authorization: 'Bearer sk_agent_secret_value' }))
     expect(key).not.toContain('sk_agent_secret_value')
+  })
+})
+
+describe('feedbackSubmitRateLimit (#3597)', () => {
+  const keyGenerator = feedbackSubmitRateLimit.rateLimit.keyGenerator
+
+  it('keys per user — two sessions for the same user share one bucket', () => {
+    const a = keyGenerator({ user: { sub: 'user-1' } })
+    const b = keyGenerator({ user: { sub: 'user-1' } })
+    expect(a).toBe(b)
+    expect(a).toBe('feedback_user:user-1')
+  })
+
+  it('two different users get two different buckets', () => {
+    const a = keyGenerator({ user: { sub: 'user-1' } })
+    const b = keyGenerator({ user: { sub: 'user-2' } })
+    expect(a).not.toBe(b)
+  })
+
+  // MUTATION PROOF: reading `request.headers`/`request.ip` instead of
+  // `request.user.sub` would pass every test above (two distinct fake
+  // requests still produce two distinct keys) and only fail here, where the
+  // SAME user is reached through what the credential-keyed generator would
+  // see as two different callers.
+  it('MUTATION PROOF: unrelated request shape (headers/ip) does not change the key — only user.sub does', () => {
+    const viaHeaders = keyGenerator({
+      user: { sub: 'user-1' },
+      headers: { authorization: 'Bearer token-a' },
+      ip: '1.1.1.1',
+    } as never)
+    const viaOtherHeaders = keyGenerator({
+      user: { sub: 'user-1' },
+      headers: { authorization: 'Bearer token-b' },
+      ip: '2.2.2.2',
+    } as never)
+    expect(viaHeaders).toBe(viaOtherHeaders)
   })
 })

@@ -121,6 +121,9 @@ haven activity export --format sie [--from <ISO>] [--to <ISO>] [--company <name>
 haven catalog list
 haven contacts list
 
+# feedback
+haven feedback submit "<text>"           # several unquoted words are joined into one text
+
 # manage (backend-only — no on-chain signing)
 haven agents pause <id> | resume <id>
 haven agents revoke <id> --yes           # terminal; needs explicit --yes

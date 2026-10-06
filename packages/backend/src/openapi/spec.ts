@@ -8513,6 +8513,38 @@ export const openapiSpec = {
         },
       },
     },
+    '/feedback': {
+      post: {
+        tags: ['Feedback'],
+        operationId: 'submitFeedback',
+        summary: 'Submit feedback or a bug report from the CLI.',
+        description:
+          '`haven feedback submit "<text>"` (#3597). User JWT only — no agent API key, no anonymous caller. Retention is 7 days; there is no reader route yet (the founders-only ops console read is #3602). The backend re-runs the CLI\'s own secret-check layers 1 (labelled secrets), 3 (key-backed-address derivation, against this database) and 4 (recovery phrases) before writing, and refuses with `text_refused` + a `reason` when one matches — the CLI\'s own check already refuses before sending, so this is the backstop for a caller that bypasses it.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['text'],
+                properties: {
+                  text: { type: 'string', minLength: 1, maxLength: 4000 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Stored. The response never echoes the text back.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Feedback' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+    },
     '/contacts/{id}': {
       put: {
         tags: ['Contacts'],
@@ -9158,6 +9190,16 @@ export const openapiSpec = {
           address: address,
           created_at: isoDateTime,
           updated_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      Feedback: {
+        type: 'object',
+        required: ['id', 'created_at', 'expires_at'],
+        properties: {
+          id: uuid,
+          created_at: isoDateTime,
+          expires_at: { ...isoDateTime, description: 'Retention is 7 days from `created_at` (#3597).' },
         },
         additionalProperties: false,
       },

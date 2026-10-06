@@ -188,7 +188,12 @@ describe('/for-agents.md (#2523)', () => {
     // bytes; the dropped ", as above" trailing clause paid 10 bytes of it back.
     // Review added "Budget changes later"'s "setup above" -> "setup in The
     // sequence" (+10 bytes).
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11000)
+    //
+    // 11000 -> 11200 for #3597, merged on top of #3596 (the page is 11126
+    // bytes at this commit): "If something breaks" gains a second paragraph
+    // sending an agent to `haven feedback submit "<text>"` and repeating the
+    // never-a-credential rule (+212 bytes over #3596's 10914).
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11200)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

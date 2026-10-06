@@ -311,6 +311,8 @@ describe('index.ts readers', () => {
       // #3509: the ops console is born enforced; its plugin 404s from an
       // onRequest hook before validation when ops is unconfigured.
       'routes/ops.ts',
+      // #3597: brand-new module with no live caller, born ENFORCED.
+      'routes/feedback.ts',
     ])
   })
 })

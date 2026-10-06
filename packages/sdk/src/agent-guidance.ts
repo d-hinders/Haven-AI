@@ -271,6 +271,8 @@ Nothing here needs you to. Steps 1-3 — account, funding, budget — are links:
 
 ${AGENT_CLIENT_UPDATE_SENTENCE} What changed: [/releases](/releases).
 
+Something else wrong? \`haven feedback submit "<text>"\` sends it to Haven — it needs \`haven login\` first. Never put a credential in that text: no API key, no delegate key, no session token, no recovery phrase.
+
 ## Vocabulary
 
 | Term | What it is |

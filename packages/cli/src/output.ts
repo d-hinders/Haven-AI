@@ -50,6 +50,11 @@ export function createOutput(
       const body = {
         ok: false as const,
         error: {
+          // `extra` spreads FIRST (#3597 round 2, N-a): it is per-command
+          // (e.g. the secret check's `layer`/`reason`), so it must never be
+          // able to clobber the contract fields every command shares —
+          // `code`, `message`, `hint` are spread AFTER and always win.
+          ...(failure.extra ?? {}),
           code: failure.code,
           message: failure.message,
           ...(failure.hint ? { hint: failure.hint } : {}),

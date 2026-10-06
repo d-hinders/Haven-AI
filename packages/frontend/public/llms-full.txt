@@ -46,6 +46,9 @@ One line: give your agent a budget, not your wallet.
 - Your agent hit a 402: /402.md
 - The agent runbook as small linked step files: /.well-known/agent-skills/index.json
 - Dashboard: / (this host's root)
+- For agents, as a web page for your user: /for-agents
+- For developers: /developers
+- How it works, and the protocols: /how-it-works, /how-it-works/protocols
 - Independent exit (inspect/revoke without Haven): /exit
 - Releases, and whether a client update is needed: /releases
 - npm: https://www.npmjs.com/package/@haven_ai/connect (also @haven_ai/sdk, @haven_ai/mcp, @haven_ai/signer, @haven_ai/cli)

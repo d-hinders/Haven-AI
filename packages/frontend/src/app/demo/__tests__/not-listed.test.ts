@@ -52,21 +52,20 @@ describe('/demo and /demo.md are not listed anywhere discoverable (#3477)', () =
     expect(read('public/for-agents.md')).not.toContain('/demo')
   })
 
-  it('is absent from SiteHeader and SiteFooter source', () => {
-    for (const component of ['src/components/marketing/SiteHeader.tsx', 'src/components/marketing/SiteFooter.tsx']) {
+  it('is absent from the site header and footer source', () => {
+    for (const component of ['src/components/marketing/site/Header.tsx', 'src/components/marketing/site/Footer.tsx']) {
       expect(read(component), component).not.toContain('/demo')
     }
   })
 
-  // #3573: the redesigned site's header, footer and section components live
-  // under components/marketing/ beside the legacy pair, and later slices add
-  // page bodies there. Every source file in the tree is read, so a new file
-  // cannot carry a /demo link past the two named above.
+  // #3573: the site's header, footer, section components and page bodies all
+  // live under components/marketing/. Every source file in the tree is read,
+  // so a new file cannot carry a /demo link past the two named above.
   it('is absent from every source file under components/marketing/', () => {
     const files = readdirSync(join(FRONTEND_ROOT, 'src/components/marketing'), { recursive: true })
       .map(String)
       .filter((name) => /\.(?:ts|tsx)$/.test(name) && !name.includes('__tests__'))
-    expect(files, 'the sweep found the legacy header it must cover').toContain('SiteHeader.tsx')
+    expect(files, 'the sweep found the header it must cover').toContain(join('site', 'Header.tsx'))
     expect(files, 'the sweep found the redesigned footer it must cover').toContain(join('site', 'Footer.tsx'))
     for (const name of files) {
       const path = `src/components/marketing/${name}`

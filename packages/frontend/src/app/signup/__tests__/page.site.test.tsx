@@ -4,14 +4,12 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 /**
- * The signup page's assertions under the REDESIGNED shell (#3578, epic #3572).
- *
- * These are the same five assertions `page.test.tsx` pins for the legacy
- * screen — four fields, every validation rule, the hand-off line — run with
- * the gate on (preview flag, stubbed per test). One structural check per test
- * run (via `renderNewShell`): the public footer that only the new shell
- * renders is present, so a silently-off gate cannot let these pass against
- * the legacy branch and prove nothing.
+ * The signup page's assertions inside the site's auth shell (#3578, epic
+ * #3572): the five `page.test.tsx` also pins (four fields, every validation
+ * rule, the hand-off line), plus one structural check per test run (via
+ * `renderNewShell`): the public footer the shell renders is present. Since
+ * the switch-over (#3579) the shell is the only screen, in a
+ * production-shaped environment too (the empty `NEXT_PUBLIC_HAVEN_ENV`).
  *
  * The real form wins over the mockup on the two lines that differ: four
  * fields (not three) and the 8-character minimum (not "At least 12
@@ -63,11 +61,10 @@ vi.mock('@/lib/api', () => {
 import SignupPage from '@/app/signup/page'
 import { ApiRequestError } from '@/lib/api'
 
-describe('SignupPage (site gate on, #3578)', () => {
+describe('SignupPage (site auth shell, #3578)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
-    vi.stubEnv('NEXT_PUBLIC_HAVEN_SITE_PREVIEW', '1')
   })
 
   afterEach(() => {

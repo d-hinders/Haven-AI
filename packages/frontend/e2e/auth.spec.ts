@@ -16,7 +16,7 @@ test.describe('authentication flows', () => {
 
     await expect(page).toHaveURL(/\/login$/)
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
     // `/login` is OUTSIDE the authenticated shell, so it has no
     // `#main-content` and no clipping ancestor: the document metric is the one
     // that works here, and this is the only call site in the repo where it was
@@ -33,7 +33,7 @@ test.describe('authentication flows', () => {
     await page.goto('/login')
     await page.getByLabel('Email').fill('ada@haven.test')
     await page.getByLabel('Password').fill('correct horse battery staple')
-    await page.getByRole('button', { name: 'Log in' }).click()
+    await page.getByRole('button', { name: 'Sign in' }).click()
 
     await expect(page).toHaveURL(/\/dashboard$/)
     await dismissMobileSidebar(page)

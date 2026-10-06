@@ -7,7 +7,7 @@ import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 /**
  * The redesigned For agents page (#3577, epic #3572), built from
  * `docs/product/site-mockup/for-agents.html` and rendered by
- * `app/for-agents/page.tsx` when `isNewSiteVisible()` is on.
+ * `app/for-agents/page.tsx`.
  *
  * It is the human-readable face of the runbook at `/for-agents.md`, which is
  * byte-pinned to the SDK constant (`for-agents-runbook.test.ts`) and cannot

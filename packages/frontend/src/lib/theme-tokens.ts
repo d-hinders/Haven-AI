@@ -60,7 +60,8 @@ export const THEME_TOKENS: TokenSpec[] = [
   { name: 'danger', light: '#b42318', dark: '#f87171' },
   { name: 'danger-soft', light: '#fef2f2', dark: '#3a1512' },
   { name: 'modal-backdrop', light: 'rgba(26, 31, 54, 0.66)', dark: 'rgba(0, 0, 0, 0.6)' },
-  // Marketing chrome (#3139) — the dot-grid texture ink of the hero backdrop.
+  // Marketing chrome (#3139) — the dot-grid texture ink of the legacy hero
+  // backdrop; no consumer since the switch-over (#3579), retirement is #3658.
   // The canvas wash beside it is a gradient and lives outside this table.
   { name: 'marketing-dot', light: 'rgba(26, 31, 54, 0.08)', dark: 'rgba(212, 220, 236, 0.07)' },
   // Categorical data-viz series (#2948) — the ordered set the chart primitives

@@ -132,7 +132,7 @@ describe('/demo page', () => {
     expect(screen.getByText(/budget you signed and it could not exceed/)).toBeInTheDocument()
     expect(screen.queryByText('8')).not.toBeInTheDocument()
     // "Questions? Ask the team." is plain text: no contact destination exists
-    // (SiteFooter's Contact is an unwired "#"), and a link that goes nowhere
+    // (the site has no contact page), and a link that goes nowhere
     // reads as broken on an investor page.
     expect(screen.getByText(/Questions\? Ask the team\./)).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Ask the team/ })).not.toBeInTheDocument()

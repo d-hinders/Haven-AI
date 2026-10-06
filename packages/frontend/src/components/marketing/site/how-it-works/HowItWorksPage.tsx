@@ -25,7 +25,7 @@ import {
 /**
  * The redesigned How it works page (#3576, epic #3572), built from
  * `docs/product/site-mockup/how-it-works.html` and rendered by
- * `app/how-it-works/page.tsx` when `isNewSiteVisible()` is on.
+ * `app/how-it-works/page.tsx`.
  *
  * Copy follows the mockup except where a claim had to be corrected against
  * the code; each correction and its source is listed in the PR. The mockup's

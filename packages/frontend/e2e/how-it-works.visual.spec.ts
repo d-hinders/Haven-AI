@@ -2,10 +2,6 @@
  * `/how-it-works` and `/how-it-works/protocols` visual regression (#3576,
  * epic #3572) — the redesigned How it works page and its protocols sub-page.
  *
- * This harness builds with the site gate on (`NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`,
- * `src/lib/site-gate.ts`), so both routes render the new pages here; with the
- * gate off `/how-it-works` is the legacy page and the sub-page 404s.
- *
  * Desktop and mobile in the light theme, plus desktop in the dark theme: the
  * white and tinted sections and the product frames take their dark forms,
  * the navy and indigo bands stay fixed. Baselines are Linux-rendered by the

@@ -20,7 +20,6 @@ covers:
   - packages/frontend/src/components/brand/AppIconArtwork.tsx
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
-  - packages/frontend/src/app/protocols/**
   - packages/frontend/src/app/developers/**
   - packages/frontend/src/app/for-agents/**
   - packages/frontend/src/app/(authenticated)/design-system/**
@@ -94,7 +93,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-02"
+last-verified: "2026-10-05"
 ---
 
 # Haven Design System
@@ -106,7 +105,7 @@ last-verified: "2026-10-02"
 
 This is the source of truth for Haven's current light visual language. Companion to the product UX guide (`docs/product/README.md`, which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
 
-The production authenticated app and `/design-system` are the live references for product UX. The production marketing routes are the live references for marketing UX: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`. When in doubt, open the live route, inspect the element, and match the system here.
+The production authenticated app and `/design-system` are the live references for product UX. The production marketing routes are the live references for marketing UX: `/`, `/how-it-works`, `/how-it-works/protocols`, `/developers` and `/for-agents`. When in doubt, open the live route, inspect the element, and match the system here.
 
 ---
 
@@ -483,7 +482,7 @@ band gains nothing from a filter — and an opaque band gives the OS-drawn statu
 glyphs a fixed backdrop instead of one that drifts with the page, which is why
 `SafeAreaBand` defaults to `bg-bg`. Where the bar's own background is
 translucent by design the band should match it rather than invent a second
-colour: the marketing `SiteHeader` passes `bg-transparent` so its dark-section
+colour: the public site's `Header` passes `bg-transparent` so its dark-section
 tint shows through. That is a real exception to *opaque*, and not one to
 *unfiltered*.
 
@@ -650,8 +649,8 @@ rather than repeated per entry:
   (Through #1829 this section claimed the icon "slides 2px on hover via wrapper
   `group-hover:gap-2`". It never did: `Button` sets no `group` class and no call site wraps
   one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link
-  affordances — `app/page.tsx:299`, `:320`, `app/protocols/page.tsx:80` — none of which are
-  `Button`s. Corrected in #1830.)
+  affordances on the legacy landing and protocols pages (both retired by the site
+  switch-over, #3579) — none of which were `Button`s. Corrected in #1830.)
 
 **Busy state: no spinner, no `loading` prop (#2871).** An action in flight
 disables its button and swaps the label to `Verbing…` — `Preparing…`,
@@ -760,9 +759,10 @@ grep -rn "rounded-md font-medium tracking-tight" src --include='*.tsx' \
   | grep -v 'src/components/ui/Button.tsx'
 ```
 
-**Clean output today is 1 line** — the surviving `BrandBandButton` primitive at
-`components/marketing/BrandBandButton.tsx:75`. More than 1 is a new hand-copy;
-zero means the scanner lost its last live subject. The retired investor page was
+**Clean output today is 2 lines** — the surviving `BrandBandButton` primitive at
+`components/marketing/BrandBandButton.tsx:75`, and the home hero's CTA at
+`components/marketing/site/home/HeroCta.tsx:20` (#3574). More than 2 is a new
+hand-copy; zero means the scanner lost its live subjects. The retired investor page was
 the second member until #2468 deleted it.
 
 It was **4** until [#1867](https://github.com/d-hinders/Haven-AI/issues/1867), and the two
@@ -1472,34 +1472,8 @@ Standard rhythm:
 Sections alternate background:
 - Default: white (`--v2-bg`)
 - Surface band: `bg-[var(--v2-surface)] border-t border-[var(--v2-border)]`
-- Color band: see below
 
-### Hero (light section)
-
-Anatomy on every marketing page:
-1. **`HeroBackdrop`** — soft mesh of four blurred radial blobs (indigo, pink, cyan, amber) at ~0.3‑0.5 opacity, plus a fine dotted grid masked to fade out. Set `position: absolute inset-0` inside a `relative overflow-hidden` section. Hero content wrapper must be `relative` so it sits above.
-2. **Eyebrow pill** — `border border-[var(--v2-border)] bg-white/80 backdrop-blur`, with a pulsing brand dot.
-3. **Headline** — see typography. **One** phrase highlighted with the brand gradient (`bg-clip-text text-transparent`). Period after the gradient is plain ink. Line break with `<br />` for rhythm.
-4. **Lede** — short, ≤ 2 sentences.
-5. **CTA pair** — primary + ghost.
-6. **Optional right column** — flow card (homepage) or omitted (subpages).
-
-### Color band (dark indigo, used sparingly)
-
-Used for **one** mid‑page section per long page (currently the homepage Agent rules band) and the **bottom CTA**. Recipe:
-
-```css
-background:
-  radial-gradient(ellipse 80% 60% at 20% 0%, rgba(124,58,237,0.55) 0%, transparent 60%),
-  radial-gradient(ellipse 70% 70% at 100% 100%, rgba(236,72,153,0.45) 0%, transparent 55%),
-  linear-gradient(180deg, #1e1b4b 0%, #2e2a78 100%);
-```
-
-Plus a low‑opacity dotted texture masked from the centre. White text, eyebrow in `text-pink-300`, secondary text `text-white/75`. Metric tiles use `bg-white/[0.04]` with `gap-px` on a `bg-white/10` parent for hairline grid lines.
-
-**Bottom CTA band variant** is a brighter brand gradient (`#4f46e5 → #4338ca` with a pink wash) — bolder, used only for the conversion ask.
-
-**Limit:** at most one mid‑page color band + the bottom CTA band per page. Don't bookend or sandwich.
+The public site's own grounds, navy and indigo bands included, are `SiteSection`'s (§ Public site below).
 
 ### Code blocks (`CodeBlock`)
 
@@ -1507,20 +1481,11 @@ Dark code on light page (Stripe pattern). `bg-[var(--v2-surface-code)]` (#0b1120
 
 Long lines scroll sideways by default. Pass `wrap` for a **single-line copy command** whose tail matters, so it wraps at phone width instead of hiding it (`whitespace-pre-wrap [overflow-wrap:anywhere]`; the `/releases` update command, whose `--doctor` was clipped at 390px, #3434). Never wrap multi-line code samples: re-flowing them breaks their indentation.
 
-### Flow card (`FlowCard`, homepage hero)
-
-Animated, cycling state machine showing one payment lifecycle (Intent → Policy → Settled). CSS‑only animation, no framer‑motion. Soft brand glow behind shifts to green when settled. Includes status pill in footer with brand pulse → success. Pattern is reusable for other "live" demos in the app.
-
-### Step list (`StepList`)
-
-3‑column grid on desktop, hairline `gap-px` on `bg-[var(--v2-border)]` parent (faux dividers via background bleed‑through). Number in brand color, title in ink, body in ink‑2.
-
-
 ### Public site
 
-The redesigned public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/3572)) is built from the approved mockup in [`docs/product/site-mockup/`](site-mockup/README.md), whose README lists the decided deviations. Its components live in `packages/frontend/src/components/marketing/site/`, beside the legacy marketing components above, which they replace page by page. Until the switch-over slice (#3579), the sections above describe what production renders and this one describes what the new site renders.
+The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/3572)) was built from an approved mockup, and since the switch-over (#3579) the production routes are its design reference, as for every marketing page. The mockup and its README of decided deviations were deleted with the switch-over; code comments that cite `site.css:<line>`, `index.html:<line>` or another mockup file refer to `docs/product/site-mockup/` as it stood at commit `caed1ffb` (`git show caed1ffb:docs/product/site-mockup/<file>`). Its components live in `packages/frontend/src/components/marketing/site/`; `Section` above is the one older marketing *page-layout* component still in use (`/demo`, `/releases`); `BrandBandButton` and `TrailingArrow` are shared with the new site.
 
-**The gate.** `isNewSiteVisible()` (`src/lib/site-gate.ts`) decides at build time which site renders: on outside production, off in production, and on in the CI e2e build through `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`. `SiteHeader` and `SiteFooter` branch on it, so every page that renders them shows the new chrome wherever it is on: `/`, `/how-it-works`, `/protocols`, `/protocols/x402`, `/protocols/mpp`, `/demo` and `/releases`. Only `/demo` and `/releases` have visual baselines in this slice; the others change content in their own slices. It is a pure function over inlined `NEXT_PUBLIC_` values, so it answers the same in server and client components and makes no page dynamic. While it exists, a legacy marketing page or component is not edited except to sit behind it. The variable and how to see the new site locally are in [`dev-environment.md`](../operations/dev-environment.md#next_public_haven_site_preview--the-redesigned-public-site-3573).
+**No gate.** Until the switch-over a build-time gate (`isNewSiteVisible()`, `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`) kept production on the legacy pages while the site was built in slices. #3579 removed it with the legacy pages: every public route renders the new site in every build, and the three `/protocols*` routes and `/demo/x402` redirect permanently to `/how-it-works/protocols` (`next.config.ts`).
 
 **Section grounds (`SiteSection`).** Four, from the mockup:
 
@@ -1539,14 +1504,14 @@ The redesigned public website (epic [#3572](https://github.com/d-hinders/Haven-A
 
 **Page building blocks (`site/blocks.tsx`, #3576).** The mockup's recurring pieces, each drawn with theme tokens on a themed ground and fixed colours on a fixed one: `SiteHero` (the compact navy hero, with an optional breadcrumb; it is `data-v2-dark-section`, so pair it with `Header overlay`), `SiteSplit` and `SiteCopy` (the two-column text-and-picture rhythm, stacking below 900px), `PaymentFlow` (a numbered payment as a real ordered list), `AgentBudgetRow` and `FramePill` (frame contents), `SiteCode` (a fixed-navy terminal block), `NavyCard` (a card on the navy band) and `SideCard` (a protocol card), plus the small text helpers `SiteLede`, `SiteTextLink`, `SiteCtaRow` and `CodePrompt`. A page that needs one of these takes it from here rather than restating the classes.
 
-**Header and footer.** The header carries only entries whose page exists. It is sticky and in the flow by default (`/demo`, `/releases`); `overlay` is the mockup's form for a page with a navy hero — absolutely positioned, transparent over the hero, and not sticky. Its tone follows what it sits over, never the theme: theme ink on the page's own ground, or fixed white ink on a fixed navy ground over a dark band, where the logo mark becomes a solid white tile with navy ink (`HavenMark tone="onNavy"`, as the mockup draws it). It keeps the installed-app `SafeAreaBand`. The footer's legal line reads "© {year} Haven Labs". It has no `href="#"` and no entry without a destination; Contact, Privacy and Terms return only with their pages.
+**Header and footer.** The header carries only entries whose page exists. It is sticky and in the flow by default (`/demo`, `/releases`); `overlay` is the mockup's form for a page with a navy hero — absolutely positioned, transparent over the hero, and not sticky. Its tone follows what it sits over, never the theme: theme ink on the page's own ground, or fixed white ink on a fixed navy ground over a dark band, where the logo mark becomes a solid white tile with navy ink (`HavenMark tone="onNavy"`, as the mockup draws it). It keeps the installed-app `SafeAreaBand`. Below `md` the inline nav is hidden (as the mockup hid it below 820px), so a menu button discloses the same `SITE_NAV` entries in a solid panel under the bar, over the page rather than pushing it down (#3579). It is a disclosure, not a dialog: `aria-expanded`/`aria-controls`, no focus trap; Escape closes it and returns focus to the button, and a press outside the header, following an entry or widening past `md` closes it. The footer's legal line reads "© {year} Haven Labs". It has no `href="#"` and no entry without a destination; Contact, Privacy and Terms return only with their pages.
 
 ---
 
 ## 4. Motion
 
 - **No entrance animations on first paint.** Respect `prefers-reduced-motion`.
-- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the cycling flow card on the homepage hero, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards.
+- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards.
 - **Allowed on the public site** (`components/marketing/site/**`, #3575): in-view animation loops **inside a product frame or mini card** — the home page's hero payment loop, how-it-works cards and accounting feed, each cycling the mockup's choreography only while its region is in view and the tab is visible, resetting to the section's settled state between cycles — and the enforcement receipt's **row-by-row assembly, replaying on each entry**. A public-site loop shows its settled state under `prefers-reduced-motion: reduce`, never shifts layout, never announces (no live region, no inserted or removed text; the animated frames are hidden from assistive technology), and confirms with text and a check icon in the success colour — never a pill or a button.
 - **Banned everywhere:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax, and entrance animation on first paint outside the allowances above — nothing animates on first paint above the fold except inside the hero product frame.
 
@@ -1624,7 +1589,7 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 
 ### Arrows
 
-- **The marketing exemption in the first bullet covers this whole section, including these arrow rules.** `components/brand`, `components/marketing`, the landing page, `/protocols` and `/how-it-works` are intentionally bespoke and exempt from every icon rule here (#874). The authoritative list is `MARKETING_SURFACES` in `packages/frontend/scripts/design-lint.mjs` — read it there; this sentence is a pointer, not a copy.
+- **The marketing exemption in the first bullet covers this whole section, including these arrow rules.** `components/brand`, `components/marketing`, the landing page, `/how-it-works`, `/developers` and `/for-agents` are intentionally bespoke and exempt from every icon rule here (#874). The authoritative list is `MARKETING_SURFACES` in `packages/frontend/scripts/design-lint.mjs` — read it there; this sentence is a pointer, not a copy.
 - **In a gated surface, an arrow that is an affordance comes from lucide.** A control's trailing arrow (`Button`'s `trailingIcon`, which renders lucide `ArrowRight` for you), a list/row chevron, a disclosure marker, anything that animates (`ErrorBoundary`'s `group-open:rotate-90`, `AgentPanel`'s removed-agents toggle). Never a raw glyph — it cannot be rotated, sized on the icon scale, or stroked at 1.5, and it lands wherever the label's typeface puts it rather than where the icon system does.
 - **Exactly one gated file may render a raw arrow:** `components/haven/TransactionMovement.tsx`, the `From <a> → To <b>` movement line (the one-file allowlist is pinned by [`packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts`](../../packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts), #2680). The glyph joins two operands the way a colon would — `aria-hidden`, on the text baseline at the run's own size and weight, with the words `From` and `To` carrying the direction. A lucide glyph would sit at a fixed pixel size beside text it must match, and since #1774 it is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to fill. **Every other raw arrow in a gated surface is a defect**, whatever it is called.
 
@@ -1642,7 +1607,7 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
   git ls-files packages/frontend/src/app packages/frontend/src/components \
     | grep -E '\.tsx?$' \
     | grep -v -e 'components/brand/' -e 'components/marketing/' -e 'src/app/page.tsx' \
-              -e 'src/app/protocols/' -e 'src/app/how-it-works/' \
+              -e 'src/app/how-it-works/' -e 'src/app/developers/' -e 'src/app/for-agents/' \
     | grep -v -e '__tests__' -e '\.test\.' -e '\.spec\.' \
     | xargs perl -CSD -ne 'print "$ARGV:$.: $_" if /[\x{2190}-\x{21FF}\x{2794}-\x{27BF}\x{27F0}-\x{27FF}\x{2900}-\x{297F}\x{2B00}-\x{2BFF}]|&[a-zA-Z]*arr[a-zA-Z]*;/; close ARGV if eof' \
     | grep -vE ':[0-9]+: *(//|\*|/\*|\{/\*)'
@@ -1868,10 +1833,10 @@ element-scoped capture clips the very thing it photographs (#1873).
 | Concern | Production location |
 |---|---|
 | Tokens | CSS vars in `packages/frontend/src/app/globals.css` at `:root`; core aliases in `packages/frontend/tailwind.config.js` |
-| Header/Footer | `packages/frontend/src/components/marketing/SiteHeader.tsx`, `SiteFooter.tsx` |
+| Header/Footer | `packages/frontend/src/components/marketing/site/Header.tsx`, `Footer.tsx` |
 | UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx`, `InlineAlert.tsx`, `Input.tsx`, `Modal.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Toast.tsx`, `Tooltip.tsx` |
-| Marketing components | `packages/frontend/src/components/marketing/Section.tsx`, `StepList.tsx`, `HeroBackdrop.tsx`, `FlowCard.tsx`, `ProtocolPlayground.tsx`, `BrandBandButton.tsx` |
-| Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/protocols/*/page.tsx` |
+| Marketing components | `packages/frontend/src/components/marketing/site/**` (the public site), `marketing/Section.tsx`, `BrandBandButton.tsx`, `TrailingArrow.tsx` |
+| Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/how-it-works/protocols/page.tsx`, `app/developers/page.tsx`, `app/for-agents/page.tsx` |
 | Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, `packages/frontend/src/components/TopBar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents; linked cards use a stretched semantic name link with sibling controls above its overlay |

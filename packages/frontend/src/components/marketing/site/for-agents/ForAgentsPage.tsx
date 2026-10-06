@@ -236,11 +236,12 @@ export function ForAgentsPage() {
                 , relay the approval link the outcome gave you, or none at all. Never assemble one.
               </li>
               <li className="text-[16px] leading-[1.65] text-[var(--v2-ink-2)]">
-                Only two changes are permitted:{' '}
-                <code className={`${SITE_TYPE.mono} rounded-[5px] bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[13.5px] text-[var(--v2-ink)]`}>--json</code>, and
-                one retry with{' '}
+                Only three changes are permitted:{' '}
+                <code className={`${SITE_TYPE.mono} rounded-[5px] bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[13.5px] text-[var(--v2-ink)]`}>--json</code>, one retry with{' '}
                 <code className={`${SITE_TYPE.mono} rounded-[5px] bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[13.5px] text-[var(--v2-ink)]`}>--runtime &lt;name&gt;</code>{' '}
-                if the harness was not detected.
+                if the harness was not detected, and one re-run with{' '}
+                <code className={`${SITE_TYPE.mono} rounded-[5px] bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[13.5px] text-[var(--v2-ink)]`}>--name</code> or{' '}
+                <code className={`${SITE_TYPE.mono} rounded-[5px] bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-[13.5px] text-[var(--v2-ink)]`}>--replace</code> after a wiring collision — whichever your user chose.
               </li>
               <li className="text-[16px] leading-[1.65] text-[var(--v2-ink-2)]">
                 Never print private keys, API keys, credential files or config secrets in chat or logs.

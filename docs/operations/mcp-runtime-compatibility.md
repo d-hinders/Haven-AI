@@ -2615,7 +2615,9 @@ configured — restart guidance including `/restart` for gateway users,
 `hermes mcp list` / `hermes mcp test`, and the `pip install mcp` fallback —
 which is both later and better placed. The one line without a connector
 counterpart, "do not run `hermes mcp add`", is subsumed by the prompt's
-universal rule that only two changes to the command are permitted.
+universal rule limiting which changes to the command are permitted (two at
+the time; three since #3689, which added the user-chosen `--name`/`--replace`
+re-run after a `wiring_collision`).
 
 **OpenClaw needed a published connector, and now has one.** The `openclaw`
 alias lives in `runtime-registry.ts`, and `npx @haven_ai/connect@alpha`

@@ -41,7 +41,7 @@ describe('/for-agents.md (#2523)', () => {
     // than 6144 because the first cold read of the draft (recorded in the PR)
     // came back with five things it could not answer from the page — where
     // `haven_get_agent` comes from, how to run `--doctor` without breaking the
-    // two-changes rule, whose voice the imported bullets speak in, where the
+    // command-modification rule, whose voice the imported bullets speak in, where the
     // setup id comes from, and whether the user needs gas as well as USDC.
     // Answering those cost ~480 bytes and is the whole point of the page.
     // It moved again for the approval hand-off: saying what is actually true
@@ -193,7 +193,15 @@ describe('/for-agents.md (#2523)', () => {
     // bytes at this commit): "If something breaks" gains a second paragraph
     // sending an agent to `haven feedback submit "<text>"` and repeating the
     // never-a-credential rule (+212 bytes over #3596's 10914).
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11200)
+    //
+    // 11200 -> 11500 for #3689 (2026-10-06; the page is 11430 bytes at this
+    // commit, 11126 before it): the command-modification rule gains its third
+    // permitted change — the one re-run, with the flag the user chose, that the
+    // connector's own wiring_collision refusal asks for. The prompt that
+    // authorised the command forbade it, so a user who chose "alongside" saw
+    // the agent's harness block the re-run. That clause is the +304 bytes;
+    // nothing unrelated was trimmed to fit.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11500)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {
@@ -281,7 +289,7 @@ describe('/for-agents.md (#2523)', () => {
     // quietly reopen one.
     expect(served).toContain('one of the Haven MCP tools the connector wires into your runtime')
     expect(served).toContain('npx -y @haven_ai/connect@<channel> --doctor')
-    expect(served).toContain('so the two-changes rule does not bind it')
+    expect(served).toContain('so the command-modification rule does not bind it')
     expect(served).toContain('"me" in them is your user, not Haven')
     // #2528 re-based this one: the URL half became false when `approval.url`
     // shipped. The surviving half — no setup id, so never build a link — is

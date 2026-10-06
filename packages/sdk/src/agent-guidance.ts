@@ -48,7 +48,7 @@ export const AGENT_LOCAL_KEY_SENTENCE =
 
 /** Sandboxed environments: the command does not change, the environment does. */
 export const AGENT_NETWORK_ACCESS_SENTENCE =
-  'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.'
+  'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a command modification.'
 
 /** #2483: `--json` is a SHOULD addressed to agents, not to a human pasting the command. */
 export const AGENT_JSON_MODE_SENTENCE =
@@ -76,9 +76,13 @@ export const AGENT_APPROVAL_RELAY_PROSE_SENTENCE =
 export const AGENT_WIRING_COLLISION_RELAY_SENTENCE =
   'If the connector refuses with wiring_collision, this machine is already wired to a different agent: relay that refusal to me with the superseded_agent_ids and suggested_name it carries, and let me choose whether to replace the existing wiring or add this agent alongside it. Never pick for me by adding --replace or --name yourself.'
 
-/** #1719: exactly two permitted changes, and the second is bounded by the refusal's own list. */
+/**
+ * #1719: the permitted changes, the second bounded by the refusal's own list.
+ * #3689 added the third: the re-run the wiring_collision refusal itself asks
+ * for, with the one flag the user chose — never one the agent picks.
+ */
 export const AGENT_COMMAND_MODIFICATION_SENTENCE =
-  'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.'
+  'Only three changes to the command above are permitted, and no others: appending --json; re-running it once with --runtime <name> added, only if the connector refuses because it could not determine the agent runtime, naming the harness you are running in and using one of the values that refusal lists; and re-running it once with the one flag I chose added, only after I have answered a wiring_collision relay — --name <the suggested_name or a name I gave> to add alongside, or --replace to replace — keeping any change already made. If that re-run is refused too, relay the refusal to me and stop. Never invent a runtime name and never change anything else.'
 
 /**
  * The agent-facing section every published README carries (#2533, A6).
@@ -261,7 +265,7 @@ Call \`haven_get_agent\`, one of the Haven MCP tools the connector wires into yo
 - \`needs_approval\` — the connector finished, nobody approved yet. Ask your user again, in their Haven tab; there is no queue to wait in.
 - \`revoked\` — the credential is not active; ask your user to create a new agent.
 
-\`ready\` covers hosted identity and the budget only, not your local signer. Check that with \`npx -y @haven_ai/connect@<channel> --doctor\`, the same tag your prompt named — a separate command, so the two-changes rule does not bind it.
+\`ready\` covers hosted identity and the budget only, not your local signer. Check that with \`npx -y @haven_ai/connect@<channel> --doctor\`, the same tag your prompt named — a separate command, so the command-modification rule does not bind it.
 
 ## If you cannot open a browser
 

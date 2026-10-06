@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode } from 'react'
+import type { InputHTMLAttributes, ReactNode, Ref } from 'react'
 import { Copy } from 'lucide-react'
 import { Icon } from './Icon'
 
@@ -64,6 +64,11 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   helperText?: ReactNode
   /** An id for the helper paragraph, so a caller can point `aria-describedby` at it. */
   helperTextId?: string
+  /**
+   * React 19 ref-as-prop: reaches the `<input>` itself, never the wrapper, so a
+   * dialog can hand it to `Modal`'s `initialFocusRef` (#3687).
+   */
+  ref?: Ref<HTMLInputElement>
 }
 
 export function Input({
@@ -73,6 +78,7 @@ export function Input({
   invalid = false,
   helperText,
   helperTextId,
+  ref,
   ...props
 }: InputProps) {
   // `focus-visible:`, not `focus:` (#1746). A text field is the one control
@@ -93,6 +99,7 @@ export function Input({
         </span>
       )}
       <input
+        ref={ref}
         className={`w-full rounded-md border bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-[var(--v2-surface)] disabled:text-[var(--v2-ink-3)] ${borderClass} ${leftIcon ? 'pl-9' : ''} ${rightAction ? 'pr-24' : ''} ${className}`}
         // The red border is only half of "invalid": assistive tech reads this
         // attribute, not the colour. An explicit `aria-invalid` in `props` wins.

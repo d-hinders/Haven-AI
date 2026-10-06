@@ -4547,6 +4547,48 @@ export const SCENARIOS = {
       await shoot(dialog, 'confirmation')
     },
   },
+  // #3687: where focus lands in the Connect agent modal. Open → the caret is in
+  // *Agent name* (its focus ring is the evidence); a step change → the step
+  // region holds focus with NO ring; Back → the caret is in the name input
+  // again. Each shot asserts the focus target first, so a capture of the wrong
+  // state fails the run instead of photographing it.
+  'connect-agent-focus': {
+    description:
+      'Connect agent modal focus: name input on open, step region after a step change, name input after Back (#3687)',
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      const name = dialog.getByLabel('Agent name')
+      await name.waitFor({ timeout: 10_000 })
+      // Playwright's mobile emulation is a coarse pointer, where the input is
+      // deliberately NOT focused (the phone keyboard would cover the dialog).
+      const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches)
+      const nameFocused = () => name.evaluate((el) => el === document.activeElement)
+      if ((await nameFocused()) === coarse) {
+        throw new Error(`connect-agent-focus: name input focus=${!coarse} expected on ${coarse ? 'coarse' : 'fine'} pointer`)
+      }
+      await shoot(dialog, 'open')
+
+      await name.pressSequentially('Research agent')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').waitFor({ timeout: 10_000 })
+      const inRegion = await page.evaluate(
+        () => document.activeElement?.getAttribute('tabindex') === '-1' && !!document.activeElement.closest('[role="dialog"]'),
+      )
+      if (!inRegion) throw new Error('connect-agent-focus: focus is not on the step region after Set agent budget')
+      await shoot(dialog, 'policy')
+
+      await dialog.getByRole('button', { name: 'Back' }).click()
+      await name.waitFor({ timeout: 10_000 })
+      if ((await nameFocused()) === coarse) {
+        throw new Error('connect-agent-focus: wrong focus target after Back')
+      }
+      await shoot(dialog, 'back')
+    },
+  },
   'connect-agent': {
     description:
       'Connect agent modal, step 4, at each connection stage (starting → slow → recovery)',

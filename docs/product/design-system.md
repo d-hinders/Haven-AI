@@ -105,6 +105,12 @@ last-verified: "2026-10-06"
 > census intentionally keeps a one-member anti-vacuity floor. This note covers
 > the affected references only; the rest of this document was not re-read.
 
+> Re-verified 2026-10-06 for #3701: § Arrows' expected-output table was retired
+> (the shell pipeline's output had drifted from the table pasted beside it) and
+> the comment-aware allowlist test is named the check of record instead. This
+> note covers § Arrows and the § Icons pointer to it only; the rest of this
+> document was not re-read.
+
 This is the source of truth for Haven's current light visual language. Companion to the product UX guide (`docs/product/README.md`, which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
 
 The production authenticated app and `/design-system` are the live references for product UX. The production marketing routes are the live references for marketing UX: `/`, `/how-it-works`, `/how-it-works/protocols`, `/developers` and `/for-agents`. When in doubt, open the live route, inspect the element, and match the system here.
@@ -1654,7 +1660,7 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 
   Each version was better and each hid the same hole one level down. The list above **is** the rule; the reasoning is only why that one file is on it. Adding a second entry is a design-system decision, not a call-site one.
 
-  **Check it over the arrow RANGES, not a list of spellings** — an enumeration only ever catches the glyph that already burned you:
+  **Check it over the arrow RANGES, not a list of spellings** — an enumeration only ever catches the glyph that already burned you. The pipeline below is kept as an **illustration** of that subtlety; the check of record is the comment-aware test named further down:
 
   ```sh
   git ls-files packages/frontend/src/app packages/frontend/src/components \
@@ -1672,22 +1678,15 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 
   **Why `perl` and not `rg` or a glyph list.** `\x{…}` ranges are explicit and locale-independent, and `perl` is present on macOS and Linux by default. The first draft of this check used `rg`; on the machine that wrote it `rg` was a **shell function**, so pasting the command into a plain shell printed `command not found` — and an empty result reads exactly like a clean one. A check you have not run from a clean shell is not a check.
 
-  **What this check CANNOT see** — state it, so nobody trusts a clean result past its reach:
+  **What this check CANNOT see** — state it, so nobody trusts a clean result past its reach. This applies to the comment-aware test just as much: it also decides from source text, so none of these holes is closed by masking comments:
 
   - **Numeric character references** — `&#8594;`, `&#x2192;`.
   - **String escapes** — `{'\u2192'}` or a glyph built by concatenation. No source-text search can catch these.
   - **Runtime data** — a glyph arriving from the API, or from i18n values rather than the JSX beside them. (Checked at the time of writing: the `lib/` translation data holds no arrows, but that is a fact about today, not a guarantee.)
 
-  A clean run means "no arrow spelled the obvious ways", never "no arrows".
+  A clean run means "no arrow spelled the obvious ways", never "no arrows" — of the pipeline and of the test alike.
 
-  **What it returns today: 5 lines, and every one of them is expected** ([#1857](https://github.com/d-hinders/Haven-AI/issues/1857) cleared the debt this table used to hold):
-
-  | Line | Why it is there |
-  |---|---|
-  | `components/haven/TransactionMovement.tsx:55` | The **one allowlisted raw arrow** — the `From <a> → To <b>` movement glyph described above |
-  | `components/haven/TransactionMovement.tsx:38`, `components/connect-agent/SetupStates.tsx:167`, `components/connect-agent/WaitingForConnector.tsx:100` and `:115` | **Continuation lines of multi-line `{/* … */}` JSX comments.** The check strips a comment line by its *opening* delimiter, which a continuation line does not carry, so a line-based search cannot tell them from markup. Four false positives is the price of not parsing JSX, and it is the right price |
-
-  So the check's clean state is **5, not 0**. A run returning more than 5 has found a new defect; a run returning fewer means an expected line moved and the table above is stale.
+  **The check of record is [`packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts`](../../packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts) (#2680), not a count from this pipeline.** The pipeline above stays as an **illustration** of why a source-text arrow search is subtle — ranges instead of spellings, comment stripping by prefix — and this section deliberately attaches **no** expected output to it: no count, no line set, no "more than N means a new defect" rule. Its output includes comment lines that render no arrow — continuations of multi-line `{/* … */}` comments, and `//` comments that trail code rather than start the line — so its result changes shape whenever a gated file gains or loses a comment, which is exactly how a pasted table here went stale. The test implements the same rule comment-aware instead: it masks comments the way the language defines them, pins the one-file allowlist to the repo tree, and turns red the moment a raw arrow appears in any other gated file. A green test is the rule holding; a pipeline run is a sketch, not a verdict.
 
   **The allowlist stays at one file — it does not go to zero (decided in [#1857](https://github.com/d-hinders/Haven-AI/issues/1857)).** Now that the ten defects are gone, the allowlist is the only thing standing between this rule and a zero-hit rule, so it is worth saying why it stays rather than letting it look like leftover debt. Greppability does not decide it: `expected set` and `empty set` are equally machine-checkable, and the entry is keyed by *file*, not line number, so it does not rot when `TransactionMovement` is edited. What decides it is the rendering. Converting that site would put a stroked 14px lucide glyph **inside a sentence**, at a fixed pixel size on a baseline it does not share with the text either side of it — and since [#1774](https://github.com/d-hinders/Haven-AI/issues/1774) the glyph is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to put an `<Icon>` in. #1840 judged that a worse rendering; #1857 re-read the site and agrees. Emptying the allowlist would therefore be a **design-system decision that changes what `TransactionMovement` renders**, not a call-site cleanup, and it would have to widen this section explicitly rather than let the list quietly reach zero.
 

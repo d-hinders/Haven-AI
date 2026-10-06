@@ -11,6 +11,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { expectCtaRowsFillColumn } from './support/cta-rows'
 import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
@@ -86,6 +87,10 @@ test.describe('/ (new home) visual regression', () => {
         const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
         const clientWidth = await page.evaluate(() => document.documentElement.clientWidth)
         expect(scrollWidth, 'horizontal scroll on mobile').toBeLessThanOrEqual(clientWidth + 1)
+
+        // Stacked CTA rows span the column: each button is as wide as its
+        // row (#3685), hero and closing band alike.
+        await expectCtaRowsFillColumn(page)
       }
 
       // The step 3 terminal wraps, never scrolls sideways (#3644), at every

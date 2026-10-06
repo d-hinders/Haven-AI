@@ -12,16 +12,16 @@ import { KNOWN_CHAIN_IDS, getChain } from '../chains.js'
  * byte for byte. Do NOT update the fixture to make this pass — a diff here
  * means the move changed values, and the diff is the bug.
  *
- * `rpcUrl` and `explorerApiKey` are resolved from environment config and are
- * redacted: they are environment wiring, not registry data, and stay in the
- * backend by design.
+ * `explorerApiKey` is resolved from environment config and is redacted: it is
+ * environment wiring, not registry data, and stays in the backend by design.
+ * The known chain shape carries no `rpcUrl` since #3671 (`rpcUrlForChain`).
  */
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'chains-registry.json')
 
 function serializeRegistry(): string {
   const chains = KNOWN_CHAIN_IDS.slice().sort((a, b) => a - b).map((id) => {
     const chain = getChain(id)
-    return { ...chain, rpcUrl: '<env>', explorerApiKey: '<env>' }
+    return { ...chain, explorerApiKey: '<env>' }
   })
   return JSON.stringify(chains, null, 2) + '\n'
 }

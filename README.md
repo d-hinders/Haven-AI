@@ -136,10 +136,9 @@ Edit `.env` and fill in the required values:
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string (default works with Docker) |
 | `JWT_SECRET` | Yes | Secret for dashboard auth tokens; use a long random string in production |
-| `RPC_URL` | No | Chain 100 only; unused by the delegation rail. Legacy Gnosis Chain RPC still read by `config.ts` (default: `https://rpc.gnosischain.com`) |
 | `RPC_URL_BASE` | No | Base RPC (default: `https://mainnet.base.org`) |
 | `RELAYER_PRIVATE_KEY` | Yes for on-chain execution | EOA private key that pays gas for relayed transactions; it cannot access user funds |
-| `GNOSISSCAN_API_KEY` | No | Chain 100 only; unused by the delegation rail. Legacy Gnosis explorer key still read by `config.ts` |
+| `GNOSISSCAN_API_KEY` | No | History only (decision (c), #3635): the chain-100 explorer history read; nothing runs on Gnosis |
 | `BASESCAN_API_KEY` | No | Base explorer API key when using an Etherscan-style Base source; Base currently defaults to Blockscout for transactions |
 | `COINGECKO_API_KEY` | No | Token price lookups |
 | `FRONTEND_URL` | No | Backend CORS/link base (default: `http://localhost:3000`) |

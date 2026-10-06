@@ -327,7 +327,6 @@ export const config = {
   // Optional with defaults
   port: Number(process.env.PORT) || 3001,
   frontendUrl: optionalEnv('FRONTEND_URL', 'http://localhost:3000'),
-  rpcUrl: optionalEnv('RPC_URL', 'https://rpc.gnosischain.com'),
   logLevel: optionalEnv('LOG_LEVEL', 'info'),
 
   // #2422 (epic #2420): the npm dist-tag in the connector command the

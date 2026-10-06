@@ -233,6 +233,8 @@ so this is a rule to point at rather than a question to ask the release runner.
       | `RPC_URL_BASE` | Base **mainnet** (8453) | shared public `https://mainnet.base.org` — **real money** |
       | `RPC_URL_BASE_SEPOLIA` | Base Sepolia (84532) | shared public `https://sepolia.base.org` |
 
+      *(`RPC_URL` was removed in #3671; this note is the #2615 record.)*
+
       **`RPC_URL` alone does not configure Base.** It reads like "RPC is
       configured" in a variable list and covers Gnosis only — chain 100, which
       the delegation rail does not use. That is the exact shape production was

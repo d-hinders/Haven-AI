@@ -158,6 +158,9 @@ for (const id of SUPPORTED_CHAIN_IDS) {
   if (!CHAINS[id]) {
     throw new Error(`chains: supported chain ${id} is not in the known registry`)
   }
+  if (!(id in SUPPORTED_RPC_URLS)) {
+    throw new Error(`chains: supported chain ${id} has no RPC wiring`)
+  }
 }
 
 /** Known to the registry (history may render) — NOT necessarily supported. */

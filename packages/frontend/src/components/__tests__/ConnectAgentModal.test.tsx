@@ -142,11 +142,22 @@ describe('ConnectAgentModal focus (#3687)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
     expect(screen.getByText('Agent policy')).toBeInTheDocument()
-    expect(document.activeElement).not.toBe(document.body)
-    expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement)
+    // The step region itself — `role="dialog"` is Modal's full-screen
+    // wrapper, so containment in it would not say "inside the panel".
+    expect(document.activeElement).toHaveAttribute('tabindex', '-1')
+    expect(document.activeElement).toHaveTextContent('Agent policy')
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(document.activeElement).toBe(screen.getByLabelText('Agent name'))
+  })
+
+  it('moves no focus on the first render of the resume step: Close keeps it', () => {
+    stubPointer(false)
+    mockUseAgentConnectionSetup.mockReturnValue(flow({ step: 'connect' }))
+    render(<ConnectAgentModal open onClose={vi.fn()} resumeSetupId="setup-1" />)
+
+    expect(screen.getByText('Connect step')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
   })
 
   it('moves no focus on a re-render that does not change the step', () => {

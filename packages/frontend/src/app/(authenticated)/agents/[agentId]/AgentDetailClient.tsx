@@ -573,7 +573,10 @@ export default function AgentDetailClient({ agentId }: Props) {
         // the agents read carries no last-payment field.
         meta={
           <>
-            {walletName} · {networkName} · Created {timeAgo(currentAgent.created_at)} ·{' '}
+            {walletName} · {networkName} · Created{' '}
+            {/* Its own node: the product-routes visual spec proves the frozen
+                clock by finding the created age as exact text (#2318). */}
+            <span>{timeAgo(currentAgent.created_at)}</span> ·{' '}
             <span className="v2-tabular" title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}>
               {formatAgentLastActivity(currentAgent.mcp_last_seen_at)}
             </span>

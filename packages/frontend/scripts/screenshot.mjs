@@ -1905,6 +1905,21 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     }
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
+    // #3693 (corrected body): remaining-this-period travels ONLY when the
+    // caller asks — fixture parity with the route's opt-in
+    // `?include=remaining` contract. The enrichment is computed from the row
+    // itself (three quarters left, refilling one period after start_date).
+    const includeRemaining = new URLSearchParams(apiPath.split('?')[1] ?? '').get('include') === 'remaining'
+    const withRemaining = (rows) => (includeRemaining
+      ? rows.map((r) => (r.status === 'active'
+          ? {
+              ...r,
+              remaining_atomic: (BigInt(r.budget_atomic) * 3n / 4n).toString(),
+              remaining_from_chain: true,
+              period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString(),
+            }
+          : { ...r, remaining_atomic: null, remaining_from_chain: null, period_end: null }))
+      : rows)
     // #2106: the delegation rail's actual spend authority, as
     // `GET /agents/:id/delegations` returns it. The agent's budget card
     // renders this on a `delegator_hybrid` account instead of the retired
@@ -1913,8 +1928,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     // AllowedCalldataEnforcer caveat) and open — or the rendered review never
     // sees the branch that was wrong.
     if (pathname === `/agents/agent-research/delegations`) {
-      return {
-        delegations: [{
+      return { delegations: withRemaining([{
           id: 'dlg-1', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: ADDR.merchant,
@@ -1924,12 +1938,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-06-02T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
           created_at: '2026-06-02T10:00:00.000Z',
-        }],
+        }]),
       }
     }
     if (pathname === `/agents/agent-retired/delegations`) {
-      return {
-        delegations: [{
+      return { delegations: withRemaining([{
           id: 'dlg-2', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
@@ -1939,15 +1952,14 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-05-18T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 4, 18) / 1000),
           created_at: '2026-05-18T10:00:00.000Z',
-        }],
+        }]),
       }
     }
     // #3542: the budget delegations the two half-revoked agents still hold.
     // `status: 'active'` on a REVOKED agent is the defect itself — the route
     // has no status filter, so it serves the row, and revoke-all targets it.
     if (pathname === `/agents/agent-half-revoked/delegations`) {
-      return {
-        delegations: [{
+      return { delegations: withRemaining([{
           id: 'dlg-half-1', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
@@ -1957,12 +1969,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-05-20T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 4, 20) / 1000),
           created_at: '2026-05-20T10:00:00.000Z',
-        }],
+        }]),
       }
     }
     if (pathname === `/agents/agent-half-removed/delegations`) {
-      return {
-        delegations: [{
+      return { delegations: withRemaining([{
           id: 'dlg-half-2', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
@@ -1972,7 +1983,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           start_date: '2026-04-12T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 3, 12) / 1000),
           created_at: '2026-04-12T10:00:00.000Z',
-        }],
+        }]),
       }
     }
     return { delegations: [] }

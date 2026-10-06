@@ -272,7 +272,10 @@ export function useDelegationBudget(
       if (!silent) manualBudgetsReloadInFlight.current += 1
       const mine = ++budgetsGeneration.current
       try {
-        const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
+        // #3693 (corrected body): remaining-this-period is OPT-IN — the budget
+        // card wants it, so it asks. The plain delegations read without the
+        // parameter is the poller-cheap shape (no chain RPC server-side).
+        const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations?include=remaining`)
         if (mine !== budgetsGeneration.current) return // a newer read has since started (F4)
         // `?? []` — an absent key must degrade, not crash the route (#3093).
         setBudgets(res.delegations ?? [])

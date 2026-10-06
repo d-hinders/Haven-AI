@@ -702,7 +702,7 @@ export type paths = {
         };
         /**
          * List an agent's budget delegations with lifecycle status.
-         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). ACTIVE rows additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
+         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, ACTIVE rows additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
          */
         get: operations["listAgentDelegations"];
         put?: never;
@@ -3650,11 +3650,11 @@ export type components = {
             merchant_slug: string | null;
             /** @description That merchant’s display name, or null. */
             merchant_name: string | null;
-            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows (#3693). When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows. */
+            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows when included. */
             remaining_atomic?: string | null;
-            /** @description False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it (#3693). null for non-active rows. */
+            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it. null for non-active rows when included. */
             remaining_from_chain?: boolean | null;
-            /** @description When the current period refills (ISO 8601), computed the same way as the analytics budget views (#3693). null for non-active rows. */
+            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When the current period refills (ISO 8601), computed the same way as the analytics budget views. Still the PERIOD boundary when the delegation expires earlier — the row expires_at then shows the earlier expiry. null for non-active rows when included. */
             period_end?: string | null;
         };
         MerchantFundingTarget: {
@@ -8926,7 +8926,10 @@ export interface operations {
     };
     listAgentDelegations: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Opt-in enrichment. remaining: each ACTIVE delegation carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); non-active rows carry them as null. Anything outside the enum is refused with the 400 envelope before the handler runs. */
+                include?: "remaining";
+            };
             header?: never;
             path: {
                 id: components["parameters"]["AgentId"];

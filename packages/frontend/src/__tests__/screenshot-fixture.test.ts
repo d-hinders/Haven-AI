@@ -158,6 +158,19 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         delegations: { recipient_address: string | null }[]
       }
       expect(open.delegations[0].recipient_address).toBeNull()
+
+      // #3693 (corrected body): the remaining-this-period enrichment travels
+      // ONLY when the caller asks — fixture parity with the route's opt-in
+      // `?include=remaining` contract. Plain call: no enrichment keys at all.
+      expect(pinned.delegations[0]).not.toHaveProperty('remaining_atomic')
+      expect(pinned.delegations[0]).not.toHaveProperty('period_end')
+      const enriched = fx('/agents/agent-research/delegations?include=remaining') as {
+        delegations: { status: string; remaining_atomic: string | null; remaining_from_chain: boolean | null; period_end: string | null }[]
+      }
+      expect(enriched.delegations[0].status).toBe('active')
+      expect(typeof enriched.delegations[0].remaining_atomic).toBe('string')
+      expect(enriched.delegations[0].remaining_from_chain).toBe(true)
+      expect(typeof enriched.delegations[0].period_end).toBe('string')
     })
 
     it('gives the user exactly ONE default account (#2202)', () => {

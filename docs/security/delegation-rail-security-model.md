@@ -2395,7 +2395,12 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > covered file this diff touches is `routes/agent-delegations.ts` — its
 > `GET /agents/:id/delegations` list response gains three per-row fields for
 > ACTIVE delegations (`remaining_atomic`, `remaining_from_chain`,
-> `period_end`; null on non-active rows), answered by the EXISTING
+> `period_end`; null on non-active rows) — OPT-IN via a single allowlisted
+> query parameter, `?include=remaining` (anything else is a 400 from the
+> enforced request schema before the handler runs): without it the response
+> is the plain lifecycle list, byte-identical to the pre-#3693 shape, and
+> neither the json fetch nor the chain read runs. The enrichment is
+> answered by the EXISTING
 > `readRemainingBudget` chain read the analytics budget views already use,
 > now fed the row's signed delegation fetched server-side via
 > `listDelegationJsonByIds` and excluded from the response as before
@@ -2404,8 +2409,9 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > nothing; a failed or rejected read answers the FULL budget with
 > `remaining_from_chain: false` (the conservative bound) and still 200; the
 > reads run bounded (the analytics worker pool, four in flight) under the
-> reader's existing timeouts. No route, role, ceremony, validation shape or
-> request side changes, and the Owner-Signature Invariant above is
+> reader's existing timeouts. No route, role, ceremony or validation shape
+> changes — the optional `include` parameter only chooses whether the
+> display enrichment runs — and the Owner-Signature Invariant above is
 > untouched — nothing here activates, revokes, rekeys or redeems anything.
 > The verification entry for the two `satisfied-by` contract docs this
 > change also covers is

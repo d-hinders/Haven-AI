@@ -218,7 +218,34 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   app.addHook('onRequest', authMiddleware)
 
   // ── GET /:id/delegations — lifecycle visibility (#802 lesson) ─────────────
-  app.get<{ Params: { id: string } }>('/:id/delegations', async (request, reply) => {
+  //
+  // #3693 (corrected body): the remaining-this-period enrichment is OPT-IN.
+  // This route is polled every 10 s by useDelegationBudget/useTaskBudgets and
+  // by the CLI wait loops — a chain RPC on every poll was a cost none of them
+  // asked for. Without `?include=remaining` the handler returns the rows the
+  // SELECT produced, byte-identical to the pre-#3693 shape: no enrichment
+  // keys (not even the three nulls on non-active rows), the server-side
+  // delegation_json fetch does NOT run, and the chain reader is never called.
+  // With `?include=remaining`, each ACTIVE row additionally carries
+  // remaining_atomic / remaining_from_chain / period_end (non-active rows
+  // carry the three as null), following the GET /merchants/:slug/budgets
+  // precedent. Unknown `include` values are refused by the enforced request
+  // schema — this module is in `enforcedModules` — before the handler runs.
+  //
+  // Expiry rule: when a delegation's `expires_at` is EARLIER than its
+  // `period_end`, `period_end` is still the period boundary — it is the
+  // enforcer's own refill clock and is not rewritten to the earlier of the
+  // two. The row already carries `expires_at`, so with the enrichment on, the
+  // earlier expiry is visible right beside the period it cuts short: the
+  // frontend caption says "expires …" instead of "refills …".
+  //
+  // The querystring type is a named alias BECAUSE the route-table generator
+  // (route-inventory.ts extractRoutes) scans for the registration with a
+  // quote-scan (`[^'"\`(]*`) across the generic — a string literal inside the
+  // inline generic would end the scan before the path and drop this route
+  // from route-modules.generated.ts.
+  type ListDelegationsQuery = { include?: 'remaining' }
+  app.get<{ Params: { id: string }; Querystring: ListDelegationsQuery }>('/:id/delegations', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
@@ -236,6 +263,15 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
        ORDER BY d.created_at DESC`,
       [request.params.id],
     )
+
+    // #3693 (corrected body): the plain pollers' default. The rows go back
+    // exactly as the SELECT produced them — the enrichment keys are absent
+    // (not null), the delegation_json fetch below never runs, and the chain
+    // reader is never called.
+    if (request.query.include !== 'remaining') {
+      return { delegations: result.rows }
+    }
+
     // delegation_json intentionally NOT in the list — fetch is explicit (#3693:
     // the remaining-this-period read needs it, so it is read SERVER-SIDE only,
     // for the ACTIVE rows, and never reaches the response).
@@ -264,7 +300,10 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         remaining = { remainingAtomic: row.budget_atomic, fromChain: false }
       }
       // period_end comes from the SAME helper the analytics budget views use —
-      // one `currentPeriodBounds`, two consumers, no drift (#3693).
+      // one `currentPeriodBounds`, two consumers, no drift (#3693). It stays
+      // the period boundary even when the row's `expires_at` falls earlier:
+      // the row's own expires_at is what shows the earlier expiry (see the
+      // route comment above).
       const { end } = currentPeriodBounds(Number(row.start_date), row.period_seconds, nowSec)
       return {
         ...row,

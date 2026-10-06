@@ -34,7 +34,7 @@ const EOA_SIGNERS = { ...PASSKEY_SIGNERS, owner_address: '0x' + 'ee'.repeat(20),
 
 function mockApi(signers: unknown) {
   mockGet.mockImplementation((url: string) => {
-    if (url.endsWith('/delegations')) return Promise.resolve({ delegations: [] })
+    if (url.endsWith('/delegations?include=remaining')) return Promise.resolve({ delegations: [] })
     if (url.endsWith('/account-signers')) return Promise.resolve(signers)
     return Promise.reject(new Error('unexpected ' + url))
   })
@@ -834,7 +834,7 @@ describe('useDelegationBudget agent switch (#3331 review finding F4)', () => {
     const { result, rerender } = renderHook(({ agentId }) => useDelegationBudget(agentId, 84532), {
       initialProps: { agentId: 'agent-1' },
     })
-    await waitFor(() => expect(pendingDelegations['/agents/agent-1/delegations']).toBeDefined())
+    await waitFor(() => expect(pendingDelegations['/agents/agent-1/delegations?include=remaining']).toBeDefined())
     await waitFor(() => expect(result.current.ready).toBe(true)) // the signer set resolved
 
     // Switch BEFORE agent-1's budgets read resolves.
@@ -845,12 +845,12 @@ describe('useDelegationBudget agent switch (#3331 review finding F4)', () => {
     // set has not been re-confirmed yet).
     expect(result.current.budgets).toBeNull()
     expect(result.current.ready).toBe(false)
-    await waitFor(() => expect(pendingDelegations['/agents/agent-2/delegations']).toBeDefined())
+    await waitFor(() => expect(pendingDelegations['/agents/agent-2/delegations?include=remaining']).toBeDefined())
 
     // The STALE agent-1 answer resolves late — it must be discarded, not
     // rendered as if it were agent-2's.
     await act(async () => {
-      pendingDelegations['/agents/agent-1/delegations']!.resolve({
+      pendingDelegations['/agents/agent-1/delegations?include=remaining']!.resolve({
         delegations: [{ id: 'agent1-budget', status: 'active', budget_atomic: '1', token_address: '0xa', recipient_address: null, delegation_hash: '0x1', version: 1, period_seconds: 86400, expires_at: 9_999_999_999 }],
       })
       await Promise.resolve()
@@ -859,7 +859,7 @@ describe('useDelegationBudget agent switch (#3331 review finding F4)', () => {
 
     // agent-2's own answer lands and IS rendered.
     await act(async () => {
-      pendingDelegations['/agents/agent-2/delegations']!.resolve({
+      pendingDelegations['/agents/agent-2/delegations?include=remaining']!.resolve({
         delegations: [{ id: 'agent2-budget', status: 'active', budget_atomic: '2', token_address: '0xb', recipient_address: null, delegation_hash: '0x2', version: 1, period_seconds: 86400, expires_at: 9_999_999_999 }],
       })
       await Promise.resolve()
@@ -903,7 +903,7 @@ describe('useDelegationBudget manual reload vs. silent poll (R2-4)', () => {
     const pending: Array<{ resolve: (v: unknown) => void }> = []
     mockGet.mockImplementation((url: string) => {
       if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
-      if (url.endsWith('/delegations')) {
+      if (url.endsWith('/delegations?include=remaining')) {
         return new Promise((resolve) => {
           pending.push({ resolve })
         })
@@ -959,7 +959,7 @@ describe('useDelegationBudget manual reload vs. silent poll (R2-4)', () => {
     const pending: Array<{ resolve: (v: unknown) => void; reject: (e: unknown) => void }> = []
     mockGet.mockImplementation((url: string) => {
       if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
-      if (url.endsWith('/delegations')) {
+      if (url.endsWith('/delegations?include=remaining')) {
         return new Promise((resolve, reject) => {
           pending.push({ resolve, reject })
         })
@@ -1009,7 +1009,7 @@ describe('useDelegationBudget manual reload vs. silent poll (R2-4)', () => {
     const pending: Array<{ resolve: (v: unknown) => void }> = []
     mockGet.mockImplementation((url: string) => {
       if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
-      if (url.endsWith('/delegations')) {
+      if (url.endsWith('/delegations?include=remaining')) {
         return new Promise((resolve) => {
           pending.push({ resolve })
         })
@@ -1096,7 +1096,7 @@ describe('useDelegationBudget visible-only polling (#2732)', () => {
     const callsAfterMount = mockGet.mock.calls.length
 
     mockGet.mockImplementation((url: string) => {
-      if (url.endsWith('/delegations')) return Promise.reject(new Error('500 mid-demo'))
+      if (url.endsWith('/delegations?include=remaining')) return Promise.reject(new Error('500 mid-demo'))
       if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
       return Promise.reject(new Error('unexpected ' + url))
     })
@@ -1104,9 +1104,10 @@ describe('useDelegationBudget visible-only polling (#2732)', () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })
 
-    // The tick fetched only budgets (the device signer set is NOT polled).
+    // The tick fetched only budgets (the device signer set is NOT polled),
+    // and it asked for the OPT-IN remaining enrichment (corrected #3693).
     expect(mockGet.mock.calls.length).toBe(callsAfterMount + 1)
-    expect(mockGet.mock.calls[callsAfterMount][0]).toContain('/delegations')
+    expect(mockGet.mock.calls[callsAfterMount][0]).toContain('/delegations?include=remaining')
     expect(result.current.budgets).toEqual([])
     expect(result.current.budgetsError).toBe(false)
   })
@@ -1119,7 +1120,7 @@ describe('useDelegationBudget visible-only polling (#2732)', () => {
     })
 
     mockGet.mockImplementation((url: string) => {
-      if (url.endsWith('/delegations')) {
+      if (url.endsWith('/delegations?include=remaining')) {
         return Promise.resolve({
           delegations: [{ id: 'd1', status: 'active', budget_atomic: '1000000' }],
         })

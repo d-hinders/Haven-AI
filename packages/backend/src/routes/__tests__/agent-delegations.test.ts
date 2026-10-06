@@ -1634,11 +1634,18 @@ describe('delegation lifecycle API (#828)', () => {
 
   describe('GET /:id/delegations', () => {
     it('never returns the signed delegation object in the list', async () => {
-      mockDb({})
+      mockDb({ list: [DELEGATION_ROW] })
       const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
       expect(res.statusCode).toBe(200)
-      const listQuery = mockQuery.mock.calls.find((c) => /FROM agent_delegations/.test(String(c[0])))!
-      expect(String(listQuery[0])).not.toContain('delegation_json')
+      // #3693 round 2 (corrected body): the assertion is on the RESPONSE body,
+      // not the SQL string — what matters is that no `delegation_json` key
+      // reaches the wire, with or without the opt-in enrichment.
+      expect(JSON.stringify(res.json())).not.toContain('delegation_json')
+      const enriched = await app.inject({
+        method: 'GET', url: `/agents/${AGENT_ID}/delegations?include=remaining`,
+      })
+      expect(enriched.statusCode).toBe(200)
+      expect(JSON.stringify(enriched.json())).not.toContain('delegation_json')
     })
 
     it('matches the documented shape for a real row (#1446)', async () => {
@@ -1680,7 +1687,7 @@ describe('delegation lifecycle API (#828)', () => {
           jsonByIds: [{ id: DELEGATION_ROW.id, delegation_json: storedJson }],
         })
         mockReadRemaining.mockImplementation(async () => ({ remainingAtomic: '1200000', fromChain: true }))
-        const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+        const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations?include=remaining` })
         expect(res.statusCode).toBe(200)
         expect(res.json().delegations[0]).toMatchObject({
           remaining_atomic: '1200000',
@@ -1718,7 +1725,7 @@ describe('delegation lifecycle API (#828)', () => {
         jsonByIds: [{ id: active.id, delegation_json: storedJson }],
       })
       mockReadRemaining.mockImplementation(async () => ({ remainingAtomic: '77', fromChain: true }))
-      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations?include=remaining` })
       expect(res.statusCode).toBe(200)
       const rows = res.json().delegations as Array<Record<string, unknown>>
       for (const row of rows.filter((r) => r.status !== 'active')) {
@@ -1741,7 +1748,7 @@ describe('delegation lifecycle API (#828)', () => {
         remainingAtomic: budgetAtomic,
         fromChain: false,
       }))
-      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations?include=remaining` })
       expect(res.statusCode).toBe(200)
       expect(res.json().delegations[0]).toMatchObject({
         remaining_atomic: '5000000',
@@ -1757,7 +1764,7 @@ describe('delegation lifecycle API (#828)', () => {
       mockReadRemaining.mockImplementation(async () => {
         throw new Error('RPC unreachable')
       })
-      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations?include=remaining` })
       expect(res.statusCode).toBe(200)
       expect(res.json().delegations[0]).toMatchObject({
         remaining_atomic: '5000000',
@@ -1781,12 +1788,75 @@ describe('delegation lifecycle API (#828)', () => {
         inFlight -= 1
         return { remainingAtomic: '1', fromChain: true }
       })
-      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations?include=remaining` })
       expect(res.statusCode).toBe(200)
       expect(mockReadRemaining).toHaveBeenCalledTimes(10)
       // The shared worker pool (analytics' pattern): four in flight at most,
       // and with 10 pending reads exactly four — never 10 at once.
       expect(maxInFlight).toBe(BUDGET_READ_CONCURRENCY)
+    })
+
+    it('WITHOUT include the response is the plain dev shape: no enrichment keys, no json fetch, the reader never called', async () => {
+      mockDb({
+        list: [DELEGATION_ROW],
+        jsonByIds: [{ id: DELEGATION_ROW.id, delegation_json: storedJson }],
+      })
+      // The mocked reader REFUSES if reached — the every-10s pollers must
+      // never pay a chain RPC they did not ask for (corrected body).
+      mockReadRemaining.mockImplementation(async () => {
+        throw new Error('the no-include default must not read the chain')
+      })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expect(res.statusCode).toBe(200)
+      const row = res.json().delegations[0] as Record<string, unknown>
+      // The three keys are ABSENT — not null — byte-identical to pre-#3693.
+      expect(Object.hasOwn(row, 'remaining_atomic')).toBe(false)
+      expect(Object.hasOwn(row, 'remaining_from_chain')).toBe(false)
+      expect(Object.hasOwn(row, 'period_end')).toBe(false)
+      // And the server-side delegation_json fetch never ran either.
+      expect(mockQuery.mock.calls.some((c) => /WHERE id = ANY\(\$1\)/.test(String(c[0])))).toBe(false)
+      expect(mockReadRemaining).not.toHaveBeenCalled()
+      // The plain shape is still exactly what the spec documents.
+      expectMatchesSpec('GET', '/agents/{id}/delegations', res.json())
+    })
+
+    it('an unknown include value is refused by the enforced schema, before the handler', async () => {
+      mockDb({})
+      await expectRejectsOffSpec(
+        app,
+        `GET /agents/${AGENT_ID}/delegations?include=everything`,
+        undefined,
+        'querystring/include',
+      )
+      // Refused BEFORE the handler: the chain reader was never reached.
+      expect(mockReadRemaining).not.toHaveBeenCalled()
+    })
+
+    it('expires_at EARLIER than period_end: period_end stays the period boundary and the row shows the earlier expiry', async () => {
+      vi.useFakeTimers({ now: new Date('2026-10-06T12:00:00.000Z') })
+      try {
+        const nowSec = Math.floor(Date.parse('2026-10-06T12:00:00.000Z') / 1000)
+        // The delegation expires in ONE hour; the daily period (anchored long
+        // ago at start_date) refills much later than that.
+        const expiring = { ...DELEGATION_ROW, expires_at: String(nowSec + 3600) }
+        mockDb({ list: [expiring], jsonByIds: [{ id: expiring.id, delegation_json: storedJson }] })
+        mockReadRemaining.mockImplementation(async () => ({ remainingAtomic: '1200000', fromChain: true }))
+        const res = await app.inject({
+          method: 'GET', url: `/agents/${AGENT_ID}/delegations?include=remaining`,
+        })
+        expect(res.statusCode).toBe(200)
+        const row = res.json().delegations[0]
+        const { end } = currentPeriodBounds(Number(expiring.start_date), expiring.period_seconds, nowSec)
+        const periodEnd = new Date(end * 1000).toISOString()
+        // NOT rewritten to the earlier of the two — period_end is the
+        // enforcer's own refill clock, and the row's expires_at is what makes
+        // the earlier expiry visible (the "expires …" caption).
+        expect(row.period_end).toBe(periodEnd)
+        expect(BigInt(row.expires_at)).toBe(BigInt(nowSec + 3600))
+        expect(BigInt(row.expires_at)).toBeLessThan(BigInt(Date.parse(periodEnd) / 1000))
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

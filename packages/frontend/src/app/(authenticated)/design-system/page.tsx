@@ -1458,14 +1458,16 @@ export default function DesignSystemPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => toast.info('Edit agent')}>Edit agent</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => toast.info('Update budget')}>Update budget</DropdownMenuItem>
-                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => toast.info('Manage labels')}>Manage labels</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => toast.info('Payment credentials')}>
                   Payment credentials
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => toast.info('Replace signing key')}>
+                  Replace signing key
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem tone="danger" onSelect={() => toast.error('Remove (demo only)')}>
-                  Remove agent
+                  Remove agent…
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

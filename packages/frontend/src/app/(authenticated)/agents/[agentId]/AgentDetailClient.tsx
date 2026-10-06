@@ -19,7 +19,7 @@ import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
-import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
+import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import {
   FINISH_REVOKING_LABEL,
@@ -522,29 +522,67 @@ export default function AgentDetailClient({ agentId }: Props) {
     }
   }
 
-  // One predicate, read twice: the badge's presence IS the reason the actions
-  // slot can be inlined, so the two must never drift apart (#2821 review).
+  // One predicate, read twice: the badge's presence IS one of the reasons the
+  // actions slot can or cannot be inlined, so the two must never drift apart
+  // (#2821 review).
   const showsStatusBadge = currentAgent.status !== 'active'
+
+  // #3694: the per-state action matrix. Archived dominates — any agent with
+  // `archived_at`, including the unlinked shape that is still `active` (an
+  // unlinked agent can be archived without being revoked), gets Restore and
+  // never Remove, Pause or Resume. The kebab renders for EVERY state, so the
+  // terminal action always has a home; before #3694 it was hidden for revoked
+  // agents and Remove/Restore lived only in a footer below the fold.
+  const showPause = isActive && !isArchived
+  const showResume = isPaused && !isArchived
+  // Edit and labels keep their pre-#3694 gate: a revoked agent's kebab used to
+  // be hidden outright, and `EditAgentModal` is still not mounted for one.
+  const canEditDetails = !isRevoked
+  // A revoked or removed agent has no credential to show or key to replace.
+  const canManageCredentials = !isRevoked && !isArchived
+  // Inline ONLY when the slot really is one icon-only control (#2821).
+  //
+  // The first version passed this unconditionally, on the reasoning that
+  // "the badge renders null while the agent is active" — true for an active
+  // agent and false for exactly the state a user opens this page to check.
+  // Rendered for a paused agent at 390px the badge took x≈250–310 and the
+  // kebab x≈322–367, leaving the title ~200px of a 342px content width, and a
+  // name as short as "Data-feed agent" wrapped to two lines.
+  //
+  // Two controls want the stacking the default gives them. One does not. Since
+  // #3694 Pause and Resume sit beside the kebab, so an active agent's slot is
+  // two controls as well. The one state left with a lone kebab is the
+  // archived-unlinked agent: still `active` (no badge), archived (no Pause).
+  const inlineHeaderActions = !showsStatusBadge && !showPause && !showResume
+  // The one status sentence the old rules footer carried that nothing else on
+  // the page says (#3694, moved from the footer). The half-revoked variant is
+  // not repeated: the half-revoked banner's title states it, directly below.
+  // The paused/active variants went — the badge and the paused banner say them.
+  const retiredStatusLine = isRetired && !halfRevoked
+    ? 'This agent no longer has access through Haven.'
+    : null
 
   return (
     <div className="max-w-5xl">
       <PageHeader
         title={currentAgent.name}
-        // Inline ONLY when the slot really is one icon-only control (#2821).
-        //
-        // The first version passed this unconditionally, on the reasoning that
-        // "the badge renders null while the agent is active" — true for an
-        // active agent and false for exactly the state a user opens this page
-        // to check. Rendered for a paused agent at 390px the badge took
-        // x≈250–310 and the kebab x≈322–367, leaving the title ~200px of a
-        // 342px content width, and a name as short as "Data-feed agent"
-        // wrapped to two lines — pushing the budget card down on the screen
-        // this issue exists to buy room on.
-        //
-        // Two controls want the stacking the default gives them. One does not.
-        // The condition is the prop's own justification, written as code
-        // instead of as a comment that was only sometimes true.
-        inlineActions={!showsStatusBadge}
+        subtitle={currentAgent.description || undefined}
+        // #3694: the identity row that was the "About this agent" card —
+        // wallet, network, created, last activity — as the header's quiet
+        // meta line (#3692's slot). "Last activity" stays `mcp_last_seen_at`:
+        // the agents read carries no last-payment field.
+        meta={
+          <>
+            {walletName} · {networkName} · Created{' '}
+            {/* Its own node: the product-routes visual spec proves the frozen
+                clock by finding the created age as exact text (#2318). */}
+            <span>{timeAgo(currentAgent.created_at)}</span> ·{' '}
+            <span className="v2-tabular" title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}>
+              {formatAgentLastActivity(currentAgent.mcp_last_seen_at)}
+            </span>
+          </>
+        }
+        inlineActions={inlineHeaderActions}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             {showsStatusBadge ? (
@@ -552,35 +590,77 @@ export default function AgentDetailClient({ agentId }: Props) {
                 {agentStatus.label}
               </StatusBadge>
             ) : null}
-            {!isRevoked ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  aria-label="Agent options"
-                  disabled={pendingAction !== null}
-                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Icon icon={EllipsisVertical} className="h-4 w-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
+            {showPause ? (
+              <Button
+                onClick={() => void handlePause()}
+                disabled={pendingAction !== null}
+                variant="ghost"
+                // `lg` (44px) so the pair matches the kebab beside it; `sm`
+                // painted 36px next to a 44px square (#3694 design review).
+                size="lg"
+              >
+                {pendingAction === 'pause' ? 'Pausing…' : 'Pause agent'}
+              </Button>
+            ) : null}
+            {showResume ? (
+              <Button
+                onClick={() => void handleResume()}
+                disabled={pendingAction !== null}
+                size="lg"
+              >
+                {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
+              </Button>
+            ) : null}
+            {/* Restore runs from a menu that closes on select, so the old
+                footer button's "Restoring…" label has no control to live on.
+                Announced here instead, beside the (disabled) trigger. */}
+            {pendingAction === 'restore' ? (
+              <span role="status" className="v2-text-meta text-[var(--v2-ink-3)]">
+                Restoring…
+              </span>
+            ) : null}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Agent options"
+                disabled={pendingAction !== null}
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Icon icon={EllipsisVertical} className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {canEditDetails ? (
                   <DropdownMenuItem onSelect={openEditAgent}>
                     Edit agent
                   </DropdownMenuItem>
+                ) : null}
+                {canEditDetails ? (
                   <DropdownMenuItem onSelect={() => setLabelsManagerOpen(true)}>
                     Manage labels
                   </DropdownMenuItem>
-                  {!isRetired ? (
-                    <DropdownMenuItem onSelect={openUpdateBudget}>Update budget</DropdownMenuItem>
-                  ) : null}
-                  <DropdownMenuSeparator />
+                ) : null}
+                {canManageCredentials ? (
                   <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
                     Payment credentials
                   </DropdownMenuItem>
+                ) : null}
+                {canManageCredentials ? (
                   <DropdownMenuItem onSelect={() => setReplaceKeyOpen(true)}>
                     Replace signing key
                   </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
+                ) : null}
+                {canEditDetails ? <DropdownMenuSeparator /> : null}
+                {isArchived ? (
+                  // #1402: restores list placement only — the agent stays revoked.
+                  <DropdownMenuItem onSelect={() => void handleRestore()}>
+                    Restore to list
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem tone="danger" onSelect={() => setRemoveOpen(true)}>
+                    Remove agent…
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         }
       />
@@ -595,11 +675,32 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       )}
 
+      {retiredStatusLine ? (
+        <p className="mt-1.5 v2-text-meta text-[var(--v2-ink-3)]">{retiredStatusLine}</p>
+      ) : null}
+
+      {/* #3694: ONE banner slot, directly under the header, ordered by the
+          detail-page rule in docs/product/design-system.md (#3692): danger,
+          then warning, then neutral; within a tone, the banner asking for a
+          decision first. So: the last action's failure (it answers the click
+          the user just made in the header), half-revoked (Finish revoking),
+          recoverable funds (Recover funds), the refresh error, paused, then
+          the recovery minimum. Tones and copy are unchanged; only the
+          position moved. `empty:hidden` drops the slot's margin when no
+          banner applies (React renders nothing for each null child). */}
+      <div className="mb-6 mt-4 flex flex-col gap-4 empty:hidden" data-testid="agent-banner-slot">
+      {errorMessage ? (
+        <div className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
+          <p className="text-sm font-medium text-[var(--v2-danger)]">Action failed</p>
+          <p className="mt-1 text-sm text-[var(--v2-danger)]">{errorMessage}</p>
+        </div>
+      ) : null}
+
       {/* #3542: revoked or removed, but a budget delegation is still redeemable
           on-chain — the status badge says "Revoked", which is only half true.
-          Above the budget card so the page opens on the thing that needs doing. */}
+          First warning in the slot: it carries the one action that ends it. */}
       {halfRevoked ? (
-        <div className="mb-6 mt-4" data-testid="half-revoked-callout">
+        <div data-testid="half-revoked-callout">
           <ApprovalRequiredBanner title={HALF_REVOKED_TITLE} tone="warning" density="compact">
             <span>{canFinish ? HALF_REVOKED_BODY : HALF_REVOKED_UNLINKED_BODY}</span>
             {canFinish ? (
@@ -618,150 +719,8 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
-      {/* Second on a phone, first from `lg` (#2821).
-
-          The identity rows — wallet, network, created, last activity — took
-          essentially the whole first screen on a 390pt viewport, so the budget,
-          which is the reason to open an agent at all, was the last thing on it
-          and pinned against the tab bar. That is desktop information density on
-          a phone.
-
-          Reordered rather than hidden or collapsed, which were the other two
-          candidates on #2821. At `lg` the grid is four columns wide and costs
-          nothing, so desktop keeps the composition it had.
-
-          The trade, stated as a trade rather than as a safeguard: `order`
-          changes paint order, not DOM order, so below `lg` a screen-reader
-          user still hears the metadata first and the budget second — they do
-          not get the reordering sighted users get (WCAG 1.3.2 territory). An
-          earlier version of this comment presented that as a mitigation, which
-          it is not. It is small here because both cards are self-labelled by
-          headings and nothing focusable sits between them, and reordering the
-          DOM instead would move the desktop composition too. Recorded so the
-          next person weighs it rather than rediscovers it. */}
-      {/* The pair, and ONLY the pair, is the flex context (#2821).
-
-          A first attempt put `flex flex-col` on the page root and ordered these
-          two against it. That is wrong and the measurement said so immediately:
-          `order` is relative to every sibling, all of which default to 0, so
-          two positive orders pushed BOTH cards below the whole rest of the page
-          — the budget row went from y=655 to y=2241. Confining the flex context
-          to the two elements being swapped is what makes the reorder local. */}
-      <div className="flex flex-col gap-6 lg:gap-0">
-        <Card hover={false} className="order-2 p-5 md:p-6 lg:order-1">
-        {/* A heading, because the reorder took this card's identity away
-            (#2821 design review). It leads with the muted description, which
-            read as the page's subtitle while this was card #1 directly under
-            the H1. As card #2 the same grey paragraph belongs to nothing. One
-            line restores it. */}
-        <h2 className="v2-text-h3 mb-2 text-[var(--v2-ink)]">About this agent</h2>
-        <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          {currentAgent.description || 'This agent can make payments within the rules you set.'}
-        </p>
-        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
-            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{networkName}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
-            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Last activity</dt>
-            <dd
-              className="mt-1 font-medium text-[var(--v2-ink)] v2-tabular"
-              title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}
-            >
-              {formatAgentLastActivityValue(currentAgent.mcp_last_seen_at)}
-            </dd>
-          </div>
-        </dl>
-        </Card>
-        {/* `-mt-6` below `lg` cancels `DelegationBudgetCard`'s own leading
-            margin (#2821 review). The 24px rhythm on this page lives on the
-            CARDS, not on a container, so swapping the order moved the pair's
-            only margin from BETWEEN them to ABOVE the stack: measured at
-            390px the two card borders touched (gap 0) while the budget card
-            started 24px lower than the metadata card used to — spending the
-            above-the-fold room this issue exists to buy. The wrapper owns the
-            gap below `lg` and hands it back at `lg`, where the child margin is
-            the original rhythm and nothing moves. */}
-        <div
-          id={DELEGATION_BUDGET_CARD_ID}
-          className="order-1 scroll-mt-24 max-lg:-mt-6 lg:order-2"
-        >
-          <DelegationBudgetCard
-            agentId={agentId}
-            chainId={chainId}
-            tokens={budgetTokenOptions}
-            onBudgetChange={refetch}
-            retired={isRevoked ? 'revoked' : isArchived ? 'archived' : undefined}
-          />
-        </div>
-      </div>
-
-      {/* #3426: the per-agent x402 tax declaration opt-in. Renders ONLY when
-          company details are VIES-valid (the component reads
-          `GET /user/company-details` itself — a 404 there means the flag is
-          off, and hides the card). The opt-in is settings, not authority: it
-          changes no budget, no rule, and no key. */}
-      <div className="mt-6">
-        <TaxDeclarationToggle
-          agentId={agentId}
-          taxDeclarationEnabled={currentAgent.tax_declaration_enabled}
-          onAgentsChanged={() => void refetch()}
-        />
-      </div>
-
-      <>
-          {/* #1089: backup & recovery moved to the account page — it's an
-              account capability, not an agent one. This is a pointer, not a
-              second copy of the controls. */}
-          {account ? (
-            <Card hover={false} className="mt-6 p-2">
-              <Row
-                href={`/accounts/${account.id}`}
-                title="Backup & recovery"
-                subtitle="Manage the ways this account can be approved"
-                trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
-              />
-            </Card>
-          ) : null}
-      </>
-
-      {agentsError ? (
-        <div
-          role="alert"
-          className="rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
-        >
-          Agent data could not refresh. This page is showing the last loaded record.
-          <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetch()}>
-            Try again
-          </Button>
-        </div>
-      ) : null}
-
-      {isPaused ? (
-        <div className="mt-4">
-          {/* #2230: title and body come from `lib/agent-pause-copy.ts`, shared
-              with `AgentCard`'s banner one click away. This page's wording is
-              the one that was TAKEN — the card said "network permissions" for
-              the same fact; see that module for why this one is the settled
-              phrasing. The rendered sentence here is byte-identical to what
-              stood before. */}
-          <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
-            {AGENT_PAUSED_BODY}
-          </ApprovalRequiredBanner>
-        </div>
-      ) : null}
-
       {hasRecoverableUsdc ? (
-        <div className="mt-4">
+        <div>
           <ApprovalRequiredBanner title={STRANDED_FUNDS_TITLE} tone="warning" density="compact">
             <span>
               {/* #2195: the cause clause is shared with `AgentCard` and count-aware
@@ -815,20 +774,83 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
+      {agentsError ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
+        >
+          Agent data could not refresh. This page is showing the last loaded record.
+          <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetch()}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
+
+      {isPaused ? (
+        <div>
+          {/* #2230: title and body come from `lib/agent-pause-copy.ts`, shared
+              with `AgentCard`'s banner one click away. This page's wording is
+              the one that was TAKEN — the card said "network permissions" for
+              the same fact; see that module for why this one is the settled
+              phrasing. The rendered sentence here is byte-identical to what
+              stood before. */}
+          <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
+            {AGENT_PAUSED_BODY}
+          </ApprovalRequiredBanner>
+        </div>
+      ) : null}
+
       {hasBelowMinimumUsdc && delegateBalance ? (
-        <div className="mt-4">
+        <div>
           <ApprovalRequiredBanner title="Recovery minimum not met" tone="neutral" density="compact">
             Your agent’s wallet is holding {strandedSummary ?? 'USDC'} below the {delegateBalance.sweep_min_usdc} USDC recovery minimum. More stranded funds can bring the balance up to the minimum.
           </ApprovalRequiredBanner>
         </div>
       ) : null}
+      </div>
 
-      {errorMessage ? (
-        <div className="mt-4 rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
-          <p className="text-sm font-medium text-[var(--v2-danger)]">Action failed</p>
-          <p className="mt-1 text-sm text-[var(--v2-danger)]">{errorMessage}</p>
-        </div>
-      ) : null}
+      {/* #3694: the budget card leads the content. #2821 reordered it above an
+          "About this agent" card on phones with `order-*` classes; that card's
+          facts now live in the header's meta line, so there is nothing left to
+          reorder and DOM order is reading order again at every width. */}
+      <div id={DELEGATION_BUDGET_CARD_ID} className="scroll-mt-24">
+        <DelegationBudgetCard
+          agentId={agentId}
+          chainId={chainId}
+          tokens={budgetTokenOptions}
+          onBudgetChange={refetch}
+          retired={isRevoked ? 'revoked' : isArchived ? 'archived' : undefined}
+        />
+      </div>
+
+      {/* #3426: the per-agent x402 tax declaration opt-in. Renders ONLY when
+          company details are VIES-valid (the component reads
+          `GET /user/company-details` itself — a 404 there means the flag is
+          off, and hides the card). The opt-in is settings, not authority: it
+          changes no budget, no rule, and no key. */}
+      <div className="mt-6">
+        <TaxDeclarationToggle
+          agentId={agentId}
+          taxDeclarationEnabled={currentAgent.tax_declaration_enabled}
+          onAgentsChanged={() => void refetch()}
+        />
+      </div>
+
+      <>
+          {/* #1089: backup & recovery moved to the account page — it's an
+              account capability, not an agent one. This is a pointer, not a
+              second copy of the controls. */}
+          {account ? (
+            <Card hover={false} className="mt-6 p-2">
+              <Row
+                href={`/accounts/${account.id}`}
+                title="Backup & recovery"
+                subtitle="Manage the ways this account can be approved"
+                trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
+              />
+            </Card>
+          ) : null}
+      </>
 
       {/* #2106: the third tile was "Pending approvals", fed by a backend
           constant of 0 (`routes/agent-activity.ts` — "pending approvals are
@@ -887,71 +909,6 @@ export default function AgentDetailClient({ agentId }: Props) {
                 helper: 'Payments above this budget are declined before any money moves.',
               },
             ]}
-            footer={
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs text-[var(--v2-ink-3)]">
-                  {isRevoked
-                    ? halfRevoked
-                      ? 'This agent’s credential is revoked, but its budget is still active.'
-                      : 'This agent no longer has access through Haven.'
-                    : isPaused
-                      ? 'Paused agents cannot start new payments through Haven.'
-                      : 'Pause the agent or remove its budget if you need to stop access.'}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {!isRetired ? (
-                    <Button
-                      onClick={openUpdateBudget}
-                      disabled={pendingAction !== null}
-                      variant="ghost"
-                      size="sm"
-                    >
-                      Update budget
-                    </Button>
-                  ) : null}
-                  {isActive ? (
-                    <Button
-                      onClick={() => void handlePause()}
-                      disabled={pendingAction !== null}
-                      variant="ghost"
-                      size="sm"
-                    >
-                      {pendingAction === 'pause' ? 'Pausing…' : 'Pause agent'}
-                    </Button>
-                  ) : null}
-                  {isPaused ? (
-                    <Button
-                      onClick={() => void handleResume()}
-                      disabled={pendingAction !== null}
-                      variant="ghost"
-                      size="sm"
-                    >
-                      {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
-                    </Button>
-                  ) : null}
-                  {!isArchived ? (
-                    <Button
-                      onClick={() => setRemoveOpen(true)}
-                      disabled={pendingAction !== null}
-                      variant="danger"
-                      size="sm"
-                    >
-                      Remove agent
-                    </Button>
-                  ) : null}
-                  {isArchived ? (
-                    <Button
-                      onClick={() => void handleRestore()}
-                      disabled={pendingAction !== null}
-                      variant="ghost"
-                      size="sm"
-                    >
-                      {pendingAction === 'restore' ? 'Restoring…' : 'Restore to list'}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            }
           />
 
           {budgetLines.length === 0 ? (

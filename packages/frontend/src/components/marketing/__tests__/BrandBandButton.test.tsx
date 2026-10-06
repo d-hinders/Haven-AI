@@ -107,3 +107,21 @@ describe('BrandBandButton trailing arrow', () => {
     expect(link.querySelector('svg')).toBeNull()
   })
 })
+
+/**
+ * Fixed ink on a fixed fill (#3139). The band CTA's white fill does not follow
+ * the theme, so its ink must not either: `--v2-ink` flips near-white in the
+ * dark palette and would put white text on the white button. Moved here from
+ * the retired `marketing-dark-tokens.test.tsx` (#3658), whose token cases left
+ * with the legacy hero backdrop.
+ */
+describe('BrandBandButton ink', () => {
+  it('keeps a fixed ink on its fixed white fill', () => {
+    const { container } = render(
+      <BrandBandButton href="/signup">Create your account</BrandBandButton>,
+    )
+    const link = container.querySelector('a') as HTMLElement
+    expect(link.className).toContain('text-[#1a1f36]')
+    expect(link.className).not.toContain('text-[var(--v2-ink)]')
+  })
+})

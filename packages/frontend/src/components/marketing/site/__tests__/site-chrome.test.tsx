@@ -166,8 +166,8 @@ describe('header legibility: four cases', () => {
       const cta = within(header).getByRole('link', { name: /Create your account/ })
       expect(cta.className).toContain('bg-white')
       expect(cta.className).toContain('text-[#0e1230]')
-      // The mockup's mark over navy (#3586, site.css:53): a solid white tile,
-      // navy ink, no translucent `inverse` tile.
+      // The mockup's mark over navy (#3586, site.css:53): a solid white tile
+      // and navy ink, not the legacy header's translucent white tile.
       const mark = brand.querySelector('svg')!
       const tile = mark.querySelector('rect')!.getAttribute('class')!.split(/\s+/)
       expect(tile).toEqual(['fill-white'])

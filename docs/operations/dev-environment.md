@@ -31,7 +31,7 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-02"
+last-verified: "2026-10-06"
 ---
 
 > **Re-verified #3664 (2026-10-05):** `index.ts`'s `enforcedModules` comments
@@ -663,6 +663,15 @@ Isolation rules that are non-negotiable for a payments product:
   > enforced from their first commit. The backend suite's request-validation
   > envelopes for both files are green, and `check:route-modules` passes at
   > the merged head. Nothing in this section's mode/rollback semantics
+  > moved.
+
+  > **Re-verified #3602 (2026-10-06):** the change adds `GET /ops/feedback`
+  > to the existing `routes/ops.ts` module — no new module, so no new
+  > `enforcedModules` entry; it joins the already-ENFORCED `/ops` prefix,
+  > and the route carries no request body. `route-modules.generated.ts` was
+  > regenerated for the added operation, and both checks that fail on a
+  > stale table are green at this head (`npm run check:route-modules` and
+  > the backend suite). Nothing in this section's mode/rollback semantics
   > moved.
 
   **How to take a shadow reading (#3208).** Not from `/health/ops` alone:

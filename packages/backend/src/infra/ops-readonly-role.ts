@@ -108,6 +108,10 @@ export const OPS_READONLY_GRANTS: Readonly<Record<string, readonly string[]>> = 
   ],
   // Public-key material only (`user_passkeys`, which holds `raw_attestation`, is not granted).
   hybrid_account_passkeys: ['id', 'account_id', 'key_id', 'public_key_x', 'public_key_y', 'label', 'created_at'],
+  // CLI feedback channel (#3597), read by the console's Feedback page (#3602).
+  // `text` is the free-text column (free-text review below); `user_id` joins
+  // the submitter so the page can show the masked email.
+  feedback: ['id', 'user_id', 'text', 'created_at', 'expires_at'],
   // Join key only (#3514): `FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL` reuses
   // this table in its NOT EXISTS probe — under column-level grants Postgres
   // denies the subquery entirely, so without it GET /ops/health would 500 on
@@ -182,6 +186,7 @@ export const OPS_FREE_TEXT_COLUMNS: Readonly<Record<string, string>> = {
   'outbound_txs.error': 'redactVendorSecrets inside markOutboundTxFailed (#3510)',
   'agent_passports.last_error': 'redactVendorSecrets in modules/passport/issuance.ts before markFailed',
   'agent_passports.revocation_last_error': 'redactVendorSecrets in modules/passport/revocation.ts',
+  'feedback.text': 'redactVendorSecrets inside insertFeedback (#3597) at the repository write boundary, behind the route\u2019s own layer 1/3/4 re-run (#3602 reads it)',
 }
 
 /** Names that need a free-text review entry before they may be granted. */

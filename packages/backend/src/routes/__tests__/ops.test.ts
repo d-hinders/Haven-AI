@@ -119,6 +119,7 @@ describe('ops console — unconfigured deployment answers like a missing route',
     expect(missing.statusCode).toBe(404)
     for (const req of [
       { method: 'GET' as const, url: '/ops/me' },
+      { method: 'GET' as const, url: '/ops/feedback' },
       { method: 'GET' as const, url: `/ops/auth/github/start?return_to=${encodeURIComponent(ORIGIN)}&nonce=${NONCE}` },
       { method: 'GET' as const, url: '/ops/auth/github/start' },
       { method: 'GET' as const, url: '/ops/auth/github/callback?state=x&code=y' },
@@ -460,6 +461,31 @@ describeDb('ops console — audit rows and reveal against a real database', () =
     expect(res.json()).toEqual({ target_type: 'user', target_id: userId, field: 'email', value: expect.stringMatching(/^ops-reveal-/) })
     expect(await auditRows()).toEqual([
       expect.objectContaining({ operator_github_id: '111', action: 'reveal', target_type: 'user', target_id: userId, field: 'email' }),
+    ])
+  })
+
+  it('a feedback reveal writes its audit row through the real main-pool writer (#3602)', async () => {
+    built = await build({ readDb: db, audit: undefined })
+    const userId = await seedUser()
+    const { rows: feedback } = await db.query<{ id: string }>(
+      `INSERT INTO feedback (user_id, text) VALUES ($1, $2) RETURNING id`,
+      [userId, 'the reveal audit row is written through the main pool'],
+    )
+    const res = await built.app.inject({
+      method: 'POST',
+      url: '/ops/reveal',
+      headers: { authorization: `Bearer ${tokenFor(111)}` },
+      payload: { target_type: 'feedback', target_id: feedback[0].id, field: 'text' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({
+      target_type: 'feedback',
+      target_id: feedback[0].id,
+      field: 'text',
+      value: 'the reveal audit row is written through the main pool',
+    })
+    expect(await auditRows()).toEqual([
+      expect.objectContaining({ operator_github_id: '111', action: 'reveal', target_type: 'feedback', target_id: feedback[0].id, field: 'text' }),
     ])
   })
 

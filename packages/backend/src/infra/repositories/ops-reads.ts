@@ -26,6 +26,40 @@ import type { Executor } from '../transaction.js'
 export const OPS_SEARCH_LIMIT = 20
 /** Rows per list in `/ops/users/:id` (#3512). */
 export const OPS_DETAIL_LIST_LIMIT = 50
+/**
+ * Rows per page of `/ops/feedback` (#3602). Fits the ops read role's 5 s
+ * `statement_timeout` (#3510): one indexed scan of `idx_feedback_user_created_at`
+ * with a LIMIT this small answers well inside it.
+ */
+export const OPS_FEEDBACK_LIST_LIMIT = 50
+
+// ── Feedback (#3602) ─────────────────────────────────────────────────────
+
+/**
+ * The last 7 days of `haven feedback submit` rows (#3597), newest first.
+ * Every read of the feedback table filters `expires_at > NOW()` (migration
+ * 106's discipline), so the page shows only live rows. Explicit projection —
+ * the ops role reads exactly the granted columns; masking of `text` and
+ * `email` happens in `modules/ops` before any response.
+ */
+export const OPS_FEEDBACK_LIST_SQL = `SELECT f.id, f.user_id, u.email, f.text, f.created_at, f.expires_at
+  FROM feedback f JOIN users u ON u.id = f.user_id
+  WHERE f.expires_at > NOW()
+  ORDER BY f.created_at DESC
+  LIMIT ${OPS_FEEDBACK_LIST_LIMIT}`
+
+export interface OpsFeedbackListRow {
+  id: string
+  user_id: string
+  email: string
+  text: string
+  created_at: Date
+  expires_at: Date
+}
+
+export async function readOpsFeedbackList(db: Executor): Promise<OpsFeedbackListRow[]> {
+  return (await db.query<OpsFeedbackListRow>(OPS_FEEDBACK_LIST_SQL, [])).rows
+}
 
 // ── Overview ────────────────────────────────────────────────────────────
 

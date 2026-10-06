@@ -49,6 +49,8 @@ const requested = ARGS.filter((a) => !a.startsWith('--'))
   .filter(Boolean)
   .map((r) => (r.startsWith('/') ? r : `/${r}`))
 // The customer capture renders the fixture user; `<id>` is a literal alias.
+// `/feedback+reveal` captures the Feedback page with one message revealed:
+// the harness clicks the row's Reveal control before the screenshot.
 const ROUTES = (requested.length > 0 ? requested : ['/overview'])
   .map((r) => (r === '/customer' || r === '/customer/<id>' ? `/customer/${FIXTURE_USER_ID}` : r))
 
@@ -152,7 +154,12 @@ try {
       return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unmocked /ops route in capture run' }) })
     })
     for (const [pattern, status, body] of fixtureRoutes()) {
-      await context.route(pattern, (route) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }))
+      await context.route(pattern, (route) => {
+        // A function body answers from the REQUEST (#3602: the reveal
+        // endpoint branches on the POST body — feedback vs user).
+        const resolved = typeof body === 'function' ? body(route.request()) : body
+        return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(resolved) })
+      })
     }
     await context.addInitScript(([key, value]) => {
       try { window.sessionStorage.setItem(key, value) } catch { /* fresh context */ }
@@ -164,7 +171,19 @@ try {
       page.on('console', (message) => {
         if (message.type() === 'error') consoleErrors.push(message.text())
       })
-      const response = await page.goto(`${BASE}${route}`, { waitUntil: 'networkidle' })
+      // The `+reveal` alias (#3602): load the page, then click the row's
+      // Reveal control and wait for the revealed text — the captured PNG is
+      // the revealed state, not the masked one.
+      const targetUrl = route === '/feedback+reveal' ? '/feedback' : route
+      const response = await page.goto(`${BASE}${targetUrl}`, { waitUntil: 'networkidle' })
+      if (route === '/feedback+reveal') {
+        const revealButton = page.getByRole('button', { name: 'Reveal feedback message' }).first()
+        await revealButton.waitFor({ state: 'visible', timeout: 20000 })
+        await revealButton.click()
+        await page.getByText('mobile Safari').first().waitFor({ timeout: 20000 }).catch(() => {
+          consoleErrors.push('feedback+reveal: the revealed text never rendered')
+        })
+      }
       // Rendered-content guard: the route's own h1 (or the sign-in error) must
       // exist — a capture of a still-compiling shell is not evidence.
       const rendered = await page

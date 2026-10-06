@@ -43,7 +43,7 @@ describe('the ops client exposes only reads, the audited reveal, and auth (#3516
     // POST /ops/reveal, and the sign-in navigation. Nothing else may appear,
     // because anything here is one call away from an unaudited write.
     expect(Object.keys(client).sort()).toEqual(
-      ['authStart', 'docHealth', 'health', 'me', 'onchain', 'overview', 'reveal', 'search', 'user'].sort(),
+      ['authStart', 'docHealth', 'feedback', 'health', 'me', 'onchain', 'overview', 'reveal', 'search', 'user'].sort(),
     )
   })
 
@@ -51,6 +51,7 @@ describe('the ops client exposes only reads, the audited reveal, and auth (#3516
     fetchMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }))
     const client = createOpsClient(stubStorage(), ORIGIN, () => {})
     await client.overview()
+    await client.feedback()
     await client.user('u-1')
     await client.onchain('u-1')
     await client.health()
@@ -63,6 +64,7 @@ describe('the ops client exposes only reads, the audited reveal, and auth (#3516
     }
     expect(calls.map((c) => c.url)).toEqual([
       `${ORIGIN}/ops/overview`,
+      `${ORIGIN}/ops/feedback`,
       `${ORIGIN}/ops/users/u-1`,
       `${ORIGIN}/ops/users/u-1/onchain`,
       `${ORIGIN}/ops/health`,

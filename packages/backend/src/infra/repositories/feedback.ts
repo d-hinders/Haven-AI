@@ -69,6 +69,16 @@ export async function findFeedbackById(
   return result.rows[0] ?? null
 }
 
+/**
+ * The ops console's audited reveal of one message's text (#3602): the same
+ * expiry filter as `findFeedbackById`, kept here so the 7-day discipline
+ * (`expires_at > NOW()` on every read, migration 106) lives in one place.
+ * `OPS_REVEAL_SQL` references this constant rather than restating the
+ * predicate — a reveal of an expired row answers 404, exactly like a
+ * missing one.
+ */
+export const FEEDBACK_REVEAL_TEXT_SQL = `SELECT text AS value FROM feedback WHERE id = $1 AND expires_at > NOW()`
+
 export const IS_KEY_BACKED_ADDRESS_SQL = `
   SELECT EXISTS (
     SELECT 1 FROM agents WHERE lower(delegate_address) = lower($1)

@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/infra/repositories/ops-access-log.ts
   - packages/backend/src/config/ops.ts
   - packages/backend/scripts/ops-readonly-role.ts
-last-verified: "2026-10-02"
+last-verified: "2026-10-06"
 ---
 
 # Ops console
@@ -32,9 +32,10 @@ read those settings from the repo — every one of them is in
 
 **It is:**
 
-- a read-only surface: platform overview, customer search, one customer's
-  record, the chain's view beside the database's, system health, and a
-  reveal of the few allowlisted fields the backend permits;
+- a read-only surface: platform overview, the last 7 days of customer
+  feedback (#3602), customer search, one customer's record, the chain's view
+  beside the database's, system health, and a reveal of the few allowlisted
+  fields the backend permits;
 - audited end to end: every sign-in that reaches a GitHub identity (allowed
   or refused), every data read and every reveal writes one `ops_access_log`
   row through the backend's MAIN pool before the response is sent — a write

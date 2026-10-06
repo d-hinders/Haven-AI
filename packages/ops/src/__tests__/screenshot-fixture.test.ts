@@ -27,6 +27,17 @@ import {
 } from '../../scripts/screenshot-fixture.mjs'
 
 describe('the capture fixture is safe by construction', () => {
+  /**
+   * The reveal endpoint's fixture answer for one POST body (#3602): the
+   * entry is a function now, so tests resolve it exactly as the harness
+   * does — a request-shaped stub in, answer object out.
+   */
+  function revealAnswer(postBody: Record<string, unknown>): Record<string, unknown> {
+    const body = fixtureRoutes().find(([pattern]) => String(pattern).endsWith('/ops/reveal'))![2]
+    if (typeof body !== 'function') return body as Record<string, unknown>
+    return body({ postData: () => JSON.stringify(postBody) }) as Record<string, unknown>
+  }
+
   it('the registry origin is an RFC 2606 reserved host', () => {
     expect(FIXTURE_BACKEND_ORIGIN.endsWith('.fixture')).toBe(true)
     expect(FIXTURE_BACKEND_ORIGIN.startsWith('https://')).toBe(true)
@@ -51,14 +62,39 @@ describe('the capture fixture is safe by construction', () => {
     for (const match of json.matchAll(/"email":"([^"]*)"/g)) {
       expect(match[1]).toMatch(/^[^@]*•••@/)
     }
-    // The ONLY full email the whole fixture serves is the reveal endpoint's
-    // answer, and it is a .example address, not a customer domain.
-    for (const [, , responseBody] of fixtureRoutes()) {
+    // The ONLY full emails the whole fixture serves are the reveal endpoint's
+    // answers, and they are .example/.fixture addresses, not customer
+    // domains. Function bodies (the reveal answers from the REQUEST, #3602)
+    // are resolved for both request kinds before scanning.
+    const answers = [
+      revealAnswer({ target_type: 'feedback', target_id: 'x', field: 'text' }),
+      revealAnswer({ target_type: 'user', target_id: FIXTURE_USER_ID, field: 'email' }),
+    ]
+    for (const responseBody of [...fixtureRoutes().map(([, , b]) => b).filter((b) => typeof b !== 'function'), ...answers]) {
       const served = JSON.stringify(responseBody)
       for (const valueMatch of served.matchAll(/"value":"([^"]+)"/g)) {
-        expect(valueMatch[1]).toMatch(/@fixture\.example$/)
+        expect(valueMatch[1]).toMatch(/@fixture\.example$|mobile Safari/)
       }
     }
+  })
+
+  it('the feedback fixture is masked at rest and the reveal answer carries the message (#3602)', () => {
+    const feedbackRoute = fixtureRoutes().find(([pattern]) => String(pattern).endsWith('/ops/feedback'))
+    expect(feedbackRoute).toBeDefined()
+    const [, status, body] = feedbackRoute!
+    expect(status).toBe(200)
+    const json = JSON.stringify(body)
+    // Masked at rest: counts and masked emails only — no message content.
+    expect(json).toContain('142 characters')
+    expect(json).toContain('da•••@gmail.com')
+    for (const match of json.matchAll(/"email":"([^"]*)"/g)) {
+      expect(match[1]).toMatch(/^[^@]*•••@/)
+    }
+    // The reveal endpoint answers a feedback reveal with the message text,
+    // echoing the requested id.
+    const answered = revealAnswer({ target_type: 'feedback', target_id: '3d9e1f2a-7c4b-4e8d-9a1f-6b5c2e8d7a3f', field: 'text' })
+    expect(answered).toMatchObject({ target_type: 'feedback', field: 'text', target_id: '3d9e1f2a-7c4b-4e8d-9a1f-6b5c2e8d7a3f' })
+    expect(String(answered.value).length).toBeGreaterThan(0)
   })
 
   it('the system_tx hit carries NO user_id — a lane hit shows the lane, not a user', () => {

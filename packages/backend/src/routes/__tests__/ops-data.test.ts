@@ -21,6 +21,7 @@ import {
   seedOpsAccount,
   seedOpsAgent,
   seedOpsDelegation,
+  seedOpsFeedback,
   seedOpsIntent,
   seedOpsRefusal,
   seedOpsSystemTx,
@@ -125,6 +126,7 @@ describeDb('ops console — data routes against a real database (#3512)', () => 
 
   const urls = () => [
     '/ops/overview',
+    '/ops/feedback',
     `/ops/search?q=${encodeURIComponent('ada.lov')}`,
     `/ops/search?q=${s.userId}`,
     `/ops/search?q=${s.address}`,
@@ -219,6 +221,82 @@ describeDb('ops console — data routes against a real database (#3512)', () => 
     expect(audits.map((a) => [a.action, a.targetType, a.targetId])).toEqual([
       ['view', 'user', s.userId],
       ['view', 'user', '00000000-0000-4000-8000-000000000000'],
+    ])
+    await app.close()
+  })
+
+  it('the feedback page lists masked messages, and the reveal returns one message after an audit row (#3602)', async () => {
+    const audits: OpsAccessLogEntry[] = []
+    const feedbackId = await seedOpsFeedback(s.userId, {
+      text: 'the export button does nothing on mobile',
+      createdAt: '2026-10-02T10:00:00Z',
+    })
+    const expiredId = await seedOpsFeedback(s.userId, {
+      text: 'expired row must not reveal',
+      createdAt: '2020-01-01T00:00:00Z',
+      expiresAt: '2020-01-08T00:00:00Z',
+    })
+    const app = await build({ readDb: recording(client).exec, audit: async (e) => void audits.push(e) })
+
+    const list = await app.inject({ method: 'GET', url: '/ops/feedback', headers: auth })
+    expect(list.statusCode).toBe(200)
+    const body = list.json()
+    expect(body.feedback).toHaveLength(1)
+    expect(body.feedback[0]).toEqual({
+      id: feedbackId,
+      email: 'ad•••@customer.example',
+      text: '40 characters',
+      created_at: '2026-10-02T10:00:00.000Z',
+      expires_at: expect.any(String),
+    })
+    expect(JSON.stringify(body)).not.toContain('export button')
+
+    // A customer JWT is refused (#3507 invariant 2).
+    const customerJwt = createSigner({ key: 'dashboard-secret-for-tests', expiresIn: 60_000 })({ sub: s.userId, email: CUSTOMER_EMAIL })
+    const refused = await app.inject({ method: 'GET', url: '/ops/feedback', headers: { authorization: `Bearer ${customerJwt}` } })
+    expect(refused.statusCode).toBe(401)
+
+    // The audited reveal of one message.
+    const reveal = await app.inject({
+      method: 'POST',
+      url: '/ops/reveal',
+      headers: auth,
+      payload: { target_type: 'feedback', target_id: feedbackId, field: 'text' },
+    })
+    expect(reveal.statusCode).toBe(200)
+    expect(reveal.json()).toEqual({
+      target_type: 'feedback',
+      target_id: feedbackId,
+      field: 'text',
+      value: 'the export button does nothing on mobile',
+    })
+
+    // An expired row reveals nothing — 404, no audit row for it.
+    const expired = await app.inject({
+      method: 'POST',
+      url: '/ops/reveal',
+      headers: auth,
+      payload: { target_type: 'feedback', target_id: expiredId, field: 'text' },
+    })
+    expect(expired.statusCode).toBe(404)
+
+    // The spec's enums, extended for feedback, are under enforced validation:
+    // a foreign (target_type, field) pair is a 400, not a silent refusal.
+    const wrongField = await app.inject({
+      method: 'POST',
+      url: '/ops/reveal',
+      headers: auth,
+      payload: { target_type: 'feedback', target_id: feedbackId, field: 'email' },
+    })
+    expect(wrongField.statusCode).toBe(400)
+
+    // The injected writer is what this harness observes (the real audit
+    // INSERT through the main pool is proven in ops.test.ts's real-DB block).
+    // The view entry names no target — like the overview read — so its
+    // targetId/field are absent, not null.
+    expect(audits.map((a) => [a.action, a.targetType, a.targetId, a.field])).toEqual([
+      ['view', 'feedback', undefined, undefined],
+      ['reveal', 'feedback', feedbackId, 'text'],
     ])
     await app.close()
   })

@@ -31,6 +31,18 @@ export function maskName(name: string): string {
 }
 
 /**
+ * Free-text feedback (#3602): the masked form leaks no content at all —
+ * no prefix, no excerpt, only the length. A customer's feedback message is
+ * arbitrary text (a bug report may quote an error string or a credential
+ * shape), so unlike the email/name maskers there is nothing safe to keep.
+ * The unmasked value leaves only through `POST /ops/reveal`, audited.
+ */
+export function maskFreeText(text: string): string {
+  const length = Array.from(text.trim()).length
+  return length === 0 ? '(empty)' : `${length} characters`
+}
+
+/**
  * The masked form of a search term, for the audit log: the query an operator
  * typed may be a customer's email, and an audit row must not become a second
  * copy of it.

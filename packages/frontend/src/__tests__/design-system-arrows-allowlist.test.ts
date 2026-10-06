@@ -1,8 +1,8 @@
 // #2680 slice-2 guard — pins design-system.md § 5 Arrows' ONE-file raw-arrow
 // allowlist ("Exactly one gated file may render a raw arrow:
-// components/haven/TransactionMovement.tsx") to the repo tree. The doc used
-// to carry a copy-paste shell pipeline for this; that pipeline masks only
-// lines STARTING with a comment marker, so it reports five comment arrows as
+// components/haven/TransactionMovement.tsx") to the repo tree. The doc still
+// carries a copy-paste shell pipeline for this; that pipeline masks only
+// lines STARTING with a comment marker, so it reports six comment arrows as
 // violations today — a check that needs eyeballing is not a check. This test
 // implements the claim properly (comment-aware) and fails when the set
 // changes. Mutation-proven for #2680: adding a second file rendering a raw

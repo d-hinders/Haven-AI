@@ -72,7 +72,7 @@ describe('array wire keys default to [] when the response omits them (#3093)', (
       Promise.resolve(url.endsWith('/account-signers') ? { account_address: ADDRESS, chain_id: 84532, owner_address: null, passkeys: [] } : {}),
     )
     const { result } = renderHook(() => useDelegationBudget('agent-1', 84532))
-    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/agents/agent-1/delegations'))
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/agents/agent-1/delegations?include=remaining'))
     await waitFor(() => expect(result.current.budgets).toEqual([]))
   })
 

@@ -605,10 +605,13 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   single icon-only control.
 - `inlineActions` keeps the actions on the title's row at every width
   ([#2821](https://github.com/d-hinders/Haven-AI/issues/2821)). Reach for it
-  when the slot holds one icon-only control: on agent detail it holds the kebab
-  alone — the `StatusBadge` beside it renders `null` while the agent is active —
-  and the stacked row was a lone bordered icon, left-aligned, belonging visually
-  to nothing.
+  when the slot holds one icon-only control: on agent detail it once held the
+  kebab alone — the `StatusBadge` beside it renders `null` while the agent is
+  active — and the stacked row was a lone bordered icon, left-aligned, belonging
+  visually to nothing. Since [#3694](https://github.com/d-hinders/Haven-AI/issues/3694)
+  Pause or Resume sits beside the kebab, so agent detail inlines only for the
+  one state with a lone kebab left (an archived agent that was never revoked);
+  two controls take the default stacking, as one row under the title.
 
   It is a **prop, not a `Children.count`**. Counting tells you how many nodes
   there are, not whether they are icon-only, and a caller wrapping its actions

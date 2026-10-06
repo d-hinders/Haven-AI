@@ -2391,3 +2391,34 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > rest of this document was not re-read for it, and `last-verified` is not
 > bumped.
 
+> **Re-verified #3693 (2026-10-06, delegations remaining-this-period):** the
+> covered file this diff touches is `routes/agent-delegations.ts` — its
+> `GET /agents/:id/delegations` list response gains three per-row fields for
+> ACTIVE delegations (`remaining_atomic`, `remaining_from_chain`,
+> `period_end`; null on non-active rows) — OPT-IN via a single allowlisted
+> query parameter, `?include=remaining` (anything else is a 400 from the
+> enforced request schema before the handler runs): without it the response
+> is the plain lifecycle list, byte-identical to the pre-#3693 shape, and
+> neither the json fetch nor the chain read runs. The enrichment is
+> answered by the EXISTING
+> `readRemainingBudget` chain read the analytics budget views already use,
+> now fed the row's signed delegation fetched server-side via
+> `listDelegationJsonByIds` and excluded from the response as before
+> (asserted). This is a read-only enrichment of data the owner could already
+> read on-chain: the reader signs nothing, prepares nothing and redeems
+> nothing; a failed or rejected read answers the FULL budget with
+> `remaining_from_chain: false` (the conservative bound) and still 200; the
+> reads run bounded (the analytics worker pool, four in flight) under the
+> reader's existing timeouts. No route, role, ceremony or validation shape
+> changes — the optional `include` parameter only chooses whether the
+> display enrichment runs — and the Owner-Signature Invariant above is
+> untouched — nothing here activates, revokes, rekeys or redeems anything.
+> The verification entry for the two `satisfied-by` contract docs this
+> change also covers is
+> `docs/regulatory/casp-changelog/2026-10-06-3693.md`. Scope of this
+> re-read: the delegation-list route paragraphs of this section and the
+> files this change touches (`routes/agent-delegations.ts`,
+> `infra/chain/delegation-budget-reader.ts`,
+> `infra/repositories/delegation-budgets.ts`); `last-verified` already reads
+> 2026-10-06 and the date is accurate for this re-read.
+

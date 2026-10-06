@@ -196,9 +196,20 @@ try {
         await page.close()
         continue
       }
+      // Computed-style probe (#3611): captures cannot show computed style, so
+      // record what the browser resolved for the page title and the first
+      // tabular figure. Under OPS_SCREENSHOT_PROD=1 this is the production CSS.
+      const computed = await page.evaluate(() => {
+        const pick = (el) => {
+          if (!el) return null
+          const cs = getComputedStyle(el)
+          return { fontSize: cs.fontSize, lineHeight: cs.lineHeight, fontWeight: cs.fontWeight, fontVariantNumeric: cs.fontVariantNumeric }
+        }
+        return { h1: pick(document.querySelector('h1')), firstTabular: pick(document.querySelector('.v2-tabular')) }
+      })
       await page.screenshot({ path: path.join(OUT_DIR, file), fullPage: true })
       const sha256 = createHash('sha256').update(await (await import('node:fs/promises')).readFile(path.join(OUT_DIR, file))).digest('hex')
-      manifest.captures.push({ route, viewport: vp.name, file, status: response?.status() ?? null, console_errors: consoleErrors, sha256 })
+      manifest.captures.push({ route, viewport: vp.name, file, status: response?.status() ?? null, console_errors: consoleErrors, sha256, computed })
       await page.close()
     }
     await context.close()

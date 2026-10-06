@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./tokens.css": "./src/tokens.css",
+    "./type.css": "./src/type.css",
     "./tailwind.preset": "./tailwind.preset.js",
     "./Button": "./src/Button.tsx",
     "./Card": "./src/Card.tsx",

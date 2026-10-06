@@ -119,7 +119,7 @@ The production authenticated app and `/design-system` are the live references fo
 
 ## 1. Tokens
 
-All tokens live as CSS custom properties at `:root` in `packages/frontend/src/app/globals.css`. Core color, radius, and shadow tokens are mirrored in `packages/frontend/tailwind.config.js` so they are usable as `bg-bg`, `text-ink`, `border-border`, `shadow-card`, etc. Since [#1945](https://github.com/d-hinders/Haven-AI/issues/1945) that mirror covers the **whole** elevation scale — raised cards and popovers were the two tiers still missing, which is exactly why their call sites reached for the arbitrary-value form that turned out to paint nothing (§ Shadows). Typography utilities, the modal backdrop and the brand gradient remain CSS variables/classes only, deliberately: the first is a set of composite classes and the last two have no Tailwind utility family to join.
+All tokens live as CSS custom properties at `:root` in `packages/ui/src/tokens.css` (moved from the dashboard's `globals.css` in #3508 so the dashboard and the ops console read one palette). Core color, radius, and shadow tokens are mirrored in the shared Tailwind preset `packages/ui/tailwind.preset.js`, which `packages/frontend/tailwind.config.js` consumes, so they are usable as `bg-bg`, `text-ink`, `border-border`, `shadow-card`, etc. Since [#1945](https://github.com/d-hinders/Haven-AI/issues/1945) that mirror covers the **whole** elevation scale — raised cards and popovers were the two tiers still missing, which is exactly why their call sites reached for the arbitrary-value form that turned out to paint nothing (§ Shadows). Typography utilities, the modal backdrop and the brand gradient remain CSS variables/classes only, deliberately: the first is a set of composite classes and the last two have no Tailwind utility family to join.
 
 **Every colour token has a dark value ([#2927](https://github.com/d-hinders/Haven-AI/issues/2927)).** The tables below carry a dark column alongside the light value. Mechanically: the light palette is the bare `:root` block; the dark values are re-declared in TWO byte-identical blocks —
 
@@ -535,7 +535,7 @@ The general point, since it will recur: when a dead style rule comes back to lif
 
 Font: Inter (already loaded via `next/font/google` in `app/layout.tsx`, in both `packages/frontend` and `packages/ops` (#3584)). Optional later: switch headings to Inter Display.
 
-Authenticated app pages use compact product typography utilities from `globals.css`:
+Authenticated app pages use compact product typography utilities from `@haven_ai/ui/type.css` (`packages/ui/src/type.css`, #3611), which both the dashboard and the ops console import after their own `globals.css`; `.v2-tabular` (tabular numerals) lives there too. Before #3611 these rules lived only in the dashboard's `globals.css`, so the ui primitives that use them styled nothing in the ops console:
 
 | Utility | Size / line-height | Weight | Tracking | Use |
 |---|---:|---:|---:|---|
@@ -1887,7 +1887,7 @@ element-scoped capture clips the very thing it photographs (#1873).
 
 | Concern | Production location |
 |---|---|
-| Tokens | CSS vars in `packages/frontend/src/app/globals.css` at `:root`; core aliases in `packages/frontend/tailwind.config.js` |
+| Tokens | CSS vars in `packages/ui/src/tokens.css` at `:root` (#3508); core aliases in the shared preset `packages/ui/tailwind.preset.js` |
 | Header/Footer | `packages/frontend/src/components/marketing/site/Header.tsx`, `Footer.tsx` |
 | UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx`, `InlineAlert.tsx`, `Input.tsx`, `Modal.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Toast.tsx`, `Tooltip.tsx` |
 | Marketing components | `packages/frontend/src/components/marketing/site/**` (the public site), `marketing/Section.tsx`, `BrandBandButton.tsx`, `TrailingArrow.tsx` |

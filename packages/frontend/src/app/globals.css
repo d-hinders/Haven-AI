@@ -56,43 +56,6 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
-.v2-text-display {
-  font-size: var(--v2-text-display);
-  line-height: var(--v2-text-display-leading);
-  font-weight: var(--v2-font-weight-semibold);
-  letter-spacing: -0.02em;
-}
-
-.v2-text-h1 {
-  font-size: var(--v2-text-h1);
-  line-height: var(--v2-text-h1-leading);
-  font-weight: var(--v2-font-weight-semibold);
-  letter-spacing: -0.015em;
-}
-
-.v2-text-h2 {
-  font-size: var(--v2-text-h2);
-  line-height: var(--v2-text-h2-leading);
-  font-weight: var(--v2-font-weight-semibold);
-  letter-spacing: -0.01em;
-}
-
-.v2-text-h3 {
-  font-size: var(--v2-text-h3);
-  line-height: var(--v2-text-h3-leading);
-  font-weight: var(--v2-font-weight-semibold);
-}
-
-.v2-text-body {
-  font-size: var(--v2-text-body);
-  line-height: var(--v2-text-body-leading);
-}
-
-.v2-text-meta {
-  font-size: var(--v2-text-meta);
-  line-height: var(--v2-text-meta-leading);
-}
-
 .v2-brand-gradient-text {
   color: var(--v2-brand);
 }
@@ -109,10 +72,6 @@
 
 *, *::before, *::after {
   box-sizing: border-box;
-}
-
-.v2-tabular {
-  font-variant-numeric: tabular-nums;
 }
 
 /*

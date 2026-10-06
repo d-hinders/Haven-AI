@@ -13,7 +13,6 @@ covers:
   - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
-  - packages/frontend/src/lib/site-gate.ts
   - packages/backend/src/config.ts
   - packages/backend/src/modules/catalog/marketplace-scope.ts
   - packages/backend/src/routes/merchants.ts
@@ -65,6 +64,13 @@ last-verified: "2026-10-02"
 > lines that call chain 100 legacy and dead; no variable, value or deploy step
 > changes. Nothing else in this document was re-verified, and `last-verified` is
 > not bumped.
+
+> **Re-verified #3579 (2026-10-05):** the site switch-over deleted the
+> public site's gate module (dropped from `covers:`) and with it every reader
+> of its preview flag; § "The public site's former gate" replaces the flag's
+> section, and the local-`/demo` sentence it carried moved to
+> § `HAVEN_DEMO_PAGE_VISIBLE`. Nothing else in this document was re-verified,
+> and `last-verified` is not bumped.
 
 > **Re-verified #3669 (2026-10-06, supported vs known chains):**
 > - **Supported narrows.** The backend's supported chain set is now an explicit 8453 and 84532. With `HAVEN_DEPLOY_CHAIN_IDS` unset, deploys, the outbound bump loop, the relayer balance monitor, prices, `GET /chains` and discovery `supported` cover Base and Base Sepolia only. Chain 100 is not one of them.
@@ -986,6 +992,10 @@ additionally ignores the override whenever Vercel's own `VERCEL` variable is
 present — belt-and-suspenders against it ever doing anything on a Vercel
 deployment even if that changed.
 
+A local `next dev` with no `.env` sets no environment name either, so it too
+counts as production: to see `/demo` locally, start the server with
+`HAVEN_DEMO_PAGE_VISIBLE=1`.
+
 ### `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright builds (#3483)
 
 The Add funds modal reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
@@ -1004,43 +1014,15 @@ grep-unique, so the leak check is mechanical), and it is not a secret: the id
 is never rendered, only its PRESENCE gates the card, so a fixed value keeps
 renders deterministic across key rotations.
 
-### `NEXT_PUBLIC_HAVEN_SITE_PREVIEW` — the redesigned public site (#3573)
+### The public site's former gate (#3573, removed by #3579)
 
-The redesigned public site (epic #3572) is built in slices behind a build-time
-gate, `isNewSiteVisible()` in `packages/frontend/src/lib/site-gate.ts`. It is
-**on outside production and off in production**: the dev Vercel project sets
-`NEXT_PUBLIC_HAVEN_ENV=dev`, so the dev deployment shows the new site, and
-production, which sets nothing, keeps today's pages until the switch-over slice
-removes the gate. `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1` turns it on in a
-production-shaped build. Every surface that builds or serves the app for the e2e
-and visual suites sets it — the CI builds, the baseline regeneration,
-Playwright's `webServer.env` for `next dev`, and the frontend's built-suite
-scripts, so a local run matches CI.
-**Neither Vercel project sets it, and neither should**: on production it would
-publish the half-built site.
-
-Some new routes exist **only** with the gate on and answer 404 without it,
-production included — the routes the site-redesign slices add, such as
-`/how-it-works/protocols` (#3576). They join `PUBLIC_SURFACES` with the
-switch-over slice (#3579), not before.
-
-It is build-time on purpose, unlike `HAVEN_DEMO_PAGE_VISIBLE` above. The `/demo`
-gate guards a page that hands out test funds, so it is server-only and read per
-request, and never reaches a client bundle. This gate guards presentation only,
-its readers include client components (the site header, and later `/login` and
-`/signup`), and an inlined constant answers the same on the server and the
-client without making any page dynamic.
-
-**To see the new site locally**, run the frontend with either variable set. A
-local `next dev` with no `.env` sets no environment name and so counts as
-production, with the gate off:
-
-```bash
-NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1 npm run dev -w packages/frontend
-```
-
-`/demo` also needs `HAVEN_DEMO_PAGE_VISIBLE=1` on a local server for the same
-reason.
+From #3573 to #3579 the redesigned public site (epic #3572) was built in
+slices behind a build-time gate that read `NEXT_PUBLIC_HAVEN_ENV` and a
+`NEXT_PUBLIC_HAVEN_*` preview flag the CI builds set, so production kept the
+legacy pages. The switch-over (#3579) deleted the gate with those pages: every
+build renders the new site, the flag is read by nothing, and the CI builds and
+Playwright no longer set it. A deployment that still sets the flag is
+unaffected; deleting it from a project's settings is tidying, not a fix.
 
 ## Inspecting the dev environment
 

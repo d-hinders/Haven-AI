@@ -1,8 +1,8 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { SiteHeader } from '@/components/marketing/SiteHeader'
-import { SiteFooter } from '@/components/marketing/SiteFooter'
+import { Header } from '@/components/marketing/site/Header'
+import { Footer } from '@/components/marketing/site/Footer'
 import { SITE_FONT_VARIABLES } from '@/components/marketing/site/fonts'
 
 /**
@@ -13,17 +13,12 @@ import { SITE_FONT_VARIABLES } from '@/components/marketing/site/fonts'
  * tint, one centred card, the agent hand-off line under the card, and the
  * public footer. This component renders that frame; the page renders its
  * form INTO it, so each form still has exactly one copy of its fields and
- * submit handler and the gate selects only the chrome around it.
+ * submit handler.
  *
  * Lives under `components/auth/` — deliberately OUTSIDE `components/marketing/`
  * and `components/brand/`, which design-lint exempts from the token rules
  * (#874): an authentication surface stays under the product's token and
  * structure gates.
- *
- * The pages branch on `isNewSiteVisible()` themselves and keep today's markup
- * for production until the switch-over (#3579), so this component is reached
- * only where the gate is on — it carries no gate of its own, matching how
- * `Header` and `Footer` stay gate-free behind `SiteHeader`/`SiteFooter`.
  *
  * Every colour reads a theme token, so the ground, card and note take their
  * dark forms with the visitor's theme (epic decision 7). The radial tint is
@@ -36,7 +31,7 @@ export function AuthShell({ children, note }: { children: ReactNode; note?: Reac
     <div
       className={`${SITE_FONT_VARIABLES} flex min-h-screen flex-col bg-[var(--v2-bg)] text-[var(--v2-ink)]`}
     >
-      <SiteHeader />
+      <Header />
       <main className="flex flex-1 flex-col">
         <section
           className="relative flex flex-1 items-center justify-center px-6 pb-20 pt-[120px] md:pb-24"
@@ -51,7 +46,7 @@ export function AuthShell({ children, note }: { children: ReactNode; note?: Reac
           </div>
         </section>
       </main>
-      <SiteFooter />
+      <Footer />
     </div>
   )
 }
@@ -59,8 +54,7 @@ export function AuthShell({ children, note }: { children: ReactNode; note?: Reac
 /**
  * The mockup's auth card (`.auth-card`): 14px radius, raised shadow, 32px
  * padding. The frame is chrome — the fields, validation and submission stay
- * in the page's one form component, which renders as this card's content in
- * the new shell and inside the page's own frame where the gate is off.
+ * in the page's one form component, which renders as this card's content.
  */
 export function AuthCard({ children }: { children: ReactNode }) {
   return (

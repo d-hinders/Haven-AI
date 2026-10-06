@@ -37,7 +37,7 @@ which is production.)
 
 ## Testing on a PR preview
 
-1. **Log in** with email + password — same account, same data, every preview
+1. **Sign in** with email + password — same account, same data, every preview
    points at the same dev backend.
 2. **Connect your wallet before anything else.**
 3. Set budgets, revoke, manage signers, run agents. Each action pops a MetaMask
@@ -60,7 +60,7 @@ On a preview that's expected — ignore it, the wallet signs.
 
 ## Testing passkeys on a preview
 
-You don't need a new account. Log in, connect your wallet, then **Backup &
+You don't need a new account. Sign in, connect your wallet, then **Backup &
 recovery → add a backup passkey** — the wallet signs the change and the new
 passkey is created on that domain. Only onboarding itself still needs a
 throwaway account.

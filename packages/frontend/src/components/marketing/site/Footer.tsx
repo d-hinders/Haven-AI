@@ -4,8 +4,7 @@ import { SITE_FONT_VARIABLES } from './fonts'
 import { SITE_WRAP } from './SiteSection'
 
 /**
- * The redesigned public footer (#3573, epic #3572), rendered by `SiteFooter`
- * when `isNewSiteVisible()` is on.
+ * The public footer (#3573, epic #3572).
  *
  * Every entry has a destination that exists today (epic rule "No dead
  * links"). The mockup's Company column (Contact, Privacy, Terms) is removed

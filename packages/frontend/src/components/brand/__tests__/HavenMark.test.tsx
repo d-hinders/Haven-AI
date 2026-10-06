@@ -4,8 +4,7 @@ import { HavenMark } from '../HavenMark'
 
 /**
  * What each tone draws (#3586). `brand` and `inverse` are pinned as they were
- * before `onNavy` existed: the legacy header production renders uses `inverse`
- * (`marketing/SiteHeader.tsx`), so adding a tone must not move either.
+ * before `onNavy` existed, so adding a tone must not move either.
  */
 function draw(tone?: 'brand' | 'inverse' | 'onNavy') {
   const { container } = render(<HavenMark tone={tone} />)

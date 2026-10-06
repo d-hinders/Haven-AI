@@ -15,9 +15,9 @@ import {
 
 /**
  * The redesigned protocols sub-page, `/how-it-works/protocols` (#3576, epic
- * #3572), built from `docs/product/site-mockup/protocols.html`. It replaces
- * the three `/protocols*` pages, which slice 7 (#3579) deletes and redirects
- * here; until then it exists only where `isNewSiteVisible()` is on.
+ * #3572), built from `docs/product/site-mockup/protocols.html`. It replaced
+ * the three `/protocols*` pages, which the switch-over (#3579) deleted and
+ * redirects here.
  *
  * One payment flow and two protocol cards, no interactive playground (epic
  * decision 3). Where the mockup's copy disagreed with the code it was

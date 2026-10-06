@@ -30,8 +30,10 @@ const TARGET = '/for-agents.md'
 
 const layout = read('packages/frontend/src/app/layout.tsx')
 const surfaces = read('packages/frontend/src/lib/discovery-surfaces.ts')
-const landing = read('packages/frontend/src/app/page.tsx')
-const footer = read('packages/frontend/src/components/marketing/SiteFooter.tsx')
+// Since the switch-over (#3579) the landing page's body and the footer are
+// the redesigned site's components; `app/page.tsx` only renders the former.
+const landing = read('packages/frontend/src/components/marketing/site/home/HomeSections.tsx')
+const footer = read('packages/frontend/src/components/marketing/site/Footer.tsx')
 
 /**
  * Every route the LANDING HTML advertises — all three hooks, not just the
@@ -50,7 +52,8 @@ const alternates = [...new Set(
   [...layout.matchAll(/rel="alternate"[\s\S]{0,200}?href="([^"]+)"/g)].map((m) => m[1])
     .concat([...layout.matchAll(/href="([^"]+)"[\s\S]{0,200}?rel="alternate"/g)].map((m) => m[1])),
 )]
-const sentence = [...landing.matchAll(/If you are an AI agent[\s\S]{0,300}?href="([^"]+)"/g)].map((m) => m[1])
+// `\s+` between the words: the sentence wraps across source lines.
+const sentence = [...landing.matchAll(/If you are an AI\s+agent[\s\S]{0,300}?href="([^"]+)"/g)].map((m) => m[1])
 const footerLinks = [...footer.matchAll(/'For agents',\s*href: '([^']+)'/g)].map((m) => m[1])
 const uniqueAlternates = [...new Set([...alternates, ...sentence, ...footerLinks])]
 

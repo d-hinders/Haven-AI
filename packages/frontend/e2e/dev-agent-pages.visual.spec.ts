@@ -2,10 +2,6 @@
  * `/developers` and `/for-agents` visual regression (#3577, epic #3572) — the
  * redesigned For developers and For agents pages.
  *
- * This harness builds with the site gate on (`NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`,
- * `src/lib/site-gate.ts`), so both routes render the new pages here; with the
- * gate off both 404.
- *
  * Desktop and mobile in the light theme, plus desktop in the dark theme: the
  * white and tinted sections and the package table take their dark forms,
  * the navy and indigo bands stay fixed. Baselines are Linux-rendered by the

@@ -571,9 +571,8 @@ last-verified: "2026-10-02"
 > (`NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`, a fixed synthetic literal so the Add
 > funds modal's visual baselines render the onramp variant; see
 > `docs/operations/dev-environment.md` § `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`
-> in the Playwright builds; #3573 added one more such line,
-> `NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1'`, which turns the redesigned public
-> site's gate on — same document, § `NEXT_PUBLIC_HAVEN_SITE_PREVIEW`).
+> in the Playwright builds; #3573 added one more such line, the redesigned
+> public site's preview flag, and #3579 removed it again with the gate).
 > Frontend-only CI wiring: no tool is added, renamed
 > or re-shaped, no description text changes, no schema or argument changes, and
 > the runtime-skew and consent-hash contracts are untouched. `last-verified` is

@@ -1,12 +1,5 @@
 /**
- * `/` visual regression, GATE-ON build (#3574).
- *
- * This harness's webServer sets `NEXT_PUBLIC_HAVEN_SITE_PREVIEW=1`
- * (playwright.config.ts, #3573), so `/` here IS the new page: the nine
- * sections of the redesigned home, static. With the gate off (production
- * until slice 7) the route renders the legacy page, whose own look is pinned
- * by nothing — accepted for this slice per epic #3572's e2e rule, the same
- * accepted residual the retargeted focus spec carries.
+ * `/` visual regression (#3574): the nine sections of the home page, static.
  *
  * Desktop and mobile in the light theme, plus desktop in the dark theme:
  * white and tinted sections and the product frames take their dark forms;

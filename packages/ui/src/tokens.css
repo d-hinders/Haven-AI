@@ -150,9 +150,10 @@
   --v2-surface-hero: linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%);
 
   /*
-   * Marketing canvas wash (#3139) — the ground HeroBackdrop paints UNDER the
-   * hero ink on the five marketing routes. GROUND-classified like the
-   * --v2-surface-hero above: the ink sits ON it, so it is a gradient and
+   * Marketing canvas wash (#3139) — the ground the legacy HeroBackdrop
+   * painted UNDER the hero ink on the marketing routes. No consumer since the
+   * site switch-over deleted it (#3579); retiring the token is #3658.
+   * GROUND-classified like the --v2-surface-hero above: the ink sits ON it, so it is a gradient and
    * lives outside the THEME_TOKENS colour table (the parity test does not
    * see gradient-valued tokens). Light byte-preserves the wash the marketing
    * surface has always painted; the dark form mirrors the #2929 hero-wash
@@ -162,7 +163,8 @@
   --v2-marketing-canvas-wash: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.96) 72%, #ffffff 100%);
 
   /*
-   * Marketing dot-grid ink (#3139). The HeroBackdrop dot texture is painted
+   * Marketing dot-grid ink (#3139), no consumer since #3579 (#3658; see the wash
+   * above). The legacy HeroBackdrop dot texture was painted
    * in the ground's own ink: the page ink at low alpha in light, a light dot
    * at low alpha in dark. Colour-valued (rgba), so it is registered in
    * THEME_TOKENS and carried by both dark blocks byte-identically.

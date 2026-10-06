@@ -266,11 +266,6 @@ export default defineConfig({
       // which inlines NEXT_PUBLIC_* from the server process's env on
       // compile. Same fixed synthetic literal as those workflows.
       NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID: 'e2e-onramp-app-id-placeholder',
-      // #3573: the redesigned public site's gate (src/lib/site-gate.ts), on
-      // for every e2e run (epic #3572: one e2e build, gate on). Like the
-      // onramp id above, the CI path bakes it in at its build step
-      // (ci.yml / update-visual-baselines.yml); this covers `next dev`.
-      NEXT_PUBLIC_HAVEN_SITE_PREVIEW: '1',
     },
   },
   // Both projects GATE on every frontend pull request (#1768). Before that,

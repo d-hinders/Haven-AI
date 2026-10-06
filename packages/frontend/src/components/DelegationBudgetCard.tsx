@@ -431,9 +431,8 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
             onGranted={handleGranted}
             // With a budget already listed, the opened form is a disclosure:
             // Cancel sits in the submit row, beside the action it cancels
-            // (#3695 design review) — the modal-footer shape this control
-            // already offers.
-            leadingAction={
+            // (#3695 design review).
+            trailingAction={
               hasActive ? (
                 <Button variant="ghost" onClick={collapseForm}>
                   Cancel

@@ -204,6 +204,7 @@ Railway rather than the repo; they are recorded in
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
+  The service sleeps (Railway serverless): the first call after idle cold-starts.
 - Hosted MCP (Railway): `https://haven-ai-hosted-mcp-dev-25c7.up.railway.app/v1` —
   confirmed by probe 2026-08-06 (`GET /v1` → 405 POST-only MCP, `/healthz` → 200).
   The service sleeps (Railway serverless): the first call after idle cold-starts.

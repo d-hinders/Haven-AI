@@ -5,6 +5,7 @@ covers:
   - packages/backend/Dockerfile
   - packages/mcp-server/Dockerfile
   - packages/demo-merchant-mcp/package.json
+  - packages/backend/src/config.ts
 last-verified: "2026-10-06"
 ---
 
@@ -12,7 +13,8 @@ last-verified: "2026-10-06"
 
 The record of how Haven's Railway services are configured. **These settings
 live in Railway, not in the repo.** No service uses config-as-code
-(`railwayConfigFile` is unset on all eight), so this page is the only place
+(`railwayConfigFile` is unset on all eight service instances: four services
+× two environments), so this page is the only place
 they are written down. When you change a setting in Railway, change this page
 too.
 
@@ -42,11 +44,11 @@ Until 2026-10-05 (dev) and 2026-10-06 (production), both start commands were
 beside `node` for the life of the container, and puts `npm` between Railway's
 `SIGTERM` and the app on shutdown. Dropping it cut about 25 MB of billed memory
 from the dev backend, measured over the same 17 hours in which the unchanged
-prod backend did not move.
+prod backend rose slightly (157→162 billed units).
 
 The commands are relative to the repo root because both services run from it
-(`WORKDIR /app` in the backend Dockerfile; root `/` for Demo-merchant). Neither
-process depends on its working directory: configuration comes from Railway
+(`WORKDIR /app` in the backend Dockerfile; root `/` for Demo-merchant). The backend's command matches its
+Dockerfile `CMD`. Neither process depends on its working directory: configuration comes from Railway
 service variables, and Demo-merchant reads no files from disk.
 
 ### Sleep
@@ -54,13 +56,15 @@ service variables, and Demo-merchant reads no files from disk.
 A sleeping service (Railway "serverless") stops after about 10 minutes without
 outbound traffic and cold-starts on the next request. It is on for both
 Demo-merchants and the dev hosted MCP. Dev Demo-merchant joined them on
-2026-10-05; it is only exercised by QA.
+2026-10-05. It sees QA traffic and the dev backend's hourly catalog probe,
+which wakes it once an hour; a cold start fails at most one probe, and an
+entry is only marked degraded after three consecutive failures.
 
 ## Reading cost
 
 Railway bills Hobby usage per resource-minute, and **memory is nearly all of
 it**: $8.20 of the $8.68 on the 2026-09 invoice. The cost of the project is
-roughly how many MB the eight services keep resident, around the clock.
+roughly how many MB the eight service instances keep resident, around the clock.
 
 **Read memory from the billing meter, not the Metrics graph.** For a sleeping
 service the graph holds the last reported value, so a service that slept most

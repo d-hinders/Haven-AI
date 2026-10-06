@@ -21,6 +21,7 @@ import { sendDelegateAlertFromEnv } from './infra/delegate-alert-webhook.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
+import { relayerKeysFromEnv } from './infra/relayer-env-keys.js'
 import discoveryRoutes from './routes/discovery.js'
 import { buildApiRootDocument } from './routes/root-document.js'
 import authRoutes from './routes/auth.js'
@@ -54,7 +55,6 @@ import {
   readRevocationAnchor,
   setAnchorUidRepair,
   setReceiptSigningKey,
-  relayerKeysFromEnv,
   passportReadiness,
   logPassportReadiness,
   retryPendingPassports,

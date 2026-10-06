@@ -258,20 +258,6 @@ export function setReceiptSigningKey(
 }
 
 /**
- * Every relayer key an operator has configured: `RELAYER_PRIVATE_KEY` and every
- * `RELAYER_PRIVATE_KEY_<chainId>`. Enumerated from the environment, NOT from the
- * supported chain list: narrowing the supported list (Gnosis, #3669) must never
- * drop a still-set per-chain key from the receipt-key collision check.
- */
-export function relayerKeysFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): Array<string | undefined> {
-  return Object.keys(env)
-    .filter((name) => /^RELAYER_PRIVATE_KEY(_\d+)?$/.test(name))
-    .map((name) => env[name])
-}
-
-/**
  * Do two env values denote the SAME private key?
  *
  * Compared on the key's VALUE, not its text. The threat is an operator pasting

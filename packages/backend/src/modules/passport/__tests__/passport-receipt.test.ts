@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { Wallet, verifyMessage } from 'ethers'
+import { relayerKeysFromEnv } from '../../../infra/relayer-env-keys.js'
 import {
   canonicalize,
   signReceipt,
   verifyReceipt,
   setReceiptSigningKey,
-  relayerKeysFromEnv,
   receiptIssuerAddress,
   isReceiptSigningConfigured,
   RECEIPT_TTL_SECONDS,

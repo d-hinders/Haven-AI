@@ -82,7 +82,6 @@ export {
   RECEIPT_VERSION,
   canonicalize,
   setReceiptSigningKey,
-  relayerKeysFromEnv,
   isReceiptSigningConfigured,
   receiptIssuerAddress,
   signReceipt,

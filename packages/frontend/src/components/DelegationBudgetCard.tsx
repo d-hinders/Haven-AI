@@ -1,15 +1,17 @@
 'use client'
 
 /**
- * Delegation-rail budget management on the agent detail page (#833, epic #821).
+ * The agent detail page's Spending section (#833, epic #821; one budget
+ * surface since #3695, epic #3691).
  *
  * Renders only for delegation-rail accounts. Grant a budget (one signature),
- * see active budgets, revoke (one signature). Outcome language only — the
- * words "delegation", "caveat", "redemption", "UserOp" never appear in the UI
- * (asserted in the tests); a budget is "a budget that refills itself".
+ * see active budgets with how much of the period is used, revoke (one
+ * signature). Outcome language only — the words "delegation", "caveat",
+ * "redemption", "UserOp" never appear in the UI (asserted in the tests); a
+ * budget is "a budget that refills itself".
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
@@ -26,7 +28,7 @@ import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { Row } from './ui/Row'
 import { useToast } from './ui/Toast'
-import { truncateAddress } from '@/components/haven'
+import { BudgetMeter, truncateAddress } from '@/components/haven'
 import { timeUntil } from '@/lib/format'
 
 interface TokenOption {
@@ -67,9 +69,35 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
   { label: 'per month', seconds: 2_592_000 },
 ]
 
+/**
+ * When a budget's next refill happens. `period_end` comes from the read
+ * (#3693) and can be stale: the hook polls, so a response can land moments
+ * before a boundary and be read after it. A past `period_end` is rolled
+ * forward by whole periods — the same boundary arithmetic the server uses —
+ * rather than rendering "refills expired".
+ */
+function nextRefillMs(periodEndIso: string, periodSeconds: number, nowMs: number): number | null {
+  const end = Date.parse(periodEndIso)
+  if (!Number.isFinite(end)) return null
+  if (end > nowMs || periodSeconds <= 0) return end
+  const periodMs = periodSeconds * 1000
+  return end + Math.ceil((nowMs - end + 1) / periodMs) * periodMs
+}
+
+/** "in 45m", "in 14h", "in 3 days" — the coarse future the caption needs. */
+function inDuration(targetMs: number, nowMs: number): string {
+  const mins = Math.max(1, Math.round((targetMs - nowMs) / 60_000))
+  if (mins < 60) return `in ${mins}m`
+  const hours = Math.round(mins / 60)
+  if (hours < 48) return `in ${hours}h`
+  return `in ${Math.round(hours / 24)} days`
+}
+
 export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange, retired }: Props) {
+  // #3695: this card is the one caller that asks for remaining-this-period —
+  // the meter on each row is drawn from it.
   const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
-    useDelegationBudget(agentId, chainId)
+    useDelegationBudget(agentId, chainId, { includeRemaining: true })
   // #3329: read separately from the period budgets above — a failed fetch
   // here must never take the budgets list down with it, so `taskBudgets`
   // stays `null` (nothing rendered) rather than surfacing its own error UI.
@@ -116,6 +144,33 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
     return g && /^0x[0-9a-fA-F]{64}$/.test(g) ? g : null
   }, [])
   const [prefill, setPrefill] = useState<{ hash: string; periodSeconds: number } | null>(null)
+  // #3695: once a budget exists, the grant form is collapsed behind "Add
+  // budget" — a permanent second form made "Set budget" the strongest element
+  // on the page. With no active budget the form is the section's content and
+  // this flag is not consulted. A `?grant=` prefill opens it (#2539): the
+  // human must see the build they are about to sign.
+  const [formOpen, setFormOpen] = useState(false)
+  // Opening and collapsing swap the pressed control for another, so focus
+  // would fall to <body> (#3695 review). An owner-initiated toggle says where
+  // focus goes next — the amount field on open, Add budget on collapse; the
+  // `?grant=` prefill opens without one, so a page load never steals focus.
+  const addBudgetRef = useRef<HTMLButtonElement>(null)
+  const amountRef = useRef<HTMLInputElement>(null)
+  const pendingFocus = useRef<'amount' | 'add' | null>(null)
+  const openForm = useCallback(() => {
+    pendingFocus.current = 'amount'
+    setFormOpen(true)
+  }, [])
+  const collapseForm = useCallback(() => {
+    pendingFocus.current = 'add'
+    setFormOpen(false)
+  }, [])
+  useEffect(() => {
+    const target = pendingFocus.current
+    if (!target) return
+    pendingFocus.current = null
+    ;(target === 'amount' ? amountRef.current : addBudgetRef.current)?.focus()
+  }, [formOpen])
 
   useEffect(() => {
     // #3549: a retired agent's card has no grant form to fill — leave the
@@ -134,6 +189,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
     setPeriod(row.period_seconds)
     setRecipient(row.recipient_address ?? '')
     setPrefill({ hash: grantHash, periodSeconds: row.period_seconds })
+    setFormOpen(true)
     try {
       window.history.replaceState(null, '', `/agents/${agentId}`)
     } catch {
@@ -184,6 +240,8 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   const handleGranted = useCallback(() => {
     setAmount('')
     setRecipient('')
+    pendingFocus.current = 'add'
+    setFormOpen(false)
     toast.success('Budget set — it refills itself every period.')
     onBudgetChange?.()
   }, [onBudgetChange, toast])
@@ -204,32 +262,24 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
     [onBudgetChange, revoke, toast],
   )
 
-  // #2473: never render NOTHING while loading. The agent page's "Add budget"
-  // scrolls to this card's anchor, so an empty card is a button that visibly
-  // does nothing. The skeleton also reserves roughly the shape the loaded card
-  // takes, so arrival is not a layout jump.
+  // #2473: never render NOTHING while loading — an empty section reads as a
+  // page that failed. The skeleton also reserves roughly the shape the loaded
+  // card takes, so arrival is not a layout jump.
   if (budgets === null && !budgetsError) {
     return (
-      <Card hover={false} className="mt-6 p-5 md:p-6">
-        <div>
-          <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent budgets</h2>
-          <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-            {retired
-              ? 'What this agent can still spend each period.'
-              : 'Set how much this agent can spend each period. The budget refills itself — no monthly signing.'}
-          </p>
-        </div>
-        <Card.Section divided className="mt-4">
+      <section className="mt-6">
+        <SpendingHeading retired={retired} />
+        <Card hover={false} className="p-5 md:p-6">
           <div className="py-3"><Skeleton className="h-5 w-48" /></div>
-        </Card.Section>
-        {/* #3549: no form-shaped placeholder for a card that will have no form. */}
-        {retired ? null : (
-          <div className="mt-4 space-y-2">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-          </div>
-        )}
-      </Card>
+          {/* #3549: no form-shaped placeholder for a card that will have no form. */}
+          {retired ? null : (
+            <div className="mt-4 space-y-2">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          )}
+        </Card>
+      </section>
     )
   }
 
@@ -242,21 +292,22 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   // only on the delegation rail). The modal offers a picker when several qualify.
   const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets, Math.floor(Date.now() / 1000))
 
+  // #3695: with no active budget the grant form IS the section's content;
+  // with one, it waits behind "Add budget" unless opened (or `?grant=` opened
+  // it). A failed list read counts as "no active budget" here, so the form —
+  // gated below on knowing the current budgets — stays reachable.
+  const hasActive = active.length > 0
+  const showForm = !hasActive || formOpen
+
   return (
-    <Card hover={false} className="mt-6 p-5 md:p-6">
-      <div>
-        <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent budgets</h2>
-        <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-          {retired
-            ? 'What this agent can still spend each period.'
-            : 'Set how much this agent can spend each period. The budget refills itself — no monthly signing.'}
-        </p>
-      </div>
+    <section className="mt-6">
+      <SpendingHeading retired={retired} />
+      <Card hover={false} className="p-5 md:p-6">
 
       {/* A failed signer-set fetch must be retryable (#1079) — without it the
           card is stranded at ready=false with no way out. */}
       {signersError ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
           <p className="text-sm text-[var(--v2-ink-2)]">
             Haven could not load how this account is approved.
           </p>
@@ -266,7 +317,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         </div>
       ) : null}
 
-      <Card.Section divided className="mt-4">
+      <div className="divide-y divide-[var(--v2-border)]">
         {budgetsError ? (
           <div className="flex flex-wrap items-center justify-between gap-3 py-3">
             <p className="text-sm text-[var(--v2-ink-2)]">
@@ -277,9 +328,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
             </Button>
           </div>
         ) : active.length === 0 ? (
-          <p className="py-3 text-sm text-[var(--v2-ink-muted)]">
-            {retired ? 'No active budget.' : 'No budget yet — set one below and your agent can start paying within it.'}
-          </p>
+          retired ? (
+            <p className="py-3 text-sm text-[var(--v2-ink-muted)]">No active budget.</p>
+          ) : null
         ) : (
           active.map((b) => (
             <BudgetRow
@@ -294,18 +345,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
             />
           ))
         )}
-      </Card.Section>
-
-      {subBudgetParents.length > 0 && !budgetsError ? (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--v2-border)] pb-3">
-          <p className="text-xs text-[var(--v2-ink-muted)]">
-            Share part of this budget with another of your agents.
-          </p>
-          <Button size="sm" variant="ghost" onClick={() => setIssuingSubBudget(true)}>
-            Issue sub-budget
-          </Button>
-        </div>
-      ) : null}
+      </div>
 
       {/* #3549: the reason is shown only beside something to stop — with no
           active budget, "No active budget." above already says it all and
@@ -318,10 +358,29 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
               : 'This agent has been removed, so its budgets can only be stopped.'}
           </p>
         ) : null
+      ) : tokens.length > 0 && !showForm ? (
+        <div className="mt-3">
+          <Button ref={addBudgetRef} size="sm" variant="ghost" onClick={openForm}>
+            Add budget
+          </Button>
+        </div>
       ) : tokens.length > 0 ? (
-        <div className="mt-4 space-y-2">
+        <div className={hasActive ? 'mt-4 space-y-2' : 'space-y-2'}>
+          {hasActive ? (
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Add a budget</p>
+          ) : (
+            <div className="pb-1">
+              <p className="text-sm font-medium text-[var(--v2-ink)]">
+                {budgetsError ? 'Set a budget' : 'Set its first budget'}
+              </p>
+              <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+                The agent can start paying within it.
+              </p>
+            </div>
+          )}
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
+              ref={amountRef}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="Amount"
@@ -370,6 +429,16 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
                 : 'One signature. Refills every period automatically.'
             }
             onGranted={handleGranted}
+            // With a budget already listed, the opened form is a disclosure:
+            // Cancel sits in the submit row, beside the action it cancels
+            // (#3695 design review).
+            trailingAction={
+              hasActive ? (
+                <Button variant="ghost" onClick={collapseForm}>
+                  Cancel
+                </Button>
+              ) : undefined
+            }
           />
         </div>
       ) : (
@@ -377,6 +446,19 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           Budgets aren&rsquo;t available for this network yet.
         </p>
       )}
+
+      {/* Below Add budget, which belongs with the rows it adds to (#3695
+          design review); sharing a slice is a different action. */}
+      {subBudgetParents.length > 0 && !budgetsError ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--v2-border)] pt-3">
+          <p className="text-xs text-[var(--v2-ink-muted)]">
+            Share part of this budget with another of your agents.
+          </p>
+          <Button size="sm" variant="ghost" onClick={() => setIssuingSubBudget(true)}>
+            Issue sub-budget
+          </Button>
+        </div>
+      ) : null}
 
       {/* #3329: task budgets are a separate, self-closing authority carved
           from a budget above — listed here only when at least one is open,
@@ -443,7 +525,25 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           onBudgetChange={onBudgetChange}
         />
       ) : null}
-    </Card>
+      </Card>
+    </section>
+  )
+}
+
+/**
+ * The section's heading and one-line description, ABOVE its card — the
+ * detail-page section rule (design-system.md, #3692).
+ */
+function SpendingHeading({ retired }: { retired?: 'revoked' | 'archived' }) {
+  return (
+    <div className="mb-3">
+      <h2 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h2>
+      <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+        {retired
+          ? 'What this agent can still spend each period.'
+          : 'What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.'}
+      </p>
+    </div>
   )
 }
 
@@ -478,9 +578,11 @@ function BudgetRow({
     .reduce((sum, tb) => sum + BigInt(tb.max_atomic), 0n)
   const reservedDisplay = t ? formatUnits(reservedAtomic, t.decimals) : reservedAtomic.toString()
 
+  const usage = budgetUsage(budget, t)
+
   return (
-    <div className="flex items-center justify-between gap-3 py-3">
-      <div className="min-w-0">
+    <div className="flex items-start justify-between gap-3 py-3">
+      <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-[var(--v2-ink)]">
           {amount} {t?.symbol ?? ''} {periodLabel}
         </p>
@@ -496,6 +598,17 @@ function BudgetRow({
         {reservedAtomic > 0n ? (
           <p className="text-xs text-[var(--v2-ink-3)]">
             {reservedDisplay} {t?.symbol ?? ''} reserved for task budgets
+          </p>
+        ) : null}
+        {usage.kind === 'meter' ? (
+          <div className="mt-2 max-w-sm">
+            <BudgetMeter usedPercent={usage.usedPercent} label={usage.label} caption={usage.caption} />
+          </div>
+        ) : usage.kind === 'expired' ? (
+          <p className="mt-2 text-xs text-[var(--v2-ink-3)]">This budget has expired and can no longer be spent.</p>
+        ) : usage.kind === 'unread' ? (
+          <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+            Usage this period couldn&rsquo;t be read from the chain.
           </p>
         ) : null}
       </div>
@@ -521,6 +634,61 @@ function BudgetRow({
       </div>
     </div>
   )
+}
+
+type BudgetUsage =
+  | { kind: 'none' }
+  | { kind: 'unread' }
+  | { kind: 'expired' }
+  | { kind: 'meter'; usedPercent: number; label: string; caption: string }
+
+/**
+ * How much of this period a budget has used (#3695), from the read's
+ * remaining-this-period (#3693).
+ *
+ * - No figure on the row (not asked for, or not an active row): nothing.
+ * - `remaining_from_chain: false`: the chain read failed and `remaining_atomic`
+ *   is the full budget, NOT a measurement — so no meter (it would claim
+ *   "0 used") and no "snapshot" wording (it is not one either).
+ * - Otherwise: used = budget − remaining, with the next refill — or the
+ *   expiry, when the budget ends before its period does.
+ */
+function budgetUsage(budget: DelegationBudget, t: TokenOption | undefined): BudgetUsage {
+  // An `active` row can outlive its `expires_at` — nothing flips the status
+  // (`eligibleSubBudgetParents` filters on expiry for the same reason). Such a
+  // budget can no longer spend, so it gets no "used this period" meter and no
+  // "expires in …" countdown (#3695 review).
+  if (budget.expires_at * 1000 <= Date.now()) return { kind: 'expired' }
+  if (budget.remaining_atomic == null || budget.remaining_from_chain == null) return { kind: 'none' }
+  if (budget.remaining_from_chain === false) return { kind: 'unread' }
+  let total: bigint
+  let remaining: bigint
+  try {
+    total = BigInt(budget.budget_atomic)
+    remaining = BigInt(budget.remaining_atomic)
+  } catch {
+    return { kind: 'none' }
+  }
+  const used = total > remaining ? total - remaining : 0n
+  const usedPercent = total > 0n ? Number((used * 10_000n) / total) / 100 : 0
+  const symbol = t?.symbol ?? ''
+  const fmt = (v: bigint) => (t ? formatUnits(v, t.decimals) : v.toString())
+  const nowMs = Date.now()
+  const expiresMs = budget.expires_at * 1000
+  const refillMs = budget.period_end ? nextRefillMs(budget.period_end, budget.period_seconds, nowMs) : null
+  const when =
+    refillMs === null
+      ? null
+      : expiresMs < refillMs
+        ? `expires ${inDuration(expiresMs, nowMs)}`
+        : `refills ${inDuration(refillMs, nowMs)}`
+  const usedLine = `${fmt(used)} of ${fmt(total)} ${symbol} used this period`.replace(/\s+/g, ' ').trim()
+  return {
+    kind: 'meter',
+    usedPercent,
+    label: `${symbol} budget used`.trim(),
+    caption: when ? `${usedLine} · ${when}` : usedLine,
+  }
 }
 
 /**

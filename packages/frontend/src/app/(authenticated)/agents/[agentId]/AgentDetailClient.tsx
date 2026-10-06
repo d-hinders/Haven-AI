@@ -15,8 +15,6 @@ import {
   type McpToolCallActivityItem,
 } from '@/hooks/useAgentActivity'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
-import { RESET_PERIODS } from '@/lib/budget-period'
-import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
@@ -60,14 +58,12 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { EmptyState } from '@/components/ui/EmptyState'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tooltip } from '@/components/ui/Tooltip'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import {
-  AgentRulesSummary,
   ApprovalRequiredBanner,
   TransactionMovement,
 } from '@/components/haven'
@@ -163,19 +159,6 @@ function activityToTransaction(
   }
 }
 
-function resetLabel(resetPeriodMin: number): string {
-  return RESET_PERIODS.find((item) => item.value === resetPeriodMin)?.label ?? `${resetPeriodMin}m`
-}
-
-function budgetPeriodLabel(resetPeriodMin: number): string {
-  const label = resetLabel(resetPeriodMin).toLowerCase()
-  if (label === 'one-time') return 'total budget'
-  if (label === 'daily') return 'per day'
-  if (label === 'weekly') return 'per week'
-  if (label === 'monthly') return 'per month'
-  return `every ${label}`
-}
-
 function mcpToolCallTone(resultStatus: string): 'success' | 'warning' | 'danger' | 'neutral' {
   switch (resultStatus) {
     case 'ok':
@@ -247,8 +230,8 @@ interface Props {
 }
 
 /**
- * Anchor for the "Activity" section (#2196), mirroring
- * `DELEGATION_BUDGET_CARD_ID`'s scroll-don't-open pattern in this same file.
+ * Anchor for the "Activity" section (#2196): the recoverable-funds banner
+ * scrolls here rather than opening anything (scroll-don't-open).
  *
  * **What this link claims, and what it deliberately does not.** The
  * recoverable-funds banner sits near the top of the page; the rows that carry
@@ -349,15 +332,10 @@ export default function AgentDetailClient({ agentId }: Props) {
   const openEditAgent = () => {
     setEditOpen(true)
   }
-  const openUpdateBudget = () => {
-    document
-      .getElementById(DELEGATION_BUDGET_CARD_ID)
-      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
   const closeEdit = () => {
     setEditOpen(false)
   }
-  // #2196: same mechanism as openUpdateBudget's delegation branch above.
+  // #2196: scroll-don't-open — see AGENT_ACTIVITY_SECTION_ID.
   const scrollToActivity = () => {
     document
       .getElementById(AGENT_ACTIVITY_SECTION_ID)
@@ -381,9 +359,9 @@ export default function AgentDetailClient({ agentId }: Props) {
   const isPaused = agent?.status === 'paused'
   const isRevoked = agent?.status === 'revoked'
   const isArchived = Boolean(agent?.archived_at)
-  // #3549: revoked OR removed — no budget can be granted, raised or shared;
-  // every "Update/Add budget" entry point scrolls to a card that no longer
-  // offers one. Keyed on exactly these two states, never on "not active":
+  // #3549: revoked OR removed — no budget can be granted, raised or shared
+  // (the Spending card offers no Add budget for one). Keyed on exactly these
+  // two states, never on "not active":
   // a pending_approval agent's FIRST grant is what activates it.
   const isRetired = isRevoked || isArchived
 
@@ -428,21 +406,6 @@ export default function AgentDetailClient({ agentId }: Props) {
   const currentAgent = rotatedKeyPatch ? { ...agent, ...rotatedKeyPatch } : agent
   const walletName = currentAgent.account_name ?? account?.name ?? 'Unassigned Haven wallet'
   const networkName = chainConfig?.name ?? 'Unknown network'
-  const budgetLines = currentAgent.allowances.map((allowance) => {
-    const decimals =
-      chainConfig &&
-      Object.values(chainConfig.tokens).find((token) => token.symbol === allowance.token_symbol)?.decimals
-    const amount = formatAllowanceAmount(allowance.allowance_amount, decimals ?? 18, {
-      symbol: allowance.token_symbol,
-    })
-    return {
-      id: allowance.id,
-      label: `${amount} ${allowance.token_symbol} ${budgetPeriodLabel(allowance.reset_period_min)}`,
-      token: allowance.token_symbol,
-      amount,
-      period: budgetPeriodLabel(allowance.reset_period_min),
-    }
-  })
   // #796/#804: recipients bind per token — the card gets EVERY configured
   // token (a picker appears only when there is more than one).
   // #2473: the token options a FIRST budget is granted from come from the
@@ -566,12 +529,25 @@ export default function AgentDetailClient({ agentId }: Props) {
         // meta line (#3692's slot). "Last activity" stays `mcp_last_seen_at`:
         // the agents read carries no last-payment field.
         meta={
+          // Each fact is one unbreakable segment, so a narrow header wraps
+          // BETWEEN facts — never "· Last / activity 2h ago" (#3694 design
+          // review, at 390px).
           <>
-            {walletName} · {networkName} · Created{' '}
-            {/* Its own node: the product-routes visual spec proves the frozen
-                clock by finding the created age as exact text (#2318). */}
-            <span>{timeAgo(currentAgent.created_at)}</span> ·{' '}
-            <span className="v2-tabular" title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}>
+            {/* The wallet name is user-chosen and can be long, so it may
+                wrap; the short facts after it stay whole. */}
+            <span>{walletName}</span> ·{' '}
+            <span className="whitespace-nowrap">{networkName}</span> ·{' '}
+            <span className="whitespace-nowrap">
+              Created{' '}
+              {/* Its own node: the product-routes visual spec proves the frozen
+                  clock by finding the created age as exact text (#2318). */}
+              <span>{timeAgo(currentAgent.created_at)}</span>
+            </span>{' '}
+            ·{' '}
+            <span
+              className="whitespace-nowrap v2-tabular"
+              title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}
+            >
               {formatAgentLastActivity(currentAgent.mcp_last_seen_at)}
             </span>
           </>
@@ -607,9 +583,16 @@ export default function AgentDetailClient({ agentId }: Props) {
             ) : null}
             {/* Restore runs from a menu that closes on select, so the old
                 footer button's "Restoring…" label has no control to live on.
-                Announced here instead, beside the (disabled) trigger. */}
+                Shown here instead, beside the (disabled) trigger. The live
+                region is ALWAYS mounted and only its text changes — a region
+                that appears already holding text is announced unreliably
+                (#3694 review); the visible copy is hidden from assistive tech
+                so it is not read twice. */}
+            <span role="status" className="sr-only">
+              {pendingAction === 'restore' ? 'Restoring…' : ''}
+            </span>
             {pendingAction === 'restore' ? (
-              <span role="status" className="v2-text-meta text-[var(--v2-ink-3)]">
+              <span aria-hidden="true" className="v2-text-meta text-[var(--v2-ink-3)]">
                 Restoring…
               </span>
             ) : null}
@@ -864,51 +847,6 @@ export default function AgentDetailClient({ agentId }: Props) {
       />
 
       <div className="mt-6 space-y-6">
-          <AgentRulesSummary
-            title="Agent budget"
-            description="What this agent can spend, where the money comes from, and how you stay in control."
-            items={[
-              {
-                label: 'Agent name',
-                value: currentAgent.name,
-                helper: currentAgent.description || undefined,
-              },
-              {
-                label: 'Spend from',
-                value: `${walletName} on ${networkName}`,
-                helper: 'Payments come from this Haven account only.',
-              },
-              {
-                label: 'Budget',
-                value:
-                  budgetLines.length > 0 ? (
-                    <div className="space-y-1">
-                      {budgetLines.map((line) => (
-                        <div key={line.id}>{line.label}</div>
-                      ))}
-                    </div>
-                  ) : (
-                    'No budget set'
-                ),
-                helper: 'Payments above this budget are declined before any money moves.',
-              },
-            ]}
-          />
-
-          {budgetLines.length === 0 ? (
-            <EmptyState
-              title="No agent budget set"
-              body={
-                isRevoked
-                  ? 'This agent has been revoked and can no longer be edited.'
-                  : isArchived
-                    ? 'This agent has been removed, so no budget can be added.'
-                    : 'Add an agent budget before this agent can make automatic payments.'
-              }
-              action={!isRetired ? <Button size="sm" onClick={openUpdateBudget}>Add budget</Button> : undefined}
-            />
-          ) : null}
-
           <div id={AGENT_ACTIVITY_SECTION_ID} className="scroll-mt-24">
             {/* #3696: the section header carries the counts the stat cards
                 used to show. The `stats` source is unchanged — all_time/today

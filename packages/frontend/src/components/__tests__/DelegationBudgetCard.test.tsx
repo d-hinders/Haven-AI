@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets } = vi.hoisted(() => ({
+const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs } = vi.hoisted(() => ({
+  mockHookArgs: vi.fn(),
   mockGet: vi.fn(),
   mockGrant: vi.fn(),
   mockRevoke: vi.fn(),
@@ -11,7 +12,9 @@ const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBu
 }))
 
 vi.mock('@/hooks/useDelegationBudget', () => ({
-  useDelegationBudget: () => ({
+  useDelegationBudget: (...args: unknown[]) => {
+    mockHookArgs(...args)
+    return {
     budgets: mockGet(),
     grant: mockGrant,
     revoke: mockRevoke,
@@ -19,7 +22,8 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     ready: true,
     budgetsError: mockBudgetsError(),
     reload: mockReload,
-  }),
+    }
+  },
 }))
 // #3329: read separately — DelegationBudgetCard's own tests must not need to
 // know this hook's wire shape, only what it returns.
@@ -218,6 +222,30 @@ describe('DelegationBudgetCard (#833)', () => {
     }
   })
 
+  // #3695 (B3): the grant form is collapsed once a budget exists — but a
+  // `?grant=` link must still land on the build it carries, prefilled.
+  it('?grant= opens the collapsed form prefilled even with an active budget present (#3695)', async () => {
+    const restore = withSearch(`?grant=${'0x' + 'cd'.repeat(32)}`)
+    try {
+      mockGet.mockReturnValue([
+        budget(),
+        budget({
+          id: 'b2',
+          delegation_hash: '0x' + 'cd'.repeat(32),
+          status: 'pending',
+          recipient_address: null,
+          budget_atomic: '7000000',
+        }),
+      ])
+      render(<DelegationBudgetCard {...PROPS} />)
+      await waitFor(() => expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('7'))
+      expect(screen.getByText('Set budget')).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+    } finally {
+      restore()
+    }
+  })
+
   it('?grant= on a retired agent leaves the link alone — there is no form to fill (#3549)', async () => {
     const restore = withSearch(`?grant=${'0x' + 'cd'.repeat(32)}`)
     const replaceState = vi.spyOn(window.history, 'replaceState')
@@ -321,7 +349,7 @@ describe('DelegationBudgetCard load failure (#2473)', () => {
     expect(container.textContent).not.toBe('')
     // Skeleton placeholders reserve the loaded card's shape (design review).
     expect(container.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThan(0)
-    expect(screen.getByText(/Agent budgets/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Spending' })).toBeTruthy()
   })
 
   it('explains itself rather than rendering no form when the chain offers no grantable token', async () => {
@@ -401,8 +429,13 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     mockGet.mockReturnValue([budget()])
     const live = render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText('Issue sub-budget')).toBeTruthy())
-    expect(screen.getByText('Set budget')).toBeTruthy()
+    // #3695: with an active budget the grant form waits behind "Add budget",
+    // so "Set budget" is not on screen until it is opened — asserting "Add
+    // budget" is what keeps the retired half below from passing vacuously.
+    expect(screen.getByRole('button', { name: 'Add budget' })).toBeTruthy()
     expect(screen.getByText('Edit')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByText('Set budget')).toBeTruthy()
     expect(screen.getByLabelText('Period')).toBeTruthy()
     live.unmount()
 
@@ -411,6 +444,7 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     expect(screen.getByText(reason)).toBeTruthy()
     // The whole grant form is gone, not just its button.
     expect(screen.queryByText('Set budget')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
     expect(screen.queryByLabelText('Budget amount')).toBeNull()
     expect(screen.queryByLabelText('Period')).toBeNull()
     expect(screen.queryByLabelText('Recipient')).toBeNull()
@@ -442,7 +476,178 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} retired="revoked" />)
     await waitFor(() => expect(screen.getByText('No active budget.')).toBeTruthy())
-    expect(document.body.textContent).not.toMatch(/set one below|Set how much|can only be stopped/)
+    expect(document.body.textContent).not.toMatch(/set one below|Set how much|can only be stopped|first budget/)
     expect(screen.queryByText('Set budget')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+  })
+})
+
+// #3695: one Spending surface — the section heading above the card, a meter
+// per budget from remaining-this-period (#3693), and a collapsed Add budget.
+describe('DelegationBudgetCard Spending section (#3695)', () => {
+  const NOW = Date.parse('2026-09-01T12:00:00Z')
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('asks the hook for remaining-this-period — the only caller that does', () => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(mockHookArgs).toHaveBeenCalledWith('agent-1', 84532, { includeRemaining: true })
+  })
+
+  it('heads the section "Spending", above the card', () => {
+    mockGet.mockReturnValue([])
+    const { container } = render(<DelegationBudgetCard {...PROPS} />)
+    const heading = screen.getByRole('heading', { name: 'Spending' })
+    // The heading sits outside the card it introduces (design-system.md
+    // detail-page section rule, #3692).
+    const card = container.querySelector('.rounded-\\[10px\\]')
+    expect(card).not.toBeNull()
+    expect(card!.contains(heading)).toBe(false)
+  })
+
+  it('draws a meter from remaining_atomic: used = budget − remaining, with the refill', () => {
+    mockGet.mockReturnValue([
+      budget({
+        remaining_atomic: '3750000',
+        remaining_from_chain: true,
+        period_end: '2026-09-02T02:00:00Z',
+      }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    const meter = screen.getByRole('progressbar', { name: 'USDC budget used' })
+    expect(meter.getAttribute('aria-valuenow')).toBe('25')
+    expect(screen.getByText('1.25 of 5 USDC used this period · refills in 14h')).toBeTruthy()
+  })
+
+  it('says "expires" when the budget ends before its period does', () => {
+    mockGet.mockReturnValue([
+      budget({
+        remaining_atomic: '5000000',
+        remaining_from_chain: true,
+        period_end: '2026-09-08T12:00:00Z',
+        expires_at: Math.floor(Date.parse('2026-09-04T12:00:00Z') / 1000),
+      }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('0 of 5 USDC used this period · expires in 3 days')).toBeTruthy()
+  })
+
+  it('rolls a stale period_end forward instead of saying it already passed', () => {
+    mockGet.mockReturnValue([
+      budget({
+        remaining_atomic: '4000000',
+        remaining_from_chain: true,
+        // A daily period whose end the read put 2h in the past: the next
+        // boundary is 22h away.
+        period_end: '2026-09-01T10:00:00Z',
+      }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('1 of 5 USDC used this period · refills in 22h')).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/expired/)
+  })
+
+  it('a failed chain read shows no meter and says so — never "0 used", never "snapshot"', () => {
+    mockGet.mockReturnValue([
+      budget({ remaining_atomic: '5000000', remaining_from_chain: false, period_end: '2026-09-02T02:00:00Z' }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByText(/couldn.t be read from the chain/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/snapshot|0 of 5/)
+  })
+
+  it('a row with no remaining figure renders no meter and no caption', () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.queryByText(/used this period|couldn.t be read/)).toBeNull()
+  })
+
+  it('with an active budget the grant form is not mounted until Add budget; Cancel collapses it', () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.queryByLabelText('Budget amount')).toBeNull()
+    expect(screen.queryByText('Set budget')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByLabelText('Budget amount')).toBeTruthy()
+    expect(screen.getByText('Set budget')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByLabelText('Budget amount')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add budget' })).toBeTruthy()
+  })
+
+  it('with no active budget the form is open, headed "Set its first budget"', () => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('Set its first budget')).toBeTruthy()
+    expect(screen.getByLabelText('Budget amount')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+  })
+
+  // #3695 review S1: an `active` row past its `expires_at` cannot spend — it
+  // must not count down "expires in 1m" forever, nor carry a usage meter.
+  it('a budget past its expiry says it has expired — no meter, no countdown', () => {
+    mockGet.mockReturnValue([
+      budget({
+        remaining_atomic: '4000000',
+        remaining_from_chain: true,
+        period_end: '2026-09-01T10:00:00Z',
+        expires_at: Math.floor(Date.parse('2026-08-31T00:00:00Z') / 1000),
+      }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('This budget has expired and can no longer be spent.')).toBeTruthy()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(document.body.textContent).not.toMatch(/expires in|refills in|used this period/)
+  })
+
+  // #3695 review S2: opening and collapsing swap the pressed control for
+  // another, so focus is placed deliberately instead of falling to <body>.
+  it('Add budget moves focus to the amount field; Cancel returns it to Add budget', () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(document.activeElement).toBe(screen.getByLabelText('Budget amount'))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+  })
+
+  it('Cancel sits in the submit row beside Set budget', () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    const setBudget = screen.getByRole('button', { name: 'Set budget' })
+    expect(cancel.parentElement).toBe(setBudget.parentElement)
+  })
+
+  it('a ?grant=-free page load moves no focus — only an owner toggle does', () => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.activeElement).toBe(document.body)
+  })
+
+  it('a successful grant collapses the form again', async () => {
+    vi.useRealTimers()
+    mockGet.mockReturnValue([budget()])
+    mockGrant.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '3' } })
+    fireEvent.click(screen.getByText('Set budget'))
+    await waitFor(() => expect(mockGrant).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByLabelText('Budget amount')).toBeNull())
+    // ...and focus lands on Add budget, not <body> (#3695 review S2).
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
   })
 })

@@ -46,10 +46,12 @@ describe('AgentRulesSummary labels are one set everywhere (#1431)', () => {
 
   it('finds every call site (the guard is worthless if it only sees the ones we fixed)', () => {
     const sites = callSites()
-    // 3 today: the connect approval step, the agent detail page, and the
-    // design-system examples. A NEW call site should make someone read
-    // this test and decide, not silently inherit whatever labels it copied.
-    expect(sites.length).toBeGreaterThanOrEqual(3)
+    // 2 today: the connect approval step and the design-system examples.
+    // #3688 removed the connect review step's copy (4 → 3); #3695 removed the
+    // agent detail page's read-only "Agent budget" summary (3 → 2) — budgets
+    // there are one Spending surface now. A NEW call site should make someone
+    // read this test and decide, not silently inherit whatever labels it copied.
+    expect(sites.length).toBeGreaterThanOrEqual(2)
   })
 
   it.each(callSites().map((p) => [p.replace(FRONTEND_SRC, 'src'), p]))(

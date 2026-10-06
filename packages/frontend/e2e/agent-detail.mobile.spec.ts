@@ -186,8 +186,7 @@ test.describe('agent detail at 390px (#2733)', () => {
     // ── 1. The active budget reads above the fold ──────────────────────────
     // The delegation fixture grants 250.00 USDC per week. The budget card's
     // active row renders "250 USDC per week" as ONE element (BudgetRow formats
-    // via formatUnits — no trailing zeros; the page SUMMARY lower down says
-    // "250.00"), so a substring probe on the full row text is both the amount
+    // via formatUnits — no trailing zeros), so a substring probe on the full row text is both the amount
     // and the period claim: if that row starts above 844px, both read without
     // scrolling.
     const fold = await foldY(page)
@@ -210,6 +209,12 @@ test.describe('agent detail at 390px (#2733)', () => {
     )
 
     // ── 2. "Set budget" is one line in its pill ────────────────────────────
+    // #3695: with an active budget the grant form waits behind "Add budget",
+    // so it is opened first — and asserted ABSENT before that, which is the
+    // collapsed-form claim measured in a real browser.
+    await expect(page.getByLabel('Recipient')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Add budget', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Set budget', exact: true })).toBeVisible()
     // The `sm` Button's height is the fixed `h-9` regardless of line count,
     // so the PILL height cannot detect wrapping. The label's rendered line
     // boxes can: one line of text produces one rect top; a wrapped label
@@ -319,7 +324,7 @@ test.describe('agent detail at 390px (#2733)', () => {
     // ...and the pair sits below the title, leaving the title the full width.
     expect(pauseBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height)
 
-    // ── 4c. The budget is the first content card, at every width (#3694) ───
+    // ── 4c. The budget is the first content card, at every width (#3694, #3695) ─
     // #2821 swapped an "About this agent" card below the budget on phones with
     // `order-*` classes and restored it above at `lg`. #3694 moved that card's
     // facts into the header's meta line and deleted the card, so the claim is
@@ -336,6 +341,18 @@ test.describe('agent detail at 390px (#2733)', () => {
         if (!budget || !header) return null
         return {
           about: Boolean(about),
+          // "First", not merely "below": the only thing between the header
+          // block and the budget is the banner slot (#3694 review, tightened
+          // in #3695 when this section was reshaped).
+          prevIsBannerSlot: budget.previousElementSibling?.getAttribute('data-testid') === 'agent-banner-slot',
+          // One budget surface (#3695): the Spending heading lives with the
+          // card, and the old read-only "Agent budget" summary is gone.
+          spendingHeading: Array.from(budget.querySelectorAll('h2')).some(
+            (h) => (h.textContent ?? '').trim() === 'Spending',
+          ),
+          summaryHeadings: Array.from(document.querySelectorAll('#main-content h2, #main-content h3')).filter(
+            (h) => (h.textContent ?? '').trim() === 'Agent budget',
+          ).length,
           headerBottom: Math.round(header.getBoundingClientRect().bottom + window.scrollY),
           budgetTop: Math.round(budget.getBoundingClientRect().top + window.scrollY),
           meta: (header.textContent ?? '').includes('Created'),
@@ -347,6 +364,9 @@ test.describe('agent detail at 390px (#2733)', () => {
     expect(mobileLayout!.about, 'no "About this agent" card renders').toBe(false)
     expect(mobileLayout!.meta, 'the header carries the identity meta line').toBe(true)
     expect(mobileLayout!.budgetTop).toBeGreaterThan(mobileLayout!.headerBottom)
+    expect(mobileLayout!.prevIsBannerSlot, 'the budget card follows the banner slot directly').toBe(true)
+    expect(mobileLayout!.spendingHeading, 'the Spending heading heads the budget card').toBe(true)
+    expect(mobileLayout!.summaryHeadings, 'no second "Agent budget" surface').toBe(0)
 
     // ...and the same composition at desktop width.
     await page.setViewportSize({ width: 1280, height: 900 })

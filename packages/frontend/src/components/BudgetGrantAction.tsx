@@ -47,6 +47,13 @@ interface Props {
    * form on a page wants.
    */
   leadingAction?: ReactNode
+  /**
+   * Rendered right AFTER the grant button in the page-form row — the Cancel
+   * of a form that opened in place (#3695). Unlike `leadingAction` it keeps
+   * the page shape: the grant button stays its intrinsic width and `helper`
+   * stays on the row.
+   */
+  trailingAction?: ReactNode
   /** Explains what to do when `ready` is false. */
   notReadyHint?: string
   /**
@@ -68,6 +75,7 @@ export default function BudgetGrantAction({
   busyLabel,
   helper,
   leadingAction,
+  trailingAction,
   notReadyHint,
   notReadyAction,
   onGranted,
@@ -145,6 +153,7 @@ export default function BudgetGrantAction({
         >
           {busy ? busyLabel : label}
         </Button>
+        {!leadingAction ? trailingAction : null}
         {helper && !leadingAction && (
           <span className="text-xs text-[var(--v2-ink-muted)] sm:ml-auto">{helper}</span>
         )}

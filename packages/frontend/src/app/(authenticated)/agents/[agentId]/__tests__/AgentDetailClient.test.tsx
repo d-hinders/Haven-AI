@@ -737,19 +737,20 @@ describe('AgentDetailClient last-activity metadata', () => {
     })
   }
 
-  // #3694: the "Update budget" button and menu item only scrolled to the card
-  // below them, so both went. The empty-state "Add budget" keeps the route
-  // until #3695 replaces that empty state.
-  it('routes Add budget to the budget card — NOT EditAgentModal — on a delegation agent', () => {
+  // #3695: ONE budget surface. The read-only "Agent budget" summary (and its
+  // "No agent budget set" empty state with a scroll-to-card "Add budget") is
+  // gone; budgets change only in the Spending card, which also owns Add
+  // budget. Fails on f9e02ee0, where both surfaces rendered.
+  it('renders exactly one budget surface — no second "Agent budget" summary (#3695)', () => {
     mockDelegationAgent()
-    const scrollIntoView = vi.fn()
-    window.HTMLElement.prototype.scrollIntoView = scrollIntoView
-
     render(<AgentDetailClient agentId="agent-1" />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
-    expect(screen.queryByTestId('edit-agent-modal')).not.toBeInTheDocument()
-    expect(scrollIntoView).toHaveBeenCalled()
+    expect(screen.getAllByText('DelegationBudgetCard')).toHaveLength(1)
+    expect(screen.queryByRole('heading', { name: 'Agent budget' })).not.toBeInTheDocument()
+    expect(screen.queryByText('No agent budget set')).not.toBeInTheDocument()
+    expect(screen.queryByText('Spend from')).not.toBeInTheDocument()
+    // The page itself offers no budget entry point; the card does (its own
+    // #3549 tests pin Add budget present on a live agent, absent on a retired one).
+    expect(screen.queryByRole('button', { name: /Add budget|Update budget/ })).not.toBeInTheDocument()
   })
 
   it('offers no Update budget entry point anywhere — button or menu item (#3694)', () => {
@@ -1010,24 +1011,18 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(items).not.toContain('Remove agent…')
   })
 
-  // #3549: every page-level "Update/Add budget" scrolls to the card; on a
-  // removed agent the card offers no form, so none of them may render. Same
-  // gate a revoked agent already had.
-  // The archived-but-not-revoked shape is the one ARCHIVE_AGENT_SQL allows
-  // besides revoked: an UNLINKED agent (account_id NULL) with no live budget.
-  // A delegator-account agent can only be archived once revoked.
-  it('an archived agent offers no Update budget or Add budget entry point (#3549)', () => {
+  // #3549: since #3695 the page has no budget entry point of its own — Add
+  // budget lives in the Spending card, which hides it for a retired agent.
+  // So the page's half of the gate is handing the card the right `retired`
+  // state (the it.each below, incl. the archived-but-not-revoked shape
+  // ARCHIVE_AGENT_SQL allows: an UNLINKED agent with no live budget), and the
+  // card's half is pinned in DelegationBudgetCard.test.tsx with Add budget
+  // asserted present on a live agent and absent on a retired one.
+  it('an archived agent is offered no Update budget anywhere on the page (#3549)', () => {
     mockAgentWith({ account_id: null, status: 'active', archived_at: '2026-06-01T00:00:00Z' })
     render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.queryByRole('button', { name: 'Update budget' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Add budget' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Update budget|Add budget/ })).not.toBeInTheDocument()
     expect(openAgentMenu()).not.toContain('Update budget')
-  })
-
-  it('the same agent un-archived still offers Add budget (#3549 control)', () => {
-    mockAgentWith({ account_id: null, status: 'active', archived_at: null })
-    render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('button', { name: 'Add budget' })).toBeInTheDocument()
   })
 
   // #3549: the card hides set/edit/issue-sub-budget for a retired agent — the
@@ -1058,6 +1053,9 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockAgentWith({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
     mockUseAgents.mockReturnValue({ ...mockUseAgents(), unarchiveAgent })
     render(<AgentDetailClient agentId="agent-1" />)
+    // The live region is mounted, empty, BEFORE the restore — only its text
+    // changes, which is what makes the announcement reliable.
+    expect(screen.getByRole('status')).toHaveTextContent('')
     openAgentMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Restore to list' }))
     const trigger = screen.getByRole('button', { name: 'Agent options' })

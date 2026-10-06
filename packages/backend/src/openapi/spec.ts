@@ -6085,7 +6085,7 @@ export const openapiSpec = {
                   required: ['deployable', 'supported'],
                   properties: {
                     deployable: { type: 'array', items: { type: 'integer' }, description: 'Chains this environment will provision on.' },
-                    supported: { type: 'array', items: { type: 'integer' }, description: 'Chains the code knows about at all.' },
+                    supported: { type: 'array', items: { type: 'integer' }, description: 'Chains Haven runs on (Base and Base Sepolia). History-only chains such as Gnosis are not listed.' },
                   },
                 },
               },

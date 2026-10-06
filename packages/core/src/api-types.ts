@@ -15957,7 +15957,7 @@ export interface operations {
                     "application/json": {
                         /** @description Chains this environment will provision on. */
                         deployable: number[];
-                        /** @description Chains the code knows about at all. */
+                        /** @description Chains Haven runs on (Base and Base Sepolia). History-only chains such as Gnosis are not listed. */
                         supported: number[];
                     };
                 };

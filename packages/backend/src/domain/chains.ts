@@ -143,9 +143,11 @@ export const KNOWN_CHAIN_IDS: readonly number[] = Object.keys(CHAINS).map(Number
 /**
  * The chains Haven RUNS on — explicit, not derived from the registry keys
  * (decision (c), #3635; epic #3634). Chain 100 (Gnosis) is known but
- * history-only and read-only: it is deliberately absent here, so every runtime
- * loop (prices, relayer monitor, discovery, deploys, balances, portfolio,
- * receive, agent creation) and the inbound ingest skip it. Lives in the backend
+ * history-only and read-only: it is deliberately absent here. The runtime loops
+ * (prices, relayer monitor, the bump loop via deploys) and discovery skip it,
+ * and balances, portfolio, receive and the delegate-balance read refuse it.
+ * Payments and budget grants refuse it upstream, through the retired-rail 410
+ * and `DELEGATION_RAIL_CHAIN_IDS`. Lives in the backend
  * (not core) because core's registry is also the frontend's known set (#3671).
  */
 export const SUPPORTED_CHAIN_IDS: readonly number[] = [8453, 84532]

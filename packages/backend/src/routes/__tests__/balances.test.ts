@@ -42,6 +42,8 @@ import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const SAFE_BASE = '0x1111111111111111111111111111111111111111'
 const SAFE_GNOSIS = '0x2222222222222222222222222222222222222222'
+// A Base account no earlier test has read, so the balance cache cannot answer for it.
+const SAFE_BASE_UNCACHED = '0x7777777777777777777777777777777777777777'
 
 describe('balance routes', () => {
   let app: FastifyInstance
@@ -117,6 +119,24 @@ describe('balance routes', () => {
 
   it('keeps the legacy address-only lookup when no chain is requested', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'safe-base', chain_id: 8453 }] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/balances/${SAFE_BASE_UNCACHED}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(mockQuery).toHaveBeenCalledWith(
+      expect.not.stringContaining('AND chain_id = $3'),
+      ['user-1', SAFE_BASE_UNCACHED],
+    )
+    expect(mockGetProvider).toHaveBeenCalledWith(8453)
+  })
+
+  it('#3669: refuses an implicit chain resolved to a history-only chain-100 account, with no RPC read', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     mockQuery.mockResolvedValueOnce({ rows: [{ id: 'safe-gnosis', chain_id: 100 }] })
 
     const response = await app.inject({
@@ -125,12 +145,9 @@ describe('balance routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.not.stringContaining('AND chain_id = $3'),
-      ['user-1', SAFE_GNOSIS],
-    )
-    expect(mockGetProvider).toHaveBeenCalledWith(100)
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('Unsupported chain: 100')
+    expect(mockGetProvider).not.toHaveBeenCalled()
   })
 
   it('requires chain_id for legacy reads that match multiple owned chains', async () => {

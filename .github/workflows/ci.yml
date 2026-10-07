@@ -441,7 +441,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # 12, not 8: on 2026-10-07 passing runs took 7-7.7 min (unit tests ~5.5,
+    # build ~0.5) and the 8-minute ceiling cancelled a dev push (run
+    # 37628537263) and PR runs that had already passed every test. The same
+    # move #2556 made for Frontend checks; a hang still fails fast.
+    timeout-minutes: 12
 
     services:
       postgres:

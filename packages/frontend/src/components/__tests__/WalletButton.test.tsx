@@ -166,16 +166,19 @@ describe('WalletButton', () => {
       })
     })
 
-    it('names the subject account in the connected-wallet menu too', () => {
+    it('names the subject account WITH its chain in the connected-wallet menu', () => {
       setConnectedWallet()
       mocks.useAuth.mockReturnValue({
-        user: { accounts: [FIRST_NOT_DEFAULT, DEFAULT_ACCOUNT] },
+        user: { accounts: [FIRST_NOT_DEFAULT, { ...DEFAULT_ACCOUNT, chain_id: 84532 }] },
         passkeys: [],
       })
       render(<WalletButton />)
       fireEvent.click(screen.getByRole('button', { name: /0x5555/ }))
       const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
-      expect(within(dialog).getByText(/^Main account · /)).toBeInTheDocument()
+      // Here `Network:` is the WALLET's chain (Base), so the account line must
+      // carry the account's own chain or the menu never says where it lives.
+      expect(within(dialog).getByText('Main account · Base Sepolia')).toBeInTheDocument()
+      expect(within(dialog).getByText('Base')).toBeInTheDocument()
     })
 
     it('reads the account it is given', () => {
@@ -504,7 +507,7 @@ describe('WalletButton', () => {
     expect(within(dialog).getByText('Haven account')).toBeInTheDocument()
     // #3719: the menu names the account its status refers to — with no
     // global active account, the default one here.
-    expect(within(dialog).getByText(/^Main account · /)).toBeInTheDocument()
+    expect(within(dialog).getByText('Main account')).toBeInTheDocument()
     expect(within(dialog).queryByText('Haven account (passkey)')).not.toBeInTheDocument()
     expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
     // #1679: the credential is named by kind + enrollment date, never

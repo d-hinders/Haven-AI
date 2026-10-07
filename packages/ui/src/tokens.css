@@ -91,14 +91,14 @@
   --v2-danger-soft-rgb: 254 242 242;
 
   /* ── Chain identity ─────────────────────────────────────────────────
-     Brand/identity colours that tell networks apart in NetworkPill and
-     NetworkSwitcher. Deliberately OUTSIDE the semantic-colour rule — they
+     Brand/identity colours that tell networks apart in NetworkPill and the
+     contacts list. Deliberately OUTSIDE the semantic-colour rule — they
      identify a chain, they are not success/warning/etc. Values are preserved
-     exactly from the pre-token components (#875). NetworkSwitcher uses the
-     solid brand dot; NetworkPill uses a lighter tinted-pill treatment, so
+     exactly from the pre-token components (#875). The solid brand dot was
+     NetworkSwitcher's until #3719 removed it; NetworkPill uses a lighter tinted-pill treatment, so
      Base carries both a brand dot (#0052FF) and a softer sky pill — unifying
      the two into one Base hue is a deliberate follow-up, not done here. */
-  --v2-chain-base: #0052ff; /* NetworkSwitcher solid dot — Coinbase Base blue */
+  --v2-chain-base: #0052ff; /* solid dot — Coinbase Base blue */
   --v2-chain-testnet: #f59e0b; /* Base Sepolia — amber, flags a testnet (dot, both surfaces) */
   /* NetworkPill soft-pill — Base (sky family) */
   --v2-chain-base-dot: #0ea5e9;

@@ -7,7 +7,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { type Agent } from '@/hooks/useAgents'
 import type { Organization } from '@/hooks/useOrganizations'
-import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, resolveChainOrNull } from '@/lib/chains'
 import {
   FINISH_REVOKING_LABEL,
   HALF_REVOKED_BODY,
@@ -181,9 +181,18 @@ export function AgentCard({
                 </span>
               ) : null}
             </div>
+            {/* #3719: the list spans every account, so the row names its own —
+                with the chain as the secondary half, the same shape the
+                account filter's options use. */}
             {agent.account_name && (
               <p className="text-xs text-[var(--v2-ink-2)] mt-0.5">
                 <span className="text-[var(--v2-ink-3)]">Account:</span> {agent.account_name}
+                {agent.account_chain_id != null && resolveChainOrNull(agent.account_chain_id) && (
+                  <span className="text-[var(--v2-ink-3)]">
+                    {' · '}
+                    {resolveChainOrNull(agent.account_chain_id)?.name}
+                  </span>
+                )}
               </p>
             )}
             {/*

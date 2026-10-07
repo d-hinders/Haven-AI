@@ -47,6 +47,7 @@ import { useToast } from '@/components/ui/Toast'
 import { TransactionActivityRow } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
+import { resolveDefaultAccount } from '@/lib/default-account'
 
 // #3127 (finding 6): the per-currency formatting itself lives in ONE place —
 // `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
@@ -667,7 +668,7 @@ function TransactionsSection({
 }
 
 export default function DashboardClient() {
-  const { user, activeAccount, passkeys: enrolledPasskeys } = useAuth()
+  const { user, passkeys: enrolledPasskeys } = useAuth()
   const { toast } = useToast()
   const accounts = user?.accounts ?? []
   const { currency } = usePreferences()
@@ -782,16 +783,11 @@ export default function DashboardClient() {
   const allOnboardingComplete =
     setupProgressReady && hasFunds && hasAgents && hasFirstAgentPayment
 
-  const defaultAccount = useMemo(
-    () => activeAccount ?? accounts.find((account) => account.is_default) ?? accounts[0] ?? null,
-    [activeAccount, accounts],
-  )
+  // #3719: no global active account. The default account pre-selects the
+  // hero's Receive / Add funds (which ask when there is more than one) and the
+  // connect flow.
+  const defaultAccount = useMemo(() => resolveDefaultAccount(accounts), [accounts])
   const hasDelegationAccounts = accounts.length > 0
-  const agentAccount = useMemo(
-    () =>
-      activeAccount ?? accounts[0] ?? null,
-    [activeAccount, accounts],
-  )
 
   // Owner-initiated send from the DASHBOARD is gone (#1989, epic #1440). It was
   // a legacy-Safe transaction signed through `SendModal`, and that rail is
@@ -1187,7 +1183,7 @@ export default function DashboardClient() {
         onClose={() => {
           setConnectAgentOpen(false)
         }}
-        accountId={agentAccount?.id ?? null}
+        accountId={defaultAccount?.id ?? null}
         onSetupUpdated={() => {
           refreshDashboardData()
         }}

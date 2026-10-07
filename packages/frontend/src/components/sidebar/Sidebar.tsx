@@ -370,8 +370,8 @@ export default function Sidebar() {
         Mobile toggle.
 
         Tap target (#1766). The control paints 32x32 — deliberately, because it
-        shares a 56px bar with `NetworkSwitcher` and a larger visible box would
-        crowd it — which left it 12px under the 44px comfort target
+        shared a 56px bar with the account chip (removed in #3719) and a larger
+        visible box would crowd it — which left it 12px under the 44px comfort target
         `docs/product/design-system.md` § Buttons documents. It is not a
         `Button`, so it inherited none of #1726's mechanism; it borrows it here
         instead: a transparent `::after` extends the HIT area to 44x44 while the

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent } from '@/hooks/useAgents'
+import type { SmartAccount } from '@/context/AuthContext'
 import {
   BUDGET_FACET,
   BUILT_IN_FACETS,
   DEFAULT_SORT,
   EMPTY_FILTER_STATE,
   STATUS_FACET,
+  accountFacet,
   applyAgentListFilters,
   budgetStateOf,
   compareAgents,
@@ -198,5 +200,29 @@ describe('isFilterActive', () => {
   })
   it('STATUS_FACET covers every status the wire type declares', () => {
     expect(STATUS_FACET.options.map((o) => o.value).sort()).toEqual(['active', 'paused', 'pending_approval', 'revoked'])
+  })
+})
+
+describe('accountFacet (#3719)', () => {
+  const BASE_ACCOUNT = { id: 'acc-base', name: 'Operating', chain_id: 8453 } as SmartAccount
+  const TEST_ACCOUNT = { id: 'acc-test', name: 'Sandbox', chain_id: 84532 } as SmartAccount
+
+  it('offers one option per account, named with its chain as the secondary half', () => {
+    const facet = accountFacet([BASE_ACCOUNT, TEST_ACCOUNT])
+    expect(facet.id).toBe('account')
+    expect(facet.options).toEqual([
+      { value: 'acc-base', label: 'Operating · Base' },
+      { value: 'acc-test', label: 'Sandbox · Base Sepolia' },
+    ])
+  })
+
+  it("matches an agent on its own account_id, and nothing without one", () => {
+    const facet = accountFacet([BASE_ACCOUNT, TEST_ACCOUNT])
+    const onBase = agent({ id: 'a1', account_id: 'acc-base' })
+    const onTest = agent({ id: 'a2', account_id: 'acc-test' })
+    const unassigned = agent({ id: 'a3', account_id: null })
+    expect(facet.predicate(onBase, 'acc-base')).toBe(true)
+    expect(facet.predicate(onTest, 'acc-base')).toBe(false)
+    expect(facet.predicate(unassigned, 'acc-base')).toBe(false)
   })
 })

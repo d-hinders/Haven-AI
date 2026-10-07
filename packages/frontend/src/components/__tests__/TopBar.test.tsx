@@ -5,19 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { LocaleProvider } from '@/context/LocaleContext'
 
-// The bar is the layout; these three are the other residents of its rows, and
+// The bar is the layout; these two are the other residents of its rows, and
 // each reaches past its own wallet-connector/provider stack. They are stubbed
 // to nothing because this suite's claim is about the theme toggle's place in
 // the right cluster — and a live WalletButton would make the whole file depend
 // on wagmi and RainbowKit contexts it is not testing. Their absence is
 // asserted nowhere; the components keep their own suites (WalletButton.test.tsx
-// covers the wallet, EnvBadge.test.tsx the badge, NetworkSwitcher.test.tsx the
-// chain).
+// covers the wallet, EnvBadge.test.tsx the badge).
 vi.mock('../WalletButton', () => ({
   default: () => <span data-testid="stub-wallet-button" />,
-}))
-vi.mock('../NetworkSwitcher', () => ({
-  default: () => <span data-testid="stub-network-switcher" />,
 }))
 vi.mock('../EnvBadge', () => ({
   default: () => <span data-testid="stub-env-badge" />,
@@ -135,5 +131,15 @@ describe('TopBar', () => {
     // "move it into the bar" edit that reads like a tidy-up.
     expect(screen.queryByRole('navigation')).toBeNull()
     expect(document.querySelectorAll('[data-mobile-tab-bar]')).toHaveLength(0)
+  })
+
+  it('renders no global account picker (#3719)', () => {
+    renderBar()
+    // Non-vacuity: the bar rendered its right cluster.
+    expect(screen.getByTestId('stub-wallet-button')).toBeTruthy()
+    // Haven has no "active" account: the bar carries no account dropdown, and
+    // an account-specific action picks its account locally.
+    expect(screen.queryByRole('button', { name: /active account/i })).toBeNull()
+    expect(screen.queryByText('Manage accounts')).toBeNull()
   })
 })

@@ -164,7 +164,7 @@ export function AgentListToolbar({
                   id={panelId}
                   role="group"
                   aria-label={facet.label}
-                  className="absolute left-3 right-3 z-20 mt-1 rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] p-1 shadow-modal sm:left-0 sm:right-auto sm:min-w-[220px]"
+                  className="absolute left-3 right-3 z-20 mt-1 rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] p-1 shadow-modal sm:left-0 sm:right-auto sm:w-max sm:min-w-[220px] sm:max-w-[360px]"
                 >
                   {facet.options.map((option) => {
                     const checked = selected.includes(option.value)

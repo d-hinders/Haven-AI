@@ -1,6 +1,7 @@
 'use client'
 
 import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
+import { accountWithChainLabel } from '@/lib/account-label'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
@@ -37,7 +38,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           >
             {flow.selectableAccounts.map((account) => (
               <option key={account.id} value={account.id}>
-                {account.name}
+                {accountWithChainLabel(account)}
               </option>
             ))}
           </Select>

@@ -217,6 +217,19 @@ last-verified: "2026-10-02"
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
 
+> **Re-verified #3756 (2026-10-07, superseded-agent wording):** this diff
+> touches covered connect files in their human-readable output only:
+> - the `--doctor` superseded-agents repair (`doctor.ts`);
+> - the replace and new-agent heads-ups and the `wiring_collision` refusal
+>   (`runtime.ts`);
+> - the collision prompt (`wiring-collision.ts`);
+> - the `--replace` help (`args.ts`) and the README.
+>
+> Each now names Remove agent… on the agent page instead of "revoke". No
+> flag, exit code, check id, `--json` field, tool, schema, version-skew or
+> consent-hash contract moves. `last-verified` stays 2026-10-02. Nothing else
+> in this document was re-verified.
+
 > **Re-verified #3722 (2026-10-07, leaked-credential copy):** this diff touches
 > covered files in their human-readable text only: the haven-pay skill's leak
 > section (`skill-content.ts`, renamed "If the credential may have leaked"), the

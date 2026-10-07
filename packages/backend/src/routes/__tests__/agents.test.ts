@@ -791,7 +791,9 @@ describe('agent archive routes (#1401)', () => {
     ])
     const response = await app.inject({ method: 'POST', url: '/agents/agent-1/archive' })
     expect(response.statusCode).toBe(409)
-    expect(response.json().error).toContain('Revoke the agent first')
+    // #3756: no live budget remains, so the only blocker is the status.
+    expect(response.json().error).toContain('This agent holds no live budget, so revoke it first (POST /agents/:id/revoke), then archive.')
+    expect(response.json().error).not.toMatch(/never stops spending/)
     await app.close()
   })
 
@@ -809,8 +811,8 @@ describe('agent archive routes (#1401)', () => {
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toContain('revoke-all')
     expect(response.json().error).toContain('still holds budget delegations')
-    // and NOT the wrong remedy:
-    expect(response.json().error).not.toContain('Revoke the agent first')
+    // and NOT the wrong remedy (#3756: re-pointed at the current no-budget wording):
+    expect(response.json().error).not.toContain('revoke it first (POST /agents/:id/revoke)')
     await app.close()
   })
 

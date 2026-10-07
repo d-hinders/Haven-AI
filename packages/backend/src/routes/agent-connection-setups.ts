@@ -204,6 +204,19 @@ export function normalizeMcpServerName(value: unknown): string | null {
 }
 
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
+
+/**
+ * #3756: the cancel refusal for an approved agent (active OR paused). It used
+ * to say "must be paused or revoked from the agent page", but the agent page
+ * has no "revoke" control and pausing ends no on-chain authority. Remove agent…
+ * is the remedy: it ends every live budget with one signature and its revoke
+ * step also cancels this setup (`revokeAgent` → `cancelSetupsForAgent`).
+ * Shown verbatim in the connect modal.
+ */
+export const APPROVED_AGENT_CANCEL_REFUSAL =
+  'This agent is already approved, so its setup cannot be cancelled here. To stop it, use Stop budget or ' +
+  'Remove agent… on the agent page (Remove agent… ends every live budget and retires the agent). ' +
+  'Pausing only blocks payments through Haven.'
 const PRODUCTION_API_HOST = 'havenbackend-production-8a00.up.railway.app'
 /**
  * The connector package spec the dashboard hands out (#2422, epic #2420).
@@ -784,7 +797,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             setup.account_tx_hash ||
             setup.tx_hash
           ) {
-            throw new SetupRefusal(409, 'Approved agents must be paused or revoked from the agent page')
+            throw new SetupRefusal(409, APPROVED_AGENT_CANCEL_REFUSAL)
           }
           if (!['awaiting_connection', 'connected_local', 'awaiting_wallet_approval'].includes(setup.status)) {
             throw new SetupRefusal(409, 'Setup cannot be cancelled')
@@ -803,7 +816,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             if (agentStatus === 'active' || agentStatus === 'paused') {
               throw new SetupRefusal(
                 409,
-                'Approved agents must be paused or revoked from the agent page',
+                APPROVED_AGENT_CANCEL_REFUSAL,
               )
             }
           }

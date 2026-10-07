@@ -2497,3 +2497,12 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > entry for the verifier, and that re-read; `last-verified` is bumped for exactly
 > this coverage.
 
+
+> **Re-verified unchanged (#3756, 2026-10-07, refusal wording):** this diff
+> touches `routes/agent-connection-setups.ts`, a covered file, in one
+> human-readable string only. The setup-cancel refusal for an approved agent
+> (active or paused) is now the constant `APPROVED_AGENT_CANCEL_REFUSAL`. It
+> names Stop budget and Remove agent… instead of "paused or revoked from the
+> agent page". The refusal fires on exactly the same conditions with the same
+> 409. No authority, signer set, delegation or custody path moves. Nothing else
+> in this document was re-read for it, and `last-verified` is not bumped.

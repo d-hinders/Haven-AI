@@ -181,7 +181,7 @@ export async function promptWiringCollisionResolution(
   io.write(`This machine is already wired to a Haven agent with a live key: ${ids}.\n`)
   io.write(`Setting up "${agentName}" on the bare haven / haven-signer pair would replace that wiring.\n`)
   io.write('  r) replace — re-point haven / haven-signer at the new agent and retire the previous directory locally\n')
-  io.write('     (tombstoned, local key files removed; you still revoke it on the Haven agent page)\n')
+  io.write('     (tombstoned, local key files removed; you still use Remove agent\u2026 on the Haven agent page)\n')
   io.write(`  a) alongside — install as a named agent (suggested: ${collision.suggestedServerName}) with its own\n`)
   io.write(`     haven-<name> / haven-signer-<name> pair, leaving the current wiring untouched\n`)
   io.write('  q) quit — nothing is written and the setup token stays unused\n')

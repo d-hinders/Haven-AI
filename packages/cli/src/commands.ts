@@ -1060,8 +1060,9 @@ async function cmdAgentRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<number
   // so it can't happen by accident in a script.
   if (!args.flags.yes) {
     throw new UsageError(
-      `This permanently revokes agent ${id}.`,
-      'Re-run with --yes to confirm. Revoke is terminal — the agent cannot go back to active.',
+      `This permanently retires agent ${id} in Haven.`,
+      'Re-run with --yes to confirm. Revoke is terminal — the agent cannot go back to active. ' +
+        'It ends no budget on-chain: end each live budget with `haven budget revoke <agentId> <delegationHash>`.',
     )
   }
   const { api } = await authed(args, d)

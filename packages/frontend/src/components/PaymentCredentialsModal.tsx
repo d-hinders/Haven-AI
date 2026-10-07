@@ -225,7 +225,9 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                 </Button>
               </div>
               <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                If you suspect this address is compromised, revoke the agent and create a new one.
+                If you suspect this key is compromised, open the agent and choose Replace signing key, or
+                Remove agent… to end its budgets. The key also controls any funds already at this address;
+                ending the budget does not recover them.
               </p>
             </section>
           ) : (

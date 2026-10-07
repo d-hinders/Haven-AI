@@ -1859,3 +1859,23 @@ function usageLinePattern(command: string): RegExp {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
+
+describe('pause / resume / revoke say what they do not do (#3722)', () => {
+  it('help: each is backend-only, the budget stays live, and budget revoke ends it', () => {
+    const help = helpText().replace(/\s+/g, ' ')
+    expect(help).toContain('agents pause <id> Block payments through Haven; the budget stays live on-chain (end it: budget revoke)')
+    expect(help).toContain('agents resume <id> Allow payments through Haven again')
+    expect(help).toContain('agents revoke <id> --yes Retire the agent in Haven (terminal). Ends no budget on-chain: run budget revoke first')
+    expect(help).not.toMatch(/Stop the agent spending|Let it spend again|Permanently revoke an agent/)
+  })
+
+  it('revoke without --yes says it retires the agent in Haven and points to haven budget revoke', async () => {
+    const api = fakeApi({ 'POST /agents/a1/revoke': {} })
+    const { deps, err } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'revoke', 'a1'], deps)).toBe(2)
+    const text = err.join('\n')
+    expect(text).toContain('This permanently retires agent a1 in Haven.')
+    expect(text).toContain('It ends no budget on-chain: end each live budget with `haven budget revoke <agentId> <delegationHash>`.')
+    expect(api.calls).not.toContain('POST /agents/a1/revoke')
+  })
+})

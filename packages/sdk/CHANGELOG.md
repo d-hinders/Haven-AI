@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **The haven-pay skill's leaked-credential guidance names the real remedies (#3722).** It used to tell the agent to have the user "pause or revoke" the agent; neither ends a leaked key's on-chain authority (pause blocks payments through Haven only, and revoke is a status flip). The section, now headed "If the credential may have leaked", says: Replace signing key (the old budget is revoked on-chain and a new one issued), or Stop budget / Remove agent… to stop all spending, and that the signing key also controls funds already in the agent wallet, which ending the budget does not recover. Text-only; no method or type changed. No update needed.
+
 ### Fixed
 
 - **`verifyPaymentReceipt` accepts the receipt endpoint's wrapped response as-is (#3723).** `GET /payments/{id}/receipt` (and `HavenClient.getReceipt`) return `{ receipt, verification }`, but the verifier looked for `authorization` at the top level, so passing that response unchanged answered `not_a_signed_receipt`. When the top level carries no `authorization` and `.receipt` is a non-null object, the bundle inside is verified — one level only, no recursion. The wrapper's `verification` is never read (it is Haven's own self-check, not offline evidence), and a `haven_list_receipts` row — bare or wrapped — still answers `not_a_signed_receipt`.

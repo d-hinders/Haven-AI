@@ -369,7 +369,7 @@ async function decideTeardown(identity: IdentityFile | null, input: UnwireInput)
           'This agent is still ACTIVE on the backend: its API key and delegate key still carry spend authority, so ' +
           'destroying them would be a live spend-authority change. Key material kept in this directory (0o600); its MCP wiring above is gone.',
         remedy:
-          'Revoke the agent on the Haven agent page (connect never revokes), then re-run --unwire; or, to delete ' +
+          'Use Remove agent\u2026 on the Haven agent page (connect never revokes), then re-run --unwire; or, to delete ' +
           `the key anyway, re-run with ${DESTROY_FLAG}.`,
       }
     case 'unauthorized':

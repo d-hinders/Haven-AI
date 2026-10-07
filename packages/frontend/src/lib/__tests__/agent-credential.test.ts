@@ -69,6 +69,14 @@ describe('buildAgentCredential', () => {
     expect(json.notes.refresh).toMatch(/budget/i)
   })
 
+  it('leak guidance names Replace signing key, not "revoke the agent" (#3722)', () => {
+    const { json } = buildAgentCredential(BASE_INPUT)
+    expect(json.notes.custody).toContain('if it leaks, open the agent at revoke_url and choose Replace signing key')
+    expect(json.notes.custody).toContain('pausing only blocks payments through Haven')
+    expect(json.notes.custody).toContain('also controls any funds already in the agent wallet, and ending the budget does not recover them')
+    expect(json.notes.custody).not.toMatch(/revoke the agent at revoke_url/)
+  })
+
   /**
    * #2106: this file leaves the browser and lands in `~/.haven/*.json`, so a
    * rail-blind claim in it outlives the session that wrote it. The note named

@@ -217,6 +217,18 @@ last-verified: "2026-10-02"
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
 
+> **Re-verified #3722 (2026-10-07, leaked-credential copy):** this diff touches
+> covered files in their human-readable text only: the haven-pay skill's leak
+> section (`skill-content.ts`, renamed "If the credential may have leaked"), the
+> signer consent line, and the connect `--tombstone` / `--unwire` output
+> sentences. All of them now name Replace signing key, Stop budget and Remove
+> agent… instead of "pause or revoke". Every runtime still installs the one
+> canonical skill string. The signer consent hash covers identity, tool names
+> and `SIGNER_CONSENT_SURFACE_VERSION` (unchanged), not the wording, so no
+> install is re-prompted by this. No tool, argument, schema, version-skew,
+> consent-hash or exit-code contract moves. `last-verified` stays 2026-10-02.
+> Nothing else in this document was re-verified.
+
 > **Re-verified, Backend checks ceiling (2026-10-07):** this diff touches
 > `.github/workflows/ci.yml`, a covered file, in the `backend_checks` job's
 > `timeout-minutes` only (8 to 12) and the comment above it. The job name,

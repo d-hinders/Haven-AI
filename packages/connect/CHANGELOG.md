@@ -17,6 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **Teardown output names the agent page's real control (#3722).** `--tombstone` and `--unwire` told the user to "revoke the agent on the Haven agent page"; the page's control is **Remove agent…** (it ends every live budget on-chain), with **Stop budget** for the budget alone. Text-only. No update needed.
 - **The runtime picker never defaults (#3732, owner decision 2026-10-07).** When the connector cannot detect the runtime and prompts (plain terminal, interactive), pressing Enter no longer accepts the first listed client: an empty answer re-asks and, after three attempts, aborts with `runtime_prompt_aborted` having written nothing — the setup token stays unused. The list may mark the suggested client, but only a typed number selects. Two corrections ride with it: a `~/.claude.json` carrying an `mcpServers` key is now config-file evidence for Claude Code, so a machine with both a Claude Code MCP config and a Codex config produces NO suggestion instead of suggesting Codex by construction (`--json` `suggested_runtime` follows the same rule); and the chat app's row reads "Claude Desktop (chat app)". No update needed. See the CASP record `docs/regulatory/casp-changelog/2026-10-07-3732.md`.
 
 ## 0.8.1-alpha.0 — 2026-10-07

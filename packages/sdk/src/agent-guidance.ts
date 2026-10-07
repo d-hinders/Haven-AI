@@ -261,7 +261,7 @@ If the approval wait times out, nothing is lost — your agent is registered and
 
 Call \`haven_get_agent\`, one of the Haven MCP tools the connector wires into your runtime in step 4. It returns identity plus \`spend_authority_readiness\`:
 
-- \`ready\` — a budget is live; you can pay.
+- \`ready\` — a budget is live: you have the authority to pay. It does not say the account holds funds — the \`allowances[]\` rows carry \`funds_cover_remaining\`, and \`false\` there is a heads-up to mention to your user, not a refusal.
 - \`needs_approval\` — the connector finished, nobody approved yet. Ask your user again, in their Haven tab; there is no queue to wait in.
 - \`revoked\` — the credential is not active; ask your user to create a new agent.
 
@@ -365,7 +365,7 @@ Then:
 1. Run \`<packages.cli.one_liner> login\`. That command is the manifest's \`packages.cli.one_liner\` (\`/.well-known/haven.json\`) — run it as given: \`packages.cli.channel\` serves the full spec. It prints a link and a code and does not need my password — it must never ask for it. Give me the link straight away and wait for me to approve it in my browser.
 2. Once I have approved, run \`haven agents connect --name <a name you choose> --budget <amount> --token USDC --period <minutes>\` with the budget I tell you. If I have not given you one, ask me before running it. Add \`--run\` to complete the connection in the same step.
 3. ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
-4. Once I have approved the budget, verify with the \`haven_get_agent\` tool: \`ready\` means you can pay, \`needs_approval\` means my approval has not landed yet.
+4. Once I have approved the budget, verify with the \`haven_get_agent\` tool: \`ready\` means I have given you the authority to pay — it does not confirm the account holds funds, so if its allowances rows carry \`funds_cover_remaining: false\`, tell me and still try the payment; \`needs_approval\` means my approval has not landed yet.
 
 Two things only I can do: approving that budget with my passkey, and funding the account with USDC — no ETH, Haven sponsors the gas. Tell me if either is missing rather than working around it.
 

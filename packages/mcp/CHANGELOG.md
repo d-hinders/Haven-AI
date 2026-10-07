@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **A funding-first `PREPARE_REVERTED` failure (#3731, hosted behaviour — reaches stdio only after the next release).** When a prepare revert was the token's own insufficient-balance error, the hosted failure now carries `revert_cause: "insufficient_balance"` and answers `next_action: fund_account_or_raise_allowance` with a funding-specific reason — the account needs funds, not a caveat change; the revert already proves the shortfall, so no check tool is named. Any other revert keeps today's caveat text and stop step, and the refusal ledger is unchanged (still `onchain_revert`). The hosted runtime picks the backend change up on deploy; stdio serves it once `@haven_ai/mcp` pins the SDK release that carries it (see `docs/operations/mcp-runtime-compatibility.md`).
+
 ### Added
 
 - **`haven_get_receipt { payment_id }` returns the signed receipt bundle (#3723).** No MCP tool returned the signed bundle `haven_verify_receipt` checks, so an agent that wanted it had to call the REST API with the key from its credential file by hand (field evidence 2026-10-07). The new read tool answers `{ receipt }` — the signed `haven-receipt-1` bundle only, from this agent's own **settled** payments: an unknown id, another agent's id or an unsettled payment is a structured 404, and the endpoint's server-side `verification` is deliberately not returned (it is computed on Haven's server, not offline — `haven_verify_receipt` reads the bundle unchanged). The tool list change re-consents: this runtime hashes its registered tool names, so installed clients ask for consent once after updating, and the exported `HavenMcpToolName` union grows (a source break for exhaustive `switch`/`Record` consumers).

@@ -672,6 +672,19 @@ export interface HavenAllowance {
   configuredAmount: string
   resetPeriodMin: number
   /**
+   * #3731: whether the account's balance can back THIS row's WHOLE remaining
+   * period budget. `false` is a heads-up to mention to the user, never a
+   * refusal — a budget larger than the balance is a normal setup (an owner
+   * may top up weekly) and says nothing certain about the next payment;
+   * `null` when unverifiable (the chain read failed, or `remaining` was not
+   * read live — `onchain.remainingIsFromChain` false). Always present: any
+   * non-boolean wire value, including an absent one, maps to `null` rather
+   * than `undefined`. The key is absent on the WIRE when the remaining is 0
+   * (`balance >= 0` would be a vacuous true). Rows for one token are each
+   * compared alone — they do not add up. Never a balance figure.
+   */
+  fundsCoverRemaining: boolean | null
+  /**
    * #3518: this budget's SCOPE, so an agent holding more than one budget
    * for a token can name the merchant-locked one before paying. The
    * recipient pin is null for an open budget; `merchantId` is set only on a
@@ -896,9 +909,13 @@ export interface RawHavenBalanceCoverage {
  * call returns, so it surfaces as an API error rather than `revoked`. `revoked`
  * is reached when the request authenticates but the agent status is non-active.
  *
- * Wallet token balance is intentionally NOT folded in here: the on-chain
- * remaining allowance is the gate Haven enforces, and insufficient wallet
- * funding surfaces at pay time as INSUFFICIENT_FUNDS.
+ * Wallet token balance is intentionally NOT folded into the readiness value
+ * itself — `ready` stays an AUTHORITY signal (installed consumers switch on
+ * its value set) — but the account's ability to back it is reported beside
+ * it: the allowances rows carry `fundsCoverRemaining` (#3731), null when
+ * unverifiable, and an underfunded prepare surfaces at pay time as
+ * `PREPARE_REVERTED` with `revert_cause: "insufficient_balance"`, never
+ * `INSUFFICIENT_FUNDS`.
  */
 export type HavenAgentReadiness = 'ready' | 'needs_approval' | 'revoked'
 
@@ -928,6 +945,14 @@ export interface HavenAgentAllowanceSummary {
   configuredAmount: string
   resetPeriodMin: number
   isResetPending: boolean
+  /**
+   * #3731: the {@link HavenAllowance.fundsCoverRemaining} projection —
+   * whether the account's balance can back this row's whole remaining
+   * period budget. `false` is a heads-up to mention to the user, not a
+   * refusal; `null` when unverifiable. Same provenance rule as the detailed
+   * read: any non-boolean wire value maps to `null`, never `undefined`.
+   */
+  fundsCoverRemaining: boolean | null
 }
 
 /**
@@ -2452,6 +2477,14 @@ export interface RawHavenAllowance {
   recipient_address?: string | null
   merchant_id?: string | null
   reserved_haven_atomic?: string
+  /**
+   * #3731: whether the account's balance can back this row's whole remaining
+   * period budget — true/false/null per the
+   * {@link HavenAllowance.fundsCoverRemaining} contract. Absent on the wire
+   * when `onchain.remaining` is 0, and on backends that predate the field;
+   * the mapping turns any non-boolean into `null`.
+   */
+  funds_cover_remaining?: boolean | null
   onchain: {
     amount: string
     spent: string

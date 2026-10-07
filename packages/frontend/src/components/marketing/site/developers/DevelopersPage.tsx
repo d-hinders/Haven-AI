@@ -116,7 +116,7 @@ const STEPS = [
   {
     n: '03',
     title: 'Verify, then pay',
-    body: 'Call haven_get_agent. When spend_authority_readiness reads ready, the agent can pay.',
+    body: 'Call haven_get_agent. When spend_authority_readiness reads ready, the agent has the authority to pay; a funds_cover_remaining false on an allowances row is a heads-up the agent will mention, not a refusal.',
   },
 ] as const
 

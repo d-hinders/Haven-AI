@@ -17,6 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **The agent skill bundle's readiness and `PREPARE_REVERTED` copy is honest about funding (#3731).** The auto-installed skill now says readiness is authority — `ready` does not mean money is there, and `funds_cover_remaining: false` on an allowances row is a heads-up to mention to the user, not a refusal — and gains a funding branch for `revert_cause: "insufficient_balance"` failures. Copy-only; the connector's behaviour is unchanged. No update needed.
 - **The runtime picker never defaults (#3732, owner decision 2026-10-07).** When the connector cannot detect the runtime and prompts (plain terminal, interactive), pressing Enter no longer accepts the first listed client: an empty answer re-asks and, after three attempts, aborts with `runtime_prompt_aborted` having written nothing — the setup token stays unused. The list may mark the suggested client, but only a typed number selects. Two corrections ride with it: a `~/.claude.json` carrying an `mcpServers` key is now config-file evidence for Claude Code, so a machine with both a Claude Code MCP config and a Codex config produces NO suggestion instead of suggesting Codex by construction (`--json` `suggested_runtime` follows the same rule); and the chat app's row reads "Claude Desktop (chat app)". No update needed. See the CASP record `docs/regulatory/casp-changelog/2026-10-07-3732.md`.
 
 ## 0.8.1-alpha.0 — 2026-10-07

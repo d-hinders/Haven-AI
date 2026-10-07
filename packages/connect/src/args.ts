@@ -287,7 +287,7 @@ export function helpText(): string {
     '  --replace                  When this machine is already wired to a different Haven agent on the bare',
     '                             haven / haven-signer pair, re-point that pair at the new agent and retire the',
     '                             previous agent directory locally (tombstoned, local key files removed).',
-    '                             Nothing is revoked — revoke the old agent on the Haven agent page. Without',
+    '                             Nothing is revoked — use Remove agent… on the Haven agent page. Without',
     '                             this flag a non-interactive run REFUSES such a collision (wiring_collision)',
     '                             and an interactive terminal is asked; --name installs alongside instead.',
     '  --name <slug>              Wiring slug for a NAMED agent: writes haven-<slug> / haven-signer-<slug>',

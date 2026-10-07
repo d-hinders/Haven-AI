@@ -122,7 +122,9 @@ describe('promptWiringCollisionResolution (#2551)', () => {
     expect(shown).toContain('replace')
     expect(shown).toContain('alongside')
     expect(shown).toContain('payment-agent')
-    expect(shown).toMatch(/revoke it on the Haven agent page/)
+    // #3756: the agent page's control is Remove agent…, not "revoke".
+    expect(shown).toContain('you still use Remove agent\u2026 on the Haven agent page')
+    expect(shown).not.toMatch(/revoke it on the Haven agent page/)
   })
 
   it.each([

@@ -37,6 +37,11 @@ describe('parseArgs', () => {
     expect(helpText()).toContain('--json')
   })
 
+  it('#3756: --replace help names Remove agent… on the agent page, not a bare revoke', () => {
+    expect(helpText()).toContain('Nothing is revoked — use Remove agent… on the Haven agent page.')
+    expect(helpText()).not.toMatch(/revoke the old agent on the Haven agent page/)
+  })
+
   it('does not enable local MCP by default', () => {
     const parsed = parseArgs(['--setup', 'hv_setup_test'], {})
     expect(parsed.options.localMcp).toBeUndefined()

@@ -385,8 +385,8 @@ and the API key travels beside it in a header.
 
 `superseded_agent_ids` lists the other agent directories on this machine. A
 re-run mints a NEW agent, and without `--replace` retires nothing, so those
-older agents still hold live API and signing keys — revoke them on the Haven
-agent page if you meant to replace them. Empty on a clean first run; an empty
+older agents still hold live API and signing keys — use **Remove agent…** on the
+Haven agent page for each if you meant to replace them. Empty on a clean first run; an empty
 list here is not a guarantee, since a scan that cannot read the credential root
 also yields one rather than failing a completed setup.
 
@@ -539,8 +539,9 @@ already-configured machine behaves as follows (characterized in
   [Running several agents in one runtime](#running-several-agents-in-one-runtime).
 - **The previous agent is not revoked by a re-run — with or without
   `--replace`.** Local retirement is local: its authority remains whatever
-  its on-chain rules and the Haven agent page say. Revoke agents you no
-  longer use from the Haven dashboard. Connect never calls revoke — that
+  its on-chain rules and the Haven agent page say. Use **Remove agent…** on
+  the Haven agent page for agents you no longer use (or the superseded-agents
+  revoke on the setup screen). Connect never calls revoke — that
   route is owner-authenticated, and an agent credential revoking a sibling
   agent would be an agent editing its own authority.
 - **A re-run never overwrites an existing credential file.** A write that would
@@ -689,8 +690,8 @@ terminal and refuses everywhere else, so a `superseded` directory now means
 someone chose it — a `--replace` whose install failed, an older connector, or
 a directory this scan could not classify. A superseded directory
 whose key is still live is a FAILING check naming the agent id, with the
-repair spelled out: revoke it on the Haven agent page, then remove the
-directory. An already-revoked one reports as informational; an unreachable
+repair spelled out: use **Remove agent…** on the Haven agent page, then remove
+the directory. An already-revoked one reports as informational; an unreachable
 probe is a note, never a verdict. Connect never revokes or deletes
 credentials itself — it reports, you decide. The setup completion output
 names superseded agents the moment they are created, for the same reason.

@@ -2291,7 +2291,10 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     expect(outcome).not.toHaveProperty('retirement_mirror_errors')
 
     expect(output).toContain('agent-old')
-    expect(output).toMatch(/[Rr]evoke/)
+    // #3756: /[Rr]evoke/ alone was satisfied by "NOT revoked" whatever the remedy said;
+    // pin the named control and the absence of the old one.
+    expect(output).toContain('use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets)')
+    expect(output).not.toMatch(/revoke them on the Haven agent page/)
     // #2551: replaced means retired LOCALLY — the restart guidance survives,
     // the "keeps acting as them" warning is now false and must not print.
     expect(output).toMatch(/NOT revoked/)
@@ -2329,6 +2332,11 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     const error = await expectRejection(runWithPriorDir(true))
     expect(error).toBeInstanceOf(ConnectError)
     expect((error as ConnectError).code).toBe('wiring_collision')
+    // #3756: the relayed refusal names the agent-page control, not a bare "revoke".
+    expect((error as ConnectError).message).toContain(
+      'still use Remove agent\u2026 on the Haven agent page to end the old agent\u2019s budgets',
+    )
+    expect((error as ConnectError).message).not.toMatch(/revoke the old agent on the Haven agent page/)
   })
 
   it('REGRESSION (B1): filesystem junk under the credentials root is never named as an agent', async () => {

@@ -224,6 +224,22 @@ last-verified: "2026-10-02"
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
 
+> **Re-verified #3756 (2026-10-07, superseded-agent wording):** this diff
+> touches covered connect files in their human-readable output only:
+> - the `--doctor` superseded-agents repair (`doctor.ts`);
+> - the replace and new-agent heads-ups and the `wiring_collision` refusal
+>   (`runtime.ts`);
+> - the collision prompt (`wiring-collision.ts`);
+> - the `--replace` help (`args.ts`) and the README.
+>
+> Each now names Remove agent… on the agent page instead of "revoke". No
+> flag, exit code, check id, `--json` field, tool, schema, version-skew or
+> consent-hash contract moves. Two body lines here repeated the same claim and
+> are fixed with it: the `--replace` paragraph ("the owner still revokes on the
+> Haven agent page") and the `--unwire` paragraph ("the owner revokes the agent
+> on the Haven agent page") now name Remove agent…. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3722 (2026-10-07, leaked-credential copy):** this diff touches
 > covered files in their human-readable text only: the haven-pay skill's leak
 > section (`skill-content.ts`, renamed "If the credential may have leaked"), the
@@ -2625,7 +2641,7 @@ superseded directory **locally** (tombstone, then the unconditional key-material
 teardown — `--unwire` itself now runs that teardown only when its #3123 probe
 says there is nothing to preserve; `--replace` does not probe — only once the
 runtime install actually completed — a failed install skips it and the outcome
-says so), and the owner still revokes on the Haven
+says so), and the owner still ends it with **Remove agent…** on the Haven
 agent page. The revoke route is owner-authenticated; the connector holds agent
 keys only. Since #3542 the dashboard's revoke of a superseded agent also ends
 its budget with one owner signature (`revoke-all`); a revoke that stops at the
@@ -4341,7 +4357,7 @@ to call next in structured fields, and those fields are typed end to end
   > Nothing else in this document was re-verified in this pass.
 
   This is local teardown, **not** backend revocation: Connect reports what it
-  changed, while the owner revokes the agent on the Haven agent page. Named
+  changed, while the owner uses **Remove agent…** on the Haven agent page. Named
   pairs are uniquely addressable. For the shared bare `haven` /
   `haven-signer` pair, however, it removes entries only with positive proof
   that this directory owns the wrapper or Hermes key; otherwise it refuses

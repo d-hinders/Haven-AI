@@ -516,7 +516,7 @@ export type paths = {
         post?: never;
         /**
          * RETIRED — always answers 410. Archive instead.
-         * @description Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: revoke the agent, kill its budgets, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.
+         * @description Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: end the agent's budgets (POST /agents/{id}/delegations/revoke-all, owner-signed), revoke the agent, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.
          */
         delete: operations["deleteAgent"];
         options?: never;
@@ -2499,7 +2499,7 @@ export type paths = {
         put?: never;
         /**
          * Cancel a pending Connect Agent 2 setup.
-         * @description Cancels setup state and revokes the pending agent API key when no on-chain authority has been activated. Active agents must be paused or revoked through normal agent controls.
+         * @description Cancels setup state and revokes the pending agent API key when no on-chain authority has been activated. An approved agent is stopped by ending its budgets instead (POST /agents/{id}/delegations/revoke-all, owner-signed; in the dashboard, Stop budget or Remove agent…); pausing only blocks payments through Haven.
          */
         post: operations["cancelAgentConnectionSetup"];
         delete?: never;

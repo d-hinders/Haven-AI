@@ -109,6 +109,18 @@ and the `release` skill.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3756, 2026-10-07, superseded-agent wording):**
+> this doc is coupled through connect's `doctor.ts`, `runtime.ts`, `args.ts`
+> and `wiring-collision.ts`, and through the backend's
+> `routes/agent-connection-setups.ts` (its approved-agent cancel refusal, which
+> this document does not describe). The change is human-readable text only: the
+> superseded-agents repair, the replace and new-agent heads-ups, the
+> `wiring_collision` refusal and prompt, and the `--replace` help now name
+> Remove agent… instead of "revoke" on the agent page. No flag, exit code,
+> check id, `--json` field, channel rule or guard this document describes
+> moved. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3722, 2026-10-07, leaked-credential copy):** this
 > doc is coupled through `packages/connect/src/cli.ts`. The change is two
 > human-readable `--tombstone` / `--unwire` output sentences, which now name the

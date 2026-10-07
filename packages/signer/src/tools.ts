@@ -18,6 +18,7 @@ import {
   assertOwnTaskBudgetCloseUserOp,
   assertOwnSubBudgetChild,
   assertOwnSubBudgetCloseUserOp,
+  x402RetryHeadersFor,
   type HavenClientUpdate,
   type X402PaymentRequired,
 } from '@haven_ai/sdk/edge'
@@ -379,8 +380,10 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   'do not call this tool. The signer validates the merchant, amount, resource, asset, and',
   'network against the recorded funding context before signing, checks expires_at when present,',
   'and rejects mismatches or expired payment windows.',
-  'Returns { payment_header, accepted }. On your retry set BOTH PAYMENT-SIGNATURE (x402 v2) and',
-  'X-PAYMENT (v1) to <payment_header>; a strict v2 merchant reads only the first.',
+  'Returns { payment_header, retry_headers, accepted }. On your retry set EVERY header named in',
+  'retry_headers to <payment_header> — the names come from the same rule the wire uses (both',
+  'PAYMENT-SIGNATURE (x402 v2) and X-PAYMENT (v1) on the EIP-3009 bridge; a strict v2 merchant reads',
+  'only the first).',
   'Only call after haven_submit has confirmed the funding step (nextAction=none or',
   'the funding tx has a confirmed status). Next for paid MCP tools: call mcp__haven__haven_complete_mcp_tool.',
 ].join(' ')
@@ -407,8 +410,8 @@ const SIGN_X402_DESCRIPTION = [
   'haven_sign, not to this one. payment_header IS the header to use.',
   'Next: for a paid MCP tool, call mcp__haven__haven_settle_mcp_tool. For a direct plain-HTTP x402',
   'merchant (the haven_pay_x402_quote path), relay signature via mcp__haven__haven_submit and then',
-  'retry the original merchant URL YOURSELF, setting BOTH PAYMENT-SIGNATURE (x402 v2) and',
-  'X-PAYMENT (v1) to payment_header — Haven never contacts that merchant.',
+  'retry the original merchant URL YOURSELF, setting EVERY header the result names in',
+  'retry_headers to payment_header — Haven never contacts that merchant.',
 ].join(' ')
 
 const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
@@ -1045,7 +1048,13 @@ export function createToolHandlers(
           'haven_x402_sign_header',
           hashPayloadForAudit(args.payment_required),
         )
-        return { payment_header: result.paymentHeader, accepted: result.accepted }
+        return {
+          payment_header: result.paymentHeader,
+          accepted: result.accepted,
+          // #3727: the ready-made retry headers beside the prose — the names
+          // come from the SDK's live rule, never re-derived here.
+          retry_headers: x402RetryHeadersFor(result.paymentHeader),
+        }
       }),
 
     haven_sign_x402: async (input) =>
@@ -1111,6 +1120,9 @@ export function createToolHandlers(
           x402_binding: funding.x402Binding,
           payment_header: header.paymentHeader,
           accepted: header.accepted,
+          // #3727: the ready-made retry headers beside the prose — the names
+          // come from the SDK's live rule, never re-derived here.
+          retry_headers: x402RetryHeadersFor(header.paymentHeader),
           ...clientUpdateField(resolved),
         }
       }),

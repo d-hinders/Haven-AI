@@ -66,6 +66,9 @@ import {
   normalizePaymentRequired,
   resolveX402RetryTarget,
   isSecureX402RetryTarget,
+  isZeroSettlementTxHash,
+  parseMerchantSettlement,
+  type EvidenceReportOutcome,
   type X402RetryTarget,
   type X402Quote,
   type X402ResumeState,
@@ -112,14 +115,191 @@ import {
  * add. Rejected outcomes, erc7710 payments, a non-eip3009/unknown scheme, and
  * a payment whose settlement is already recorded all keep the old answer.
  */
-function reportOutcomeHandoff(outcome: 'accepted' | 'rejected', offerSettlementEvidence: boolean, paymentId: string): HostedHandoff {
+function reportOutcomeHandoff(
+  outcome: 'accepted' | 'rejected',
+  offerSettlementEvidence: boolean,
+  paymentId: string,
+  // #3727: the folded evidence's result, when the caller supplied evidence.
+  // Its answer REPLACES the status re-read's offer — a confirmed record is
+  // "no tool follows" even if the re-read somehow lagged, a retryable one
+  // re-names the evidence tool with the hash prefilled, and a refused one
+  // names NO tool (re-reporting the same hash re-refuses).
+  settlementEvidence?: ReportedSettlementEvidence | null,
+): HostedHandoff {
   if (outcome === 'rejected') {
     return { nextTool: 'haven_sweep_delegate', nextArguments: {} }
   }
+  if (settlementEvidence) return evidenceHandoff(settlementEvidence, paymentId)
   if (offerSettlementEvidence) {
     return { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId } }
   }
   return { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
+}
+
+/**
+ * #3727: the settlement evidence a caller may fold INTO the outcome report —
+ * the raw base64 `PAYMENT-RESPONSE` header the merchant returned and/or an
+ * explicit `settlement_tx_hash`. Resolved and validated BEFORE anything is
+ * written, so a malformed or self-contradictory call refuses the same way the
+ * strict input contract does and leaves no partial record behind.
+ *
+ * What the decoder contributes: `parseMerchantSettlement` reads the header
+ * for its `transaction` field (and the `txHash`/`tx_hash` spellings some
+ * merchants use) and nothing else — a `payer` inside is the merchant's claim
+ * about who paid, is NOT Haven's record, and is never written (#3125).
+ *
+ * Refusals, each before any write:
+ * - `PAYMENT_EVIDENCE_UNREADABLE` — `payment_response` decoded to no
+ *   transaction field, or to a value that is not a 0x-prefixed 64-hex hash.
+ * - `ZERO_SETTLEMENT_HASH` — the decoded (or supplied) hash is the demo
+ *   merchant's `0x00…00` "delivered, not settled" marker. Same recognizer
+ *   `haven_report_settlement_evidence` refuses with, applied here before the
+ *   outcome write so the two tools refuse identically.
+ * - `SETTLEMENT_EVIDENCE_CONFLICT` — both inputs supplied and they name
+ *   DIFFERENT hashes (hex is case-insensitive: matching case-insensitively is
+ *   the honest comparison, since a checksummed copy of the same hash must not
+ *   read as a conflict). One hash, asserted twice in agreement, is accepted —
+ *   the explicit `settlement_tx_hash` wins for the echo.
+ */
+type FoldedSettlementEvidence = {
+  /** The single hash the evidence names, after decoding and conflict-checking. */
+  readonly settlementTxHash: string
+  /** Which argument named it — echoed on the response for reconciliation. */
+  readonly source: 'settlement_tx_hash' | 'payment_response' | 'both'
+}
+
+const TX_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/
+
+function resolveSettlementEvidence(args: {
+  settlement_tx_hash?: string
+  payment_response?: string
+}): FoldedSettlementEvidence | null {
+  const explicit = args.settlement_tx_hash
+  const header = args.payment_response
+  if (!explicit && !header) return null
+
+  let decoded: string | undefined
+  if (header) {
+    const parsed = parseMerchantSettlement(header).settlementTxHash
+    if (typeof parsed !== 'string' || parsed.length === 0) {
+      throw new HostedToolError({
+        code: 'PAYMENT_EVIDENCE_UNREADABLE',
+        statusCode: 400,
+        message:
+          'payment_response did not decode to a settlement transaction: the PAYMENT-RESPONSE header must be ' +
+          'the base64 value the merchant returned and carry a `transaction` field. Nothing was written — ' +
+          're-report with settlement_tx_hash, or without evidence.',
+      })
+    }
+    if (!TX_HASH_PATTERN.test(parsed)) {
+      throw new HostedToolError({
+        code: 'PAYMENT_EVIDENCE_UNREADABLE',
+        statusCode: 400,
+        message:
+          'payment_response decoded to a `transaction` that is not a 0x-prefixed 64-hex transaction hash. ' +
+          'Nothing was written — re-report with settlement_tx_hash, or without evidence.',
+      })
+    }
+    if (isZeroSettlementTxHash(parsed)) {
+      throw new HostedToolError({
+        code: 'ZERO_SETTLEMENT_HASH',
+        statusCode: 400,
+        message:
+          'payment_response decoded to the zero hash (0x00…00) — the "delivered, not settled" marker, not a ' +
+          'transaction. Nothing was written, and nothing would verify on-chain.',
+      })
+    }
+    decoded = parsed
+  }
+
+  if (explicit && decoded && explicit.toLowerCase() !== decoded.toLowerCase()) {
+    throw new HostedToolError({
+      code: 'SETTLEMENT_EVIDENCE_CONFLICT',
+      statusCode: 409,
+      message:
+        'settlement_tx_hash and the transaction inside payment_response name DIFFERENT hashes. Nothing was ' +
+        'written: supply the one hash you hold, or both copies of the same hash.',
+    })
+  }
+  if (explicit && isZeroSettlementTxHash(explicit)) {
+    throw new HostedToolError({
+      code: 'ZERO_SETTLEMENT_HASH',
+      statusCode: 400,
+      message:
+        'settlement_tx_hash is the zero hash (0x00…00) — the "delivered, not settled" marker, not a ' +
+        'transaction. Nothing was written, and nothing would verify on-chain.',
+    })
+  }
+
+  return {
+    settlementTxHash: explicit ?? decoded!,
+    source: explicit && decoded ? 'both' : explicit ? 'settlement_tx_hash' : 'payment_response',
+  }
+}
+
+/**
+ * #3727: the `settlement_evidence` block the outcome report carries when the
+ * caller supplied evidence — the result of the ONE `reportSettlementEvidence`
+ * call it replaced (the same seam `haven_report_settlement_evidence` uses, so
+ * the on-chain verification and every refusal are exactly that tool's). Absent
+ * entirely when no evidence was supplied: calls without evidence answer the
+ * pre-existing shape, byte for byte.
+ */
+type ReportedSettlementEvidence = {
+  readonly settlement_tx_hash: string
+  readonly source: FoldedSettlementEvidence['source']
+  readonly recorded: boolean
+  readonly outcome: EvidenceReportOutcome['outcome'] | 'not_attempted'
+  readonly status_code?: number
+  readonly refusal_reason?: string
+  readonly note?: string
+}
+
+const EVIDENCE_RECORDED_OMITTED_REASON =
+  'the merchant accepted the paid retry and the settlement is verified and recorded; the purchase is complete and no Haven tool follows'
+
+function evidenceHandoff(
+  reported: ReportedSettlementEvidence,
+  paymentId: string,
+): HostedHandoff {
+  if (reported.recorded) {
+    return { nextTool: null, nextToolOmittedReason: EVIDENCE_RECORDED_OMITTED_REASON }
+  }
+  if (reported.outcome === 'retryable') {
+    return {
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: { payment_id: paymentId, settlement_tx_hash: reported.settlement_tx_hash },
+    }
+  }
+  if (reported.outcome === 'refused') {
+    return {
+      nextTool: null,
+      nextToolOmittedReason:
+        'the settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash',
+    }
+  }
+  // Unreachable for an accepted outcome (not_attempted only rides a rejection,
+  // which keeps the sweep handoff), but typed honestly rather than asserted.
+  return { nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }
+}
+
+function evidenceReason(reported: ReportedSettlementEvidence): string {
+  if (reported.recorded) {
+    return (
+      'Recorded. The merchant settlement was verified on-chain and recorded beside the funding ' +
+      'transaction; the purchase is complete and no further Haven tool is needed.'
+    )
+  }
+  if (reported.outcome === 'retryable') {
+    return (
+      'Recorded. The settlement hash could not be verified yet (the chain read failed, or the ' +
+      'transaction is not mined); retry haven_report_settlement_evidence with the same hash.'
+    )
+  }
+  return (
+    'Recorded, but the settlement evidence was refused: the hash does not match this payment ' +
+    'on-chain. Do not re-report the same hash — check the PAYMENT-RESPONSE you relayed.'
+  )
 }
 
 function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
@@ -694,12 +874,58 @@ export function createPlainHttpX402Handlers(
     haven_report_x402_outcome: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_report_x402_outcome', input)
+        // #3727: resolve and validate the optional folded evidence BEFORE
+        // anything is written — a malformed or self-contradictory call
+        // refuses here and leaves no partial record.
+        const evidence = resolveSettlementEvidence(args)
         const report = await haven.reportX402MerchantOutcome({
           paymentId: args.payment_id,
           outcome: args.outcome,
           merchantStatus: args.merchant_status,
           ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
         })
+        // #3727: on an accepted outcome, record the folded evidence through
+        // the SAME seam `haven_report_settlement_evidence` uses — one call
+        // replaces the follow-up. Deliberately BEFORE the status re-read
+        // below, so the re-read reflects the write: a confirmed evidence
+        // report shows up as `merchant_settlement_recorded: true` on the
+        // very read this response is reconciled against. On a REJECTED
+        // outcome the evidence is ignored with a warning (the report's own
+        // handoff to haven_sweep_delegate is unchanged) — there is no
+        // merchant settlement to verify when the merchant refused the retry,
+        // and the caller can re-send the same evidence once it holds a real
+        // acceptance. The three-outcome contract (`confirmed` / `retryable`
+        // / `refused`) is that tool's; a refused hash names the same
+        // on-chain mismatch it always did.
+        let settlementEvidence: ReportedSettlementEvidence | null = null
+        if (evidence && report.outcome === 'accepted') {
+          const evidenceOutcome = await haven.reportSettlementEvidence(
+            report.paymentId,
+            evidence.settlementTxHash,
+          )
+          settlementEvidence = {
+            settlement_tx_hash: evidence.settlementTxHash,
+            source: evidence.source,
+            recorded: evidenceOutcome.outcome === 'confirmed',
+            outcome: evidenceOutcome.outcome,
+            ...(evidenceOutcome.outcome !== 'confirmed' && evidenceOutcome.statusCode !== undefined
+              ? { status_code: evidenceOutcome.statusCode }
+              : {}),
+            ...(evidenceOutcome.outcome === 'refused' && evidenceOutcome.reason
+              ? { refusal_reason: evidenceOutcome.reason }
+              : {}),
+          }
+        } else if (evidence) {
+          settlementEvidence = {
+            settlement_tx_hash: evidence.settlementTxHash,
+            source: evidence.source,
+            recorded: false,
+            outcome: 'not_attempted',
+            note:
+              'Evidence is only recorded with outcome "accepted"; the rejection was recorded as reported, ' +
+              'and no settlement was verified or written.',
+          }
+        }
         // Re-read rather than predict. The status this returns is the one the
         // agent would get from haven_get_payment_status on its next call, so
         // "reflected on the NEXT call" is demonstrated in the report's own
@@ -733,6 +959,9 @@ export function createPlainHttpX402Handlers(
           // was anchored to — and see that the agent did not choose it.
           tx_hash: report.txHash,
           resource_url: report.resourceUrl,
+          // #3727: present only when the caller supplied evidence — calls
+          // without evidence answer the pre-existing shape, byte for byte.
+          ...(settlementEvidence ? { settlement_evidence: settlementEvidence } : {}),
           ...buildAgentGuidance({
             // #3475 follow-up review round 1 (S1): next_action is UNCHANGED
             // by the settlement-evidence offer — it stays the status re-read's
@@ -747,20 +976,38 @@ export function createPlainHttpX402Handlers(
               (report.outcome === 'rejected'
                 ? AgentPaymentNextAction.SweepStrandedFunds
                 : AgentPaymentNextAction.None),
-            ...reportOutcomeHandoff(report.outcome, offerSettlementEvidence, report.paymentId),
+            // #3727: the handoff comes from the outcome + folded-evidence
+            // result — a confirmed record names no tool, a retryable one
+            // re-names the evidence tool with the hash prefilled, and a
+            // refused one names no tool (re-reporting the same hash
+            // re-refuses). Without evidence this is the #3475 offer logic,
+            // unchanged.
+            ...reportOutcomeHandoff(
+              report.outcome,
+              offerSettlementEvidence,
+              report.paymentId,
+              settlementEvidence,
+            ),
             safeToContinue: true,
             reason:
               report.outcome === 'rejected'
-                ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
-                  'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
-                  'the same purchase.'
-                : offerSettlementEvidence
-                  ? "Recorded. If the merchant's response carried a settlement transaction " +
-                    '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
-                    'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
-                    'not, the purchase is already complete and no further Haven tool is needed.'
-                  : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
-                    'Haven tool is needed.',
+                ? settlementEvidence
+                  ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
+                    'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
+                    'the same purchase. The settlement evidence you attached was not used: it is only ' +
+                    'recorded with an accepted outcome.'
+                  : 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
+                    'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
+                    'the same purchase.'
+                : settlementEvidence
+                  ? evidenceReason(settlementEvidence)
+                  : offerSettlementEvidence
+                    ? "Recorded. If the merchant's response carried a settlement transaction " +
+                      '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
+                      'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
+                      'not, the purchase is already complete and no further Haven tool is needed.'
+                    : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
+                      'Haven tool is needed.',
             summary: {
               payment_id: report.paymentId,
               status: status?.status ?? 'confirmed',

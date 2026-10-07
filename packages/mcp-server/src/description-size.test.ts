@@ -370,11 +370,27 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * stricter than round 17's 964.04 because the 28th tool joins the
  * denominator and the new description is short; the stricter of the two
  * holds, shrink-only from here.
+ *
+ * **Re-derived — round 19, #3727 (2026-10-07, composed with #3730's round 18).**
+ * `haven_report_x402_outcome` gained the folded settlement-evidence input, and
+ * its description must name it before an agent meets it: pass the raw base64
+ * PAYMENT-RESPONSE header and/or a settlement_tx_hash, Haven verifies the hash
+ * on-chain BEFORE recording (a mismatch is refused), a rejected outcome records
+ * no evidence, and an accepted purchase completes with no further tool. +324
+ * UTF-8 bytes on that one description (594 → 918) — the same call as rounds
+ * 4-7: the copy is the issue's deliverable, and hand-trimming it would cut
+ * exactly the field names and the verify-before-record contract agents must
+ * read. No overclaim remains to trim. The union tree re-measures at 27,311
+ * UTF-8 bytes across the same 28 tools (measured, not derived arithmetically —
+ * the same union discipline as rounds 5/16), so the absolute pin moves to that
+ * exact value, shrink-only from here. The mean pin moves too: 27,311 / 28 =
+ * 975.3929 sits above round 18's 960.83, and the same rule applies —
+ * re-derived at the measured mean, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 26_903
-// Mean pin: round 18 (block above): 26,903 / 28 = 960.8214…, pinned at the
-// two-decimal ceiling (960.83). Shrink-only from here.
-const MAX_MEAN_BYTES = 960.83
+const MAX_TOTAL_BYTES = 27_311
+// Mean pin: round 19 (block above): 27,311 / 28 = 975.3929, pinned UP at the
+// two-decimal ceiling (975.4) — a ceiling rounds the safe direction.
+const MAX_MEAN_BYTES = 975.4
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

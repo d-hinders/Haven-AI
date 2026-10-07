@@ -36,6 +36,7 @@ import {
   HavenPaymentStateError,
   resolveTokenFromAddress,
   verifyPaymentReceipt,
+  x402RetryHeadersFor,
   type PaymentReceipt,
   type SweepAuthorization,
 } from '@haven_ai/sdk'
@@ -879,6 +880,11 @@ export function createStateDirectRecoveryHandlers(
             tx_hash: null,
             funding_tx_hash: null,
             payment_header: paymentHeader,
+            // #3727: the ready-made retry headers beside the prose — built
+            // from the SDK's live name rule, so on erc7710 this is
+            // PAYMENT-SIGNATURE ONLY (the delegation chain would double past
+            // the header-size ceiling under the legacy alias).
+            retry_headers: x402RetryHeadersFor(paymentHeader),
             ...buildAgentGuidance({
               // The shared vocabulary's value for "retry the merchant" (#1308).
               // Its own doc comment mentions resuming, so the reason below says

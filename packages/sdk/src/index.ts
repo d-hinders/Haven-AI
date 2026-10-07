@@ -189,6 +189,10 @@ export {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   x402V2PaymentEnvelope,
+  // #3727: the live header-name rule and the ready-made retry headers built
+  // from it.
+  x402PaymentHeaderNamesFor,
+  x402RetryHeadersFor,
   validateStandardX402PaymentHeader,
   X402PaymentHeaderValidationError,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
@@ -226,6 +230,9 @@ export type { X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-
 // own marker.
 export type { EvidenceReportOutcome } from './merchant-completion.js'
 export { isZeroSettlementTxHash } from './merchant-completion.js'
+// #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses —
+// it takes `transaction` (or its aliases) only and never surfaces `payer`.
+export { parseMerchantSettlement } from './merchant-completion.js'
 export {
   resolveX402RetryTarget,
   isSecureX402RetryTarget,

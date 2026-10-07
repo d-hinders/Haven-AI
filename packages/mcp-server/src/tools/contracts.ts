@@ -450,10 +450,20 @@ export const toolSchemas = {
     // #2292: the plain-HTTP twin of haven_complete_mcp_tool's bookkeeping —
     // see REPORT_X402_OUTCOME_DESCRIPTION for why it is a separate tool.
     //
-    // Note what is NOT here: no merchant_url, no tx_hash, no resource_url, no
-    // amount. Everything Haven writes down is read from the payment's own
-    // record, so the report says what the merchant ANSWERED and cannot say
-    // what it was answering about.
+    // Note what is NOT here: no merchant_url, no resource_url, no amount.
+    // Everything Haven writes down is read from the payment's own record, so
+    // the report says what the merchant ANSWERED and cannot say what it was
+    // answering about.
+    //
+    // #3727: the ONE caller-supplied hash this tool accepts is the optional
+    // settlement evidence below, and it is safe because nothing is trusted:
+    // Haven decodes the PAYMENT-RESPONSE (taking `transaction` only, never
+    // `payer`) or takes `settlement_tx_hash` verbatim, then verifies the
+    // delegate → merchant transfer on-chain through the same
+    // `reportSettlementEvidence` seam `haven_report_settlement_evidence`
+    // uses, BEFORE recording. A hash that does not match the payment
+    // on-chain is refused exactly as that tool refuses it, so the report
+    // still cannot say anything Haven has not checked itself.
     payment_id: z.string().min(1),
     outcome: z.enum(['accepted', 'rejected'], {
       required_error:
@@ -469,6 +479,26 @@ export const toolSchemas = {
     // Truncated server-side; kept short because it is a diagnostic snippet,
     // not a receipt.
     merchant_body: z.string().max(4096).optional(),
+    // #3727: optional settlement evidence, folded in so an accepted plain-HTTP
+    // purchase needs no second tool call. Supply settlement_tx_hash and/or
+    // payment_response; supplying both with DIFFERENT hashes is refused
+    // before anything is written. Evidence is only recorded on an `accepted`
+    // outcome.
+    settlement_tx_hash: z
+      .string()
+      .regex(
+        /^0x[0-9a-fA-F]{64}$/,
+        'settlement_tx_hash must be a 0x-prefixed transaction hash: 0x followed by exactly 64 hex characters (case-insensitive).',
+      )
+      .optional(),
+    // The merchant's raw PAYMENT-RESPONSE header value, base64, verbatim as
+    // the merchant returned it. Decoded for its `transaction` field only —
+    // a `payer` inside is merchant-claimed data and is never written (#3125).
+    payment_response: z
+      .string()
+      .min(1)
+      .max(131072, 'payment_response is the raw base64 PAYMENT-RESPONSE header value; 128KB is far beyond any real header.')
+      .optional(),
   },
   haven_report_settlement_evidence: {
     // #2972: the remedy #2970's guidance could not name — an erc7710 agent
@@ -1216,9 +1246,14 @@ const REPORT_X402_OUTCOME_DESCRIPTION = [
   'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never contacts it, so',
   'nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
   'merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next',
-  'haven_get_payment_status instead of a 15-minute wait. Evidence only, your own payments only: it',
-  'moves no money. Not for merchants Haven called for you — haven_complete_mcp_tool and',
-  'haven_settle_mcp_tool already record what they observed.',
+  'haven_get_payment_status instead of a 15-minute wait. On an accepted outcome you may fold the',
+  'settlement evidence into this call: pass the raw base64 PAYMENT-RESPONSE header as',
+  'payment_response and/or the settlement_tx_hash — Haven decodes it (transaction only), verifies',
+  'the hash on-chain BEFORE recording (a hash that does not match the payment on-chain is',
+  'refused), and the purchase is complete with no further tool. A rejected outcome records no',
+  'evidence. Evidence only, your own payments only: it moves no money. Not for merchants Haven',
+  'called for you — haven_complete_mcp_tool and haven_settle_mcp_tool already record what they',
+  'observed.',
 ].join(' ')
 
 const SWEEP_DELEGATE_DESCRIPTION = [

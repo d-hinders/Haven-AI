@@ -581,6 +581,21 @@ chain.
 > about authority, custody or signing changes. Scope of this note: that one
 > CASE predicate. Nothing else in this document was re-verified.
 
+> **Re-verified unchanged (#3727, 2026-10-07 — the folded settlement evidence
+> and retry_headers):** this diff touched one file in this document's coverage
+> list, `packages/signer/src/tools.ts`, and none of its signing surfaces. The
+> signer's `haven_sign_x402` / `haven_x402_sign_header` results now also carry
+> `retry_headers` — a `{ <name>: <payment_header> }` echo derived from the
+> SDK's live `x402PaymentHeaderNamesFor` rule, naming which headers to set on
+> the agent's own merchant retry; the header value itself, its signing, its
+> binding spend and its audit entry are untouched, and no payload becomes
+> signable or refused differently. The hosted `haven_report_x402_outcome`
+> evidence fold lives outside this document's coverage and is
+> caller-asserted + chain-verified
+> (`docs/regulatory/casp-changelog/2026-10-07-3727.md`), moving no authority.
+> Scope of this note: those result-shaped additions. Nothing else in this
+> document was re-verified.
+
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,
 > `infra/repositories/smart-accounts.ts`, and only its comment: the retired

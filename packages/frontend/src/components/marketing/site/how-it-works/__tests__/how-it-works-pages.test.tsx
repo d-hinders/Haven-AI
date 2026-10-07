@@ -248,4 +248,11 @@ describe('budget lede names stopping, not pausing or revoking (#3722)', () => {
     expect(text).toContain('You sign it once, it refills itself, and you can stop it at any time.')
     expect(text).not.toMatch(/pause or revoke/i)
   })
+
+  it('the budget mock offers the real control, Stop budget, not Pause / Revoke', () => {
+    const { container } = render(<HowItWorksPage />)
+    const text = (container.textContent ?? '').replace(/\s+/g, ' ')
+    expect(text).toContain('Stop budget')
+    expect(text).not.toMatch(/\bPause\b|\bRevoke\b/)
+  })
 })

@@ -188,8 +188,7 @@ export function HowItWorksPage() {
                 meta="Monthly budget · resets 11 Jul · pinned to Klara Data AB"
               />
               <div className="mt-3.5 flex justify-end gap-2">
-                <FrameControl>Pause</FrameControl>
-                <FrameControl>Revoke</FrameControl>
+                <FrameControl>Stop budget</FrameControl>
               </div>
             </ProductFrame>
             <div className="order-1 min-[900px]:order-2">

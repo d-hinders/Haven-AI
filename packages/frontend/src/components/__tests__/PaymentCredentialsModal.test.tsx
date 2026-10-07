@@ -19,7 +19,8 @@ describe('PaymentCredentialsModal leak guidance (#3722)', () => {
   it('points a compromised key at Replace signing key or Remove agent…, never "revoke the agent and create a new one"', () => {
     const { container } = render(<PaymentCredentialsModal open onClose={() => {}} agent={agent} />)
     const text = (container.ownerDocument.body.textContent ?? '').replace(/\s+/g, ' ')
-    expect(text).toContain('If you suspect this key is compromised, open the agent and choose Replace signing key, or Remove agent… to end its budgets.')
+    expect(text).toContain('If you suspect this agent’s signing key is compromised, choose Replace signing key from this agent’s menu, or Remove agent… to end its budgets.')
+    expect(text).not.toMatch(/open the agent/)
     expect(text).toContain('The key also controls any funds already at this address; ending the budget does not recover them.')
     expect(text).not.toMatch(/revoke the agent and create a new one/)
   })

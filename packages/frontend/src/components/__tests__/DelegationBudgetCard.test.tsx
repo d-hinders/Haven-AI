@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
 const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs } = vi.hoisted(() => ({
@@ -100,11 +100,12 @@ describe('DelegationBudgetCard (#833)', () => {
     expect(screen.getByText(/to 0xf0f0/)).toBeTruthy()
   })
 
-  it('offers Issue sub-budget only when the agent has an active budget (#3506)', async () => {
+  it('offers Issue sub-budget only when the agent has an active budget (#3506, #3716)', async () => {
     mockGet.mockReturnValue([])
     const { unmount } = render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
     unmount()
 
     // A pending (not yet active) budget is not something to slice either.
@@ -114,9 +115,16 @@ describe('DelegationBudgetCard (#833)', () => {
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
     second.unmount()
 
+    // #3716: with an eligible budget the entry lives INSIDE the Add budget
+    // panel — absent while the panel is closed, present once it is open.
     mockGet.mockReturnValue([budget()])
-    render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Issue sub-budget')).toBeTruthy())
+    const third = render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByText('Issue sub-budget')).toBeTruthy()
+    third.unmount()
   })
 
   it('grant: one Set-budget action calls grant with parsed atomic amount + period', async () => {
@@ -241,6 +249,9 @@ describe('DelegationBudgetCard (#833)', () => {
       await waitFor(() => expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('7'))
       expect(screen.getByText('Set budget')).toBeTruthy()
       expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+      // #3716: the prefill opens the panel, so the entry shows there too.
+      expect(screen.getByText('Issue sub-budget')).toBeTruthy()
+      expect(screen.getByText('Or share part of an existing budget with another agent')).toBeTruthy()
     } finally {
       restore()
     }
@@ -428,7 +439,7 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     // rendered them (an Edit / Issue sub-budget needs an active, unexpired row).
     mockGet.mockReturnValue([budget()])
     const live = render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Issue sub-budget')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
     // #3695: with an active budget the grant form waits behind "Add budget",
     // so "Set budget" is not on screen until it is opened — asserting "Add
     // budget" is what keeps the retired half below from passing vacuously.
@@ -437,6 +448,9 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
     expect(screen.getByText('Set budget')).toBeTruthy()
     expect(screen.getByLabelText('Period')).toBeTruthy()
+    // #3716: the live half's sub-budget assertion moved here — the entry only
+    // exists once the panel is open, and a retired agent has neither.
+    expect(screen.getByText('Issue sub-budget')).toBeTruthy()
     live.unmount()
 
     render(<DelegationBudgetCard {...PROPS} retired={retired} />)
@@ -480,6 +494,23 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     expect(screen.queryByText('Set budget')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
   })
+
+  // #3716: the sub-budget entry lives inside the Add budget panel, which a
+  // retired agent does not have — so `retired ? []` keeps the modal from ever
+  // mounting. This asserts it in the only way available from outside: no
+  // panel to open, no entry, no dialog.
+  it.each(['revoked', 'archived'] as const)(
+    '%s: cannot mount the sub-budget modal — the panel it lives in does not exist (#3716)',
+    async (retired) => {
+      mockGet.mockReturnValue([budget()])
+      render(<DelegationBudgetCard {...PROPS} retired={retired} />)
+      await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+      expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+      expect(screen.queryByText('Issue sub-budget')).toBeNull()
+      expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+      expect(screen.queryByRole('dialog')).toBeNull()
+    },
+  )
 })
 
 // #3695: one Spending surface — the section heading above the card, a meter
@@ -648,6 +679,76 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByLabelText('Budget amount')).toBeNull())
     // ...and focus lands on Add budget, not <body> (#3695 review S2).
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+  })
+})
+
+// #3716: the sub-budget entry moved from a permanent card row into the Add
+// budget panel — below the grant form, visible only while the panel is open.
+describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)', () => {
+  it('sits below Set budget / Cancel in DOM order once the panel is open', () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    const link = screen.getByRole('button', { name: 'Issue sub-budget' })
+    const setBudget = screen.getByRole('button', { name: 'Set budget' })
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING
+    expect(setBudget.compareDocumentPosition(link) & FOLLOWING).toBeTruthy()
+    expect(cancel.compareDocumentPosition(link) & FOLLOWING).toBeTruthy()
+  })
+
+  it('is absent with the panel open when the only active budget is merchant-pinned', () => {
+    mockGet.mockReturnValue([budget({ merchant_id: 'm-1', merchant_slug: 'ampersend-demo-api', merchant_name: 'Ampersend Demo API' })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeTruthy()
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+  })
+
+  it('is absent when the form shows by default over a pending-only budget', () => {
+    mockGet.mockReturnValue([budget({ status: 'pending' })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('Set budget')).toBeTruthy()
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+  })
+
+  // The real hook nulls `budgets` on error (useDelegationBudget), so
+  // subBudgetParents is [] there — the rows here keep the fixture one step
+  // from vacuous while the clause under test stays `!budgetsError`.
+  it('is absent when the budgets read failed, even with the panel open', () => {
+    mockGet.mockReturnValue([budget()])
+    mockBudgetsError.mockReturnValue(true)
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeTruthy()
+    expect(screen.queryByText('Issue sub-budget')).toBeNull()
+    expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
+  })
+
+  it('clicking the entry collapses the form, opens the modal inside focus, and returns focus to Add budget on close', async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2' } })
+    // act-wrapped: the modal's open/close state lands in effects (its own
+    // child effect and the card's focus-restore) that outlive the event.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Issue sub-budget' }))
+    })
+
+    // The form is gone; the modal is open with focus INSIDE the dialog (the
+    // card's focus effect must not pull it back out).
+    expect(screen.queryByLabelText('Budget amount')).toBeNull()
+    const dialog = screen.getByRole('dialog', { name: 'Issue sub-budget' })
+    expect(dialog.contains(document.activeElement)).toBe(true)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
   })
 })

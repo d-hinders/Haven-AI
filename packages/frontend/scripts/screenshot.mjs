@@ -119,8 +119,8 @@
  *     npm run screenshot -w packages/frontend -- --scenario=connect-agent
  *
  * ── The fixture ──────────────────────────────────────────────────────────────
- * Auth: an `haven_token` + `haven_active_account_id` are seeded in localStorage
- * before any script runs (the same keys the app and e2e fixtures use), so
+ * Auth: an `haven_token` is seeded in localStorage before any script runs
+ * (the same key the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, two
  * agents both on the delegation rail, transactions, contacts, agent activity +
@@ -245,9 +245,9 @@ const DEVICE_SCALE_FACTOR = 2
 
 // Exported for the parity test against src/lib/auth-storage.ts — a key rename
 // there must fail a test here, not silently capture logged-out screenshots.
+// (#3719 retired the active-account key: nothing reads it, so it is not seeded.)
 export const SEED_STORAGE_KEYS = {
   token: 'haven_token',
-  activeAccount: 'haven_active_account_id',
 }
 
 // ── Color scheme of a run (#2929) ────────────────────────────────────────────
@@ -2518,7 +2518,6 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
   if (!signedOut) {
     await context.addInitScript((keys) => {
       window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
-      window.localStorage.setItem(keys.activeAccount, 'safe-fixture')
     }, SEED_STORAGE_KEYS)
   }
 
@@ -3753,6 +3752,53 @@ export const SCENARIOS = {
    * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` already
    * carries a recorded name, which is why it is not overridden here.
    */
+  'agents-multi-account': {
+    description:
+      'The /agents list for a user with TWO accounts (#3719): every agent shows, each row names its account and chain, and the Account filter is offered — there is no global active account narrowing the list',
+    // The shared fixture has one account, so the filter (registered only with
+    // more than one) and a row on a second account are unreachable without
+    // this. Two endpoints, and they agree: `/auth/me` serves both accounts and
+    // `/agents` moves the second fixture agent onto the second one.
+    api(apiPath) {
+      const second = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-treasury',
+        name: 'Treasury',
+        account_address: '0x6666666666666666666666666666666666666666',
+        chain_id: 8453,
+        is_default: false,
+        account_type: 'delegator_hybrid',
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }, second] }
+      }
+      if (apiPath === '/agents') {
+        return {
+          agents: FIXTURE_AGENTS.map((a, i) =>
+            i === 1
+              ? { ...a, account_id: second.id, account_address: second.account_address, account_name: second.name, account_chain_id: second.chain_id }
+              : a,
+          ),
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      for (const name of ['Research agent', 'Data-feed agent']) {
+        await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
+      }
+      // Positive control: the second account's row label is on screen.
+      await page.getByText('Treasury', { exact: true }).first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'list')
+
+      await page.getByRole('button', { name: /^Account:/ }).first().click()
+      await page.getByRole('group', { name: 'Account' }).waitFor({ timeout: 10_000 })
+      await shoot(page.locator('main').first(), 'account-filter')
+    },
+  },
   'mcp-name-all-recorded': {
     description:
       'The /agents list with every agent reporting an MCP server name — the hoisted "not recorded" explanation must be ABSENT (#2043)',

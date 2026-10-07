@@ -1,247 +1,53 @@
 /**
- * `/accounts`: the card's set-active control on a real touch device (#2241),
- * and the ABSENCE of a set-default control on it (#2374).
+ * `/accounts` on a real touch device: the card is a link and nothing else.
  *
- * ## What #2374 changed here
+ * ## History, stated so the absences below read as decisions
  *
- * This file used to be about a PAIR. The second control — an unlabelled
- * `Set as default` star, 26x26 painted with an `h-11 w-11` target — was
- * dropped from the card by owner decision: after #2241 made it permanently
- * visible on touch it was a bare glyph whose meaning lived only in
- * `aria-label`, and every way of explaining it in place cost the title row
- * width that #2223 / #2235 / #2236 had already spent three issues protecting.
- * Setting a default now happens on `/accounts/<id>` only.
+ * This file measured the card's actions: first a PAIR (a `Set as default`
+ * star and `Set active`, #2241), then `Set active` alone after #2374 removed
+ * the star by owner decision (setting a default lives on `/accounts/<id>`).
+ * #3719 removed the global active account, and `Set active` with it, so the
+ * card holds no action at all. Its tap-target and paint geometry checks are
+ * GONE rather than weakened — there is nothing left to measure.
  *
- * Three consequences for this spec, all of them stated rather than silently
- * absorbed:
+ * What survives:
  *
- *  - the star's own geometry checks are GONE, not weakened — there is nothing
- *    left to measure;
- *  - the star-versus-neighbour clearance test is replaced by an ABSENCE pin
- *    (`the card offers no set-default control`), which carries its own
- *    non-vacuity: the same scan that must find nothing matching /default/ must
- *    find the set-active control, or it is proving that the page failed to
- *    render;
- *  - the real-tap test loses HALF of what it could observe, and that is a real
- *    loss of coverage rather than a tidy-up. See its own note.
- *
- * ## TWO defects, and they are different kinds
- *
- * **1. Hover-gated — a functional defect, not polish.** The wrapper was
- * `opacity-0 group-hover:opacity-100 focus-within:opacity-100`. On a device
- * with no hover the `group-hover` branch can never fire, so the control
- * painted nothing.
- *
- * The issue described that as the controls being "effectively keyboard/AT-only
- * -reachable … never surfaced by touch alone", and that is **not what the
- * measurement showed**. `opacity: 0` suppresses painting and does not touch
- * hit-testing: on unchanged `dev` at Pixel 5, `elementFromPoint` at each
- * button's centre returned the button. The card therefore carried an invisible
- * **73 x 24px** "Set active" and (then) an invisible **26 x 26px** star in its
- * top-right corner — where a finger lands to open the account — and both
- * handlers call `preventDefault()` + `stopPropagation()`, so a tap there did
- * not navigate. It silently wrote a new default account.
- *
- * So the controls were not unreachable. They were INVISIBLE AND STILL LIVE:
- * undiscoverable and tap-stealing at once, which is strictly worse than the
- * diagnosis in the issue. Fixed by gating the hover treatment itself on
- * `(hover: hover)`, so a touch device never enters it and the wrapper keeps
- * its default opacity 1.
- *
- * **2. Under the touch-target floor — an ergonomics defect.** The documented
- * floor is 44px (`docs/product/design-system.md` § Buttons *Tap targets*,
- * #1726; `docs/product/design-review.md` § Responsive And States). Measured
- * hit rectangles on unchanged `dev`: **73 x 24** for "Set active" (a macOS
- * reading; the same button renders 75 wide on the Linux CI runner, which is
- * why only the HEIGHT is pinned hard — see `PAINT` below). Fixed with the
- * transparent-`::after` mechanism that section documents — vertical-only for a
- * labelled button. The both-axes variant for an icon square (#1766's
- * deviation) applied to the star and left with it; the rule itself is
- * general and still documented, and `WalletButton.tsx` still borrows it.
- *
- * ## Why a browser, and why `chromium-mobile` specifically
- *
- * Neither defect exists in jsdom, which has no layout, no `(hover: *)` media
- * evaluation and no hit-testing — `getBoundingClientRect` reports 26 x 26 for
- * a perfectly working overlay, and a class assertion reads the same string
- * whether or not the resulting rectangle is 44px. `chromium-mobile` is Pixel 5
- * device emulation — `(hover: none)`, `(pointer: coarse)`, real touch points,
- * not a viewport override on a desktop browser (#1768) — so it is the only
- * project here in which "what does a touch user get" is a real question.
- *
- * And no screenshot can stand in for it. `/accounts` has **no committed visual
- * baseline at any width**: `e2e/__screenshots__/` holds baselines for four
- * specs — `design-system`, `agent-panel-states`, `focus-visible` and
- * `wallet-button-collapsed-states` — and not one of them renders this route,
- * while the blocking *Design visual regression* job pixel-compares
- * `/design-system`. So the pixel gate could not see this before and cannot see
- * it now. A capture would in any case show a transparent overlay as nothing at
- * all — the same reason #2038's touch defects survived both a pixel gate and a
- * rendered design review.
- *
- * ## What is asserted, and why each half needs the other
- *
- * Every test asserts its own claim AND the thing that claim could have been
- * bought with:
- *
- *  - VISIBILITY is asserted together with the PAINT being unchanged. A reveal
- *    bought by enlarging the buttons is a different change with a real cost to
- *    the title row, and #2223/#2235/#2236 spent three issues on that row's
- *    width.
- *  - The 44px HIT rectangle is asserted together with the PAINT being
- *    unchanged, exactly as the two-part assertion in this spec requires
- *    does: a "fix" that raises the painted height satisfies the floor and
- *    breaks the density the compact sizes exist for, which is the call #1726
- *    made and this borrows.
- *  - The set-default control is asserted ABSENT, page-wide and by two
- *    spellings (an `aria-label` and a visible label), because #2374 is a
- *    removal and a removal that nothing pins comes back. Its non-vacuity is
- *    the set-active control the same scan must still find.
- *  - A tap is asserted to actually WORK, so none of the geometry above is
- *    geometry over a decoration.
+ *  - an ABSENCE pin for both removed controls, with its own non-vacuity: the
+ *    same page-wide scan that must find nothing matching /default/ or
+ *    /set .* as active/ must find the card's own name link, or it is proving
+ *    that the page failed to render;
+ *  - a set-default write must never leave the page (#2374, network level);
+ *  - a real tap on the card body, and Enter on the name link, open the
+ *    account through the stretched link without a full reload.
  */
 import { expect, test, type Page } from '@playwright/test'
 import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testSafe, testUser } from './fixtures/haven-api'
 
-/**
- * The documented floor — `docs/product/design-system.md` § Buttons *Tap
- * targets*, and `docs/product/design-review.md` § Responsive And States
- * ("Primary and risk-bearing mobile touch targets are at least 44px").
- */
-const TOUCH_TARGET_FLOOR = 44
+const SECOND_CARD = 'Imported Safe'
+const DEFAULT_CARD = 'Operating wallet'
 
-/**
- * The only card that renders an action. Since #2374 there is ONE button and it
- * is gated on `!isActive` alone, so the seeded active account renders none —
- * whether or not it is also the default. (`ACTIVE_DEFAULT_CARD` keeps its name
- * because the fixture still seeds it as both; only the gate narrowed.)
- */
-const ACTION_CARD = 'Imported Safe'
-const ACTIVE_DEFAULT_CARD = 'Operating wallet'
-
-/**
- * The painted boxes, measured on unchanged `dev` at Pixel 5 and asserted to be
- * UNCHANGED by this fix. Both defects here are fixed without moving a pixel,
- * which is the whole point of the `::after` mechanism and of gating the
- * existing hover treatment rather than adding an override.
- *
- * WHICH OF THESE FOUR NUMBERS IS PLATFORM-STABLE, because one of them is not
- * and it failed CI before this note existed. `Set active`'s WIDTH is a text
- * measurement: it renders **72.6px on macOS and 75px on the Linux CI runner**,
- * and an absolute pin on it is a font-metric assertion wearing a layout
- * assertion's clothes. The remaining figure here is geometry — the height comes
- * from the `text-xs`/`py-1` line box — so it stays pinned hard.
- *
- * `setActive.w` is therefore kept only as a CEILING with real headroom, paired
- * with the relational check below that expresses the actual rule ("the target
- * grew sideways, the button did not"). A number nobody can reproduce on their
- * own machine is worse than no number.
- */
-const PAINT = {
-  setActive: { h: 24, maxW: 90 },
-}
-/** Sub-pixel tolerance on a paint assertion. Deliberately tight. */
-const PAINT_TOLERANCE = 1.5
-
-type Probe = {
-  wrapOpacity: number
-  hoverNone: boolean
-  pointerCoarse: boolean
-  buttons: {
-    label: string | null
-    paint: { w: number; h: number }
-    hit: { w: number; h: number }
-    centreHitsSelf: boolean
-  }[]
-  /**
-   * #2374's absence pin, gathered PAGE-WIDE rather than per card, and paired
-   * with its own non-vacuity control.
-   *
-   * `setDefaultControls` must be empty and `setActiveControls` must not be, so
-   * a run in which `/accounts` rendered nothing at all fails LOUDLY instead of
-   * reading as a clean absence. Two spellings are scanned because a
-   * reintroduction could arrive as either the old `aria-label`-only star or as
-   * the labelled variant #2374 rejected: any button or link whose accessible
-   * name OR visible text mentions "default" counts. The `default` BADGE is a
-   * `span`, so it is not swept up by this.
-   */
+type ControlScan = {
+  /** Every button or link on the page, by accessible name + visible text. */
+  all: string[]
   setDefaultControls: string[]
   setActiveControls: string[]
 }
 
 /**
- * Anchor on the named link inside the explicit card test hook, never on a
- * class string — the class strings are what this fix changes.
+ * Scan the WHOLE document, not one card: a reintroduction that landed on any
+ * card must fail here. The `default` BADGE is a `span`, so it is not swept up.
  */
-async function probeCard(page: Page, label: string): Promise<Probe> {
-  return page.evaluate((accountName) => {
-    const card = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="account-card"]'))
-      .find((candidate) => candidate.querySelector('a')?.textContent?.trim() === accountName) ?? null
-    if (!card) throw new Error(`no /accounts card labelled "${accountName}"`)
-    const buttons = Array.from(card.querySelectorAll('button')) as HTMLElement[]
-    if (buttons.length === 0) throw new Error(`the card labelled "${accountName}" renders no action buttons`)
-    const wrap = buttons[0].parentElement as HTMLElement
-
-    /*
-      Walk outward from an element's centre until a tap stops landing on it.
-      This is the HIT rectangle — the border box plus whatever the `::after`
-      overlay adds, minus whatever another element has taken — and it is the
-      only measurement that distinguishes a working overlay from an inert one.
-      `getBoundingClientRect` returns the border box and reports 26x26 even
-      when the overlay works perfectly (#1766).
-
-      `max` must exceed the element's own half extent, or the walk stops on the
-      CAP and reports a hit rectangle smaller than reality — a false "something
-      is covering this". 120 clears the widest control here (73px) with room.
-    */
-    const walk = (el: HTMLElement, cx: number, cy: number, dx: number, dy: number, max = 120) => {
-      let n = 0
-      while (n < max) {
-        const x = cx + dx * (n + 1)
-        const y = cy + dy * (n + 1)
-        if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) break
-        const top = document.elementFromPoint(x, y)
-        if (!(!!top && (top === el || el.contains(top)))) break
-        n += 1
-      }
-      return n
-    }
-    const measure = (el: HTMLElement) => {
-      const b = el.getBoundingClientRect()
-      const cx = Math.round(b.left + b.width / 2)
-      const cy = Math.round(b.top + b.height / 2)
-      const top = document.elementFromPoint(cx, cy)
-      return {
-        label: el.getAttribute('aria-label'),
-        paint: { w: +b.width.toFixed(1), h: +b.height.toFixed(1) },
-        hit: {
-          w: walk(el, cx, cy, -1, 0) + walk(el, cx, cy, 1, 0) + 1,
-          h: walk(el, cx, cy, 0, -1) + walk(el, cx, cy, 0, 1) + 1,
-        },
-        centreHitsSelf: !!top && (top === el || el.contains(top)),
-      }
-    }
-
-    /*
-      #2374. Scan the WHOLE document, not this card: the control was removed
-      from every card, and a pin that only looked at one of them would pass on
-      a reintroduction that landed on the others.
-    */
+async function scanControls(page: Page): Promise<ControlScan> {
+  return page.evaluate(() => {
     const nameOf = (el: Element) =>
       `${el.getAttribute('aria-label') ?? ''} ${el.textContent ?? ''}`.trim()
-    const controls = Array.from(document.querySelectorAll('button, a[role="button"]'))
-    const matching = (re: RegExp) =>
-      controls.map(nameOf).filter((n) => re.test(n))
-
+    const all = Array.from(document.querySelectorAll('button, a')).map(nameOf)
     return {
-      wrapOpacity: Number(getComputedStyle(wrap).opacity),
-      hoverNone: window.matchMedia('(hover: none)').matches,
-      pointerCoarse: window.matchMedia('(pointer: coarse)').matches,
-      buttons: buttons.map(measure),
-      setDefaultControls: matching(/default/i),
-      setActiveControls: matching(/active/i),
+      all,
+      setDefaultControls: all.filter((n) => /default/i.test(n)),
+      setActiveControls: all.filter((n) => /set .* as active|set active/i.test(n)),
     }
-  }, label)
+  })
 }
 
 async function serveAccounts(page: Page, accounts: unknown[]) {
@@ -260,12 +66,12 @@ async function openAccountsWithBothCards(page: Page) {
   await mockHavenApi(page)
   await seedAuthenticatedSession(page)
   await serveAccounts(page, [
-    { ...testSafe, name: ACTIVE_DEFAULT_CARD, is_default: true },
+    { ...testSafe, name: DEFAULT_CARD, is_default: true },
     {
       ...testSafe,
       id: 'safe-second',
       account_address: '0x4444444444444444444444444444444444444444',
-      name: ACTION_CARD,
+      name: SECOND_CARD,
       is_default: false,
       created_at: '2026-04-20T10:00:00.000Z',
     },
@@ -279,186 +85,45 @@ async function openAccountsWithBothCards(page: Page) {
     `tooltip-reachability.spec.ts` make before their own hit-dependent reads.
   */
   await dismissMobileSidebar(page)
-  await page.getByTestId('account-card').filter({ hasText: ACTION_CARD }).scrollIntoViewIfNeeded()
-  /*
-    The wrapper carries `transition-opacity`. Reading it mid-transition would
-    make the visibility assertion flaky in the direction that hides a
-    regression, so settle until two consecutive reads agree.
-  */
-  let probe = await probeCard(page, ACTION_CARD)
-  for (let i = 0; i < 40; i++) {
-    await page.waitForTimeout(150)
-    const again = await probeCard(page, ACTION_CARD)
-    if (JSON.stringify(again) === JSON.stringify(probe)) break
-    probe = again
-  }
-  return probe
+  await page.getByTestId('account-card').filter({ hasText: SECOND_CARD }).scrollIntoViewIfNeeded()
 }
 
-test('/accounts: the card actions are VISIBLE on a touch device, with no hover and no paint change', async ({
-  page,
-}) => {
+test('/accounts: the card offers neither a set-default nor a set-active control', async ({ page }) => {
   test.slow()
-  const probe = await openAccountsWithBothCards(page)
+  await openAccountsWithBothCards(page)
+  const scan = await scanControls(page)
 
-  /*
-    Non-vacuity FIRST. Everything below is a claim about a device with no
-    hover; if this project ever stopped being device emulation the assertions
-    would pass for the wrong reason, which is exactly the #1768 trap.
-  */
-  expect(probe.hoverNone, 'this project is not emulating a hover-less device').toBe(true)
-  expect(probe.pointerCoarse, 'this project is not emulating a coarse pointer').toBe(true)
+  // Non-vacuity FIRST: the same scan, on the same page, must find the control
+  // that IS meant to be there — the card's own name link. Without this an
+  // empty `/accounts` is a green run.
   expect(
-    probe.buttons.map((b) => b.label),
-    'the action card renders the wrong button set',
-  ).toEqual([`Set ${ACTION_CARD} as active`])
-
-  // Defect 1. Nothing was hovered, tapped or focused before this read.
-  expect(
-    probe.wrapOpacity,
-    `the card's actions are at opacity ${probe.wrapOpacity} on a device that cannot hover — a touch user sees nothing where a live control is`,
-  ).toBeGreaterThan(0.99)
-
-  /*
-    And the visibility was not bought by growing the buttons. Both halves,
-    because a reveal that also inflates the paint spends the title row's width
-    — the measure #2223/#2235/#2236 exist to protect.
-  */
-  const [setActive] = probe.buttons
-  expect(
-    setActive.paint.h,
-    `"Set active" paints ${setActive.paint.w}x${setActive.paint.h}px — the height is not the documented ${PAINT.setActive.h}`,
-  ).toBeCloseTo(PAINT.setActive.h, 0)
-  expect(
-    setActive.paint.w,
-    `"Set active" paints ${setActive.paint.w}px wide, past the ${PAINT.setActive.maxW}px ceiling — that is a label or a padding change, not a reveal`,
-  ).toBeLessThanOrEqual(PAINT.setActive.maxW)
-})
-
-test('/accounts: the card action clears the 44px touch-target floor without moving a pixel', async ({
-  page,
-}) => {
-  test.slow()
-  const probe = await openAccountsWithBothCards(page)
-  const [setActive] = probe.buttons
-
-  for (const b of probe.buttons) {
-    // A hit rectangle read through an element that is not the button itself is
-    // not a reading of that button.
-    expect(b.centreHitsSelf, `a tap at the centre of "${b.label}" does not reach it`).toBe(true)
-    expect(
-      b.hit.w,
-      `"${b.label}" has a ${b.hit.w}x${b.hit.h}px hit rectangle (paints ${b.paint.w}x${b.paint.h}) — the floor is ${TOUCH_TARGET_FLOOR}px`,
-    ).toBeGreaterThanOrEqual(TOUCH_TARGET_FLOOR)
-    expect(
-      b.hit.h,
-      `"${b.label}" has a ${b.hit.w}x${b.hit.h}px hit rectangle (paints ${b.paint.w}x${b.paint.h}) — the floor is ${TOUCH_TARGET_FLOOR}px`,
-    ).toBeGreaterThanOrEqual(TOUCH_TARGET_FLOOR)
-  }
-
-  /*
-    The other half of #1726's call, asserted for the same reason
-    this same two-part assertion: a "fix" that raises the painted height clears
-    the floor and destroys the density the compact control was chosen for.
-    Without this the floor check above would bless exactly the wrong fix.
-  */
-  expect(
-    Math.abs(setActive.paint.h - PAINT.setActive.h),
-    `"Set active" now paints ${setActive.paint.h}px tall — the target was supposed to grow, not the button`,
-  ).toBeLessThanOrEqual(PAINT_TOLERANCE)
-  /*
-    The vertical-only rule for the labelled button, stated as a RELATIONSHIP so
-    it holds on any platform's font metrics. `after:inset-x-0` means the
-    overlay spans the button's own width and adds none, so the hit rectangle
-    must be the border box sideways however wide the label renders. This is
-    what the absolute width pin used to imply and could not survive: 72.6px on
-    macOS, 75px on Linux CI.
-  */
-  expect(
-    setActive.hit.w - setActive.paint.w,
-    `"Set active"'s target is ${setActive.hit.w}px against a ${setActive.paint.w}px box — it has grown SIDEWAYS, which the vertical-only rule forbids for a labelled control`,
-  ).toBeLessThanOrEqual(PAINT_TOLERANCE)
-})
-
-/**
- * #2374 — the removal, pinned.
- *
- * An absence assertion is weak by nature, so this one is built the way the
- * `/accounts` inflow-closure tests are: scan PAGE-WIDE, match the strings a
- * reintroduction would actually have to render, and carry a positive control
- * in the same test so a blank page cannot read as a pass.
- *
- * WHY THE SCAN IS ON /default/i AND NOT ON THE OLD `aria-label`. The star's
- * accessible name was `Set <account> as default`. Pinning that exact string
- * would pass on the labelled `Set default` variant the decision explicitly
- * rejected, and on a kebab-menu item added to the card later. Matching any
- * button whose accessible name or visible text mentions "default" is the
- * scope of the decision rather than the shape of the thing removed. The
- * `default` BADGE is a `span` and is untouched by it — deliberately: the chip
- * that NAMES the state stays, only the control that SETS it from the card is
- * gone.
- */
-test('/accounts: the card offers no set-default control', async ({ page }) => {
-  test.slow()
-  const probe = await openAccountsWithBothCards(page)
-
-  // Non-vacuity FIRST, and it is the whole reason this test can be trusted:
-  // the same scan, on the same page, must still find the control that IS
-  // meant to be there. Without this an empty `/accounts` is a green run.
-  // `.some(includes)` rather than `toContain`: the scan concatenates the
-  // accessible name with the visible text, so this entry reads
-  // "Set Imported Safe as active Set active" — an exact match would be pinning
-  // the concatenation format rather than the control's presence. The same scan
-  // also sees the sidebar's account switcher, which is why the /default/i arm
-  // below is written as "nothing mentions default" rather than "no buttons".
-  expect(
-    probe.setActiveControls.some((n) => n.includes(`Set ${ACTION_CARD} as active`)),
-    `the page rendered no set-active control either — this run proves nothing about an absence. The scan saw ${JSON.stringify(probe.setActiveControls)}`,
+    scan.all.some((n) => n.includes(SECOND_CARD)),
+    `the scan found no account link — this run proves nothing about an absence. It saw ${JSON.stringify(scan.all)}`,
   ).toBe(true)
 
   expect(
-    probe.setDefaultControls,
-    `the card renders ${JSON.stringify(probe.setDefaultControls)} — #2374 removed the set-default control from /accounts; it lives on /accounts/<id> only`,
+    scan.setDefaultControls,
+    `the page renders ${JSON.stringify(scan.setDefaultControls)} — #2374 removed the set-default control from /accounts; it lives on /accounts/<id> only`,
   ).toEqual([])
+  expect(
+    scan.setActiveControls,
+    `the page renders ${JSON.stringify(scan.setActiveControls)} — #3719 removed the global active account and its Set active control`,
+  ).toEqual([])
+  expect(
+    await page.getByTestId('account-card').locator('button').count(),
+    'an account card renders a button again — the card is a link and holds no action since #3719',
+  ).toBe(0)
 })
 
-/**
- * The geometry above is geometry over a DECORATION unless a finger actually
- * works the control, and `page.tap()` dispatches a genuine touch sequence only
- * under `chromium-mobile`.
- *
- * ## WHAT CHANGED WITH #2374 AND #3550, said plainly
- *
- * It used to tap the STAR, and it could assert two containment properties
- * because the star's effect (`setDefault` -> `PUT /user/accounts/:id/default`)
- * was distinguishable from selecting the account. #3550 then removed the
- * card-level click handler entirely: navigation belongs to the stretched name
- * link, while "Set active" is a sibling button with its own state change. The
- * button therefore needs neither `stopPropagation()` nor `preventDefault()`;
- * its stacking position keeps the stretched link from receiving the tap.
- *
- * WHAT IS STILL ASSERTED, and it is not nothing:
- *
- *   - the tap WORKS — the active account really changes, so every hit
- *     rectangle above is geometry over a live control;
- *   - the click ends with `defaultPrevented: false` and the URL remains on the
- *     list, proving the sibling button owns the tap without an anchor-cancel
- *     workaround. The value is read AFTER dispatch completes (a capture-phase
- *     listener holding the event, drained on a macrotask), because
- *     `defaultPrevented` during capture is always false and would assert nothing;
- *   - no set-default write leaves the page. Kept from the old test and
- *     repurposed: `PUT /user/accounts/:id/default` is intercepted and must never
- *     fire, which is a second, network-level reading of #2374's removal.
- */
-test('/accounts: a real tap on the sibling "Set active" switches the account without link navigation', async ({
+test('/accounts: a real tap on the card body opens the account, with no set-default write', async ({
   page,
 }) => {
   test.slow()
   await openAccountsWithBothCards(page)
 
   /*
-    The write the REMOVED control used to make. Intercepted so that a
-    reintroduced star — or any tap that reaches one — shows up here as a
+    The write the REMOVED star used to make (#2374). Intercepted so that a
+    reintroduced control — or any tap that reaches one — shows up here as a
     network event rather than as a silent success.
   */
   let defaultWrite: string | null = null
@@ -467,58 +132,7 @@ test('/accounts: a real tap on the sibling "Set active" switches the account wit
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   })
 
-  const activeAccountBefore = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
-  await page.evaluate(() => {
-    const probe = { defaultPrevented: null as boolean | null }
-    ;(window as unknown as { __tapProbe: typeof probe }).__tapProbe = probe
-    document.addEventListener(
-      'click',
-      (e) => {
-        setTimeout(() => {
-          probe.defaultPrevented = e.defaultPrevented
-        }, 0)
-      },
-      true,
-    )
-  })
-
-  await page.getByRole('button', { name: `Set ${ACTION_CARD} as active` }).tap()
-  await page.waitForTimeout(1200)
-  const probe = await page.evaluate(
-    () => (window as unknown as { __tapProbe: { defaultPrevented: boolean | null } }).__tapProbe,
-  )
-  const activeAccountAfter = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
-
-  // Non-vacuity: the seeded id has to be readable AND has to be the other
-  // account, or "it changed" is trivially true or trivially impossible.
-  expect(activeAccountBefore, 'no active safe was seeded — a change reading proves nothing').not.toBeNull()
-  expect(
-    activeAccountAfter,
-    `tapping "Set active" left the active account at ${activeAccountAfter} — the visible control is a decoration`,
-  ).not.toBe(activeAccountBefore)
-
-  expect(
-    probe.defaultPrevented,
-    'no click reached the document — the containment assertion below would be vacuous',
-  ).not.toBeNull()
-  expect(
-    probe.defaultPrevented,
-    'the sibling control unexpectedly prevented its click; it should no longer need anchor containment workarounds',
-  ).toBe(false)
-  expect(new URL(page.url()).pathname).toBe('/accounts')
-
-  expect(
-    defaultWrite,
-    `tapping "Set active" sent ${defaultWrite} — a set-default write left a page that has no set-default control (#2374)`,
-  ).toBeNull()
-})
-
-test('/accounts: a real pointer press on card body activates and opens the account', async ({ page }) => {
-  test.slow()
-  await openAccountsWithBothCards(page)
-
-  const activeAccountBefore = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
-  const card = page.getByTestId('account-card').filter({ hasText: ACTION_CARD })
+  const card = page.getByTestId('account-card').filter({ hasText: SECOND_CARD })
   // Use the token row rather than the footer: at 390px the fixed bottom nav
   // can overlap the footer after scrolling, which would test that nav instead
   // of the stretched card link.
@@ -537,20 +151,19 @@ test('/accounts: a real pointer press on card body activates and opens the accou
     ),
     'account-card body navigation performed a full reload',
   ).toBe('alive')
-  const activeAccountAfter = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
-  expect(activeAccountAfter).not.toBe(activeAccountBefore)
+  expect(
+    defaultWrite,
+    `tapping the card sent ${defaultWrite} — a set-default write left a page that has no set-default control (#2374)`,
+  ).toBeNull()
 })
 
-test('/accounts: Enter on the account name link activates and opens the account', async ({ page }) => {
+test('/accounts: Enter on the account name link opens the account', async ({ page }) => {
   await openAccountsWithBothCards(page)
 
-  const activeAccountBefore = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
-  const nameLink = page.getByRole('link', { name: ACTION_CARD, exact: true })
+  const nameLink = page.getByRole('link', { name: SECOND_CARD, exact: true })
   await nameLink.focus()
   await expect(nameLink).toBeFocused()
   await page.keyboard.press('Enter')
 
   await page.waitForURL('**/accounts/safe-second')
-  const activeAccountAfter = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
-  expect(activeAccountAfter).not.toBe(activeAccountBefore)
 })

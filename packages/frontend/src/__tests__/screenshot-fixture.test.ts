@@ -21,7 +21,7 @@ import {
   themeSeedFor,
   findViewportMismatches,
 } from '../../scripts/screenshot.mjs'
-import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_ACCOUNT_STORAGE_KEY } from '../lib/auth-storage'
+import { AUTH_TOKEN_STORAGE_KEY } from '../lib/auth-storage'
 // The theme seed key is the app's own constant (#2929); the harness and this
 // parity test both read it through `theme-bootstrap`, so a rename in
 // ThemeContext reddens them together rather than drifting silently.
@@ -698,7 +698,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     // capture logged-out screenshots as PR evidence.
     expect(SEED_STORAGE_KEYS).toEqual({
       token: AUTH_TOKEN_STORAGE_KEY,
-      activeAccount: ACTIVE_ACCOUNT_STORAGE_KEY,
     })
   })
 

@@ -71,7 +71,6 @@ covers:
   - packages/frontend/src/components/AgentPanel.tsx
   - packages/frontend/src/components/ConfirmDialog.tsx
   - packages/frontend/src/components/InfoModal.tsx
-  - packages/frontend/src/components/NetworkSwitcher.tsx
   - packages/frontend/src/components/__tests__/wallet-popover-presentational-guard.test.ts
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
   - packages/frontend/src/components/ui/__tests__/Modal.test.tsx
@@ -266,7 +265,7 @@ modifier (`/75`), or the arbitrary form when the exact value matters (`/[0.78]`)
 
 ### Chain identity
 
-`--v2-chain-*` (Base, testnet, plus `NetworkPill`'s sky/amber soft-pill scale) tells networks apart in `NetworkPill` and `NetworkSwitcher`. These are **identity** colours — deliberately outside the semantic rule above. Never reuse a chain colour to carry success/warning meaning, and never route money tone through them. Live swatches on `/design-system` → "Colour tokens".
+`--v2-chain-*` (Base, testnet, plus `NetworkPill`'s sky/amber soft-pill scale) tells networks apart in `NetworkPill`. These are **identity** colours — deliberately outside the semantic rule above. Never reuse a chain colour to carry success/warning meaning, and never route money tone through them. Live swatches on `/design-system` → "Colour tokens".
 
 ### Radii
 
@@ -949,7 +948,8 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   has no long axis, so the overlay is `h-11 w-11` and centred on both. What still
   applies is the *reason* behind the original rule — check what the widened target now
   reaches, in **both** states the control has. For the toggle, closed: right box edge
-  x=54, nearest interactive control (`NetworkSwitcher`) at x=68, 14px of clearance.
+  x=54, nearest interactive control (`NetworkSwitcher`, since removed by
+  [#3719](https://github.com/d-hinders/Haven-AI/issues/3719)) at x=68, 14px of clearance.
   Open: the target floats over the drawer's own logo band, which it already did at 32px
   — what is asserted there is that the logo link is still reachable at its centre, not
   that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
@@ -988,7 +988,8 @@ short, and an icon-only square grows in both axes. Two rules generalise from it:
 
 - **In an over-subscribed bar, drop a label rather than squeeze every control.** `TopBar`
   does not fit three labelled controls at 320px and never did. #1767 removed the
-  overlapping by making the account chip the only compressible item, which paid for the
+  overlapping by making the account chip (removed with the global active account in #3719)
+  the only compressible item, which paid for the
   whole deficit out of one label — the account name rendered **17px** wide, orderly and
   unreadable — and the brand CTA wrapped to two lines, painting taller than the 56px
   band. Collapsing the widest control's label returns 48.64px to the row and takes the
@@ -1052,6 +1053,11 @@ density the issue was protecting.
 > *example* of it. Read the star in the bullets below as history that explains the shape
 > of the rules, not as a control you will find in `AccountsOverviewClient.tsx`.
 
+> **The rest of this borrower is retired too ([#3719](https://github.com/d-hinders/Haven-AI/issues/3719)).**
+> `Set active` left the card with the global active account: Haven has no "active" account,
+> so the `/accounts` card holds no action at all and is a link to `/accounts/<id>`. Read
+> `Set active` below as the history that explains the rules, not as a control you will find.
+
 What is new is the defect the measurement found *underneath* the undersized target, which
 the issue had diagnosed the other way round:
 
@@ -1107,16 +1113,17 @@ and the icon square's 6 + 14 + 6) and express the sideways rule as a relationshi
 
 `e2e/accounts-card-tap-target.mobile.spec.ts` pins all of it, and `/accounts` has no
 committed pixel baseline at any width — so, as with #2038, the blocking visual gate could
-not have seen any of this. Since #2374 that spec also pins the star's **absence**,
-page-wide and against both spellings a reintroduction could take, with the surviving
-`Set active` control as its non-vacuity check.
+not have seen any of this. Since #3719 that spec pins the **absence** of both controls
+(the star, #2374, and `Set active`), page-wide and against both spellings a reintroduction
+could take, with the card's own name link as its non-vacuity check; its geometry checks
+left with the control.
 
 **Current account-card interaction (#3550).** The card container is not itself a link or
 tab stop. Its account-name `Link` owns a stretched pseudo-element that covers the card;
-clicking the card body therefore activates that account and navigates to it. `Set active`
-is a sibling above the overlay, so it performs only its own action without propagation
-guards. Keep its vertical 44px hit-area expansion. This sibling structure is the reason
-the historical `preventDefault()` behaviour above must not be reintroduced.
+clicking the card body therefore navigates to that account. Since #3719 the card holds no
+other control. If an action ever returns to it, it must be a sibling above the overlay with
+its own vertical 44px hit-area expansion and no propagation guards — the historical
+`preventDefault()` behaviour above must not be reintroduced.
 
 **Prove it rendered, not in the class string.** A pseudo-element overlay has several
 silent no-op failure modes (a clipping ancestor, a positioning context resolving
@@ -1594,7 +1601,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 | px | Class | Where it is used (the built precedent, not a preference) |
 |---|---|---|
-| 12 | `h-3 w-3` | A glyph in a run of the product's **smallest type** — a disclosure chevron before a `<summary>`, a trailing arrow after a 12 px link label, a copy glyph after a mono address, a sort caret in a table header — including when that glyph is wrapped in its own small button, as long as it sits **inside** the type run rather than beside it. It is **not** the rung for a remove/dismiss control on a data row; that is 14, per [#1923](https://github.com/d-hinders/Haven-AI/issues/1923) below. Mostly `text-xs`, but **not exclusively, and the exception is the point**: `NetworkSwitcher`'s trigger is `text-[13px]`, `Table`'s header is `text-[11px]`, `FilterBar`'s is `text-sm`. Read it as *the dense-affordance rung*, not as a `text-xs` lookup |
+| 12 | `h-3 w-3` | A glyph in a run of the product's **smallest type** — a disclosure chevron before a `<summary>`, a trailing arrow after a 12 px link label, a copy glyph after a mono address, a sort caret in a table header — including when that glyph is wrapped in its own small button, as long as it sits **inside** the type run rather than beside it. It is **not** the rung for a remove/dismiss control on a data row; that is 14, per [#1923](https://github.com/d-hinders/Haven-AI/issues/1923) below. Mostly `text-xs`, but **not exclusively, and the exception is the point**: `Table`'s header is `text-[11px]`, `FilterBar`'s is `text-sm`. Read it as *the dense-affordance rung*, not as a `text-xs` lookup |
 | 14 | `h-3.5 w-3.5` | The default beside `text-sm`; the **block-leading indicator** on a banner or callout (`flex items-start` + `mt-0.5` + `flex-shrink-0`) whatever the body type is — it aligns to the first line's cap height, not to the em box; and the glyph in a **remove / dismiss control on a data row**, whether its box is a fixed `h-6 w-6` or padding-only `p-1` ([#1923](https://github.com/d-hinders/Haven-AI/issues/1923), below) |
 | 16 | `h-4 w-4` | Beside `text-base`, and the icon in a **32–36 px tile** (`h-8 w-8` / `h-9 w-9`) |
 | 20 | `h-5 w-5` | A standalone icon with no container, and `EmptyState`'s icon slot — which is literally `h-5 w-5` inside a 40 px halo, so a call site that passes anything else is fighting the primitive |
@@ -1619,7 +1626,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 **Why six and not the three this section used to claim.** The old rule said 14/16/20 "exactly" and was [verified false](https://github.com/d-hinders/Haven-AI/issues/1858): 34 of 119 sized call sites were off it. Crucially the discrepancy resolved **both ways**, and assuming the code had to bend to the doc would have destroyed real work:
 
-- **12 px was never drift.** Nineteen call sites, and they are not scattered — every one is a chevron, caret, copy glyph or trailing arrow in the app's densest controls, the great majority of them in a `text-xs` run. Three rungs simply had no step for type that small, so authors took a fourth without the doc admitting it existed. **Stated carefully, because the first draft of this line was checkably false**: "every one sits in `text-xs`" is not true — `NetworkSwitcher.tsx:96` sits in `text-[13px]`, `ui/Table.tsx:157` in a `text-[11px]` header, and `transactions/FilterBar.tsx:329` in `text-sm`. The rung is real; the tidy single-class story about it was not, and replacing a false absolute with the measured spread is the whole habit this section is trying to build.
+- **12 px was never drift.** Nineteen call sites, and they are not scattered — every one is a chevron, caret, copy glyph or trailing arrow in the app's densest controls, the great majority of them in a `text-xs` run. Three rungs simply had no step for type that small, so authors took a fourth without the doc admitting it existed. **Stated carefully, because the first draft of this line was checkably false**: "every one sits in `text-xs`" is not true — `NetworkSwitcher.tsx:96` (deleted by #3719) sat in `text-[13px]`, `ui/Table.tsx:157` in a `text-[11px]` header, and `transactions/FilterBar.tsx:329` in `text-sm`. The rung is real; the tidy single-class story about it was not, and replacing a false absolute with the measured spread is the whole habit this section is trying to build.
 - **24 and 28 were not drift either.** Four sites, two apiece, and each pair is the icon at half its status medallion (48→24, 56→28). `EmptyState` had independently hard-coded the same ratio — a 20 px slot in a 40 px ring, 16 in a 32 — so "half the container" was already built into a primitive before it was ever written down.
 - **Eleven sites WERE drift**, and all eight arbitrary values were among them. They were corrected to the nearest rung: 10→12, 11→12, 13→14 (×3), 17→16, 18→20, 22→20, 22→24, and both non-square pairs→12.
 

@@ -138,6 +138,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           agentId={connectView.agentId}
           setupId={setup?.setup_id ?? setupStatus.setup_id}
           chainId={flow.approvalChainId}
+          accountId={flow.approvalAccountId}
           status={setupStatus}
           walletName={flow.approvalWalletLabel}
           onApproved={flow.handleDelegationApproved}

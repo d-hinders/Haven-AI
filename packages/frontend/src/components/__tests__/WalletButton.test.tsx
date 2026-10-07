@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const PASSKEY_ADDRESS = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
 const EOA_ADDRESS = '0x5555555555555555555555555555555555555555'
-const ACTIVE_ACCOUNT = {
+const DEFAULT_ACCOUNT = {
   id: 'safe-1',
   account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 100,
@@ -110,7 +110,7 @@ describe('WalletButton', () => {
     mocks.connectState.authenticationStatus = 'authenticated'
     mocks.disconnectAsync.mockResolvedValue(undefined)
     mocks.useAuth.mockReturnValue({
-      activeAccount: ACTIVE_ACCOUNT,
+      user: { accounts: [DEFAULT_ACCOUNT] },
       passkeys: [],
     })
     mocks.useActiveSigner.mockReturnValue(null)
@@ -121,6 +121,44 @@ describe('WalletButton', () => {
       value: {
         writeText: mocks.writeText,
       },
+    })
+  })
+
+  // #3719: no global active account. The app-bar pill reports the DEFAULT
+  // account's signer — seeded second here, so "first account" cannot pass for
+  // it — and the connect flow's pill reports the account it is approving on.
+  describe('subject account (#3719)', () => {
+    const FIRST_NOT_DEFAULT = {
+      ...DEFAULT_ACCOUNT,
+      id: 'acc-first',
+      account_address: '0x3333333333333333333333333333333333333333',
+      chain_id: 84532,
+      name: 'Sandbox',
+      is_default: false,
+    }
+
+    it('reads the is_default account, not the first one', () => {
+      mocks.useAuth.mockReturnValue({
+        user: { accounts: [FIRST_NOT_DEFAULT, DEFAULT_ACCOUNT] },
+        passkeys: [],
+      })
+      render(<WalletButton />)
+      expect(mocks.useActiveSigner).toHaveBeenLastCalledWith({
+        accountAddress: DEFAULT_ACCOUNT.account_address,
+        chainId: DEFAULT_ACCOUNT.chain_id,
+      })
+    })
+
+    it('reads the account it is given', () => {
+      mocks.useAuth.mockReturnValue({
+        user: { accounts: [FIRST_NOT_DEFAULT, DEFAULT_ACCOUNT] },
+        passkeys: [],
+      })
+      render(<WalletButton accountId="acc-first" />)
+      expect(mocks.useActiveSigner).toHaveBeenLastCalledWith({
+        accountAddress: FIRST_NOT_DEFAULT.account_address,
+        chainId: FIRST_NOT_DEFAULT.chain_id,
+      })
     })
   })
 
@@ -281,14 +319,14 @@ describe('WalletButton', () => {
   it('shows a passkey unavailable note in the connected-wallet dropdown', () => {
     setConnectedWallet()
     mocks.useAuth.mockReturnValue({
-      activeAccount: ACTIVE_ACCOUNT,
+      user: { accounts: [DEFAULT_ACCOUNT] },
       passkeys: [
         {
           id: 'passkey-1',
           credential_id: 'credential-1',
           signer_address: PASSKEY_ADDRESS,
-          chain_id: ACTIVE_ACCOUNT.chain_id,
-          account_address: ACTIVE_ACCOUNT.account_address,
+          chain_id: DEFAULT_ACCOUNT.chain_id,
+          account_address: DEFAULT_ACCOUNT.account_address,
           created_at: '2026-05-05T00:00:00.000Z',
         },
       ],
@@ -434,7 +472,9 @@ describe('WalletButton', () => {
     render(<WalletButton />)
     fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
     const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
-    expect(within(dialog).getByText('Haven account')).toBeInTheDocument()
+    // #3719: the section names the account the pill speaks for — with no
+    // global active account, that is the default one (here `Main account`).
+    expect(within(dialog).getByText('Main account')).toBeInTheDocument()
     expect(within(dialog).queryByText('Haven account (passkey)')).not.toBeInTheDocument()
     expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
     // #1679: the credential is named by kind + enrollment date, never

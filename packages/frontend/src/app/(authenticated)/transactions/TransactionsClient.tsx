@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
-import { useChainScope } from '@/hooks/useActiveChain'
+import { useChainScope } from '@/hooks/useChainScope'
 import { resolveChainOrNull } from '@/lib/chains'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
@@ -136,9 +136,9 @@ export default function TransactionsClient() {
     filters.accountId || filters.agentId || filters.tokenKey || filters.direction,
   )
 
-  // Transactions follow the active chain by default and re-default when it
-  // switches; the network dropdown overrides to another chain or all (#620).
-  const { scope, setScope } = useChainScope('follow-active')
+  // Every network by default; the network dropdown narrows to one (#620).
+  // There is no active chain to follow since #3719.
+  const { scope, setScope } = useChainScope()
   const chainIds = Array.from(new Set(userAccounts.map((s) => s.chain_id))).sort((a, b) => a - b)
   const showNetworkFilter = chainIds.length > 1
 

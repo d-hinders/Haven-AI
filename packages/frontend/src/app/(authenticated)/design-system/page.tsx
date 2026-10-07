@@ -479,8 +479,7 @@ export default function DesignSystemPage() {
             </p>
             <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
               <code className="rounded bg-[var(--v2-surface)] px-1">--v2-chain-*</code> tells networks
-              apart (Base, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>{' '}
-              and <code className="rounded bg-[var(--v2-surface)] px-1">NetworkSwitcher</code>. These are{' '}
+              apart (Base, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>. These are{' '}
               <span className="font-medium text-[var(--v2-ink)]">identity</span> colours, deliberately outside the
               semantic rules — never reuse a chain colour for success/warning meaning, and never route money
               tone through them.

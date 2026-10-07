@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test'
-import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/auth-storage'
+import { AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/auth-storage'
 import {
   ampersendDemoApi,
   ampersendOffers,
@@ -1221,13 +1221,11 @@ export async function serveAgentDetailResponses(
 
 export async function seedAuthenticatedSession(page: Page) {
   await page.addInitScript(
-    ({ tokenKey, activeAccountKey }) => {
+    ({ tokenKey }) => {
       window.localStorage.setItem(tokenKey, 'e2e-token')
-      window.localStorage.setItem(activeAccountKey, 'safe-main')
     },
     {
       tokenKey: AUTH_TOKEN_STORAGE_KEY,
-      activeAccountKey: ACTIVE_ACCOUNT_STORAGE_KEY,
     },
   )
 }

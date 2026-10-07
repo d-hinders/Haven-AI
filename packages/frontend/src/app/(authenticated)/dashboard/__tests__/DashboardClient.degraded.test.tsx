@@ -144,7 +144,6 @@ function mockBaseState() {
       wallet_address: '0x5555555555555555555555555555555555555555',
       accounts: [SAFE],
     },
-    activeAccount: SAFE,
     passkeys: [],
   })
   mockUsePreferences.mockReturnValue({ currency: 'USD' })

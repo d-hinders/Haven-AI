@@ -1,4 +1,6 @@
 import type { Agent } from '@/hooks/useAgents'
+import type { SmartAccount } from '@/context/AuthContext'
+import { resolveChainOrNull } from '@/lib/chains'
 
 /**
  * Search, facets and sort for the `/agents` list (#3165).
@@ -97,6 +99,26 @@ export const BUDGET_FACET: AgentFacet = {
 }
 
 export const BUILT_IN_FACETS: AgentFacet[] = [STATUS_FACET, BUDGET_FACET]
+
+/**
+ * Account facet (#3719). The list shows every agent on every account — there
+ * is no global active account narrowing it — so a user with several accounts
+ * filters here instead. Registered by the surface only when there is more than
+ * one account; with one, the facet would be a single always-true option.
+ * Each option names the account with its chain as the secondary half.
+ */
+export function accountFacet(accounts: readonly SmartAccount[]): AgentFacet {
+  return {
+    id: 'account',
+    label: 'Account',
+    match: 'any',
+    options: accounts.map((account) => {
+      const chain = resolveChainOrNull(account.chain_id)?.name
+      return { value: account.id, label: chain ? `${account.name} · ${chain}` : account.name }
+    }),
+    predicate: (agent, value) => agent.account_id === value,
+  }
+}
 
 // ── Search ─────────────────────────────────────────────────────────────────
 

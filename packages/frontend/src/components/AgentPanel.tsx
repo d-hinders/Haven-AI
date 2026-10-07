@@ -7,7 +7,7 @@ import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import { useAgentListFilters } from '@/hooks/useAgentListFilters'
-import { BUILT_IN_FACETS } from '@/lib/agent-list-filters'
+import { BUILT_IN_FACETS, accountFacet } from '@/lib/agent-list-filters'
 import { organizationFacet } from '@/lib/agent-organizations'
 import { AgentListToolbar } from './agent-panel/AgentListToolbar'
 import { AgentOrganizationTree } from './agent-panel/AgentOrganizationTree'
@@ -60,7 +60,15 @@ export default function AgentPanel() {
     () => (panel.organizations.length > 0 ? [organizationFacet(panel.organizations)] : []),
     [panel.organizations],
   )
-  const allFacets = useMemo(() => [...BUILT_IN_FACETS, ...orgFacets], [orgFacets])
+  // #3719: the list spans every account; with more than one, filter by it.
+  const accountFacets = useMemo(
+    () => (panel.accounts.length > 1 ? [accountFacet(panel.accounts)] : []),
+    [panel.accounts],
+  )
+  const allFacets = useMemo(
+    () => [...BUILT_IN_FACETS, ...accountFacets, ...orgFacets],
+    [accountFacets, orgFacets],
+  )
   // #3542: removed agents whose budget delegation is still live. Same predicate
   // as the cards, so the toggle and the marker inside it cannot disagree.
   const removedHalfRevokedCount = useMemo(
@@ -507,7 +515,7 @@ export default function AgentPanel() {
         onClose={closeConnectModal}
         starterAllowance={panel.firstAgentSetup}
         accountAddress={accountAddress}
-        accountId={panel.activeAccountId}
+        accountId={panel.defaultAccountId}
         onSetupUpdated={panel.handleSetupUpdated}
         resumeSetupId={activeResumeSetupId}
       />

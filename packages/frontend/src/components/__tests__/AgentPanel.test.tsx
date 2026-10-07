@@ -107,7 +107,7 @@ function setAgents(agents: unknown[], extra: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockUseAuth.mockReturnValue({ activeAccount: SAFE })
+  mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
   setAgents([])
   mockUseOrganizations.mockReturnValue({
     organizations: [],
@@ -322,7 +322,7 @@ describe('AgentPanel Removed group and half-revoked agents (#3542)', () => {
 
 describe('AgentPanel list toolbar (#3165)', () => {
   beforeEach(() => {
-    mockUseAuth.mockReturnValue({ activeAccount: SAFE, activeChainId: SAFE.chain_id })
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
   })
 
   it('renders the toolbar above a non-empty list and filters the cards through it', () => {

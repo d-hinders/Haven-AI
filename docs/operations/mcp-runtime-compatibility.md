@@ -1949,13 +1949,13 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >
 > **Surfaces this release moves:**
 > - **CLI.** A new command, `haven feedback submit` (#3597), with a local secret
->   check before any request. Additive.
+>   check before any request, and one agent-runbook line pointing at it. Additive.
 > - **Setup-prompt text.** The SDK's `AGENT_COMMAND_MODIFICATION_SENTENCE` permits
 >   the one user-chosen `--name`/`--replace` re-run after a `wiring_collision`
 >   relay (#3689). Text only; no SDK method or API change.
 > - **Not moved.** The tool set and tool arguments on both runtimes (no change
->   under `packages/mcp/src` or `packages/mcp-server/src` in the range besides
->   the version literals), the signer (no change under `packages/signer/src`),
+>   under `packages/mcp/src` or `packages/mcp-server/src` in the range; the
+>   bump rewrites only their version literals), the signer (no change under `packages/signer/src`),
 >   and the consent hashes. `CLIENT_COMPAT` is unchanged: `@haven_ai/signer`
 >   `min_version` stays `0.6.0-alpha.0`.
 >

@@ -859,41 +859,41 @@ describe('#3620 — budget-scope keys are the same on both runtimes, or the diff
 })
 
 /**
- * The hosted identity gate. The transport checks that a bearer token is
- * present, never that it is valid, so every networked tool first resolves the
- * key to an agent. These run every tool with its own valid arguments against a
- * Haven that rejects the key (or cannot answer), and pin that nothing reaches
- * a merchant — or any Haven route but the one identity read — and that the
- * refusal is the typed one.
+ * The hosted identity gate (`tools/identity-gate.ts`). Every gated tool runs
+ * with its own valid arguments over the real transport against a Haven that
+ * refuses the agent read; the only request made is that read, and the
+ * handler never runs.
  */
-describe('hosted identity gate — a rejected key reaches no merchant', () => {
+describe('hosted identity gate — nothing runs before the agent read succeeds', () => {
   const ALL_ARGS: Record<HostedToolName, Record<string, unknown>> = {
     ...VALID_ARGS,
     haven_get_agent: {},
     haven_get_allowances: {},
   }
 
-  function stubHaven(status: number) {
+  const BODIES: Record<number, Record<string, string>> = {
+    401: { error: 'Invalid or revoked API key' },
+    403: {
+      error: 'agent_paused',
+      detail: 'New API-initiated transactions are blocked until you resume this agent.',
+    },
+    503: { error: 'service_unavailable' },
+  }
+
+  function stubHaven(agentStatus: number, open: string[] = []) {
     fetches = []
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
-      fetches.push(`${(init.method ?? 'GET').toUpperCase()} ${new URL(url).host}${new URL(url).pathname}`)
-      if (new URL(url).host === 'haven.test') {
-        return {
-          ok: false,
-          status,
-          statusText: 'refused',
-          headers: new Headers({ 'content-type': 'application/json' }),
-          json: async () => ({ error: 'unauthorized' }),
-          text: async () => '{"error":"unauthorized"}',
-        } as unknown as Response
-      }
-      // A merchant that would answer anything — reaching it is the failure.
+      const u = new URL(url)
+      fetches.push(`${(init.method ?? 'GET').toUpperCase()} ${u.host}${u.pathname}`)
+      const refused = u.host === 'haven.test' && !open.some((p) => u.pathname.endsWith(p))
+      const body = refused ? BODIES[agentStatus] : {}
       return {
-        ok: true,
-        status: 200,
-        headers: new Headers(),
-        json: async () => ({}),
-        text: async () => '{}',
+        ok: !refused,
+        status: refused ? agentStatus : 200,
+        statusText: refused ? 'refused' : 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => body,
+        text: async () => JSON.stringify(body),
       } as unknown as Response
     })
   }
@@ -901,26 +901,49 @@ describe('hosted identity gate — a rejected key reaches no merchant', () => {
   for (const status of [401, 403, 503]) {
     for (const name of Object.keys(toolSchemas) as HostedToolName[]) {
       if (IDENTITY_GATE_EXEMPT.has(name)) continue
-      it(`${name} with a Haven ${status} on the agent read refuses before its handler`, async () => {
+      it(`${name}: a ${status} on the agent read refuses before the handler`, async () => {
         stubHaven(status)
         const client = await connectedClient()
         const { text } = await callToolText(client, name, ALL_ARGS[name])
         expect(fetches).toEqual(['GET haven.test/machine-payments/agent'])
-        const payload = JSON.parse(text) as { success: boolean; code: string; next_action?: string }
+        const payload = JSON.parse(text) as { success: boolean; code: string; message: string; next_action?: string }
         expect(payload.success).toBe(false)
-        expect(payload.code).toBe(AGENT_IDENTITY_UNVERIFIED)
-        expect(payload.next_action).toBe('stop_and_tell_user')
+        if (status === 401) {
+          expect(payload.code).toBe(AGENT_IDENTITY_UNVERIFIED)
+          expect(payload.next_action).toBe('stop_and_tell_user')
+        } else {
+          // A valid key on a paused/pending agent, or a backend fault: the
+          // backend's own answer is relayed, not reworded as a bad key.
+          expect(payload.code).not.toBe(AGENT_IDENTITY_UNVERIFIED)
+        }
       })
     }
   }
 
-  it('exempts only tools that make no request at all', async () => {
-    expect([...IDENTITY_GATE_EXEMPT]).toEqual(Object.keys(OFFLINE_TOOLS))
+  it('a 403 keeps the backend reason (paused agent, valid key)', async () => {
+    stubHaven(403)
+    const client = await connectedClient()
+    const { text } = await callToolText(client, 'haven_get_agent', {})
+    expect(text).toContain('resume this agent')
+    expect(text).not.toContain('did not accept this agent API key')
+  })
+
+  it('haven_verify_receipt is exempt and makes no request', async () => {
     stubHaven(401)
     const client = await connectedClient()
-    for (const name of IDENTITY_GATE_EXEMPT) {
-      await callToolText(client, name, ALL_ARGS[name])
-    }
+    await callToolText(client, 'haven_verify_receipt', ALL_ARGS.haven_verify_receipt)
     expect(fetches).toEqual([])
+  })
+
+  it('haven_sweep_delegate is exempt: a key refused on the agent read still reaches sweep/prepare', async () => {
+    stubHaven(401, ['/sweep/prepare'])
+    const client = await connectedClient()
+    await callToolText(client, 'haven_sweep_delegate', ALL_ARGS.haven_sweep_delegate)
+    expect(fetches.some((f) => f.endsWith('/sweep/prepare'))).toBe(true)
+    expect(fetches).not.toContain('GET haven.test/machine-payments/agent')
+  })
+
+  it('exempts exactly the two tools whose reason is written in identity-gate.ts', () => {
+    expect([...IDENTITY_GATE_EXEMPT].sort()).toEqual(['haven_sweep_delegate', 'haven_verify_receipt'])
   })
 })

@@ -337,10 +337,11 @@ API key was lost, rotate it in Haven and update the runtime config.
 
 **Tools are listed but every call fails**
 
-The hosted server lists its tools for any well-formed Bearer token; the key is
-checked only when a tool call reaches Haven. A call failing with
-`statusCode: 401` (`Invalid or revoked API key`) means the token is invalid or
-revoked: rotate the API key or create a new agent credential. A 403
+The hosted server lists its tools for any well-formed Bearer token. Every tool
+call (except `haven_verify_receipt` and `haven_sweep_delegate`) first checks the
+key with Haven and does nothing else if that check fails. A call failing with
+`code: AGENT_IDENTITY_UNVERIFIED` and `statusCode: 401` means the token is
+invalid or revoked: rotate the API key or create a new agent credential. A 403
 `agent_pending_approval` means the agent is still waiting for its first budget
 grant in Haven; `agent_paused` means the owner paused it.
 

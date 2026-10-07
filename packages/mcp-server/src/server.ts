@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { AgentPaymentNextAction, HavenApiError, HavenClient, havenClientIdentity } from '@haven_ai/sdk'
+import { HavenClient, havenClientIdentity } from '@haven_ai/sdk'
 import { hostedConnectorUpgradeCommand } from './connector-channel.js'
 import {
   assertHostedToolRegistry,
@@ -10,8 +10,10 @@ import {
   type HostedToolName,
   type ToolPayload,
 } from './tools.js'
-import { HostedToolError, runTool } from './tools/support/index.js'
-import { refusalNextStep } from './tools/support/guidance.js'
+import { runTool } from './tools/support/index.js'
+import { IDENTITY_GATE_EXEMPT, requireAgentIdentity } from './tools/identity-gate.js'
+
+export { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT } from './tools/identity-gate.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
 export const HOSTED_SERVER_VERSION = '0.8.1-alpha.0'
@@ -241,46 +243,6 @@ export function buildHostedMcpServer(haven: HavenClient): McpServer {
   }
 
   return server
-}
-
-export const AGENT_IDENTITY_UNVERIFIED = 'AGENT_IDENTITY_UNVERIFIED'
-
-/**
- * Tools that make no network request at all, so there is nothing for the
- * identity gate to protect. Every other tool, including any added later, is
- * gated — the default is closed.
- */
-export const IDENTITY_GATE_EXEMPT: ReadonlySet<HostedToolName> = new Set<HostedToolName>(['haven_verify_receipt'])
-
-/**
- * The bearer token is checked for presence at the transport, never for
- * validity, and several tools reach a merchant (quote probes, MCP handshakes,
- * discovery) before any Haven API call of their own. So every tool dispatch
- * first resolves the token to an agent, and a failed read — rejected key or
- * unreachable backend alike — refuses the call before the handler runs.
- * Fail-closed and per dispatch, not memoized: a revoked key stops at its next
- * call.
- */
-export async function requireAgentIdentity(haven: HavenClient): Promise<void> {
-  try {
-    await haven.getAgent()
-  } catch (err) {
-    const rejected = err instanceof HavenApiError && (err.statusCode === 401 || err.statusCode === 403)
-    throw new HostedToolError({
-      code: AGENT_IDENTITY_UNVERIFIED,
-      message: rejected
-        ? 'Haven did not accept this agent API key. Check the Authorization: Bearer key in your MCP client configuration, or reconnect the agent in Haven.'
-        : 'Haven could not verify this agent API key right now, so the call was not attempted. Try again shortly.',
-      statusCode: err instanceof HavenApiError ? err.statusCode : undefined,
-      nextStep: refusalNextStep({
-        nextAction: AgentPaymentNextAction.StopAndTellUser,
-        nextTool: null,
-        nextToolOmittedReason: rejected
-          ? 'the agent API key was not accepted; the user must fix the key or reconnect the agent before any tool can run'
-          : 'the agent identity could not be read; no tool runs until it can',
-      }),
-    })
-  }
 }
 
 function toMcpResult(payload: ToolPayload) {

@@ -78,8 +78,8 @@ last-verified: "2026-10-02"
 ---
 
 > **Re-verified (2026-10-07, hosted agent identity before tool dispatch):**
-> - **Every hosted tool call reads the agent first.** `buildHostedMcpServer` (`packages/mcp-server/src/server.ts`) resolves the bearer key with `getAgent()` before a tool's handler runs. A failed read refuses with `code: AGENT_IDENTITY_UNVERIFIED`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`; a rejected key and an unreachable backend give distinct messages.
-> - **One exemption.** `haven_verify_receipt` makes no request at all and is not gated.
+> - **Every hosted tool call reads the agent first.** `buildHostedMcpServer` runs `requireAgentIdentity` (`packages/mcp-server/src/tools/identity-gate.ts`) before a tool's handler. A 401 on that read refuses with `code: AGENT_IDENTITY_UNVERIFIED`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`. Any other failure is relayed through `normalizeError` as before, so `agent_pending_approval` and `agent_paused` keep their backend reason. The handler does not run either way.
+> - **Two exemptions.** `haven_verify_receipt` makes no request. `haven_sweep_delegate` calls only the sweep routes the backend keeps open to revoked and paused keys, so sweep recovery is unchanged.
 > - **No contract moves.** No tool, schema, strict-input list, expected-context version or consent hash moves; the local MCP, the signer and the connector are untouched. A valid key sees one extra agent read per call and otherwise unchanged answers.
 >
 > `last-verified` stays 2026-10-02. Nothing else in this document was re-verified.

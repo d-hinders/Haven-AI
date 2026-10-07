@@ -60,6 +60,39 @@ export interface RawERC20Transfer {
   tokenDecimal: string
 }
 
+// ── Shared request plumbing ──────────────────────────────────────
+
+/**
+ * Sent on every explorer request. Node's default fetch identifies itself as
+ * `node`, which edge bot protection in front of public explorers refuses
+ * (HTTP 403) — prod Base history reads failed that way on every request.
+ */
+const EXPLORER_REQUEST_HEADERS: Record<string, string> = {
+  Accept: 'application/json',
+  'User-Agent': 'Haven-Backend/1.0 (transaction history)',
+}
+
+/** Longest response-body excerpt an explorer error carries. */
+export const EXPLORER_ERROR_BODY_MAX = 200
+
+/**
+ * A short, single-line excerpt of a failed response's body, so the logged
+ * error says WHY the explorer refused (a Cloudflare page, an API-key notice)
+ * rather than only the status. Never throws: a body that cannot be read
+ * leaves the excerpt empty.
+ */
+async function errorBodyExcerpt(response: Response): Promise<string> {
+  try {
+    const text = (await response.text()).replace(/\s+/g, ' ').trim()
+    if (!text) return ''
+    const excerpt =
+      text.length > EXPLORER_ERROR_BODY_MAX ? `${text.slice(0, EXPLORER_ERROR_BODY_MAX)}…` : text
+    return ` — ${excerpt}`
+  } catch {
+    return ''
+  }
+}
+
 // ── Etherscan-compatible v1 client (Etherscan V2 + Blockscout v1) ──
 
 async function fetchFromV1<T>(
@@ -81,14 +114,16 @@ async function fetchFromV1<T>(
   }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const response = await fetch(url.toString())
+    const response = await fetch(url.toString(), { headers: EXPLORER_REQUEST_HEADERS })
 
     if (!response.ok) {
       if (attempt < retries && (response.status === 429 || response.status >= 500)) {
         await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
         continue
       }
-      throw new Error(`Explorer API error (chain ${chainId}): ${response.status}`)
+      throw new Error(
+        `Explorer API error (chain ${chainId}): ${response.status}${await errorBodyExcerpt(response)}`,
+      )
     }
 
     const data = (await response.json()) as EtherscanResponse<T[] | string>
@@ -166,6 +201,11 @@ async function fetchFromV2<T>(
   // explorerApiUrl ends in /api/v2. The caller owns the address, so the
   // caller passes `addresses/${addr}/${resource}`.
   const url = new URL(`${chain.explorerApiUrl.replace(/\/$/, '')}/${resource}`)
+  // Blockscout takes its key as the `apikey` query param. It survives the
+  // cursor hops below: those only set params, never clear the URL.
+  if (chain.explorerApiKey) {
+    url.searchParams.set('apikey', chain.explorerApiKey)
+  }
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v)
 
   const items: T[] = []
@@ -174,9 +214,11 @@ async function fetchFromV2<T>(
   // the loop ended: a spent budget with the provider still offering a cursor
   // is a capped read, an absent cursor is a complete one.
   for (let page = 0; page < EXPLORER_MAX_PAGES; page++) {
-    const response = await fetch(url.toString())
+    const response = await fetch(url.toString(), { headers: EXPLORER_REQUEST_HEADERS })
     if (!response.ok) {
-      throw new Error(`Blockscout v2 error (chain ${chainId}): ${response.status}`)
+      throw new Error(
+        `Blockscout v2 error (chain ${chainId}): ${response.status}${await errorBodyExcerpt(response)}`,
+      )
     }
     const data = (await response.json()) as V2Page<T>
     items.push(...(data.items ?? []))

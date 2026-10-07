@@ -250,7 +250,13 @@ export async function fetchAccountTransactions({
     // cap is the page budget, four windows deep, rather than the first one.
     const truncated = normal.hasMore || internal.hasMore || erc20.hasMore
 
-    txCache.set(cacheKey, { transactions: deduped, truncated })
+    // A read with a failed leg is NOT cached. A cache hit reports
+    // `hadFailures: false`, so caching it would show the incomplete rows as
+    // complete for the rest of the TTL — the banner would clear on reload
+    // while the missing rows stayed missing. The next read retries instead.
+    if (!hadFailures) {
+      txCache.set(cacheKey, { transactions: deduped, truncated })
+    }
 
     return {
       transactions: deduped,

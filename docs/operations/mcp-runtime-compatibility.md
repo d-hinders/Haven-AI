@@ -4977,3 +4977,16 @@ to call next in structured fields, and those fields are typed end to end
 > version-skew surface and no consent-hash input changed. `last-verified`
 > stays 2026-10-02 (already bumped by an earlier same-day change). Scope of
 > this note: that one file. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#3729, 2026-10-07):** `packages/cli/src/commands.ts`
+> and `packages/cli/src/commands.test.ts` are covered by this doc and were
+> touched — `agents revoke` now reads the agent's server-computed
+> `live_delegation_count` first and refuses (exit 4, `HavenCliError`) while a
+> budget is still live on-chain unless `--keep-budget` is passed, and
+> `budget revoke` accepts a `replaced` row (the backend's prepare route
+> already did). A client-side guard only: no tool is added, renamed or
+> re-shaped, no hosted/local schema or description changes, no version-skew
+> surface and no consent-hash input moves, and the backend is untouched. The
+> manifest rows and the skew tables above stand. `last-verified` is not
+> re-stamped: this note is the scope. Nothing else in this document was
+> re-verified.

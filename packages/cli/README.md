@@ -126,7 +126,9 @@ haven feedback submit "<text>"           # several unquoted words are joined int
 
 # manage (backend-only — no on-chain signing)
 haven agents pause <id> | resume <id>
-haven agents revoke <id> --yes           # terminal; needs explicit --yes
+haven agents revoke <id> [--keep-budget] --yes   # terminal; needs explicit --yes; refuses
+                                                 # while a budget is still live on-chain
+                                                 # unless --keep-budget
 haven agents rotate-key <id>             # new API key, shown once
 haven agents rename <id> <name>
 haven wallets rename <id> <name>

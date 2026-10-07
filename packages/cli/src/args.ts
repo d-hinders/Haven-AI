@@ -21,6 +21,14 @@ export interface ParsedArgs {
     hashes: boolean
     version: boolean
     yes: boolean
+    /**
+     * #3729: override for `agents revoke` — revoke the agent even though a
+     * budget delegation is still live on-chain (pending, active or replaced),
+     * saying so out loud instead of silently leaving the budget redeemable.
+     * Without it the command refuses and lists the exact `haven budget
+     * revoke` command for each live row.
+     */
+    keepBudget: boolean
     api?: string
     email?: string
     safe?: string
@@ -93,7 +101,7 @@ const VALUE_FLAGS = new Set([
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
   const flags: ParsedArgs['flags'] = {
-    json: false, help: false, version: false, yes: false, noWait: false, run: false, wait: false, hashes: false,
+    json: false, help: false, version: false, yes: false, noWait: false, run: false, wait: false, hashes: false, keepBudget: false,
   }
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -102,6 +110,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === '--help' || arg === '-h') flags.help = true
     else if (arg === '--version' || arg === '-v') flags.version = true
     else if (arg === '--yes' || arg === '-y') flags.yes = true
+    else if (arg === '--keep-budget') flags.keepBudget = true
     else if (arg === '--no-wait') flags.noWait = true
     else if (arg === '--run') flags.run = true
     else if (arg === '--wait') flags.wait = true
@@ -215,7 +224,8 @@ export function helpText(): string {
     'Manage (backend-only — no on-chain signing):',
     '  agents pause <id>             Stop the agent spending; keeps its budget',
     '  agents resume <id>            Let it spend again',
-    '  agents revoke <id> --yes      Permanently revoke an agent',
+    '  agents revoke <id> --yes      Permanently revoke an agent. Refuses while a',
+    '                          budget is still live on-chain unless --keep-budget',
     '  agents rotate-key <id>        Issue a new API key (shown once)',
     '  agents rename <id> <name>',
     '  wallets rename <id> <name>',

@@ -100,6 +100,13 @@ interface Agent {
   allowances?: Allowance[]
   /** #3597: the spec's `Agent` schema always carries it; added here for the feedback secret check's layer 3. */
   delegate_address?: string
+  /**
+   * #3729: how many delegation rows are still live (pending, active or
+   * replaced), computed server-side — the CLI gates the revoke on this rather
+   * than keeping its own copy of the live set. Optional so an older backend
+   * that predates the field reads as "nothing live" rather than crashing.
+   */
+  live_delegation_count?: number
 }
 interface Balance { symbol: string; formatted: string; balance: string }
 /**
@@ -979,12 +986,11 @@ async function cmdBudgetRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
   if (row.status === 'revoked') {
     throw new HavenCliError(`Delegation ${hash} is already revoked.`, EXIT.refused)
   }
-  if (row.status === 'replaced') {
-    throw new HavenCliError(
-      `Delegation ${hash} was already replaced by a newer grant — nothing to revoke.`,
-      EXIT.refused,
-    )
-  }
+  // #3542 / #3729: a `replaced` row is still live — the newer grant does not
+  // undo it until the newer delegation is itself revoked. The backend's
+  // prepare route accepts `replaced` (it only rejects `revoked`), so this
+  // refusal was a dead end for an agent whose only live row had been
+  // replaced: the row is prepared for revocation like any other live one.
 
   // PREPARE only: the response carries the unsigned UserOp and the dashboard
   // link. The /submit step stays owner-session-only by design.
@@ -1049,7 +1055,7 @@ async function cmdAgentLifecycle(args: ParsedArgs, d: ResolvedDeps, action: 'pau
 
 async function cmdAgentRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const id = args.positionals[0]
-  if (!id) throw new UsageError('Usage: haven agents revoke <id> --yes')
+  if (!id) throw new UsageError('Usage: haven agents revoke <id> [--keep-budget] --yes')
   // Revoke is terminal (status can't go back to active). Require explicit --yes
   // so it can't happen by accident in a script.
   if (!args.flags.yes) {
@@ -1059,12 +1065,65 @@ async function cmdAgentRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<number
     )
   }
   const { api } = await authed(args, d)
+
+  // #3729: POST /agents/:id/revoke is a status flip — it changes no delegation
+  // row and makes no on-chain call — so a live budget delegation outlives the
+  // revoke, and whoever holds the delegate key can keep redeeming it. The
+  // gate reads the server's own live count instead of keeping a CLI copy of
+  // the live set, then names each live row's exact revocation command. A
+  // budget going live between this read and the POST is accepted: this is a
+  // client-side guard, not an authority control (the superseded-agent path
+  // and older CLIs can still create that state).
+  let live: DelegationRow[] = []
+  try {
+    const agent = await api.get<Agent>(`/agents/${id}`)
+    if ((agent.live_delegation_count ?? 0) > 0) {
+      const { delegations } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
+      live = delegations.filter((r) => r.status === 'pending' || r.status === 'active' || r.status === 'replaced')
+    }
+  } catch (err) {
+    // Fail closed: without the live set, no revoke. The read's own exit
+    // class stands (401 → 3, network → 5, 403/404 → refused) — the note only
+    // explains why the revoke never happened, it does not re-classify the
+    // failure.
+    d.o.note(`Couldn't check budgets for agent ${id}, so the revocation was not attempted.`)
+    throw err
+  }
+
+  if (live.length > 0 && !args.flags.keepBudget) {
+    throw new HavenCliError(
+      `Agent ${id} still has a live on-chain budget. Revoking now would leave it redeemable by the delegate key.`,
+      EXIT.refused,
+      [
+        ...live.map((r) => `haven budget revoke ${id} ${r.delegation_hash}  # ${r.status}`),
+        'Remove agent… in the dashboard ends every live budget with one signature, before revoking.',
+        'To revoke the agent anyway and leave the budget live on-chain, re-run with --keep-budget.',
+      ].join('\n'),
+      // The machine branch: a script skips the prose and reads the rows.
+      { live_delegations: live.map(({ delegation_hash, status }) => ({ delegation_hash, status })) },
+    )
+  }
+
   await api.post(`/agents/${id}/revoke`)
   emit(
     d,
     args.flags.json,
-    { ok: true, agent_id: id, status: 'revoked' },
-    () => `Agent ${id} revoked. To also remove its on-chain allowance, use the dashboard.`,
+    live.length > 0
+      ? {
+          ok: true,
+          agent_id: id,
+          status: 'revoked',
+          live_delegations: live.map(({ delegation_hash, status }) => ({ delegation_hash, status })),
+        }
+      : { ok: true, agent_id: id, status: 'revoked' },
+    () =>
+      live.length > 0
+        ? [
+            `Agent ${id} revoked.`,
+            `Its budget is still live on-chain: the delegate key can keep spending until each delegation is revoked.`,
+            ...live.map((r) => `haven budget revoke ${id} ${r.delegation_hash}  # ${r.status}`),
+          ].join('\n')
+        : `Agent ${id} revoked. To also remove its on-chain allowance, use the dashboard.`,
   )
   return EXIT.ok
 }

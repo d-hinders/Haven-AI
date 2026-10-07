@@ -399,8 +399,8 @@
       },
       "cmdAgentRevoke": {
         "convention": "snake",
-        "keys": "ok, agent_id, status",
-        "reason": "Hybrid envelope: a bare `ok` beside snake_case identifiers."
+        "keys": "ok, agent_id, status; ok, agent_id, status, live_delegations (the --keep-budget success with rows still live, each carrying delegation_hash and status)",
+        "reason": "Hybrid envelope: a bare `ok` beside snake_case identifiers. #3729 added optional live_delegations on the --keep-budget success path."
       },
       "cmdAgentRename": {
         "convention": "snake",

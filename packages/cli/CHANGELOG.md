@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **`haven agents revoke` refuses while a budget is still live, unless `--keep-budget` (#3729).** The revoke route is a status flip: it changes no delegation row and makes no on-chain call, so a live budget delegation stayed redeemable by the delegate key. The command now reads the agent's `live_delegation_count` first and, with any live budget (pending, active or replaced), exits 4 (refused) printing the exact `haven budget revoke <agentId> <hash>` command for each live row, and names **Remove agent…** in the dashboard — the one-signature route that ends every live budget before revoking. Scripts that relied on `agents revoke --yes` exiting 0 with a live budget will now see exit 4; pass `--keep-budget` to revoke anyway, which revokes and then warns that the budget is still live on-chain, followed by the same per-row commands. Under `--json` the refusal carries `error.live_delegations: [{ delegation_hash, status }]`, and the `--keep-budget` success payload carries the same `live_delegations`. A failed budget check keeps the read's own exit code and adds a "couldn't check budgets" note. The backend is unchanged; this is a client-side guard, not an authority control — older installed CLIs, direct API calls and the superseded-agent path can still leave a budget live.
+
+### Fixed
+
+- **`haven budget revoke` accepts a `replaced` delegation (#3542, #3729).** A replaced row is still live (#3542) and the backend's prepare route already accepts one — it rejects only `revoked` — so the old "already replaced — nothing to revoke" refusal was a dead end for an agent whose only live row had been replaced. A `replaced` row is now prepared for revocation like any other live row.
+
 ## 0.8.1-alpha.0 — 2026-10-07
 
 ### Added

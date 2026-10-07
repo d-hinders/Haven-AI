@@ -224,7 +224,8 @@ describe('--json contract, success paths', () => {
     },
     'GET /balances/0xabc': { balances: [{ symbol: 'USDC', formatted: '10.00', balance: '10000000' }] },
     'GET /agents': { agents: [{ id: 'a1', name: 'Payer', status: 'active' }] },
-    'GET /agents/a1': { id: 'a1', name: 'Payer', status: 'active', allowances: [] },
+    'GET /agents/a1': { id: 'a1', name: 'Payer', status: 'active', allowances: [], live_delegation_count: 0 },
+    'GET /agents/a1/delegations': { delegations: [] },
     'GET /transactions': {
       transactions: [{
         hash: '0xtx', direction: 'out', valueFormatted: '1.00', asset: 'USDC', timestamp: 1_700_000_000,

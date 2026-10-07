@@ -321,10 +321,10 @@ function differsFromRequest(target: X402RetryTarget): { resource_url_differs_fro
 // In request mode `haven_pay_x402_quote` makes the unpaid request itself and
 // builds the payment from the 402 it fetched, so the challenge never passes
 // through the agent (the 2026-10-07 Bitrefill failure was an agent retyping
-// it). The probe is a NEW kind of reach for this tool, so it runs under a
-// policy stricter than the quote's: https only; no IP literal, loopback,
-// reserved or single-label host; no redirect followed; a bounded timeout
-// well under the tool budget; and a cap on the bytes read. What it cannot do
+// it). The probe is a NEW kind of reach for this tool, so it runs under
+// #3747's hosted egress policy (the quote's own: public https hosts only, its
+// quote timeout and while-reading byte cap) with a stricter redirect rule —
+// none is followed. What it cannot do
 // from inside mcp-server is refuse a public NAME that resolves to a private
 // address (the backend's DNS-pinning guard is not importable here) — the
 // accepted residual tracked by #3740. It returns only a parsed challenge to

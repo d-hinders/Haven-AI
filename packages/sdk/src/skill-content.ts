@@ -286,7 +286,8 @@ merchant leg for you.
 \`to\`, \`amount\`, and \`token\` for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` with the quote's \`next_arguments\`
-(\`url\`, \`method\`, \`headers\`, \`body\` and a cap) and no
+(\`url\`, \`method\`, \`headers\`, \`body\`, a cap and an
+\`idempotency_key\`) and no
 \`payment_required\`: Haven fetches the payment challenge itself, so there is
 nothing to copy. Follow the result's guidance fields first and sign in the
 local Haven signer. If the 402 carries a

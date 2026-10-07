@@ -384,7 +384,7 @@ budgets) and a stricter redirect rule: none is followed. It builds the intent fr
 fetched, so the challenge the backend stores — and the eip3009 header echoes —
 is the merchant's, never an agent's copy (the 2026-10-07 Bitrefill failure was
 an agent dropping `extensions.bazaar.schema` while retyping it). A repeated call
-with the same `idempotency_key` answers from Haven's record
+with the same `idempotency_key` — for the same URL, within the cap — answers from Haven's record
 (`GET /x402/by-idempotency-key/{key}`) before any re-probe; without a key the
 derived key covers the whole probed challenge, `extensions` included. The paid
 request is still the agent's own retry. What the probe cannot refuse from

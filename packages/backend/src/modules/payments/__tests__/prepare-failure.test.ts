@@ -12,7 +12,8 @@ import {
   boundedErrorDetails,
   prepareFailureBody,
 } from '../prepare-failure.js'
-import { REVERT_REASON_MAX_LENGTH, classifyRevertForLedger, revertReasonOf } from '../refusal-ledger.js'
+import { REVERT_REASON_MAX_LENGTH, classifyRevertForLedger, isExecutionRevert, revertReasonOf } from '../refusal-ledger.js'
+import { INSUFFICIENT_BALANCE_REVERT_CAUSE, INSUFFICIENT_BALANCE_REVERT_REASON } from '../prepare-failure.js'
 
 const PERIOD_REASON = 'ERC20PeriodTransferEnforcer:transfer-amount-exceeded'
 const PERIOD_HEX =
@@ -191,5 +192,62 @@ describe('revertReasonOf (#3609)', () => {
     expect(got).not.toMatch(/[^\x20-\x7e…]/)
     expect(got.length).toBeLessThanOrEqual(REVERT_REASON_MAX_LENGTH + 1)
     expect(got.startsWith('EvilEnforcer[31m')).toBe(true)
+  })
+})
+
+describe('prepareFailureBody names the real cause when the wallet is short (#3731)', () => {
+  // The live shape a bundler relays for USDC (Circle FiatToken) on Base: the
+  // simulation revert carrying the token's own `Error(string)` — the same
+  // captured-shape pattern as LIVE_DUMP above, with the FiatToken's message.
+  // Not a hand-built string: the hex is the ABI-encoded `Error(string)` revert
+  // data the chain actually returns, inside the bundler's simulation text.
+  const INSUFFICIENT_BALANCE_HEX =
+    '0x08c379a0' +
+    (32).toString(16).padStart(64, '0') +
+    Buffer.byteLength(INSUFFICIENT_BALANCE_REVERT_REASON).toString(16).padStart(64, '0') +
+    Buffer.from(INSUFFICIENT_BALANCE_REVERT_REASON, 'utf8').toString('hex').padEnd(
+      Math.ceil(Buffer.byteLength(INSUFFICIENT_BALANCE_REVERT_REASON) / 32) * 64,
+      '0',
+    )
+  const SHORT_WALLET_DUMP = new Error(
+    'Execution reverted with reason: UserOperation reverted during simulation with reason: ' +
+      INSUFFICIENT_BALANCE_HEX +
+      '.\n\nRequest Arguments:\n  callData: 0x5c1c6dcd' +
+      'ab'.repeat(2800) +
+      '\n  paymasterData: 0x01' +
+      'cd'.repeat(80) +
+      '\n  url: https://api.pimlico.io/v2/8453/rpc?apikey=pim_SECRETKEY123\n\nVersion: viem@2.54.1',
+  )
+
+  it('an insufficient-balance revert is an execution revert, classified onchain_revert', () => {
+    expect(isExecutionRevert(SHORT_WALLET_DUMP)).toBe(true)
+    expect(classifyRevertForLedger(SHORT_WALLET_DUMP)).toBe('onchain_revert')
+  })
+
+  it('carries revert_cause: insufficient_balance and a funding-first message', () => {
+    const reason = classifyRevertForLedger(SHORT_WALLET_DUMP)
+    const body = prepareFailureBody(SHORT_WALLET_DUMP, reason, 'infra text')
+    expect(body.error_code).toBe(PREPARE_REVERTED_ERROR_CODE)
+    // The refusal ledger is unchanged — still booked as onchain_revert.
+    expect(body.refusal_reason).toBe('onchain_revert')
+    // revert_cause matches the SAME value revert_reason reports: the two
+    // cannot disagree.
+    expect(body.revert_cause).toBe(INSUFFICIENT_BALANCE_REVERT_CAUSE)
+    expect(body.revert_reason).toBe(INSUFFICIENT_BALANCE_REVERT_REASON)
+    // The message leads with FUNDING, not the caveat text.
+    expect(body.message).toMatch(/does not hold enough of the token/)
+    expect(body.message).toMatch(/needs funds/)
+    expect(body.message).toMatch(/once funded/)
+    expect(body.message).not.toMatch(/caveat/)
+  })
+
+  it('any other revert — the caveat case and a reasonless one — carries NO revert_cause', () => {
+    const caveatBody = prepareFailureBody(LIVE_DUMP, classifyRevertForLedger(LIVE_DUMP), 'infra')
+    expect(caveatBody.revert_cause).toBeUndefined()
+    expect(caveatBody.message).toMatch(/caveat/)
+
+    const reasonless = new EstimateGasExecutionError(new Error('execution reverted') as never, {} as never)
+    const reasonlessBody = prepareFailureBody(reasonless, classifyRevertForLedger(reasonless), 'infra')
+    expect(reasonlessBody).not.toHaveProperty('revert_cause')
   })
 })

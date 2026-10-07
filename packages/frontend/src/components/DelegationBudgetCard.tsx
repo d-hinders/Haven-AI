@@ -20,6 +20,7 @@ import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
+import ConfirmDialog from './ConfirmDialog'
 import { eligibleSubBudgetParents } from '@/lib/sub-budget'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
@@ -41,6 +42,12 @@ interface Props {
   agentId: string
   chainId: number
   tokens: TokenOption[]
+  /**
+   * #3717: the agent's display name, for the Stop confirm's body ("{agent}
+   * can no longer spend from this 1 USDC/day budget…"). This card has one
+   * mount site, so it is a plain prop rather than a name lookup.
+   */
+  agentName: string
   /**
    * Fires after a successful grant or revoke (#1090): the agent-page budget
    * SUMMARY reads a different source (useAgents) than this card's live
@@ -93,7 +100,7 @@ function inDuration(targetMs: number, nowMs: number): string {
   return `in ${Math.round(hours / 24)} days`
 }
 
-export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange, retired }: Props) {
+export default function DelegationBudgetCard({ agentId, chainId, tokens, agentName, onBudgetChange, retired }: Props) {
   // #3695: this card is the one caller that asks for remaining-this-period —
   // the meter on each row is drawn from it.
   const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
@@ -364,6 +371,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
               key={b.delegation_hash}
               budget={b}
               tokens={tokens}
+              agentName={agentName}
               openTaskBudgets={openTaskBudgets}
               onRevoke={handleRevoke}
               onEdit={retired ? undefined : setEditing}
@@ -580,9 +588,36 @@ function SpendingHeading({ retired }: { retired?: 'revoked' | 'archived' }) {
   )
 }
 
+/**
+ * The Stop confirm's spend phrase, from the row's own formatted values.
+ * Known token, listed period: the owner's "1 USDC/day" slash form. Anything
+ * else falls back to the row's own label without the slash — "1 USDC every
+ * 3600s", or "5 per day" when the token is unknown.
+ */
+function spendPhrase(amount: string | bigint, t: TokenOption | undefined, periodLabel: string): string {
+  const noun = t ? periodNounFromLabel(periodLabel) : null
+  if (t && noun) return `${amount} ${t.symbol}/${noun}`
+  if (t) return `${amount} ${t.symbol} ${periodLabel}`
+  return `${amount} ${periodLabel}`.replace(/\s+/g, ' ')
+}
+
+function periodNounFromLabel(label: string): string | null {
+  switch (label) {
+    case 'per day':
+      return 'day'
+    case 'per week':
+      return 'week'
+    case 'per month':
+      return 'month'
+    default:
+      return null
+  }
+}
+
 function BudgetRow({
   budget,
   tokens,
+  agentName,
   openTaskBudgets,
   onRevoke,
   onEdit,
@@ -591,9 +626,11 @@ function BudgetRow({
 }: {
   budget: DelegationBudget
   tokens: TokenOption[]
+  /** #3717: the agent's display name, for the confirm's body. */
+  agentName: string
   /** Open, unexpired task budgets across the agent (#3329) — filtered to this row's parent below. */
   openTaskBudgets: TaskBudget[]
-  onRevoke: (hash: string) => void
+  onRevoke: (hash: string) => void | Promise<void>
   /** Opens the edit-in-place flow (#3166) for THIS row; absent on a retired agent (#3549). */
   onEdit?: (budget: DelegationBudget) => void
   busy: boolean
@@ -603,6 +640,24 @@ function BudgetRow({
   const amount = t ? formatUnits(BigInt(budget.budget_atomic), t.decimals) : budget.budget_atomic
   const periodLabel =
     PERIODS.find((p) => p.seconds === budget.period_seconds)?.label ?? `every ${budget.period_seconds}s`
+
+  // #3717: Stop ends an irreversible on-chain budget, so it explains itself
+  // at the moment of action rather than asking for a signature cold. The
+  // dialog stays up with `loading` while the owner signs and closes when the
+  // flow resolves — success or cancelled signature, whichever the toast
+  // reports (handleRevoke never throws: the hook returns a result).
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [signing, setSigning] = useState(false)
+
+  async function handleConfirmStop() {
+    setSigning(true)
+    try {
+      await onRevoke(budget.delegation_hash)
+      setConfirmOpen(false)
+    } finally {
+      setSigning(false)
+    }
+  }
 
   // #3329: the sum of open, unexpired task budgets carved from THIS budget —
   // matched by parent delegation hash, never rendered when the sum is zero.
@@ -661,10 +716,34 @@ function BudgetRow({
             Edit
           </Button>
         ) : null}
-        <Button size="sm" variant="ghost" onClick={() => onRevoke(budget.delegation_hash)} disabled={busy || !ready}>
-          Stop
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setConfirmOpen(true)}
+          disabled={busy || !ready}
+          aria-label={`Stop budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
+        >
+          Stop budget
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => handleConfirmStop()}
+        title="Stop this budget?"
+        confirmLabel="Stop budget"
+        loading={signing}
+        // Same gate as the row button: no confirm while a lifecycle action is
+        // in flight or no reachable signer.
+        confirmDisabled={busy || !ready}
+        body={
+          <p>
+            {agentName} can no longer spend from this {spendPhrase(amount, t, periodLabel)} budget. This can&rsquo;t be
+            undone, but you can set a new budget for the agent at any time.
+          </p>
+        }
+      />
     </div>
   )
 }

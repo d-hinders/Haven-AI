@@ -175,7 +175,7 @@ describe('WalletButton', () => {
       render(<WalletButton />)
       fireEvent.click(screen.getByRole('button', { name: /0x5555/ }))
       const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
-      expect(within(dialog).getByText(/^Main account · /)).toBeInTheDocument()
+      expect(within(dialog).getByText('Main account')).toBeInTheDocument()
     })
 
     it('reads the account it is given', () => {
@@ -504,7 +504,7 @@ describe('WalletButton', () => {
     expect(within(dialog).getByText('Haven account')).toBeInTheDocument()
     // #3719: the menu names the account its status refers to — with no
     // global active account, the default one here.
-    expect(within(dialog).getByText(/^Main account · /)).toBeInTheDocument()
+    expect(within(dialog).getByText('Main account')).toBeInTheDocument()
     expect(within(dialog).queryByText('Haven account (passkey)')).not.toBeInTheDocument()
     expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
     // #1679: the credential is named by kind + enrollment date, never

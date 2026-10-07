@@ -2507,6 +2507,6 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > budgets, "revoke first" for a live credential) still holds, so the body is
 > unchanged. The refusal fires on exactly the same conditions with the same
 > 409. (The setup-cancel refusal in `routes/agent-connection-setups.ts`, also
-> reworded, is outside this document's `covers:`.) No authority, signer set,
+> reworded, is outside the code this document covers.) No authority, signer set,
 > delegation or custody path moves. Nothing else in this document was re-read
 > for it, and `last-verified` is not bumped.

@@ -5008,10 +5008,11 @@ to call next in structured fields, and those fields are typed end to end
 > description payload is re-derived as a new round in
 > `packages/mcp-server/src/description-size.test.ts` (the shrink-only
 > `MAX_TOTAL_BYTES` pin cannot absorb a 28th description without a re-measure,
-> as #3518 did); `MAX_MEAN_BYTES` is unchanged. Hosted picks the SDK change
-> up on deploy; stdio only through a release (`@haven_ai/mcp` pins the SDK
-> exactly). No backend route, OpenAPI, wire field, migration or payment path
-> changed; the `agent_tool_invocations` audit allowlist is NOT extended, so
+> as #3518 did); `MAX_MEAN_BYTES` is re-pinned to the new round's two-decimal
+> ceiling (960.83, stricter than round 17's 964.04). Hosted picks the SDK
+> change up on deploy; stdio only through a release (`@haven_ai/mcp` pins the
+> SDK exactly). No backend route, OpenAPI, wire field, migration or payment
+> path changed; the `agent_tool_invocations` audit allowlist is NOT extended, so
 > `haven_get_receipt` leaves no audit row (like `haven_verify_receipt`
 > today). `last-verified` is not re-stamped: this block is the scope.
 > Nothing else in this document was re-verified.

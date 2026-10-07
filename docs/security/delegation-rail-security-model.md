@@ -2466,11 +2466,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `verifyPaymentReceipt` (#3723) accepts either layer — the whole object or
 > `.receipt` alone. No build, signing, intent, guard or refusal path moves.
 > The digest this document describes is untouched: the verifier lives in
-> `packages/sdk/src/receipt.ts`, which is not in this document's coverage, and
-> its #3723 change was re-read from that side — the endpoint-response wrapper
-> is unwrapped ONE level and the wrapper's `verification` (Haven's own
-> self-check) is never read, so the offline evidence is still the recovered
-> delegate signature over the delegation digest, nothing server-asserted.
-> Scope of this note: the `getReceipt()` doc comment and that re-read;
-> `last-verified` is bumped for exactly this coverage.
+> `packages/sdk/src/receipt.ts`, which this diff adds to the front-matter
+> `covers:` list — the offline verifier is trust-critical, so future
+> receipt.ts changes re-gate this document. Its #3723 change was re-read from
+> that side — the endpoint-response wrapper is unwrapped ONE level and the
+> wrapper's `verification` (Haven's own self-check) is never read, so the
+> offline evidence is still the recovered delegate signature over the
+> delegation digest, nothing server-asserted.
+> Scope of this note: the `getReceipt()` doc comment, the new `covers:` entry
+> for the verifier, and that re-read; `last-verified` is bumped for exactly
+> this coverage.
 

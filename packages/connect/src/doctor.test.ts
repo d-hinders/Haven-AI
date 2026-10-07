@@ -441,7 +441,9 @@ describe('superseded agent credentials (#1688)', () => {
     expect(check?.ok).toBe(false)
     expect(check?.detail).toContain('agent-old')
     expect(check?.detail).toMatch(/SPEND-CAPABLE/)
-    expect(check?.repair).toMatch(/[Rr]evoke/)
+    // #3756: names the agent page's real control; /[Rr]evoke/ alone passed on "never revokes".
+    expect(check?.repair).toContain('Use Remove agent\u2026 on the Haven agent page for agent-old (it ends each one\u2019s live budgets)')
+    expect(check?.repair).not.toMatch(/^Revoke /)
     expect(check?.repair).toContain('agent-old')
     // Connect reports; the user acts. The repair must never claim otherwise.
     expect(check?.repair).toMatch(/never revokes or deletes/)
@@ -2128,7 +2130,7 @@ describe('doctor verdict levels (#3121)', () => {
       const check = report.checks.find((c) => c.id === 'superseded_agents')
       expect(check?.level).toBe('failed')
       expect(check?.detail).toMatch(/SPEND-CAPABLE/)
-      expect(check?.repair).toMatch(/Revoke agent-old/)
+      expect(check?.repair).toMatch(/Use Remove agent\u2026 on the Haven agent page for agent-old/) // #3756: was /Revoke agent-old/
       expect(report.ok).toBe(false)
     })
 
@@ -2192,6 +2194,8 @@ describe('doctor verdict levels (#3121)', () => {
     expect(check?.detail).toContain("Runtime 'claude-code' has no config file the connector can read")
     expect(check?.detail).toContain('cannot be verified from this machine')
     expect(check?.repair).toMatch(/Check agent-old on the Haven agent page/)
+    expect(check?.repair).toContain('use Remove agent\u2026 on the ones you no longer use')
+    expect(check?.repair).not.toMatch(/revoke the ones/)
     expect(report.level).toBe('advisory')
     expect(report.ok).toBe(true)
   })

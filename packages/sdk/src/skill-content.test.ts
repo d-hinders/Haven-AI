@@ -487,3 +487,24 @@ describe('x402 payment URL handed back by another tool (#3735)', () => {
     expect(frontMatter).toMatch(/hits an HTTP 402 \(x402\) paywall, or another tool returns an x402 payment URL/)
   })
 })
+
+describe('leaked-credential guidance (#3722)', () => {
+  const start = HAVEN_SKILL_MD.indexOf('## If the credential may have leaked')
+  const section = HAVEN_SKILL_MD.slice(start).replace(/\s+/g, ' ')
+
+  it('exists, and names the owner-ruled remedies by their real control names', () => {
+    expect(start).toBeGreaterThan(-1)
+    expect(section).toContain('choose Replace signing key: the old budget is revoked on-chain and a new one is issued')
+    expect(section).toContain('use Stop budget on the agent\'s budget, or Remove agent… to end every budget')
+    expect(section).toContain('Pausing only blocks payments through Haven; the budget stays live on-chain.')
+  })
+
+  it('discloses that ending the budget does not recover agent-wallet funds', () => {
+    expect(section).toContain('also controls any funds already in the agent wallet, and ending the budget does not recover them')
+  })
+
+  it('never offers pause or revoke as the remedy anywhere in the skill', () => {
+    expect(HAVEN_SKILL_MD).not.toMatch(/pause or revoke/i)
+    expect(HAVEN_SKILL_MD).not.toMatch(/^## Revoke$/m)
+  })
+})

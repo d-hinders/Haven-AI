@@ -77,6 +77,13 @@ covers:
 last-verified: "2026-10-07"
 ---
 
+> **Re-verified (2026-10-07, hosted agent identity before tool dispatch):**
+> - **Every hosted tool call reads the agent first.** `buildHostedMcpServer` runs `requireAgentIdentity` (`packages/mcp-server/src/tools/identity-gate.ts`) before a tool's handler. A 401 on that read refuses with `code: AGENT_IDENTITY_UNVERIFIED`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`. Any other failure is relayed through `normalizeError` as before, so `agent_pending_approval` and `agent_paused` keep their backend reason. The handler does not run either way.
+> - **Two exemptions.** `haven_verify_receipt` makes no request. `haven_sweep_delegate` calls only the sweep routes the backend keeps open to revoked and paused keys, so sweep recovery is unchanged.
+> - **No contract moves.** No tool, schema, strict-input list, expected-context version or consent hash moves; the local MCP, the signer and the connector are untouched. A valid key sees one extra agent read per call and otherwise unchanged answers.
+>
+> `last-verified` stays 2026-10-02. Nothing else in this document was re-verified.
+
 > **Re-verified #3728 (2026-10-07, signer SIWX phase 1):** the local signer
 > gains one tool, `haven_sign_siwx { url, challenge }` — an x402
 > Sign-In-With-X (CAIP-122 / EIP-4361) sign-in for the delegate EOA. The tool
@@ -216,6 +223,34 @@ last-verified: "2026-10-07"
 > moves — the runtime manifest, connector channel, dist-tag and setup-prompt
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
+
+> **Re-verified #3756 (2026-10-07, superseded-agent wording):** this diff
+> touches covered connect files in their human-readable output only:
+> - the `--doctor` superseded-agents repair (`doctor.ts`);
+> - the replace and new-agent heads-ups and the `wiring_collision` refusal
+>   (`runtime.ts`);
+> - the collision prompt (`wiring-collision.ts`);
+> - the `--replace` help (`args.ts`) and the README.
+>
+> Each now names Remove agent… on the agent page instead of "revoke". No
+> flag, exit code, check id, `--json` field, tool, schema, version-skew or
+> consent-hash contract moves. Two body lines here repeated the same claim and
+> are fixed with it: the `--replace` paragraph ("the owner still revokes on the
+> Haven agent page") and the `--unwire` paragraph ("the owner revokes the agent
+> on the Haven agent page") now name Remove agent…. `last-verified` stays
+> 2026-10-02. Nothing else in this document was re-verified.
+
+> **Re-verified #3722 (2026-10-07, leaked-credential copy):** this diff touches
+> covered files in their human-readable text only: the haven-pay skill's leak
+> section (`skill-content.ts`, renamed "If the credential may have leaked"), the
+> signer consent line, and the connect `--tombstone` / `--unwire` output
+> sentences. All of them now name Replace signing key, Stop budget and Remove
+> agent… instead of "pause or revoke". Every runtime still installs the one
+> canonical skill string. The signer consent hash covers identity, tool names
+> and `SIGNER_CONSENT_SURFACE_VERSION` (unchanged), not the wording, so no
+> install is re-prompted by this. No tool, argument, schema, version-skew,
+> consent-hash or exit-code contract moves. `last-verified` stays 2026-10-02.
+> Nothing else in this document was re-verified.
 
 > **Re-verified, Backend checks ceiling (2026-10-07):** this diff touches
 > `.github/workflows/ci.yml`, a covered file, in the `backend_checks` job's
@@ -2554,7 +2589,7 @@ the `ConnectError` vocabulary rather than the regex ladder.
 | `runtime_no_installed_clients` | Interactive terminal, but no client Haven can configure is installed | Re-run with `--runtime <name>`, or `other` |
 | `runtime_prompt_aborted` | Ctrl-C / EOF at the prompt, or three invalid answers | Re-run and choose, or pass `--runtime` to skip the prompt |
 | `runtime_config_unreadable` | The chosen client's config file exists but is not parseable JSON/YAML | Fix (or move aside) the named file, then `--doctor --repair --runtime <name>` — **not** the connector command |
-| `wiring_collision` ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) | A **bare** (no `--name`) setup on a machine whose credential root already holds a bare-pair directory with a usable key — what `--doctor` calls `wired` or `superseded` — and no interactive terminal to ask | **Relay to the human**, who chooses: re-run with `--replace` (re-point `haven` / `haven-signer`, retire the previous directory locally) or with `--name <slug>` (install alongside; `error.suggested_name` proposes one). An agent following the setup prompt must not add either flag itself |
+| `wiring_collision` ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) | A **bare** setup — `--bare`, or `--replace`; since [#3737](https://github.com/d-hinders/Haven-AI/issues/3737) a default setup names its own pair and never lands here — on a machine whose credential root already holds a bare-pair directory with a usable key — what `--doctor` calls `wired` or `superseded` — and no interactive terminal to ask | **Relay to the human**, who chooses: re-run with `--replace` (re-point `haven` / `haven-signer`, retire the previous directory locally) or with `--name <slug>` (install alongside; `error.suggested_name` proposes one). An agent following the setup prompt must not add either flag itself |
 | `wiring_collision_declined` | The same collision at an interactive terminal, and the user chose neither | Re-run with `--replace` or `--name <slug>` |
 
 The first five refuse **before any side effect**, so there is nothing to
@@ -2606,7 +2641,7 @@ superseded directory **locally** (tombstone, then the unconditional key-material
 teardown — `--unwire` itself now runs that teardown only when its #3123 probe
 says there is nothing to preserve; `--replace` does not probe — only once the
 runtime install actually completed — a failed install skips it and the outcome
-says so), and the owner still revokes on the Haven
+says so), and the owner still ends it with **Remove agent…** on the Haven
 agent page. The revoke route is owner-authenticated; the connector holds agent
 keys only. Since #3542 the dashboard's revoke of a superseded agent also ends
 its budget with one owner signature (`revoke-all`); a revoke that stops at the
@@ -4322,7 +4357,7 @@ to call next in structured fields, and those fields are typed end to end
   > Nothing else in this document was re-verified in this pass.
 
   This is local teardown, **not** backend revocation: Connect reports what it
-  changed, while the owner revokes the agent on the Haven agent page. Named
+  changed, while the owner uses **Remove agent…** on the Haven agent page. Named
   pairs are uniquely addressable. For the shared bare `haven` /
   `haven-signer` pair, however, it removes entries only with positive proof
   that this directory owns the wrapper or Hermes key; otherwise it refuses

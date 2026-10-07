@@ -375,7 +375,9 @@ export function createPlainHttpX402Handlers(
       // as a separate tool call makes its own read — the SDK's in-flight
       // dedupe (`AccountReads.agentInFlight`) only collapses reads issued
       // within the same tick. The "exactly ONE agent fetch" pin on this file
-      // measures the pay tool alone and is unaffected.
+      // measures the pay tool alone and is unaffected. Through the hosted
+      // server the dispatch identity gate (`identity-gate.ts`) adds one more
+      // agent read before this handler runs.
       const agentPromise = haven.getAgent().then(
         (a) => a,
         () => undefined,
@@ -557,7 +559,8 @@ export function createPlainHttpX402Handlers(
           // 'delegation' would build a request the backend refuses, and 3009
           // is this tool's pre-#2041 behaviour anyway. The prefetch doubles as
           // createX402Intent's delegateAddress hint (#1348), so the 3009 branch
-          // still makes exactly ONE agent round-trip rather than two.
+          // still makes exactly ONE agent round-trip rather than two (in this
+          // handler; the hosted dispatch identity gate makes its own first).
           const prefetchedAgent = await haven.getAgent().then(
             (a) => a,
             () => undefined,

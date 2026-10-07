@@ -96,22 +96,102 @@ export interface TotalsSpendRow {
  * the fiat columns are NULL on every other status (booked only by the
  * confirm UPDATE, `payment-intents.ts:538,637`), so summing them is already
  * safe, but the explicit predicate is what a mutation test can remove.
+ *
+ * #3755 — the gross sums are NETTED against `delegate_sweeps`. A clawed-back
+ * funding leg (merchant refused after funding, funds swept back to the
+ * treasury) must not count as spent. `delegate_sweeps` carries agent, token,
+ * `value_atomic` (token units) and `tx_hash` but NO fiat column and NO
+ * per-intent link, so the netting is a RATIO per (agent, token, chain)
+ * group, applied per window independently:
+ *
+ *     net = gross × (1 − min(1, swept_atomic / confirmed_atomic))
+ *
+ * `swept_atomic` sums `value_atomic` of sweeps that actually returned funds
+ * (`status = 'submitted'` with a `tx_hash` — the `submitted` lifecycle in
+ * `machine-payments.ts` sets both together; `prepared`/`submitting` rows have
+ * not left the delegate wallet, `failed`/`expired` rows never did), anchored
+ * on `COALESCE(submitted_at, created_at)` inside the SAME window as the
+ * gross it amends. `confirmed_atomic` sums `amount_raw::numeric` of the
+ * group's confirmed legs in that window — guarded by the same
+ * `'^[0-9]+$'` shape check `FEES_TOTALS_SQL` uses, because `amount_raw` is
+ * `VARCHAR(78)` with no CHECK constraint and a failed cast would be a
+ * FAILED QUERY, not a wrong number. A leg whose `amount_raw` fails the
+ * shape check keeps its booked fiat but contributes no measurable atomic
+ * (ratio denominator), so its group nets at factor 1 — an unmeasurable
+ * group is left gross rather than silently over-netted.
+ *
+ * The ratio form (rather than a fiat-rate conversion of the swept amount)
+ * needs no price point: the same spot price that booked the fiat booked the
+ * atomic amounts, so `swept/confirmed` IS the returned share of the group's
+ * booked volume. `min(1, …)` caps the factor at 0 — a sweep can never drive
+ * a window's spend negative, even when it claws back funds booked in an
+ * earlier window (the earlier window stays overstated until the window
+ * rolls; that residual is the price of having no sweep→intent link, and is
+ * stated here rather than hidden). `payments_counted` is deliberately NOT
+ * netted: the count is of funding legs made, not of money kept.
  */
-export const TOTALS_SPEND_SQL = `SELECT
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 THEN pi.usd_value ELSE 0 END), 0)::text AS spent_usd,
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 THEN pi.eur_value ELSE 0 END), 0)::text AS spent_eur,
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 THEN pi.sek_value ELSE 0 END), 0)::text AS spent_sek,
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 THEN pi.usd_value ELSE 0 END), 0)::text AS spent_previous_usd,
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 THEN pi.eur_value ELSE 0 END), 0)::text AS spent_previous_eur,
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 THEN pi.sek_value ELSE 0 END), 0)::text AS spent_previous_sek,
-    COUNT(*) FILTER (WHERE pi.confirmed_at >= $2 AND pi.confirmed_at < $3)::text AS payments_counted
-  FROM payment_intents pi
-  JOIN agents a ON a.id = pi.agent_id
-  ${DELEGATION_RAIL_JOIN}
-  WHERE pi.user_id = $1
-    AND pi.status = 'confirmed'
-    AND pi.confirmed_at >= $4
-    AND pi.confirmed_at < $3`
+export const TOTALS_SPEND_SQL = `WITH legs AS (
+    SELECT pi.agent_id,
+           LOWER(pi.token_address) AS token_key,
+           COALESCE(pi.chain_id, 0) AS chain_key,
+           CASE WHEN pi.amount_raw ~ '^[0-9]+$' THEN pi.amount_raw::numeric END AS atomic,
+           pi.usd_value,
+           pi.eur_value,
+           pi.sek_value,
+           pi.confirmed_at
+    FROM payment_intents pi
+    JOIN agents a ON a.id = pi.agent_id
+    ${DELEGATION_RAIL_JOIN}
+    WHERE pi.user_id = $1
+      AND pi.status = 'confirmed'
+      AND pi.confirmed_at >= $4
+      AND pi.confirmed_at < $3
+  ), swept AS (
+    SELECT ds.agent_id,
+           LOWER(ds.token_address) AS token_key,
+           ds.chain_id AS chain_key,
+           SUM(CASE WHEN COALESCE(ds.submitted_at, ds.created_at) >= $2
+                     AND COALESCE(ds.submitted_at, ds.created_at) < $3
+                    THEN ds.value_atomic ELSE 0 END) AS swept_current,
+           SUM(CASE WHEN COALESCE(ds.submitted_at, ds.created_at) >= $4
+                     AND COALESCE(ds.submitted_at, ds.created_at) < $2
+                    THEN ds.value_atomic ELSE 0 END) AS swept_previous
+    FROM delegate_sweeps ds
+    WHERE ds.user_id = $1
+      AND ds.status = 'submitted'
+      AND ds.tx_hash IS NOT NULL
+      AND ((COALESCE(ds.submitted_at, ds.created_at) >= $2
+        AND COALESCE(ds.submitted_at, ds.created_at) < $3)
+    OR (COALESCE(ds.submitted_at, ds.created_at) >= $4
+        AND COALESCE(ds.submitted_at, ds.created_at) < $2))
+    GROUP BY ds.agent_id, LOWER(ds.token_address), ds.chain_id
+  ), grouped AS (
+    SELECT l.agent_id, l.token_key, l.chain_key,
+           SUM(CASE WHEN l.confirmed_at >= $2 AND l.confirmed_at < $3 THEN l.atomic ELSE 0 END) AS atomic_current,
+           SUM(CASE WHEN l.confirmed_at >= $4 AND l.confirmed_at < $2 THEN l.atomic ELSE 0 END) AS atomic_previous,
+           SUM(CASE WHEN l.confirmed_at >= $2 AND l.confirmed_at < $3 THEN COALESCE(l.usd_value, 0) ELSE 0 END) AS usd_current,
+           SUM(CASE WHEN l.confirmed_at >= $2 AND l.confirmed_at < $3 THEN COALESCE(l.eur_value, 0) ELSE 0 END) AS eur_current,
+           SUM(CASE WHEN l.confirmed_at >= $2 AND l.confirmed_at < $3 THEN COALESCE(l.sek_value, 0) ELSE 0 END) AS sek_current,
+           SUM(CASE WHEN l.confirmed_at >= $4 AND l.confirmed_at < $2 THEN COALESCE(l.usd_value, 0) ELSE 0 END) AS usd_previous,
+           SUM(CASE WHEN l.confirmed_at >= $4 AND l.confirmed_at < $2 THEN COALESCE(l.eur_value, 0) ELSE 0 END) AS eur_previous,
+           SUM(CASE WHEN l.confirmed_at >= $4 AND l.confirmed_at < $2 THEN COALESCE(l.sek_value, 0) ELSE 0 END) AS sek_previous,
+           COUNT(*) FILTER (WHERE l.confirmed_at >= $2 AND l.confirmed_at < $3) AS legs_current
+    FROM legs l
+    GROUP BY l.agent_id, l.token_key, l.chain_key
+  )
+  SELECT
+    COALESCE(SUM(g.usd_current * CASE WHEN COALESCE(g.atomic_current, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_current, 0) / g.atomic_current, 1) ELSE 1 END), 0)::text AS spent_usd,
+    COALESCE(SUM(g.eur_current * CASE WHEN COALESCE(g.atomic_current, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_current, 0) / g.atomic_current, 1) ELSE 1 END), 0)::text AS spent_eur,
+    COALESCE(SUM(g.sek_current * CASE WHEN COALESCE(g.atomic_current, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_current, 0) / g.atomic_current, 1) ELSE 1 END), 0)::text AS spent_sek,
+    COALESCE(SUM(g.usd_previous * CASE WHEN COALESCE(g.atomic_previous, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_previous, 0) / g.atomic_previous, 1) ELSE 1 END), 0)::text AS spent_previous_usd,
+    COALESCE(SUM(g.eur_previous * CASE WHEN COALESCE(g.atomic_previous, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_previous, 0) / g.atomic_previous, 1) ELSE 1 END), 0)::text AS spent_previous_eur,
+    COALESCE(SUM(g.sek_previous * CASE WHEN COALESCE(g.atomic_previous, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_previous, 0) / g.atomic_previous, 1) ELSE 1 END), 0)::text AS spent_previous_sek,
+    COALESCE(SUM(g.legs_current), 0)::text AS payments_counted
+  FROM grouped g
+  LEFT JOIN swept s
+    ON s.agent_id = g.agent_id
+   AND s.token_key = g.token_key
+   AND s.chain_key = g.chain_key`
 
 /** `userId` is REQUIRED. `current`/`previous` are equal-length, adjacent windows. */
 export async function sumTotalsSpendForUser(
@@ -186,21 +266,76 @@ export interface ByDaySpendRow {
  * query rather than silently defaulting to UTC. The route validates `tz`
  * before this ever runs (see `routes/analytics-overview.ts`), so this is a
  * second, structural line of defense, not the only one.
+ *
+ * #3755 — each day is netted by the SAME window-level ratio
+ * `sumTotalsSpendForUser` applies (see its doc block): per (agent, token,
+ * chain) group, `1 − min(1, swept_atomic / confirmed_atomic)` over the whole
+ * `[from, to)` window, multiplied into every day the group booked spend. The
+ * sweep rows carry no per-day breakdown and no sweep→intent link, so the
+ * clawback is spread across the days in proportion to where the group's
+ * booked volume sits — which sums back to exactly the netted window total
+ * (`Σ_day gross_day × factor = gross_window × factor`), keeping by-day and
+ * totals consistent by construction. Day values are therefore never negative
+ * and no new buckets appear: the wire shape (`by_day[]` days with activity)
+ * is unchanged, and the frontend's stacked bar needs no negative-segment
+ * handling. A group with sweeps but no confirmed legs in the window nets
+ * nothing — there is no booked spend to amend.
  */
-export const BY_DAY_SPEND_SQL = `SELECT
-    date_trunc('day', pi.confirmed_at AT TIME ZONE $2)::date::text AS day,
-    pi.agent_id,
-    COALESCE(SUM(pi.usd_value), 0)::text AS usd,
-    COALESCE(SUM(pi.eur_value), 0)::text AS eur,
-    COALESCE(SUM(pi.sek_value), 0)::text AS sek
-  FROM payment_intents pi
-  JOIN agents a ON a.id = pi.agent_id
-  ${DELEGATION_RAIL_JOIN}
-  WHERE pi.user_id = $1
-    AND pi.status = 'confirmed'
-    AND pi.confirmed_at >= $3
-    AND pi.confirmed_at < $4
-  GROUP BY day, pi.agent_id`
+export const BY_DAY_SPEND_SQL = `WITH legs AS (
+    SELECT date_trunc('day', pi.confirmed_at AT TIME ZONE $2)::date::text AS day,
+           pi.agent_id,
+           LOWER(pi.token_address) AS token_key,
+           COALESCE(pi.chain_id, 0) AS chain_key,
+           CASE WHEN pi.amount_raw ~ '^[0-9]+$' THEN pi.amount_raw::numeric END AS atomic,
+           pi.usd_value,
+           pi.eur_value,
+           pi.sek_value
+    FROM payment_intents pi
+    JOIN agents a ON a.id = pi.agent_id
+    ${DELEGATION_RAIL_JOIN}
+    WHERE pi.user_id = $1
+      AND pi.status = 'confirmed'
+      AND pi.confirmed_at >= $3
+      AND pi.confirmed_at < $4
+  ), swept AS (
+    SELECT ds.agent_id,
+           LOWER(ds.token_address) AS token_key,
+           ds.chain_id AS chain_key,
+           SUM(ds.value_atomic) AS swept_window
+    FROM delegate_sweeps ds
+    WHERE ds.user_id = $1
+      AND ds.status = 'submitted'
+      AND ds.tx_hash IS NOT NULL
+      AND COALESCE(ds.submitted_at, ds.created_at) >= $3
+      AND COALESCE(ds.submitted_at, ds.created_at) < $4
+    GROUP BY ds.agent_id, LOWER(ds.token_address), ds.chain_id
+  ), grouped AS (
+    SELECT l.agent_id, l.token_key, l.chain_key, SUM(l.atomic) AS atomic_window
+    FROM legs l
+    GROUP BY l.agent_id, l.token_key, l.chain_key
+  ), day_groups AS (
+    SELECT l.day, l.agent_id, l.token_key, l.chain_key,
+           SUM(COALESCE(l.usd_value, 0)) AS usd_day,
+           SUM(COALESCE(l.eur_value, 0)) AS eur_day,
+           SUM(COALESCE(l.sek_value, 0)) AS sek_day
+    FROM legs l
+    GROUP BY l.day, l.agent_id, l.token_key, l.chain_key
+  )
+  SELECT dg.day,
+         dg.agent_id,
+         SUM(dg.usd_day * CASE WHEN COALESCE(gr.atomic_window, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_window, 0) / gr.atomic_window, 1) ELSE 1 END)::text AS usd,
+         SUM(dg.eur_day * CASE WHEN COALESCE(gr.atomic_window, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_window, 0) / gr.atomic_window, 1) ELSE 1 END)::text AS eur,
+         SUM(dg.sek_day * CASE WHEN COALESCE(gr.atomic_window, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_window, 0) / gr.atomic_window, 1) ELSE 1 END)::text AS sek
+  FROM day_groups dg
+  JOIN grouped gr
+    ON gr.agent_id = dg.agent_id
+   AND gr.token_key = dg.token_key
+   AND gr.chain_key = dg.chain_key
+  LEFT JOIN swept s
+    ON s.agent_id = dg.agent_id
+   AND s.token_key = dg.token_key
+   AND s.chain_key = dg.chain_key
+  GROUP BY dg.day, dg.agent_id`
 
 /** `userId` is REQUIRED. One statement regardless of agent count. */
 export async function listByDaySpendForUser(
@@ -231,14 +366,69 @@ export interface PerAgentSpendRow {
  * agent that spent inside the range must still appear (AC). The LEFT JOIN to
  * `payment_intents` is what lets a zero-spend agent still show up with
  * `payments = 0` rather than being dropped by an inner join.
+ *
+ * #3755 — the per-agent fiat sums are netted by the SAME per-(agent, token,
+ * chain) sweep ratio `sumTotalsSpendForUser` applies (see its doc block),
+ * over this statement's single `[from, to)` window: each token group's
+ * gross × (1 − min(1, swept/confirmed)), then summed per agent, so an agent
+ * whose funds were partially clawed back shows its net share here and
+ * `totals.spent` stays the sum of the `agents[].spent` column. `payments`
+ * and `last_payment_at` stay gross — they describe activity, not money
+ * kept — and an agent with no confirmed legs keeps `0` spend even if it has
+ * sweeps (nothing booked to amend), via the `COALESCE` on the netted CTE.
  */
-export const PER_AGENT_SPEND_SQL = `SELECT
+export const PER_AGENT_SPEND_SQL = `WITH legs AS (
+    SELECT pi.agent_id,
+           LOWER(pi.token_address) AS token_key,
+           COALESCE(pi.chain_id, 0) AS chain_key,
+           CASE WHEN pi.amount_raw ~ '^[0-9]+$' THEN pi.amount_raw::numeric END AS atomic,
+           pi.usd_value,
+           pi.eur_value,
+           pi.sek_value
+    FROM payment_intents pi
+    WHERE pi.user_id = $1
+      AND pi.status = 'confirmed'
+      AND pi.confirmed_at >= $2
+      AND pi.confirmed_at < $3
+  ), swept AS (
+    SELECT ds.agent_id,
+           LOWER(ds.token_address) AS token_key,
+           ds.chain_id AS chain_key,
+           SUM(ds.value_atomic) AS swept_window
+    FROM delegate_sweeps ds
+    WHERE ds.user_id = $1
+      AND ds.status = 'submitted'
+      AND ds.tx_hash IS NOT NULL
+      AND COALESCE(ds.submitted_at, ds.created_at) >= $2
+      AND COALESCE(ds.submitted_at, ds.created_at) < $3
+    GROUP BY ds.agent_id, LOWER(ds.token_address), ds.chain_id
+  ), per_token AS (
+    SELECT l.agent_id, l.token_key, l.chain_key,
+           SUM(l.atomic) AS atomic_window,
+           SUM(COALESCE(l.usd_value, 0)) AS usd_token,
+           SUM(COALESCE(l.eur_value, 0)) AS eur_token,
+           SUM(COALESCE(l.sek_value, 0)) AS sek_token
+    FROM legs l
+    GROUP BY l.agent_id, l.token_key, l.chain_key
+  ), netted AS (
+    SELECT p.agent_id,
+           SUM(p.usd_token * CASE WHEN COALESCE(p.atomic_window, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_window, 0) / p.atomic_window, 1) ELSE 1 END) AS spent_usd,
+           SUM(p.eur_token * CASE WHEN COALESCE(p.atomic_window, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_window, 0) / p.atomic_window, 1) ELSE 1 END) AS spent_eur,
+           SUM(p.sek_token * CASE WHEN COALESCE(p.atomic_window, 0) > 0 THEN 1 - LEAST(COALESCE(s.swept_window, 0) / p.atomic_window, 1) ELSE 1 END) AS spent_sek
+    FROM per_token p
+    LEFT JOIN swept s
+      ON s.agent_id = p.agent_id
+     AND s.token_key = p.token_key
+     AND s.chain_key = p.chain_key
+    GROUP BY p.agent_id
+  )
+  SELECT
     a.id AS agent_id,
     a.name,
     a.status,
-    COALESCE(SUM(pi.usd_value), 0)::text AS spent_usd,
-    COALESCE(SUM(pi.eur_value), 0)::text AS spent_eur,
-    COALESCE(SUM(pi.sek_value), 0)::text AS spent_sek,
+    COALESCE(n.spent_usd, 0)::text AS spent_usd,
+    COALESCE(n.spent_eur, 0)::text AS spent_eur,
+    COALESCE(n.spent_sek, 0)::text AS spent_sek,
     COUNT(pi.id)::text AS payments,
     MAX(pi.confirmed_at) AS last_payment_at
   FROM agents a
@@ -248,8 +438,9 @@ export const PER_AGENT_SPEND_SQL = `SELECT
    AND pi.status = 'confirmed'
    AND pi.confirmed_at >= $2
    AND pi.confirmed_at < $3
+  LEFT JOIN netted n ON n.agent_id = a.id
   WHERE a.user_id = $1
-  GROUP BY a.id, a.name, a.status`
+  GROUP BY a.id, a.name, a.status, n.spent_usd, n.spent_eur, n.spent_sek`
 
 interface PerAgentSpendRawRow {
   agent_id: string

@@ -2509,3 +2509,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > Line #4) — the hosted server stays keyless and the policy touches no key
 > material. Scope of this note: the client.ts egress wiring; `last-verified`
 > is not re-stamped (it already reads 2026-10-07) — this block is the scope.
+
+> **Re-verified unchanged (#3756, 2026-10-07, refusal wording):** this diff
+> touches `routes/agents.ts`, a covered file, in one human-readable string
+> only: the archive 409 for a non-revoked agent with no live budget now says
+> "This agent holds no live budget, so revoke it first (POST
+> /agents/:id/revoke), then archive." instead of implying the agent can still
+> spend. Re-read §"Archiving cannot hide a live delegation agent (#1436)": its
+> claim that the refusal names the remedy that applies (`revoke-all` for live
+> budgets, "revoke first" for a live credential) still holds, so the body is
+> unchanged. The refusal fires on exactly the same conditions with the same
+> 409. (The setup-cancel refusal in `routes/agent-connection-setups.ts`, also
+> reworded, is outside the code this document covers.) No authority, signer set,
+> delegation or custody path moves. Nothing else in this document was re-read
+> for it, and `last-verified` is not bumped.
+

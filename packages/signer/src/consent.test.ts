@@ -74,7 +74,9 @@ describe('signer consent gate', () => {
     // toContain holds, and the retired rail's name must not come back.
     expect(block).toContain("The agent's signed budget delegation is the real spend gate")
     expect(block).not.toContain('Safe')
-    expect(block).toContain('pause or revoke agent authority outside this signer')
+    // #3722: the owner-ruled sentence, exactly (pause and API revoke end no on-chain authority).
+    expect(block).toContain("the wallet\nowner can stop the agent's budget or remove the agent outside this signer.")
+    expect(block).not.toMatch(/pause or revoke/)
     expect(block).toContain('haven_sign')
     expect(block).toContain(`${SIGNER_ACK_ENV}=${hash}`)
   })

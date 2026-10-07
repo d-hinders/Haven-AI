@@ -376,7 +376,9 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
  * inclusion, so the default for a new file is "checked". A new seam has to be
  * argued for here; a new capability needs nothing.
  */
-const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry']
+// identity-gate: the hosted dispatch gate `buildHostedMcpServer` runs before
+// every handler; it owns no tool, so it is a seam, not a capability.
+const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry', 'identity-gate']
 
 const CAPABILITY_MODULES: readonly string[] = fs
   .readdirSync(new URL('../', import.meta.url), { withFileTypes: true })

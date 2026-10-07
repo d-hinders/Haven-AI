@@ -127,7 +127,9 @@ agent's delegate first. There is no approval queue. Deep dive:
 
 **Hosted MCP + local signer is the default.** For supported writable runtimes,
 the connector writes a hosted MCP entry (URL + Bearer API key) plus a local
-`haven-signer` stdio entry. Current profiles include Claude Code, Codex CLI and
+signer stdio entry — `haven-signer-<slug>` under the default named pair,
+`haven-signer` on a bare `--bare`/`--replace` or pre-#3737 install.
+Current profiles include Claude Code, Codex CLI and
 Desktop, Cursor, VS Code/Insiders, Claude Desktop, Hermes Agent, and a manual
 credential path. Hermes uses `$HERMES_HOME/config.yaml` plus an owner-only `.env` when
 set, otherwise `~/.hermes/config.yaml` plus `.env`; the hosted API key stays in

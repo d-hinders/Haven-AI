@@ -74,9 +74,12 @@ permissions require action by the Safe owner outside Haven.
 2. Haven creates a pending setup and returns a setup token and connector
    command.
 3. The connector normally runs locally, generates the delegate signing key and
-   API key, and stores both in protected local runtime configuration. Before
-   it generates anything it checks whether this machine's bare `haven` /
-   `haven-signer` pair already belongs to a different agent with a live key
+   API key, and stores both in protected local runtime configuration. A default
+   setup names the pair from the agent's display name
+   ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) and displaces
+   nothing, so it never has to ask. Only a bare-pair run — `--bare`, or
+   `--replace` — can collide with an agent already wired to the bare
+   `haven` / `haven-signer` pair with a live key
    ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)): a terminal is
    asked to replace or install alongside, a non-interactive run refuses, and
    either way declining reaches neither key generation nor step 4. A server
@@ -373,8 +376,10 @@ requests or their responses, and nothing here relays, submits, or broadcasts:
 - Declined or insufficient requests expose no signable hash — nothing is queued.
 - x402 authorization is bound to amount, merchant, resource, asset, and network.
 - Sweep authorization is bound to the registered delegate and Haven wallet.
-- Live delegation agents can be paused or revoked in Haven; legacy Safe
-  permissions require action by the Safe owner outside Haven.
+- A live delegation agent's budget can be stopped, or its signing key
+  replaced, in Haven; pausing only blocks payments through Haven and leaves the
+  budget live on-chain. Legacy Safe permissions require action by the Safe owner
+  outside Haven.
 
 Re-verified 2026-10-05 (weekly docs audit #3645, at dev `cdb91d86`), a full
 re-read of everything except the dated notes. Changed: the recommended

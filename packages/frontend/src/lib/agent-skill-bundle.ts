@@ -52,8 +52,16 @@ nothing is paid past the rules the user set.
 
 Hosted tools run in the \`mcp__haven__\` namespace. Local signing tools run in
 the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
+Those are an UNNAMED pair's names: the default setup now names the pair from
+the agent's display name, \`haven-<slug>\` / \`haven-signer-<slug>\`, and its
+tool names follow that pair — \`mcp__haven-<slug>__…\` /
+\`mcp__haven-signer-<slug>__…\`. Read the server names off the agent's own
+configuration (or the \`next_tool_server\` field) rather than assuming the bare
+ones; bare \`haven\` / \`haven-signer\` remain on installs wired before the
+change, and \`--bare\` still opts into them.
 That namespacing is Claude-family; other runtimes name the servers by their
-own config keys (Codex: \`haven\`, \`haven_signer\`). Tool results carry the
+own config keys (Codex: \`haven\`, \`haven_signer\` — or the pair's two
+suffixed names). Tool results carry the
 exact next step (\`next_action\`, \`next_tool\`, \`next_arguments\`, plus the
 runtime-neutral \`next_tool_server\` + \`next_tool_name\` + \`next_tool_server_role\`
 — the bare tool name on that logical server, whatever your runtime calls it).
@@ -440,11 +448,15 @@ raw merchant evidence; never use it to decide whether the purchase was paid.
 Do not call \`haven_get_agent\` or \`haven_get_allowances\` again just to
 report a purchase you already made.
 
-## Revoke
+## If the credential may have leaked
 
-If this agent's credential may have leaked, tell the user to pause or revoke
-the agent in the Haven dashboard under Agents. New requests stop immediately
-for that credential.
+If this agent's credential may have leaked, tell the user to open the agent in
+the Haven dashboard and choose Replace signing key: the old budget is revoked
+on-chain and a new one is issued to a new key. To stop all spending now, they
+use Stop budget on the agent's budget, or Remove agent… to end every budget and
+retire the agent. Pausing only blocks payments through Haven; the budget stays
+live on-chain. The signing key also controls any funds already in the agent
+wallet, and ending the budget does not recover them.
 `
 }
 

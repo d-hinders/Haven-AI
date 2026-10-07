@@ -206,6 +206,26 @@ relays ("Connection closed" plus this process's exit message) names the same
 command. The consent hash covers identity, tool names and the surface version —
 not the block's prose — so neither change re-prompts an acknowledged install.
 
+## Several Haven pairs on one machine (#3738)
+
+One harness can carry several Haven pairs — `haven-research` +
+`haven-signer-research`, `haven-ops` + `haven-signer-ops`, alongside a bare
+`haven` + `haven-signer` (Codex: `haven` + `haven_signer`). A model must act as
+one agent per task and keep hosted and signer calls inside that pair. Server
+names are easy to cross, so the signer's `initialize` instructions state what
+it is bound to:
+
+```
+This signer is bound to agent id <agent_id> and delegate address <0x…>.
+```
+
+The agent id comes from the credential file's `agent_id` (or `HAVEN_AGENT_ID`
+alongside `HAVEN_DELEGATE_KEY`); when neither is set the line says "no recorded
+agent id" and still gives the delegate address, which is then compared alone.
+The model compares it with `haven_get_agent`'s `id` and `delegateAddress` from
+the hosted server it called, and signs nothing on a mismatch. Neither value is secret (the consent screen prints both), and
+the line is advisory: what the signer refuses to sign is unchanged.
+
 ## Orchestration
 
 Direct payment:
@@ -333,7 +353,7 @@ refusal class — `fallback`, `retry_with_new_quote`, `http_status`,
 `SIGN_CONTEXT_REFUSED` (other) row names the hosted status read
 (`next_tool_server_role: hosted`, `next_tool_name: haven_get_payment_status`,
 `next_arguments: { payment_id }` — resolve the role against your own server
-names); every other row carries `next_tool_omitted_reason` with the exact
+names, and with several Haven pairs against this signer's own pair); every other row carries `next_tool_omitted_reason` with the exact
 remedy. `message` is unchanged.
 
 **#3271: `haven_sign` (never `haven_sign_x402`) has one escape from this

@@ -214,6 +214,7 @@ describe('buildHostedMcpServer', () => {
     expect(HOSTED_INSTRUCTIONS).toContain('ask before any payment tool')
     expect(HOSTED_INSTRUCTIONS).toContain('haven-<slug>\nwith haven-signer-<slug>, bare haven with haven-signer, Codex haven with\nhaven_signer')
     expect(HOSTED_INSTRUCTIONS).toContain('haven_get_agent returns id and\ndelegateAddress')
+    expect(HOSTED_INSTRUCTIONS).toContain('compare the delegate address alone\nwhen a signer has no recorded agent id')
   })
 
   it('keeps x402 next-tool guidance runtime-neutral (bare names in descriptions, naming note on instructions)', async () => {

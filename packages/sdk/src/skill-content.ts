@@ -82,8 +82,9 @@ signer call goes to the signer of the hosted server you called —
 \`haven-signer\`, Codex \`haven\` with \`haven_signer\`. Confirm by identity,
 not name: \`haven_get_agent\` returns \`id\` and \`delegateAddress\`, and each
 signer states the agent id and delegate address it is bound to in its own
-instructions. If they differ, stop and sign nothing — switch to the signer
-whose identity matches.
+instructions (compare the delegate address alone when a signer has no recorded
+agent id). If they differ, stop and sign nothing — switch to the signer whose
+identity matches.
 
 ## When to use this skill
 

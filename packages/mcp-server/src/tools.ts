@@ -143,7 +143,7 @@ export function createToolHandlers(haven: HavenClient, options?: CreateToolHandl
     // haven_pay_x402_quote, haven_resume_x402_payment,
     // haven_report_x402_outcome — are owned by the capability module and
     // composed in here. Same one-directional guarantee as the spreads above.
-    ...createPlainHttpX402Handlers(haven, options ?? {}),
+    ...createPlainHttpX402Handlers(haven, options),
 
     // #2812: the paid-MCP completion — haven_complete_mcp_tool,
     // haven_settle_mcp_tool — are owned by the capability module and composed

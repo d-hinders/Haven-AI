@@ -1484,3 +1484,83 @@ describe('#3419 — the task-budget notice is pinned to the packages it describe
     expect(local).toEqual(hosted)
   })
 })
+
+/**
+ * #3739 — echo fidelity, point 2: in request mode the hosted server probes the
+ * merchant itself, the backend stores THAT challenge (as JSONB, which reorders
+ * keys), and the eip3009 header the signer builds from the stored copy must
+ * echo the merchant's `extensions` exactly. The field failure was an agent
+ * dropping `extensions.bazaar.schema`; this decodes the real header and
+ * deep-compares, so a lost or edited extension is red here.
+ */
+describe('#3739 — request mode: the header echoes the probed challenge', () => {
+  const REQUEST_MODE_CHALLENGE = {
+    ...PAYMENT_REQUIRED,
+    extensions: {
+      bazaar: {
+        info: { input: { type: 'http', method: 'POST', body: { invoice_id: 'inv_123' } } },
+        schema: {
+          type: 'object',
+          properties: { input: { type: 'object', properties: { body: { type: 'object' } } } },
+          required: ['input'],
+        },
+      },
+    },
+  }
+
+  /** What a JSONB round trip may do to the stored copy: same content, other key order. */
+  function reorderKeys(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(reorderKeys)
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>)
+          .reverse()
+          .map((k) => [k, reorderKeys((value as Record<string, unknown>)[k])]),
+      )
+    }
+    return value
+  }
+
+  it('decodes the eip3009 header built from the JSONB-stored copy: extensions (schema included) and resource deep-equal the probe', async () => {
+    stubHavenApi('delegation')
+    const haven = globalThis.fetch
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) =>
+      new URL(url).hostname === 'merchant.test'
+        ? new Response(JSON.stringify(REQUEST_MODE_CHALLENGE), {
+            status: 402,
+            headers: { 'content-type': 'application/json' },
+          })
+        : haven(url, init),
+    )
+    const hostedHandlers = createHostedHandlers(
+      new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' }),
+      { x402Probe: { allowHost: (host) => host === 'merchant.test' } },
+    )
+
+    const pay = ok<{ payment_id: string; next_tool_name: string }>(
+      await hostedHandlers.haven_pay_x402_quote({ url: 'https://merchant.test/data', max_amount_human: '2' }),
+    )
+    expect(pay.next_tool_name).toBe('haven_sign_x402')
+
+    const posted = (capturedCalls.find((c) => new URL(c.url).pathname === '/x402')!.body as Record<string, unknown>)
+      .paymentRequired
+    expect(posted).toEqual(REQUEST_MODE_CHALLENGE)
+
+    // The signer receives the STORED copy (sign-context re-serves it by
+    // payment_id); handed over directly here, key-reordered as JSONB may be.
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+    const expected = await makeX402ExpectedAuth('delegation')
+    const signed = ok<{ payment_header: string }>(
+      await signerHandlers.haven_sign_x402({
+        payload_hash: FUNDING_HASH,
+        typed_data: TYPED_DATA,
+        x402_expected: expected.snake,
+        payment_required: reorderKeys(posted),
+      }),
+    )
+    const decoded = JSON.parse(atob(signed.payment_header)) as Record<string, unknown>
+    expect(decoded.extensions).toEqual(REQUEST_MODE_CHALLENGE.extensions)
+    expect(decoded.resource).toEqual(REQUEST_MODE_CHALLENGE.resource)
+  })
+})

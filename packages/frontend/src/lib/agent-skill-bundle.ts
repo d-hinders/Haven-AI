@@ -266,16 +266,20 @@ merchant leg for you.
 **Direct transfer / non-MCP paywall:** \`mcp__haven__haven_pay\` with
 \`to\`, \`amount\`, and \`token\` for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
-\`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
-first and sign in the local Haven signer. If the 402 carries a
+\`mcp__haven__haven_pay_x402_quote\` with the quote's \`next_arguments\`
+(\`url\`, \`method\`, \`headers\`, \`body\` and a cap) and no
+\`payment_required\`: Haven fetches the payment challenge itself, so there is
+nothing to copy. Follow the result's guidance fields first and sign in the
+local Haven signer. If the 402 carries a
 \`sign-in-with-x\` extension (x402 Sign-In-With-X), call
 \`mcp__haven-signer__haven_sign_siwx\` with \`{ url, challenge }\` — \`url\` is
 the FINAL URL after redirects — and retry the merchant with the
 \`SIGN-IN-WITH-X\` header it returns: the delegate
 wallet signs in as the wallet that paid, moving no funds. NEVER follow a
 redirect with \`SIGN-IN-WITH-X\` (or a resulting session token) attached; if
-the final origin differs, re-sign there. On THIS path Haven does not talk to
-the merchant: \`mcp__haven-signer__haven_sign_x402\` returns both
+the final origin differs, re-sign there. On THIS path Haven never sends the
+paid request (it makes only the unpaid probe):
+\`mcp__haven-signer__haven_sign_x402\` returns both
 \`signature\` and \`payment_header\`; relay \`signature\` with
 \`mcp__haven__haven_submit\`, then retry the paywalled URL yourself with
 \`payment_header\`. Do not pass that call's \`x402_binding\` to
@@ -283,8 +287,8 @@ the merchant: \`mcp__haven-signer__haven_sign_x402\` returns both
 building the header, so the call can only refuse. Then tell Haven what the
 merchant answered: \`mcp__haven__haven_report_x402_outcome\` with the
 \`payment_id\`, \`outcome\` (\`"accepted"\` for a 2xx, else \`"rejected"\`)
-and the \`merchant_status\` you got. Because Haven never contacted that
-merchant, this is the only way it can learn the purchase failed — without it a
+and the \`merchant_status\` you got. Because Haven never sent that paid
+request, this is the only way it can learn the purchase failed — without it a
 failed purchase reads as complete for fifteen minutes. If the merchant's
 \`PAYMENT-RESPONSE\` header names a \`transaction\`, also pass it to
 \`mcp__haven__haven_report_settlement_evidence\` (\`payment_id\`,
@@ -313,17 +317,20 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   Haven cannot pay (for example, only the \`upto\` scheme).
 - **On the local runtime** (\`@haven_ai/mcp\`), \`haven_pay_x402\` with that
   same \`url\`, \`method\`, \`headers\` and \`body\` probes, pays and retries
-  the request itself; the next two points are for the hosted tools.
-- **The retry repeats the request.** On this hosted path
-  \`mcp__haven__haven_pay_x402_quote\` takes no method, body or headers, and
-  the quote result does not carry them back, so YOU send the paid request:
-  the same method, body and \`Content-Type\` to \`retry_url\`, plus the
+  the request itself; the next three points are for the hosted tools.
+- **Pay from the request.** Call \`mcp__haven__haven_pay_x402_quote\` with
+  the quote result's \`next_arguments\`: the same \`url\`, \`method\`,
+  \`headers\` and \`body\`, plus a cap, and no \`payment_required\`. Haven
+  makes that unpaid request again itself and builds the payment from the 402
+  it receives, so the challenge never passes through you.
+- **The retry repeats the request.** YOU send the paid request: the same
+  method, body and \`Content-Type\` to \`retry_url\`, plus the
   \`payment_header\` (as \`PAYMENT-SIGNATURE\`, and also \`X-PAYMENT\` on
   EIP-3009). A retry without the body fails after the funding leg has already
   moved money.
-- **Copy \`payment_required\` verbatim.** Hand the quote result's
-  \`payment_required\` to \`mcp__haven__haven_pay_x402_quote\` exactly as
-  returned — never retyped, trimmed or "corrected". Haven echoes its
+- **If you pass \`payment_required\` instead, copy it verbatim.** Hand the
+  merchant's \`payment_required\` to \`mcp__haven__haven_pay_x402_quote\`
+  exactly as returned — never retyped, trimmed or "corrected". Haven echoes its
   \`extensions\` into the signed header, as x402 v2 requires, and a merchant
   that compares the echo refuses an edited one after funding has moved.
 - **Prefer the x402 URL over the deposit address or web link.** The network

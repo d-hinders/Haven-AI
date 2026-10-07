@@ -629,16 +629,20 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     })
   }
 
-  it('haven_pay_x402_quote\'s "quote" crossover ALREADY failed loudly — payment_required is required', async () => {
-    // Measured, not assumed. #2348's divergence table reads as though `quote`
-    // were as silent as `idempotencyKey`; it never was, because the field it
-    // stands in for is required. Pinned so the claim in STRICT_INPUT_TOOLS'
-    // message stays true.
+  it('haven_pay_x402_quote\'s "quote" crossover fails loudly as an undeclared key, not for a missing payment_required', async () => {
+    // #3739: payment_required is OPTIONAL now (its absence selects request
+    // mode), so "payment_required is required" — the reason this pin used to
+    // give — no longer holds and would pass for the wrong reason. What refuses
+    // `quote` is the strict schema: the key is undeclared here, and the
+    // refusal says what the hosted tool reads instead. Nothing is fetched,
+    // so request mode never starts.
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_pay_x402_quote', {
       quote: { paymentRequired: {} },
     })
-    expect(text).toContain('payment_required')
+    expect(text).toContain('quote')
+    expect(text).toContain('A quote object has no meaning here')
+    expect(text).not.toContain('payment_required is required')
     expect(fetches).toEqual([])
   })
 

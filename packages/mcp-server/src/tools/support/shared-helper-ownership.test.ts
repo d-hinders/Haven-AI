@@ -878,8 +878,12 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
       .split('\n')
       .map((l) => l.trim())
       .filter((t) => t !== '' && !t.startsWith('//'))
+    // #3739: a spread may also pass the facade's own `options` through
+    // (request mode's probe seam) — still a spread of a capability, never a
+    // literal key, so the shadow it guards against stays unreachable.
     const unexpected = statements.filter(
-      (t) => t !== 'return {' && t !== '}' && !/^\.{3}create[A-Za-z0-9]+Handlers\(haven\),$/.test(t),
+      (t) =>
+        t !== 'return {' && t !== '}' && !/^\.{3}create[A-Za-z0-9]+Handlers\(haven(, options)?\),$/.test(t),
     )
     expect(
       unexpected,

@@ -18,6 +18,7 @@ import { beforeEach, afterEach, vi } from 'vitest'
 import { HavenClient } from '@haven_ai/sdk'
 import {
   createToolHandlers,
+  type CreateToolHandlersOptions,
   type HostedToolName,
   type ToolPayload,
   type ToolSuccess,
@@ -153,9 +154,19 @@ export function fail(payload: ToolPayload) {
 }
 
 /** Keyless client against the stubbed backend, wired to the full handler set. */
-export function handlers(): Record<HostedToolName, (input: unknown) => Promise<ToolPayload>> {
+export function handlers(
+  options?: CreateToolHandlersOptions,
+): Record<HostedToolName, (input: unknown) => Promise<ToolPayload>> {
   const haven = new HavenClient({ apiKey: 'test-key', baseUrl: 'http://haven.test' })
-  return createToolHandlers(haven)
+  return createToolHandlers(haven, options)
+}
+
+/**
+ * #3739: the request-mode probe seam — admits the `merchant.test` fixture
+ * host, which the production egress policy refuses as a reserved name.
+ */
+export const MERCHANT_TEST_PROBE: CreateToolHandlersOptions = {
+  x402Probe: { allowHost: (host) => host === 'merchant.test' },
 }
 
 /** A client that can mint REAL payment headers through the SDK funding leg. */

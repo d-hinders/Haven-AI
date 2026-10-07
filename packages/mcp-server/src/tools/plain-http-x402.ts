@@ -415,8 +415,13 @@ async function readBounded(response: Response, max: number): Promise<Uint8Array<
   const declared = Number(response.headers.get('content-length') ?? NaN)
   if (Number.isFinite(declared) && declared > max) return null
   if (!response.body) {
-    const buf = new Uint8Array(await response.arrayBuffer())
-    return buf.byteLength > max ? null : buf
+    // A Response with no stream (a test double, or an empty body): read it
+    // whole — it is already in memory, so the cap is a check, not a bound.
+    const buf =
+      typeof response.arrayBuffer === 'function'
+        ? new Uint8Array(await response.arrayBuffer())
+        : new TextEncoder().encode(await response.text())
+    return buf.byteLength > max ? null : (buf as Uint8Array<ArrayBuffer>)
   }
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
@@ -520,7 +525,9 @@ export async function probeX402Challenge(
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
   if (value && typeof value === 'object') {
+    // Keys holding `undefined` are dropped, as JSON (and the JSONB copy) drops them.
     return `{${Object.keys(value as Record<string, unknown>)
+      .filter((k) => (value as Record<string, unknown>)[k] !== undefined)
       .sort()
       .map((k) => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`)
       .join(',')}}`
@@ -658,7 +665,7 @@ export type PlainHttpX402ToolName = (typeof PLAIN_HTTP_X402_TOOLS)[number]
  */
 export function createPlainHttpX402Handlers(
   haven: HavenClient,
-  options: { x402Probe?: X402RequestProbeOptions } = {},
+  options?: { x402Probe?: X402RequestProbeOptions },
 ): HostedToolHandlers<PlainHttpX402ToolName> {
   return {
     haven_quote_x402: async (input) => {
@@ -838,7 +845,7 @@ export function createPlainHttpX402Handlers(
           if (args.method) init.method = args.method
           if (args.headers) init.headers = args.headers
           if (args.body !== undefined) init.body = args.body
-          payReq = await probeX402Challenge(args.url, init, options.x402Probe)
+          payReq = await probeX402Challenge(args.url, init, options?.x402Probe)
           if (!selectStandardPaymentOption(payReq.accepts) && !selectErc7710PaymentOption(payReq.accepts)) {
             // The shared refusal, #3735's `upto` hint included.
             throw noCompatiblePaymentOptionError(payReq.accepts)

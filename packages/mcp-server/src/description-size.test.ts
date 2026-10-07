@@ -401,11 +401,25 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * real, and shrink-only from here). The mean pin:
  * 28,523 / 28 = 1018.6785…, pinned at the two-decimal ceiling (1018.68) — a
  * ceiling rounds the safe direction.
+ *
+ * **Re-derived — round 22, #3739 (2026-10-07).** `haven_pay_x402_quote` gains
+ * request mode, the route its quote now names: the agent passes the request
+ * it quoted (url, method, headers, body) and no payment_required, Haven
+ * re-sends that unpaid request itself under an https-only, no-redirect
+ * policy, and a cap is required. The description has to say that, and that
+ * payment_required mode still wants the challenge UNCHANGED, because both
+ * are the mode-selection rule an agent acts on. The existing pay text was
+ * compacted around it (the two cap sentences merged, the never-contacts line
+ * shortened), and `haven_quote_x402`'s hosted override replaced the shared
+ * "Haven re-uses the captured request" line, false on the hosted path, with
+ * the request-mode next step. No tool was added — 28 holds. Measured:
+ * 28,737 UTF-8 bytes (+214); the mean pin: 28,737 / 28 = 1026.3214…, pinned
+ * at the two-decimal ceiling (1026.33). Shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 28_523
-// Mean pin: round 21 (block above): 28,523 / 28 = 1018.6785…, pinned at the
-// two-decimal ceiling (1018.68). Shrink-only from here.
-const MAX_MEAN_BYTES = 1018.68
+const MAX_TOTAL_BYTES = 28_737
+// Mean pin: round 22 (block above): 28,737 / 28 = 1026.3214…, pinned at the
+// two-decimal ceiling (1026.33). Shrink-only from here.
+const MAX_MEAN_BYTES = 1026.33
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

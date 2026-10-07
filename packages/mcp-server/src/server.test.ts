@@ -343,7 +343,11 @@ describe('buildHostedMcpServer', () => {
     it('names the quote → pay handoff with url: request_url, never resource_url', () => {
       expect(paragraph).not.toBe('')
       expect(paragraph).toContain('haven_quote_x402, then haven_pay_x402_quote')
-      expect(paragraph).toContain('{ payment_required, url: request_url, max_amount_human | max_amount }')
+      // #3739: the handoff is request mode now — the quote's next_arguments,
+      // never a copied payment_required (changed on purpose, not weakened).
+      expect(paragraph).toContain("next_arguments { url, method, headers, body, max_amount_human } and no")
+      expect(paragraph).toContain('Haven fetches the challenge itself, so never copy it')
+      expect(paragraph).not.toContain('{ payment_required, url: request_url')
       // #3097: passing the merchant's declared resource_url as url was the downgrade.
       expect(HOSTED_INSTRUCTIONS).not.toMatch(/url:\s*resource_url/)
     })

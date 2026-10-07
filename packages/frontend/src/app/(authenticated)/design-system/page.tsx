@@ -2959,7 +2959,7 @@ export default function DesignSystemPage() {
           </p>
           <p>
             You can stop this agent's budget at any time. Stopping it takes effect on-chain, so it
-            stops the agent whether or not Haven is reachable.
+            ends the budget whether or not Haven is reachable.
           </p>
           <p>
             Anything the agent pays for shows up in your transaction history with the merchant, the

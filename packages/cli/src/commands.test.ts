@@ -1879,3 +1879,27 @@ describe('pause / resume / revoke say what they do not do (#3722)', () => {
     expect(api.calls).not.toContain('POST /agents/a1/revoke')
   })
 })
+
+describe('pause / resume / revoke output says the budget is untouched (#3722)', () => {
+  it('pause says payments through Haven are blocked and the budget stays live on-chain', async () => {
+    const api = fakeApi({ 'POST /agents/a1/pause': {} })
+    const { deps, out } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'pause', 'a1'], deps)).toBe(0)
+    expect(out.join('\n')).toContain('Agent a1 paused: payments through Haven are blocked, but its budget stays live on-chain (end it with `haven budget revoke`).')
+  })
+
+  it('resume says only that payments through Haven are allowed again', async () => {
+    const api = fakeApi({ 'POST /agents/a1/resume': {} })
+    const { deps, out } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'resume', 'a1'], deps)).toBe(0)
+    expect(out.join('\n')).toContain('Agent a1 resumed: payments through Haven are allowed again.')
+  })
+
+  it('revoke with no live budget says so, and no longer points at an "on-chain allowance" in the dashboard', async () => {
+    const api = fakeApi({ 'GET /agents/a1': { id: 'a1', live_delegation_count: 0 }, 'POST /agents/a1/revoke': {} })
+    const { deps, out } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'revoke', 'a1', '--yes'], deps)).toBe(0)
+    expect(out.join('\n')).toContain('Agent a1 revoked in Haven. It had no live budget on-chain.')
+    expect(out.join('\n')).not.toMatch(/on-chain allowance/)
+  })
+})

@@ -1049,7 +1049,12 @@ async function cmdAgentLifecycle(args: ParsedArgs, d: ResolvedDeps, action: 'pau
   const { api } = await authed(args, d)
   await api.post(`/agents/${id}/${action}`)
   const status = action === 'pause' ? 'paused' : 'resumed'
-  emit(d, args.flags.json, { ok: true, agent_id: id, status }, () => `Agent ${id} ${status}.`)
+  // #3722: pause/resume are Haven-side only; say so, so nobody reads "paused" as a stopped budget.
+  emit(d, args.flags.json, { ok: true, agent_id: id, status }, () =>
+    action === 'pause'
+      ? `Agent ${id} paused: payments through Haven are blocked, but its budget stays live on-chain (end it with \`haven budget revoke\`).`
+      : `Agent ${id} resumed: payments through Haven are allowed again.`,
+  )
   return EXIT.ok
 }
 
@@ -1124,7 +1129,7 @@ async function cmdAgentRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<number
             `Its budget is still live on-chain: the delegate key can keep spending until each delegation is revoked.`,
             ...live.map((r) => `haven budget revoke ${id} ${r.delegation_hash}  # ${r.status}`),
           ].join('\n')
-        : `Agent ${id} revoked. To also remove its on-chain allowance, use the dashboard.`,
+        : `Agent ${id} revoked in Haven. It had no live budget on-chain.`,
   )
   return EXIT.ok
 }

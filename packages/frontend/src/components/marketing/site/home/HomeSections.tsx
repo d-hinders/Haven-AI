@@ -186,7 +186,7 @@ export function HomeSpendingLimits() {
     },
     {
       title: 'Change it whenever you like',
-      body: 'Raise, lower or stop a budget at any time. If an agent’s credential leaks, it still cannot spend your account past its budget. You can replace its signing key in one step.',
+      body: 'Raise, lower or stop a budget at any time. If an agent’s credential leaks, it still cannot spend your account past its budget. You can replace its signing key.',
     },
   ]
   return (

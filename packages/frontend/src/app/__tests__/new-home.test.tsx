@@ -249,6 +249,10 @@ describe('the new home page (#3574)', () => {
     expect(text).toContain(
       'If an agent’s credential leaks, it still cannot spend your account past its budget.',
     )
+    // #3722: the control copy names stopping a budget and replacing the key, never pausing.
+    expect(text).toContain('Raise, lower or stop a budget at any time.')
+    expect(text).toContain('You can replace its signing key.')
+    expect(text).not.toMatch(/pause the agent/i)
     expect(text).toContain('Nothing was paid. Nothing is waiting for your approval.')
     // No chain or mechanism vocabulary in the band, and nothing describes a
     // refused payment as pending or queued.

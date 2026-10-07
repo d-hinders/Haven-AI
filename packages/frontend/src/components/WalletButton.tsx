@@ -30,6 +30,7 @@ import { BRAND_COLOURS } from '@/lib/brand-colours'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { truncateAddress } from '@/components/haven'
 import { resolveDefaultAccount } from '@/lib/default-account'
+import { usePathname } from 'next/navigation'
 
 // Generative identicon gradient stops — decorative art hashed from an address
 // for visual variety, NOT design-system colour. These are data, not UI chrome,
@@ -212,6 +213,12 @@ interface PopoverProps {
    */
   wrongWalletOwner?: string
   /**
+   * The account this menu's status refers to (#3719). There is no global
+   * active account, so the menu names it rather than leaving "this account"
+   * to be inferred. Omitted by the `/design-system` illustrations.
+   */
+  accountName?: string
+  /**
    * Render as a static ILLUSTRATION rather than a live overlay (#1952).
    *
    * `/design-system` shows this popover's two signing-credential states side by
@@ -318,6 +325,7 @@ export function WalletPopover({
   signingWith,
   unavailablePasskey = false,
   wrongWalletOwner,
+  accountName,
   presentational = false,
   open,
   onClose,
@@ -497,6 +505,11 @@ export function WalletPopover({
           data-wallet-menu-scroll=""
           className="min-h-0 flex-1 overflow-y-auto p-4"
         >
+          {accountName && (
+            <p className="mb-3 truncate text-xs text-[var(--v2-ink-3)]" title={accountName}>
+              Account: <span className="font-medium text-[var(--v2-ink-2)]">{accountName}</span>
+            </p>
+          )}
           {unavailablePasskey && (
             <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
               This account uses a passkey that is not available here.
@@ -633,17 +646,24 @@ export default function WalletButton({
 }: {
   /**
    * The account whose signer this pill reports. Omitted in the app bar, where
-   * it is the user's default account (#3719: there is no global active
-   * account); the connect flow passes the account the budget is approved on.
+   * it is the account page being viewed, else the user's default account
+   * (#3719: there is no global active account); the connect flow passes the
+   * account the budget is approved on.
    */
   accountId?: string | null
 } = {}) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const { user, passkeys } = useAuth()
+  // On `/accounts/<id>` the page's own action area gates on THAT account, so
+  // the pill speaks for it too and the two cannot disagree (#2073); anywhere
+  // else, the default account.
+  const pathname = usePathname()
+  const routeAccountId = pathname?.match(/^\/accounts\/([^/]+)/)?.[1]
+  const findAccount = (id: string | null | undefined) =>
+    id ? user?.accounts?.find((candidate) => candidate.id === id) : undefined
   const subjectAccount =
-    (accountId ? user?.accounts?.find((candidate) => candidate.id === accountId) : undefined) ??
-    resolveDefaultAccount(user?.accounts)
+    findAccount(accountId) ?? findAccount(routeAccountId) ?? resolveDefaultAccount(user?.accounts)
   const subjectAccountAddress = subjectAccount?.account_address as Address | undefined
   const activeSigner = useActiveSigner({
     accountAddress: subjectAccountAddress,
@@ -791,6 +811,7 @@ export default function WalletButton({
                 hasConnectedWallet={connected}
                 switching={pendingSwitch}
                 anchorRef={triggerRef}
+                accountName={subjectAccountName}
               />
             </div>
           )
@@ -853,7 +874,7 @@ export default function WalletButton({
 
               <WalletPopover
                 primary={{
-                  label: subjectAccountName ?? 'Haven account',
+                  label: 'Haven account',
                   address: delegatorSigner.accountAddress,
                   chainName: accountChainName,
                 }}
@@ -866,6 +887,7 @@ export default function WalletButton({
                 hasConnectedWallet={connected}
                 switching={pendingSwitch}
                 anchorRef={triggerRef}
+                accountName={subjectAccountName}
               />
             </div>
           )
@@ -982,6 +1004,7 @@ export default function WalletButton({
               hasConnectedWallet={connected}
               switching={pendingSwitch}
               anchorRef={triggerRef}
+              accountName={subjectAccountName}
             />
           </div>
         )

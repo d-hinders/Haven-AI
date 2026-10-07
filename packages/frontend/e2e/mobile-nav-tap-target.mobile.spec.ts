@@ -652,18 +652,16 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         //    name rather than a spacing decision, in a file that rejects a 6px
         //    gap elsewhere. `TopBar`'s regions now hold `mr-3` apart.
         //
-        //    Since #3719 removed the account chip, a phone's bar can hold a
-        //    single control (the wallet), and then there is no gap to measure.
-        //    So the floor applies whenever two or more controls share the
-        //    band, and a lone control must be the ONLY reason the gap is null:
-        //    `barControlCount` is asserted beside it so an empty scan cannot
-        //    pass as "nothing to compare".
+        //    Since #3719 removed the account chip, a phone's bar on this route
+        //    holds ONE control (the wallet; `EnvBadge` is a span and the theme
+        //    toggle is `hidden` below `lg`), so on `/dashboard` this floor has
+        //    nothing to measure and does not fire. It still applies wherever
+        //    two controls share the band (a detail route's back link beside
+        //    the wallet), and `barControlCount` is asserted so an empty scan
+        //    cannot pass as "nothing to compare".
         expect(m.barControlCount).toBeGreaterThan(0)
         if (m.barControlCount >= 2) {
-          expect(m.smallestBarGap).not.toBeNull()
           expect(m.smallestBarGap!).toBeGreaterThanOrEqual(MIN_CONTROL_GAP_PX)
-        } else {
-          expect(m.smallestBarGap).toBeNull()
         }
 
         // 9. The account chip is GONE (#3719 removed the global active
@@ -671,8 +669,8 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         //    this assertion used to hold its truncated segments to a legibility
         //    floor (#1767, #1803). With nothing left to squeeze, what remains
         //    is that the chip stays gone — a reintroduced one would reopen
-        //    every width question above. The gap floor (8) and the wallet
-        //    collapse (10) still guard the row that is left.
+        //    every width question above. The wallet collapse (10) still guards
+        //    the row that is left; see (8) for when the gap floor fires.
         expect(m.accountChipCount).toBe(0)
 
         // 10. What PAYS for (9), and the two ways paying for it goes wrong

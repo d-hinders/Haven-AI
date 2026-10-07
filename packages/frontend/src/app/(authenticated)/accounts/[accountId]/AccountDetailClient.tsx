@@ -2,7 +2,7 @@
 
 import { EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'

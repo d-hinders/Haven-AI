@@ -404,3 +404,48 @@ describe('AgentPanel list toolbar (#3165)', () => {
     expect(screen.getByRole('button', { name: /Organization:/ })).toBeInTheDocument()
   })
 })
+
+describe('AgentPanel across accounts (#3719)', () => {
+  const OPERATING = { ...SAFE, id: 'acc-op', name: 'Operating', chain_id: 8453, is_default: true }
+  const TREASURY = { ...SAFE, id: 'acc-tr', name: 'Treasury', chain_id: 84532, is_default: false }
+  const onOperating = agent({
+    id: 'agent-op', name: 'Research agent',
+    account_id: OPERATING.id, account_name: OPERATING.name, account_chain_id: OPERATING.chain_id,
+  })
+  const onTreasury = agent({
+    id: 'agent-tr', name: 'Payroll agent',
+    account_id: TREASURY.id, account_name: TREASURY.name, account_chain_id: TREASURY.chain_id,
+  })
+
+  it('lists every account’s agents, each naming its account and chain', () => {
+    mockUseAuth.mockReturnValue({ user: { accounts: [OPERATING, TREASURY] } })
+    setAgents([onOperating, onTreasury])
+
+    render(<AgentPanel />)
+
+    expect(screen.getByRole('link', { name: 'Research agent' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Payroll agent' })).toBeInTheDocument()
+    expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === 'Account: Operating · Base')).toBeInTheDocument()
+    expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === 'Account: Treasury · Base Sepolia')).toBeInTheDocument()
+  })
+
+  it('offers the Account filter with two or more accounts', () => {
+    mockUseAuth.mockReturnValue({ user: { accounts: [OPERATING, TREASURY] } })
+    setAgents([onOperating, onTreasury])
+
+    render(<AgentPanel />)
+
+    expect(screen.getByRole('button', { name: /^Account:/ })).toBeInTheDocument()
+  })
+
+  it('offers no Account filter with a single account', () => {
+    mockUseAuth.mockReturnValue({ user: { accounts: [OPERATING] } })
+    setAgents([onOperating])
+
+    render(<AgentPanel />)
+
+    // Non-vacuity: the toolbar rendered its built-in facets.
+    expect(screen.getByRole('button', { name: /^Status:/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Account:/ })).toBeNull()
+  })
+})

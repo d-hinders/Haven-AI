@@ -13,6 +13,9 @@ const DEFAULT_ACCOUNT = {
   created_at: '2026-05-05T00:00:00.000Z',
 }
 
+const navigation = vi.hoisted(() => ({ pathname: '/dashboard' as string | null }))
+vi.mock('next/navigation', () => ({ usePathname: () => navigation.pathname }))
+
 const mocks = vi.hoisted(() => ({
   connectState: {
     account: undefined as
@@ -147,6 +150,32 @@ describe('WalletButton', () => {
         accountAddress: DEFAULT_ACCOUNT.account_address,
         chainId: DEFAULT_ACCOUNT.chain_id,
       })
+    })
+
+    it('on an account page, reads that account (#2073 parity with the page gate)', () => {
+      navigation.pathname = '/accounts/acc-first'
+      mocks.useAuth.mockReturnValue({
+        user: { accounts: [FIRST_NOT_DEFAULT, DEFAULT_ACCOUNT] },
+        passkeys: [],
+      })
+      render(<WalletButton />)
+      expect(mocks.useActiveSigner).toHaveBeenLastCalledWith({
+        accountAddress: FIRST_NOT_DEFAULT.account_address,
+        chainId: FIRST_NOT_DEFAULT.chain_id,
+      })
+      navigation.pathname = '/dashboard'
+    })
+
+    it('names the subject account in the connected-wallet menu too', () => {
+      setConnectedWallet()
+      mocks.useAuth.mockReturnValue({
+        user: { accounts: [FIRST_NOT_DEFAULT, DEFAULT_ACCOUNT] },
+        passkeys: [],
+      })
+      render(<WalletButton />)
+      fireEvent.click(screen.getByRole('button', { name: /0x5555/ }))
+      const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
+      expect(within(dialog).getByText('Main account')).toBeInTheDocument()
     })
 
     it('reads the account it is given', () => {
@@ -472,8 +501,9 @@ describe('WalletButton', () => {
     render(<WalletButton />)
     fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
     const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
-    // #3719: the section names the account the pill speaks for — with no
-    // global active account, that is the default one (here `Main account`).
+    expect(within(dialog).getByText('Haven account')).toBeInTheDocument()
+    // #3719: the menu names the account its status refers to — with no
+    // global active account, the default one here.
     expect(within(dialog).getByText('Main account')).toBeInTheDocument()
     expect(within(dialog).queryByText('Haven account (passkey)')).not.toBeInTheDocument()
     expect(within(dialog).getByText('Signing with')).toBeInTheDocument()

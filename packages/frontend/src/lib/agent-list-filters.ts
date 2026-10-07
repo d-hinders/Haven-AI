@@ -1,6 +1,6 @@
 import type { Agent } from '@/hooks/useAgents'
 import type { SmartAccount } from '@/context/AuthContext'
-import { resolveChainOrNull } from '@/lib/chains'
+import { accountWithChainLabel } from '@/lib/account-label'
 
 /**
  * Search, facets and sort for the `/agents` list (#3165).
@@ -112,10 +112,7 @@ export function accountFacet(accounts: readonly SmartAccount[]): AgentFacet {
     id: 'account',
     label: 'Account',
     match: 'any',
-    options: accounts.map((account) => {
-      const chain = resolveChainOrNull(account.chain_id)?.name
-      return { value: account.id, label: chain ? `${account.name} · ${chain}` : account.name }
-    }),
+    options: accounts.map((account) => ({ value: account.id, label: accountWithChainLabel(account) })),
     predicate: (agent, value) => agent.account_id === value,
   }
 }

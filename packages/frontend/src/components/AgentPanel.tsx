@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui/Icon'
 import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import { useAgentListFilters } from '@/hooks/useAgentListFilters'
 import { BUILT_IN_FACETS, accountFacet } from '@/lib/agent-list-filters'
@@ -35,7 +36,6 @@ export default function AgentPanel() {
   const panel = useAgentPanelState()
   const {
     accountAddress,
-    chainId,
     agents,
     loading,
     error: agentsError,
@@ -431,7 +431,7 @@ export default function AgentPanel() {
           {listFilters.filtered.length > 0 && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
               {listFilters.filtered.map((agent) => {
-                const agentChainId = agent.account_chain_id ?? chainId
+                const agentChainId = agent.account_chain_id ?? DEFAULT_CHAIN_ID
 
                 return (
                   <AgentCard
@@ -501,7 +501,7 @@ export default function AgentPanel() {
                 onMoveToOrganization={panel.handleAgentMoved}
                 onBudgetEnded={handleBudgetEnded}
                 busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                chainId={agent.account_chain_id ?? chainId}
+                chainId={agent.account_chain_id ?? DEFAULT_CHAIN_ID}
                 organizations={panel.organizations}
               />
             ))}

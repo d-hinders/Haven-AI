@@ -103,6 +103,14 @@ and the `release` skill.
 >
 > The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified unchanged (#3722, 2026-10-07, leaked-credential copy):** this
+> doc is coupled through `packages/connect/src/cli.ts`. The change is two
+> human-readable `--tombstone` / `--unwire` output sentences, which now name the
+> agent page's **Remove agent…** control instead of "revoke the agent". No flag,
+> exit code, `--json` field, channel rule or guard this document describes
+> moved. The rest of this document was not re-read for it, and `last-verified`
+> is not bumped.
+
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this doc is coupled through `routes/agent-connection-setups.ts` and
 > `middleware/retired-safe-names.ts`. The route's change is one internal

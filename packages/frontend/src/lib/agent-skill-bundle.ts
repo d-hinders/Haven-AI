@@ -440,11 +440,15 @@ raw merchant evidence; never use it to decide whether the purchase was paid.
 Do not call \`haven_get_agent\` or \`haven_get_allowances\` again just to
 report a purchase you already made.
 
-## Revoke
+## If the credential may have leaked
 
-If this agent's credential may have leaked, tell the user to pause or revoke
-the agent in the Haven dashboard under Agents. New requests stop immediately
-for that credential.
+If this agent's credential may have leaked, tell the user to open the agent in
+the Haven dashboard and choose Replace signing key: the old budget is revoked
+on-chain and a new one is issued to a new key. To stop all spending now, they
+use Stop budget on the agent's budget, or Remove agent… to end every budget and
+retire the agent. Pausing only blocks payments through Haven; the budget stays
+live on-chain. The signing key also controls any funds already in the agent
+wallet, and ending the budget does not recover them.
 `
 }
 

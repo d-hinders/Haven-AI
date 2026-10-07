@@ -136,8 +136,8 @@ export async function runCli(
       } else {
         io.stdout(redactSecrets(`Tombstoned agent ${info.agent_id} at ${parsed.tombstone.directory}.\n`))
         io.stdout(
-          'Key files were NOT touched and nothing was revoked — revoke the agent on the Haven ' +
-            'agent page if you have not already.\n',
+          'Key files were NOT touched and nothing was revoked — on the Haven agent page, use ' +
+            'Remove agent\u2026 (or Stop budget) if you have not already.\n',
         )
         io.stdout(
           info.recordPath !== null
@@ -271,7 +271,7 @@ export async function runCli(
               ? 'This directory\u2019s local key material was KEPT (see above); the tombstone\n'
               : 'This directory\u2019s local key material was removed and the tombstone\n') +
             'record + #2155 mirror survive — but nothing was REVOKED on the backend. If you have not\n' +
-            'already, revoke the agent on the Haven agent page to stop it spending entirely.\n',
+            'already, use Remove agent\u2026 on the Haven agent page to end its budgets on-chain and stop it spending.\n',
         )
       }
       return failures.length > 0 || retained ? 1 : 0

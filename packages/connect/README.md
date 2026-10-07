@@ -161,8 +161,8 @@ minutes. Two rules follow:
    stderr log on every probe, and records it in `TOMBSTONE.json` for
    `--doctor` — with a copy in `~/.haven/tombstones/` (or `.tombstones/` inside
    a custom credentials root), so the retirement stays visible after the
-   directory is deleted. It touches no key material and revokes nothing — revoke the
-   agent on the Haven agent page yourself. Delete the tombstone only once every
+   directory is deleted. It touches no key material and revokes nothing — use **Remove
+   agent…** (or **Stop budget**) on the Haven agent page yourself. Delete the tombstone only once every
    long-lived host has been restarted.
 
    **Pass a real DIRECTORY, not an agent id.** A named agent lives at its wiring
@@ -219,7 +219,7 @@ backend change) and **refuses to destroy the key material on every answer**:
 
 | Probe | What it means | What `--unwire` does |
 | --- | --- | --- |
-| `ok` | The agent is still active: its key still spends. | Refuses; tells you to revoke on the Haven agent page (connect never revokes), then re-run. |
+| `ok` | The agent is still active: its key still spends. | Refuses; tells you to use **Remove agent…** on the Haven agent page (connect never revokes), then re-run. |
 | `unauthorized` | The key no longer authenticates on normal routes (revoked, archived, paused, pending approval, rotated, or not a key the backend knows — it does not say which). | Refuses; says plainly that a stranded balance **may** exist and the connector **cannot check**; recover first (`haven_sweep_delegate`, or the agent page). |
 | `network_error` / `bad_response` | Could not verify. | Refuses: unknown is not "safe to delete". Retry. |
 | *(no stored API key + URL)* | Nothing the recovery routes would accept. | Proceeds, unprobed — the pre-#3123 shape. |

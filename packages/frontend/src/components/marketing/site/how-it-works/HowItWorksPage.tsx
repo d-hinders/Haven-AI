@@ -188,8 +188,7 @@ export function HowItWorksPage() {
                 meta="Monthly budget · resets 11 Jul · pinned to Klara Data AB"
               />
               <div className="mt-3.5 flex justify-end gap-2">
-                <FrameControl>Pause</FrameControl>
-                <FrameControl>Revoke</FrameControl>
+                <FrameControl>Stop budget</FrameControl>
               </div>
             </ProductFrame>
             <div className="order-1 min-[900px]:order-2">
@@ -200,7 +199,7 @@ export function HowItWorksPage() {
               >
                 <SiteLede>
                   An amount and a period per agent, optionally pinned to one recipient. You sign it once, it refills
-                  itself, and you can pause or revoke it at any time.
+                  itself, and you can stop it at any time.
                 </SiteLede>
               </SiteCopy>
             </div>

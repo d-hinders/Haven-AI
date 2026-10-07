@@ -115,7 +115,7 @@ export function renderSignerConsentBlock(input: SignerConsentInput, hash: string
   lines.push("this signer's key file - it never sends the key, a signature, or anything")
   lines.push('else outbound, and it cannot show a live allowance summary.')
   lines.push("The agent's signed budget delegation is the real spend gate, and the wallet")
-  lines.push('owner can pause or revoke agent authority outside this signer.')
+  lines.push("owner can stop the agent's budget or remove the agent outside this signer.")
   lines.push('')
   lines.push('Tools this signer will expose to your agent runtime (one line each; the')
   lines.push('full agent-facing descriptions are what the runtime sees):')

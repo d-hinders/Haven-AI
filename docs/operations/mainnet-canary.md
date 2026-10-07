@@ -321,7 +321,7 @@ pauses widening at that step until explained.
 ## 6. Rollback
 
 **Per-agent:** revoke the agent's grants from the dashboard (budget card →
-Stop) or `POST /agents/:id/delegations/:hash/revoke` + submit. Revocation is
+Stop budget) or `POST /agents/:id/delegations/:hash/revoke` + submit. Revocation is
 an **owner-signed sponsored treasury op** — "quickly" means: one signature
 per grant, landing at bundler speed (seconds to ~a minute per op on 8453).
 It is NOT instant and NOT batch: N active grants = N signatures. The

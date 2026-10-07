@@ -682,8 +682,8 @@ Money and risk clarity:
   returns Base USDC only; native ETH remains in the agent wallet.
 - Explain that Haven's relayer pays gas but cannot change the signed destination
   or spend by itself.
-- Pausing or revoking stops new Haven-supported funding but does not recover an
-  existing agent-wallet balance. Present recovery as a separate action.
+- Stopping the budget ends new funding but does not recover an existing
+  agent-wallet balance. Present recovery as a separate action.
 - Submission, success, retry guidance, and explorer links belong in the
   agent/tool result today. Surface them on this screen only if execution status
   is later wired back into the route.

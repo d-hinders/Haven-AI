@@ -1765,7 +1765,7 @@ export default function DesignSystemPage() {
           <RiskExplainer
             items={[
               'The agent can make payments automatically while it stays within the budget.',
-              'You can pause or revoke the agent from its detail page.',
+              'You can stop its budget or remove the agent from its detail page.',
               'Requests above the remaining budget are declined — nothing is paid past the rules you set.',
             ]}
           />
@@ -2611,8 +2611,8 @@ export default function DesignSystemPage() {
               statusTone="success"
             />
             <ApprovalRequiredBanner title="You stay in control" tone="neutral">
-              Anything above 75 USDC is declined before it is paid, and you can pause or revoke
-              this agent at any time.
+              Anything above 75 USDC is declined before it is paid, and you can stop this agent's
+              budget at any time.
             </ApprovalRequiredBanner>
           </div>
         </div>
@@ -2958,8 +2958,8 @@ export default function DesignSystemPage() {
             budget does not stack up into a larger one next period.
           </p>
           <p>
-            You can pause or revoke this agent at any time. Revoking takes effect on-chain, so it
-            stops the agent whether or not Haven is reachable.
+            You can stop this agent's budget at any time. Stopping it takes effect on-chain, so it
+            ends the budget whether or not Haven is reachable.
           </p>
           <p>
             Anything the agent pays for shows up in your transaction history with the merchant, the

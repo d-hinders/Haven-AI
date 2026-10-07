@@ -24,6 +24,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **The consent text names the owner's real stop controls (#3722).** "the wallet owner can pause or revoke agent authority outside this signer" now reads "the wallet owner can stop the agent's budget or remove the agent outside this signer." Pause and API revoke end no on-chain authority. `SIGNER_CONSENT_SURFACE_VERSION` is unchanged (copy edit): existing installs are not re-prompted for this, and see the new text at their next consent prompt. No update needed.
 - **Every upgraded install re-prompts for consent exactly once (#3728).** The consent hash covers the sorted tool NAMES, so `haven_sign_siwx` joining the registered set moves it on its own; `SIGNER_CONSENT_SURFACE_VERSION` stays 2 (a bump would be a second, redundant re-prompt lever on the same event), and the consent wording now says the signer signs "x402 Sign-In-With-X sign-in challenges" — which proves to a merchant that the wallet paid it, and moves no funds. A sign-in identity changes when credentials rotate (`/agents/:id/rekey/*` issues a new delegate key): codes the old key never retrieved can no longer be reached by SIWX after a rekey (documented in `docs/product/agent-key-rotation.md`). `packages/connect` derives `requiredSignerTools` from this list, so doctor/install probes now require the new tool from the installed signer.
 
 ## 0.8.1-alpha.0 — 2026-10-07

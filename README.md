@@ -317,8 +317,9 @@ Independent layers keep the API and signing boundaries separate:
 | **Credential scoping** | API-key identity, prefix display, rotation, and revocation state | Haven backend |
 
 If Haven is compromised, API keys alone cannot sign transactions. For a live delegation
-agent, an account owner can pause or revoke it in Haven, and can revoke the underlying
-on-chain authority directly without needing Haven — see the [independent exit path](docs/exit/README.md).
+agent, an account owner can stop its budget or replace its signing key in Haven (pausing
+only blocks payments through Haven), and can revoke the underlying on-chain authority
+directly without needing Haven — see the [independent exit path](docs/exit/README.md).
 The dashboard exposes no pause or revoke controls for legacy Safe records; any residual Safe permission
 must be revoked externally by the Safe owner.
 

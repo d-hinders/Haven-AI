@@ -360,8 +360,10 @@ requests or their responses, and nothing here relays, submits, or broadcasts:
 - Declined or insufficient requests expose no signable hash — nothing is queued.
 - x402 authorization is bound to amount, merchant, resource, asset, and network.
 - Sweep authorization is bound to the registered delegate and Haven wallet.
-- Live delegation agents can be paused or revoked in Haven; legacy Safe
-  permissions require action by the Safe owner outside Haven.
+- A live delegation agent's budget can be stopped, or its signing key
+  replaced, in Haven; pausing only blocks payments through Haven and leaves the
+  budget live on-chain. Legacy Safe permissions require action by the Safe owner
+  outside Haven.
 
 Re-verified 2026-10-05 (weekly docs audit #3645, at dev `cdb91d86`), a full
 re-read of everything except the dated notes. Changed: the recommended

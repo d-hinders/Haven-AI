@@ -33,7 +33,7 @@ One line: give your agent a budget, not your wallet.
 
 1. Create a Haven account at the dashboard (`/`) — one passkey prompt (Face ID / Touch ID), no seed phrase.
 2. Create an agent and set its budget: how much, per what period, optionally pinned to a recipient.
-3. Connect the agent: copy the connector command from the dashboard into the agent's environment. The agent can now pay — only within the rules you set. Pause, tighten, or revoke at any time.
+3. Connect the agent: copy the connector command from the dashboard into the agent's environment. The agent can now pay — only within the rules you set. Tighten or stop the budget at any time.
 
 ## What Haven is not
 

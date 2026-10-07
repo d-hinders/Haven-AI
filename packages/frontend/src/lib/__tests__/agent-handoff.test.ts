@@ -283,3 +283,20 @@ describe('buildHandoff — SDK example', () => {
     }
   })
 })
+
+describe('buildHandoff — leak guidance (#3722)', () => {
+  const { markdown } = buildHandoff(BASE_INPUT)
+  const text = markdown.replace(/\s+/g, ' ')
+
+  it('names Replace signing key, Stop budget and Remove agent…, not pause or revoke', () => {
+    expect(text).toContain('If this file leaks, open the agent in the Haven dashboard and choose Replace signing key')
+    expect(text).toContain('use Stop budget on the agent\'s budget, or Remove agent… to end every live budget')
+    expect(text).toContain('Pausing the agent only blocks payments through Haven; its budget stays live on-chain.')
+    expect(text).not.toMatch(/pause or revoke/i)
+    expect(text).not.toMatch(/Revoking the agent stops/)
+  })
+
+  it('discloses that ending the budget does not recover the agent-wallet balance', () => {
+    expect(text).toContain('also controls any funds already in the agent wallet, and ending the budget does not recover them')
+  })
+})

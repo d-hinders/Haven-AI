@@ -396,12 +396,14 @@ describe('teardown refuses before destroying the recovery credential (#3123)', (
     })
   }
 
-  it('probe ok: the refusal names the live spend authority and the remedy (revoke on the agent page, or the override)', async () => {
+  it('probe ok: the refusal names the live spend authority and the remedy (Remove agent… on the agent page, or the override)', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-ok-'))
     const { dir } = await seedProbeableAgent(homeDir)
     const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), probeHostedIdentity: async () => ({ status: 'ok', agentId: 'agent-research', delegateAddress: '0x' + 'cd'.repeat(20) }) })
     expect(result.teardown.detail).toMatch(/still ACTIVE/)
-    expect(result.teardown.remedy).toMatch(/Revoke the agent on the Haven agent page/)
+    // #3722: the page's control is "Remove agent…" (it ends the live budgets); there is no "revoke" there.
+    expect(result.teardown.remedy).toMatch(/Use Remove agent\u2026 on the Haven agent page/)
+    expect(result.teardown.remedy).not.toMatch(/Revoke the agent/)
     expect(result.teardown.remedy).toContain('--destroy-key-material')
   })
 

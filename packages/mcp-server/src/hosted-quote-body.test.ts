@@ -32,6 +32,16 @@ function stubFetch() {
   vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString()
     seen.push({ url, init })
+    // The hosted identity gate's agent read must succeed first.
+    if (url.startsWith('http://haven.test/')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({}),
+        text: async () => '{}',
+      } as unknown as Response
+    }
     // A 402 shaped enough for the SDK's quote path to parse.
     return {
       ok: false,

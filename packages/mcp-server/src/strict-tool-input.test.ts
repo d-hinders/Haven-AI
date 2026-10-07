@@ -35,7 +35,7 @@ import { HavenClient, HAVEN_SKILL_MD } from '@haven_ai/sdk'
 // would break the Docker builder on a workspace link pointing at a directory
 // the image never copied. (haven-reviewer, #2348.)
 import { toolSchemas as localToolSchemas, computeConsentHash, type ConsentInput } from '@haven_ai/mcp'
-import { buildHostedMcpServer } from './server.js'
+import { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT, buildHostedMcpServer } from './server.js'
 import {
   createToolHandlers,
   toolSchemas,
@@ -402,10 +402,12 @@ describe('#2349 — the {} tools: strictness would change exactly one case', () 
  * whether a strict parse changes which refusal a caller meets first. It does
  * not for a caller sending only declared keys: both cap spellings are
  * declared, so strict passes them through and `readMaxAmountCap` still
- * raises its own — more useful — refusals, before any network call.
+ * raises its own — more useful — refusals, before any payment work. The one
+ * request they make is the hosted identity gate's agent read, which runs
+ * before every networked tool's handler.
  */
 describe('#2349 — the cap refusals stay reachable behind strict', () => {
-  it('both caps → AmbiguousMaxAmount, no network', async () => {
+  it('both caps → AmbiguousMaxAmount, only the identity read', async () => {
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_prepare_catalog_purchase', {
       catalog_id: 'cat_1',
@@ -414,15 +416,15 @@ describe('#2349 — the cap refusals stay reachable behind strict', () => {
     })
     expect(text).toContain('Both max_amount')
     expect(text.toLowerCase()).not.toContain('unrecognized')
-    expect(fetches).toEqual([])
+    expect(fetches).toEqual(['GET /machine-payments/agent'])
   })
 
-  it('no cap → the cap-required refusal, no network', async () => {
+  it('no cap → the cap-required refusal, only the identity read', async () => {
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_prepare_catalog_purchase', { catalog_id: 'cat_1' })
     expect(text).toContain('A spending cap is REQUIRED')
     expect(text.toLowerCase()).not.toContain('unrecognized')
-    expect(fetches).toEqual([])
+    expect(fetches).toEqual(['GET /machine-payments/agent'])
   })
 
   it('an UNDECLARED key alongside both caps meets the strict refusal first — stated, not hidden', async () => {
@@ -854,4 +856,71 @@ describe('#3620 — budget-scope keys are the same on both runtimes, or the diff
       }).toEqual({ missingOnHosted: allowed.missingOnHosted, missingOnLocal: allowed.missingOnLocal })
     })
   }
+})
+
+/**
+ * The hosted identity gate. The transport checks that a bearer token is
+ * present, never that it is valid, so every networked tool first resolves the
+ * key to an agent. These run every tool with its own valid arguments against a
+ * Haven that rejects the key (or cannot answer), and pin that nothing reaches
+ * a merchant — or any Haven route but the one identity read — and that the
+ * refusal is the typed one.
+ */
+describe('hosted identity gate — a rejected key reaches no merchant', () => {
+  const ALL_ARGS: Record<HostedToolName, Record<string, unknown>> = {
+    ...VALID_ARGS,
+    haven_get_agent: {},
+    haven_get_allowances: {},
+  }
+
+  function stubHaven(status: number) {
+    fetches = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      fetches.push(`${(init.method ?? 'GET').toUpperCase()} ${new URL(url).host}${new URL(url).pathname}`)
+      if (new URL(url).host === 'haven.test') {
+        return {
+          ok: false,
+          status,
+          statusText: 'refused',
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({ error: 'unauthorized' }),
+          text: async () => '{"error":"unauthorized"}',
+        } as unknown as Response
+      }
+      // A merchant that would answer anything — reaching it is the failure.
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({}),
+        text: async () => '{}',
+      } as unknown as Response
+    })
+  }
+
+  for (const status of [401, 403, 503]) {
+    for (const name of Object.keys(toolSchemas) as HostedToolName[]) {
+      if (IDENTITY_GATE_EXEMPT.has(name)) continue
+      it(`${name} with a Haven ${status} on the agent read refuses before its handler`, async () => {
+        stubHaven(status)
+        const client = await connectedClient()
+        const { text } = await callToolText(client, name, ALL_ARGS[name])
+        expect(fetches).toEqual(['GET haven.test/machine-payments/agent'])
+        const payload = JSON.parse(text) as { success: boolean; code: string; next_action?: string }
+        expect(payload.success).toBe(false)
+        expect(payload.code).toBe(AGENT_IDENTITY_UNVERIFIED)
+        expect(payload.next_action).toBe('stop_and_tell_user')
+      })
+    }
+  }
+
+  it('exempts only tools that make no request at all', async () => {
+    expect([...IDENTITY_GATE_EXEMPT]).toEqual(Object.keys(OFFLINE_TOOLS))
+    stubHaven(401)
+    const client = await connectedClient()
+    for (const name of IDENTITY_GATE_EXEMPT) {
+      await callToolText(client, name, ALL_ARGS[name])
+    }
+    expect(fetches).toEqual([])
+  })
 })

@@ -22,7 +22,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  verifyPaymentReceipt,
 } from '@haven_ai/sdk'
+import { signedErc7710Receipt } from '@haven_ai/sdk/test-support'
 import {
   AGENT_ALLOWANCES_RESPONSE,
   AGENT_RESPONSE,
@@ -736,6 +738,80 @@ describe('haven_verify_receipt (#3418) — a list row is not a signed bundle', (
       if (!result.success) throw new Error(`verify threw on ${String(receipt)}`)
       expect(result.data).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
     }
+  })
+
+  // #3723 guard: the wrapper unwrap never rescues a list row — the row inside
+  // a { receipt, verification } wrapper carries no authorization either way.
+  it('a WRAPPED list row still answers not_a_signed_receipt', async () => {
+    const result = await handlers().haven_verify_receipt({
+      receipt: { receipt: erc7710Row, verification: { verified: true } } as never,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({ verified: false, reason: 'not_a_signed_receipt' })
+  })
+})
+
+// ── #3723 — the wrapped response and the bundle read ─────────────────────────
+
+describe('#3723 — haven_verify_receipt accepts the endpoint response; haven_get_receipt returns the bundle', () => {
+  const bundle = signedErc7710Receipt()
+
+  it('the whole { receipt, verification } response verifies — the first positive erc7710 verify here', async () => {
+    expect(verifyPaymentReceipt(bundle)).toMatchObject({ verified: true, verifiedOver: 'delegation_digest' })
+    const result = await handlers().haven_verify_receipt({
+      receipt: { receipt: bundle, verification: { verified: true, recoveredSigner: '0xlies' } } as never,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({
+      verified: true,
+      recoveredSigner: bundle.authorization.delegate,
+      verifiedOver: 'delegation_digest',
+    })
+  })
+
+  it('the spread form — { receipt, verification } as top-level arguments — verifies: verification accepted and ignored', async () => {
+    const result = await handlers().haven_verify_receipt({
+      receipt: bundle,
+      verification: { verified: true, recoveredSigner: '0xlies' },
+    } as never)
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error(`verify failed: ${result.message}`)
+    expect(result.data).toEqual({
+      verified: true,
+      recoveredSigner: bundle.authorization.delegate,
+      verifiedOver: 'delegation_digest',
+    })
+  })
+
+  it('haven_get_receipt returns { receipt } and that output verifies unchanged', async () => {
+    stubFetch({
+      'GET /payments/pay_3723/receipt': {
+        status: 200,
+        body: { receipt: bundle, verification: { verified: true, verifiedOver: 'delegation_digest' } },
+      },
+    })
+    const result = ok<{ receipt: unknown }>(await handlers().haven_get_receipt({ payment_id: 'pay_3723' }))
+    // { receipt } ONLY — the server-side self-check is not returned.
+    expect(result.data).toEqual({ receipt: bundle })
+    const verify = ok<{ verified: boolean; verifiedOver?: string }>(
+      await handlers().haven_verify_receipt({ receipt: result.data.receipt }),
+    )
+    expect(verify.data).toMatchObject({ verified: true, verifiedOver: 'delegation_digest' })
+  })
+
+  it('an unknown id answers the structured 404, never a raw error', async () => {
+    stubFetch({
+      'GET /payments/pay_missing/receipt': {
+        status: 404,
+        body: { error: 'not_found', message: 'No receipt for payment pay_missing' },
+      },
+    })
+    const result = await handlers().haven_get_receipt({ payment_id: 'pay_missing' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.statusCode).toBe(404)
   })
 })
 

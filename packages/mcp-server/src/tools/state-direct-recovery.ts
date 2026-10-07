@@ -3,14 +3,15 @@
  * surface, carved out of `tools.ts` (which stays the compatibility facade
  * `index.ts`, `server.ts`, tests and embedders import).
  *
- * Ten authority reads plus the #3126 sufficiency check — one owner:
+ * Eleven authority reads plus the #3126 sufficiency check — one owner:
  *
  *   state      haven_get_agent, haven_get_allowances,
  *              haven_check_funds (#3126),
  *              haven_get_payment_status, haven_get_resume_state
  *   direct     haven_send, haven_pay, haven_submit
  *   recovery   haven_sweep_delegate
- *   receipts   haven_list_receipts, haven_verify_receipt
+ *   receipts   haven_list_receipts, haven_verify_receipt,
+ *              haven_get_receipt (#3723 — the signed bundle's read)
  *
  * The handler bodies moved VERBATIM: names, schemas (`tools/contracts.ts`),
  * success/failure shapes, request-context behaviour and agent guidance are
@@ -154,6 +155,9 @@ export const STATE_DIRECT_RECOVERY_TOOLS = [
   'haven_get_resume_state',
   'haven_list_receipts',
   'haven_verify_receipt',
+  // #3723: the signed bundle's read — the endpoint's own response, via
+  // HavenClient.getReceipt, on the hosted per-request (bearer-key) client.
+  'haven_get_receipt',
 ] as const satisfies readonly HostedToolName[]
 
 export type StateDirectRecoveryToolName = (typeof STATE_DIRECT_RECOVERY_TOOLS)[number]
@@ -939,6 +943,19 @@ export function createStateDirectRecoveryHandlers(
       runTool(async () => {
         const args = parseStrict('haven_verify_receipt', input)
         return verifyPaymentReceipt(args.receipt as PaymentReceipt)
+      }),
+
+    // #3723: the signed bundle's MCP home. Returns `{ receipt }` ONLY — the
+    // endpoint's server-side `verification` is computed on Haven's server,
+    // not offline, so handing it back would invite the agent to trust it and
+    // skip haven_verify_receipt. The bundle passes to that verifier unchanged,
+    // and a 404 (unknown id, another agent's id, unsettled) carries the
+    // backend's structured error through runTool.
+    haven_get_receipt: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_get_receipt', input)
+        const { receipt } = await haven.getReceipt(args.payment_id)
+        return { receipt }
       }),
   }
 }

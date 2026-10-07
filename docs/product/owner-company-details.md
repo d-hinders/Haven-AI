@@ -171,7 +171,10 @@ nothing else can read it through Haven's API.
 ### Where it does not surface (yet)
 
 `parties.buyer` is additive on `GET /payments/:id/receipt` and the receipts
-list (`GET /machine-payments/receipts`, `haven_list_receipts`) only. Two other
+list (`GET /machine-payments/receipts`, `haven_list_receipts`) only — the same
+bundle is now also reachable through MCP as `haven_get_receipt` (#3723),
+which returns the endpoint's `{ receipt }` verbatim, `parties.buyer` included.
+Two other
 payment-status surfaces do NOT carry it, deliberately out of scope for #3332:
 `GET /machine-payments/:id/status` (`modules/payments/agent-payment-status.ts`,
 `haven_get_payment_status`) and the `POST /machine-payments/evidence` 202

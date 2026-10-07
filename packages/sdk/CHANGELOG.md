@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Fixed
+
+- **`verifyPaymentReceipt` accepts the receipt endpoint's wrapped response as-is (#3723).** `GET /payments/{id}/receipt` (and `HavenClient.getReceipt`) return `{ receipt, verification }`, but the verifier looked for `authorization` at the top level, so passing that response unchanged answered `not_a_signed_receipt`. When the top level carries no `authorization` and `.receipt` is a non-null object, the bundle inside is verified — one level only, no recursion. The wrapper's `verification` is never read (it is Haven's own self-check, not offline evidence), and a `haven_list_receipts` row — bare or wrapped — still answers `not_a_signed_receipt`.
+
 ## 0.8.1-alpha.0 — 2026-10-07
 
 ### Added

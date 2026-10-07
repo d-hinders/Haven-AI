@@ -35,6 +35,12 @@ import type { RawPaymentParties } from './types.js'
  * history row, which carries no signature at all — returns
  * `not_a_signed_receipt`. Verification never throws.
  *
+ * #3723: the response `GET /payments/{id}/receipt` returns —
+ * `{ receipt, verification }` — is accepted AS-IS: when the top level carries
+ * no `authorization`, the `.receipt` object inside is verified instead (one
+ * level, no recursion). The wrapper's `verification` is never read — it is
+ * Haven's own self-check, and trusting it would defeat an offline verifier.
+ *
  * This lives in the SDK so agents and users can verify receipts client-side.
  */
 export const RECEIPT_VERSION = 'haven-receipt-1'
@@ -173,7 +179,10 @@ function finish(result: MatchResult, verifiedOver: 'sign_hash' | 'delegation_dig
  * names (see the module doc for what that proves — and what it does not).
  * Never throws: anything that is not a signed receipt — a
  * `haven_list_receipts` history row, null, undefined, a non-object — returns
- * `not_a_signed_receipt`. Pure — `recover` is injectable but defaults to
+ * `not_a_signed_receipt`. The `{ receipt, verification }` wrapper the receipt
+ * endpoint returns is accepted as-is: `.receipt` is verified, and the
+ * wrapper's `verification` — Haven's own self-check — is never read. Pure —
+ * `recover` is injectable but defaults to
  * standard ECDSA recovery, so this runs anywhere (no Haven backend).
  */
 export function verifyPaymentReceipt(
@@ -183,9 +192,23 @@ export function verifyPaymentReceipt(
   // #3418 rule 1: a list row (or any non-bundle) has no authorization object
   // holding string delegate/signHash — answer, never throw.
   if (typeof receipt !== 'object' || receipt === null) return NOT_A_SIGNED_RECEIPT
-  const source = receipt as {
+  let source = receipt as {
     authorization?: unknown
+    receipt?: unknown
     onChain?: { chainId?: unknown }
+  }
+  // #3723: accept the endpoint's response as-is. When the top level carries no
+  // `authorization` and `.receipt` is a non-null object, verify the bundle
+  // inside the `{ receipt, verification }` wrapper (GET
+  // /payments/{id}/receipt, and HavenClient.getReceipt's re-wrap). ONE level
+  // only — no recursion — and the wrapper's `verification` is NEVER read: it
+  // is Haven's own self-check, and trusting it would defeat an offline
+  // verifier. A list row wrapped or bare still answers not_a_signed_receipt.
+  if (typeof source.authorization !== 'object' || source.authorization === null) {
+    if (typeof source.receipt !== 'object' || source.receipt === null) {
+      return NOT_A_SIGNED_RECEIPT
+    }
+    source = source.receipt as typeof source
   }
   if (typeof source.authorization !== 'object' || source.authorization === null) {
     return NOT_A_SIGNED_RECEIPT

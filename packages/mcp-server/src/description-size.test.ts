@@ -359,11 +359,22 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * `haven_get_agent` descriptions stopped claiming the agent read lists every
  * task budget (it lists live rows only). Measured 26,029 bytes / 27 tools;
  * both pins ratchet down to the measured values.
+ *
+ * **Re-derived — round 18, #3723 (2026-10-07).** A 28th hosted description
+ * joins (`haven_get_receipt`, described from the shared `getReceipt`
+ * fragment) and `haven_verify_receipt`'s fragment grows to name it, so the
+ * shrink-only round-17 total cannot hold and is RE-DERIVED at the measured
+ * value — a new round, not a loosening: 26,903 UTF-8 bytes across 28 tools,
+ * measured on the #3723 tree (round 17 base 26,029 + 874). The mean pin:
+ * 26,903 / 28 = 960.8214…, pinned at the two-decimal ceiling (960.83) —
+ * stricter than round 17's 964.04 because the 28th tool joins the
+ * denominator and the new description is short; the stricter of the two
+ * holds, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 26_029
-// Mean pin: round 17 (block above): 26,029 / 27 = 964.0370…, pinned at the
-// two-decimal ceiling (964.04). Shrink-only from here.
-const MAX_MEAN_BYTES = 964.04
+const MAX_TOTAL_BYTES = 26_903
+// Mean pin: round 18 (block above): 26,903 / 28 = 960.8214…, pinned at the
+// two-decimal ceiling (960.83). Shrink-only from here.
+const MAX_MEAN_BYTES = 960.83
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

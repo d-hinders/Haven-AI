@@ -161,8 +161,9 @@ rather than from arguments (`haven_report_x402_outcome`, `haven_submit`,
 `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
 `haven_pay_x402_quote` — each with a refusal that NAMES the local spelling, so
 a caller holding `idempotencyKey` is told what to send instead. #2349 closed
-the list: **the split now stands at 25 strict of the 27 hosted tools, with the
+the list: **the split now stands at 26 strict of the 28 hosted tools, with the
 two permissive tools on a second, equally explicit list** (re-measured
+2026-10-07: #3723 added `haven_get_receipt` strict; re-measured
 2026-10-05: #3557 added `haven_get_task_budget` strict; re-measured
 2026-09-30: #3354 added `haven_open_task_budget`, `haven_close_task_budget`
 and `haven_check_funds` strict, and the vocabulary-map follow-ups grew

@@ -555,6 +555,12 @@ export class AccountReads {
     }
   }
 
+  /**
+   * #3723: the re-wrap is deliberate — this is the endpoint's own
+   * `{ receipt, verification }` shape, and `verifyPaymentReceipt` accepts the
+   * whole object or `.receipt` alone. The local `verification` is Haven's
+   * self-check, not offline evidence.
+   */
   async getReceipt(paymentId: string): Promise<{ receipt: PaymentReceipt; verification: ReceiptVerification }> {
     const { receipt } = await this.transport.get<{ receipt: PaymentReceipt }>(`/payments/${paymentId}/receipt`)
     return { receipt, verification: verifyPaymentReceipt(receipt) }

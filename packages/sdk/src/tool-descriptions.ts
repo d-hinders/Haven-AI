@@ -147,9 +147,18 @@ export const toolDescriptions = {
     summary:
       'Verify a signed payment receipt offline — confirm the agent delegate signed its authorisation.',
     selectionGuidance:
-      'Takes the signed bundle from GET /payments/{id}/receipt, not a haven_list_receipts row — a row carries no signature and returns not_a_signed_receipt. No network.',
+      'The signed bundle comes from haven_get_receipt or GET /payments/{id}/receipt — that response is accepted as-is (whole, or its .receipt) — not a haven_list_receipts row: a row carries no signature and returns not_a_signed_receipt. No network.',
     behavior:
-      'Never throws. An erc7710 bundle verifies over the delegation digest the delegate signed; a direct or eip3009 bundle returns not_verifiable_offline. verified true means only that the delegate signed the hash named by verifiedOver — payment facts are Haven-asserted and settlement is not proven; check settlementTxHash on an explorer.',
+      'Never throws. An erc7710 bundle verifies over the delegation digest the delegate signed; a direct or eip3009 bundle returns not_verifiable_offline. verified true means only that the delegate signed the hash named by verifiedOver — payment facts are Haven-asserted and settlement is not proven; check settlementTxHash on an explorer. The endpoint wrapper\'s own verification field, when one rides along, is ignored — offline recovery is the only evidence.',
+    nextActionGuidance: '',
+  },
+  getReceipt: {
+    summary:
+      "Fetch one settled payment's signed receipt bundle — the self-contained evidence an offline verifier checks.",
+    selectionGuidance:
+      "This agent's own settled payments only. Use when the signed bundle itself is needed — receipt verification (haven_verify_receipt reads it unchanged), attaching payment evidence to a report — not for status questions: haven_get_payment_status answers status, and haven_list_receipts rows are history metadata without the signature.",
+    behavior:
+      "Returns { receipt } — the signed haven-receipt-1 bundle. An unknown id, another agent's id, or the agent's own unsettled payment is a structured 404. Settlement is not proven by fetching: check settlementTxHash on an explorer.",
     nextActionGuidance: '',
   },
   payMcpTool: {

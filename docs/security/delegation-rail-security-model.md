@@ -17,6 +17,7 @@ covers:
   - packages/sdk/src/sub-budget-guards.ts
   - packages/sdk/src/userop-binding.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/receipt.ts
   - packages/sdk/src/x402-erc7710.ts
   - packages/sdk/src/x402-funding-leg.ts
   - packages/sdk/src/delegate-sweep.ts
@@ -66,7 +67,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-06"
+last-verified: "2026-10-07"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -2457,4 +2458,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > unread, never as a measurement. Scope of this note: the hook's read path.
 > Nothing else in this document was re-read for it, and `last-verified` is not
 > bumped.
+
+> **Re-verified #3723 (2026-10-07, offline receipt verification):** the covered
+> file this diff touches is `packages/sdk/src/client.ts`, JSDoc-only: the
+> `getReceipt()` doc comment now states that its returned
+> `{ receipt, verification }` object is the endpoint's own shape and that
+> `verifyPaymentReceipt` (#3723) accepts either layer — the whole object or
+> `.receipt` alone. No build, signing, intent, guard or refusal path moves.
+> The digest this document describes is untouched: the verifier lives in
+> `packages/sdk/src/receipt.ts`, which is not in this document's coverage, and
+> its #3723 change was re-read from that side — the endpoint-response wrapper
+> is unwrapped ONE level and the wrapper's `verification` (Haven's own
+> self-check) is never read, so the offline evidence is still the recovered
+> delegate signature over the delegation digest, nothing server-asserted.
+> Scope of this note: the `getReceipt()` doc comment and that re-read;
+> `last-verified` is bumped for exactly this coverage.
 

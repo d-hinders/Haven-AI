@@ -1489,7 +1489,7 @@ exploratory.
 > queued or pending approval, and nothing silently spent. The refusal IS the pass —
 > the delegation rail has no approval queue, so do not record the decline as a failure.
 > 4. Make a priced call **above the max price** → expect a `PRICE_EXCEEDS_MAX` rejection.
-> 5. `haven_list_receipts`, then `haven_verify_receipt` on the step-2 payment. `haven_verify_receipt` takes the signed bundle from `GET /payments/:id/receipt` (`HavenClient.getReceipt`), not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies; a direct or eip3009 bundle returns `not_verifiable_offline` (the signed user operation is not in the bundle).
+> 5. `haven_list_receipts`, then `haven_get_receipt { payment_id }` + `haven_verify_receipt` on the step-2 payment. `haven_get_receipt` returns the signed bundle (`{ receipt }`, settled payments only); `haven_verify_receipt` accepts the `GET /payments/:id/receipt` response (`HavenClient.getReceipt`) as-is, not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies; a direct or eip3009 bundle returns `not_verifiable_offline` (the signed user operation is not in the bundle).
 > Stop at the first failed step. Then write a run report from
 > `docs/bug-reports/_run-report-template.md` (per-goal pass/fail + friction) and file
 > concrete bugs as issues. This is non-gating exploratory coverage.

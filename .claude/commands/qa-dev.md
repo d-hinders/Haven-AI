@@ -40,7 +40,7 @@ Run each goal through the actual tools. Record the outcome (pass/fail + what you
    behaviour as a FAIL. Its deterministic sibling is the `over-budget-refused`
    harness leg — renamed from `over-budget-queue` by #2016 for the same reason.)*
 8. **Over max price** — make a priced call **above the configured max price**. Expect the `PRICE_EXCEEDS_MAX` rejection — not a settlement.
-9. **Receipts** — `haven_list_receipts` for recent activity. `haven_verify_receipt` takes the signed bundle from `GET /payments/:id/receipt` (`HavenClient.getReceipt`), not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies (`verifiedOver: 'delegation_digest'`); a direct or eip3009 bundle returns `not_verifiable_offline`.
+9. **Receipts** — `haven_list_receipts` for recent activity. `haven_get_receipt { payment_id }` returns the signed bundle (`{ receipt }`, settled payments only); `haven_verify_receipt` accepts the `GET /payments/:id/receipt` response (`HavenClient.getReceipt`) as-is, not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies (`verifiedOver: 'delegation_digest'`); a direct or eip3009 bundle returns `not_verifiable_offline`.
 
 Stop and report on the **first failed step** rather than pressing on (a failed money-path step is the signal).
 

@@ -35,7 +35,7 @@ import {
 import { setStrictRefusalThrower } from './tools/parsing.js'
 import { createCatalogPurchaseHandlers } from './tools/catalog-purchase.js'
 import { createPaidMcpCompletionHandlers } from './tools/paid-mcp-completion.js'
-import { createPlainHttpX402Handlers } from './tools/plain-http-x402.js'
+import { createPlainHttpX402Handlers, type X402RequestProbeOptions } from './tools/plain-http-x402.js'
 import { createStateDirectRecoveryHandlers } from './tools/state-direct-recovery.js'
 import { createTaskBudgetHandlers } from './tools/task-budgets.js'
 import { HostedToolError } from './tools/support/errors.js'
@@ -104,7 +104,16 @@ export {
   type TaskBudgetToolName,
 } from './tools/task-budgets.js'
 
-export function createToolHandlers(haven: HavenClient): HostedToolHandlers {
+/**
+ * #3739: `options.x402Probe` is the explicit test seam for request mode's
+ * egress policy (fixtures use `merchant.test`, a reserved name production
+ * refuses). Production passes nothing.
+ */
+export interface CreateToolHandlersOptions {
+  x402Probe?: X402RequestProbeOptions
+}
+
+export function createToolHandlers(haven: HavenClient, options?: CreateToolHandlersOptions): HostedToolHandlers {
   return {
     // #2809: state, direct payment and recovery — haven_get_agent,
     // haven_get_allowances, haven_sweep_delegate, haven_send, haven_pay,
@@ -134,7 +143,7 @@ export function createToolHandlers(haven: HavenClient): HostedToolHandlers {
     // haven_pay_x402_quote, haven_resume_x402_payment,
     // haven_report_x402_outcome — are owned by the capability module and
     // composed in here. Same one-directional guarantee as the spreads above.
-    ...createPlainHttpX402Handlers(haven),
+    ...createPlainHttpX402Handlers(haven, options ?? {}),
 
     // #2812: the paid-MCP completion — haven_complete_mcp_tool,
     // haven_settle_mcp_tool — are owned by the capability module and composed

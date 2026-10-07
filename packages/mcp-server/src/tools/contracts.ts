@@ -412,11 +412,21 @@ export const toolSchemas = {
     // http:// retry target is refused. haven_quote_x402 returns this as
     // `request_url`; pass it back verbatim.
     url: z.string().url().optional(),
+    // #3739: REQUEST MODE — selected by `payment_required` being ABSENT. The
+    // hosted server then makes the unpaid request itself (url + these three,
+    // exactly as on haven_quote_x402) and builds the payment from the 402 it
+    // fetched, so the challenge never passes through the agent. `url` and a
+    // cap are required in that mode; the handler refuses without them.
+    method: z.string().optional(),
+    headers: z.record(z.string()).optional(),
+    body: z.string().optional(),
     // The parsed HTTP 402 PaymentRequired the agent received from the merchant
     // (or the paymentRequired field from a haven_quote_x402 result).
     // Validated downstream by the SDK; typed as an object (not z.unknown()) so
     // MCP clients embed it as JSON rather than serialising it to a string.
-    payment_required: z.record(z.string(), z.unknown()),
+    // #3739: OPTIONAL — present selects payment_required mode (unchanged),
+    // absent selects request mode above.
+    payment_required: z.record(z.string(), z.unknown()).optional(),
     // Optional pre-funding price cap, atomic units (same unit as
     // payment_required.accepts[].amount). Rejected before funding if exceeded.
     max_amount: z
@@ -849,13 +859,13 @@ export const STRICT_INPUT_TOOLS = {
     'has no use for — carrying it here used to be dropped in silence. haven_discover_tools ' +
     'hands you resource_url; this tool spells that argument url.',
   haven_pay_x402_quote:
-    'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
-    '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotency_key — it used to ' +
-    'take idempotencyKey, but now refuses that spelling itself. Passing quote already ' +
-    'failed loudly here, because payment_required is required — it is idempotencyKey that was ' +
-    'dropped in silence before that, replacing the caller\'s replay scope with a key derived ' +
-    'from the quote. Pass payment_required (the paymentRequired field of a haven_quote_x402 ' +
-    'result) and idempotency_key.',
+    'This is the HOSTED surface, which takes url (with optional method, headers and body) or ' +
+    'payment_required, plus idempotency_key (snake_case). The local MCP (@haven_ai/mcp) takes ' +
+    'quote and idempotency_key — it used to take idempotencyKey, but now refuses that spelling ' +
+    'itself. A quote object has no meaning here: pass the request you quoted (url, method, ' +
+    'headers, body) and Haven fetches the challenge itself. idempotencyKey used to be dropped ' +
+    'in silence, replacing the caller\'s replay scope with a key derived from the quote; ' +
+    'spell it idempotency_key.',
   // ── #2349, batch 3 — the remainder ──────────────────────────────────────
   // Same discipline as above: each message says what the tool DOES read the
   // value from, so a caller holding the refused key learns where it belongs.
@@ -1146,19 +1156,31 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
   nextActionGuidance: 'On success no further Haven tool is needed — return the merchant result to the user.',
 })
 
+// #3739: the shared nextActionGuidance ("Haven re-uses the captured request
+// when paying") is true of the LOCAL runtime only; on the hosted path the pay
+// tool's request mode re-sends the request itself, so the hosted override
+// says that instead. Added to #3727 after it merged and never built (#3739).
 const QUOTE_X402_DESCRIPTION = composeDescription({
   ...sharedDescriptions.quoteX402,
   behavior:
-    'Probes the merchant directly from the hosted server and parses the 402. Haven is not contacted. Returns the full quote including payment_required for haven_pay_x402_quote.',
+    'Probes the merchant directly from the hosted server and parses the 402. Haven is not contacted. Returns the quote and a next step naming haven_pay_x402_quote with this same request.',
+  nextActionGuidance:
+    'Next: haven_pay_x402_quote with the next_arguments given (url, method, headers, body, and the cap). It fetches the challenge again itself, unpaid, so never copy payment_required across.',
 })
 
 const PAY_X402_QUOTE_DESCRIPTION = [
   'Step 1 of a direct x402 purchase (plain HTTP, non-MCP): build the funding step and',
-  'return the unsigned hash for the local signer. Pass the payment_required from haven_quote_x402',
-  'or straight from the merchant 402, plus url (haven_quote_x402\'s request_url): the paid',
-  'retry goes there, never to the declared resource_url; public http:// is refused.',
-  'Cap rule: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
-  'quoted price as-is and the response carries cap_warning.',
+  'return the unsigned hash for the local signer.',
+  // #3739: request mode is the default route and is named first.
+  'Request mode (preferred): pass url plus method, headers and body exactly as you quoted them',
+  '(haven_quote_x402 names them in next_arguments) and omit payment_required. Haven then makes the',
+  'same unpaid request itself, https only and following no redirects, and builds the payment from',
+  'the 402 it fetched, so the challenge is never copied. A cap is REQUIRED in this mode.',
+  'payment_required mode: pass the payment_required from the merchant 402 UNCHANGED, never retyped',
+  'or trimmed, plus url; the paid retry goes to url, never to the declared resource_url, and',
+  'public http:// is refused.',
+  'Cap rule: max_amount_human (preferred) or max_amount, never both; in payment_required mode',
+  'omitting BOTH accepts the quoted price as-is and the response carries cap_warning.',
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
   'older signer. Over-budget is declined at prepare; nothing is held for later approval.',
@@ -1169,7 +1191,8 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
   'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
-  'Haven never talks to this merchant and never holds the key. The header is built before funding',
+  'Haven never sends the PAID request and never holds the key (request mode makes only the unpaid',
+  'probe). The header is built before funding',
   'confirms, so its validity window starts at signing: retry promptly, and on',
   'PAYMENT_WINDOW_EXPIRED re-run this tool with the same idempotency_key.',
   'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
@@ -1236,8 +1259,9 @@ const RESUME_X402_DESCRIPTION = [
 // two records — but they differ in the one place that matters: WHO called the
 // merchant. haven_complete_mcp_tool makes the call itself, so what it writes
 // is observed; this tool writes what the caller ASSERTS about a call Haven
-// deliberately did not make, because on the plain-HTTP path Haven never talks
-// to the merchant and never holds the key. Folding them together would put an
+// deliberately did not make, because on the plain-HTTP path Haven never sends
+// the merchant the PAID request (request mode's unpaid probe, #3739, is the only
+// call it makes) and never holds the key. Folding them together would put an
 // observed fact and an asserted one behind one name, with a flag deciding
 // which — and their arguments barely intersect (merchant_url / tool_name /
 // payment_header versus outcome / merchant_status). That is the mode flag
@@ -1247,8 +1271,8 @@ const RESUME_X402_DESCRIPTION = [
 // budget, which this description sits comfortably under). What an agent needs
 // is what it does, what to pass, what changes, and what it cannot do.
 const REPORT_X402_OUTCOME_DESCRIPTION = [
-  'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never contacts it, so',
-  'nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
+  'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never sends it the',
+  'paid request, so nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
   'merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next',
   'haven_get_payment_status instead of a 15-minute wait. On an accepted outcome you may fold the',
   'settlement evidence into this call: pass the raw base64 PAYMENT-RESPONSE header as',

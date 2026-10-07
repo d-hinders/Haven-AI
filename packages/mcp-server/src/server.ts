@@ -204,7 +204,10 @@ export function createHostedHavenClient(options: HostedClientOptions): HavenClie
  * backend can attribute the audit-log row. The async-local store keeps
  * concurrent tenants' headers from leaking into each other.
  */
-export function buildHostedMcpServer(haven: HavenClient): McpServer {
+export function buildHostedMcpServer(
+  haven: HavenClient,
+  options?: CreateToolHandlersOptions,
+): McpServer {
   const server = new McpServer(
     {
       name: HOSTED_SERVER_NAME,
@@ -213,7 +216,7 @@ export function buildHostedMcpServer(haven: HavenClient): McpServer {
     { instructions: HOSTED_INSTRUCTIONS },
   )
 
-  const handlers = createToolHandlers(haven)
+  const handlers = createToolHandlers(haven, options)
   // #2807: fail loud BEFORE registration if the contract registry is
   // incomplete — a tool without a schema, description, input-policy decision
   // or handler cannot boot. Compile-time exhaustiveness (the Record

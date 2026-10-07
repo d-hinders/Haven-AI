@@ -214,6 +214,11 @@ export {
   resolveTokenBySymbol,
 } from './x402.js'
 
+// #3739: the shared no-payable-option refusal, so the hosted request mode can
+// refuse a fetched challenge with no `exact` option BEFORE any intent exists,
+// in the same words (including the #3735 `upto` hint) every SDK path uses.
+export { noCompatiblePaymentOptionError } from './x402-protocol.js'
+
 export {
   // #3410: the one atomic→human formatter for consent-surface renders, so
   // the consent block and the allowance reads cannot disagree.

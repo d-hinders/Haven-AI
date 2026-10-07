@@ -158,7 +158,7 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // which is not a payment and so cannot go through buildAgentGuidance's
   // AgentPaymentSummary. #3506: a sub-budget row's hand-off (haven_get_agent's
   // pending rows, haven_submit's sub_budget_id result) uses it from s2809 too.
-  taskBudgetNextStep: { module: 'guidance', slices: ['s2809', 's3329'] },
+  taskBudgetNextStep: { module: 'guidance', slices: ['s2809', 's2811', 's3329'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -412,6 +412,9 @@ const CAPABILITY_ALLOWED_IMPORTS = [
  */
 const CAPABILITY_EXTRA_ALLOWED_IMPORTS: Record<string, string[]> = {
   'paid-mcp-completion': ['node:crypto'],
+  // #3739: `createHash` for request mode's derived replay key, which hashes
+  // the whole probed challenge (extensions included).
+  'plain-http-x402': ['node:crypto'],
 }
 
 /** Support module → its runtime export names, enumerated (not derived). */

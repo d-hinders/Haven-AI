@@ -64,15 +64,19 @@ import {
   selectStandardPaymentOption,
   selectX402SettlementScheme,
   normalizePaymentRequired,
+  noCompatiblePaymentOptionError,
+  parsePaymentRequiredResponse,
   resolveX402RetryTarget,
   isSecureX402RetryTarget,
   isZeroSettlementTxHash,
   parseMerchantSettlement,
   type EvidenceReportOutcome,
   type X402RetryTarget,
+  type X402PaymentRequired,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
+import { createHash } from 'node:crypto'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { delegationAllowanceBlock } from './support/allowance-block.js'
@@ -89,6 +93,7 @@ import {
   paymentStatusHandoff,
   type HostedHandoff,
   refusalNextStep,
+  taskBudgetNextStep,
 } from './support/guidance.js'
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
 import {
@@ -308,6 +313,317 @@ function differsFromRequest(target: X402RetryTarget): { resource_url_differs_fro
     : { resource_url_differs_from_request: target.resourceUrlDiffersFromRequest }
 }
 
+// ── #3739: request mode's own unpaid probe ────────────────────────────────
+//
+// In request mode `haven_pay_x402_quote` makes the unpaid request itself and
+// builds the payment from the 402 it fetched, so the challenge never passes
+// through the agent (the 2026-10-07 Bitrefill failure was an agent retyping
+// it). The probe is a NEW kind of reach for this tool, so it runs under a
+// policy stricter than the quote's: https only; no IP literal, loopback,
+// reserved or single-label host; no redirect followed; a bounded timeout
+// well under the tool budget; and a cap on the bytes read. What it cannot do
+// from inside mcp-server is refuse a public NAME that resolves to a private
+// address (the backend's DNS-pinning guard is not importable here) — the
+// accepted residual tracked by #3740. It returns only a parsed challenge to
+// the agent, never the response body.
+
+/**
+ * The explicit test seam the issue asks for: fixtures use `merchant.test`,
+ * which the reserved-name rule refuses in production. Nothing outside tests
+ * passes `allowHost`.
+ */
+export interface X402RequestProbeOptions {
+  /** Hosts admitted despite the reserved-name rule. Tests only. */
+  allowHost?: (hostname: string) => boolean
+  timeoutMs?: number
+  maxResponseBytes?: number
+}
+
+/** Well under the hosted tool budget; the quote's transport default is 300 s. */
+export const X402_REQUEST_PROBE_TIMEOUT_MS = 15_000
+/** A 402 challenge is a few KB; this bounds what an unpaid probe reads. */
+export const X402_REQUEST_PROBE_MAX_BYTES = 256 * 1024
+/** `POST /x402` drops a stored challenge over 64 KB (`createX402Intent`). */
+const X402_STORED_CHALLENGE_MAX_BYTES = 65_536
+/** The SDK's derived-key bucket (`X402_IDEMPOTENCY_BUCKET_MS`), same width. */
+const REQUEST_MODE_KEY_BUCKET_MS = 300_000
+
+/** Reserved / non-public suffixes (RFC 6761, RFC 6762, RFC 8375, common internal TLDs). */
+const RESERVED_HOST_SUFFIXES = [
+  'localhost',
+  'local',
+  'internal',
+  'test',
+  'invalid',
+  'example',
+  'lan',
+  'intranet',
+  'home.arpa',
+  'onion',
+]
+
+function probeRefusal(code: string, message: string): HostedToolError {
+  return new HostedToolError({
+    code,
+    message: `${message} Nothing was funded or signed, and no payment was created.`,
+    statusCode: 400,
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason:
+        'the merchant request could not be probed under the egress policy; nothing was created, so there is nothing to resume',
+    }),
+  })
+}
+
+/** Refuses an unpaid-probe target outside the policy, before any fetch. */
+export function assertX402ProbeTargetAllowed(rawUrl: string, options: X402RequestProbeOptions = {}): URL {
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    throw probeRefusal('X402_PROBE_TARGET_REFUSED', `Refusing to probe ${rawUrl}: it is not a valid URL.`)
+  }
+  if (url.protocol !== 'https:') {
+    throw probeRefusal(
+      'X402_PROBE_TARGET_REFUSED',
+      `Refusing to probe ${url.origin}: request mode fetches https URLs only.`,
+    )
+  }
+  // WHATWG parsing already canonicalises IPv4 spellings (`2130706433`,
+  // `0x7f.1`, `0`) to dotted form; strip trailing dots so `localhost.` and
+  // `merchant.test.` cannot slip past the suffix rule.
+  const host = url.hostname.toLowerCase().replace(/\.+$/, '')
+  if (options.allowHost?.(host)) return url
+  if (host.startsWith('[') || /^[0-9.]+$/.test(host)) {
+    throw probeRefusal(
+      'X402_PROBE_TARGET_REFUSED',
+      `Refusing to probe ${url.origin}: request mode does not fetch IP-literal hosts. Use the merchant's domain name.`,
+    )
+  }
+  if (!host.includes('.') || RESERVED_HOST_SUFFIXES.some((s) => host === s || host.endsWith(`.${s}`))) {
+    throw probeRefusal(
+      'X402_PROBE_TARGET_REFUSED',
+      `Refusing to probe ${url.origin}: request mode does not fetch loopback, reserved or single-label hosts.`,
+    )
+  }
+  return url
+}
+
+/** Reads at most `max` bytes; `null` when the body is larger. */
+async function readBounded(response: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = Number(response.headers.get('content-length') ?? NaN)
+  if (Number.isFinite(declared) && declared > max) return null
+  if (!response.body) {
+    const buf = new Uint8Array(await response.arrayBuffer())
+    return buf.byteLength > max ? null : buf
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await reader.cancel().catch(() => undefined)
+      return null
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
+}
+
+function isTimeout(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+}
+
+/**
+ * The request-mode probe: one unpaid request under the egress policy, parsed
+ * to an x402 challenge. Anything but a parseable x402 402 refuses here, before
+ * any intent, funding or signature exists.
+ */
+export async function probeX402Challenge(
+  rawUrl: string,
+  init: RequestInit,
+  options: X402RequestProbeOptions = {},
+): Promise<X402PaymentRequired> {
+  const url = assertX402ProbeTargetAllowed(rawUrl, options)
+  const timeoutMs = options.timeoutMs ?? X402_REQUEST_PROBE_TIMEOUT_MS
+  const maxBytes = options.maxResponseBytes ?? X402_REQUEST_PROBE_MAX_BYTES
+  const signal = AbortSignal.timeout(timeoutMs)
+  let response: Response
+  let bytes: Uint8Array<ArrayBuffer> | null
+  try {
+    // `redirect: 'error'`, set per call: a 3xx is refused, never followed —
+    // a redirect is how an allowed host would hand the probe to one that is not.
+    response = await globalThis.fetch(url.toString(), { ...init, redirect: 'error', signal })
+    if (response.status >= 300 && response.status < 400) {
+      throw probeRefusal(
+        'X402_PROBE_REDIRECT_REFUSED',
+        `The merchant answered the unpaid request with HTTP ${response.status} (a redirect). Request mode does not follow redirects: re-call with the final https URL.`,
+      )
+    }
+    bytes = await readBounded(response, maxBytes)
+  } catch (err) {
+    if (err instanceof HostedToolError) throw err
+    if (isTimeout(err) || signal.aborted) {
+      throw probeRefusal(
+        'X402_PROBE_TIMEOUT',
+        `The merchant did not answer the unpaid request within ${Math.round(timeoutMs / 1000)} s.`,
+      )
+    }
+    const cause = (err as { cause?: { message?: string } })?.cause?.message ?? ''
+    if (/redirect/i.test(`${(err as Error)?.message ?? ''} ${cause}`)) {
+      throw probeRefusal(
+        'X402_PROBE_REDIRECT_REFUSED',
+        'The merchant answered the unpaid request with a redirect. Request mode does not follow redirects: re-call with the final https URL.',
+      )
+    }
+    throw probeRefusal(
+      'X402_PROBE_FAILED',
+      `The unpaid request to ${url.origin} failed: ${(err as Error)?.message ?? String(err)}.`,
+    )
+  }
+  if (bytes === null) {
+    throw probeRefusal(
+      'X402_PROBE_TOO_LARGE',
+      `The merchant's answer to the unpaid request is larger than ${maxBytes} bytes, too large to be an x402 challenge.`,
+    )
+  }
+  if (response.status !== 402) {
+    throw probeRefusal(
+      'X402_PROBE_NOT_PAYMENT_REQUIRED',
+      `The merchant answered the unpaid request with HTTP ${response.status}, not 402 Payment Required, so there is nothing to pay. ` +
+        'Check the url, method, headers and body (Content-Type: application/json for a JSON API).',
+    )
+  }
+  try {
+    return await parsePaymentRequiredResponse(
+      new Response(bytes, { status: 402, headers: response.headers }),
+    )
+  } catch {
+    throw probeRefusal(
+      'X402_PROBE_NOT_PAYMENT_REQUIRED',
+      'The merchant answered 402, but not with an x402 challenge Haven can read.',
+    )
+  }
+}
+
+/** Key-sorted JSON, so the derived key does not depend on property order. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+/**
+ * Request mode's derived replay key when the caller passed none. It covers the
+ * WHOLE probed challenge, `extensions` included, so a request-mode call can
+ * never replay an intent built from a different (e.g. agent-edited) challenge.
+ * Same 5-minute bucket as the SDK's derived key.
+ */
+export function requestModeIdempotencyKey(paymentRequired: X402PaymentRequired, now = Date.now()): string {
+  const bucket = Math.floor(now / REQUEST_MODE_KEY_BUCKET_MS)
+  return `x402r:${createHash('sha256').update(`${canonicalJson(paymentRequired)}|${bucket}`).digest('hex').slice(0, 24)}`
+}
+
+/**
+ * #3739: request mode's replay, BEFORE any probe. With the caller's
+ * `idempotency_key` an existing intent answers from Haven's own record, so a
+ * repeated call never depends on the merchant still answering and never
+ * re-probes. Returns `null` — fall through to probe + `POST /x402`, whose own
+ * key replay still applies — when there is no live intent to answer with: no
+ * row, an expired or closed signing window (the backend frees the key), a
+ * different task budget (the backend's #3392 pin answers that), an unknown
+ * scheme, or a failed lookup (an older backend without the route).
+ */
+async function requestModeReplay(
+  haven: HavenClient,
+  args: Record<string, any>,
+): Promise<Record<string, unknown> | null> {
+  const found = await haven.findX402IntentByIdempotencyKey(args.idempotency_key).catch(() => null)
+  if (!found) return null
+  const requestedBudget = typeof args.task_budget_id === 'string' ? args.task_budget_id.toLowerCase() : null
+  if ((found.taskBudgetId?.toLowerCase() ?? null) !== requestedBudget) return null
+  if (found.status === 'expired') return null
+  if (found.status === 'pending_signature' && !found.windowOpen) return null
+  const facts = {
+    payment_id: found.paymentId,
+    status: found.status,
+    idempotent_replay: true,
+    ...(found.settlementScheme ? { settlement_scheme: found.settlementScheme } : {}),
+    amount_atomic: found.amountAtomic,
+    network: found.network,
+    resource_url: found.resourceUrl,
+    retry_url: args.url,
+  }
+  const summary = {
+    payment_id: found.paymentId,
+    status: found.status,
+    amount_atomic: found.amountAtomic,
+    network: found.network,
+  }
+  if (found.status === 'pending_signature' && found.settlementScheme === 'erc7710') {
+    return {
+      ...facts,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+        nextTool: 'haven_sign',
+        nextArguments: { payment_id: found.paymentId },
+        safeToContinue: true,
+        reason:
+          'This idempotency_key already has a payment awaiting signature, so nothing was probed or ' +
+          'created. Sign locally: call next_tool with next_arguments EXACTLY as given, then ' +
+          "haven_submit with settlement_scheme: 'erc7710' to receive the merchant payment_header, " +
+          'and retry retry_url yourself with PAYMENT-SIGNATURE set to it.',
+        summary,
+      }),
+    }
+  }
+  if (found.status === 'pending_signature' && found.settlementScheme === 'eip3009') {
+    return {
+      ...facts,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+        nextTool: 'haven_sign_x402',
+        nextArguments: { payment_id: found.paymentId },
+        safeToContinue: true,
+        reason:
+          'This idempotency_key already has a payment awaiting signature, so nothing was probed or ' +
+          'created. Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
+          'fetches the stored payment challenge itself. It returns BOTH signature and payment_header. ' +
+          'Relay signature via haven_submit, then retry retry_url yourself with payment_header.',
+        summary,
+      }),
+    }
+  }
+  if (found.status === 'pending_signature') return null
+  return {
+    ...facts,
+    ...buildAgentGuidance({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      ...paymentStatusHandoff(found.paymentId),
+      safeToContinue: true,
+      reason:
+        'This idempotency_key already belongs to a payment past the signing step, so nothing was ' +
+        'probed or created. Read its state with next_tool and follow its nextAction. Do NOT pay again.',
+      summary,
+    }),
+  }
+}
+
 // #3497: the block itself moved to `support/allowance-block.ts` — #3476 built
 // it here and declared it capability-local because nothing else called it;
 // #3497 item 4 wires the same block into `haven_pay_mcp_tool`, which made it
@@ -342,6 +658,7 @@ export type PlainHttpX402ToolName = (typeof PLAIN_HTTP_X402_TOOLS)[number]
  */
 export function createPlainHttpX402Handlers(
   haven: HavenClient,
+  options: { x402Probe?: X402RequestProbeOptions } = {},
 ): HostedToolHandlers<PlainHttpX402ToolName> {
   return {
     haven_quote_x402: async (input) => {
@@ -394,7 +711,20 @@ export function createPlainHttpX402Handlers(
           agent,
           'haven_pay_x402_quote',
         )
-        // Return the full quote — the agent passes paymentRequired to haven_pay_x402_quote.
+        // #3739: the result names its next tool for the first time — the pay
+        // tool in REQUEST MODE, with the request exactly as the caller sent
+        // it (url, method, headers, body), so the agent never copies the
+        // challenge. The cap is prefilled with the quoted amount, the
+        // no-cap convention every quote → pay pair follows; the agent lowers
+        // it to a cap the user stated. payment_required stays in the result
+        // for payment_required mode, unchanged.
+        const payNextArguments: Record<string, unknown> = {
+          url: args.url,
+          ...(args.method ? { method: args.method } : {}),
+          ...(args.headers ? { headers: args.headers } : {}),
+          ...(args.body !== undefined ? { body: args.body } : {}),
+          max_amount_human: quote.amount,
+        }
         // Omit the captured request snapshot (it's server-side context, not useful at the agent).
         return {
           success: true,
@@ -424,6 +754,15 @@ export function createPlainHttpX402Handlers(
             merchant_address: quote.merchantAddress,
             max_timeout_seconds: quote.maxTimeoutSeconds,
             ...prediction,
+            ...taskBudgetNextStep({
+              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+              nextTool: 'haven_pay_x402_quote',
+              nextArguments: payNextArguments,
+              reason:
+                'Pay with next_tool and next_arguments: Haven fetches the payment challenge itself ' +
+                'from this same request, so do not copy payment_required. The cap is prefilled ' +
+                'with the quoted amount; lower it to any cap the user stated.',
+            }),
           },
         }
       } catch (err) {
@@ -444,25 +783,84 @@ export function createPlainHttpX402Handlers(
       } catch (err) {
         return normalizeError(err)
       }
-      // #1469: agent-supplied shape, sanitized through the SAME normalizer the
-      // parsed-Response path uses — it drops null/non-object accepts[] entries
-      // and validates the envelope. The raw cast this replaced let a null hole
-      // reach the selectors and 500 where every other caller gets a clean
-      // refusal; the Zod schema only guarantees a string-keyed record.
-      const payReq = normalizePaymentRequired(args.payment_required)
-      if (!payReq) {
-        return wrongTool(
-          'WRONG_TOOL',
-          'The payment_required argument is missing or is not a valid x402 PaymentRequired object. Call haven_quote_x402 first to obtain the payment_required, or use haven_pay_mcp_tool for a full round trip.',
-          'haven_quote_x402',
-        )
+      // #3739: the mode is selected by whether payment_required is present.
+      // Absent → REQUEST MODE: this handler probes the request itself and
+      // builds the payment from the 402 it fetched. Present → today's
+      // payment_required mode, byte-for-byte below.
+      const requestMode = args.payment_required === undefined
+      let payReq: X402PaymentRequired | null = null
+      if (!requestMode) {
+        // #1469: agent-supplied shape, sanitized through the SAME normalizer the
+        // parsed-Response path uses — it drops null/non-object accepts[] entries
+        // and validates the envelope. The raw cast this replaced let a null hole
+        // reach the selectors and 500 where every other caller gets a clean
+        // refusal; the Zod schema only guarantees a string-keyed record.
+        payReq = normalizePaymentRequired(args.payment_required)
+        if (!payReq) {
+          return wrongTool(
+            'WRONG_TOOL',
+            'The payment_required argument is missing or is not a valid x402 PaymentRequired object. Call haven_quote_x402 first to obtain the payment_required, or use haven_pay_mcp_tool for a full round trip.',
+            'haven_quote_x402',
+          )
+        }
       }
       return runTool(async () => {
+        // ── #3739: request mode — cap, replay, probe, all before any intent ──
+        let requestModeCap: ReturnType<typeof readMaxAmountCap> | undefined
+        let derivedKey: string | undefined
+        if (requestMode) {
+          if (!args.url) {
+            throw new HostedToolError({
+              code: 'INVALID_INPUT',
+              message:
+                'Pass url (the https URL of the request you quoted, with method, headers and body ' +
+                'as you sent them) so Haven can fetch the payment challenge itself, or pass ' +
+                'payment_required. Nothing was probed, funded or signed.',
+              statusCode: 400,
+              nextStep: refusalNextStep({
+                nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                nextTool: null,
+                nextToolOmittedReason: 're-call this tool with url; nothing was probed, funded or signed',
+              }),
+            })
+          }
+          // The cap is REQUIRED here: the price is whatever the merchant
+          // answers this probe with, which no one has seen yet.
+          requestModeCap = readMaxAmountCap(args, { required: true })
+          // A repeated call with the caller's key returns the existing
+          // intent BEFORE any re-probe, so a replay never depends on the
+          // merchant still answering.
+          if (args.idempotency_key) {
+            const replayed = await requestModeReplay(haven, args)
+            if (replayed) return replayed
+          }
+          const init: RequestInit = {}
+          if (args.method) init.method = args.method
+          if (args.headers) init.headers = args.headers
+          if (args.body !== undefined) init.body = args.body
+          payReq = await probeX402Challenge(args.url, init, options.x402Probe)
+          if (!selectStandardPaymentOption(payReq.accepts) && !selectErc7710PaymentOption(payReq.accepts)) {
+            // The shared refusal, #3735's `upto` hint included.
+            throw noCompatiblePaymentOptionError(payReq.accepts)
+          }
+          // payment_required mode falls back to the agent's own copy when the
+          // backend cannot store an oversized challenge; request mode has no
+          // such copy, so it refuses instead.
+          if (new TextEncoder().encode(JSON.stringify(payReq)).length > X402_STORED_CHALLENGE_MAX_BYTES) {
+            throw probeRefusal(
+              'X402_CHALLENGE_TOO_LARGE',
+              `The merchant's x402 challenge is larger than ${X402_STORED_CHALLENGE_MAX_BYTES} bytes, too large for Haven to store, and request mode builds the payment only from the stored copy.`,
+            )
+          }
+          derivedKey = args.idempotency_key ? undefined : requestModeIdempotencyKey(payReq)
+        }
+        if (!payReq) throw new Error('unreachable: payment_required mode returned above')
         // #3097: where the paid retry will go, decided BEFORE any intent exists.
         // The caller's `url` (the one it quoted) wins; the merchant-declared
         // `resource.url` is the fallback. A public http:// target is refused
-        // here — this tool never retries the merchant itself, so this is the
-        // last point before a signed header is handed to the agent.
+        // here — this tool never sends the PAID retry itself (request mode's
+        // unpaid probe above is the only merchant call it makes, #3739), so
+        // this is the last point before a signed header is handed to the agent.
         const retryTarget = resolveX402RetryTarget({
           requestUrl: args.url,
           resourceUrl: payReq.resource.url,
@@ -480,9 +878,11 @@ export function createPlainHttpX402Handlers(
             nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you quoted as url; nothing was funded or signed' }),
           })
         }
-        // #1351: shape-check the cap before the funding intent — this tool has
-        // no merchant probe of its own, so this is the first thing that runs.
-        const cap = readMaxAmountCap(args, { required: false })
+        // #1351: shape-check the cap before the funding intent. In
+        // payment_required mode this tool has no merchant probe of its own, so
+        // this is the first thing that runs; request mode read it before probing.
+        // #3739: request mode already read (and required) the cap before probing.
+        const cap = requestModeCap ?? readMaxAmountCap(args, { required: false })
         try {
           // ── #2041: ONE cap assertion, against the option actually selected ──
           // This tool used to assert the cap HERE, pre-network, against
@@ -583,7 +983,9 @@ export function createPlainHttpX402Handlers(
               // funding-shape branch; the erc7710 insert carries
               // `conflictTarget: 'x402_idempotency_key'`); it was simply never
               // invoked from here.
-              ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+              // #3739: request mode's derived key covers the whole probed
+              // challenge (extensions included) when the caller passed none.
+              ...(args.idempotency_key ?? derivedKey ? { idempotencyKey: args.idempotency_key ?? derivedKey } : {}),
               // #3378: build the settlement child under the task budget the
               // caller named (#3329) — this handler used to drop it.
               ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
@@ -662,7 +1064,8 @@ export function createPlainHttpX402Handlers(
           }
 
           const intent = await haven.createX402Intent(payReq, {
-            idempotencyKey: args.idempotency_key,
+            // #3739: see the erc7710 branch — request mode's derived key.
+            idempotencyKey: args.idempotency_key ?? derivedKey,
             // #3378: fund the leg under the task budget the caller named (#3329).
             ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
             // #3617: no sub_budget_id — see the erc7710 branch above.

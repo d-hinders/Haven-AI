@@ -1177,7 +1177,7 @@ describe('AgentDetailClient last-activity metadata', () => {
    */
   const ARCHIVED_AT = '2026-06-01T00:00:00Z'
   it.each([
-    ['active', { status: 'active' }, 'Pause agent',
+    ['active', { status: 'active' }, 'Pause payments',
       ['Edit agent', 'Manage labels', 'Payment credentials', 'Replace signing key', 'Remove agent…']],
     ['paused', { status: 'paused' }, 'Resume agent',
       ['Edit agent', 'Manage labels', 'Payment credentials', 'Replace signing key', 'Remove agent…']],
@@ -1195,7 +1195,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockAgentWith(overrides)
     render(<AgentDetailClient agentId="agent-1" />)
 
-    for (const name of ['Pause agent', 'Resume agent'] as const) {
+    for (const name of ['Pause payments', 'Resume agent'] as const) {
       if (name === headerAction) {
         expect(screen.getByRole('button', { name })).toBeInTheDocument()
       } else {
@@ -1244,7 +1244,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockAgentWith({ status: 'active' })
     mockUseAgents.mockReturnValue({ ...mockUseAgents(), pauseAgent, resumeAgent })
     const { unmount } = render(<AgentDetailClient agentId="agent-1" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Pause agent' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause payments' }))
     expect(pauseAgent).toHaveBeenCalledWith('agent-1')
     unmount()
 
@@ -1258,7 +1258,7 @@ describe('AgentDetailClient last-activity metadata', () => {
   it('renders Pause and Resume inside the page header (#3694)', () => {
     mockAgentWith({ status: 'active' })
     const { unmount } = render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('banner')).toContainElement(screen.getByRole('button', { name: 'Pause agent' }))
+    expect(screen.getByRole('banner')).toContainElement(screen.getByRole('button', { name: 'Pause payments' }))
     unmount()
     mockAgentWith({ status: 'paused' })
     render(<AgentDetailClient agentId="agent-1" />)
@@ -1331,7 +1331,7 @@ describe('AgentDetailClient last-activity metadata', () => {
       mockUseAgents.mockReturnValue({ ...mockUseAgents(), pauseAgent })
       mockUseDelegateBalance.mockReturnValue(RECOVERABLE)
       render(<AgentDetailClient agentId="agent-1" />)
-      fireEvent.click(screen.getByRole('button', { name: 'Pause agent' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Pause payments' }))
       const failure = await vi.waitFor(() => screen.getByText('Action failed'))
       const slot = screen.getByTestId('agent-banner-slot')
       expect(slot.firstElementChild).toContainElement(failure)

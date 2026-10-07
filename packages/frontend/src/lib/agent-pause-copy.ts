@@ -1,48 +1,38 @@
 /**
  * One sentence for one fact — what a Haven-side pause does, and what it leaves
- * standing — shared by every surface that announces it (#2230).
+ * standing — shared by every surface that announces it.
  *
  * `/agents` (`AgentCard`) and `/agents/[agentId]` (`AgentDetailClient`) render
  * the same `ApprovalRequiredBanner` for the same agent state, one click apart:
  * the card's own link IS the navigation between them. #2216 made them agree on
- * `tone`, on the reasoning that leaving one fact rendered two ways across that
- * link is the #2195 defect. They still disagreed on the WORDS:
+ * `tone`, and #2230 put the WORDS in this shared module so the next
+ * divergence is a test failure rather than a reviewer finding.
  *
- *   AgentCard         "… Existing NETWORK PERMISSIONS stay in place."
- *   AgentDetailClient "… Existing WALLET RULES stay in place."
+ * ── THE 2026-10-07 OWNER DECISION ───────────────────────────────────────────
  *
- * Same seven-word opening, then a different noun for the same thing.
+ * The #2230 sentence ("New agent payments are blocked until you resume this
+ * agent. Existing wallet rules stay in place.") was honest but incomplete: a
+ * pause blocks only HAVEN-initiated payments. The budget delegation stays
+ * live on-chain and the agent holds its delegate key, so a holder of the raw
+ * key can still redeem within the budget OUTSIDE Haven, paying its own gas
+ * (`docs/architecture/07-edge-signer.md`;
+ * `delegation-rail-security-model.md`; `packages/signer/src/consent.ts`).
+ * #3271's binding makes the shipped signer refuse unbound redemptions, so
+ * that is a capability, not default behaviour — but the old sentence said
+ * nothing about what is still standing.
  *
- * ── WHICH WORDING WAS TAKEN, AND WHY IT WAS TAKEN RATHER THAN WRITTEN ────────
+ * Owner feedback from prod (2026-10-07) asked the pause controls to say what
+ * they do, and the owner approved this sentence verbatim for the banner:
  *
- * The detail page's — "wallet rules". Taking a settled phrasing rather than
- * inventing a third is #2233's own lesson on this component, where the
- * custody page's (retired in #3024) "Enforced on-chain" was adopted for
- * exactly this reason. Three independent readings agree on which of these two
- * is the settled one:
+ *   Payments paused. Haven won't send payments for this agent until you
+ *   resume. Its budget is still live on-chain. To end it, stop the budget or
+ *   remove the agent.
  *
- * 1. **Usage.** "wallet rules" is what the product already says everywhere
- *    else — `packages/connect/README.md` (twice), `packages/connect/src/
- *    storage.ts`'s credential note, `docs/architecture/07-edge-signer.md` — as
- *    well as on the detail page. "network permissions" appears in exactly one
- *    file in the repository: this card's own, and its pause dialog below.
- *    One of these is a convention; the other is a local coinage.
- * 2. **Register.** `docs/product/copy-guidelines.md` prefers "agent rules" /
- *    "agent budgets" over policy-and-permission language, and lists "Session
- *    key permissions" among the phrasings to avoid; `:417` maps the agent's
- *    delegate address to "Agent wallet address". Both point at rules-and-wallet
- *    rather than permissions-and-network.
- * 3. **Accuracy.** Neither phrase is exact — what survives a Haven-side pause
- *    is the agent's SIGNED BUDGET DELEGATION, enforced on-chain by the caveat
- *    enforcers, which Haven cannot revoke by pausing (`CLAUDE.md` § Agent
- *    Model). Of the two approximations, "rules" is the register the product
- *    uses for that envelope, and "wallet" names where it lives. "Network
- *    permissions" reads as a property of the chain rather than of the user's
- *    own account.
- *
- * A third, more literally accurate phrasing ("the budget you signed stays in
- * place") was considered and rejected: it would be a third sentence for a fact
- * that already has two, which is the shape this module exists to end.
+ * It states the narrow truth (only Haven's sending is paused), that the
+ * budget survives, and names the two actions that actually end it. The same
+ * decision renamed the pause controls "Pause payments" and made them one
+ * click on both surfaces (the `/agents` card's pause confirm was removed) —
+ * the banner is the honest account of what that one click did.
  *
  * ── WHY A MODULE AND NOT TWO STRINGS THAT AGREE ─────────────────────────────
  *
@@ -60,9 +50,10 @@ export const AGENT_PAUSED_TITLE = 'Paused in Haven'
 /**
  * The body both surfaces give this state.
  *
- * Was two sentences differing only in the noun ("network permissions" on the
- * card, "wallet rules" on the detail page); this is the detail page's, taken
- * verbatim for the reasons in the module header.
+ * The owner-approved sentence from 2026-10-07 (see the module header), taken
+ * verbatim. It replaced #2230's "New agent payments are blocked until you
+ * resume this agent. Existing wallet rules stay in place." — same first
+ * claim, plus what survives the pause and how to end it.
  */
 export const AGENT_PAUSED_BODY =
-  'New agent payments are blocked until you resume this agent. Existing wallet rules stay in place.'
+  "Payments paused. Haven won't send payments for this agent until you resume. Its budget is still live on-chain. To end it, stop the budget or remove the agent."

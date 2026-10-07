@@ -274,7 +274,7 @@ test.describe('agent detail at 390px (#2733)', () => {
         return { painted: b.height, hit: walk(0, -1) + walk(0, 1) + 1 }
       }, name)
 
-    for (const name of ['Pause agent'] as const) {
+    for (const name of ['Pause payments'] as const) {
       // elementFromPoint is viewport-relative, so each target is scrolled into
       // view before the walk or the probe reports a phantom 1px target. (The
       // header sits at the top today; the scroll keeps the probe honest if it
@@ -309,7 +309,7 @@ test.describe('agent detail at 390px (#2733)', () => {
       .getByRole('heading', { name: 'Research agent', exact: true })
       .boundingBox()
     expect(titleBox, 'the agent title rendered').not.toBeNull()
-    const pauseBox = await page.getByRole('button', { name: 'Pause agent', exact: true }).boundingBox()
+    const pauseBox = await page.getByRole('button', { name: 'Pause payments', exact: true }).boundingBox()
     expect(pauseBox, 'the header Pause action rendered').not.toBeNull()
     const overlaps =
       pauseBox!.y < kebabBox!.y + kebabBox!.height && kebabBox!.y < pauseBox!.y + pauseBox!.height

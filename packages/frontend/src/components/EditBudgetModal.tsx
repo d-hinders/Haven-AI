@@ -104,7 +104,7 @@ function editMerchantRefusalCopy(detail: string | undefined, merchantName: strin
       // true in both cases, and point at the page that tells them apart.
       return `Not every offer from ${merchantName} accepts this kind of budget now, so it can't be changed here. This budget keeps paying only the address it was set up with — ${merchantName}'s page shows whether that is still where it is paid.`
     case 'merchant_not_found':
-      return `${merchantName} could not be found, so this budget can't be changed here. Close this and use Stop on the budget.`
+      return `${merchantName} could not be found, so this budget can't be changed here. Close this and stop the budget on the agent page instead.`
     default:
       return null
   }
@@ -533,7 +533,7 @@ export default function EditBudgetModal({
                     </p>
                     <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
                       The new limits took effect, but the previous budget still needs to be
-                      stopped. Use Stop next to it in the budget list when you are ready.
+                      stopped. Use Stop budget next to it in the budget list when you are ready.
                     </p>
                   </>
                 ) : outcome.reason === 'refused' ? (

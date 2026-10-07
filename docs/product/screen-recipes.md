@@ -423,7 +423,7 @@ done, and how to stop it (#3691, epic). Sections, in order:
    `meta` line — wallet · network · Created {age} · Last activity {age} (or
    "No activity yet"; last activity is `mcp_last_seen_at`). Labels sit under
    it. The actions slot: the status badge (renders nothing while active),
-   **Pause/Resume beside the header** — Pause while active, Resume while
+   **Pause payments/Resume beside the header** — Pause payments while active, Resume while
    paused, never for an archived agent — then the kebab menu. The per-state
    action matrix (#3694): the kebab renders for **every** state; Edit agent and
    Manage labels unless revoked; Payment credentials and Replace signing key

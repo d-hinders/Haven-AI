@@ -609,7 +609,7 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   kebab alone — the `StatusBadge` beside it renders `null` while the agent is
   active — and the stacked row was a lone bordered icon, left-aligned, belonging
   visually to nothing. Since [#3694](https://github.com/d-hinders/Haven-AI/issues/3694)
-  Pause or Resume sits beside the kebab, so agent detail inlines only for the
+  Pause payments or Resume sits beside the kebab, so agent detail inlines only for the
   one state with a lone kebab left (an archived agent that was never revoked);
   two controls take the default stacking, as one row under the title.
 
@@ -1604,7 +1604,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 **The 12 px row cites buttons that do not meet the 44 px tap target, and that is a debt it inherits rather than endorses.** The shared `ui/CopyButton.tsx:63`/`:65` (a bare `h-5 w-5`, and so every `Address`, `McpServerName` and account-detail copy control that renders it) hosts this rung without the invisible `::after` hit area. The legacy hand-rolled controls were removed with the retired Safe agent surfaces; Address, MCP-server and account-detail copy controls route through the shared primitive, while the code-block control remains the documented local 14px exception below. Nothing here changes those boxes. Naming it so the table is not read as blessing sub-44 px targets: an icon-only button owes its own tap-target treatment whatever size glyph it holds.
 
-**A small icon-only button's GEOMETRY does not pick its rung — what the glyph is doing does ([#1923](https://github.com/d-hinders/Haven-AI/issues/1923)).** The legacy Safe budget-row examples that motivated this rule were retired with the Safe agent-management surface in [#2258](https://github.com/d-hinders/Haven-AI/issues/2258). The live delegation budget card uses a labelled `Stop` action rather than an icon-only remove control. The general rule still applies to any future remove or dismiss control: decide its glyph size from its role, then add the live call site to the design-system review and coverage test.
+**A small icon-only button's GEOMETRY does not pick its rung — what the glyph is doing does ([#1923](https://github.com/d-hinders/Haven-AI/issues/1923)).** The legacy Safe budget-row examples that motivated this rule were retired with the Safe agent-management surface in [#2258](https://github.com/d-hinders/Haven-AI/issues/2258). The live delegation budget card uses a labelled `Stop budget` action rather than an icon-only remove control. The general rule still applies to any future remove or dismiss control: decide its glyph size from its role, then add the live call site to the design-system review and coverage test.
 
 **The decision, scoped to what was actually measured:** a **remove / dismiss control on a data row** takes **14**, whichever way its box is built. The retired budget-row examples are no longer live; remaining copy and dismiss controls retain their own role-based precedents. **The row's own type does not pull it back to 12** — re-derive the choice when adding a new data-row control rather than reviving the removed legacy examples.
 

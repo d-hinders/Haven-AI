@@ -77,7 +77,7 @@ test.describe('retired agent budget card visual regression (#3549)', () => {
       await expect(card).toHaveCount(1)
       // The active budget is still listed, and Stop still ends it.
       await expect(card.getByText(/250 USDC per week/)).toBeVisible()
-      await expect(card.getByRole('button', { name: 'Stop' })).toHaveCount(1)
+      await expect(card.getByRole('button', { name: 'Stop budget', exact: true })).toHaveCount(1)
       // Nothing that grants authority.
       await expect(card.getByText(state.reason)).toBeVisible()
       await expect(card.getByRole('button', { name: 'Set budget' })).toHaveCount(0)

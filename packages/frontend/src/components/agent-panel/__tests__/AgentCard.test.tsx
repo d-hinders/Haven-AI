@@ -54,10 +54,11 @@ function renderCard(
   } = {},
 ) {
   const onRestore = vi.fn()
+  const onPause = vi.fn()
   const { container } = render(
     <AgentCard
       agent={agent}
-      onPause={vi.fn()}
+      onPause={onPause}
       onResume={vi.fn()}
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
       onArchive={vi.fn().mockResolvedValue(undefined)}
@@ -67,7 +68,7 @@ function renderCard(
       organizations={organizations}
     />,
   )
-  return { onRestore, container }
+  return { onRestore, onPause, container }
 }
 
 /**
@@ -221,35 +222,23 @@ describe('AgentCard paused notice copy (#2230)', () => {
   })
 
   /**
-   * The card's OTHER account of a pause — the confirm dialog — has to use the
-   * same noun.
-   *
-   * Converging the banner alone would have replaced a divergence BETWEEN two
-   * screens with one INSIDE a single file, describing the same fact two
-   * paragraphs apart: strictly worse than what #2230 was filed about. The
-   * dialog's prose is hand-maintained rather than shared (it says more than
-   * the banner and is not a candidate for one clause), so this is the cheap
-   * literal guard the rework caps explicitly keep — a blanket `not.toContain`
-   * on a phrase this file now has no legitimate use for, not an assertion that
-   * interprets a sentence.
+   * #3717: pause is ONE click on this card. There is no confirm dialog to
+   * keep in the same register anymore — it was removed with the owner's
+   * 2026-10-07 decision — so the honest account of what the click did is the
+   * banner above, and the click itself goes straight to `onPause`. The
+   * non-vacuity probe flips: instead of proving a dialog opened before an
+   * absence check, this proves the click FIRED before asserting no dialog
+   * exists at all.
    */
-  it('says the same thing in the pause dialog — no "network permissions" anywhere on this card', () => {
-    const { container } = renderCard(agentFixture({ status: 'active' } as Partial<Agent>))
+  it('pauses directly on click — no confirm dialog stands between', () => {
+    const { onPause, container } = renderCard(agentFixture())
     fireEvent.click(screen.getByRole('button', { name: 'Pause Research agent' }))
-    // Non-vacuity: the dialog must actually be open, or this passes on an
-    // empty haystack — which is how a `not.toContain` guard goes quietly
-    // useless.
-    expect(
-      screen.getByRole('heading', { name: /Pause Research agent\?/ }),
-      'the pause dialog did not open, so the absence check below is vacuous',
-    ).toBeTruthy()
-    // Case-INSENSITIVE, on `haven-reviewer`'s own mutation: it reintroduced
-    // the divergence as "Network Permissions" and the `toContain` form stayed
-    // green. Nobody types that by accident, but a guard whose only job is to
-    // catch one phrase should not be defeatable by the shift key.
-    expect((container.textContent ?? '') + (document.body.textContent ?? '')).not.toMatch(
-      /network permissions/i,
-    )
+    expect(onPause).toHaveBeenCalledTimes(1)
+    expect(onPause).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-1' }))
+    // No pause dialog anywhere on the card, not even closed.
+    expect(screen.queryByRole('heading', { name: /Pause Research agent\?/ })).toBeNull()
+    // And the click did not route through anything that would have opened one.
+    expect((container.textContent ?? '') + (document.body.textContent ?? '')).not.toMatch(/network permissions/i)
   })
 })
 

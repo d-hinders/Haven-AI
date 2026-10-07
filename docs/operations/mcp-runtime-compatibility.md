@@ -2386,18 +2386,33 @@ precedence order:
    the refusal at rung 7 is written as an instruction to the agent rather than
    to a human.
 6. **The clients installed here (#1719).** When nothing was detected and stdin
-   is an interactive terminal, the connector scans for the config locations it
-   can actually write (`~/.claude`, `~/.codex/config.toml`, `~/.cursor/mcp.json`,
-   the VS Code / VS Code Insiders user `mcp.json`, a workspace `.vscode/`,
-   Claude Desktop's `claude_desktop_config.json`, `$HERMES_HOME/config.yaml`)
-   and offers **only those**, likeliest first — an existing MCP config outranks
-   a bare client directory. The scan **populates the choices; it never
-   selects** (the #1719 invariant — pinned by
+   is an interactive terminal, the connector scans for agent clients — the
+   config files it can actually write (`~/.codex/config.toml`,
+   `~/.cursor/mcp.json`, the VS Code / VS Code Insiders user `mcp.json`, a
+   workspace `.vscode/`, Claude Desktop's `claude_desktop_config.json`,
+   `$HERMES_HOME/config.yaml`) plus the clients it configures through their
+   own CLIs, seen as directory markers only: Claude Code (`~/.claude`,
+   `~/.claude.json`), which is wired via `claude mcp add-json` and is never
+   configured by writing a file — so those paths are EVIDENCE, never write
+   targets (an earlier revision of this paragraph wrongly listed `~/.claude`
+   among the config locations the connector writes; corrected in #3732).
+   Since #3732, a `~/.claude.json` that carries an `mcpServers` key counts as
+   config-file evidence for Claude Code — so a machine with both a Claude
+   Code MCP config and a Codex config ties, and produces NO suggestion,
+   instead of suggesting Codex by construction. Candidates are offered
+   likeliest first — an existing MCP config outranks a bare client
+   directory — and the list may mark one client `(suggested)`, but the
+   prompt **never pre-selects**: an empty answer re-asks and, after three
+   attempts, aborts with nothing written and the setup token unused
+   (#3732's owner decision, matching the wiring-collision prompt). The scan
+   **populates the choices; it never selects** (the #1719 invariant — pinned by
    [`packages/connect/src/installed-clients.test.ts`](../../packages/connect/src/installed-clients.test.ts)
    "NEVER selects for the user", #2680). Finding exactly one installed app still prompts, because an
    installed app tells you what exists, not where the user wants their agent to
    run, and a silent wrong write plants an API key and a delegate key in an app
-   they do not use. This rung is **omitted entirely** — not answered — under
+   they do not use. The chat app's row reads "Claude Desktop (chat app)" so a
+   user in the desktop app's Code tab cannot mistake it for where they are.
+   This rung is **omitted entirely** — not answered — under
    `--json` and whenever `process.stdin.isTTY` is false, so CI and automation
    reach the refusal instead of blocking on stdin.
 7. Nothing known → the connector **refuses before any side effect** (the
@@ -2464,14 +2479,21 @@ found on **this machine** (additive, still `schema_version` 1):
   on self-knowledge alone. `allowed_runtimes` says what is *permitted*;
   `installed_clients` says what is *here*.
 - `error.suggested_runtime` — the top hit, and only when it is unambiguously
-  top: a lone candidate, or a live MCP config file outranking bare client
-  directories. Two candidates in the same evidence tier are separated only by
-  the scan's fixed order, which is a preference rather than a fact about the
-  machine, so no suggestion is offered there.
+  top: a lone candidate, or a single live MCP config file among bare client
+  directories. Since #3732, a `~/.claude.json` carrying an `mcpServers` key
+  is config-file evidence for Claude Code — so a machine with both a Claude
+  Code MCP config and a Codex config ties, and NO suggestion is offered,
+  where before Codex won by construction. Two candidates in the same evidence
+  tier are separated only by the scan's fixed order, which is a preference
+  rather than a fact about the machine, so no suggestion is offered there.
 
 **The scan populates choices; it never selects.** This is #1719's invariant and
 it is unchanged: a `suggested_runtime` is a value the agent may echo back as
-`--runtime`, never a selection the connector makes. Finding exactly one
+`--runtime`, never a selection the connector makes. The interactive prompt
+follows the same rule and is stricter still (#3732): it never pre-selects —
+an empty answer re-asks, and after three attempts aborts with
+`runtime_prompt_aborted` having written nothing — even when the scan found
+exactly one client. Finding exactly one
 installed client does **not** flip the outcome to success — an installed app
 tells you what exists, not where the user wants their agent to run, and the
 cost of being wrong is an API key and a delegate key written into an app they

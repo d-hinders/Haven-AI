@@ -7,6 +7,7 @@ import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, ResolvedSetup, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
 import type { InstalledClientCandidate } from './installed-clients.js'
+import { scanInstalledClients } from './installed-clients.js'
 import { completionHandoffLines, failedConnectOutcome, failureOutcomeFor, runConnect, waitForBudgetApproval } from './runtime.js'
 import type { ConnectDeps } from './runtime.js'
 import { CONNECT_OUTCOME_FILENAME } from './storage.js'
@@ -575,6 +576,25 @@ describe('runConnect', () => {
 
         expect(promptRuntime).toHaveBeenCalledTimes(1)
         expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+      })
+
+      it('passes the hint scan’s env to the default prompt rung, so both rungs see one machine (#3732)', async () => {
+        const spies = resolutionSpies()
+        // A neutral env: no detection variable (CLAUDECODE etc.) may fire, or
+        // the ladder would resolve at rung 2 and never reach the prompt.
+        const env = { TERM: 'xterm' } as NodeJS.ProcessEnv
+        const promptRuntimeByInstalledClient = vi.fn(async () => 'hermes' as const)
+        // The run still fails later (stub API returns nothing) — the assertions
+        // are about what happened BEFORE that: the prompt rung got the hint
+        // scan's env, and the resolved value carried through.
+        await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          interactive: true,
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env, isTty: true, promptRuntimeByInstalledClient }))
+
+        expect(promptRuntimeByInstalledClient).toHaveBeenCalledWith(expect.objectContaining({ env }))
+        expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'hermes' }))
       })
 
       it('skips the prompt entirely when stdin is not a TTY', async () => {
@@ -2922,6 +2942,11 @@ describe('runConnect terminal outcome record (#2173)', () => {
 // menu to what is actually installed here — as a HINT. The load-bearing
 // assertion in every case below is that it is still a REFUSAL.
 describe('runtime_undetermined installed-client hint (#2174)', () => {
+  // Hand-built candidates: pairs like `claude-code` + `config-file` are states
+  // the REAL scanner cannot produce (its Claude Code evidence now comes via
+  // `evidencePath` — `~/.claude.json` — with `configPath` null, #3732). These
+  // therefore pin the hint → refusal WIRING as a pure function of the scan
+  // result; the real-path fixtures live in the #3732 tests below.
   function scanStub(candidates: Array<[InstalledClientCandidate['runtime'], InstalledClientCandidate['evidence']]>) {
     return vi.fn(async () => candidates.map(([runtime, evidence]) => ({
       runtime, label: runtime, detail: 'x', configPath: null, evidence,
@@ -2992,6 +3017,31 @@ describe('runtime_undetermined installed-client hint (#2174)', () => {
 
     expect(record?.installed_clients).toEqual(['claude-code', 'cursor'])
     expect(record?.suggested_runtime).toBeUndefined()
+  })
+
+  it('JSON record and prose agree on a REAL claude-code/codex tie: no suggestion in either channel (#3732)', async () => {
+    // Over real paths, not the hand-built scanStub: a home with
+    // ~/.codex/config.toml AND a ~/.claude.json carrying mcpServers used to
+    // suggest Codex by construction. Now both are config-tier, so neither
+    // channel suggests — the same rule the prompt follows (Enter never
+    // selects), pinned here across BOTH channels with one test.
+    const claudeJson = '/home/agent/.claude.json'
+    const codexToml = '/home/agent/.codex/config.toml'
+    const scan = vi.fn(async () => scanInstalledClients({
+      homeDir: '/home/agent',
+      cwd: '/work',
+      env: {},
+      exists: async (path) => path === claudeJson || path === codexToml,
+      readFile: async (path) => (path === claudeJson ? JSON.stringify({ mcpServers: {} }) : '[mcp_servers.haven]'),
+    }))
+    const { error } = await refuse(scan as ConnectDeps['scanInstalledClients'])
+    const record = failedConnectOutcome(undefined, error).error
+
+    expect(record?.installed_clients).toEqual(['claude-code', 'codex-cli'])
+    expect(record?.suggested_runtime).toBeUndefined()
+    expect(error.message).toContain('claude-code, codex-cli')
+    expect(error.message).toContain('Haven will not choose between them for you')
+    expect(error.message).not.toContain('The likeliest is')
   })
 
   it('names the found clients in the prose channel too', async () => {

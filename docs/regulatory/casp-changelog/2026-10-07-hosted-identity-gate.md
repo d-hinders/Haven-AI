@@ -1,6 +1,6 @@
 - **Hosted MCP: agent identity before tool dispatch** — every hosted tool
   dispatch now resolves the agent API key to an agent (`haven.getAgent()`)
-  before the tool's handler runs, so no tool issues any request, to Haven or
+  before the tool's handler runs, so no gated tool issues any request, to Haven or
   a third party, for a key Haven does not accept. The gate lives in
   `packages/mcp-server/src/tools/identity-gate.ts` and runs from
   `buildHostedMcpServer`'s registration loop, so it covers every tool,

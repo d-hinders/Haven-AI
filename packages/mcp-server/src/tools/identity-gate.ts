@@ -1,6 +1,6 @@
 /**
  * Hosted identity gate: every hosted tool dispatch resolves the agent API key
- * to an agent before the tool's handler runs, so no tool issues any request
+ * to an agent before the tool's handler runs, so no gated tool issues any request
  * — to Haven or a third party — for a key Haven does not accept.
  *
  * Only a 401 is mapped to {@link AGENT_IDENTITY_UNVERIFIED}. Any other

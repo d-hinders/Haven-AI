@@ -54,6 +54,8 @@ import {
   HavenApiError,
   HavenClient,
   HavenInsecureRetryTargetError,
+  MerchantEgressRefusedError,
+  MerchantEgressResponseCapError,
   type NextStep,
   MerchantTimeoutError,
   X402PaymentHeaderValidationError,
@@ -64,7 +66,7 @@ import {
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
-import { HostedToolError, paymentWindowExpiredError, runTool } from './support/errors.js'
+import { HostedToolError, egressRefusalBeforeIntent, paymentWindowExpiredError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   buildPurchaseSummary,
@@ -352,6 +354,83 @@ export async function deliverMerchantPayment(
         nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.SweepStrandedFunds, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: args.payment_id } }),
         rail: 'x402',
         suggestedTool: 'haven_get_payment_status',
+      })
+    }
+    // #3747: an egress-policy refusal during PAID delivery. Two distinct
+    // states, both carrying the payment id because funding is already
+    // confirmed (or erc7710 has no funding leg at all):
+    //  - BEFORE any request was sent (a pre-send URL refusal): the merchant
+    //    was NOT called — mirror the HavenInsecureRetryTargetError branch.
+    //  - MID-FLIGHT (a redirect on the paid POST, a refused redirect hop, or
+    //    the response cap crossed while reading): the paid request itself was
+    //    already sent and the header MAY have been delivered — this is the
+    //    #1300 verify-then-sweep state, routed to the status read FIRST,
+    //    NEVER a blind sweep. On erc7710 there is no funding leg, so the
+    //    existing no-sweep handling applies: check status later, ignore any
+    //    sweep guidance.
+    if (err instanceof MerchantEgressRefusedError || err instanceof MerchantEgressResponseCapError) {
+      const midFlight = !(err instanceof MerchantEgressRefusedError) || !err.beforeRequest
+      const detail = err.message
+      if (midFlight && options?.noFundingLeg) {
+        throw new HostedToolError({
+          code: 'MERCHANT_EGRESS_REFUSED',
+          message:
+            `The erc7710 paid retry was interrupted by the hosted egress policy after the request was sent: ` +
+            `${detail} erc7710 has no funding leg, so there is no delegate balance to strand or sweep — ` +
+            `ignore this code's sweep guidance. The merchant may still redeem the settlement authorization ` +
+            `within its window: check haven_get_payment_status after that window and re-quote only if it ` +
+            `shows no settlement.`,
+          statusCode: 400,
+          paymentId: args.payment_id,
+          status: 'merchant_unresponsive_after_funding',
+          phase: 'not_delivered',
+          nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: args.payment_id } }),
+          rail: 'erc7710',
+          suggestedTool: 'haven_get_payment_status',
+        })
+      }
+      if (midFlight) {
+        throw new HostedToolError({
+          code: 'MERCHANT_EGRESS_REFUSED',
+          message:
+            `The paid retry was interrupted by the hosted egress policy after the request was sent: ` +
+            `${detail} The funding leg is confirmed on-chain and the merchant's answer never arrived ` +
+            `complete: the merchant may still settle late. Check haven_get_payment_status and retry ` +
+            `haven_complete_mcp_tool ONCE before considering a sweep — sweep only if no settlement appears.`,
+          statusCode: 400,
+          paymentId: args.payment_id,
+          status: 'merchant_unresponsive_after_funding',
+          phase: 'funded_but_unsettled',
+          nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.SweepStrandedFunds, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: args.payment_id } }),
+          rail: 'x402',
+          suggestedTool: 'haven_get_payment_status',
+        })
+      }
+      // Pre-send: the merchant was never called.
+      throw new HostedToolError({
+        code: 'MERCHANT_EGRESS_REFUSED',
+        message: options?.noFundingLeg
+          ? `${err.message} No merchant call was made and erc7710 has no funding leg, so nothing ` +
+            `moved; re-quote the merchant at its public https URL.`
+          : `${err.message} The funding leg is already confirmed on-chain and the merchant was NOT ` +
+            `called: retry haven_complete_mcp_tool with the merchant's public https URL as merchant_url, ` +
+            `or recover the delegate balance with haven_sweep_delegate.`,
+        statusCode: 400,
+        paymentId: args.payment_id,
+        phase: options?.noFundingLeg ? 'not_delivered' : 'funded_but_unsettled',
+        nextStep: options?.noFundingLeg
+          ? refusalNextStep({
+              nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+              nextTool: null,
+              nextToolOmittedReason: 're-quote the merchant at its public https URL; nothing moved',
+            })
+          : refusalNextStep({
+              nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+              nextTool: 'haven_sweep_delegate',
+              nextArguments: {},
+            }),
+        rail: options?.noFundingLeg ? 'erc7710' : 'x402',
+        suggestedTool: options?.noFundingLeg ? 'haven_quote_mcp_tool' : 'haven_get_payment_status',
       })
     }
     // #3097: the SDK refuses to hand a payment header to a public http://
@@ -794,6 +873,22 @@ export function createPaidMcpCompletionHandlers(
         // the submit burns the settlement child, which is not recoverable by
         // re-signing either.
         const merchantContext = await resolveMerchantCallContext(haven, args)
+        // #3747: the egress policy also runs HERE — before the funding
+        // signature relay and before the erc7710 submit (both schemes resolve
+        // at this site; erc7710 has no funding leg, so refusing pre-submit is
+        // equally before-spend). The stored-context rehydration path was
+        // already validated at quote time, so re-asserting is a no-op there;
+        // an EXPLICITLY supplied merchant_url has never been checked by this
+        // point and the first transport-side check would otherwise land only
+        // after `ensureFundingConfirmed` — the exact funded-but-undeliverable
+        // outcome the issue criterion forbids.
+        if (haven.merchantEgress) {
+          try {
+            haven.merchantEgress.assertUrl(merchantContext.merchantUrl)
+          } catch (err) {
+            throw egressRefusalBeforeIntent(err)
+          }
+        }
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.

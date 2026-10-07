@@ -3,6 +3,7 @@ import { MerchantTimeoutError } from './types.js'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
 import { X402_PAYMENT_HEADER_NAMES, normalizePaymentRequired, x402PaymentHeaderNamesFor } from './x402.js'
 import { assertSecureX402RetryTarget } from './x402-retry-target.js'
+import { MerchantEgressRefusedError, MerchantEgressResponseCapError, isBodyPhaseTimeout, type MerchantEgressPolicy, type MerchantEgressUse } from './merchant-egress.js'
 
 export const DEFAULT_MERCHANT_TIMEOUT = 300_000
 export const MCP_NOTIFICATION_TIMEOUT = 10_000
@@ -71,6 +72,14 @@ type MerchantFetch = (input: string | URL | Request, init?: RequestInit) => Prom
 export interface McpMerchantTransportOptions {
   merchantTimeout?: number
   fetch?: MerchantFetch
+  /**
+   * #3747: optional merchant-egress policy. Absent — the SDK default — the
+   * transport behaves exactly as before. Present, every request and every
+   * GET-redirect hop is `assertUrl`-checked before it connects, redirects go
+   * `manual` with re-checked GET follows, response bodies are capped WHILE
+   * being read, and `budgetFor` resolves per-use timeouts.
+   */
+  egress?: MerchantEgressPolicy
 }
 
 /**
@@ -83,27 +92,178 @@ export interface McpMerchantTransportOptions {
 export class McpMerchantTransport {
   private readonly merchantTimeout: number
   private readonly fetchImpl: MerchantFetch
+  private readonly egress: MerchantEgressPolicy | undefined
   private requestId = 0
 
   constructor(options: McpMerchantTransportOptions = {}) {
     this.merchantTimeout = options.merchantTimeout ?? DEFAULT_MERCHANT_TIMEOUT
+    this.egress = options.egress
     // Resolve the global at call time, matching the former client helper and
     // preserving the SDK's established fetch-mocking/polyfill seam.
     this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init))
   }
 
+  /**
+   * #3747: the timeout a merchant use runs under. Without an egress policy
+   * this is always `merchantTimeout` — byte-identical to the pre-policy
+   * behaviour; with one, the effective deadline is
+   * `min(policy timeout for the use, merchantTimeout)` (spec review
+   * 2026-10-07) — a policy can only TIGHTEN `merchantTimeout`, never extend
+   * it.
+   */
+  budgetFor(use: MerchantEgressUse): number {
+    const policyTimeout = this.egress?.timeouts?.[use]
+    return policyTimeout === undefined ? this.merchantTimeout : Math.min(policyTimeout, this.merchantTimeout)
+  }
+
+  /** The per-use response byte cap (falls back to the policy's default). */
+  capFor(use: MerchantEgressUse): number | undefined {
+    const egress = this.egress
+    if (!egress) return undefined
+    return egress.responseByteCaps?.[use] ?? egress.maxResponseBytes
+  }
+
   /** Fetch a merchant with a settlement-sized timeout and caller cancellation. */
-  async fetch(url: string, init: RequestInit = {}, timeoutMs = this.merchantTimeout): Promise<Response> {
+  async fetch(url: string, init: RequestInit = {}, timeoutMs = this.merchantTimeout, maxBytes?: number): Promise<Response> {
+    if (!this.egress) {
+      const timeoutSignal = AbortSignal.timeout(timeoutMs)
+      const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
+      try {
+        return await this.fetchImpl(url, { ...init, signal })
+      } catch (err) {
+        if (timeoutSignal.aborted) {
+          throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${url}`)
+        }
+        throw err
+      }
+    }
+    return this.fetchUnderPolicy(url, init, timeoutMs, maxBytes)
+  }
+
+  /**
+   * #3747: the policy path. Every URL — the initial request and each redirect
+   * hop — is `assertUrl`-checked BEFORE it connects; redirects run `manual`
+   * so nothing is ever followed un-checked; GET redirects are followed up to
+   * `maxGetRedirects` (a redirect on any other method is refused); response
+   * bodies are capped WHILE being read, not after buffering. The timeout
+   * signal spans the WHOLE redirect chain, and `MerchantTimeoutError`
+   * classification is preserved.
+   */
+  private async fetchUnderPolicy(url: string, init: RequestInit, timeoutMs: number, maxBytes?: number): Promise<Response> {
+    const egress = this.egress as MerchantEgressPolicy
+    // Before anything is sent: a refusal here means no request of this use
+    // ever left.
+    try {
+      egress.assertUrl(url)
+    } catch (err) {
+      throw asRefusal(err, url, true)
+    }
+    const method = (init.method ?? 'GET').toUpperCase()
     const timeoutSignal = AbortSignal.timeout(timeoutMs)
     const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
+    const maxRedirects = egress.maxGetRedirects ?? 0
+    let currentUrl = url
+    let hops = 0
     try {
-      return await this.fetchImpl(url, { ...init, signal })
+      while (true) {
+        // (Spec review 2026-10-07): 'manual' is set AFTER spreading init so a
+        // caller-supplied `redirect: 'follow'` cannot win; the ONE override
+        // allowed is the stricter 'error' (discovery, the #3739 probe).
+        const response = await this.fetchImpl(currentUrl, {
+          ...init,
+          redirect: init.redirect === 'error' ? 'error' : 'manual',
+          signal,
+        })
+        if (!isRedirectStatus(response.status)) return this.capResponse(response, currentUrl, maxBytes)
+        // The 3xx came back from a request that WAS sent: everything from
+        // here on is mid-flight.
+        if (method !== 'GET') {
+          throw new MerchantEgressRefusedError(
+            `Hosted egress policy refuses the ${response.status} redirect from ${currentUrl}: ` +
+              `redirects are followed for GET requests only, and this was a ${method}. ` +
+              'The request itself was already sent to the checked URL; nothing was sent to the redirect target.',
+            currentUrl,
+            'redirect_on_non_get',
+            false,
+          )
+        }
+        const location = response.headers.get('location')
+        if (!location) {
+          throw new MerchantEgressRefusedError(
+            `Hosted egress policy refuses the ${response.status} redirect from ${currentUrl}: it carries no Location header, so there is no checked target to follow.`,
+            currentUrl,
+            'redirect_missing_location',
+            false,
+          )
+        }
+        let next: string
+        try {
+          next = new URL(location, currentUrl).toString()
+        } catch {
+          throw new MerchantEgressRefusedError(
+            `Hosted egress policy refuses the redirect from ${currentUrl}: its Location header is not a resolvable URL.`,
+            currentUrl,
+            'redirect_invalid_location',
+            false,
+          )
+        }
+        if (hops >= maxRedirects) {
+          throw new MerchantEgressRefusedError(
+            `Hosted egress policy refuses the redirect from ${currentUrl} to ${next}: the ${maxRedirects}-redirect budget for this request is spent.`,
+            next,
+            'redirect_budget_exceeded',
+            false,
+          )
+        }
+        try {
+          egress.assertUrl(next)
+        } catch (err) {
+          // Mid-flight: the chain's earlier requests were already sent.
+          throw asRefusal(err, next, false)
+        }
+        hops++
+        currentUrl = next
+      }
     } catch (err) {
       if (timeoutSignal.aborted) {
-        throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${url}`)
+        throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${currentUrl}`)
       }
       throw err
     }
+  }
+
+  /**
+   * #3747: enforce `maxResponseBytes` at the STREAM, so every later read —
+   * `.text()`, `.json()`, `.clone().text()` — rejects mid-read the moment the
+   * cap is crossed. A body that never ends can never buffer past the cap.
+   */
+  private capResponse(response: Response, url: string, maxBytes?: number): Response {
+    const cap = maxBytes ?? (this.egress as MerchantEgressPolicy).maxResponseBytes
+    if (!cap || !response.body) return response
+    let total = 0
+    const capped = response.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          total += chunk.byteLength
+          if (total > cap) {
+            controller.error(
+              new MerchantEgressResponseCapError(
+                `Merchant response from ${url} exceeded the ${cap}-byte cap while it was being read; the read was aborted.`,
+                cap,
+                url,
+              ),
+            )
+            return
+          }
+          controller.enqueue(chunk)
+        },
+      }),
+    )
+    return new Response(capped, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    })
   }
 
   /**
@@ -134,7 +294,7 @@ export class McpMerchantTransport {
             clientInfo: MCP_CLIENT_INFO,
           },
         }),
-      })
+      }, this.budgetFor('mcpSession'), this.capFor('mcpSession'))
 
       if (!response.ok) return undefined
 
@@ -146,7 +306,10 @@ export class McpMerchantTransport {
 
       await this.notifyInitialized(url, init, sessionId, wallet)
       return sessionId
-    } catch {
+    } catch (err) {
+      // #3747 spec review: a policy REFUSAL is never degraded to "no
+      // session" — rethrow it so the caller sees the real refusal.
+      if (err instanceof MerchantEgressRefusedError || err instanceof MerchantEgressResponseCapError) throw err
       return undefined
     }
   }
@@ -164,7 +327,12 @@ export class McpMerchantTransport {
     let text: string
     try {
       text = await response.clone().text()
-    } catch {
+    } catch (err) {
+      // #3747: a mid-read egress cap refusal is a real refusal, never a
+      // "not an MCP message" shrug; a body-phase deadline is a merchant
+      // timeout, never a bare DOMException (spec review 2026-10-07).
+      if (err instanceof MerchantEgressResponseCapError) throw err
+      if (isBodyPhaseTimeout(err)) throw new MerchantTimeoutError(`Merchant response body read timed out.`)
       return undefined
     }
 
@@ -191,7 +359,9 @@ export class McpMerchantTransport {
     let text: string
     try {
       text = await response.clone().text()
-    } catch {
+    } catch (err) {
+      if (err instanceof MerchantEgressResponseCapError) throw err
+      if (isBodyPhaseTimeout(err)) throw new MerchantTimeoutError(`Merchant response body read timed out.`)
       return response
     }
 
@@ -281,7 +451,7 @@ export class McpMerchantTransport {
     // #3118: a `tools/call` body additionally carries the payment in
     // `params._meta["x402/payment"]` (the official MCP profile). Any other
     // body is sent byte-for-byte as the caller gave it.
-    return this.fetch(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader))
+    return this.fetch(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader), this.budgetFor('delivery'), this.capFor('delivery'))
   }
 
   /**
@@ -539,11 +709,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** 301/302/303/307/308 — the statuses a policy-aware fetch handles itself. */
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+}
+
+/**
+ * Normalise a policy `assertUrl` throw to a `MerchantEgressRefusedError` with
+ * the transport's own mid-flight knowledge — the policy throws
+ * `beforeRequest: true` (its contract is "nothing sent yet"), but a HOP check
+ * runs after earlier requests of the same use were already sent.
+ */
+function asRefusal(err: unknown, url: string, beforeRequest: boolean): unknown {
+  if (!(err instanceof MerchantEgressRefusedError)) return err
+  if (err.beforeRequest === beforeRequest) return err
+  return new MerchantEgressRefusedError(err.message, url, err.refusal, beforeRequest)
+}
+
 /** Consume and preserve every diagnostic field of a failed merchant response. */
 export async function captureMerchantResponse(
   response: Response,
 ): Promise<CapturedMerchantResponse> {
-  const merchant_body = await response.text().catch(() => '')
+  const merchant_body = await response.text().catch((err: unknown) => {
+    // #3747: a cap refusal while reading a failure body is REAL information —
+    // never launder it into an empty string.
+    if (err instanceof MerchantEgressResponseCapError) throw err
+    return ''
+  })
   return {
     merchant_status: response.status,
     merchant_status_text: response.statusText,
@@ -564,7 +756,8 @@ async function responseHasBazaarExtension(response: Response): Promise<boolean> 
   try {
     const body = (await response.clone().json()) as { extensions?: { bazaar?: unknown } } | null
     return body?.extensions?.bazaar != null
-  } catch {
+  } catch (err) {
+    if (err instanceof MerchantEgressResponseCapError) throw err
     return false
   }
 }

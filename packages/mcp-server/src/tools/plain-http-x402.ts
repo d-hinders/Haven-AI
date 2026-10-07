@@ -82,7 +82,7 @@ import {
   quoteWarnings,
   readMaxAmountCap,
 } from './support/cap-price.js'
-import { HostedToolError, normalizeError, runTool } from './support/errors.js'
+import { HostedToolError, egressRefusalBeforeIntent, normalizeError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   catchSettledReplay,
@@ -479,6 +479,17 @@ export function createPlainHttpX402Handlers(
             statusCode: 400,
             nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you quoted as url; nothing was funded or signed' }),
           })
+        }
+        // #3747: the hosted egress policy also runs HERE, at the last point
+        // before an intent exists — an https:// IP literal or internal name
+        // passes the scheme check above but is refused before funding, so it
+        // can never surface only as a funded-but-undeliverable payment.
+        if (haven.merchantEgress) {
+          try {
+            haven.merchantEgress.assertUrl(retryTarget.url)
+          } catch (err) {
+            throw egressRefusalBeforeIntent(err)
+          }
         }
         // #1351: shape-check the cap before the funding intent — this tool has
         // no merchant probe of its own, so this is the first thing that runs.

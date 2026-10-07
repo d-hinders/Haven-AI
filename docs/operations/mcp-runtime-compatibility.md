@@ -25,6 +25,7 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
+  - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/receipt.ts
   - packages/sdk/src/edge.ts
@@ -74,7 +75,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-02"
+last-verified: "2026-10-07"
 ---
 
 > **Re-verified (2026-10-07, hosted agent identity before tool dispatch):**
@@ -5191,3 +5192,18 @@ to call next in structured fields, and those fields are typed end to end
 > The refusal ledger is unchanged (`onchain_revert`; reason set fixed by the
 > migration 086 CHECK). `last-verified` is not re-stamped: this block is the
 > scope. Nothing else in this document was re-verified.
+
+> **#3747 re-verification (2026-10-07, merchant-transport only).** The hosted
+> merchant-egress policy (`packages/sdk/src/merchant-egress.ts`) changed
+> `mcp-merchant-transport.ts` and `client.ts` — both on this contract's cover
+> list. The change is additive and outbound-only: an optional
+> `merchantEgress` config that gates where merchant requests CONNECT
+> (https-only public hosts, re-checked GET redirects, while-reading byte
+> caps, per-use timeouts). No tool is added, renamed or re-shaped; no
+> strict schema changes; the version-skew and consent-hash contracts do not
+> move, and no signing input (typed data, digest, auth.version) is touched —
+> a refusal happens before signing or after an already-signed header was
+> relayed, never by altering intent. The wire contract suite
+> (`x402-expected-wire-contract.test.ts`) runs green through the fixture
+> seam. Scope of this note: those two files' egress additions;
+> `last-verified` is bumped to 2026-10-07 for exactly this coverage.

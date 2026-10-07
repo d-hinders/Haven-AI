@@ -51,6 +51,7 @@ const boundary: ClientBoundary = {
     'listReceipts',
     'listReceiptsPage', // #3128
     'listTaskBudgets', // #3329
+    'merchantEgress', // #3747
     'openTaskBudget', // #3329
     'pay',
     'payX402Quote',
@@ -132,6 +133,7 @@ const boundary: ClientBoundary = {
     "async waitForConfirmation(paymentId: string): Promise<PaymentResult>",
     "clientUpdate(): HavenClientUpdate | undefined",
     "constructor(config: HavenClientConfig)",
+    "get merchantEgress(): MerchantEgressPolicy | undefined", // #3747
     "readonly delegateAddress: string | undefined",
     "sign(hash: string): string",
     "withRequestContext<T>(headers: Record<string, string>, fn: () => Promise<T>): Promise<T>",
@@ -161,6 +163,7 @@ const boundary: ClientBoundary = {
     './haven-api-transport.js',
     './mcp-merchant-transport.js',
     './merchant-completion.js',
+    './merchant-egress.js', // #3747
     './payment-mappers.js',
     './payment-state.js',
     './receipt.js',
@@ -465,6 +468,10 @@ describe('HavenClient structural boundary', () => {
       'HAVEN_MINIMUM_NODE_VERSION',
       'HAVEN_SKILL_BODY_MD',
       'HAVEN_SKILL_MD',
+      'HOSTED_DISCOVERY_TIMEOUT_MS', // #3747
+      'HOSTED_EGRESS_TIMEOUTS', // #3747
+      'HOSTED_MAX_GET_REDIRECTS', // #3747
+      'HOSTED_RESPONSE_BYTE_CAPS', // #3747
       'HYBRID_DELEGATOR_DOMAIN_NAME', // #3271
       'HYBRID_DELEGATOR_DOMAIN_VERSION', // #3271
       'HavenApiError',
@@ -481,6 +488,10 @@ describe('HavenClient structural boundary', () => {
       'INSECURE_RETRY_TARGET_CODE', // #3097
       'MAX_TASK_BUDGET_TTL_SECONDS', // #3329
       'MERCHANT_DISCOVERY_PATHS',
+      'MERCHANT_EGRESS_REFUSED_CODE', // #3747
+      'MERCHANT_EGRESS_RESPONSE_CAP_CODE', // #3747
+      'MerchantEgressRefusedError', // #3747
+      'MerchantEgressResponseCapError', // #3747
       'MerchantTimeoutError',
       'NEXT_TOOL_SERVER_NAMES', // #3101
       'NEXT_TOOL_SERVER_ROLES', // #3101
@@ -518,6 +529,7 @@ describe('HavenClient structural boundary', () => {
       'assertBoundDirectPaymentUserOp', // #3283
       'assertOwnTaskBudgetCloseUserOp', // #3329
       'assertOwnTaskChild', // #3329
+      'assertPublicHttpsMerchantUrl', // #3747
       'assertSecureX402RetryTarget', // #3097
       'assertUserOpTypedDataBinding', // #3271
       'buildSweepAuthorizationMessage',
@@ -544,6 +556,7 @@ describe('HavenClient structural boundary', () => {
       'isConnectorChannel',
       'isErc7710Option',
       'isPackedUserOperationTypedData', // #3271
+      'isPublicHttpsMerchantUrl', // #3747
       'isSecureX402RetryTarget', // #3097
       'isSupportedNodeVersion',
       'isSweepableChain',
@@ -557,6 +570,8 @@ describe('HavenClient structural boundary', () => {
       'parseNextTool', // #3101
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
+      'publicHttpsMerchantUrlRefusal', // #3747
+      'readBodyCapped', // #3747
       'readClientUpdate', // #3303
       'readX402ReceiptPayer',
       'renderNextTool', // #3101
@@ -572,6 +587,7 @@ describe('HavenClient structural boundary', () => {
       'signHash',
       'signUserOpTypedDataForDelegation',
       'signerUpdateFallback',
+      'strictMerchantEgressPolicy', // #3747
       'sweepUsdcAddress',
       'sweepUsdcDomain',
       'toStandardPaymentRequirements',
@@ -605,6 +621,7 @@ describe('HavenClient structural boundary', () => {
       'confirmationTimeout?: number',
       'defaultHeaders?: Record<string, string>',
       'delegateKey?: string',
+      'merchantEgress?: MerchantEgressPolicy', // #3747
       'merchantTimeout?: number',
       'pollingInterval?: number',
       'requestTimeout?: number',
@@ -640,6 +657,10 @@ describe('HavenClient structural boundary', () => {
       'HavenPaymentReceipt',
       'HavenPaymentReceiptsPage', // #3128
       'MachinePaymentRail',
+      'MerchantEgressPolicy', // #3747
+      'MerchantEgressRefusalReason', // #3747
+      'MerchantEgressTimeouts', // #3747
+      'MerchantEgressUse', // #3747
       'NextStep', // #3101
       'NextStepArguments', // #3101
       'NextStepHandoff', // #3101

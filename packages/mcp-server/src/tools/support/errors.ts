@@ -20,6 +20,8 @@ import {
   HavenApiError,
   HavenError,
   HavenPaymentStateError,
+  MerchantEgressRefusedError,
+  MerchantEgressResponseCapError,
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   type HavenClient,
@@ -257,6 +259,68 @@ const PREPARE_REVERTED_OMITTED_REASON =
 const INSUFFICIENT_BALANCE_REVERT_CAUSE = 'insufficient_balance'
 const PREPARE_REVERTED_FUNDING_OMITTED_REASON =
   'the account does not hold enough of the token to fund this payment; the revert already proves the shortfall and the body carries no token or amount to check with — tell the user the account needs funds, and the payment can be re-made once it is funded'
+
+/**
+ * #3747: the structured hosted refusal for a merchant-egress policy refusal
+ * that happened BEFORE anything was sent — the quote/prepare seams run the
+ * policy pre-intent, so the sentence can say nothing was funded or signed
+ * with certainty.
+ */
+export function egressRefusalBeforeIntent(err: unknown): HostedToolError {
+  const refused = err instanceof MerchantEgressRefusedError
+    ? err
+    : new MerchantEgressRefusedError(String(err instanceof Error ? err.message : err), '', 'url_not_allowed', true)
+  return new HostedToolError({
+    code: 'MERCHANT_EGRESS_REFUSED',
+    message: `${refused.message} Nothing was funded or signed.`,
+    statusCode: 400,
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+      nextTool: null,
+      nextToolOmittedReason:
+        're-call with the merchant’s public https URL as merchant_url / url (no IP literals, no localhost or internal names); nothing was funded or signed',
+    }),
+  })
+}
+
+/**
+ * #3747: the structured refusal for egress refusals raised at the transport —
+ * the fallback envelope for every quote-path refusal (a refused initial URL,
+ * a refused redirect hop, a body over the while-reading cap). Delivery-time
+ * refusals are mapped earlier, in paid-mcp-completion, where the payment id
+ * and the verify-then-sweep state are known.
+ */
+function normalizeMerchantEgressError(
+  err: MerchantEgressRefusedError | MerchantEgressResponseCapError,
+): ToolFailure {
+  const code = err instanceof MerchantEgressResponseCapError
+    ? 'MERCHANT_EGRESS_RESPONSE_CAP'
+    : 'MERCHANT_EGRESS_REFUSED'
+  const omittedReason = err instanceof MerchantEgressResponseCapError
+    ? 'the merchant’s response exceeded the hosted response-size cap while it was being read and the read was aborted; re-quote the resource, and tell the user if it persists'
+    : err.beforeRequest
+      ? 'the hosted egress policy refuses this merchant URL: re-call with a public https merchant URL (no IP literals, no localhost or internal names); nothing was sent'
+      : 'the hosted egress policy refused a redirect mid-flight; nothing further was sent to the refused target — if a payment was in flight, check haven_get_payment_status before anything else'
+  const step = err instanceof MerchantEgressResponseCapError || !err.beforeRequest
+    ? refusalNextStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: omittedReason,
+      })
+    : refusalNextStep({
+        nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+        nextTool: null,
+        nextToolOmittedReason: omittedReason,
+      })
+  return {
+    success: false,
+    code,
+    message: err.message,
+    statusCode: 400,
+    next_action: step.next_action,
+    ...nextStepWireFields(step),
+  }
+}
 
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
@@ -566,6 +630,9 @@ export function normalizeError(err: unknown): ToolFailure {
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }
+  }
+  if (err instanceof MerchantEgressRefusedError || err instanceof MerchantEgressResponseCapError) {
+    return normalizeMerchantEgressError(err)
   }
   if (err instanceof HavenError) {
     return {

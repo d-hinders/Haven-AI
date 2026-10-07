@@ -1,4 +1,7 @@
 import { HAVEN_CONNECTOR_CHANNEL, connectorUpgradeCommand } from './connector-channel.js'
+// Type-only on purpose: merchant-egress.ts extends HavenError at module eval,
+// and a runtime import here would make the two modules circular.
+import type { MerchantEgressPolicy } from './merchant-egress.js'
 
 // ── Client Configuration ─────────────────────────────────────────
 
@@ -22,6 +25,17 @@ export interface HavenClientConfig {
    *  merchants may settle on-chain synchronously, so the default is
    *  deliberately generous. #1300. */
   merchantTimeout?: number
+
+  /**
+   * #3747: optional string-level merchant-egress policy. When set, EVERY
+   * merchant request (and every redirect hop) is checked against it before
+   * connecting; GET redirects are followed `manual` with re-checked hops;
+   * response bodies are capped WHILE being read; per-use timeouts apply.
+   * Absent — the SDK, local-MCP and embedder default — behaviour is
+   * unchanged. This is network policy, never spend control: the on-chain
+   * allowance remains the real control. See `merchant-egress.ts`.
+   */
+  merchantEgress?: MerchantEgressPolicy
 
   /** Timeout in ms when polling for tx confirmation (default: 90000) */
   confirmationTimeout?: number

@@ -73,6 +73,18 @@ says why; that is a complete answer.
 Follow those fields first; the prose below is fallback and orientation, not
 the source of truth.
 
+**When more than one Haven pair is configured** (a named pair is
+\`haven-<slug>\` + \`haven-signer-<slug>\`), you act as ONE agent per task. If
+the user has not said which — in the request, or a project-level choice they
+stated — ask before any payment tool. Keep every call inside that pair: a
+signer call goes to the signer of the hosted server you called —
+\`haven-<slug>\` with \`haven-signer-<slug>\`, bare \`haven\` with
+\`haven-signer\`, Codex \`haven\` with \`haven_signer\`. Confirm by identity,
+not name: \`haven_get_agent\` returns \`id\` and \`delegate_address\`, and each
+signer states the agent id and delegate address it is bound to in its own
+instructions. If they differ, stop and sign nothing — switch to the signer
+whose identity matches.
+
 ## When to use this skill
 
 - The user asks to send money, pay someone, tip, donate, or transfer tokens.

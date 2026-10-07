@@ -93,6 +93,16 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toMatch(/never reserves a price/i)
   })
 
+  it('keeps one Haven pair per task when several are configured (#3738)', () => {
+    // (a) ask which agent, (b) the pair mapping, (c) identity by agent id.
+    expect(HAVEN_SKILL_MD).toContain('**When more than one Haven pair is configured**')
+    expect(HAVEN_SKILL_MD).toContain('ask before any payment tool')
+    expect(HAVEN_SKILL_MD).toContain(
+      '`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with\n`haven-signer`, Codex `haven` with `haven_signer`',
+    )
+    expect(HAVEN_SKILL_MD).toContain('`haven_get_agent` returns `id` and `delegate_address`')
+  })
+
   it('tells the agent to follow the response guidance fields first (#1308)', () => {
     expect(HAVEN_SKILL_MD).toContain('next_action')
     expect(HAVEN_SKILL_MD).toContain('next_tool')

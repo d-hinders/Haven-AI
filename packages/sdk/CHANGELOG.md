@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **The `haven-pay` skill covers a harness with several Haven pairs (#3738).** Act as one agent per task, ask which when the user has not said, keep every signer call inside the pair of the hosted server called (`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with `haven-signer`, Codex `haven` with `haven_signer`), and confirm by identity — `haven_get_agent`'s `id` and `delegate_address` against the identity the signer states. No update needed.
+
 ### Fixed
 
 - **`verifyPaymentReceipt` accepts the receipt endpoint's wrapped response as-is (#3723).** `GET /payments/{id}/receipt` (and `HavenClient.getReceipt`) return `{ receipt, verification }`, but the verifier looked for `authorization` at the top level, so passing that response unchanged answered `not_a_signed_receipt`. When the top level carries no `authorization` and `.receipt` is a non-null object, the bundle inside is verified — one level only, no recursion. The wrapper's `verification` is never read (it is Haven's own self-check, not offline evidence), and a `haven_list_receipts` row — bare or wrapped — still answers `not_a_signed_receipt`.

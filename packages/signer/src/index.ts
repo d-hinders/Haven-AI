@@ -25,6 +25,7 @@ export {
   signerInstructions,
   SIGNER_CAPABILITY_KEY,
   type SignerCompatibility,
+  type SignerIdentity,
 } from './capabilities.js'
 
 export {

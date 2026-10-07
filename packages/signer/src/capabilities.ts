@@ -112,7 +112,33 @@ export function signerCapabilityAdvertisement(): {
  * handshake here or the signing-time error there — tells the user the same
  * thing.
  */
-export function signerInstructions(): string {
+export interface SignerIdentity {
+  /** The credential file's agent id; absent on the bare `HAVEN_DELEGATE_KEY` path. */
+  agentId?: string
+  /** The delegate key's address — always known, since the signer holds the key. */
+  delegateAddress?: string
+}
+
+/**
+ * #3738: the identity line. Once one harness carries several Haven pairs, the
+ * model must keep hosted and signer calls inside one pair, and a server NAME
+ * is not proof of that — `haven-research` and `haven-signer-research-2` are
+ * easy to cross. Identity is: the hosted `haven_get_agent` returns `id` and
+ * `delegate_address`, and this line states what THIS signer is bound to, so
+ * the model can compare the two before it signs. Neither value is a secret
+ * (the consent block prints both). Advisory, like the rest of this string —
+ * the signing path's own checks are unchanged.
+ */
+function signerIdentityLines(identity: SignerIdentity | undefined): string[] {
+  if (!identity?.agentId && !identity?.delegateAddress) return []
+  const agent = identity.agentId
+    ? `agent id ${identity.agentId}`
+    : 'no recorded agent id (the key was supplied without a credential file)'
+  const delegate = identity.delegateAddress ? ` and delegate address ${identity.delegateAddress}` : ''
+  return [`This signer is bound to ${agent}${delegate}.`]
+}
+
+export function signerInstructions(identity?: SignerIdentity): string {
   const compatibility = signerCompatibility()
   return [
     'Haven edge signer: sign-only tools bound to the local delegate key. It never emits the',
@@ -120,6 +146,15 @@ export function signerInstructions(): string {
     'Haven by payment_id — pass payment_id to haven_sign (preferred for both a direct payment,',
     '#3271, and delegation-rail x402) or haven_sign_x402 (x402 only) instead of relaying bulky',
     'typed-data payloads yourself.',
+    '',
+    ...signerIdentityLines(identity),
+    'When more than one Haven pair is configured, you act as ONE agent per task: if the',
+    'user has not said which (in the request, or a project-level choice they stated), ask',
+    'before any payment tool. Sign only through the signer of the hosted server you called:',
+    'haven-<slug> with haven-signer-<slug>, bare haven with haven-signer, Codex haven with',
+    'haven_signer. Before signing, compare the identity above with haven_get_agent (its id',
+    'and delegate_address) from that hosted server. If they differ, stop and sign nothing —',
+    'switch to the signer whose identity matches.',
     '',
     'Version compatibility (check this BEFORE signing, not after):',
     `- x402 expected-context versions supported: ${compatibility.x402_expected_context_versions.join(', ')}`,
@@ -139,7 +174,8 @@ export function signerInstructions(): string {
     'machine-readable, not just prose: it carries code, supported_versions, received_version, and',
     'fallback fields alongside the message, so you can branch on it directly. Every signer',
     'refusal also carries the next-step family: next_tool_name + next_tool_server_role when a',
-    'hosted tool follows (resolve the role against your own server names), else',
+    'hosted tool follows (resolve the role against your own server names — with several',
+    'Haven pairs, the hosted server of THIS signer\'s pair), else',
     'next_tool_omitted_reason saying why not.',
     '',
     'An undeclared top-level argument is refused, not stripped: haven_sign answers',

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet } from 'ethers'
 import agentConnectionSetupRoutes, {
+  APPROVED_AGENT_CANCEL_REFUSAL,
   CONNECTOR_PACKAGE,
   normalizeMcpServerName,
 } from '../agent-connection-setups.js'
@@ -1850,7 +1851,10 @@ describe('agent connection setup routes', () => {
     })
 
     expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/paused or revoked/)
+    // #3756: names the agent page's real controls, never pause/revoke.
+    expect(response.json().error).toBe(APPROVED_AGENT_CANCEL_REFUSAL)
+    expect(response.json().error).toContain('use Stop budget or Remove agent… on the agent page')
+    expect(response.json().error).not.toMatch(/paused or revoked/)
     expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups'))).toBe(false)
 
     await app.close()
@@ -2324,7 +2328,9 @@ describe('cancel cannot orphan a live delegation-rail agent (#1073)', () => {
     })
 
     expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/paused or revoked from the agent page/)
+    expect(response.json().error).toBe(APPROVED_AGENT_CANCEL_REFUSAL)
+    expect(response.json().error).toContain('Pausing only blocks payments through Haven.')
+    expect(response.json().error).not.toMatch(/paused or revoked/)
     expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK')
     // The setup must NOT have been marked cancelled.
     expect(

@@ -516,7 +516,7 @@ export type paths = {
         post?: never;
         /**
          * RETIRED — always answers 410. Archive instead.
-         * @description Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: revoke the agent, kill its budgets, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.
+         * @description Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: end the agent's budgets (POST /agents/{id}/delegations/revoke-all, owner-signed), revoke the agent, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.
          */
         delete: operations["deleteAgent"];
         options?: never;
@@ -2183,7 +2183,7 @@ export type paths = {
         };
         /**
          * One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.
-         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-2 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.
+         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. Spend figures are additionally NET of `delegate_sweeps` clawbacks (#3755): per (agent, token, chain) group, gross × (1 − min(1, swept_atomic/confirmed_atomic)) over sweeps that actually returned funds (`status = 'submitted'` with a `tx_hash`, anchored on `submitted_at` in the same window) — a merchant-refused funding leg whose stranded amount was swept back to the treasury does not count as spent. `payments`/`payments_counted` and `last_payment_at` stay gross: they count funding legs made, not money kept. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-2 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.
          */
         get: operations["getAnalyticsOverview"];
         put?: never;
@@ -2499,7 +2499,7 @@ export type paths = {
         put?: never;
         /**
          * Cancel a pending Connect Agent 2 setup.
-         * @description Cancels setup state and revokes the pending agent API key when no on-chain authority has been activated. Active agents must be paused or revoked through normal agent controls.
+         * @description Cancels setup state and revokes the pending agent API key when no on-chain authority has been activated. An approved agent is stopped by ending its budgets instead (POST /agents/{id}/delegations/revoke-all, owner-signed; in the dashboard, Stop budget or Remove agent…); pausing only blocks payments through Haven.
          */
         post: operations["cancelAgentConnectionSetup"];
         delete?: never;
@@ -15967,8 +15967,9 @@ export interface operations {
                             refusals_recorded_from: string | null;
                         };
                         totals: {
-                            /** @description Sum of booked fiat, CONFIRMED only. */
+                            /** @description Booked fiat of CONFIRMED payments, NET of `delegate_sweeps` clawbacks (#3755): per (agent, token, chain) group, gross × (1 − min(1, swept_atomic/confirmed_atomic)) over submitted sweeps in the window — clawed-back funding legs do not count as spent. */
                             spent: string;
+                            /** @description Same net-of-sweeps basis as `spent`, over the previous window. */
                             spent_previous: string;
                             refused_count: number;
                             refused_attempts: number;
@@ -16004,6 +16005,7 @@ export interface operations {
                             id: string;
                             name: string;
                             status: string;
+                            /** @description Net of `delegate_sweeps` clawbacks (#3755), same basis as `totals.spent`; `payments` and `last_payment_at` stay gross. */
                             spent: string;
                             /** @description This agent’s share of total spend across delegation-rail agents, in [0, 1]. */
                             share: number;

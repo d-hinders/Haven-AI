@@ -90,6 +90,7 @@ interface SeedPaymentInput {
   status?: string
   usdValue?: number | null
   eurValue?: number | null
+  sekValue?: number | null
   confirmedAt?: string
   createdAt?: string
   toAddress?: string
@@ -106,6 +107,7 @@ async function seedPayment(input: SeedPaymentInput): Promise<string> {
     status = 'confirmed',
     usdValue = 10,
     eurValue = 9,
+    sekValue = null,
     confirmedAt = new Date().toISOString(),
     createdAt = confirmedAt,
     toAddress = `0x${String(seq).padStart(40, '9')}`,
@@ -117,13 +119,13 @@ async function seedPayment(input: SeedPaymentInput): Promise<string> {
     `INSERT INTO payment_intents (
        agent_id, user_id, account_address, token_symbol, token_address, to_address,
        amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
-       status, usd_value, eur_value, confirmed_at, created_at, expires_at,
+       status, usd_value, eur_value, sek_value, confirmed_at, created_at, expires_at,
        chain_id, merchant_address
      ) VALUES (
        $1, $2, '0x' || repeat('a', 40), 'USDC', '0x' || repeat('b', 40), $3,
        $4, '10.00', '0x' || repeat('c', 40), 1, $5,
-       $6, $7, $8, $9, $10, NOW() + interval '10 minutes',
-       $11, $12
+       $6, $7, $8, $9, $10, $11, NOW() + interval '10 minutes',
+       $12, $13
      ) RETURNING id`,
     [
       agentId,
@@ -134,6 +136,7 @@ async function seedPayment(input: SeedPaymentInput): Promise<string> {
       status,
       status === 'confirmed' ? usdValue : null,
       status === 'confirmed' ? eurValue : null,
+      status === 'confirmed' ? sekValue : null,
       status === 'confirmed' ? confirmedAt : null,
       createdAt,
       chainId,
@@ -154,6 +157,49 @@ function rangeOfDays(days: number): DateRange {
   const to = new Date()
   const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000)
   return { from: from.toISOString(), to: to.toISOString() }
+}
+
+/**
+ * A `delegate_sweeps` row (#3755). Defaults mirror the real submitted shape:
+ * same token address `seedPayment` books (`'0x' || repeat('b', 40)`), a
+ * `tx_hash`, and `submitted_at = created_at = now`. `seedPayment` books
+ * `amount_raw = '10000000'` (10.00 USDC at 6dp), so sweeps are expressed in
+ * those same atomic units.
+ */
+async function seedSweep(input: {
+  agentId: string
+  userId: string
+  valueAtomic: string
+  status?: string
+  txHash?: string | null
+  submittedAt?: string | null
+  tokenAddress?: string
+  chainId?: number
+}): Promise<string> {
+  seq += 1
+  const status = input.status ?? 'submitted'
+  const submittedAt = input.submittedAt === undefined ? new Date().toISOString() : input.submittedAt
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO delegate_sweeps
+       (agent_id, user_id, chain_id, token_address, from_address, to_address,
+        value_atomic, valid_after, valid_before, nonce, status, tx_hash, submitted_at, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 9999999999, $8, $9, $10, $11, COALESCE($11, NOW()))
+     RETURNING id`,
+    [
+      input.agentId,
+      input.userId,
+      input.chainId ?? 84532,
+      input.tokenAddress ?? '0x' + 'b'.repeat(40),
+      '0x' + 'c'.repeat(40),
+      '0x' + 'd'.repeat(40),
+      input.valueAtomic,
+      `0x${String(seq).padStart(64, '1')}`,
+      status,
+      input.txHash === undefined ? `0x${String(seq).padStart(64, 'e')}`.slice(0, 66) : input.txHash,
+      submittedAt,
+    ],
+  )
+  return rows[0].id
 }
 
 describeDb('analytics-overview repository (#2946)', () => {
@@ -982,6 +1028,199 @@ describeDb('analytics-overview repository (#2946)', () => {
     const fees = await sumFeesTotalsForUser(userId, range, rangeOfDays(14))
     expect(Number(fees.fee_rows)).toBe(1)
     expect(Number(fees.fee_usd)).toBeCloseTo(0.1, 6)
+  })
+
+  // ── #3755: spend netted against delegate_sweeps ─────────────────────────
+  // The issue's ready-made fixture: three 0.01-USDC funding legs (≈0.10 SEK
+  // each), one settled, two refused-after-funding and swept back (0.02 USDC
+  // via the gasless sweep) — expected NET 0.10 SEK where the gross shows
+  // 0.30.
+
+  it('issue fixture: two refused legs swept back → totals show NET 0.10 SEK, not gross 0.30', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 31)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+
+    // Three confirmed funding legs — the refused ones carry `confirmed_at`
+    // too (that is the bug), so all three land in the gross sums.
+    for (let i = 0; i < 3; i++) {
+      await seedPayment({
+        agentId,
+        userId,
+        usdValue: 0.01,
+        eurValue: 0.009,
+        sekValue: 0.1,
+        confirmedAt: daysAgoIso(1, 10 + i),
+        amountRaw: '10000',
+      })
+    }
+    // The gasless sweep: 0.02 USDC (20000 atomic) back to the treasury.
+    await seedSweep({ agentId, userId, valueAtomic: '20000', submittedAt: daysAgoIso(1, 14) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, rangeOfDays(14))
+    expect(Number(totals.spent_sek)).toBeCloseTo(0.1, 6)
+    expect(Number(totals.spent_usd)).toBeCloseTo(0.01, 6)
+    expect(Number(totals.spent_eur)).toBeCloseTo(0.009, 6)
+    // The count is of legs MADE, not money kept — deliberately not netted.
+    expect(Number(totals.payments_counted)).toBe(3)
+  })
+
+  it('a sweep that never returned funds (prepared, failed, tx_hash-less) nets nothing', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 32)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+
+    await seedPayment({ agentId, userId, usdValue: 0.1, eurValue: 0.09, confirmedAt: daysAgoIso(1), amountRaw: '100000' })
+    await seedSweep({ agentId, userId, valueAtomic: '100000', status: 'prepared', txHash: null, submittedAt: null })
+    await seedSweep({ agentId, userId, valueAtomic: '100000', status: 'failed', submittedAt: daysAgoIso(1) })
+    await seedSweep({ agentId, userId, valueAtomic: '100000', status: 'submitted', txHash: null, submittedAt: daysAgoIso(1) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, rangeOfDays(14))
+    expect(Number(totals.spent_usd)).toBeCloseTo(0.1, 6)
+  })
+
+  it('netting is scoped to the swept agent: an unswept agent stays gross, per-agent and totals agree', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 33)
+    const sweptAgent = await seedAgent(userId, accountId)
+    const untouchedAgent = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+
+    await seedPayment({ agentId: sweptAgent, userId, usdValue: 0.2, confirmedAt: daysAgoIso(1), amountRaw: '20000' })
+    await seedPayment({ agentId: untouchedAgent, userId, usdValue: 0.1, confirmedAt: daysAgoIso(1), amountRaw: '10000' })
+    await seedSweep({ agentId: sweptAgent, userId, valueAtomic: '20000', submittedAt: daysAgoIso(1) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, rangeOfDays(14))
+    expect(Number(totals.spent_usd)).toBeCloseTo(0.1, 6)
+
+    const perAgent = await listPerAgentSpendForUser(userId, current)
+    const byId = new Map(perAgent.map((r) => [r.agent_id, r]))
+    expect(Number(byId.get(sweptAgent)!.spent_usd)).toBeCloseTo(0, 6)
+    expect(Number(byId.get(untouchedAgent)!.spent_usd)).toBeCloseTo(0.1, 6)
+    // Activity columns stay gross on the swept agent.
+    expect(Number(byId.get(sweptAgent)!.payments)).toBe(1)
+  })
+
+  it('netting is scoped to token and chain: a sweep of another token/chain does not touch this group', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 34)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+
+    await seedPayment({ agentId, userId, usdValue: 0.1, confirmedAt: daysAgoIso(1), amountRaw: '10000' })
+    await seedSweep({ agentId, userId, valueAtomic: '10000', tokenAddress: '0x' + '1'.repeat(40), submittedAt: daysAgoIso(1) })
+    await seedSweep({ agentId, userId, valueAtomic: '10000', chainId: 1, submittedAt: daysAgoIso(1) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, rangeOfDays(14))
+    expect(Number(totals.spent_usd)).toBeCloseTo(0.1, 6)
+  })
+
+  it('token matching is case-insensitive (sweep rows are VARCHAR(42), intents are LOWER()-ed)', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 35)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+
+    await seedPayment({ agentId, userId, usdValue: 0.1, confirmedAt: daysAgoIso(1), amountRaw: '10000' })
+    await seedSweep({ agentId, userId, valueAtomic: '10000', tokenAddress: '0x' + 'B'.repeat(40), submittedAt: daysAgoIso(1) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, rangeOfDays(14))
+    expect(Number(totals.spent_usd)).toBeCloseTo(0, 6)
+  })
+
+  it('a sweep larger than the confirmed atomic volume caps the factor at zero — never negative', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 36)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+
+    await seedPayment({ agentId, userId, usdValue: 0.1, confirmedAt: daysAgoIso(1), amountRaw: '10000' })
+    await seedSweep({ agentId, userId, valueAtomic: '999999999', submittedAt: daysAgoIso(1) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, rangeOfDays(14))
+    expect(Number(totals.spent_usd)).toBe(0)
+    expect(Number(totals.spent_sek)).toBe(0)
+    expect(Number(totals.spent_eur)).toBe(0)
+  })
+
+  it('sweeps net the window they were submitted in: previous-window sweeps amend `spent_previous`', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 37)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+    const previous = rangeOfDays(14)
+
+    await seedPayment({ agentId, userId, usdValue: 0.2, confirmedAt: daysAgoIso(10), amountRaw: '20000' })
+    await seedSweep({ agentId, userId, valueAtomic: '20000', submittedAt: daysAgoIso(9) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, previous)
+    expect(Number(totals.spent_previous_usd)).toBeCloseTo(0, 6)
+    expect(Number(totals.spent_usd)).toBe(0)
+  })
+
+  it('a current-window sweep of funds booked in the previous window floors at zero and leaves the older window overstated (documented residual)', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 38)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+    const previous = rangeOfDays(14)
+
+    await seedPayment({ agentId, userId, usdValue: 0.2, confirmedAt: daysAgoIso(10), amountRaw: '20000' })
+    await seedSweep({ agentId, userId, valueAtomic: '20000', submittedAt: daysAgoIso(1) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, previous)
+    // No confirmed legs in the current window → nothing to net there (0).
+    expect(Number(totals.spent_usd)).toBe(0)
+    // The previous window stays gross: with no sweep→intent link, netting is
+    // anchored on where the legs are, and a sweep submitted later cannot
+    // reach back into a window whose ratio it is not part of.
+    expect(Number(totals.spent_previous_usd)).toBeCloseTo(0.2, 6)
+  })
+
+  it('by-day: each day scales by the window ratio and the days sum back to the netted window total', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 39)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+
+    // 10 USDC booked yesterday, 20 the day before → 30 gross. A 20-USDC
+    // sweep returns 2/3 of the group's booked volume → factor 1/3 per day.
+    await seedPayment({ agentId, userId, usdValue: 10, eurValue: 9, confirmedAt: daysAgoIso(1), amountRaw: '10000000' })
+    await seedPayment({ agentId, userId, usdValue: 20, eurValue: 18, confirmedAt: daysAgoIso(2), amountRaw: '20000000' })
+    await seedSweep({ agentId, userId, valueAtomic: '20000000', submittedAt: daysAgoIso(1) })
+
+    const byDay = await listByDaySpendForUser(userId, 'UTC', current)
+    const daySum = byDay.reduce((s, r) => s + Number(r.usd), 0)
+    expect(daySum).toBeCloseTo(10, 6)
+    for (const row of byDay) {
+      // Netted, not gross: every day sits strictly below its gross booking.
+      expect(Number(row.usd)).toBeGreaterThan(0)
+      expect(Number(row.usd)).toBeLessThan(30)
+    }
+    const day1 = byDay.find((r) => r.day === daysAgoIso(1).slice(0, 10))!
+    const day2 = byDay.find((r) => r.day === daysAgoIso(2).slice(0, 10))!
+    expect(Number(day1.usd)).toBeCloseTo(10 / 3, 6)
+    expect(Number(day2.usd)).toBeCloseTo(20 / 3, 6)
+
+    // And the window net the totals statement reports is the same 10.
+    const totals = await sumTotalsSpendForUser(userId, current, rangeOfDays(14))
+    expect(Number(totals.spent_usd)).toBeCloseTo(10, 6)
+  })
+
+  it('a leg whose amount_raw fails the numeric shape check keeps its gross (unmeasurable groups are not over-netted)', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 40)
+    const agentId = await seedAgent(userId, accountId)
+    const current = rangeOfDays(7)
+
+    await seedPayment({ agentId, userId, usdValue: 0.1, confirmedAt: daysAgoIso(1), amountRaw: 'not-a-number' })
+    await seedSweep({ agentId, userId, valueAtomic: '10000', submittedAt: daysAgoIso(1) })
+
+    const totals = await sumTotalsSpendForUser(userId, current, rangeOfDays(14))
+    expect(Number(totals.spent_usd)).toBeCloseTo(0.1, 6)
+    expect(Number(totals.payments_counted)).toBe(1)
   })
 
   // ── Performance AC, proven by counting driver calls, not by EXPLAIN ─────

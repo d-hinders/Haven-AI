@@ -433,7 +433,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         })
       }
       return reply.code(409).send({
-        error: 'Only revoked agents can be archived. Revoke the agent first — archiving never stops spending by itself.',
+        // #3756: this branch runs only with no live budget left, so the agent
+        // cannot spend; the one blocker is its status. Say exactly that.
+        error: 'Only revoked agents can be archived. This agent holds no live budget, so revoke it first (POST /agents/:id/revoke), then archive.',
       })
     }
 

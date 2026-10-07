@@ -315,7 +315,7 @@ export function helpText(): string {
     '  --replace                  When this machine is already wired to a different Haven agent on the bare',
     '                             haven / haven-signer pair, re-point that pair at the new agent and retire the',
     '                             previous agent directory locally (tombstoned, local key files removed).',
-    '                             Nothing is revoked — revoke the old agent on the Haven agent page. Implies',
+    '                             Nothing is revoked — use Remove agent… on the Haven agent page. Implies',
     '                             the bare pair. Without it (or --bare) a non-interactive run REFUSES such a',
     '                             collision (wiring_collision) and an interactive terminal is asked.',
     '  --bare                     Wire the bare haven / haven-signer pair. Without --name a setup now names',

@@ -963,7 +963,7 @@ async function executeConnect(
       log('')
       log(
         `Replaced: previous agent(s) ${supersededIds(replacing!)} are retired on this machine but NOT revoked — ` +
-          'revoke them on the Haven agent page, then restart EVERY long-lived host (gateways, TUI workers, ' +
+          'use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets), then restart EVERY long-lived host (gateways, TUI workers, ' +
           'editors): each holds the MCP wiring snapshot from its own start time, and the tombstone speaks only ' +
           'when a stale host next probes the old path.',
       )
@@ -974,7 +974,7 @@ async function executeConnect(
           'still exist with their own keys, and any host that was already running keeps acting as them.',
       )
       log(
-        'If you meant to replace them: revoke them on the Haven agent page, then restart EVERY ' +
+        'If you meant to replace them: use Remove agent\u2026 on the Haven agent page for each (it ends their live budgets), then restart EVERY ' +
           'long-lived host (gateways, TUI workers, editors) — each holds the MCP wiring snapshot from ' +
           'its own start time, so after repeated setups each can be stuck on a DIFFERENT old agent. ' +
           `Then remove their directories under ~/.haven/agents (or ${RERUN_HINT} --tombstone <dir> to ` +
@@ -1296,7 +1296,7 @@ async function resolveWiringCollision(
       'Haven setup token is still unused. If you are an AI agent running this command: do NOT add a flag yourself — ' +
       'relay this to your user and stop. Your user decides: REPLACE the existing wiring (re-run the same command with ' +
       '--replace added, which re-points the pair at the new agent and retires the previous directory locally — they ' +
-      'still revoke the old agent on the Haven agent page), or install ALONGSIDE it (re-run with --name <slug> added, ' +
+      'still use Remove agent\u2026 on the Haven agent page to end the old agent\u2019s budgets), or install ALONGSIDE it (re-run with --name <slug> added, ' +
       `e.g. --name ${collision.suggestedServerName}, which gives the new agent its own haven-<slug> / haven-signer-<slug> pair). ` +
       'Re-run only with the flag your user chooses.',
     'relay_wiring_collision_to_user',

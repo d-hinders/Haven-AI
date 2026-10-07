@@ -479,8 +479,7 @@ export default function DesignSystemPage() {
             </p>
             <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
               <code className="rounded bg-[var(--v2-surface)] px-1">--v2-chain-*</code> tells networks
-              apart (Base, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>{' '}
-              and <code className="rounded bg-[var(--v2-surface)] px-1">NetworkSwitcher</code>. These are{' '}
+              apart (Base, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>. These are{' '}
               <span className="font-medium text-[var(--v2-ink)]">identity</span> colours, deliberately outside the
               semantic rules — never reuse a chain colour for success/warning meaning, and never route money
               tone through them.
@@ -2721,6 +2720,9 @@ export default function DesignSystemPage() {
             <div inert aria-hidden="true" className="relative h-0 w-72">
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
+              // #3719: the live menu names the account its status refers to;
+              // shown on this illustration so the line has a rendered state.
+              accountName={'Operating wallet \u00b7 Base Sepolia'}
               signingWith={{
                 label: 'Passkey \u00b7 added March 3, 2026',
                 keyId: DS_PASSKEY_KEY_ID,

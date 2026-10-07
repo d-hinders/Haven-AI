@@ -16,11 +16,10 @@ vi.mock('@/hooks/useContactChains', () => ({
   useContactChains: () => ({ chainsByAddress: chainsState.map, loading: false }),
 }))
 
-vi.mock('@/hooks/useActiveChain', () => ({
+vi.mock('@/hooks/useChainScope', () => ({
   useChainScope: () => ({
     scope: scopeState.scope,
     setScope: mockSetScope,
-    activeChainId: 8453,
     chains: [],
   }),
 }))
@@ -132,7 +131,7 @@ describe('ContactsPage', () => {
     expect(within(badges).getByText('Gnosis Chain')).toBeInTheDocument()
   })
 
-  it('offers a network filter and never collapses to the active chain by default', () => {
+  it('offers a network filter and shows every chain by default', () => {
     chainsState.map = new Map([
       [CONTACT.address.toLowerCase(), [8453]],
       [SECOND_CONTACT.address.toLowerCase(), [100]],
@@ -141,7 +140,7 @@ describe('ContactsPage', () => {
 
     render(<ContactsPage />)
 
-    // Default scope is "all" — both chains' contacts show regardless of active chain.
+    // Default scope is "all" — both chains' contacts show.
     expect(screen.getByText('Acme Services')).toBeInTheDocument()
     expect(screen.getByText('Gnosis Vendor')).toBeInTheDocument()
 

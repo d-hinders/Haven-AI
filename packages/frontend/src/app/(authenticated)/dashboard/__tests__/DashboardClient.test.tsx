@@ -119,7 +119,6 @@ function mockBaseState() {
       wallet_address: '0x5555555555555555555555555555555555555555',
       accounts: [SAFE],
     },
-    activeAccount: SAFE,
   })
   mockUsePreferences.mockReturnValue({ currency: 'USD' })
   mockUseContacts.mockReturnValue({
@@ -353,7 +352,6 @@ describe('DashboardClient', () => {
         wallet_address: '0x5555555555555555555555555555555555555555',
         accounts: [SAFE],
       },
-      activeAccount: SAFE,
     })
     mockUseDashboardOverview.mockReturnValue({
       data: {
@@ -599,7 +597,6 @@ describe('DashboardClient', () => {
           wallet_address: '0x5555555555555555555555555555555555555555',
           accounts: [DELEGATOR_ACCOUNT],
         },
-        activeAccount: DELEGATOR_ACCOUNT,
       })
 
     it('shows the nudge for a funded, single-signer delegation-rail account', () => {
@@ -661,7 +658,6 @@ describe('DashboardClient', () => {
             wallet_address: null,
             accounts: [{ ...SAFE, account_type: 'legacy_safe' as const }],
           },
-          activeAccount: { ...SAFE, account_type: 'legacy_safe' as const },
           passkeys: [
             {
               id: 'passkey-1',
@@ -711,7 +707,6 @@ describe('DashboardClient', () => {
           wallet_address: '0x5555555555555555555555555555555555555555',
           accounts: [DELEGATOR_ACCOUNT],
         },
-        activeAccount: DELEGATOR_ACCOUNT,
       })
       // The signer set must be KNOWN (here: one passkey, no owner — the
       // nudge-worthy configuration) or the component stays silent on the
@@ -740,7 +735,6 @@ describe('DashboardClient', () => {
           wallet_address: '0x5555555555555555555555555555555555555555',
           accounts: [DELEGATOR_ACCOUNT],
         },
-        activeAccount: DELEGATOR_ACCOUNT,
       })
       // Known single-signer set, same as above: without it the test passes
       // via unknown-signer silence and the error branch is load-bearing for

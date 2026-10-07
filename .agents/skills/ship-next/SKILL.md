@@ -14,14 +14,17 @@ Accept one source:
 - no argument or `label=<name>`: choose the lowest-numbered open issue with the label, defaulting to `code-quality`;
 - `epic=#<n>`: choose the lowest-numbered open sub-issue;
 - a specified ready issue: ship that issue;
-- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*), add `code-quality`, then ship the created issue. The label is not what makes the issue ready. It is there so that a run that stops partway leaves the issue in the loop's queue rather than orphaned.
+- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*, and lifting `pending-review` per its § *Hold until ready* — if an owner question stays open, ask it and stop), add `code-quality`, then ship the created issue. The label is not what makes the issue ready. It is there so that a run that stops partway leaves the issue in the loop's queue rather than orphaned.
 
 **Respect dependencies before number order.** An issue is BLOCKED — skip it and take the next candidate — when any of these hold:
 
 - a `Depends on` / `depends: #N` reference in its body points at an issue that is still open;
 - a build-order comment on the epic sequences it after something still open;
 - its scope presupposes code that does not exist yet (verify with a quick grep — an
-  acceptance gate for a subsystem cannot ship before the subsystem).
+  acceptance gate for a subsystem cannot ship before the subsystem);
+- it carries `pending-review`: its spec review or an owner decision is outstanding
+  ([new-task](../new-task/SKILL.md) § *Hold until ready*). This holds for a
+  specified issue too — report what it is waiting for instead of building it.
 
 If every remaining candidate is blocked, stop and report the dependency chain instead
 of forcing the lowest number.

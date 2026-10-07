@@ -7,7 +7,6 @@ import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
-const mockSetActiveSafe = vi.fn()
 const mockUseAccounts = vi.fn()
 const mockUseAgents = vi.fn()
 const mockUsePreferences = vi.fn()
@@ -15,7 +14,6 @@ const mockUsePortfolio = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
-  setActiveAccount: (...args: unknown[]) => mockSetActiveSafe(...args),
 }))
 
 vi.mock('@/hooks/useAccounts', () => ({
@@ -78,7 +76,7 @@ describe('AccountsOverviewClient — degraded balance reads (#3295)', () => {
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
     mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], loading: false })
     mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
-    mockUseAuth.mockReturnValue({ activeAccount: BASE, setActiveAccount: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE] } })
   })
 
   it('shows the last-known total with the stale indicator when a token read failed', () => {

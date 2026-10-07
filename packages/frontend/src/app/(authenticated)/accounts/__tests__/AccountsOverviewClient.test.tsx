@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -6,13 +6,11 @@ const {
   mockUseAccounts,
   mockUseAgents,
   mockUsePreferences,
-  mockSetActiveSafe,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAccounts: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUsePreferences: vi.fn(),
-  mockSetActiveSafe: vi.fn(),
 }))
 
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
@@ -59,7 +57,7 @@ function getAccountCard(name: string): HTMLElement {
   return card
 }
 
-describe('AccountsOverviewClient — active account (#629)', () => {
+describe('AccountsOverviewClient — no global active account (#3719)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
@@ -69,52 +67,30 @@ describe('AccountsOverviewClient — active account (#629)', () => {
       accounts: [BASE, SEPOLIA],
       loading: false,
     })
-    mockUseAuth.mockReturnValue({ activeAccount: BASE, setActiveAccount: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
   })
 
-  it('marks the active account and offers Set active only on the others', () => {
+  it('marks no account as active and offers no Set active control', () => {
     render(<AccountsOverviewClient />)
 
-    const activeCard = getAccountCard('Base account')
-    expect(within(activeCard).getByText('Active')).toBeInTheDocument()
-    // The active card has no "set active" affordance.
-    expect(within(activeCard).queryByLabelText(/Set Base account as active/)).toBeNull()
+    // Non-vacuity: both cards rendered.
+    const baseCard = getAccountCard('Base account')
+    const sepoliaCard = getAccountCard('Sepolia account')
 
-    // The other card offers a switch.
-    expect(screen.getByLabelText('Set Sepolia account as active')).toBeInTheDocument()
+    for (const card of [baseCard, sepoliaCard]) {
+      expect(within(card).queryByText('Active')).toBeNull()
+      expect(within(card).queryAllByRole('button')).toEqual([])
+    }
+    expect(screen.queryByText('Set active')).toBeNull()
+    expect(screen.queryByLabelText(/as active/i)).toBeNull()
   })
 
-  it('switches the active account via the sibling Set active control', () => {
-    render(<AccountsOverviewClient />)
-
-    fireEvent.click(screen.getByLabelText('Set Sepolia account as active'))
-    expect(mockSetActiveSafe).toHaveBeenCalledWith(SEPOLIA)
-    expect(mockSetActiveSafe).toHaveBeenCalledTimes(1)
-  })
-
-  it('activates from both normal and modified name-link clicks', () => {
+  it('each card is a plain link to its account', () => {
     render(<AccountsOverviewClient />)
 
     const link = screen.getByRole('link', { name: 'Sepolia account' })
     expect(link).toHaveAttribute('href', '/accounts/sep1')
-    fireEvent.click(link, { ctrlKey: true })
-    expect(mockSetActiveSafe).toHaveBeenCalledTimes(1)
-    expect(mockSetActiveSafe).toHaveBeenLastCalledWith(SEPOLIA)
-
-    fireEvent.click(link)
-    expect(mockSetActiveSafe).toHaveBeenCalledTimes(2)
-    expect(mockSetActiveSafe).toHaveBeenLastCalledWith(SEPOLIA)
-  })
-
-  it('keeps the stretched account link and Set active as siblings', () => {
-    render(<AccountsOverviewClient />)
-
-    const card = getAccountCard('Sepolia account')
-    const link = within(card).getByRole('link', { name: 'Sepolia account' })
-    const control = within(card).getByRole('button', { name: 'Set Sepolia account as active' })
     expect(link.className).toContain('after:absolute')
-    expect(link.contains(control)).toBe(false)
-    expect(card.querySelector('a a, a button')).toBeNull()
   })
 
   /**
@@ -178,7 +154,7 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
-    mockUseAuth.mockReturnValue({ activeAccount: BASE, setActiveAccount: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
   })
 
   it('offers no Add-account entry point when accounts exist', () => {
@@ -229,9 +205,11 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
  * block above states — so this follows the same three rules:
  *
  *  1. **Non-vacuity first.** Every case asserts the card IS rendered and the
- *     control that is meant to survive ("Set active") IS found, before
- *     asserting anything is missing. A component that threw would otherwise
- *     read as a clean removal.
+ *     absence scan itself finds a real control — the card's own name link —
+ *     before asserting anything is missing. A component that threw, or a scan
+ *     that can never return anything, would otherwise read as a clean
+ *     removal. (Until #3719 the surviving control was "Set active"; that is
+ *     gone with the global active account, so the scan covers links too.)
  *  2. **Both spellings.** The scan matches any control whose accessible name
  *     or visible text mentions "default", not the star's old exact label — so
  *     it also fails on the labelled `Set default` variant the decision
@@ -252,13 +230,12 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
-    mockUseAuth.mockReturnValue({ activeAccount: BASE, setActiveAccount: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
   })
 
   /** Every control on the page whose accessible name or text mentions the word. */
   function controlsMentioning(word: RegExp): string[] {
-    return screen
-      .queryAllByRole('button')
+    return [...screen.queryAllByRole('button'), ...screen.queryAllByRole('link')]
       .map((el) => `${el.getAttribute('aria-label') ?? ''} ${el.textContent ?? ''}`.trim())
       .filter((n) => word.test(n))
   }
@@ -268,15 +245,13 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
 
     render(<AccountsOverviewClient />)
 
-    // Non-vacuity: the cards rendered, and the surviving action is present.
-    expect(screen.getByRole('link', { name: 'Base account' })).toBeInTheDocument()
+    // Non-vacuity: the cards rendered, and the same scan finds a real control.
     // `.some(includes)` rather than `toContain`: the scan concatenates the
-    // accessible name with the visible text, so the entry reads
-    // "Set Sepolia account as active Set active" and an exact match would be
+    // accessible name with the visible text, so an exact match would be
     // asserting the concatenation format instead of the control's presence.
     expect(
-      controlsMentioning(/active/i).some((n) => n.includes('Set Sepolia account as active')),
-      `the surviving set-active control was not found — the scan saw ${JSON.stringify(controlsMentioning(/active/i))}`,
+      controlsMentioning(/Sepolia account/).some((n) => n.includes('Sepolia account')),
+      `the absence scan found no control to prove itself on — it saw ${JSON.stringify(controlsMentioning(/account/i))}`,
     ).toBe(true)
 
     expect(controlsMentioning(/default/i)).toEqual([])
@@ -291,22 +266,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
   it('offers no set-default control for a lone NON-default account either', () => {
     const LONE = account('lone1', 'Lone account', 8453, false)
     mockUseAccounts.mockReturnValue({ accounts: [LONE], loading: false })
-    /*
-      `activeAccount: null` — no account selected yet — and that is load-bearing
-      rather than incidental. `haven-reviewer` found this arm's non-vacuity
-      check proving less than it looked: with the lone account ALSO active,
-      the card renders no button at all, so `controlsMentioning` had nothing
-      to find and the positive control had to come from `getByLabelText`, a
-      different query path than the absence scan uses. A scan that has never
-      been shown to return anything is not evidence of an absence.
-
-      Leaving the account unselected renders `Set active`, so the SAME scan
-      that must come back empty for /default/i must come back non-empty for
-      /active/i. The state under test is unchanged in the way that matters —
-      one account, `is_default: false`, so both badges are suppressed and
-      `/accounts/<id>` hides its own set-default action.
-    */
-    mockUseAuth.mockReturnValue({ activeAccount: null, setActiveAccount: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ user: { accounts: [LONE] } })
 
     render(<AccountsOverviewClient />)
 
@@ -315,8 +275,8 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
     // none.
     expect(screen.getByRole('link', { name: 'Lone account' })).toBeInTheDocument()
     expect(
-      controlsMentioning(/active/i).some((n) => n.includes('Set Lone account as active')),
-      `the absence scan found no set-active control to prove itself on — it saw ${JSON.stringify(controlsMentioning(/active/i))}`,
+      controlsMentioning(/Lone account/).some((n) => n.includes('Lone account')),
+      `the absence scan found no control to prove itself on — it saw ${JSON.stringify(controlsMentioning(/account/i))}`,
     ).toBe(true)
 
     // The state the star was worst in: no badge says "default" anywhere, the

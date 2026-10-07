@@ -7,6 +7,10 @@
  * keep the read-only row plus Stop, with a one-line reason where the form
  * was. These clips pin that card state.
  *
+ * Since #3716 the sub-budget entry lives inside the Add budget panel, which
+ * a retired agent does not have — the "no Issue sub-budget" assertion below
+ * is structurally true there and kept as a cheap guard, not the gate.
+ *
  * ELEMENT-SCOPED to the card's anchor (`#delegation-budget-card`), the same
  * scoping `edit-budget-modal.visual.spec.ts` uses, at the 390 px evidence
  * viewport (`scripts/evidence-viewports.mjs`). One clip, REVOKED: a revoked

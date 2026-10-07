@@ -398,7 +398,7 @@ Money and risk clarity:
 
 ## Agent List
 
-Use for `/agents`: every managed agent as a card, with the list controls above it (#3165).
+Use for `/agents`: every managed agent as a card, with the list controls above it (#3165). The list spans every account the user has — there is no global active account narrowing it (#3719) — so each card names its account with the chain as the secondary half (`Account: Treasury · Base`).
 
 Structure:
 1. Header with the count and the primary action (Connect agent).
@@ -409,7 +409,7 @@ Structure:
 
 Rules:
 - Filter state lives in the URL (`?q=…&status=active,paused&budget=none&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). Writes use `history.replaceState` with a `null` state (Next treats its own `__NA`-marked state as an internal write and would not re-sync `useSearchParams`), so the URL never lags a keystroke. Unknown values in a pasted link are dropped, never applied silently.
-- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode), so the labels facet (#3167) and the organization facet (#3164) plug in without a toolbar change. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts.
+- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options use the same `name · chain` shape as the card. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts.
 - The budget facet offers only what `GET /agents` can prove from `allowances`: recurring, one-time, none. Exhausted, near-limit and pending-signature need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
 - Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind).
 - Filtering is client-side over the loaded list; the API is unpaginated, so this holds until an account has enough agents for `GET /agents` itself to need paging.
@@ -456,9 +456,13 @@ done, and how to stop it (#3691, epic). Sections, in order:
    form is the section's content, headed "Set its first budget"; once one
    exists, adding another is an "Add budget" control that opens the form in
    place (Cancel collapses it), never a permanent second form — unless
-   `?grant=` asks for the form, in which case it opens expanded. A revoked or
-   removed agent's section is read-only plus Stop (#3549). There is no
-   second, read-only budget summary on the page.
+   `?grant=` asks for the form, in which case it opens expanded. Sharing part
+   of an existing budget with another agent lives INSIDE the Add budget
+   panel — a quiet line and an "Issue sub-budget" button below the grant
+   form, shown only while the panel is open (#3716) — never as a permanent
+   card row; the Sub-agent budgets list of issued slices stays on the card,
+   outside the panel. A revoked or removed agent's section is read-only plus
+   Stop (#3549). There is no second, read-only budget summary on the page.
 5. Activity — heading and description above the card, payments-only rows
    (`TransactionsTable` in card variant), empty state "No activity yet". The
    header's right side carries the counts summary — "{n} today · {m} all

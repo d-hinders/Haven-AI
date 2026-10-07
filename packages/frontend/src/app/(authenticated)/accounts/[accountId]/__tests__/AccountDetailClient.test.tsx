@@ -146,8 +146,6 @@ describe('AccountDetailClient', () => {
         wallet_address: '0x5555555555555555555555555555555555555555',
         accounts: [SAFE],
       },
-      activeAccount: SAFE,
-      setActiveAccount: vi.fn(),
       loading: false,
       passkeys: [],
     })
@@ -537,8 +535,6 @@ describe('AccountDetailClient', () => {
         wallet_address: '0x5555555555555555555555555555555555555555',
         accounts: [{ ...SAFE, account_type: 'delegator_hybrid' }],
       },
-      activeAccount: { ...SAFE, account_type: 'delegator_hybrid' },
-      setActiveAccount: vi.fn(),
       loading: false,
       passkeys: [],
     })

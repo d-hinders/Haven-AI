@@ -198,8 +198,10 @@ type Measurement = {
   headerLeft: number
   /** Smallest gap between two consecutive controls inside the bar, in px. */
   smallestBarGap: number | null
-  /** Rendered widths of the account chip's truncating text segments. */
-  chipSegments: number[]
+  /** How many controls sit in the bar's band — what `smallestBarGap` is over. */
+  barControlCount: number
+  /** Account chips in the header — 0 since #3719 removed the global account picker. */
+  accountChipCount: number
   /**
    * The wallet control — the bar's RIGHTMOST control, and what #1803 dropped
    * the label of. Three facts, because the collapse can fail in three ways:
@@ -459,28 +461,11 @@ async function measureToggle(page: Page): Promise<Measurement> {
         corners,
         neighbour,
         headerLeft: Math.round(headerBox.left),
+        barControlCount: inBar.length,
         smallestBarGap: inBar.length >= 2 && Number.isFinite(smallestBarGap)
           ? Math.round(smallestBarGap * 100) / 100
           : null,
-        /**
-         * Widths of the chip's RENDERED text segments, so a collapsed-to-a-
-         * sliver segment is a number rather than a judgement.
-         *
-         * `getClientRects().length` is the display filter, and it is doing real
-         * work: a `hidden sm:inline` segment is still in the DOM with its text
-         * intact and measures 0, which is indistinguishable from "squeezed to
-         * nothing" by width alone. Not hypothetical — the first version of this
-         * reported 0 for the deliberately hidden chain name and read as the
-         * very defect it was added to catch.
-         */
-        chipSegments: Array.from(
-          header.querySelectorAll<HTMLElement>('button[aria-label^="Active account"] span'),
-        )
-          .filter(
-            (el) =>
-              el.getClientRects().length > 0 && !!el.textContent && el.textContent.trim().length > 1,
-          )
-          .map((el) => Math.round(el.getBoundingClientRect().width)),
+        accountChipCount: header.querySelectorAll('button[aria-label^="Active account"]').length,
         wallet,
         slot: slotBox
           ? {
@@ -666,27 +651,27 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         //    called that what it was, a coincidence of the current account
         //    name rather than a spacing decision, in a file that rejects a 6px
         //    gap elsewhere. `TopBar`'s regions now hold `mr-3` apart.
-        expect(m.smallestBarGap).not.toBeNull()
-        expect(m.smallestBarGap!).toBeGreaterThanOrEqual(MIN_CONTROL_GAP_PX)
-
-        // 9. ...and what pays for that room stays legible. The chip absorbs the
-        //    squeeze by truncating, which is fine until a segment truncates to
-        //    a sliver — the failure mode review asked about, and it was real:
-        //    letting the chain name share the squeeze measured it at 18px on a
-        //    390px viewport. It is dropped below `sm` now, so the account name
-        //    gets the room.
         //
-        //    The width-scoped exception that used to sit here is GONE (#1803).
-        //    It relaxed this floor to 1px below 390 because at 320 the bar was
-        //    over-subscribed by more than the chip could absorb: the account
-        //    name landed at 17px, orderly and unreadable. That is fixed at the
-        //    source rather than excused here — the wallet control's label is
-        //    dropped below `sm` (assertion 10), which returns 48.64px to the
-        //    row at 320 and takes the name from 17px to 66px. The floor is now
-        //    the same number at every width this suite runs, which is the only
-        //    form in which it means anything at 320.
-        expect(m.chipSegments.length).toBeGreaterThan(0)
-        expect(Math.min(...m.chipSegments)).toBeGreaterThanOrEqual(LEGIBLE_SEGMENT_PX)
+        //    Since #3719 removed the account chip, a phone's bar on this route
+        //    holds ONE control (the wallet; `EnvBadge` is a span and the theme
+        //    toggle is `hidden` below `lg`), so on `/dashboard` this floor has
+        //    nothing to measure and does not fire. It still applies wherever
+        //    two controls share the band (a detail route's back link beside
+        //    the wallet), and `barControlCount` is asserted so an empty scan
+        //    cannot pass as "nothing to compare".
+        expect(m.barControlCount).toBeGreaterThan(0)
+        if (m.barControlCount >= 2) {
+          expect(m.smallestBarGap!).toBeGreaterThanOrEqual(MIN_CONTROL_GAP_PX)
+        }
+
+        // 9. The account chip is GONE (#3719 removed the global active
+        //    account and its picker). It was the row's compressible item, and
+        //    this assertion used to hold its truncated segments to a legibility
+        //    floor (#1767, #1803). With nothing left to squeeze, what remains
+        //    is that the chip stays gone — a reintroduced one would reopen
+        //    every width question above. The wallet collapse (10) still guards
+        //    the row that is left; see (8) for when the gap floor fires.
+        expect(m.accountChipCount).toBe(0)
 
         // 10. What PAYS for (9), and the two ways paying for it goes wrong
         //     (#1803, owner decision 2026-08-23).

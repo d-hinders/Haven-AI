@@ -4,7 +4,6 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import WalletButton from './WalletButton'
 import EnvBadge from './EnvBadge'
-import NetworkSwitcher from './NetworkSwitcher'
 import { ChevronLeft } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
@@ -108,13 +107,11 @@ export default function TopBar({ actionSlot }: TopBarProps) {
 
           `mr-3` is a floor, not decoration (#1767, design review). This region is
           the compressible one and the right region carries `ml-auto`, so on a
-          phone the two meet exactly when the row runs out of space: measured at
-          390px, the account chip's right edge landed on the notification bell's
-          left edge at 210.61 — touching, with no overlap and no gap either. That
-          was a coincidence of the current strings, not a spacing decision, and it
-          sat one line away from this file rejecting a 6px gap elsewhere as too
-          tight. `mr-3` gives it the same 12px the row uses between its own items;
-          where there is free space `ml-auto` absorbs it and nothing moves.
+          phone the two meet exactly when the row runs out of space. `mr-3` gives
+          it the same 12px the row uses between its own items; where there is
+          free space `ml-auto` absorbs it and nothing moves. (The account chip
+          that once made this row over-subscribed, #1767, was removed with the
+          global active account in #3719.)
         */}
         <div className="flex items-center gap-3 min-w-0 mr-3">
           {/*
@@ -123,16 +120,12 @@ export default function TopBar({ actionSlot }: TopBarProps) {
             the tab bar's "More" slot at the bottom of the screen, so there is no
             longer a fixed control overlapping this row to reserve room for.
 
-            What that gives back is 32px on a phone, and it goes where it was
-            taken from — `NetworkSwitcher`, the widest item here and the only one
-            that could truncate to pay for the spacer (#1767). If a fixed control
-            is ever reintroduced over this row, the reservation has to come back
-            with it; a bare `w-8` is not enough, it needs `shrink-0`, because this
-            row is over-subscribed at 390px and an unshrunk spacer collapses to
-            zero and lets the control paint over the chip.
+            If a fixed control is ever reintroduced over this row, the
+            reservation has to come back with it; a bare `w-8` is not enough, it
+            needs `shrink-0`, or an unshrunk spacer collapses to zero in a tight
+            row and lets the control paint over its neighbour.
           */}
           <EnvBadge />
-          <NetworkSwitcher />
           {back && (
             <Link
               href={back.href}

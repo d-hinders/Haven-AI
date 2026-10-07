@@ -135,9 +135,14 @@ export async function startRekey(
     expires_at: expiresAt,
   })
 
+  // #3737 owner decision 3: an auto-selected named agent prints its exact
+  // --name, so phase two does not depend on the sole-agent discovery still
+  // holding by the time the owner returns with the key. A bare agent prints
+  // no --name, exactly as before.
+  const finishName = options.serverName ?? stored.discoveredSlug
   const finishCommand = [
     connectorRerunCommand('--rekey-finish'),
-    options.serverName ? `--name ${options.serverName}` : undefined,
+    finishName ? `--name ${finishName}` : undefined,
     '--api-key <the key the dashboard showed you>',
     options.runtime ? `--runtime ${options.runtime}` : '--runtime <your runtime>',
   ]

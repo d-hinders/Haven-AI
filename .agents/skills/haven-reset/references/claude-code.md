@@ -5,7 +5,7 @@ Use this procedure only when the active client is Claude Code and the user expli
 ## Reset
 
 1. If `~/.claude.json` exists, create a timestamped backup before mutation. If the repository has `.mcp.json`, back it up separately before removing project-scope entries. User and local scope are stored through Claude's user configuration; project scope is stored in the repository `.mcp.json`.
-2. Remove both `haven` and `haven-signer` from user, local, and project scopes. Ignore only an explicit not-found result:
+2. Remove every Haven pair — not only the bare names — from user, local, and project scopes. Ignore only an explicit not-found result. Start with the bare pair:
 
    ```bash
    claude mcp remove haven -s user
@@ -15,6 +15,8 @@ Use this procedure only when the active client is Claude Code and the user expli
    claude mcp remove haven-signer -s local
    claude mcp remove haven-signer -s project
    ```
+
+   A default setup now names the pair from the agent's display name ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)): enumerate every additional Haven entry in `claude mcp list` (anything named `haven-<slug>` / `haven-signer-<slug>`) and run the same three scope commands with that exact name. A reset that removes only the bare names leaves named pairs live.
 
 3. Delete `~/.haven` — but **not before** the tombstone step. This procedure does not
    restate it: follow [SKILL.md](../SKILL.md) *Required Sequence* step 4, which
@@ -27,7 +29,7 @@ Use this procedure only when the active client is Claude Code and the user expli
 
 ## Verify
 
-1. Inspect `~/.claude.json` and confirm no key under `mcpServers` matches `haven` case-insensitively.
+1. Inspect `~/.claude.json` and confirm no key under `mcpServers` contains `haven` case-insensitively — the bare pair or a named `haven-<slug>` / `haven-signer-<slug>` pair alike.
 2. Inspect the repository `.mcp.json` when present and confirm its `mcpServers` contains no Haven entry.
 3. If a stale hand-edited entry remains, restore safety by removing only that verified Haven entry from the corresponding backed-up config structure, then inspect both files again.
 4. Confirm `~/.haven` holds no live credential material — `identity.json`,

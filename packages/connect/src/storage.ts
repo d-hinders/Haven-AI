@@ -2,6 +2,7 @@ import { access, chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } 
 import crypto from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { assertValidServerSlug } from './server-names.js'
 
 export interface StoredCredentialPaths {
   directory: string
@@ -162,6 +163,15 @@ export interface StoredCredentialSnapshot {
   agentId: string
   apiKey: string
   delegateAddress?: string
+  /**
+   * #3737 owner decision 3: set only when the directory was DISCOVERED (no
+   * `--name`/agent-id key given) and its MCP binding names a valid hosted
+   * slug — so the printed `--rekey-finish` line can carry the exact
+   * `--name` instead of relying on the sole-agent discovery holding until
+   * phase two. Absent for a bare agent (no slug to print) and for an
+   * explicitly keyed call.
+   */
+  discoveredSlug?: string
   accountAddress?: string
   /**
    * Which key the stored files carried the account address under — `--doctor`
@@ -201,6 +211,24 @@ export async function readStoredCredentials(
         'or pass the --name you wired it under.',
     )
   }
+  // #3737 owner decision 3: a discovered directory reports its own slug, so
+  // the repair line names it exactly — the sole-agent discovery that selected
+  // it must not have to hold until phase two.
+  let discoveredSlug: string | undefined
+  if (!key) {
+    const binding = await readJsonFile(join(directory, 'mcp-server-binding.json'))
+    const hostedName = binding && typeof binding === 'object' ? asString((binding as Record<string, unknown>).server_name) : undefined
+    if (hostedName && hostedName.startsWith('haven-')) {
+      const slug = hostedName.slice('haven-'.length)
+      try {
+        assertValidServerSlug(slug)
+        discoveredSlug = slug
+      } catch {
+        // Not a slug-shaped suffix (or a reserved name): print no --name and
+        // let phase two rediscover, rather than print a wrong one.
+      }
+    }
+  }
   const agent = (await readJsonFile(join(directory, 'agent.json'))) ?? {}
   const signer = (await readJsonFile(join(directory, 'signer.json'))) ?? {}
 
@@ -219,6 +247,7 @@ export async function readStoredCredentials(
     directory,
     agentId,
     apiKey,
+    ...(discoveredSlug ? { discoveredSlug } : {}),
     apiUrl,
     hostedMcpUrl,
     delegateAddress: asString(agent.delegate_address) ?? asString(signer.delegate_address),
@@ -283,7 +312,13 @@ async function discoverSoleAgentDirectory(baseDir?: string): Promise<string> {
   const candidates: string[] = []
   for (const entry of entries) {
     const directory = join(root, entry)
-    if (!(await readJsonFile(join(directory, 'identity.json')))) continue
+    const identity = await readJsonFile(join(directory, 'identity.json'))
+    if (!identity) continue
+    // #3737 owner decision 3: a LIVE agent only — one that still holds a
+    // stored API key. A key-removed directory (unwired or reset) is not one
+    // --rekey can act for, and under named-by-default the credential root
+    // carries retired directories of every shape.
+    if (!asString(identity.api_key)) continue
     if (await readJsonFile(join(directory, 'TOMBSTONE.json'))) continue
     candidates.push(directory)
   }

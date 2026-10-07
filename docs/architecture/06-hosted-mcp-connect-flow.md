@@ -61,9 +61,12 @@ permissions require action by the Safe owner outside Haven.
 2. Haven creates a pending setup and returns a setup token and connector
    command.
 3. The connector normally runs locally, generates the delegate signing key and
-   API key, and stores both in protected local runtime configuration. Before
-   it generates anything it checks whether this machine's bare `haven` /
-   `haven-signer` pair already belongs to a different agent with a live key
+   API key, and stores both in protected local runtime configuration. A default
+   setup names the pair from the agent's display name
+   ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) and displaces
+   nothing, so it never has to ask. Only a bare-pair run — `--bare`, or
+   `--replace` — can collide with an agent already wired to the bare
+   `haven` / `haven-signer` pair with a live key
    ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)): a terminal is
    asked to replace or install alongside, a non-interactive run refuses, and
    either way declining reaches neither key generation nor step 4. A server

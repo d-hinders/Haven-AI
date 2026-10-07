@@ -93,18 +93,23 @@ deliberately, not an unreachable one.
 3. **Run the connector for a delegation account** in that environment (`npx -y <connector_package> …`,
    where `<connector_package>` is the value that environment's own setup response returns — since
    #2422 the dist-tag is per-deployment (`HAVEN_CONNECTOR_CHANNEL`) and `@alpha` only in
-   production — or the pasted prompt). Expect: credentials written under `~/.haven/agents/<id>/`,
-   hosted MCP + `haven-signer` entries written to that runtime's config, and the
-   dashboard advancing to the delegation budget-approval screen. For Hermes, verify its
-   `config.yaml` references `MCP_HAVEN_API_KEY` while the matching owner-only
-   `.env` holds the value; do not copy secrets into the run report.
+   production — or the pasted prompt). Expect: credentials written under
+   `~/.haven/agents/<slug-or-id>/`, the agent's own pair — `haven-<slug>` /
+   `haven-signer-<slug>`, named from the agent's display name by default
+   ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) — written to that
+   runtime's config, and the dashboard advancing to the delegation
+   budget-approval screen. For Hermes, verify its `config.yaml` references the
+   pair's env key (`MCP_HAVEN_<SLUG>_API_KEY`, or `MCP_HAVEN_API_KEY` on a bare
+   pair) while the matching owner-only `.env` holds the value; do not copy
+   secrets into the run report.
 4. **Approve, then activate MCP wiring** — approval, not activation, unlocks
    Haven tools. Start a new Claude Code session or fresh Codex CLI session
    (`codex resume --last` is one option); restart Codex Desktop or Claude
    Desktop; let Cursor/VS Code hot-reload; and for Hermes start a new session
-   or run `/restart` in Gateway. For Hermes, check `hermes mcp list` shows both
-   `haven` and `haven-signer`, then run `hermes mcp test haven`. Install its MCP
-   SDK with `pip install mcp` if tools are absent.
+   or run `/restart` in Gateway. For Hermes, check `hermes mcp list` shows the
+   agent's pair (`haven-<slug>` / `haven-signer-<slug>`, or `haven` /
+   `haven-signer` on older installs), then run `hermes mcp test <hosted name>`.
+   Install its MCP SDK with `pip install mcp` if tools are absent.
 5. **Confirm read-only state** — `haven_get_agent` and
    `haven_get_allowances` show identity, readiness, the Haven wallet, and the
    configured budget/live remaining. Do not sign, fund, or create a payment to

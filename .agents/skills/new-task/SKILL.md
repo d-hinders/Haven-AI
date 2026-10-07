@@ -90,13 +90,25 @@ of these hold:
 
 1. the § *Issue review* pass has run, its corrections are in the body, and the
    verdict comment is posted;
-2. **no owner question is open** — every question the body or the verdict lists
-   is answered by the owner, recorded on the issue, and folded into the body;
-3. the body says so: a settled issue has no `## Open questions` section left
-   (answered ones move under `## Owner decisions` with the date).
+2. **no owner question is open** — every question addressed to the owner is
+   answered by the owner, recorded on the issue, and folded into the body;
+3. the body says so: owner questions live under `## Open questions (owner)`,
+   and a settled issue has none left (answered ones move under
+   `## Owner decisions` with the date).
 
-Whoever lifts it says why in the same comment as the last decision or the
-verdict ("all owner questions settled — lifting `pending-review`").
+Only **owner** questions hold the label. A question a partner or the builder
+can settle — "decide at build time", "a partner confirms the fixture" — goes
+under its own heading naming who answers it, and does not keep the issue
+blocked: the label would stop the very session that answers it from claiming.
+
+**Who lifts it.** The filing session, at step 9, when nothing is open. When the
+owner answers later, **whichever session records the answers** — the filer
+coming back, or any session the owner asks — folds them into the body and
+lifts the label in the same pass; the owner may also simply remove it. Whoever
+lifts it says why in the same comment as the last decision or the verdict
+("all owner questions settled — lifting `pending-review`"). A filing session
+that leaves the label on reports, to its user, exactly which questions it is
+waiting for (step 9), so the hold is never silent.
 
 **Put it back** the moment a new owner question appears on an issue nobody has
 claimed yet — a review finding that needs a ruling, a scope gap the code
@@ -108,6 +120,18 @@ question surfaced after the claim), do not rely on the body edit alone: post
 one comment addressed to the claimant that lists every decision verbatim and
 names which earlier wording it supersedes, then update the body. A builder
 reads the body it picked up, not the one it was later replaced with.
+
+**Epics.** Every slice carries the label from creation, like the tracking issue.
+The epic's one verdict (posted on the tracking issue) satisfies condition 1 for
+every slice; conditions 2 and 3 are judged **per slice**, so lift each slice's
+label separately — a slice with no open owner question comes off while another
+holds. `ship-next epic=#<n>` selects only sub-issues, so the tracking issue's
+own label does not block the queue; lift it when the epic-level questions are
+settled.
+
+A run that stops after the verdict but before lifting leaves a settled issue
+blocked. That is the fail-closed direction, and the next session to look
+lifts it.
 
 *Why (2026-10-07, owner):* #3717 was filed with four open owner questions
 listed in its verdict and no hold label; a partner pipeline claimed it eleven
@@ -295,7 +319,9 @@ The captain then has three obligations before the issue is queued or announced:
    body — re-measured by the captain at a named SHA, never copied from the
    reviewer's wording.
 2. **Resolve or state** every named lever and scope gap: settle it in the body,
-   or record it as an open question for the requester or partners.
+   or record it as an open question naming who answers it — one for the owner
+   goes under `## Open questions (owner)` and keeps `pending-review` on
+   (§ *Hold until ready*); one for a partner or the builder does not.
 3. **Post the verdict comment** on the issue (for an epic, on the tracking
    issue): it opens with the words `Spec-review verdict on` and the reviewed SHA,
    lists the corrections applied and the open questions, and ends with
@@ -405,8 +431,10 @@ the label automatically, to queue the CI-health issues they file.
 
 - Do not add `code-quality` by default, and do not offer it as a closing step.
 - When the requester passes `--ship` or clearly asks to ship now, run § *Issue
-  review* first, then continue with [ship-next](../ship-next/SKILL.md) on that
-  issue number. A specified issue needs no label.
+  review* first, lift `pending-review` per § *Hold until ready*, then continue
+  with [ship-next](../ship-next/SKILL.md) on that issue number. If an owner
+  question stays open, stop and ask it — the owner is usually in the session.
+  A specified issue needs no `code-quality` label.
 - Add `code-quality` to a backlog issue only when someone asks for the
   autonomous loop to pick it up. Making the issue an epic sub-issue queues it for
   `epic=#<n>` instead.

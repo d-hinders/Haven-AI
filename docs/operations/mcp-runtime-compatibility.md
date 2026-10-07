@@ -25,6 +25,7 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
+  - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/receipt.ts
   - packages/sdk/src/edge.ts
@@ -74,7 +75,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-02"
+last-verified: "2026-10-07"
 ---
 
 > **Re-verified (2026-10-07, hosted agent identity before tool dispatch):**
@@ -3538,13 +3539,16 @@ Hosted only; the local `@haven_ai/mcp` runtime is unchanged (its one-shot
   step for the first time: `haven_pay_x402_quote` with request-mode
   `next_arguments`. Those are the request as the caller sent it, plus
   `max_amount_human` set to the quoted amount.
-- **Egress policy, stricter than the quote's own probe.**
-  - https only; no IP literal (WHATWG-canonicalised, so `2130706433` and
-    `0x7f.1` count), no loopback, reserved or single-label host (`.localhost`,
-    `.local`, `.internal`, `.test`, …, trailing dots stripped).
-  - `redirect: 'error'`, set per call, and an explicit refusal of any 3xx.
-  - A 15 s timeout and a 256 KB read cap.
-  - Each refusal is a typed `X402_PROBE_*` code with nothing created. A 402 the
+- **Egress policy: #3747's hosted policy, with a stricter redirect rule.**
+  - The target is checked by the client's `merchantEgress` policy
+    (`docs/security/hosted-egress.md`): public https hosts only, no IP literal,
+    localhost, single-label or internal name. A refusal is
+    `MERCHANT_EGRESS_REFUSED`, before any request.
+  - `redirect: 'error'`, set per call, and an explicit refusal of any 3xx:
+    stricter than the policy's re-checked GET redirects, as #3739 and #3747
+    agreed.
+  - The policy's quote budgets: a 15 s timeout and a 256 KiB read cap.
+  - Other refusals are typed `X402_PROBE_*` codes with nothing created. A 402 the
     backend cannot store (over 64 KB) refuses as `X402_CHALLENGE_TOO_LARGE`:
     request mode has no agent copy to fall back on.
   - The policy cannot refuse a public name that resolves to a private address
@@ -5242,3 +5246,18 @@ to call next in structured fields, and those fields are typed end to end
 > The refusal ledger is unchanged (`onchain_revert`; reason set fixed by the
 > migration 086 CHECK). `last-verified` is not re-stamped: this block is the
 > scope. Nothing else in this document was re-verified.
+
+> **#3747 re-verification (2026-10-07, merchant-transport only).** The hosted
+> merchant-egress policy (`packages/sdk/src/merchant-egress.ts`) changed
+> `mcp-merchant-transport.ts` and `client.ts` — both on this contract's cover
+> list. The change is additive and outbound-only: an optional
+> `merchantEgress` config that gates where merchant requests CONNECT
+> (https-only public hosts, re-checked GET redirects, while-reading byte
+> caps, per-use timeouts). No tool is added, renamed or re-shaped; no
+> strict schema changes; the version-skew and consent-hash contracts do not
+> move, and no signing input (typed data, digest, auth.version) is touched —
+> a refusal happens before signing or after an already-signed header was
+> relayed, never by altering intent. The wire contract suite
+> (`x402-expected-wire-contract.test.ts`) runs green through the fixture
+> seam. Scope of this note: those two files' egress additions;
+> `last-verified` is bumped to 2026-10-07 for exactly this coverage.

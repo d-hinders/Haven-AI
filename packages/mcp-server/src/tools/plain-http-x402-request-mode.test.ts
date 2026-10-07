@@ -18,22 +18,20 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { AgentPaymentNextAction } from '@haven_ai/sdk'
 import {
   AGENT_RESPONSE,
-  MERCHANT_TEST_PROBE,
   PAYMENT_REQUIRED,
   X402_INTENT_RESPONSE,
   clearCalls,
   fail,
+  fixtureHandlers,
+  fixtureMerchantEgress,
   handlers,
   installSharedFixtureLifecycle,
   ok,
   recordedCalls,
   stubFetch,
 } from '../test-support/hosted-mcp.js'
-import {
-  assertX402ProbeTargetAllowed,
-  probeX402Challenge,
-  requestModeIdempotencyKey,
-} from './plain-http-x402.js'
+import { assertPublicHttpsMerchantUrl } from '@haven_ai/sdk'
+import { probeX402Challenge, requestModeIdempotencyKey } from './plain-http-x402.js'
 
 installSharedFixtureLifecycle()
 
@@ -104,7 +102,7 @@ function stubMerchant(
 }
 
 async function pay(args: Record<string, unknown>) {
-  return handlers(MERCHANT_TEST_PROBE).haven_pay_x402_quote(args)
+  return fixtureHandlers().haven_pay_x402_quote(args)
 }
 
 describe('#3739 request mode: works on both schemes', () => {
@@ -169,7 +167,7 @@ describe('#3739 request mode: works on both schemes', () => {
   })
 })
 
-describe('#3739 request mode: egress policy refuses before any fetch', () => {
+describe('#3739 request mode: the #3747 egress policy refuses before any fetch', () => {
   const refused = [
     ['an http URL', 'http://merchant.example.com/paid'],
     ['an IPv4 literal', 'https://127.0.0.1/paid'],
@@ -190,13 +188,14 @@ describe('#3739 request mode: egress policy refuses before any fetch', () => {
     it(`refuses ${label}`, async () => {
       stubMerchant(CHALLENGE)
       const res = fail(await handlers().haven_pay_x402_quote({ url, max_amount_human: '2' }))
-      expect(res.code).toBe('X402_PROBE_TARGET_REFUSED')
+      // #3747's hosted policy decides the target; request mode refuses with its code.
+      expect(res.code).toBe('MERCHANT_EGRESS_REFUSED')
       expect(recordedCalls()).toEqual([])
     })
   }
 
   it('POSITIVE CONTROL: a public https domain passes the target check', () => {
-    expect(assertX402ProbeTargetAllowed('https://api.bitrefill.com/x402/invoice/pay').hostname).toBe('api.bitrefill.com')
+    expect(() => assertPublicHttpsMerchantUrl('https://api.bitrefill.com/x402/invoice/pay')).not.toThrow()
   })
 
   it('refuses a merchant 3xx on the probe instead of following it, and sets redirect: error', async () => {
@@ -205,7 +204,7 @@ describe('#3739 request mode: egress policy refuses before any fetch', () => {
       seenRedirect = init.redirect
       return new Response(null, { status: 302, headers: { location: 'https://127.0.0.1/' } })
     })
-    await expect(probeX402Challenge(MERCHANT_URL, {}, MERCHANT_TEST_PROBE.x402Probe)).rejects.toMatchObject({
+    await expect(probeX402Challenge(MERCHANT_URL, {}, fixtureMerchantEgress())).rejects.toMatchObject({
       code: 'X402_PROBE_REDIRECT_REFUSED',
     })
     expect(seenRedirect).toBe('error')
@@ -215,7 +214,7 @@ describe('#3739 request mode: egress policy refuses before any fetch', () => {
     vi.stubGlobal('fetch', async () => {
       throw new TypeError('fetch failed', { cause: new Error('unexpected redirect') })
     })
-    await expect(probeX402Challenge(MERCHANT_URL, {}, MERCHANT_TEST_PROBE.x402Probe)).rejects.toMatchObject({
+    await expect(probeX402Challenge(MERCHANT_URL, {}, fixtureMerchantEgress())).rejects.toMatchObject({
       code: 'X402_PROBE_REDIRECT_REFUSED',
     })
   })
@@ -229,7 +228,7 @@ describe('#3739 request mode: egress policy refuses before any fetch', () => {
         }),
     )
     await expect(
-      probeX402Challenge(MERCHANT_URL, {}, { ...MERCHANT_TEST_PROBE.x402Probe, timeoutMs: 20 }),
+      probeX402Challenge(MERCHANT_URL, {}, { ...fixtureMerchantEgress(), timeouts: { quote: 20 } }),
     ).rejects.toMatchObject({ code: 'X402_PROBE_TIMEOUT' })
   })
 
@@ -237,14 +236,14 @@ describe('#3739 request mode: egress policy refuses before any fetch', () => {
     const big = JSON.stringify({ ...CHALLENGE, padding: 'x'.repeat(4096) })
     vi.stubGlobal('fetch', async () => new Response(big, { status: 402 }))
     await expect(
-      probeX402Challenge(MERCHANT_URL, {}, { ...MERCHANT_TEST_PROBE.x402Probe, maxResponseBytes: 1024 }),
+      probeX402Challenge(MERCHANT_URL, {}, { ...fixtureMerchantEgress(), responseByteCaps: { quote: 1024 } }),
     ).rejects.toMatchObject({ code: 'X402_PROBE_TOO_LARGE' })
     vi.stubGlobal(
       'fetch',
       async () => new Response('{}', { status: 402, headers: { 'content-length': String(10 * 1024 * 1024) } }),
     )
     await expect(
-      probeX402Challenge(MERCHANT_URL, {}, { ...MERCHANT_TEST_PROBE.x402Probe, maxResponseBytes: 1024 }),
+      probeX402Challenge(MERCHANT_URL, {}, { ...fixtureMerchantEgress(), responseByteCaps: { quote: 1024 } }),
     ).rejects.toMatchObject({ code: 'X402_PROBE_TOO_LARGE' })
   })
 })
@@ -526,7 +525,7 @@ describe('#3739 resume works for a payment created in request mode', () => {
     expect(created.data.payment_id).toBe('pay_x402')
 
     const resumed = ok(
-      await handlers(MERCHANT_TEST_PROBE).haven_resume_x402_payment({ payment_id: 'pay_x402', url: MERCHANT_URL }),
+      await fixtureHandlers().haven_resume_x402_payment({ payment_id: 'pay_x402', url: MERCHANT_URL }),
     ) as { data: Record<string, any> }
     expect(resumed.data.payment_id).toBe('pay_x402')
     expect(resumed.data.payment_required).toEqual(CHALLENGE)

@@ -39,6 +39,19 @@ runtime or `@haven_ai/signer`.
 | Edge signer | Delegate private key | Local signing authority |
 | Budget delegation | On-chain caveat enforcers | Automatic-spend enforcement |
 
+**Merchant egress (#3747).** Every hosted merchant request — quote, MCP
+session, tool call, paid delivery, discovery — is additionally constrained by
+the string-level egress policy in
+[docs/security/hosted-egress.md](../security/hosted-egress.md): https-only
+public hosts (no IP literals, no localhost or internal names — including
+`*.railway.internal`), GET redirects followed only with every hop re-checked
+(≤3; a redirect on any other method is refused), while-reading response byte
+caps, and short probe budgets with a finite paid-delivery budget. The same
+policy runs at quote/prepare time, so a bad target is refused **before**
+funding; a refusal during paid delivery after the request was sent routes
+through the #1300 verify-then-sweep handling. Accepted residual: a public
+name whose DNS answer points at private space is not blocked (#3742–#3744).
+
 API authentication is identity, a delegate signature is authority, and the
 on-chain caveat stack is enforcement. Hosted MCP must never accept, store, or log a
 delegate key. It has a boot-time guard that rejects an injected key.
@@ -392,4 +405,7 @@ custody summary.
 - [x402 payment sequence](04-x402-payment-sequence.md)
 - [Edge signer](07-edge-signer.md)
 - [Local vs hosted MCP](08-local-vs-hosted-mcp.md)
+- [Hosted merchant egress](../security/hosted-egress.md) (#3747: the string-level
+  policy every hosted merchant request runs under — https-only public hosts,
+  re-checked GET redirects, while-reading byte caps; the accepted DNS residual)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

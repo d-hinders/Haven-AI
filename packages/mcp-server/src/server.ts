@@ -1,10 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { HavenClient, havenClientIdentity } from '@haven_ai/sdk'
+import { HavenClient, havenClientIdentity, strictMerchantEgressPolicy, type MerchantEgressPolicy } from '@haven_ai/sdk'
 import { hostedConnectorUpgradeCommand } from './connector-channel.js'
 import {
   assertHostedToolRegistry,
   createToolHandlers,
-  type CreateToolHandlersOptions,
   toolDescriptions,
   toolInputSchema,
   toolSchemas,
@@ -155,6 +154,17 @@ export interface HostedClientOptions {
   apiKey: string
   /** Haven backend base URL the server relays through. */
   baseUrl?: string
+  /**
+   * #3747: override the strict hosted merchant-egress policy. Production
+   * callers OMIT this — `createHostedHavenClient` then installs
+   * `strictMerchantEgressPolicy()` (https-only public hosts, re-checked GET
+   * redirects, while-reading byte caps, short probe budgets, finite paid
+   * delivery). The override exists as the EXPLICIT test seam so tests reach
+   * local fixture servers without carving an exemption into the production
+   * policy, and for a deployment that must adjust budgets deliberately. It is
+   * never read from request input.
+   */
+  merchantEgress?: MerchantEgressPolicy
 }
 
 /**
@@ -180,6 +190,13 @@ export function createHostedHavenClient(options: HostedClientOptions): HavenClie
     apiKey: options.apiKey,
     baseUrl: options.baseUrl,
     chainRpcs,
+    // #3747: the hosted server constrains every merchant request — quote,
+    // MCP session, tool call, paid delivery, discovery — to public https
+    // hosts, with re-checked redirects and while-reading body caps. The
+    // per-request test seam is `options.merchantEgress`; production never
+    // passes it. Without a policy the SDK would ship requests to any host
+    // the agent names, including IP literals and *.railway.internal.
+    merchantEgress: options.merchantEgress ?? strictMerchantEgressPolicy(),
     // #3303: the hosted server is Haven-deployed and outside the five
     // published packages, so the backend's compat table never hints or refuses
     // it; naming it keeps its requests from reading as a bare SDK embedder's.
@@ -206,10 +223,7 @@ export function createHostedHavenClient(options: HostedClientOptions): HavenClie
  * backend can attribute the audit-log row. The async-local store keeps
  * concurrent tenants' headers from leaking into each other.
  */
-export function buildHostedMcpServer(
-  haven: HavenClient,
-  options?: CreateToolHandlersOptions,
-): McpServer {
+export function buildHostedMcpServer(haven: HavenClient): McpServer {
   const server = new McpServer(
     {
       name: HOSTED_SERVER_NAME,
@@ -218,7 +232,7 @@ export function buildHostedMcpServer(
     { instructions: HOSTED_INSTRUCTIONS },
   )
 
-  const handlers = createToolHandlers(haven, options)
+  const handlers = createToolHandlers(haven)
   // #2807: fail loud BEFORE registration if the contract registry is
   // incomplete — a tool without a schema, description, input-policy decision
   // or handler cannot boot. Compile-time exhaustiveness (the Record

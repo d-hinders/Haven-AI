@@ -67,6 +67,8 @@ import {
   parsePaymentRequiredResponse,
   resolveTokenFromAddress,
   resolveX402RetryTarget,
+  strictMerchantEgressPolicy,
+  type MerchantEgressPolicy,
   isSecureX402RetryTarget,
   isZeroSettlementTxHash,
   parseMerchantSettlement,
@@ -87,7 +89,7 @@ import {
   quoteWarnings,
   readMaxAmountCap,
 } from './support/cap-price.js'
-import { HostedToolError, normalizeError, runTool } from './support/errors.js'
+import { HostedToolError, egressRefusalBeforeIntent, normalizeError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   catchSettledReplay,
@@ -329,39 +331,17 @@ function differsFromRequest(target: X402RetryTarget): { resource_url_differs_fro
 // the agent, never the response body.
 
 /**
- * The explicit test seam the issue asks for: fixtures use `merchant.test`,
- * which the reserved-name rule refuses in production. Nothing outside tests
- * passes `allowHost`.
+ * #3739: the probe's budgets fall back to these when the client carries no
+ * egress policy. They equal #3747's hosted quote budgets
+ * (`HOSTED_EGRESS_TIMEOUTS.quote`, `HOSTED_RESPONSE_BYTE_CAPS.quote`), which
+ * apply whenever the policy is present.
  */
-export interface X402RequestProbeOptions {
-  /** Hosts admitted despite the reserved-name rule. Tests only. */
-  allowHost?: (hostname: string) => boolean
-  timeoutMs?: number
-  maxResponseBytes?: number
-}
-
-/** Well under the hosted tool budget; the quote's transport default is 300 s. */
 export const X402_REQUEST_PROBE_TIMEOUT_MS = 15_000
-/** A 402 challenge is a few KB; this bounds what an unpaid probe reads. */
 export const X402_REQUEST_PROBE_MAX_BYTES = 256 * 1024
 /** `POST /x402` drops a stored challenge over 64 KB (`createX402Intent`). */
 const X402_STORED_CHALLENGE_MAX_BYTES = 65_536
 /** The SDK's derived-key bucket (`X402_IDEMPOTENCY_BUCKET_MS`), same width. */
 const REQUEST_MODE_KEY_BUCKET_MS = 300_000
-
-/** Reserved / non-public suffixes (RFC 6761, RFC 6762, RFC 8375, common internal TLDs). */
-const RESERVED_HOST_SUFFIXES = [
-  'localhost',
-  'local',
-  'internal',
-  'test',
-  'invalid',
-  'example',
-  'lan',
-  'intranet',
-  'home.arpa',
-  'onion',
-]
 
 function probeRefusal(code: string, message: string): HostedToolError {
   return new HostedToolError({
@@ -375,40 +355,6 @@ function probeRefusal(code: string, message: string): HostedToolError {
         'the merchant request could not be probed under the egress policy; nothing was created, so there is nothing to resume',
     }),
   })
-}
-
-/** Refuses an unpaid-probe target outside the policy, before any fetch. */
-export function assertX402ProbeTargetAllowed(rawUrl: string, options: X402RequestProbeOptions = {}): URL {
-  let url: URL
-  try {
-    url = new URL(rawUrl)
-  } catch {
-    throw probeRefusal('X402_PROBE_TARGET_REFUSED', 'Refusing to probe the url: it is not a valid URL.')
-  }
-  if (url.protocol !== 'https:') {
-    throw probeRefusal(
-      'X402_PROBE_TARGET_REFUSED',
-      `Refusing to probe ${url.origin}: request mode fetches https URLs only.`,
-    )
-  }
-  // WHATWG parsing already canonicalises IPv4 spellings (`2130706433`,
-  // `0x7f.1`, `0`) to dotted form; strip trailing dots so `localhost.` and
-  // `merchant.test.` cannot slip past the suffix rule.
-  const host = url.hostname.toLowerCase().replace(/\.+$/, '')
-  if (options.allowHost?.(host)) return url
-  if (host.startsWith('[') || /^[0-9.]+$/.test(host)) {
-    throw probeRefusal(
-      'X402_PROBE_TARGET_REFUSED',
-      `Refusing to probe ${url.origin}: request mode does not fetch IP-literal hosts. Use the merchant's domain name.`,
-    )
-  }
-  if (!host.includes('.') || RESERVED_HOST_SUFFIXES.some((s) => host === s || host.endsWith(`.${s}`))) {
-    throw probeRefusal(
-      'X402_PROBE_TARGET_REFUSED',
-      `Refusing to probe ${url.origin}: request mode does not fetch loopback, reserved or single-label hosts.`,
-    )
-  }
-  return url
 }
 
 /** Reads at most `max` bytes; `null` when the body is larger. */
@@ -458,17 +404,24 @@ function isTimeout(err: unknown): boolean {
 export async function probeX402Challenge(
   rawUrl: string,
   init: RequestInit,
-  options: X402RequestProbeOptions = {},
+  policy: MerchantEgressPolicy,
 ): Promise<X402PaymentRequired> {
-  const url = assertX402ProbeTargetAllowed(rawUrl, options)
-  const timeoutMs = options.timeoutMs ?? X402_REQUEST_PROBE_TIMEOUT_MS
-  const maxBytes = options.maxResponseBytes ?? X402_REQUEST_PROBE_MAX_BYTES
+  // #3747's hosted egress policy decides the target (public https hosts only;
+  // no IP literal, localhost, single-label or internal name), BEFORE any fetch.
+  try {
+    policy.assertUrl(rawUrl)
+  } catch (err) {
+    throw egressRefusalBeforeIntent(err)
+  }
+  const url = new URL(rawUrl)
+  const timeoutMs = policy.timeouts?.quote ?? X402_REQUEST_PROBE_TIMEOUT_MS
+  const maxBytes = policy.responseByteCaps?.quote ?? policy.maxResponseBytes ?? X402_REQUEST_PROBE_MAX_BYTES
   const signal = AbortSignal.timeout(timeoutMs)
   let response: Response
   let bytes: Uint8Array<ArrayBuffer> | null
   try {
-    // `redirect: 'error'`, set per call: a 3xx is refused, never followed —
-    // a redirect is how an allowed host would hand the probe to one that is not.
+    // `redirect: 'error'`, set per call: stricter than #3747's re-checked GET
+    // redirects, as #3739 and #3747 agreed — a 3xx is refused, never followed.
     response = await globalThis.fetch(url.toString(), { ...init, redirect: 'error', signal })
     if (response.status >= 300 && response.status < 400) {
       await response.body?.cancel().catch(() => undefined)
@@ -737,7 +690,6 @@ export type PlainHttpX402ToolName = (typeof PLAIN_HTTP_X402_TOOLS)[number]
  */
 export function createPlainHttpX402Handlers(
   haven: HavenClient,
-  options?: { x402Probe?: X402RequestProbeOptions },
 ): HostedToolHandlers<PlainHttpX402ToolName> {
   return {
     haven_quote_x402: async (input) => {
@@ -922,7 +874,7 @@ export function createPlainHttpX402Handlers(
           if (args.method) init.method = args.method
           if (args.headers) init.headers = args.headers
           if (args.body !== undefined) init.body = args.body
-          payReq = await probeX402Challenge(args.url, init, options?.x402Probe)
+          payReq = await probeX402Challenge(args.url, init, haven.merchantEgress ?? strictMerchantEgressPolicy())
           if (!selectStandardPaymentOption(payReq.accepts) && !selectErc7710PaymentOption(payReq.accepts)) {
             throw noPayableOptionRefusal(payReq.accepts)
           }
@@ -960,6 +912,17 @@ export function createPlainHttpX402Handlers(
             statusCode: 400,
             nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you quoted as url; nothing was funded or signed' }),
           })
+        }
+        // #3747: the hosted egress policy also runs HERE, at the last point
+        // before an intent exists — an https:// IP literal or internal name
+        // passes the scheme check above but is refused before funding, so it
+        // can never surface only as a funded-but-undeliverable payment.
+        if (haven.merchantEgress) {
+          try {
+            haven.merchantEgress.assertUrl(retryTarget.url)
+          } catch (err) {
+            throw egressRefusalBeforeIntent(err)
+          }
         }
         // #1351: shape-check the cap before the funding intent. In
         // payment_required mode this tool has no merchant probe of its own, so

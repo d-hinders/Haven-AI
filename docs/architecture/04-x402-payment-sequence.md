@@ -377,9 +377,10 @@ the hosted default.** The drawing below is `payment_required` mode, where the
 agent hands over the 402 it received. In request mode the agent instead passes
 `haven_pay_x402_quote` the request it quoted (`url`, `method`, `headers`,
 `body`, and a required cap — `haven_quote_x402` names them in its
-`next_arguments`), and the hosted MCP makes that unpaid request again itself:
-https only, no IP-literal, loopback or reserved host, no redirect followed, a
-15 s timeout and a 256 KB read cap. It builds the intent from the 402 *it*
+`next_arguments`), and the hosted MCP makes that unpaid request again itself,
+under #3747's hosted egress policy (public https hosts only — no IP literal,
+localhost, single-label or internal name — with its 15 s and 256 KiB quote
+budgets) and a stricter redirect rule: none is followed. It builds the intent from the 402 *it*
 fetched, so the challenge the backend stores — and the eip3009 header echoes —
 is the merchant's, never an agent's copy (the 2026-10-07 Bitrefill failure was
 an agent dropping `extensions.bazaar.schema` while retyping it). A repeated call

@@ -88,6 +88,7 @@ function rebuildRealFixtureForSender(newSender: `0x${string}`) {
   return rebuildDirectUserOpForSender(directPaymentUserOpFixture.typed_data, newSender)
 }
 import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
+import { fixtureMerchantEgress } from './test-support/hosted-mcp.js'
 import { createHostedHavenClient } from './server.js'
 import {
   directSignerCompatibilityNotice,
@@ -1533,8 +1534,7 @@ describe('#3739 — request mode: the header echoes the probed challenge', () =>
         : haven(url, init),
     )
     const hostedHandlers = createHostedHandlers(
-      new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' }),
-      { x402Probe: { allowHost: (host) => host === 'merchant.test' } },
+      new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test', merchantEgress: fixtureMerchantEgress() }),
     )
 
     const pay = ok<{ payment_id: string; next_tool_name: string }>(

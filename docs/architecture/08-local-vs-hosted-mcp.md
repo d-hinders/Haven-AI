@@ -361,6 +361,17 @@ haven_pay_x402_quote → haven_sign
 > when the fact warrants it (eip3009, accepted, unsettled) — not a new call
 > an agent must always make. `last-verified` unchanged.
 
+> **Hosted egress (#3747).** Only the HOSTED side of this comparison is
+> constrained: `createHostedHavenClient` installs the strict merchant-egress
+> policy (https-only public hosts, no IP literals or internal names, ≤3
+> re-checked GET redirects, while-reading byte caps, per-use budgets —
+> [docs/security/hosted-egress.md](../security/hosted-egress.md)). The local
+> MCP and SDK embedders are unchanged: without `merchantEgress` the client
+> behaves exactly as before, including `http` to loopback and reserved
+> `.test`/`.localhost`/`.invalid`/`.example` fixtures. Accepted residual on
+> the hosted side: a public name whose DNS answer points at private space is
+> not blocked (that is the resolution-time work parked in #3742–#3744).
+
 The report step exists only on the EIP-3009 branch, and only in hosted mode's
 plain-HTTP shape ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).
 It is where the local/hosted split has a consequence rather than a preference:
@@ -431,6 +442,7 @@ since #1984 — are unaffected, hosted and local alike.
 
 - [Hosted connect flow](06-hosted-mcp-connect-flow.md)
 - [Edge signer](07-edge-signer.md)
+- [Hosted merchant egress](../security/hosted-egress.md) (#3747)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
 
 > **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff

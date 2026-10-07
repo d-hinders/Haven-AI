@@ -132,6 +132,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   isX402PaymentWindowExpired: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   paymentWindowExpiredError: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   paymentWindowExpiredErrorFor: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  // #3747: the hosted refusal for a pre-intent merchant-egress refusal, used
+  // by the quote/prepare seams in mcp-context and plain-http-x402.
+  egressRefusalBeforeIntent: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
@@ -444,6 +447,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'paymentWindowExpiredError',
     'paymentWindowExpiredErrorFor',
     'normalizeError',
+    'egressRefusalBeforeIntent', // #3747
   ],
   guidance: [
     'buildAgentGuidance',
@@ -878,12 +882,8 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
       .split('\n')
       .map((l) => l.trim())
       .filter((t) => t !== '' && !t.startsWith('//'))
-    // #3739: a spread may also pass the facade's own `options` through
-    // (request mode's probe seam) — still a spread of a capability, never a
-    // literal key, so the shadow it guards against stays unreachable.
     const unexpected = statements.filter(
-      (t) =>
-        t !== 'return {' && t !== '}' && !/^\.{3}create[A-Za-z0-9]+Handlers\(haven(, options)?\),$/.test(t),
+      (t) => t !== 'return {' && t !== '}' && !/^\.{3}create[A-Za-z0-9]+Handlers\(haven\),$/.test(t),
     )
     expect(
       unexpected,

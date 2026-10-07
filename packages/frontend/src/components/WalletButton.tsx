@@ -761,7 +761,9 @@ export default function WalletButton({
         const accountChainName = getAccountChainName(subjectAccount?.chain_id)
         // Which account the pill speaks for, now that nothing on screen says
         // which one is "active" (#3719).
-        // The name only: the menu's own `Network:` row already carries the chain.
+        // The name only: in the passkey and delegator menus the `Network:` row
+        // already carries the account's chain (in the connected-wallet menu that
+        // row is the wallet's network).
         const subjectAccountName = subjectAccount?.name
         const openWalletConnect = () => {
           if (openConnectModalHook) {

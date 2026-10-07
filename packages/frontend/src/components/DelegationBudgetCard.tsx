@@ -165,12 +165,38 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
     pendingFocus.current = 'add'
     setFormOpen(false)
   }, [])
+  // #3716: the sub-budget entry lives in the Add budget panel, below the
+  // grant form. Clicking it collapses the form and opens the modal. It
+  // deliberately does NOT route through `collapseForm`/`pendingFocus`: the
+  // card's focus effect below fires on the `formOpen` change — after
+  // `Modal`'s own child effect (ui/Modal.tsx) — so a pending focus would pull
+  // focus back out of the dialog that just opened. The typed amount and
+  // recipient survive, exactly as Cancel leaves them.
+  const openSubBudget = useCallback(() => {
+    setFormOpen(false)
+    setIssuingSubBudget(true)
+  }, [])
   useEffect(() => {
     const target = pendingFocus.current
     if (!target) return
     pendingFocus.current = null
     ;(target === 'amount' ? amountRef.current : addBudgetRef.current)?.focus()
   }, [formOpen])
+
+  // #3716: when the modal closes, `formOpen` does not change, so the effect
+  // above does not run — and `Modal` restores focus to the clicked entry
+  // (ui/Modal.tsx), which the collapsed form has unmounted. Focus Add budget
+  // explicitly, once per open→close cycle; the guard keeps the initial
+  // render (and a close without a modal) from stealing focus.
+  const wasIssuingSubBudget = useRef(false)
+  useEffect(() => {
+    if (issuingSubBudget) {
+      wasIssuingSubBudget.current = true
+    } else if (wasIssuingSubBudget.current) {
+      wasIssuingSubBudget.current = false
+      addBudgetRef.current?.focus()
+    }
+  }, [issuingSubBudget])
 
   useEffect(() => {
     // #3549: a retired agent's card has no grant form to fill — leave the
@@ -287,9 +313,10 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   // shape `signersError` already uses below, rather than collapsing the whole
   // card and taking the grant form with it.
   const active = (budgets ?? []).filter((b) => b.status === 'active')
-  // #3506: a sub-budget is carved from a LIVE budget — the entry point exists
-  // only when this agent has an active, unexpired one (the card itself renders
-  // only on the delegation rail). The modal offers a picker when several qualify.
+  // #3506: a sub-budget is carved from a LIVE budget — the entry point, now
+  // inside the Add budget panel below (#3716), exists only when this agent
+  // has an active, unexpired one (the card itself renders only on the
+  // delegation rail). The modal offers a picker when several qualify.
   const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets, Math.floor(Date.now() / 1000))
 
   // #3695: with no active budget the grant form IS the section's content;
@@ -440,25 +467,31 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
               ) : undefined
             }
           />
+          {/* #3716: sharing a slice of an EXISTING budget with another agent
+              is a different thing from giving this agent more spending
+              power, so it sits below the form — under Set budget and Cancel
+              — and reads as another action, never an option of the form. It
+              shows only while the panel is open (this block), keeping the
+              #3506 gate: eligible parents (active, unexpired,
+              not merchant-pinned) and no failed budgets read (the real hook
+              nulls `budgets` on error, so `subBudgetParents` is empty
+              there). */}
+          {subBudgetParents.length > 0 && !budgetsError ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-[var(--v2-ink-muted)]">
+                Or share part of an existing budget with another agent
+              </p>
+              <Button variant="tertiary" onClick={openSubBudget}>
+                Issue sub-budget
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
           Budgets aren&rsquo;t available for this network yet.
         </p>
       )}
-
-      {/* Below Add budget, which belongs with the rows it adds to (#3695
-          design review); sharing a slice is a different action. */}
-      {subBudgetParents.length > 0 && !budgetsError ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--v2-border)] pt-3">
-          <p className="text-xs text-[var(--v2-ink-muted)]">
-            Share part of this budget with another of your agents.
-          </p>
-          <Button size="sm" variant="ghost" onClick={() => setIssuingSubBudget(true)}>
-            Issue sub-budget
-          </Button>
-        </div>
-      ) : null}
 
       {/* #3329: task budgets are a separate, self-closing authority carved
           from a budget above — listed here only when at least one is open,

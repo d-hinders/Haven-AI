@@ -456,9 +456,13 @@ done, and how to stop it (#3691, epic). Sections, in order:
    form is the section's content, headed "Set its first budget"; once one
    exists, adding another is an "Add budget" control that opens the form in
    place (Cancel collapses it), never a permanent second form — unless
-   `?grant=` asks for the form, in which case it opens expanded. A revoked or
-   removed agent's section is read-only plus Stop (#3549). There is no
-   second, read-only budget summary on the page.
+   `?grant=` asks for the form, in which case it opens expanded. Sharing part
+   of an existing budget with another agent lives INSIDE the Add budget
+   panel — a quiet line and an "Issue sub-budget" button below the grant
+   form, shown only while the panel is open (#3716) — never as a permanent
+   card row; the Sub-agent budgets list of issued slices stays on the card,
+   outside the panel. A revoked or removed agent's section is read-only plus
+   Stop (#3549). There is no second, read-only budget summary on the page.
 5. Activity — heading and description above the card, payments-only rows
    (`TransactionsTable` in card variant), empty state "No activity yet". The
    header's right side carries the counts summary — "{n} today · {m} all

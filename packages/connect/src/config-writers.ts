@@ -651,7 +651,9 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       restartRequired: true,
       messages: [
         `Updated Haven MCP entries in ${target}; stored the hosted MCP identity in ${envTarget}.`,
-        'Restart Hermes (start a new session; gateway users: /restart), then verify with `hermes mcp list`, `hermes mcp test haven`, and `hermes mcp test haven-signer`.',
+        // #3737: name the pair actually written — a bare run prints exactly the
+        // historical sentence; a named run names its own pair.
+        `Restart Hermes (start a new session; gateway users: /restart), then verify with \`hermes mcp list\`, \`hermes mcp test ${names.hosted}\`, and \`hermes mcp test ${names.signer}\`.`,
         'If several long-lived Hermes processes are running (a gateway plus TUI workers), restart EVERY one: each loads its MCP wiring at startup, so a process started before this setup keeps using its old snapshot.',
         'If no mcp_* tools appear after restart, ensure the MCP SDK is installed in Hermes: pip install mcp',
       ],

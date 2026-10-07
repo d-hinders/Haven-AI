@@ -130,24 +130,91 @@ export async function detectWiringCollision(input: {
  * types it back (or their own), and the ordinary `--name` path validates it
  * again before anything is written.
  */
-export function proposeServerSlug(agentName: string, taken: ReadonlySet<string>): string {
+export function proposeServerSlug(
+  agentName: string,
+  taken: ReadonlySet<string>,
+  maxBaseLength = 32,
+): string {
   let base = agentName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-')
-    .slice(0, 32)
+    .slice(0, maxBaseLength)
     .replace(/-+$/g, '')
   if (!slugIsValid(base)) base = 'agent'
   if (!taken.has(base)) return base
   for (let n = 2; n < 1000; n += 1) {
     const suffix = `-${n}`
-    const candidate = `${base.slice(0, 32 - suffix.length).replace(/-+$/g, '')}${suffix}`
+    const candidate = `${base.slice(0, maxBaseLength - suffix.length).replace(/-+$/g, '')}${suffix}`
     if (slugIsValid(candidate) && !taken.has(candidate)) return candidate
   }
   // Unreachable in practice (999 same-named directories); never return a
   // taken or invalid slug, so refuse loudly rather than propose one.
   throw new Error(`Could not propose an unused server name for ${JSON.stringify(agentName)}.`)
+}
+
+/**
+ * #3737: the slug a DEFAULT setup derives for itself. Same rules as the
+ * collision-path proposal — slugified display name, `agent` fallback, numeric
+ * de-collision — with the owner-decision-4 environment mark appended: on a
+ * non-production backend the slug ends `-dev`, so a machine can hold a dev
+ * and a production agent side by side and every config entry says which is
+ * which. `maxBaseLength` reserves room for the mark so the result still
+ * passes `assertValidServerSlug`.
+ *
+ * `taken` must name EVERY directory under the credential root — not just the
+ * keyed ones (`detectWiringCollision`'s set) — so a slug freed by `--unwire`
+ * (a tombstoned or key-removed directory) is never handed out again and the
+ * new credentials are never written into a retired directory. See
+ * `listTakenDirectoryNames`.
+ */
+export function deriveServerSlug(
+  agentName: string,
+  taken: ReadonlySet<string>,
+  markNonProduction: boolean,
+): string {
+  const mark = '-dev'
+  if (!markNonProduction) return proposeServerSlug(agentName, taken)
+  const base = proposeServerSlug(agentName, taken, 32 - mark.length)
+  // An agent literally named "Research Dev" already slugifies to a marked
+  // slug; appending again would only shorten the usable base.
+  if (base.endsWith(mark)) return base
+  const marked = `${base}${mark}`
+  if (!taken.has(marked)) return marked
+  return proposeServerSlug(marked, taken)
+}
+
+/**
+ * Every directory name under the credential root — the widest possible
+ * `taken` set for slug derivation (#3737). Deliberately wider than
+ * `detectWiringCollision`'s: that one only names directories holding an
+ * `identity.json`, because displacement needs a live key, but DERIVATION
+ * must avoid every name that exists on disk in any state, retired ones
+ * included — connect never overwrites a directory, and writing fresh
+ * credentials into a tombstoned or key-removed one would revive a retired
+ * identity. Best-effort: an unreadable root yields an empty set, the same
+ * stance `detectWiringCollision` takes (the storage preflight has already
+ * run by the time this is called, so the root is normally writable).
+ */
+export async function listTakenDirectoryNames(credentialsDir?: string): Promise<Set<string>> {
+  const root = defaultCredentialRoot(credentialsDir)
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    return new Set()
+  }
+  const taken = new Set<string>()
+  for (const entry of entries) {
+    try {
+      if (!(await stat(join(root, entry))).isDirectory()) continue
+    } catch {
+      continue
+    }
+    taken.add(entry)
+  }
+  return taken
 }
 
 function slugIsValid(slug: string): boolean {

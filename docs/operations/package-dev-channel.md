@@ -687,14 +687,20 @@ throughout.
    to step 5 of the operator checklist.
 
    **On a machine that already has a production agent wired** — the normal
-   case for a developer laptop — the bare command now stops instead of
-   silently re-pointing `haven` / `haven-signer` at the dev agent
-   ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)): a terminal is
-   asked, a non-interactive run refuses with `wiring_collision`. Take the
-   **alongside** answer here — add `--name <slug>` (the 2026-09-04 rollout
-   used `--name devtest`, by hand, for exactly this reason) so the dev agent
-   gets its own `haven-<slug>` / `haven-signer-<slug>` pair and the production
-   wiring is untouched. Do **not** answer `--replace` on a machine whose
+   case for a developer laptop — a default connect now simply names its own
+   pair from the agent's display name
+   ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)): the dev agent
+   gets a `haven-<slug>` pair (marked `-dev` on the non-production backend) and
+   the production wiring is untouched, with no prompt and no flag. The
+   collision question now belongs only to a bare-pair run: when the command
+   targets the bare `haven` / `haven-signer` pair and it already belongs to a
+   different agent with a live key
+   ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)) — reachable
+   only through `--bare` or `--replace` — a terminal is asked and a
+   non-interactive run refuses with `wiring_collision`. To install alongside
+   an EXPLICITLY named pair instead, pass `--name <slug>` by hand (the
+   2026-09-04 rollout used `--name devtest`, for exactly this reason). Do
+   **not** answer `--replace` on a machine whose
    production wiring you want to keep: it retires that agent's local key files.
    `--doctor` enumerates every agent on the machine regardless of name, so
    step 5 is unchanged. Since #3122 the run also says, BEFORE it writes

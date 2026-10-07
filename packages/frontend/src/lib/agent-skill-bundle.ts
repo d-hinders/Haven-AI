@@ -69,7 +69,7 @@ stated — ask before any payment tool. Keep every call inside that pair: a
 signer call goes to the signer of the hosted server you called —
 \`haven-<slug>\` with \`haven-signer-<slug>\`, bare \`haven\` with
 \`haven-signer\`, Codex \`haven\` with \`haven_signer\`. Confirm by identity,
-not name: \`haven_get_agent\` returns \`id\` and \`delegate_address\`, and each
+not name: \`haven_get_agent\` returns \`id\` and \`delegateAddress\`, and each
 signer states the agent id and delegate address it is bound to in its own
 instructions. If they differ, stop and sign nothing — switch to the signer
 whose identity matches.

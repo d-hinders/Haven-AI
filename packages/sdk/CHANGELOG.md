@@ -17,7 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
-- **The `haven-pay` skill covers a harness with several Haven pairs (#3738).** Act as one agent per task, ask which when the user has not said, keep every signer call inside the pair of the hosted server called (`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with `haven-signer`, Codex `haven` with `haven_signer`), and confirm by identity — `haven_get_agent`'s `id` and `delegate_address` against the identity the signer states. No update needed.
+- **The `haven-pay` skill covers a harness with several Haven pairs (#3738).** Act as one agent per task, ask which when the user has not said, keep every signer call inside the pair of the hosted server called (`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with `haven-signer`, Codex `haven` with `haven_signer`), and confirm by identity — `haven_get_agent`'s `id` and `delegateAddress` against the identity the signer states. No update needed.
 
 ### Fixed
 

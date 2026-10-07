@@ -10,7 +10,7 @@ import type { SignerCredentials } from './credentials.js'
 /**
  * #3738: once one harness carries several Haven pairs, the model confirms a
  * signer belongs to the hosted server it called by IDENTITY — the hosted
- * `haven_get_agent` returns `id` and `delegate_address`, and the signer states
+ * `haven_get_agent` returns `id` and `delegateAddress`, and the signer states
  * its own in the `initialize` instructions. These drive the real server build
  * and read what the client receives, not the source text.
  */
@@ -41,7 +41,7 @@ describe('signer identity in the handshake (#3738)', () => {
   it('still states the delegate address on the bare-key path, with no agent id to give', async () => {
     const instructions = await instructionsFor(undefined)
     expect(instructions).toContain(
-      `This signer is bound to no recorded agent id (the key was supplied without a credential file) and delegate address ${DELEGATE}.`,
+      `This signer is bound to no recorded agent id and delegate address ${DELEGATE}.`,
     )
   })
 
@@ -65,7 +65,8 @@ describe('signer identity in the handshake (#3738)', () => {
     expect(instructions).toContain(
       'haven-<slug> with haven-signer-<slug>, bare haven with haven-signer, Codex haven with\nhaven_signer',
     )
-    expect(instructions).toContain('compare the identity above with haven_get_agent (its id\nand delegate_address)')
+    expect(instructions).toContain('haven_get_agent (its id and delegateAddress) from that hosted server')
+    expect(instructions).toContain('address alone when this signer has no recorded agent id')
   })
 
   it('omits the identity line when called with no identity (the exported default)', () => {

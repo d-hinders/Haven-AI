@@ -100,7 +100,7 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain(
       '`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with\n`haven-signer`, Codex `haven` with `haven_signer`',
     )
-    expect(HAVEN_SKILL_MD).toContain('`haven_get_agent` returns `id` and `delegate_address`')
+    expect(HAVEN_SKILL_MD).toContain('`haven_get_agent` returns `id` and `delegateAddress`')
   })
 
   it('tells the agent to follow the response guidance fields first (#1308)', () => {

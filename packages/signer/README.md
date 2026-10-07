@@ -215,11 +215,11 @@ it is bound to:
 This signer is bound to agent id <agent_id> and delegate address <0x…>.
 ```
 
-The agent id comes from the credential file's `agent_id`; on the bare
-`HAVEN_DELEGATE_KEY` path there is none, and the line says so while still
-giving the delegate address. The model compares it with `haven_get_agent`'s
-`id` and `delegate_address` from the hosted server it called, and signs nothing
-on a mismatch. Neither value is secret (the consent screen prints both), and
+The agent id comes from the credential file's `agent_id` (or `HAVEN_AGENT_ID`
+alongside `HAVEN_DELEGATE_KEY`); when neither is set the line says "no recorded
+agent id" and still gives the delegate address, which is then compared alone.
+The model compares it with `haven_get_agent`'s `id` and `delegateAddress` from
+the hosted server it called, and signs nothing on a mismatch. Neither value is secret (the consent screen prints both), and
 the line is advisory: what the signer refuses to sign is unchanged.
 
 ## Orchestration

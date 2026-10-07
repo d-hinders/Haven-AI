@@ -124,7 +124,7 @@ export interface SignerIdentity {
  * model must keep hosted and signer calls inside one pair, and a server NAME
  * is not proof of that — `haven-research` and `haven-signer-research-2` are
  * easy to cross. Identity is: the hosted `haven_get_agent` returns `id` and
- * `delegate_address`, and this line states what THIS signer is bound to, so
+ * `delegateAddress`, and this line states what THIS signer is bound to, so
  * the model can compare the two before it signs. Neither value is a secret
  * (the consent block prints both). Advisory, like the rest of this string —
  * the signing path's own checks are unchanged.
@@ -133,7 +133,7 @@ function signerIdentityLines(identity: SignerIdentity | undefined): string[] {
   if (!identity?.agentId && !identity?.delegateAddress) return []
   const agent = identity.agentId
     ? `agent id ${identity.agentId}`
-    : 'no recorded agent id (the key was supplied without a credential file)'
+    : 'no recorded agent id'
   const delegate = identity.delegateAddress ? ` and delegate address ${identity.delegateAddress}` : ''
   return [`This signer is bound to ${agent}${delegate}.`]
 }
@@ -152,9 +152,10 @@ export function signerInstructions(identity?: SignerIdentity): string {
     'user has not said which (in the request, or a project-level choice they stated), ask',
     'before any payment tool. Sign only through the signer of the hosted server you called:',
     'haven-<slug> with haven-signer-<slug>, bare haven with haven-signer, Codex haven with',
-    'haven_signer. Before signing, compare the identity above with haven_get_agent (its id',
-    'and delegate_address) from that hosted server. If they differ, stop and sign nothing —',
-    'switch to the signer whose identity matches.',
+    'haven_signer. Before signing, compare the identity this signer states with',
+    'haven_get_agent (its id and delegateAddress) from that hosted server — the delegate',
+    'address alone when this signer has no recorded agent id. If they differ, stop and sign',
+    'nothing — switch to the signer whose identity matches.',
     '',
     'Version compatibility (check this BEFORE signing, not after):',
     `- x402 expected-context versions supported: ${compatibility.x402_expected_context_versions.join(', ')}`,

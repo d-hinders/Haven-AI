@@ -3790,8 +3790,9 @@ export const SCENARIOS = {
       for (const name of ['Research agent', 'Data-feed agent']) {
         await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
       }
-      // Positive control: the second account's row label is on screen.
-      await page.getByText('Treasury', { exact: true }).first().waitFor({ timeout: 20_000 })
+      // Positive control: the second account's row label is on screen. Not
+      // `exact`: the row reads "Account: Treasury · Base" across three nodes.
+      await page.getByText(/Treasury/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'list')
 
       await page.getByRole('button', { name: /^Account:/ }).first().click()

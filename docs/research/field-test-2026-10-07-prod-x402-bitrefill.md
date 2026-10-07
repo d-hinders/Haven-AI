@@ -45,6 +45,9 @@ transaction hashes are public on-chain data and are kept as evidence.
   behaviour.
 - A re-run with `--name` was blocked by Claude Code's auto-mode safety
   classifier as "Unauthorized Persistence", so the user ran it in a terminal.
+  That matches Haven's own design: the `wiring_collision` refusal tells an AI
+  agent to hand the choice to its user rather than add the flag itself. Do
+  not treat the block as something to work around.
 - Runtime detection failed in the desktop app's terminal pane, and the picker
   pre-selected Codex (#3732).
 - Setup then completed: keys were minted locally, the MCP entries were written
@@ -71,10 +74,11 @@ transaction hashes are public on-chain data and are kept as evidence.
   payer is the delegate account; on eip3009 (path B) it is the delegate EOA.
 - The signed receipt verified with `haven_verify_receipt`
   (`verifiedOver: delegation_digest`), but only after the agent unwrapped
-  `.receipt` and fetched the bundle with its API key outside MCP. Fixed by
-  #3723.
+  `.receipt` and fetched the bundle with its API key outside MCP. Fixed by #3730
+  (closes #3723): merged to `dev` on 2026-10-07, not yet in production on
+  that date.
 
-Five tool calls. This is the cleanest flow today.
+Five tool calls. On 2026-10-07 this was the cleanest flow.
 
 ## 3. Path B: Bitrefill without an account (plain-HTTP x402)
 
@@ -191,13 +195,13 @@ This is the reference fixture for #3728.
 | Finding | Issue |
 |---|---|
 | `haven_get_agent` reports `ready` while the treasury cannot cover a payment; the underfunded prepare was misdiagnosed as a caveat revert | #3731 |
-| `haven_verify_receipt` rejected the receipt endpoint's own response; no MCP tool returned the signed bundle | #3723 (shipped in #3730) |
+| `haven_verify_receipt` rejected the receipt endpoint's own response; no MCP tool returned the signed bundle | #3723 (fix merged to `dev` in #3730; not in production as of 2026-10-07) |
 | A plain-HTTP x402 payment takes 7 steps, with manual base64 decoding and header-name choice | #3727 (in-perimeter; the hosted "Haven calls the merchant" alternative stays closed, #3249) |
 | No sign-in-with-x signing, so Bitrefill browsing costs a payment per call, and codes may need sign-in | #3728 |
 | The connector's runtime picker pre-selects the first client; a Codex config outranks Claude Code by construction | #3732 |
 | No guidance for paying an x402 URL that another MCP hands back | #3735 |
 | `next_tool` names the default server names under `--name` | not filed (documented behaviour; `next_tool_server_role` helps) |
-| Claude Code's auto-mode classifier blocks re-running the connector | not filed (environment note: run the command yourself) |
+| Claude Code's auto-mode classifier blocks re-running the connector | not filed: consistent with the `wiring_collision` design, where the user runs the command |
 
 ## 7. Open questions
 

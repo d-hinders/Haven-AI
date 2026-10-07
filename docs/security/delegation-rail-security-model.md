@@ -2510,3 +2510,13 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > reworded, is outside the code this document covers.) No authority, signer set,
 > delegation or custody path moves. Nothing else in this document was re-read
 > for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3739, 2026-10-07, x402 key lookup):** this diff
+> touches `packages/sdk/src/client.ts`, a covered file, with one new read-only
+> method, `findX402IntentByIdempotencyKey` (`GET /x402/by-idempotency-key/{key}`,
+> agent-authenticated, scoped to the calling agent, 404 for another agent's
+> key, never writes). It returns an intent's id, status, scheme, amount and
+> signing-window state so the hosted pay tool can answer a replay before
+> re-probing a merchant. It creates, signs and authorizes nothing; no
+> delegation, caveat, signer set or custody path moves. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.

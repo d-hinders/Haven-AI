@@ -3522,6 +3522,51 @@ backend reports in `connector_package`. That is exactly the skew this section is
 about: a signer installed from one channel against a backend emitting another is
 how an unknown `x402_expected_context_version` arises in the first place.
 
+### `haven_pay_x402_quote` pays from the request, not a copied challenge (#3739)
+
+Hosted only; the local `@haven_ai/mcp` runtime is unchanged (its one-shot
+`haven_pay_x402` already probes and pays from the request).
+
+- **Request mode.** `haven_pay_x402_quote` now selects its mode by whether
+  `payment_required` is present:
+  - Absent: it takes `url` (required), `method`, `headers`, `body` and a cap
+    (required). It makes the unpaid request itself and builds the payment from
+    the 402 it fetched.
+  - Present: `payment_required` mode is unchanged, and the challenge must still
+    be passed UNCHANGED.
+- **The quote names the pay step.** `haven_quote_x402`'s result carries a next
+  step for the first time: `haven_pay_x402_quote` with request-mode
+  `next_arguments`. Those are the request as the caller sent it, plus
+  `max_amount_human` set to the quoted amount.
+- **Egress policy, stricter than the quote's own probe.**
+  - https only; no IP literal (WHATWG-canonicalised, so `2130706433` and
+    `0x7f.1` count), no loopback, reserved or single-label host (`.localhost`,
+    `.local`, `.internal`, `.test`, …, trailing dots stripped).
+  - `redirect: 'error'`, set per call, and an explicit refusal of any 3xx.
+  - A 15 s timeout and a 256 KB read cap.
+  - Each refusal is a typed `X402_PROBE_*` code with nothing created. A 402 the
+    backend cannot store (over 64 KB) refuses as `X402_CHALLENGE_TOO_LARGE`:
+    request mode has no agent copy to fall back on.
+  - The policy cannot refuse a public name that resolves to a private address
+    (#3740, accepted residual).
+- **Replays.**
+  - With `idempotency_key`, the existing intent answers BEFORE any re-probe,
+    through the new read-only `GET /x402/by-idempotency-key/{key}`:
+    - awaiting signature → the signer tool;
+    - past signing → `haven_get_payment_status`.
+  - A closed window, a different task budget, or a 404 (including an older
+    backend without the route) falls through to probe + `POST /x402`, whose own
+    key replay still applies.
+  - With no key, the derived key (`x402r:…`) hashes the whole probed challenge,
+    `extensions` included.
+- **Skew.**
+  - Signer: no change. The signer fetches the stored challenge by `payment_id`
+    exactly as before.
+  - Hosted server ahead of the backend: request mode works, but loses only the
+    replay-before-probe.
+  - Older skill text still says to copy `payment_required` verbatim. That
+    remains a valid mode.
+
 ### Detecting skew before a payment (#1155)
 
 Every row above is a *post-quote* symptom: the agent found out by trying to pay.

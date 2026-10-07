@@ -64,7 +64,6 @@ import {
   selectStandardPaymentOption,
   selectX402SettlementScheme,
   normalizePaymentRequired,
-  noCompatiblePaymentOptionError,
   parsePaymentRequiredResponse,
   resolveX402RetryTarget,
   isSecureX402RetryTarget,
@@ -521,6 +520,31 @@ export async function probeX402Challenge(
   }
 }
 
+/**
+ * A hosted wrapper for the no-payable-option case, refused before any intent
+ * exists. The SDK's shared `noCompatiblePaymentOptionError` lives in
+ * `x402-protocol.ts`, which the SDK deliberately keeps off its public surface
+ * (`x402-module-boundaries.test.ts`), so this restates its #3735 hint for
+ * field case 1: Bitrefill answers a JSON POST sent without its body or
+ * `Content-Type` with a generic `upto` challenge Haven cannot pay.
+ */
+function noPayableOptionRefusal(accepts: unknown[]): HostedToolError {
+  const offered = [
+    ...new Set(
+      accepts
+        .map((o) => (o && typeof o === 'object' ? (o as { scheme?: unknown }).scheme : undefined))
+        .filter((s): s is string => typeof s === 'string' && s !== 'exact'),
+    ),
+  ]
+  return probeRefusal(
+    'X402_NO_PAYABLE_OPTION',
+    "The merchant's 402 offers no payment option Haven can settle" +
+      (offered.length ? ` (it offered only ${offered.map((s) => `'${s}'`).join(', ')}; Haven pays only the 'exact' scheme)` : '') +
+      '. For a request with a body, this often means the body or its Content-Type was missing or invalid: ' +
+      're-call with the full request (method, body, and Content-Type: application/json for a JSON API).',
+  )
+}
+
 /** Key-sorted JSON, so the derived key does not depend on property order. */
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -847,8 +871,7 @@ export function createPlainHttpX402Handlers(
           if (args.body !== undefined) init.body = args.body
           payReq = await probeX402Challenge(args.url, init, options?.x402Probe)
           if (!selectStandardPaymentOption(payReq.accepts) && !selectErc7710PaymentOption(payReq.accepts)) {
-            // The shared refusal, #3735's `upto` hint included.
-            throw noCompatiblePaymentOptionError(payReq.accepts)
+            throw noPayableOptionRefusal(payReq.accepts)
           }
           // payment_required mode falls back to the agent's own copy when the
           // backend cannot store an oversized challenge; request mode has no

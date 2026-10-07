@@ -202,8 +202,11 @@ branches of "merchant retry **or** `haven_complete_mcp_tool`" are not
 symmetric, and the asymmetry is the point of this whole flow: on the
 `haven_complete_mcp_tool` branch Haven makes the merchant call and therefore
 *observes* the outcome, writing the evidence or reconciliation row itself. On
-the plain-HTTP branch Haven never contacts the merchant — it holds no key and
-speaks to no merchant — so the outcome only exists in the agent. Without a
+the plain-HTTP branch Haven never sends the merchant the paid request — it holds
+no key, and in request mode
+([#3739](https://github.com/d-hinders/Haven-AI/issues/3739)) its only merchant
+call is the unpaid probe that fetches the challenge — so the outcome only exists
+in the agent. Without a
 report, the funded-but-undelivered detection this doc describes could not fire
 for fifteen minutes on the one flow Haven prescribes.
 

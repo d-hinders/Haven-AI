@@ -66,7 +66,7 @@ import {
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
-import { HostedToolError, paymentWindowExpiredError, runTool } from './support/errors.js'
+import { HostedToolError, egressRefusalBeforeIntent, paymentWindowExpiredError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   buildPurchaseSummary,
@@ -873,6 +873,22 @@ export function createPaidMcpCompletionHandlers(
         // the submit burns the settlement child, which is not recoverable by
         // re-signing either.
         const merchantContext = await resolveMerchantCallContext(haven, args)
+        // #3747: the egress policy also runs HERE — before the funding
+        // signature relay and before the erc7710 submit (both schemes resolve
+        // at this site; erc7710 has no funding leg, so refusing pre-submit is
+        // equally before-spend). The stored-context rehydration path was
+        // already validated at quote time, so re-asserting is a no-op there;
+        // an EXPLICITLY supplied merchant_url has never been checked by this
+        // point and the first transport-side check would otherwise land only
+        // after `ensureFundingConfirmed` — the exact funded-but-undeliverable
+        // outcome the issue criterion forbids.
+        if (haven.merchantEgress) {
+          try {
+            haven.merchantEgress.assertUrl(merchantContext.merchantUrl)
+          } catch (err) {
+            throw egressRefusalBeforeIntent(err)
+          }
+        }
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.

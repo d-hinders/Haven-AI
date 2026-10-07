@@ -137,7 +137,7 @@ export class McpMerchantTransport {
         throw err
       }
     }
-    return this.fetchUnderPolicy(url, init, timeoutMs)
+    return this.fetchUnderPolicy(url, init, timeoutMs, maxBytes)
   }
 
   /**

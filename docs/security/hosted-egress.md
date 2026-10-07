@@ -45,7 +45,12 @@ hosted client's own outbound rule.
   transport, the `quoteMcpToolCall` family (before the probe and before the
   #1271 discovery fallback), and `haven_pay_x402_quote`'s pre-intent retry
   target all refuse a bad target **before funding**, so a bad target can
-  never surface only as a funded-but-undeliverable payment.
+  never surface only as a funded-but-undeliverable payment. The settle fast
+  path resolves the merchant call context BEFORE the funding signature relay
+  / erc7710 submit (`haven_settle_mcp_tool`) and asserts the URL there — an
+  explicitly supplied bad target is refused while the intent is still
+  `pending_signature`; stored-context rehydration was validated at quote
+  time, so re-asserting is a no-op there.
 - Discovery (`discoverMerchantMcpUrl`) asserts the input origin before it
   fetches and reads its 64 KB document with the cap enforced while reading.
 

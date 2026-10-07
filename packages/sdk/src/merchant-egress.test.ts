@@ -81,6 +81,17 @@ describe('isPublicHttpsMerchantUrl — the strict hosted string check', () => {
     expect(isPublicHttpsMerchantUrl('https://doc.example/')).toBe(false)
   })
 
+  it('refuses the acceptance-criteria host forms: trailing dots, IPv4-mapped v6, short integer hosts', () => {
+    // Trailing-dot forms (the dot-strip trick), the IPv4-mapped IPv6 literal
+    // (its mapped v4 is loopback), and the short integer form URL normalises
+    // to 0.0.0.0. Round-2 review probe: all four were already refused — these
+    // rows pin them.
+    expect(isPublicHttpsMerchantUrl('https://localhost./')).toBe(false)
+    expect(isPublicHttpsMerchantUrl('https://x.railway.internal./')).toBe(false)
+    expect(isPublicHttpsMerchantUrl('https://[::ffff:7f00:1]/')).toBe(false)
+    expect(isPublicHttpsMerchantUrl('https://0/')).toBe(false)
+  })
+
   it('assertPublicHttpsMerchantUrl throws a before-request refusal naming the reason', () => {
     expect(() => assertPublicHttpsMerchantUrl('https://haven-ai.railway.internal/')).toThrowError(
       MerchantEgressRefusedError,
@@ -121,6 +132,13 @@ describe('McpMerchantTransport under a policy — refusal before any connection'
     'https://localhost:3001/paid',
     'https://myhost/paid',
     'https://haven-ai.railway.internal/paid',
+    // Round-2 review: the acceptance criteria name these four host forms —
+    // trailing-dot spellings, the IPv4-mapped v6 literal, and the short
+    // integer host (URL normalises it to 0.0.0.0).
+    'https://localhost./paid',
+    'https://x.railway.internal./paid',
+    'https://[::ffff:7f00:1]/paid',
+    'https://0/paid',
   ]
 
   for (const url of refusedShapes) {
@@ -242,6 +260,36 @@ describe('McpMerchantTransport under a policy — per-use budgets', () => {
     // constructor default here), exactly as without a policy.
     expect(transport.budgetFor('mcpSession')).toBe(300_000)
     expect(transport.budgetFor('discovery')).toBe(300_000)
+  })
+
+  it('a per-use byte cap reaches the wire: a ~300 KiB quote body refuses at the 256 KiB quote cap', async () => {
+    // Round-1 review (PROVEN at runtime): `fetch` used to drop `maxBytes` on
+    // the policy path, so every use ran at the 5 MiB default and the 256 KiB
+    // quote/mcpSession caps were dead. 300 KiB is over the quote cap but far
+    // under the 5 MiB default, so the refusal can only be the per-use cap.
+    const fetchSpy = recordingFetch(() => okText('x'.repeat(300 * 1024)))
+    const transport = transportWith(strictMerchantEgressPolicy(), fetchSpy)
+    // The client passes budgetFor + capFor explicitly (client.ts quote/complete/
+    // resume + initialize) — mirror that call shape exactly.
+    const response = await transport.fetch(
+      'https://a.dev/quote',
+      {},
+      transport.budgetFor('quote'),
+      transport.capFor('quote'),
+    )
+    await expect(response.text()).rejects.toBeInstanceOf(MerchantEgressResponseCapError)
+  })
+
+  it('a body under the per-use cap reads normally on a quote use', async () => {
+    const fetchSpy = recordingFetch(() => okText('x'.repeat(200 * 1024)))
+    const transport = transportWith(strictMerchantEgressPolicy(), fetchSpy)
+    const response = await transport.fetch(
+      'https://a.dev/quote',
+      {},
+      transport.budgetFor('quote'),
+      transport.capFor('quote'),
+    )
+    await expect(response.text()).resolves.toHaveLength(200 * 1024)
   })
 
   it('a hanging quote use aborts on the policy quote budget and keeps the MerchantTimeoutError classification', async () => {

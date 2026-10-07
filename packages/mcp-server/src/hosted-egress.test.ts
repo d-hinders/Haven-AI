@@ -92,6 +92,14 @@ const REFUSED_URLS = [
   ['localhost', 'https://localhost:3001/paid'],
   ['single-label host', 'https://intranet/paid'],
   ['*.railway.internal', 'https://haven-ai.railway.internal/paid'],
+  // Round-2 review: the acceptance criteria name these four host forms —
+  // trailing-dot spellings, the IPv4-mapped v6 literal, and the short
+  // integer host (URL normalises it to 0.0.0.0). The check already refuses
+  // all four; these rows pin it.
+  ['trailing-dot localhost', 'https://localhost./paid'],
+  ['trailing-dot internal', 'https://x.railway.internal./paid'],
+  ['IPv4-mapped IPv6 literal', 'https://[::ffff:7f00:1]/paid'],
+  ['short integer host', 'https://0/paid'],
 ] as const
 
 describe('createHostedHavenClient — the policy is strict by default and seamed for tests', () => {
@@ -163,6 +171,53 @@ describe('refusal before any connection — the quoteMcpToolCall family (quote +
     expect(result.code).toBe('MERCHANT_EGRESS_REFUSED')
     expect(result.message).toContain('Nothing was funded or signed')
     expect(calls.find((c) => c.url === 'http://haven.test/x402')).toBeUndefined()
+  })
+})
+
+describe('refusal BEFORE funding on the settle fast path — the resolveMerchantCallContext half', () => {
+  // Explicit context (bad merchant_url supplied by the caller): the handler
+  // resolves it BEFORE the funding relay / erc7710 submit, so the egress
+  // policy must refuse while the intent is still pending_signature and
+  // nothing has been spent. The stored-context rehydration half was validated
+  // at quote time — re-asserting is a no-op there.
+  const badExplicitContext = {
+    signature: `0x${'11'.repeat(65)}`,
+    merchant_url: 'https://10.0.0.5/paid',
+    tool_name: 'create_text',
+    arguments: { prompt: 'Hello' },
+  }
+
+  it('x402: an explicitly bad merchant_url refuses before the funding signature relay', async () => {
+    const calls = installSplitFetch(BACKEND_ROUTES, () => new Response('never'))
+    const result = fail(
+      await hostedHandlers().haven_settle_mcp_tool({
+        ...badExplicitContext,
+        payment_id: 'pay_x402',
+        payment_header: 'AAAA',
+      }),
+    )
+    expect(result.code).toBe('MERCHANT_EGRESS_REFUSED')
+    expect(result.message).toContain('Nothing was funded or signed')
+    // No funding relay (POST /payments/pay_x402/sign), no merchant request —
+    // the first transport-side check never got a turn because nothing was
+    // sent at all.
+    expect(calls.find((c) => c.method === 'POST' && c.url === 'http://haven.test/payments/pay_x402/sign')).toBeUndefined()
+    expect(calls.filter((c) => !c.url.startsWith('http://haven.test'))).toEqual([])
+  })
+
+  it('erc7710: an explicitly bad merchant_url refuses before the /settle submit', async () => {
+    const calls = installSplitFetch(BACKEND_ROUTES, () => new Response('never'))
+    const result = fail(
+      await hostedHandlers().haven_settle_mcp_tool({
+        ...badExplicitContext,
+        payment_id: 'pay_7710',
+      }),
+    )
+    expect(result.code).toBe('MERCHANT_EGRESS_REFUSED')
+    expect(result.message).toContain('Nothing was funded or signed')
+    // The settlement child was never submitted and the merchant never called.
+    expect(calls.find((c) => c.method === 'POST' && c.url === 'http://haven.test/x402/pay_7710/settle')).toBeUndefined()
+    expect(calls.filter((c) => !c.url.startsWith('http://haven.test'))).toEqual([])
   })
 })
 

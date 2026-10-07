@@ -2497,7 +2497,6 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > entry for the verifier, and that re-read; `last-verified` is bumped for exactly
 > this coverage.
 
-
 > **Re-verified unchanged (#3756, 2026-10-07, refusal wording):** this diff
 > touches `routes/agents.ts`, a covered file, in one human-readable string
 > only: the archive 409 for a non-revoked agent with no live budget now says

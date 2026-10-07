@@ -5045,3 +5045,26 @@ to call next in structured fields, and those fields are typed end to end
 > `haven_get_receipt` leaves no audit row (like `haven_verify_receipt`
 > today). `last-verified` is not re-stamped: this block is the scope.
 > Nothing else in this document was re-verified.
+
+> **Re-verified #3735 (2026-10-07, an x402 payment URL handed back by another
+> tool):** the generic haven-pay skill (`packages/sdk/src/skill-content.ts`,
+> and its byte-identical frontend copy `agent-skill-bundle.ts`) gains one
+> paragraph after the non-MCP paywall block, a trigger bullet, and a wider
+> front-matter `description` ("…or another tool returns an x402 payment URL").
+> The paragraph tells the agent to quote the exact request (`url`, `method`,
+> `headers`, `body` as a JSON string, `Content-Type: application/json` on a
+> JSON POST), to repeat that method, body and `Content-Type` on its own paid
+> retry (the hosted `haven_pay_x402_quote` takes none of them), to copy
+> `payment_required` verbatim, to prefer the x402 URL over a deposit address,
+> to pay one route only, and to check delivery in the merchant's own tool. The
+> SDK's shared no-compatible-option refusal (`noCompatiblePaymentOptionError`)
+> now names the offered schemes and the
+> likely cause when every `accepts` entry is a non-`exact` scheme, echoing a
+> merchant's scheme string only when it is a short identifier. Hosted
+> `haven_quote_x402` relays that message through `HavenClient.quoteX402`, so
+> hosted picks it up on deploy; the local runtime and connect pick up both
+> changes only through a release (they pin the SDK exactly). No tool schema,
+> consent hash, wire field, route, signer or payment path changed, and nothing
+> under `packages/mcp-server/src/**` was edited. `last-verified` is not
+> re-stamped: this block is the scope. Nothing else in this document was
+> re-verified.

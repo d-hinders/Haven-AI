@@ -1037,6 +1037,9 @@ export class HavenClient {
    * locally. The server's own verification is ignored — the receipt is verified
    * here (independently of Haven) by recovering the signer from the
    * authorisation, so the result is trustworthy even if the backend lied.
+   * The returned `{ receipt, verification }` object is the same shape the
+   * `GET /payments/{id}/receipt` endpoint returns, and `verifyPaymentReceipt`
+   * (#3723) accepts either layer: pass this whole object or `.receipt` alone.
    */
   async getReceipt(
     paymentId: string,

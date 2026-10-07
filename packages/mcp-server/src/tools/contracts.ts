@@ -68,6 +68,10 @@ export type HostedToolName =
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
   | 'haven_verify_receipt'
+  // #3723: the signed bundle's MCP home — `haven_get_receipt { payment_id }`
+  // returns `{ receipt }`, and `haven_verify_receipt` accepts that response
+  // (or the endpoint's `{ receipt, verification }`) unchanged.
+  | 'haven_get_receipt'
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
@@ -511,6 +515,19 @@ export const toolSchemas = {
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
+    // #3723: the spread form — the endpoint's `{ receipt, verification }`
+    // spread as top-level arguments — verifies: `verification` is declared
+    // ACCEPTED-AND-IGNORED (Haven's own self-check, never read; the stdio
+    // runtime strips the same key, so the two runtimes agree). Strictness is
+    // not dropped: every other undeclared key is still refused by name.
+    verification: z.unknown().optional(),
+  },
+  // #3723: the signed bundle's read — `{ receipt }` only, settled payments
+  // only. The endpoint's server-side `verification` is deliberately NOT
+  // returned: it is computed on Haven's server, not offline, and an agent
+  // that trusted it would skip haven_verify_receipt.
+  haven_get_receipt: {
+    payment_id: z.string().min(1),
   },
 // #3101: `as const satisfies` keeps every key on the type — under a plain
 // `Record<HostedToolName, z.ZodRawShape>` annotation a probe assigning
@@ -859,10 +876,18 @@ export const STRICT_INPUT_TOOLS = {
   haven_verify_receipt:
     'Verification is offline and reads only the receipt object itself: the signer is ' +
     'recovered from receipt.authorization and compared with the delegate the receipt names. ' +
-    'The input must be the signed bundle from GET /payments/{id}/receipt — a ' +
-    'haven_list_receipts history row carries no signature and answers ' +
-    'not_a_signed_receipt. An expected signer, delegate or payment_id sent alongside used to ' +
-    'be dropped in silence — a caller cannot pin what the receipt must say, only ask what it does say.',
+    'The input is the signed bundle from haven_get_receipt or GET /payments/{id}/receipt — ' +
+    'the whole response, its .receipt, or the spread { receipt, verification } form (that ' +
+    'verification is accepted and IGNORED: it is Haven\'s own self-check, never offline ' +
+    'evidence) — while a haven_list_receipts history row carries no signature and answers ' +
+    'not_a_signed_receipt. Any other undeclared key is refused: an expected signer, delegate ' +
+    'or payment_id cannot pin what the receipt must say, only ask what it does say.',
+  haven_get_receipt:
+    'The bundle is read by payment_id alone; nothing else selects it. The payment must be ' +
+    'this agent\'s own and settled — an unknown id, another agent\'s id or an unsettled ' +
+    'payment is the structured 404. The response is { receipt } only: the endpoint\'s ' +
+    'server-side verification is not offline evidence, so it is never returned — ' +
+    'haven_verify_receipt reads the returned bundle unchanged.',
   haven_discover_tools:
     'The catalog filters are category, search, rail and verified. A query, name, merchant, ' +
     'chain or limit sent here used to be dropped in silence and the FULL catalog came back ' +
@@ -1279,6 +1304,8 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
+  // #3723: the signed bundle's read, described from the shared fragment.
+  haven_get_receipt: composeDescription(sharedDescriptions.getReceipt),
   haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
   haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
   haven_get_task_budget: GET_TASK_BUDGET_DESCRIPTION,

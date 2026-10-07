@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **`haven_get_receipt { payment_id }` returns the signed receipt bundle (#3723).** No MCP tool returned the signed bundle `haven_verify_receipt` checks, so an agent that wanted it had to call the REST API with the key from its credential file by hand (field evidence 2026-10-07). The new read tool answers `{ receipt }` — the signed `haven-receipt-1` bundle only, from this agent's own **settled** payments: an unknown id, another agent's id or an unsettled payment is a structured 404, and the endpoint's server-side `verification` is deliberately not returned (it is computed on Haven's server, not offline — `haven_verify_receipt` reads the bundle unchanged). The tool list change re-consents: this runtime hashes its registered tool names, so installed clients ask for consent once after updating, and the exported `HavenMcpToolName` union grows (a source break for exhaustive `switch`/`Record` consumers).
+
+### Fixed
+
+- **`haven_verify_receipt` accepts the receipt endpoint's wrapped response as-is (#3723).** `GET /payments/{id}/receipt` returns `{ receipt, verification }`, but passing that response unchanged as the `receipt` argument answered `not_a_signed_receipt` — the verifier looked for `authorization` at the top level. The bundle inside is now verified when the top level carries no `authorization` (one level only, no recursion; the wrapper's `verification` is never read — it is Haven's own self-check, not offline evidence). The spread form (`{ receipt, verification }` as top-level arguments) also verifies: `verification` is an accepted-and-ignored argument. A `haven_list_receipts` row still answers `not_a_signed_receipt`, bare or wrapped.
+
 ## 0.8.1-alpha.0 — 2026-10-07
 
 ## 0.8.0-alpha.0 — 2026-10-05

@@ -112,6 +112,9 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   haven_verify_receipt: {
     receipt: { authorization: { delegate: '0xabc', signHash: '0x00', signature: '' } },
   },
+  // #3723: the handler calls haven.getReceipt('pay_1') — the stubbed Haven
+  // answers `{}`, which the loop tolerates downstream.
+  haven_get_receipt: { payment_id: 'pay_1' },
   haven_discover_tools: {},
   haven_submit_catalog_entry: { resource_url: 'https://merchant.example/mcp' },
   // #3329: the handler resolves the token via haven.getAllowances() first
@@ -196,6 +199,9 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   // #3518: a spelling the LOCAL MCP reserves for the sign handoff's
   // payment branch — this read tool takes the id only.
   haven_get_task_budget: 'signature',
+  // #3723: the SDK's camelCase spelling — the same crossover-key class as the
+  // other by-id reads; this tool takes the snake_case id only.
+  haven_get_receipt: 'paymentId',
 }
 
 let fetches: string[]
@@ -599,10 +605,14 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
       'haven_open_task_budget',
       'haven_close_task_budget',
       'haven_get_task_budget',
+      // #3723: the signed bundle's read, pinned as a literal for the same
+      // anti-vacuity reason — the loops self-scope, so only a literal
+      // assertion goes red when the entry is deleted.
+      'haven_get_receipt',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(25)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(26)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],

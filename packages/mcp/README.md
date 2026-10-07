@@ -117,6 +117,9 @@ Environment variable form:
 - `haven_discover_tools`
 - `haven_submit_catalog_entry`
 - `haven_list_receipts`
+- `haven_verify_receipt`
+- `haven_get_receipt` (#3723 — the signed bundle: `{ receipt }` from one of this agent's own settled payments, which `haven_verify_receipt` reads unchanged)
+- `haven_get_task_budget` (#3518)
 - `haven_open_task_budget` (#3329)
 - `haven_close_task_budget` (#3329)
 - `haven_submit` (#3329 — relays a local signer signature by `task_budget_id`, or (#3506) by `sub_budget_id` for a sub-budget this agent delegates (listed in `haven_get_agent`'s `pendingSubBudgetSignatures[]`); a `payment_id` is refused on this runtime, which signs and submits payments inline)

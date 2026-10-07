@@ -81,6 +81,8 @@ const PINNED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_close_task_budget',
   // #3518: the read-by-id a close refusal's "re-check the budget's status" points at.
   'haven_get_task_budget',
+  // #3723: the signed bundle's read — the receipt endpoint's own response.
+  'haven_get_receipt',
 ]
 
 /** A complete synthetic registry for the injectable detection-logic tests. */

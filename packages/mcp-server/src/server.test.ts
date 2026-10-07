@@ -47,6 +47,7 @@ describe('buildHostedMcpServer', () => {
         'haven_get_resume_state',
         'haven_list_receipts',
         'haven_verify_receipt',
+        'haven_get_receipt',
         'haven_complete_mcp_tool',
         'haven_settle_mcp_tool',
         'haven_pay',

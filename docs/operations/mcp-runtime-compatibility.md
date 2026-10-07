@@ -26,6 +26,7 @@ covers:
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-completion.ts
+  - packages/sdk/src/receipt.ts
   - packages/sdk/src/edge.ts
   - packages/sdk/src/client-identity.ts
   - packages/core/src/client-compat.ts
@@ -4990,3 +4991,41 @@ to call next in structured fields, and those fields are typed end to end
 > manifest rows and the skew tables above stand. `last-verified` is not
 > re-stamped: this note is the scope. Nothing else in this document was
 > re-verified.
+> **Re-verified #3723 (2026-10-07, the receipt endpoint's wrapped response +
+> the signed bundle's MCP read):** `verifyPaymentReceipt`
+> (`packages/sdk/src/receipt.ts`) now accepts the response
+> `GET /payments/{id}/receipt` returns — `{ receipt, verification }` — as-is:
+> when the top level carries no `authorization` and `.receipt` is a non-null
+> object, the bundle inside is verified, one level only, no recursion. The
+> wrapper's `verification` is NEVER read — it is Haven's own self-check
+> computed on Haven's server, and trusting it would defeat an offline
+> verifier; a throwing getter around a valid bundle still verifies, and a
+> wrapper around a bundle signed by another key answers `signer_mismatch`. A
+> `haven_list_receipts` row — bare or wrapped — still answers
+> `not_a_signed_receipt`. Both MCP runtimes gain
+> `haven_get_receipt { payment_id }` (strict input, in
+> `STATE_DIRECT_RECOVERY_TOOLS` on the hosted runtime), backed by
+> `HavenClient.getReceipt` and returning `{ receipt }` only — the
+> server-side `verification` is deliberately not handed back, so an agent
+> cannot skip `haven_verify_receipt` on Haven's own word. The spread form
+> (`{ receipt, verification }` as top-level arguments) verifies on both
+> runtimes: hosted declares `verification` as accepted-and-ignored in its
+> strict schema (previously it refused the key), and stdio — which silently
+> stripped it — now declares the same schema, so the two agree. **The local
+> runtime's consent hash MOVES**: a new registered tool name joins the sorted
+> set (`packages/mcp/src/consent.ts`), so every installed client is re-asked
+> for consent once after the update — intended, with precedent in #3329 and
+> #3518, and recorded in `packages/mcp/CHANGELOG.md` under `## Unreleased`;
+> the signer's hash does not. The exported `HavenMcpToolName` union grows
+> (lever: a source break for exhaustive `switch`/`Record` consumers). The
+> description payload is re-derived as a new round in
+> `packages/mcp-server/src/description-size.test.ts` (the shrink-only
+> `MAX_TOTAL_BYTES` pin cannot absorb a 28th description without a re-measure,
+> as #3518 did); `MAX_MEAN_BYTES` is re-pinned to the new round's two-decimal
+> ceiling (960.83, stricter than round 17's 964.04). Hosted picks the SDK
+> change up on deploy; stdio only through a release (`@haven_ai/mcp` pins the
+> SDK exactly). No backend route, OpenAPI, wire field, migration or payment
+> path changed; the `agent_tool_invocations` audit allowlist is NOT extended, so
+> `haven_get_receipt` leaves no audit row (like `haven_verify_receipt`
+> today). `last-verified` is not re-stamped: this block is the scope.
+> Nothing else in this document was re-verified.

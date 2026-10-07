@@ -30,6 +30,7 @@ import { BRAND_COLOURS } from '@/lib/brand-colours'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { truncateAddress } from '@/components/haven'
 import { resolveDefaultAccount } from '@/lib/default-account'
+import { accountWithChainLabel } from '@/lib/account-label'
 import { usePathname } from 'next/navigation'
 
 // Generative identicon gradient stops — decorative art hashed from an address
@@ -761,7 +762,7 @@ export default function WalletButton({
         const accountChainName = getAccountChainName(subjectAccount?.chain_id)
         // Which account the pill speaks for, now that nothing on screen says
         // which one is "active" (#3719).
-        const subjectAccountName = subjectAccount?.name
+        const subjectAccountName = subjectAccount ? accountWithChainLabel(subjectAccount) : undefined
         const openWalletConnect = () => {
           if (openConnectModalHook) {
             openConnectModalHook()

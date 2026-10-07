@@ -2720,6 +2720,9 @@ export default function DesignSystemPage() {
             <div inert aria-hidden="true" className="relative h-0 w-72">
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
+              // #3719: the live menu names the account its status refers to;
+              // shown on this illustration so the line has a rendered state.
+              accountName={'Operating wallet \u00b7 Base Sepolia'}
               signingWith={{
                 label: 'Passkey \u00b7 added March 3, 2026',
                 keyId: DS_PASSKEY_KEY_ID,

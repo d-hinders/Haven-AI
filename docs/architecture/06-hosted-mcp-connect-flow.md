@@ -331,7 +331,7 @@ handler-level check remains for callers that import `createToolHandlers`
 directly. The advertised JSON Schema is unchanged — it already said
 `additionalProperties: false`.
 
-The edge signer exposes four local, sign-only tools. `haven_x402_sign_header`
+The edge signer exposes five local, sign-only tools. `haven_x402_sign_header`
 and `haven_sign_sweep_delegate` never reach the network; `haven_sign` and
 `haven_sign_x402` do only in their by-id forms. Given a `payment_id`, both fetch
 that payment's exact signing context from Haven over an authenticated,

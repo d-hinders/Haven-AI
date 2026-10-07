@@ -40,9 +40,11 @@ import {
  * The edge signer core.
  *
  * Holds the delegate key in this process and exposes the signing operations a
- * hosted-MCP flow needs — five, none of them a raw-hash primitive (#3169): each
+ * hosted-MCP flow needs — six, none of them a raw-hash primitive (#3169): each
  * takes a payload something can check — a Haven binding verified here, typed
- * data the account validates on-chain, or a sweep authorization. It performs no network I/O and never
+ * data the account validates on-chain, a sweep authorization, or (since
+ * #3728) an EIP-4361 SIWX message composed in-package from grammar-validated
+ * challenge fields. It performs no network I/O and never
  * returns the key — only signatures and the standard x402 header. See
  * docs/architecture/07-edge-signer.md.
  */
@@ -88,6 +90,18 @@ export interface EdgeSigner {
    * relayer broadcasts it and pays gas. Never broadcasts — pure signing.
    */
   signSweepAuthorization(input: SweepSignatureInput): Promise<SweepSignatureResult>
+  /**
+   * Sign an EIP-4361 (SIWE) message with EIP-191 `personal_sign` (#3728) —
+   * the x402 Sign-In-With-X extension. The message ALWAYS reaches this method
+   * composed in-package by the tool layer (`siwx.ts`) from grammar-validated
+   * challenge fields, with the address taken from this key — never a
+   * caller-supplied string, hash or byte payload. The name is deliberately
+   * SIWX-scoped, not a generic `signMessage`: the delegate key's EIP-191
+   * surface on this interface stays single-purpose. Breaking for
+   * out-of-package `EdgeSigner` implementers (open question in #3728,
+   * decided: acceptable — the only implementation is `createEdgeSigner`).
+   */
+  signSiwxMessage(message: string): Promise<string>
 }
 
 export interface SweepSignatureInput {
@@ -520,6 +534,16 @@ export function createEdgeSigner(
         )
       }
       return { signature }
+    },
+
+    async signSiwxMessage(message: string): Promise<string> {
+      // EIP-191 `personal_sign` over the exact composed string (viem hashes
+      // it with the EIP-191 prefix internally). The caller (tools.ts, via
+      // siwx.ts) has validated and composed the message; this signs those
+      // bytes and nothing else — there is no path here that signs caller
+      // bytes directly.
+      const account = privateKeyToAccount(delegateKey as `0x${string}`)
+      return account.signMessage({ message })
     },
   }
 }

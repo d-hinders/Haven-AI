@@ -3538,7 +3538,8 @@ Hosted only; the local `@haven_ai/mcp` runtime is unchanged (its one-shot
 - **The quote names the pay step.** `haven_quote_x402`'s result carries a next
   step for the first time: `haven_pay_x402_quote` with request-mode
   `next_arguments`. Those are the request as the caller sent it, plus
-  `max_amount_human` set to the quoted amount.
+  `max_amount_human` set to the quoted amount and a fresh `idempotency_key`
+  that a retried pay call replays.
 - **Egress policy: #3747's hosted policy, with a stricter redirect rule.**
   - The target is checked by the client's `merchantEgress` policy
     (`docs/security/hosted-egress.md`): public https hosts only, no IP literal,

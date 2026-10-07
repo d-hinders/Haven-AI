@@ -64,8 +64,10 @@ export interface RawERC20Transfer {
 
 /**
  * Sent on every explorer request. Node's default fetch identifies itself as
- * `node`, which edge bot protection in front of public explorers refuses
- * (HTTP 403) — prod Base history reads failed that way on every request.
+ * `node`, which edge bot protection in front of public explorers may refuse
+ * (HTTP 403). Production Base history reads were refused with 403 on every
+ * request (2026-10-07); whether the identity, a missing key or the caller's
+ * IP was the reason is what the error excerpt below exists to say.
  */
 const EXPLORER_REQUEST_HEADERS: Record<string, string> = {
   Accept: 'application/json',
@@ -76,21 +78,36 @@ const EXPLORER_REQUEST_HEADERS: Record<string, string> = {
 export const EXPLORER_ERROR_BODY_MAX = 200
 
 /**
- * A short, single-line excerpt of a failed response's body, so the logged
- * error says WHY the explorer refused (a Cloudflare page, an API-key notice)
- * rather than only the status. Never throws: a body that cannot be read
- * leaves the excerpt empty.
+ * A short, single-line diagnosis of a failed response, so the logged error
+ * says WHY the explorer refused (a Cloudflare page, an API-key notice)
+ * rather than only the status: the `server` and `cf-ray` headers, then an
+ * excerpt of the body. `secret` (the API key, when one is sent) is redacted
+ * from the result — the request URL carries it, and an intermediary's error
+ * page may echo that URL back. Never throws: anything unreadable is omitted.
  */
-async function errorBodyExcerpt(response: Response): Promise<string> {
+async function errorDiagnosis(response: Response, secret: string): Promise<string> {
+  // Redact BEFORE truncating, so a cut can never leave a partial key behind.
+  const redact = (text: string) => (secret ? text.split(secret).join('[redacted]') : text)
+  const parts: string[] = []
   try {
-    const text = (await response.text()).replace(/\s+/g, ' ').trim()
-    if (!text) return ''
-    const excerpt =
-      text.length > EXPLORER_ERROR_BODY_MAX ? `${text.slice(0, EXPLORER_ERROR_BODY_MAX)}…` : text
-    return ` — ${excerpt}`
+    const server = response.headers?.get('server')
+    const cfRay = response.headers?.get('cf-ray')
+    if (server) parts.push(`server=${redact(server)}`)
+    if (cfRay) parts.push(`cf-ray=${redact(cfRay)}`)
   } catch {
-    return ''
+    // headers unreadable — the body may still say enough
   }
+  try {
+    const text = redact((await response.text()).replace(/\s+/g, ' ').trim())
+    if (text) {
+      parts.push(
+        text.length > EXPLORER_ERROR_BODY_MAX ? `${text.slice(0, EXPLORER_ERROR_BODY_MAX)}…` : text,
+      )
+    }
+  } catch {
+    // body unreadable — keep whatever the headers gave
+  }
+  return parts.length === 0 ? '' : ` — ${parts.join(' ')}`
 }
 
 // ── Etherscan-compatible v1 client (Etherscan V2 + Blockscout v1) ──
@@ -122,7 +139,7 @@ async function fetchFromV1<T>(
         continue
       }
       throw new Error(
-        `Explorer API error (chain ${chainId}): ${response.status}${await errorBodyExcerpt(response)}`,
+        `Explorer API error (chain ${chainId}): ${response.status}${await errorDiagnosis(response, chain.explorerApiKey)}`,
       )
     }
 
@@ -217,7 +234,7 @@ async function fetchFromV2<T>(
     const response = await fetch(url.toString(), { headers: EXPLORER_REQUEST_HEADERS })
     if (!response.ok) {
       throw new Error(
-        `Blockscout v2 error (chain ${chainId}): ${response.status}${await errorBodyExcerpt(response)}`,
+        `Blockscout v2 error (chain ${chainId}): ${response.status}${await errorDiagnosis(response, chain.explorerApiKey)}`,
       )
     }
     const data = (await response.json()) as V2Page<T>

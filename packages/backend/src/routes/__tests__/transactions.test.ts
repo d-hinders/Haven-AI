@@ -1438,10 +1438,9 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
       expect.stringContaining('https://base.blockscout.com/api/v2/addresses/'),
       expect.anything(), // the request init (explorer headers)
     )
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      expect.stringContaining('https://api.etherscan.io/v2/api'),
-      expect.anything(), // the request init (explorer headers)
-    )
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes('https://api.etherscan.io/v2/api')),
+    ).toBe(false)
 
     const unowned = await app.inject({
       method: 'GET',

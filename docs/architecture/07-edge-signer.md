@@ -50,11 +50,10 @@ delegate key locally and performs sign-only operations. Its only network use
 is the #1263 read-only signing-context fetch (see Current Form) — it never
 relays, submits, or exposes anything.
 
-Topology and custody contract:
-[`06-hosted-mcp-connect-flow.md`](06-hosted-mcp-connect-flow.md). That document
-predates the one-call signer fast path; this guide and
-[`04-x402-payment-sequence.md`](04-x402-payment-sequence.md) are the current
-orchestration references.
+Topology, custody contract and the hosted tool chains:
+[`06-hosted-mcp-connect-flow.md`](06-hosted-mcp-connect-flow.md). This guide
+holds the signer; [`04-x402-payment-sequence.md`](04-x402-payment-sequence.md)
+holds the x402 authority boundaries.
 Custody guardrails: [`../regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md).
 Connect Agent 2 local-key pairing contract:
 [`../archive/connect-agent-2-local-key-pairing.md`](../archive/connect-agent-2-local-key-pairing.md).

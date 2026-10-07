@@ -102,6 +102,32 @@ export function signerCapabilityAdvertisement(): {
   return { experimental: { [SIGNER_CAPABILITY_KEY]: signerCompatibility() } }
 }
 
+export interface SignerIdentity {
+  /** The credential file's `agent_id`, or `HAVEN_AGENT_ID`; absent when neither is set. */
+  agentId?: string
+  /** The delegate key's address — always known, since the signer holds the key. */
+  delegateAddress?: string
+}
+
+/**
+ * #3738: the identity line. Once one harness carries several Haven pairs, the
+ * model must keep hosted and signer calls inside one pair, and a server NAME
+ * is not proof of that — `haven-research` and `haven-signer-research-2` are
+ * easy to cross. Identity is: the hosted `haven_get_agent` returns `id` and
+ * `delegateAddress`, and this line states what THIS signer is bound to, so
+ * the model can compare the two before it signs. Neither value is a secret
+ * (the consent block prints both). Advisory, like the rest of this string —
+ * the signing path's own checks are unchanged.
+ */
+function signerIdentityLines(identity: SignerIdentity | undefined): string[] {
+  if (!identity?.agentId && !identity?.delegateAddress) return []
+  const agent = identity.agentId
+    ? `agent id ${identity.agentId}`
+    : 'no recorded agent id'
+  const delegate = identity.delegateAddress ? ` and delegate address ${identity.delegateAddress}` : ''
+  return [`This signer is bound to ${agent}${delegate}.`]
+}
+
 /**
  * The agent-readable half: MCP `instructions`, which clients surface to the
  * model. The machine-readable capability above is the precise statement, but
@@ -111,8 +137,11 @@ export function signerCapabilityAdvertisement(): {
  * It names the same fix as #1143 so an agent that hits either surface — the
  * handshake here or the signing-time error there — tells the user the same
  * thing.
+ *
+ * Since #3738 it also states the agent id and delegate address this signer is
+ * bound to, when `identity` is given.
  */
-export function signerInstructions(): string {
+export function signerInstructions(identity?: SignerIdentity): string {
   const compatibility = signerCompatibility()
   return [
     'Haven edge signer: sign-only tools bound to the local delegate key. It never emits the',
@@ -120,6 +149,16 @@ export function signerInstructions(): string {
     'Haven by payment_id — pass payment_id to haven_sign (preferred for both a direct payment,',
     '#3271, and delegation-rail x402) or haven_sign_x402 (x402 only) instead of relaying bulky',
     'typed-data payloads yourself.',
+    '',
+    ...signerIdentityLines(identity),
+    'When more than one Haven pair is configured, you act as ONE agent per task: if the',
+    'user has not said which (in the request, or a project-level choice they stated), ask',
+    'before any payment tool. Sign only through the signer of the hosted server you called:',
+    'haven-<slug> with haven-signer-<slug>, bare haven with haven-signer, Codex haven with',
+    'haven_signer. Before signing, compare the identity this signer states with',
+    'haven_get_agent (its id and delegateAddress) from that hosted server — the delegate',
+    'address alone when this signer has no recorded agent id. If they differ, stop and sign',
+    'nothing — switch to the signer whose identity matches.',
     '',
     'Version compatibility (check this BEFORE signing, not after):',
     `- x402 expected-context versions supported: ${compatibility.x402_expected_context_versions.join(', ')}`,
@@ -139,7 +178,8 @@ export function signerInstructions(): string {
     'machine-readable, not just prose: it carries code, supported_versions, received_version, and',
     'fallback fields alongside the message, so you can branch on it directly. Every signer',
     'refusal also carries the next-step family: next_tool_name + next_tool_server_role when a',
-    'hosted tool follows (resolve the role against your own server names), else',
+    'hosted tool follows (resolve the role against your own server names — with several',
+    'Haven pairs, the hosted server of THIS signer\'s pair), else',
     'next_tool_omitted_reason saying why not.',
     '',
     'An undeclared top-level argument is refused, not stripped: haven_sign answers',
@@ -147,5 +187,12 @@ export function signerInstructions(): string {
     'command) instead of dropping the key and answering the generic signing error — if you see',
     'that refusal, this signer predates the argument form you sent. Update the signer; nothing',
     'was signed, fetched or audited.',
+    '',
+    'Sign-In-With-X (#3728): when a merchant 402 carries a sign-in-with-x extension (or the',
+    'merchant documents a CAIP-122 sign-in route), call haven_sign_siwx with { url, challenge }.',
+    'The signer composes the EIP-4361 message itself from the validated challenge and signs it with',
+    "the delegate key — it returns { sign_in_with_x_header }; retry the merchant with the",
+    'SIGN-IN-WITH-X header set to that value. This proves the delegate wallet paid the merchant; it',
+    'moves no funds and cannot approve any payment.',
   ].join('\n')
 }

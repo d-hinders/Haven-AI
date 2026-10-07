@@ -318,8 +318,11 @@ Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools.ts`, the facade), and
 `packages/signer/src/tools.ts` as the source of truth.
 
-The four edge-signer tools are `haven_sign`, `haven_x402_sign_header`,
-`haven_sign_x402`, and `haven_sign_sweep_delegate`.
+The five edge-signer tools are `haven_sign`, `haven_sign_siwx`,
+`haven_x402_sign_header`, `haven_sign_x402`, and `haven_sign_sweep_delegate`.
+`haven_sign_siwx` (#3728) is the x402 Sign-In-With-X signer: it composes the
+EIP-4361 message itself from a validated merchant challenge and signs in as the
+delegate wallet — it moves no funds and takes no input from Haven.
 
 ## x402 comparison
 
@@ -568,7 +571,7 @@ open count still 0 — `scripts/ci/vocabulary-map.json` unchanged), the #3411
 `idempotencyKey` refusal (`IDEMPOTENCY_KEY_RENAMED`, still declared-but-refused
 in the schemas), the #2366 body convergence, the standing
 `quote`/`payment_required` owner decision, the deleted `#314` aliases
-(`server.ts` still iterates `toolSchemas` only), the four edge-signer tool
+(`server.ts` still iterates `toolSchemas` only), the five edge-signer tool
 names, the two-flow x402 comparison (EIP-3009 bridge / erc7710 direct, the
 settle-column split, `POST /x402/:id/settle` selection, the #1986 410 rail
 scope — still present in `routes/x402.ts`), `assertExpectedBinding` /

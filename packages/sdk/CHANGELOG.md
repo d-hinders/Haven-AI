@@ -15,12 +15,17 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **The `haven-pay` skill covers a harness with several Haven pairs (#3738).** Act as one agent per task, ask which when the user has not said, keep every signer call inside the pair of the hosted server called (`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with `haven-signer`, Codex `haven` with `haven_signer`), and confirm by identity — `haven_get_agent`'s `id` and `delegateAddress` against the identity the signer states. No update needed.
+
 ### Fixed
 
 - **`verifyPaymentReceipt` accepts the receipt endpoint's wrapped response as-is (#3723).** `GET /payments/{id}/receipt` (and `HavenClient.getReceipt`) return `{ receipt, verification }`, but the verifier looked for `authorization` at the top level, so passing that response unchanged answered `not_a_signed_receipt`. When the top level carries no `authorization` and `.receipt` is a non-null object, the bundle inside is verified — one level only, no recursion. The wrapper's `verification` is never read (it is Haven's own self-check, not offline evidence), and a `haven_list_receipts` row — bare or wrapped — still answers `not_a_signed_receipt`.
 
 ### Added
 
+- **The haven-pay skill covers an x402 payment URL that another tool hands back (#3735).** When a merchant's own MCP or API returns a link to pay beside a deposit address, the skill now tells the agent to quote the exact request (`method`, `headers`, `body` as a JSON string, and `Content-Type: application/json` on a JSON POST), to repeat it on its own paid retry, to copy `payment_required` verbatim, to prefer the x402 URL, to pay exactly one route, and to check delivery in the merchant's tool. The skill's front-matter `description` names the case so it loads before any 402 is seen. The shared no-compatible-option refusal now says when the merchant offered only a non-`exact` scheme (for example `upto`) and that a missing body or `Content-Type` is the likely cause. Text-only: no method, type or selection behaviour changed. No update needed.
 - **`x402RetryHeadersFor(paymentHeader)` — the ready-made retry headers beside the live name rule (#3727).** `{ <name>: <header> }` for every name `x402PaymentHeaderNamesFor` puts on the wire for that payload (both `PAYMENT-SIGNATURE` and `X-PAYMENT` on eip3009, `PAYMENT-SIGNATURE` only on erc7710), exported from the barrel and from `@haven_ai/sdk/edge` so the signer's one-shot results build them from the same rule. The hosted `haven_report_x402_outcome` schema also gained the optional settlement-evidence input (`settlement_tx_hash` / raw `payment_response` header) — additive tool-input fields behind the same `POST /machine-payments/evidence` verification seam; no SDK call signature changed. No update needed.
 
 ## 0.8.1-alpha.0 — 2026-10-07

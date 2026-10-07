@@ -115,6 +115,9 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    the same binding verification and digest re-derivation before signing. The
    signer CORE remains network-free:
    - `haven_sign`
+   - `haven_sign_siwx` for x402 Sign-In-With-X (#3728) — composes the EIP-4361
+     message itself from the validated challenge, signs it EIP-191, returns the
+     finished `SIGN-IN-WITH-X` header; never contacts a merchant
    - `haven_x402_sign_header`
    - `haven_sign_x402` for the one-call x402 signing fast path
    - `haven_sign_sweep_delegate` for stranded Base-USDC recovery
@@ -142,6 +145,10 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    documented default is "sign; branch on the structured signing-time refusal
    below" — but the handshake stays advertised for harnesses and humans that
    can read it. The handshake carries no key material and no authority.
+   Since #3738 the `instructions` also state the agent id and delegate
+   address the signer is bound to, so a model holding several Haven pairs can
+   check them against `haven_get_agent`'s `id` / `delegateAddress`; advisory,
+   and neither value is secret.
 
    **Structured signing-time refusal (#1309).** The #1143 refusal itself is
    unchanged — an unsupported expected-context or sweep-binding version still
@@ -431,6 +438,26 @@ hosted:  haven_sweep_delegate           -> authorization + expected_auth
 local:   haven_sign_sweep_delegate      -> EIP-3009 signature
 hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
 ```
+
+**Sign-In-With-X (x402 extension, #3728) — the delegate EOA signs in as the
+wallet that paid; no facilitator and no Haven involvement:**
+
+```
+merchant: 402 with extensions['sign-in-with-x'] -> challenge
+local:    haven_sign_siwx { url, challenge } -> SIGN-IN-WITH-X header
+agent:    retry the merchant with the SIGN-IN-WITH-X header set to that value
+```
+
+The signer composes the EIP-4361 message itself from grammar-validated
+challenge fields (domain == URL host, resource uri origin == URL origin,
+https URL, alphanumeric nonce ≥ 8 chars, expiry window ≤ 5 minutes plus a
+pinned 30-second clock-skew tolerance,
+`supportedChains` offering the credential chain with `eip191`) and the
+delegate address read from the key — it never signs a caller-supplied
+message, hash or byte string, so a SIWX signature cannot double as a payment
+authorization or any other Haven signature. Phase 1 is the delegate EOA only
+(EIP-1271/6492 for the delegate account is phase 2); the user's treasury
+account is permanently out of scope.
 
 ## Custody invariants
 

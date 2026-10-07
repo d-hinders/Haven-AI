@@ -84,6 +84,24 @@ last-verified: "2026-10-02"
 >
 > `last-verified` stays 2026-10-02. Nothing else in this document was re-verified.
 
+> **Re-verified #3728 (2026-10-07, signer SIWX phase 1):** the local signer
+> gains one tool, `haven_sign_siwx { url, challenge }` — an x402
+> Sign-In-With-X (CAIP-122 / EIP-4361) sign-in for the delegate EOA. The tool
+> takes no input from Haven, composes the message in-package from
+> grammar-validated challenge fields, and returns a finished
+> `SIGN-IN-WITH-X` header; it moves no money.
+> - **One consent-hash event, not a version bump.** The consent hash covers
+>   the sorted tool NAMES, so the new tool moves it once — every upgraded
+>   install re-prompts exactly once. `SIGNER_CONSENT_SURFACE_VERSION` stays 2.
+> - **`requiredSignerTools` is derived**, so no connect-side edit: doctor and
+>   install probes now require the new tool from the installed signer. An
+>   older signer keeps paying but does not list the tool.
+> - **No schema, expected-context or sweep-binding version moves.** The audit
+>   entry gains optional additive `domain`/`nonce` fields on `version: 1`,
+>   following the `safe_address?`/`chain_id?` pattern, no key renamed (#2914).
+> Scope of this note: the signer tool set, consent and audit surfaces.
+> Nothing else in this document was re-verified.
+
 > **Re-verified #3669 (2026-10-06, backend supported vs known chains):**
 > - **The wire value narrows.** `GET /chains` and discovery `chains.supported` now list 8453 and 84532 only; chain 100 leaves. No key or field is removed.
 > - **History filters keep working.** `GET /transactions` still accepts a `chainId=100` history filter, through the new known-chain gate.
@@ -205,6 +223,15 @@ last-verified: "2026-10-02"
 > moves — the runtime manifest, connector channel, dist-tag and setup-prompt
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
+
+> **Re-verified, Backend checks ceiling (2026-10-07):** this diff touches
+> `.github/workflows/ci.yml`, a covered file, in the `backend_checks` job's
+> `timeout-minutes` only (8 to 12) and the comment above it. The job name,
+> its steps, the check identity and every ruleset contract are unchanged. No
+> tool, schema, version-skew or consent-hash contract moves; the client
+> releases table, upgrade hints, publish flow and package resolution are
+> untouched. `last-verified` stays 2026-10-02. Nothing else in this document
+> was re-verified.
 
 > **Re-verified #3583 (2026-10-02, the ops render smoke):** this diff touches
 > `.github/workflows/ci.yml`, a covered file, inside the `ops_checks` job
@@ -3475,7 +3502,7 @@ nothing to read.
 
 | Surface | What it states | Where |
 |---|---|---|
-| Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model) | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
+| Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model), which since #3738 also state the agent id and delegate address the signer is bound to | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
 | Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus in-band guidance (since #1547: branch on the signer's machine-readable version-mismatch refusal, not a pre-compare). Present on the **EIP-3009 shape** of each tool; the erc7710 shape carries none, and since #2041 that now includes `haven_pay_x402_quote` | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`, `haven_prepare_catalog_purchase`) |
 
 **The information is agent-mediated, and cannot be otherwise.** The signer and
@@ -4042,6 +4069,19 @@ to call next in structured fields, and those fields are typed end to end
   configured servers and call `next_tool_name` there. The pair alone was the
   documented answer until #2550 and was wrong for the named case, which is why
   the role exists rather than a fourth spelling of the name.
+  **Several pairs on one client (#3738):** once a harness carries more than
+  one Haven pair, the role alone is ambiguous — `signer` matches every signer.
+  The hosted instructions, the signer's own instructions and the `haven-pay`
+  skill all carry one rule: act as one agent per task, ask which when the user
+  has not said, and send each signer call to the signer of the hosted server
+  called (`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with
+  `haven-signer`, Codex `haven` with `haven_signer`). Identity, not name, is
+  the check: the signer's `initialize` instructions state the agent id and
+  delegate address it is bound to, compared with `haven_get_agent`'s `id` and
+  `delegateAddress`. In the hosted instructions both this rule and the
+  server-name rule above sit inside the first 2,000 characters, because
+  Claude Code truncates server instructions at about 2,048 (pinned by the
+  hosted server's own tests).
 - **`--doctor` / `--repair` (#1589):** a stuck setup is diagnosable without a
   hand-built MCP client: `npx @haven_ai/connect@alpha --doctor --runtime
   <runtime>` checks config, credentials, the pinned signer runtime, the hosted
@@ -5074,3 +5114,27 @@ to call next in structured fields, and those fields are typed end to end
 > `haven_get_receipt` leaves no audit row (like `haven_verify_receipt`
 > today). `last-verified` is not re-stamped: this block is the scope.
 > Nothing else in this document was re-verified.
+
+> **Re-verified #3735 (2026-10-07, an x402 payment URL handed back by another
+> tool):** the generic haven-pay skill (`packages/sdk/src/skill-content.ts`,
+> and its byte-identical frontend copy `agent-skill-bundle.ts`) gains one
+> paragraph after the non-MCP paywall block, a trigger bullet, and a wider
+> front-matter `description` ("…or another tool returns an x402 payment URL").
+> The paragraph tells the agent to quote the exact request (`url`, `method`,
+> `headers`, `body` as a JSON string, `Content-Type: application/json` on a
+> JSON POST), to repeat that method, body and `Content-Type` on its own paid
+> retry (the hosted `haven_pay_x402_quote` takes none of them), to copy
+> `payment_required` verbatim, to prefer the x402 URL over a deposit address,
+> to pay one route only, and to check delivery in the merchant's own tool. The
+> SDK's shared no-compatible-option refusal (`noCompatiblePaymentOptionError`)
+> now names the offered schemes and the
+> likely cause when every `accepts` entry is a non-`exact` scheme, echoing a
+> merchant's scheme string only when it is a short identifier. Hosted
+> `haven_quote_x402` relays that message through `HavenClient.quoteX402`, so
+> hosted picks it up on deploy; the local runtime (the refusal) and connect
+> (the skill) pick up their changes only through a release (they pin the SDK
+> exactly). No tool schema,
+> consent hash, wire field, route, signer or payment path changed, and nothing
+> under `packages/mcp-server/src/**` was edited. `last-verified` is not
+> re-stamped: this block is the scope. Nothing else in this document was
+> re-verified.

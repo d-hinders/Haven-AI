@@ -51,7 +51,7 @@ import {
 
 export const HAVEN_SKILL_MD = `---
 name: haven-pay
-description: Pay for things from the user's Haven wallet within their agent rules, and set Haven up when it is not yet connected. Use when the user asks to send, pay, tip, or transfer crypto; when a request hits an HTTP 402 (x402) paywall; or when they ask to create a Haven account, create an agent, or connect one.
+description: Pay for things from the user's Haven wallet within their agent rules, and set Haven up when it is not yet connected. Use when the user asks to send, pay, tip, or transfer crypto; when a request hits an HTTP 402 (x402) paywall, or another tool returns an x402 payment URL; or when they ask to create a Haven account, create an agent, or connect one.
 ---
 
 # Haven: pay from a Haven wallet
@@ -73,11 +73,27 @@ says why; that is a complete answer.
 Follow those fields first; the prose below is fallback and orientation, not
 the source of truth.
 
+**When more than one Haven pair is configured** (a named pair is
+\`haven-<slug>\` + \`haven-signer-<slug>\`), you act as ONE agent per task. If
+the user has not said which — in the request, or a project-level choice they
+stated — ask before any payment tool. Keep every call inside that pair: a
+signer call goes to the signer of the hosted server you called —
+\`haven-<slug>\` with \`haven-signer-<slug>\`, bare \`haven\` with
+\`haven-signer\`, Codex \`haven\` with \`haven_signer\`. Confirm by identity,
+not name: \`haven_get_agent\` returns \`id\` and \`delegateAddress\`, and each
+signer states the agent id and delegate address it is bound to in its own
+instructions (compare the delegate address alone when a signer has no recorded
+agent id). If they differ, stop and sign nothing — switch to the signer whose
+identity matches.
+
 ## When to use this skill
 
 - The user asks to send money, pay someone, tip, donate, or transfer tokens.
 - A request returns HTTP 402 (x402): use the Haven pay tools to settle it,
   then retry the original request.
+- Another tool or API hands back an x402 payment URL (a merchant's own
+  checkout, for example): pay that URL with the Haven pay tools rather than a
+  raw deposit address — see *Paying* below.
 
 ## Onboarding and setup
 
@@ -255,7 +271,14 @@ merchant leg for you.
 \`to\`, \`amount\`, and \`token\` for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
-first and sign in the local Haven signer. On THIS path Haven does not talk to
+first and sign in the local Haven signer. If the 402 carries a
+\`sign-in-with-x\` extension (x402 Sign-In-With-X), call
+\`mcp__haven-signer__haven_sign_siwx\` with \`{ url, challenge }\` — \`url\` is
+the FINAL URL after redirects — and retry the merchant with the
+\`SIGN-IN-WITH-X\` header it returns: the delegate
+wallet signs in as the wallet that paid, moving no funds. NEVER follow a
+redirect with \`SIGN-IN-WITH-X\` (or a resulting session token) attached; if
+the final origin differs, re-sign there. On THIS path Haven does not talk to
 the merchant: \`mcp__haven-signer__haven_sign_x402\` returns both
 \`signature\` and \`payment_header\`; relay \`signature\` with
 \`mcp__haven__haven_submit\`, then retry the paywalled URL yourself with
@@ -281,6 +304,48 @@ crashes after payment, a later \`mcp__haven__haven_get_payment_status\` call
 may report \`nextAction: 'retry_original_x402_request'\` — only then call
 \`mcp__haven__haven_resume_x402_payment\` with the preserved resume state or
 payment id, instead of paying again.
+
+**An x402 payment URL handed back by another tool:** some merchants run their
+own MCP or API for browsing and checkout and then hand back a link to pay —
+for example, an invoice carrying an \`x402_payment_url\` to POST with its
+\`invoice_id\`, beside a raw deposit address and a web payment link.
+- **Quote the exact request:** \`mcp__haven__haven_quote_x402\` with \`url\`,
+  \`method\`, \`headers\` and \`body\`, exactly as the merchant described it.
+  \`body\` is a JSON **string**, not an object. On a JSON POST always pass
+  \`headers: {"Content-Type": "application/json"}\` — the tool does not infer
+  it, and a merchant may answer a request without it with a generic challenge
+  Haven cannot pay (for example, only the \`upto\` scheme).
+- **On the local runtime** (\`@haven_ai/mcp\`), \`haven_pay_x402\` with that
+  same \`url\`, \`method\`, \`headers\` and \`body\` probes, pays and retries
+  the request itself; the next two points are for the hosted tools.
+- **The retry repeats the request.** On this hosted path
+  \`mcp__haven__haven_pay_x402_quote\` takes no method, body or headers, and
+  the quote result does not carry them back, so YOU send the paid request:
+  the same method, body and \`Content-Type\` to \`retry_url\`, plus the
+  \`payment_header\` (as \`PAYMENT-SIGNATURE\`, and also \`X-PAYMENT\` on
+  EIP-3009). A retry without the body fails after the funding leg has already
+  moved money.
+- **Copy \`payment_required\` verbatim.** Hand the quote result's
+  \`payment_required\` to \`mcp__haven__haven_pay_x402_quote\` exactly as
+  returned — never retyped, trimmed or "corrected". Haven echoes its
+  \`extensions\` into the signed header, as x402 v2 requires, and a merchant
+  that compares the echo refuses an edited one after funding has moved.
+- **Prefer the x402 URL over the deposit address or web link.** The network
+  and token then come from the merchant's own machine-readable challenge, not
+  from reading an address; the paid request carries the merchant's own
+  reference (the invoice id); and Haven records the outcome and, once you
+  report it, the merchant's settlement evidence. (A deposit transfer is bound
+  to its payee and amount on-chain too; the difference is the record, not
+  the binding.)
+- **Pay exactly one route, and never fall back silently.** If the x402 route
+  is refused or fails, do not then pay the deposit address — that pays the
+  invoice twice. Follow the result's guidance fields instead: on EIP-3009, a
+  merchant that refused the paid retry after funding leaves stranded delegate
+  funds, recovered with \`mcp__haven__haven_sweep_delegate\`; otherwise stop and
+  tell the user. That includes a budget pinned to one recipient, which cannot
+  pay a merchant that offers only EIP-3009.
+- **Check delivery in the merchant's own tool** after paying (a get-invoice
+  tool, say), and report the outcome as above.
 
 **Catalog tool arguments:** when \`haven_discover_tools\` returns
 \`tool_arguments\`, pass that object unchanged as the pay tool's

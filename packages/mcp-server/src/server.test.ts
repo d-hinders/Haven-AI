@@ -197,6 +197,26 @@ describe('buildHostedMcpServer', () => {
     expect(toolDescriptions.haven_pay).toContain('sign_context_unavailable')
   })
 
+  it('puts the server-name and several-pairs rules where Claude Code still reads them (#3738)', () => {
+    // Claude Code truncates server instructions at about 2,048 characters; a
+    // rule past the cut is invisible to it. Both rules must START before 2,000
+    // and the several-pairs rule must END before it, so the whole of it is read.
+    const namedPair = HOSTED_INSTRUCTIONS.indexOf('If yours differ')
+    const severalPairs = HOSTED_INSTRUCTIONS.indexOf('When more than one Haven pair is configured')
+    const ruleEnd = HOSTED_INSTRUCTIONS.indexOf('switch to the signer whose identity matches.')
+    expect(namedPair).toBeGreaterThan(-1)
+    expect(namedPair).toBeLessThan(2000)
+    expect(severalPairs).toBeGreaterThan(-1)
+    expect(severalPairs).toBeLessThan(2000)
+    expect(ruleEnd).toBeGreaterThan(severalPairs)
+    expect(ruleEnd).toBeLessThan(2000)
+    // (a) ask which agent, (b) the pair mapping, (c) identity by agent id.
+    expect(HOSTED_INSTRUCTIONS).toContain('ask before any payment tool')
+    expect(HOSTED_INSTRUCTIONS).toContain('haven-<slug>\nwith haven-signer-<slug>, bare haven with haven-signer, Codex haven with\nhaven_signer')
+    expect(HOSTED_INSTRUCTIONS).toContain('haven_get_agent returns id and\ndelegateAddress')
+    expect(HOSTED_INSTRUCTIONS).toContain('compare the delegate address alone\nwhen a signer has no recorded agent id')
+  })
+
   it('keeps x402 next-tool guidance runtime-neutral (bare names in descriptions, naming note on instructions)', async () => {
     // The slim-descriptions pass (#1591) finished what the runtime-neutral
     // naming work (#1588) started: descriptions name next tools by their BARE
@@ -212,7 +232,10 @@ describe('buildHostedMcpServer', () => {
     // resolve via next_tool_server, which is the field that is WRONG on a
     // `--name <slug>` install. Cheap literal guards; nothing interprets prose.
     expect(HOSTED_INSTRUCTIONS).toContain('next_tool_server_role')
-    expect(HOSTED_INSTRUCTIONS).toContain('--name <slug>')
+    // #3738: a named pair is no longer attributed to `--name` alone (#3737
+    // names every new pair by default), so the guard pins the pair shape.
+    expect(HOSTED_INSTRUCTIONS).toContain('haven-<slug> + haven-signer-<slug>')
+    expect(HOSTED_INSTRUCTIONS).not.toContain('--name <slug>')
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)

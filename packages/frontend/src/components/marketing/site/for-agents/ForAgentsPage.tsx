@@ -50,7 +50,7 @@ const SEQUENCE: ReadonlyArray<{ who: 'human' | 'you'; lead: string; body: string
 
 /** The readiness values (runbook § How to verify), each verbatim. */
 const READINESS = [
-  ['ready', 'a budget is live; you can pay.'],
+  ['ready', 'a budget is live: you have the authority to pay. It does not say the account holds funds — the allowances[] rows carry funds_cover_remaining, and false there is a heads-up to mention to your user, not a refusal.'],
   ['needs_approval', 'nobody approved yet. Ask your user again; there is no queue.'],
   ['revoked', 'the credential is not active; ask your user to create a new agent.'],
 ] as const

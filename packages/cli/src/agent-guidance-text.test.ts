@@ -98,8 +98,13 @@ describe('haven guide text (#2525)', () => {
     // after a wiring_collision relay, +295), and "the two-changes rule"
     // becomes "the command-modification rule" (+9).
     // Lands at 11430/11341.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11430)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11341)
+    //
+    // #3731: +189 bytes / +187 units — the runbook's § How to verify `ready`
+    // bullet stops claiming "you can pay" and states readiness is authority,
+    // naming `funds_cover_remaining` as the heads-up it is. Lands at
+    // 11619/11528.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11619)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11528)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

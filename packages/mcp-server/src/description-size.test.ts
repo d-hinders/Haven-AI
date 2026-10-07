@@ -387,24 +387,25 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * 975.3929 sits above round 18's 960.83, and the same rule applies —
  * re-derived at the measured mean, shrink-only from here.
  *
- * **Re-derived — round 20, #3728 (2026-10-07).** The hosted x402 tool surface
- * gained a mandatory routing pointer: when a merchant 402 carries a
- * `sign-in-with-x` extension, the response now points the agent at the local
- * signer's `haven_sign_siwx` at the moment it is looking at the extension —
- * the signer composes and signs the CAIP-122 challenge itself, and the pointer
- * carries the redirect warning the signer cannot enforce. +431 UTF-8 bytes on
- * one description (`haven_pay_x402_quote`); no overclaim remains to trim (the
- * pointer is the issue's required content). The union with #3723/#3727 is
- * disjoint (different descriptions), but the total re-measures on the merged
- * tree per the rounds-5/16 discipline: 27,746 UTF-8 bytes across the same 28
- * tools, so the absolute pin moves to that exact value, shrink-only from
- * here. The mean pin: 27,746 / 28 = 990.9285…, pinned at the two-decimal
- * ceiling (990.93) — a ceiling rounds the safe direction.
+ * **Re-derived — round 21, #3731 composed with #3728 (2026-10-07).** Two
+ * same-day growths landed on disjoint descriptions: #3728 added a mandatory
+ * `sign-in-with-x` routing pointer on `haven_pay_x402_quote` (+431 bytes) and
+ * #3731 grew `getAgent`'s and `getAllowances'` shared fragments to name
+ * `fundsCoverRemaining` (readiness is authority; the coverage field's
+ * meaning, its false/null/absent cases, and the per-row compare; +777 over
+ * the #3727 tree, 28,088 on its own union WITHOUT #3728). Neither growth
+ * added a tool — the 28 count holds — so the union
+ * tree RE-MEASURES at 28,523 UTF-8 bytes (measured, not derived
+ * arithmetically — the same union discipline as rounds 5/16/19/20 — the
+ * +431/#3731 arithmetic would have said 28,519; the four extra bytes are
+ * real, and shrink-only from here). The mean pin:
+ * 28,523 / 28 = 1018.6785…, pinned at the two-decimal ceiling (1018.68) — a
+ * ceiling rounds the safe direction.
  */
-const MAX_TOTAL_BYTES = 27_746
-// Mean pin: round 20 (block above): 27,746 / 28 = 990.9285…, pinned at the
-// two-decimal ceiling (990.93) — a ceiling rounds the safe direction.
-const MAX_MEAN_BYTES = 990.93
+const MAX_TOTAL_BYTES = 28_523
+// Mean pin: round 21 (block above): 28,523 / 28 = 1018.6785…, pinned at the
+// two-decimal ceiling (1018.68). Shrink-only from here.
+const MAX_MEAN_BYTES = 1018.68
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

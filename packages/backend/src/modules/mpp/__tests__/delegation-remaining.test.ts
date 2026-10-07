@@ -26,6 +26,13 @@ vi.mock('../../../rails/execution-rail.js', () => ({
   resolveExecutionRail: () => 'delegation',
   sessionRailRetired: () => ({ statusCode: 410, body: {} }),
 }))
+// #3731: the holdings read goes through the #994 ChainClient port (same as
+// balance-coverage.ts). Mocked at the factory so the test never touches a
+// provider; the stub records calls to assert ONE balanceOf per DISTINCT token.
+const mockGetTokenBalance = vi.fn()
+vi.mock('../../../infra/chain/index.js', () => ({
+  getChainClient: () => ({ getTokenBalance: mockGetTokenBalance }),
+}))
 // #2307: a `vi.mock('../../../infra/repositories/agents.js')` stood here
 // declaring `listAllowanceConfigForAgent`. #2020 deleted that function, and
 // `../allowances.js` does not import the agents repository at all — so the mock
@@ -58,7 +65,9 @@ const budget = (over: Record<string, unknown> = {}) => ({
 })
 
 const onchainOf = async () => {
-  const res = (await handleGetAllowances(AGENT)) as unknown as { body: { allowances: Array<{ onchain: Record<string, string> }> } }
+  const res = (await handleGetAllowances(AGENT)) as unknown as {
+    body: { allowances: Array<{ onchain: Record<string, string>; funds_cover_remaining?: boolean | null }> }
+  }
   return res.body.allowances
 }
 
@@ -148,5 +157,107 @@ describe('delegation-rail remaining reflects in-period spend (#1145)', () => {
 
     expect(await onchainOf()).toEqual([])
     expect(mockRead).not.toHaveBeenCalled()
+  })
+})
+
+describe('funds_cover_remaining — whether the balance backs each remaining budget (#3731)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockDerive.mockResolvedValue(new Map([['agt_1', [budget()]]]))
+    mockJson.mockResolvedValue(new Map([['del_1', '{"signed":"delegation"}']]))
+    mockRead.mockResolvedValue({ remainingAtomic: '1500000', fromChain: true })
+  })
+
+  it('balance ≥ remaining → true', async () => {
+    mockGetTokenBalance.mockResolvedValue(2_000_000n)
+
+    const [a] = await onchainOf()
+    expect(a.funds_cover_remaining).toBe(true)
+  })
+
+  it('balance < remaining → false', async () => {
+    mockGetTokenBalance.mockResolvedValue(1_499_999n)
+
+    const [a] = await onchainOf()
+    expect(a.funds_cover_remaining).toBe(false)
+  })
+
+  it('a failed balanceOf → null — the rest of the response still succeeds', async () => {
+    mockGetTokenBalance.mockRejectedValue(new Error('RPC unreachable'))
+
+    const [a] = await onchainOf()
+    expect(a.funds_cover_remaining).toBeNull()
+    expect(a.onchain.remaining).toBe('1500000')
+  })
+
+  it('a non-live remaining (the #1145 fallback) → null, and NO balanceOf is made for it', async () => {
+    mockRead.mockResolvedValue({ remainingAtomic: '5000000', fromChain: false })
+
+    const [a] = await onchainOf()
+    expect(a.funds_cover_remaining).toBeNull()
+    expect(mockGetTokenBalance).not.toHaveBeenCalled()
+  })
+
+  it('a remaining of 0 → the key is ABSENT (balance ≥ 0 would be a vacuous true)', async () => {
+    mockRead.mockResolvedValue({ remainingAtomic: '0', fromChain: true })
+    mockGetTokenBalance.mockResolvedValue(0n)
+
+    const [a] = await onchainOf()
+    expect(a.onchain.remaining).toBe('0')
+    expect(a).not.toHaveProperty('funds_cover_remaining')
+    // No read is spent on a vacuous comparison either.
+    expect(mockGetTokenBalance).not.toHaveBeenCalled()
+  })
+
+  it('ONE balanceOf per DISTINCT token — two rows on one token share the read, each compared ALONE', async () => {
+    // Open + pinned rows on the SAME token (#3518): same balance, different
+    // remainings — the balance brackets between them. Two `true` rows would
+    // NOT mean both are backed at once; each row is compared alone.
+    mockDerive.mockResolvedValue(
+      new Map([
+        ['agt_1', [budget({ id: 'del_1', token_address: '0xtoken' }), budget({ id: 'del_2', token_address: '0xTOKEN', budget_atomic: '9000000' })]],
+      ]),
+    )
+    mockJson.mockResolvedValue(
+      new Map([
+        ['del_1', '{"signed":"delegation"}'],
+        ['del_2', '{"signed":"delegation"}'],
+      ]),
+    )
+    mockRead.mockImplementation(async (_chain, _json, fallback) => ({ remainingAtomic: fallback, fromChain: true }))
+    mockGetTokenBalance.mockResolvedValue(5_500_000n)
+
+    const rows = await onchainOf()
+    expect(rows).toHaveLength(2)
+    // Distinct-token dedupe: `0xTOKEN` lower-cases onto the same read (the
+    // last row's casing wins — the same token either way).
+    expect(mockGetTokenBalance).toHaveBeenCalledTimes(1)
+    expect(mockGetTokenBalance).toHaveBeenCalledWith(84532, '0xTOKEN', '0xsafe')
+    expect(rows[0].funds_cover_remaining).toBe(true) // 5_500_000 ≥ 5_000_000
+    expect(rows[1].funds_cover_remaining).toBe(false) // 5_500_000 < 9_000_000
+  })
+
+  it('two DISTINCT tokens get one read each, and one failure does not touch the other row', async () => {
+    mockDerive.mockResolvedValue(
+      new Map([
+        ['agt_1', [budget({ id: 'del_1', token_address: '0xtoken' }), budget({ id: 'del_2', token_address: '0xother' })]],
+      ]),
+    )
+    mockJson.mockResolvedValue(
+      new Map([
+        ['del_1', '{"signed":"delegation"}'],
+        ['del_2', '{"signed":"delegation"}'],
+      ]),
+    )
+    mockRead.mockImplementation(async (_chain, _json, fallback) => ({ remainingAtomic: fallback, fromChain: true }))
+    mockGetTokenBalance.mockImplementation(async (_chain, token) => {
+      if (token === '0xtoken') return 6_000_000n
+      throw new Error('RPC unreachable')
+    })
+
+    const rows = await onchainOf()
+    expect(mockGetTokenBalance).toHaveBeenCalledTimes(2)
+    expect(rows[0].funds_cover_remaining).toBe(true)
+    expect(rows[1].funds_cover_remaining).toBeNull()
   })
 })

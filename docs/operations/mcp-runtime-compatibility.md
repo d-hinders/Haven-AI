@@ -5131,3 +5131,28 @@ to call next in structured fields, and those fields are typed end to end
 > under `packages/mcp-server/src/**` was edited. `last-verified` is not
 > re-stamped: this block is the scope. Nothing else in this document was
 > re-verified.
+
+> **Re-verified #3731 (2026-10-07, funds coverage + the underfunded prepare's
+> real cause):** `/machine-payments/allowances` rows now carry
+> `funds_cover_remaining` (`true | false | null` — one `balanceOf` per
+> DISTINCT token, per-row compare, absent when the remaining is 0, `null` when
+> the read failed or the remaining was not live), mapped onto
+> `HavenAllowance` and the `haven_get_agent` summary rows on BOTH runtimes
+> (`fundsCoverRemaining`, any non-boolean wire value → `null`, never
+> `undefined`). A `prepare_reverted` whose revert was the token's own
+> insufficient-balance error carries `revert_cause: "insufficient_balance"`
+> and a funding-first `message`; the HOSTED `PREPARE_REVERTED` mapping reads
+> it and answers `next_action: fund_account_or_raise_allowance` with a
+> funding-specific omitted reason (one new pinned site,
+> `next-step-fixtures.ts` — `lint:next-steps` re-derived 57 → 58). **The
+> skew:** the hosted runtime answers the funding step as soon as the backend
+> deploys; stdio answers it only after its next release pins the SDK — until
+> then a stdio `haven_pay`/`haven_send` on a short wallet still returns
+> today's caveat text (the refusal itself is unchanged on both). No tool is
+> added, renamed or re-shaped; no strict schema changes (the new body field
+> rides the existing failure object); the consent hash does NOT move (no
+> registered-name change; the description fragments grew — the
+> `description-size` gate re-derived as round 19, 27,680 bytes / 28 tools).
+> The refusal ledger is unchanged (`onchain_revert`; reason set fixed by the
+> migration 086 CHECK). `last-verified` is not re-stamped: this block is the
+> scope. Nothing else in this document was re-verified.

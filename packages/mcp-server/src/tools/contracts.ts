@@ -1387,6 +1387,14 @@ export interface ToolFailure {
   revert_reason?: string | null
   refusal_reason?: string
   /**
+   * #3731: on `PREPARE_REVERTED`, `insufficient_balance` when the revert was
+   * the token's own insufficient-balance error — the account does not hold
+   * enough of the token, and the remedy is funding (the next step is
+   * `fund_account_or_raise_allowance` with a funding reason). Any other
+   * revert carries no `revert_cause`.
+   */
+  revert_cause?: string
+  /**
    * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
    * the same `next_tool` family a success does, built by the SDK's typed
    * builder. Additive; `next_tool` is never null — an absent tool says why in

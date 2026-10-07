@@ -202,7 +202,13 @@ describe('/for-agents.md (#2523)', () => {
     // the agent's harness block the re-run. That clause is +295 bytes and the
     // rename to "the command-modification rule" +9; nothing unrelated was
     // trimmed to fit.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11500)
+    //
+    // 11500 -> 11700 for #3731 (2026-10-07; the page is 11619 bytes at this
+    // commit, 11430 before it): the "How to verify" `ready` bullet stops
+    // claiming "you can pay" — it states readiness is authority and names
+    // `funds_cover_remaining` as the heads-up it is (+189 bytes). Nothing
+    // unrelated was trimmed to fit.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11700)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

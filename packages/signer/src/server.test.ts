@@ -175,7 +175,7 @@ describe('runSignerConsentGate', () => {
       accountAddress: credentials.accountAddress,
       chainId: credentials.chainId,
       network: credentials.network,
-      toolNames: ['haven_sign', 'haven_x402_sign_header', 'haven_sign_x402', 'haven_sign_sweep_delegate'],
+      toolNames: ['haven_sign', 'haven_sign_siwx', 'haven_x402_sign_header', 'haven_sign_x402', 'haven_sign_sweep_delegate'],
     }
     const allowed = await runSignerConsentGate(signer, credentials, {
       consentEnv: { HAVEN_SIGNER_ACK: computeSignerConsentHash(input) },
@@ -196,6 +196,7 @@ describe('buildSignerMcpServer', () => {
     const { tools } = await client.listTools()
     expect(tools.map((t) => t.name).sort()).toEqual([
       'haven_sign',
+      'haven_sign_siwx',
       'haven_sign_sweep_delegate',
       'haven_sign_x402',
       'haven_x402_sign_header',
@@ -234,6 +235,9 @@ describe('buildSignerMcpServer', () => {
     // one is the whole defect.
     expect(byName.get('haven_x402_sign_header')).toContain('NOT haven_sign_x402')
     expect(byName.get('haven_sign_sweep_delegate')).toContain('mcp__haven__haven_sweep_delegate')
+    // #3728: the SIWX tool says what it is for and that it cannot move funds.
+    expect(byName.get('haven_sign_siwx')).toContain('sign-in-with-x')
+    expect(byName.get('haven_sign_siwx')).toContain('MOVES NO FUNDS')
 
     await client.close()
     await server.close()

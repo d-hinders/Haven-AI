@@ -222,6 +222,7 @@ The signer exposes local stdio MCP tools:
 | `haven_sign_x402` | One-call x402 fast path: funding signature + merchant payment header; signs by `payment_id` ALONE (#1355 — Haven's sign-context re-serves `payment_required`); a caller-supplied `payment_required` is the fallback for pre-#1355 backends |
 | `haven_x402_sign_header` | Build and sign the x402 merchant payment header after the Haven funding leg succeeds (decomposed flow) |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → the agent's account (Haven wallet) only) |
+| `haven_sign_siwx` | Answer a merchant x402 Sign-In-With-X challenge (#3728): the signer composes the EIP-4361 message itself from the validated `sign-in-with-x` challenge and the delegate address from the key, signs it EIP-191, and returns the finished `SIGN-IN-WITH-X` header. Moves no funds; refuses unless domain/uri match the URL being called (the FINAL URL after redirects — never follow a redirect with the header or a resulting session token attached), the URL is https, the nonce is well-formed, the expiry window is ≤ 5 minutes (plus a small clock-skew tolerance), and `supportedChains` offers the credential chain with `eip191` |
 
 The signer's ONE network use (#1263) is a read-only fetch of a signing context
 from Haven. It fetches by `payment_id` for a payment

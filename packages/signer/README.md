@@ -61,7 +61,7 @@ metadata found in the credential file, and the sign-only tool list. It refuses
 to start until acknowledged with either `HAVEN_SIGNER_ACK=<hash>` or
 `npx @haven_ai/signer@alpha --credentials /path/to/haven-agent.json --ack`.
 
-It exposes four stdio MCP tools, all sign-only:
+It exposes five stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
@@ -69,6 +69,7 @@ It exposes four stdio MCP tools, all sign-only:
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
+| `haven_sign_siwx` | Answer a merchant x402 Sign-In-With-X (SIWX) challenge (#3728): the signer composes the EIP-4361 message ITSELF from the grammar-validated `sign-in-with-x` challenge and the delegate address read from the key — never a caller-supplied message — signs it EIP-191, and returns the finished header. Refuses (`SIWX_REFUSED`) unless the challenge domain matches the `url` host (the FINAL URL after redirects — never follow a redirect with the header or a resulting session token attached), the resource uri origin matches, the URL is https, the nonce is well-formed, the expiry window is ≤ 5 minutes (plus a small clock-skew tolerance), and `supportedChains` offers the credential chain with `eip191`. Moves no funds and grants no spend authority | `{ sign_in_with_x_header }` — retry the merchant with the `SIGN-IN-WITH-X` header set to that value |
 
 The `initialize` handshake advertises which binding versions this signer
 understands, under `capabilities.experimental['haven/signer-compatibility']`
@@ -99,8 +100,11 @@ const { paymentHeader } = await signer.buildX402PaymentHeader(
 )
 ```
 
-The signer also exposes `signSweepAuthorization(input)` for the gasless sweep.
-All four are methods on the object `createEdgeSigner` returns, not standalone
+The signer also exposes `signSweepAuthorization(input)` for the gasless sweep and
+`signSiwxMessage(message)` for #3728's composed EIP-4361 sign-in — the message
+always reaches it composed in-package from grammar-validated challenge fields,
+with the address taken from the key.
+All five are methods on the object `createEdgeSigner` returns, not standalone
 exports. There is NO raw-hash primitive: `signPaymentHash(hash)` (raw ECDSA over
 the retired AllowanceModule rail's hash) was removed in #3169, and
 `signX402FundingHash` (the expected-context v1 bare-hash path) in #3272 — the
@@ -289,6 +293,17 @@ what a payload means; they re-derive it.
 - **A binding version it does not understand.** The refusal is machine-readable
   — `code`, `supported_versions`, `received_version`, `fallback`, and (#3103)
   `next_tool_omitted_reason` — and names updating the signer as the fix.
+- **A sign-in challenge that does not describe the origin it is sent to (#3728).**
+  `haven_sign_siwx` composes the EIP-4361 message itself from the challenge's
+  grammar-validated fields and the delegate address from the key; a challenge
+  whose domain is not the host of the `url` being called, whose resource uri
+  origin differs, that is not https, that carries a malformed or missing nonce,
+  a `version` other than `"1"`, an expiry window beyond the spec's 5-minute max
+  age (plus a small clock-skew tolerance), or that does not offer the credential
+  chain with an `eip191` signature type is refused with no signature and no
+  audit entry. A caller-supplied message, hash or byte string is never signed —
+  a SIWX signature therefore cannot double as a payment authorization, a
+  UserOp signature or any other Haven signature.
 - **A sweep that does not move funds out of this delegate's own key** — the
   `from` check is unconditional. The **destination** check is not, and this is
   the one asymmetry in this list: the signer compares the sweep's `to` against

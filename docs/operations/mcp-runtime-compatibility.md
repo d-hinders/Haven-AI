@@ -77,6 +77,24 @@ covers:
 last-verified: "2026-10-02"
 ---
 
+> **Re-verified #3728 (2026-10-07, signer SIWX phase 1):** the local signer
+> gains one tool, `haven_sign_siwx { url, challenge }` — an x402
+> Sign-In-With-X (CAIP-122 / EIP-4361) sign-in for the delegate EOA. The tool
+> takes no input from Haven, composes the message in-package from
+> grammar-validated challenge fields, and returns a finished
+> `SIGN-IN-WITH-X` header; it moves no money.
+> - **One consent-hash event, not a version bump.** The consent hash covers
+>   the sorted tool NAMES, so the new tool moves it once — every upgraded
+>   install re-prompts exactly once. `SIGNER_CONSENT_SURFACE_VERSION` stays 2.
+> - **`requiredSignerTools` is derived**, so no connect-side edit: doctor and
+>   install probes now require the new tool from the installed signer. An
+>   older signer keeps paying but does not list the tool.
+> - **No schema, expected-context or sweep-binding version moves.** The audit
+>   entry gains optional additive `domain`/`nonce` fields on `version: 1`,
+>   following the `safe_address?`/`chain_id?` pattern, no key renamed (#2914).
+> Scope of this note: the signer tool set, consent and audit surfaces.
+> Nothing else in this document was re-verified.
+
 > **Re-verified #3669 (2026-10-06, backend supported vs known chains):**
 > - **The wire value narrows.** `GET /chains` and discovery `chains.supported` now list 8453 and 84532 only; chain 100 leaves. No key or field is removed.
 > - **History filters keep working.** `GET /transactions` still accepts a `chainId=100` history filter, through the new known-chain gate.

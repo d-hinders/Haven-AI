@@ -3554,14 +3554,20 @@ Hosted only; the local `@haven_ai/mcp` runtime is unchanged (its one-shot
     through the new read-only `GET /x402/by-idempotency-key/{key}`:
     - awaiting signature → the signer tool;
     - past signing → `haven_get_payment_status`.
+    - Only when the stored intent is for the same URL and its amount fits this
+      call's cap; otherwise the call falls through (the probe re-checks the
+      cap, `POST /x402` the rest).
+    - The quote's `next_arguments` prefill a fresh `idempotency_key`
+      (`x402q:…`) per quote, so a retried pay call replays.
   - A closed window, a different task budget, or a 404 (including an older
     backend without the route) falls through to probe + `POST /x402`, whose own
     key replay still applies.
   - With no key, the derived key (`x402r:…`) hashes the whole probed challenge,
     `extensions` included.
 - **Skew.**
-  - Signer: no change. The signer fetches the stored challenge by `payment_id`
-    exactly as before.
+  - Signer: no behaviour change; it fetches the stored challenge by
+    `payment_id` exactly as before. Its `haven_sign_x402` description now says
+    Haven never sends the merchant the paid request (text only).
   - Hosted server ahead of the backend: request mode works, but loses only the
     replay-before-probe.
   - Older skill text still says to copy `payment_required` verbatim. That

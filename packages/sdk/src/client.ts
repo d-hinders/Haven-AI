@@ -2045,6 +2045,7 @@ export class HavenClient {
       windowOpen: raw.window_open === true,
       taskBudgetId: raw.task_budget_id ?? null,
       amountAtomic: raw.amount_atomic,
+      asset: raw.asset ?? null,
       network: raw.network,
     }
   }

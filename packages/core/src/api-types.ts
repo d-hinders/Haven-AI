@@ -19231,6 +19231,8 @@ export interface operations {
                         window_open: boolean;
                         task_budget_id: string | null;
                         amount_atomic: string;
+                        /** @description Token contract of the stored amount, so a caller can convert a whole-token cap. */
+                        asset: string | null;
                         network: string;
                     };
                 };

@@ -286,7 +286,7 @@ the FINAL URL after redirects — and retry the merchant with the
 wallet signs in as the wallet that paid, moving no funds. NEVER follow a
 redirect with \`SIGN-IN-WITH-X\` (or a resulting session token) attached; if
 the final origin differs, re-sign there. On THIS path Haven never sends the
-paid request (it makes only the unpaid probe):
+paid request (it sends only unpaid probes):
 \`mcp__haven-signer__haven_sign_x402\` returns both
 \`signature\` and \`payment_header\`; relay \`signature\` with
 \`mcp__haven__haven_submit\`, then retry the paywalled URL yourself with

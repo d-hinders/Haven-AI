@@ -1121,8 +1121,8 @@ x402 merchants answer a re-request of a settled purchase idempotently
 derivation above is deliberately server-side, and stays so — case 2 has to
 fire for an agent that never came back, which no client-written signal can
 provide. What #2292 changes is how long the *surviving* agent has to wait. On
-the plain-HTTP path Haven never sends the merchant the paid request (request
-mode's unpaid probe, #3739, is the only call it makes), so before #2292 both
+the plain-HTTP path Haven never sends the merchant the paid request (it sends
+only unpaid probes: `haven_quote_x402`'s, and since #3739 request mode's), so before #2292 both
 routes into `funded_but_unsettled` were out of reach there: the
 `merchant_retry_rejected_after_payment` event had exactly one producer, the
 SDK's own retry path, and a manually retried merchant could not write it; and

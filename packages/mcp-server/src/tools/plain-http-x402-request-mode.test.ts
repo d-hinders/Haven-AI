@@ -327,6 +327,7 @@ describe('#3739 request mode: repeated calls', () => {
     window_open: true,
     task_budget_id: null,
     amount_atomic: '1500000',
+    asset: PAYMENT_REQUIRED.accepts[0].asset,
     network: 'base',
   }
 
@@ -379,6 +380,38 @@ describe('#3739 request mode: repeated calls', () => {
       expect(merchantCalls()).toHaveLength(1)
       expect((authorizeCalls()[0].body as Record<string, unknown>).idempotencyKey).toBe('k1')
     }
+  })
+
+  // #3739 review (B1): the shortcut must not skip what the backend's own key
+  // replay checks — a reused key on another merchant, or above THIS call's cap,
+  // falls through to the probe, where the cap refuses and POST /x402 re-checks.
+  it('a reused key on a DIFFERENT url falls through to the probe instead of answering', async () => {
+    stubMerchant(CHALLENGE, AGENT_RESPONSE, X402_INTENT_RESPONSE, lookup({ ...LIVE_3009, resource_url: 'https://other.merchant.example/paid' }))
+    ok(await pay({ url: MERCHANT_URL, max_amount_human: '2', idempotency_key: 'k1' }))
+    expect(merchantCalls()).toHaveLength(1)
+    expect(authorizeCalls()).toHaveLength(1)
+  })
+
+  it('a reused key whose stored amount exceeds THIS cap falls through, and the probe refuses it', async () => {
+    const pricey = {
+      ...CHALLENGE,
+      accepts: [{ ...PAYMENT_REQUIRED.accepts[0], amount: '5000000', maxAmountRequired: '5000000' }],
+    }
+    stubMerchant(pricey, AGENT_RESPONSE, X402_INTENT_RESPONSE, lookup({ ...LIVE_3009, amount_atomic: '5000000' }))
+    const res = fail(await pay({ url: MERCHANT_URL, max_amount_human: '1', idempotency_key: 'k1' }))
+    expect(res.code).toBe('PRICE_EXCEEDS_MAX')
+    expect(merchantCalls()).toHaveLength(1)
+    expect(authorizeCalls()).toEqual([])
+  })
+
+  it('an atomic cap is compared exactly; an unknown asset with a whole-token cap falls through', async () => {
+    stubMerchant(CHALLENGE, AGENT_RESPONSE, X402_INTENT_RESPONSE, lookup(LIVE_3009))
+    const answered = ok(await pay({ url: MERCHANT_URL, max_amount: '1500000', idempotency_key: 'k1' })) as { data: Record<string, any> }
+    expect(answered.data.idempotent_replay).toBe(true)
+    clearCalls()
+    stubMerchant(CHALLENGE, AGENT_RESPONSE, X402_INTENT_RESPONSE, lookup({ ...LIVE_3009, asset: '0x' + '99'.repeat(20) }))
+    ok(await pay({ url: MERCHANT_URL, max_amount_human: '2', idempotency_key: 'k1' }))
+    expect(merchantCalls()).toHaveLength(1)
   })
 
   it('with no key, the derived key covers the WHOLE probed challenge, extensions included', async () => {
@@ -434,7 +467,10 @@ describe('#3739 haven_quote_x402 names the request-mode next step', () => {
     ) as { data: Record<string, any> }
 
     expect(res.data.next_tool_name).toBe('haven_pay_x402_quote')
+    // #3739 review (S2): a fresh replay key per quote.
+    expect(res.data.next_arguments.idempotency_key).toMatch(/^x402q:[0-9a-f-]{36}$/)
     expect(res.data.next_arguments).toEqual({
+      idempotency_key: res.data.next_arguments.idempotency_key,
       url: MERCHANT_URL,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

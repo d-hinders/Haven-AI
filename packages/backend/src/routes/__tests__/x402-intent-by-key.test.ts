@@ -226,6 +226,7 @@ describeDb('GET /x402/by-idempotency-key/:key (#3739)', () => {
       window_open: true,
       task_budget_id: null,
       amount_atomic: '10000',
+      asset: USDC,
       network: 'eip155:84532',
     })
     expectMatchesSpec('GET', '/x402/by-idempotency-key/{key}', body)

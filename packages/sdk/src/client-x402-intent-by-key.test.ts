@@ -29,6 +29,7 @@ const WIRE = {
   window_open: true,
   task_budget_id: null,
   amount_atomic: '10000',
+  asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
   network: 'eip155:8453',
 }
 
@@ -57,6 +58,7 @@ describe('HavenClient.findX402IntentByIdempotencyKey (#3739)', () => {
       windowOpen: true,
       taskBudgetId: null,
       amountAtomic: '10000',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
       network: 'eip155:8453',
     })
   })

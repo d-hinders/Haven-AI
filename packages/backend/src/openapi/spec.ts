@@ -7441,6 +7441,7 @@ export const openapiSpec = {
                     'window_open',
                     'task_budget_id',
                     'amount_atomic',
+                    'asset',
                     'network',
                   ],
                   properties: {
@@ -7455,6 +7456,10 @@ export const openapiSpec = {
                     },
                     task_budget_id: { type: ['string', 'null'] },
                     amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                    asset: {
+                      type: ['string', 'null'],
+                      description: 'Token contract of the stored amount, so a caller can convert a whole-token cap.',
+                    },
                     network: { type: 'string' },
                   },
                   additionalProperties: false,

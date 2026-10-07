@@ -1190,7 +1190,8 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
   'Haven never sends the paid request or holds the key. The header is built before funding',
   'confirms, so its validity window starts at signing: retry promptly, and on',
-  'PAYMENT_WINDOW_EXPIRED re-run this tool with the same idempotency_key.',
+  'PAYMENT_WINDOW_EXPIRED re-run this tool with the same arguments (request mode: the same',
+  'request, cap and idempotency_key).',
   'When the merchant advertises extra.assetTransferMethod "erc7710" and the account is on the',
   'delegation rail, this returns settlement_scheme "erc7710" instead: sign, then haven_submit with',
   'settlement_scheme "erc7710" returns the payment_header directly. No funding leg on that path.',
@@ -1256,8 +1257,8 @@ const RESUME_X402_DESCRIPTION = [
 // merchant. haven_complete_mcp_tool makes the call itself, so what it writes
 // is observed; this tool writes what the caller ASSERTS about a call Haven
 // deliberately did not make, because on the plain-HTTP path Haven never sends
-// the merchant the PAID request (request mode's unpaid probe, #3739, is the only
-// call it makes) and never holds the key. Folding them together would put an
+// the merchant the PAID request (it sends only unpaid probes: haven_quote_x402's
+// and, since #3739, request mode's) and never holds the key. Folding them together would put an
 // observed fact and an asserted one behind one name, with a flag deciding
 // which — and their arguments barely intersect (merchant_url / tool_name /
 // payment_header versus outcome / merchant_status). That is the mode flag

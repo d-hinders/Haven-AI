@@ -65,6 +65,7 @@ import {
   selectX402SettlementScheme,
   normalizePaymentRequired,
   parsePaymentRequiredResponse,
+  resolveTokenFromAddress,
   resolveX402RetryTarget,
   isSecureX402RetryTarget,
   isZeroSettlementTxHash,
@@ -75,12 +76,13 @@ import {
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { delegationAllowanceBlock } from './support/allowance-block.js'
 import {
   CAP_WARNING_TEXT,
+  humanToAtomic,
   priceSelectedOption,
   quoteWarnings,
   readMaxAmountCap,
@@ -381,7 +383,7 @@ export function assertX402ProbeTargetAllowed(rawUrl: string, options: X402Reques
   try {
     url = new URL(rawUrl)
   } catch {
-    throw probeRefusal('X402_PROBE_TARGET_REFUSED', `Refusing to probe ${rawUrl}: it is not a valid URL.`)
+    throw probeRefusal('X402_PROBE_TARGET_REFUSED', 'Refusing to probe the url: it is not a valid URL.')
   }
   if (url.protocol !== 'https:') {
     throw probeRefusal(
@@ -469,6 +471,7 @@ export async function probeX402Challenge(
     // a redirect is how an allowed host would hand the probe to one that is not.
     response = await globalThis.fetch(url.toString(), { ...init, redirect: 'error', signal })
     if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined)
       throw probeRefusal(
         'X402_PROBE_REDIRECT_REFUSED',
         `The merchant answered the unpaid request with HTTP ${response.status} (a redirect). Request mode does not follow redirects: re-call with the final https URL.`,
@@ -579,15 +582,25 @@ export function requestModeIdempotencyKey(paymentRequired: X402PaymentRequired, 
  * row, an expired or closed signing window (the backend frees the key), a
  * different task budget (the backend's #3392 pin answers that), an unknown
  * scheme, or a failed lookup (an older backend without the route).
+ *
+ * #3739 review (B1): it ALSO falls through unless the stored intent is for this
+ * request's URL and its amount fits this call's cap. The backend's own replay
+ * refuses a reused key on a different resource or amount (409); a shortcut
+ * that skipped those checks would hand back a sign instruction for another
+ * merchant's, or a larger, payment. Falling through restores both: the probe
+ * re-checks the cap, and `POST /x402` re-checks the rest.
  */
 async function requestModeReplay(
   haven: HavenClient,
   args: Record<string, any>,
+  cap: ReturnType<typeof readMaxAmountCap>,
 ): Promise<Record<string, unknown> | null> {
   const found = await haven.findX402IntentByIdempotencyKey(args.idempotency_key).catch(() => null)
   if (!found) return null
   const requestedBudget = typeof args.task_budget_id === 'string' ? args.task_budget_id.toLowerCase() : null
   if ((found.taskBudgetId?.toLowerCase() ?? null) !== requestedBudget) return null
+  if (!sameRequestUrl(found.resourceUrl, args.url)) return null
+  if (!storedAmountWithinCap(found, cap)) return null
   if (found.status === 'expired') return null
   if (found.status === 'pending_signature' && !found.windowOpen) return null
   const facts = {
@@ -653,6 +666,41 @@ async function requestModeReplay(
       summary,
     }),
   }
+}
+
+/** Same resource, compared as parsed URLs (case of scheme/host, default port). */
+function sameRequestUrl(stored: string | null, requested: string | undefined): boolean {
+  if (!stored || !requested) return false
+  try {
+    return new URL(stored).href === new URL(requested).href
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The stored intent's amount against THIS call's cap. A whole-token cap is
+ * converted with the stored asset's own decimals; an asset Haven does not
+ * recognise, or a cap that cannot be converted, is not "within" — the caller
+ * then falls through to the probe, where the cap is enforced as always.
+ */
+function storedAmountWithinCap(
+  found: { amountAtomic: string; asset: string | null; network: string },
+  cap: ReturnType<typeof readMaxAmountCap>,
+): boolean {
+  let amount: bigint
+  try {
+    amount = BigInt(found.amountAtomic)
+  } catch {
+    return false
+  }
+  if (cap.kind === 'atomic') return amount <= BigInt(cap.value)
+  if (cap.kind === 'human') {
+    const token = found.asset ? resolveTokenFromAddress(found.asset, found.network) : null
+    const capAtomic = token ? humanToAtomic(cap.value, token.decimals) : null
+    return capAtomic !== null && amount <= capAtomic
+  }
+  return false
 }
 
 // #3497: the block itself moved to `support/allowance-block.ts` — #3476 built
@@ -749,7 +797,12 @@ export function createPlainHttpX402Handlers(
         // no-cap convention every quote → pay pair follows; the agent lowers
         // it to a cap the user stated. payment_required stays in the result
         // for payment_required mode, unchanged.
+        // #3739 review (S2): a fresh replay key per quote, so a retried pay
+        // call replays its intent instead of minting another — a key derived
+        // from the challenge cannot collapse retries against a merchant whose
+        // challenge varies per request. A new purchase is a new quote.
         const payNextArguments: Record<string, unknown> = {
+          idempotency_key: `x402q:${randomUUID()}`,
           url: args.url,
           ...(args.method ? { method: args.method } : {}),
           ...(args.headers ? { headers: args.headers } : {}),
@@ -862,7 +915,7 @@ export function createPlainHttpX402Handlers(
           // intent BEFORE any re-probe, so a replay never depends on the
           // merchant still answering.
           if (args.idempotency_key) {
-            const replayed = await requestModeReplay(haven, args)
+            const replayed = await requestModeReplay(haven, args, requestModeCap)
             if (replayed) return replayed
           }
           const init: RequestInit = {}
@@ -1138,8 +1191,12 @@ export function createPlainHttpX402Handlers(
               // One contract now, and it is the one the tool already implements.
               reason:
                 'Sign locally: call next_tool with next_arguments EXACTLY as given — the ' +
-                'signer fetches payment_required itself; only if it reports the context carried ' +
-                'none, re-call with the payment_required you passed to this tool added VERBATIM. ' +
+                // #3739 review: request mode passed no payment_required, so the
+                // fallback clause applies to payment_required mode only.
+                (requestMode
+                  ? 'signer fetches payment_required itself (Haven stored the challenge it fetched). '
+                  : 'signer fetches payment_required itself; only if it reports the context carried ' +
+                    'none, re-call with the payment_required you passed to this tool added VERBATIM. ') +
                 'It returns BOTH signature and payment_header. Relay signature via haven_submit, ' +
                 'then retry retry_url yourself with payment_header. Do NOT call ' +
                 'haven_x402_sign_header: haven_sign_x402 already spent its binding building that ' +

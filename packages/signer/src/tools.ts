@@ -431,7 +431,7 @@ const SIGN_X402_DESCRIPTION = [
   'Next: for a paid MCP tool, call mcp__haven__haven_settle_mcp_tool. For a direct plain-HTTP x402',
   'merchant (the haven_pay_x402_quote path), relay signature via mcp__haven__haven_submit and then',
   'retry the original merchant URL YOURSELF, setting EVERY header the result names in',
-  'retry_headers to payment_header — Haven never contacts that merchant.',
+  'retry_headers to payment_header — Haven never sends that merchant the paid request.',
 ].join(' ')
 
 const SIGN_SWEEP_DELEGATE_DESCRIPTION = [

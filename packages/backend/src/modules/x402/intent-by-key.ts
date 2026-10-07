@@ -74,6 +74,7 @@ export async function getX402IntentByIdempotencyKey(
       window_open: windowOpen,
       task_budget_id: (row.task_budget_id as string | null | undefined) ?? null,
       amount_atomic: String(row.amount_raw),
+      asset: (row.token_address as string | null | undefined) ?? null,
       network,
     },
   }

@@ -548,6 +548,8 @@ export interface X402IntentByKey {
   taskBudgetId: string | null
   /** Atomic amount, as a string. */
   amountAtomic: string
+  /** #3739 review: token contract of `amountAtomic`, so a whole-token cap can be converted. */
+  asset: string | null
   network: string
 }
 
@@ -561,6 +563,7 @@ export interface RawX402IntentByKey {
   window_open: boolean
   task_budget_id: string | null
   amount_atomic: string
+  asset?: string | null
   network: string
 }
 

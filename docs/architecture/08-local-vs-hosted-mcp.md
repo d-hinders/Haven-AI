@@ -366,8 +366,8 @@ plain-HTTP shape ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).
 It is where the local/hosted split has a consequence rather than a preference:
 in local mode the SDK makes the merchant retry itself and writes the evidence
 or reconciliation row from what it observed, while here the AGENT makes that
-retry and Haven never sends the merchant the paid request (request mode's
-unpaid probe, #3739, is the only call it makes) — so the outcome has to come back
+retry and Haven never sends the merchant the paid request (it sends only unpaid
+probes: `haven_quote_x402`'s, and since #3739 request mode's) — so the outcome has to come back
 through a tool or it does not come back at all. erc7710 needs no equivalent:
 there is no funding leg, `confirmed` IS merchant settlement, and the
 funded-but-undelivered state the report resolves is scoped to

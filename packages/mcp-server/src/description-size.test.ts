@@ -413,13 +413,14 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * shortened), and `haven_quote_x402`'s hosted override replaced the shared
  * "Haven re-uses the captured request" line, false on the hosted path, with
  * the request-mode next step. No tool was added — 28 holds. Measured:
- * 28,737 UTF-8 bytes (+214); the mean pin: 28,737 / 28 = 1026.3214…, pinned
- * at the two-decimal ceiling (1026.33). Shrink-only from here.
+ * 28,789 UTF-8 bytes (+266, including review round 1's request-mode rule for
+ * PAYMENT_WINDOW_EXPIRED); the mean pin: 28,789 / 28 = 1028.1785…, pinned at
+ * the two-decimal ceiling (1028.18). Shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 28_737
-// Mean pin: round 22 (block above): 28,737 / 28 = 1026.3214…, pinned at the
-// two-decimal ceiling (1026.33). Shrink-only from here.
-const MAX_MEAN_BYTES = 1026.33
+const MAX_TOTAL_BYTES = 28_789
+// Mean pin: round 22 (block above): 28,789 / 28 = 1028.1785…, pinned at the
+// two-decimal ceiling (1028.18). Shrink-only from here.
+const MAX_MEAN_BYTES = 1028.18
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

@@ -12,6 +12,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
+  - packages/backend/src/middleware/safe-inflow-retired.ts
 last-verified: "2026-10-07"
 ---
 
@@ -114,9 +115,10 @@ done
   `agentAuth.ts`, the chains registries) and sibling architecture docs, but no
   claim in this file changed meaning.
 - Re-verified 2026-10-07 (weekly docs audit #3645, at dev `009bd611`). Changed:
-  rows 4 and 6 now describe what docs 04 and 06 actually hold (doc 06 never
-  predated the signer fast path; doc 04's live content is the delegation-rail
-  x402 sections and the task/sub-agent budgets); the "One live policy rail"
+  rows 4 and 6 now describe what docs 04 and 06 actually hold (doc 06 has
+  documented the paid-MCP fast path since #702, so "predates" was stale; doc
+  04's live content is the delegation-rail x402 sections and the task/sub-agent
+  budgets); the "One live policy rail"
   bullet scopes the legacy baseline to docs 1–3; the chain line names the
   history-only status of chain 100; the Safe-import sentence says import is
   closed (410). Re-checked without change: every index row's target and the

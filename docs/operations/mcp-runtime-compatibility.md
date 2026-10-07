@@ -1669,8 +1669,8 @@ last-verified: "2026-10-02"
 > pass.
 >
 > **Recent re-verification (#3645, 2026-10-07):** `scripts/README.md`'s
-> internal-pin section now lists `ops` (and `ui` in the table) among the
-> private workspace consumers that pin `"*"`, matching what
+> internal-pin section now lists `ops` among the private consumers that pin
+> `"*"` and adds `ops` and `ui` to the table's private rows, matching what
 > `npm run lint:workspace-pins` already enforces by the `private: true` field.
 > The published-package enumeration `release:bump:test` checks is unchanged.
 > Text only: no tool, argument, schema, description or consent input changes,

@@ -7,12 +7,16 @@ covers:
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
+  - packages/frontend/src/components/DelegationBudgetCard.tsx
+  - packages/backend/src/infra/chain/delegation-budget-reader.ts
 last-verified: "2026-10-07"
 ---
 
 # Loop Harness Index
 
-Last updated: 2026-10-07 (#3645)
+Last updated: 2026-10-07 (#3645 — whole index re-read at dev `009bd611`: the
+live-loop sentence, LP-1's frontend-twin note and LP-2's closing paragraph
+changed; everything else unchanged)
 
 The portfolio of **oracle-grounded differential loops** in this repo — see
 [`loop-engineering.md`](./loop-engineering.md) for the concept and the template.

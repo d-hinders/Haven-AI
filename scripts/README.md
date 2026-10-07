@@ -66,7 +66,8 @@ every PR (`npm run lint:workspace-pins`).
 |---|---|---|---|
 | `sdk`, `signer`, `mcp`, `connect`, `cli` | no | **exact pin** | `npx`-installed on someone else's machine; `*` would resolve to whatever the registry serves |
 | `mcp-server` | **yes** | **`"*"`** | Docker-deployed, but its Dockerfile runs `npm ci --workspace=packages/mcp-server --workspace=packages/sdk --include-workspace-root` and builds the SDK from source — it resolves from *inside* the workspace |
-| `backend`, `frontend`, `ops`, `qa-agent`, `core`, `ui` | yes | **`"*"`** | never leave the workspace |
+| `backend`, `frontend`, `ops`, `qa-agent` | yes | **`"*"`** | never leave the workspace |
+| `core`, `ui` | yes | — | never leave the workspace; no internal `@haven_ai/*` deps |
 | `demo-merchant-mcp` | yes | — | Railway-deployed test fixture, not published |
 
 `mcp-server` was on the wrong side until [#1526](https://github.com/d-hinders/Haven-AI/issues/1526). It was classified as published purely because it lacked `private: true`, and `release-bump.mjs` rewrote its pins on every release — so resolution was correct only by *coincidence*, holding just as long as every bump touched both, and as long as the Dockerfile kept naming every internal dep in its `--workspace=` list.

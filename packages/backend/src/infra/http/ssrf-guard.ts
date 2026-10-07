@@ -224,13 +224,19 @@ export type PinnedTransport = (req: PinnedRequest) => Promise<PinnedResponse | S
  * the `lookup` hook, so the socket cannot be re-pointed between our check and
  * the connect. Redirects are NOT followed here — `safeGetText` follows them,
  * re-validating each hop, so the hop policy stays visible and testable.
+ *
+ * Exported so the real-transport tests (#3741) can run THIS object against a
+ * local server — every test that injects a fake transport exercises none of
+ * the controls that live on the socket.
  */
-const httpsTransport: PinnedTransport = async (req) =>
+export const httpsTransport: PinnedTransport = async (req) =>
   await new Promise<PinnedResponse | SsrfRefusal>((resolve) => {
     let settled = false
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined
     const done = (value: PinnedResponse | SsrfRefusal) => {
       if (settled) return
       settled = true
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer)
       resolve(value)
     }
 
@@ -281,6 +287,18 @@ const httpsTransport: PinnedTransport = async (req) =>
         res.on('error', (err) => done(refuse('transport_error', err.message)))
       },
     )
+
+    // Control 4, the TOTAL deadline (#3741). The `timeout:` option above is a
+    // socket IDLE timeout: a server that drips one byte every few seconds is
+    // never idle, never trips it, and can stay under the byte cap for as long
+    // as it likes — `safeFetch` re-checks its deadline only BETWEEN hops. This
+    // timer is the wall clock: armed before the connect, cleared only when the
+    // request settles (body read included), it aborts and destroys the request
+    // the moment the total budget is gone, however chatty the socket is.
+    deadlineTimer = setTimeout(() => {
+      request.destroy()
+      done(refuse('timeout', `total budget of ${req.timeoutMs}ms exhausted before the response completed`))
+    }, req.timeoutMs)
 
     request.on('timeout', () => {
       request.destroy()

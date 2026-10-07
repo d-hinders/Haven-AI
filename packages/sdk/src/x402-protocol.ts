@@ -196,10 +196,23 @@ export function noCompatiblePaymentOptionError(
         (x402AssetTransferMethod(opt) !== null ||
           opt.extra?.paymentFlow !== undefined),
     )
+  // #3735: when the merchant offered ONLY non-`exact` schemes (`upto` is the
+  // live case), name them and point at the likeliest cause. Bitrefill answers
+  // a JSON POST sent without `Content-Type: application/json` with its generic
+  // `upto` challenge instead of the invoice's `exact` one, and the agent could
+  // not tell that from the bare refusal. Mutually exclusive with `erc7710Only`
+  // (that selector requires `exact`), and checked before `unsupportedOnly`,
+  // whose `extra` probe an `upto` entry can also match.
+  const offeredSchemes = nonExactSchemesOnly(accepts)
   return new HavenApiError(
     'No compatible payment option found in x402 requirements. ' +
       'Haven supports standard x402 exact payments on Base USDC.' +
-      (erc7710Only
+      (offeredSchemes
+        ? ` The merchant offered only ${offeredSchemes}; Haven pays only the 'exact' ` +
+          'scheme. For a request with a body, this often means the body or its ' +
+          'Content-Type was missing or invalid: send the full request again (method, ' +
+          'body, and Content-Type: application/json for a JSON API).'
+        : erc7710Only
         ? " The only Haven-compatible option this merchant advertises is tagged " +
           "extra.assetTransferMethod: 'erc7710' (direct settlement), which this EIP-3009 " +
           'payment path cannot settle — the limitation is the settlement scheme, not the ' +
@@ -213,6 +226,31 @@ export function noCompatiblePaymentOptionError(
           : ''),
     400,
   )
+}
+
+/**
+ * The distinct schemes of `accepts` when EVERY entry is an object naming a
+ * scheme other than `exact` (quoted, comma-joined, in offer order); otherwise
+ * null. An empty list, a non-object entry, or an entry with no string scheme
+ * says nothing about the scheme being the reason, so it returns null.
+ *
+ * The scheme is merchant-controlled text and the refusal is read by an agent,
+ * so only a short identifier is echoed: anything else returns null and the
+ * refusal stays generic rather than quoting the merchant.
+ */
+const SCHEME_ECHO_RE = /^[A-Za-z0-9_-]{1,32}$/
+
+function nonExactSchemesOnly(accepts: X402PaymentOption[]): string | null {
+  if (!Array.isArray(accepts) || accepts.length === 0) return null
+  const schemes: string[] = []
+  for (const opt of accepts) {
+    if (opt === null || typeof opt !== 'object') return null
+    const scheme = (opt as { scheme?: unknown }).scheme
+    if (typeof scheme !== 'string' || scheme === 'exact') return null
+    if (!SCHEME_ECHO_RE.test(scheme)) return null
+    if (!schemes.includes(scheme)) schemes.push(scheme)
+  }
+  return schemes.map((s) => `'${s}'`).join(', ')
 }
 
 export function buildX402Quote(

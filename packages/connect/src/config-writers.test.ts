@@ -252,6 +252,29 @@ describe('runtime config writers', () => {
     expect(toml).not.toContain(PRIVATE_KEY)
   })
 
+  it('#3737: the Hermes completion text names the pair actually written', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-named-msg-'))
+    const credentialsDir = join(dir, 'ops')
+
+    const result = await writeRuntimeConfig({
+      runtime: 'hermes',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(credentialsDir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: credentialsDir,
+      signerCommand: { command: WRAPPER_PATH, args: [] },
+      homeDir: dir,
+      serverName: 'ops',
+    })
+
+    expect(result.hostedConfigured).toBe(true)
+    expect(result.messages.join('\n')).toContain('hermes mcp test haven-ops')
+    expect(result.messages.join('\n')).toContain('hermes mcp test haven-signer-ops')
+    expect(result.messages.join('\n')).not.toContain('hermes mcp test haven ')
+    expect(result.messages.join('\n')).not.toContain('hermes mcp test haven-signer,')
+  })
+
   it('merges Hermes YAML without disturbing other settings and writes owner-only config', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-config-'))
     const credentialsDir = join(dir, 'agent-1')

@@ -280,3 +280,51 @@ describe('#3123 flags are refused, never silently discarded, on the --rekey path
     expect(() => parseArgs(['--prune-signer-runtimes', '--setup', 'tok'], {})).toThrow(/takes no --setup token/)
   })
 })
+
+describe('#3737: --bare and the derived-by-default slug', () => {
+  it('a plain setup run derives the slug by default', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--api', 'https://api.haven.example'], {})
+    expect(parsed.options.deriveServerName).toBe(true)
+    expect(parsed.options.serverName).toBeUndefined()
+  })
+
+  it('--name suppresses derivation and still carries the slug', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--name', 'research'], {})
+    expect(parsed.options.serverName).toBe('research')
+    expect(parsed.options.deriveServerName).toBeUndefined()
+  })
+
+  it('--bare suppresses derivation and leaves the pair unnamed', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--bare'], {})
+    expect(parsed.options.serverName).toBeUndefined()
+    expect(parsed.options.deriveServerName).toBeUndefined()
+    expect(parsed.options.replaceExistingWiring).toBeUndefined()
+  })
+
+  it('--replace suppresses derivation (it already implies the bare pair)', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--replace'], {})
+    expect(parsed.options.replaceExistingWiring).toBe(true)
+    expect(parsed.options.deriveServerName).toBeUndefined()
+  })
+
+  it('--bare --replace is redundant but allowed', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--bare', '--replace'], {})
+    expect(parsed.options.replaceExistingWiring).toBe(true)
+  })
+
+  it('--bare with --name is a usage error', () => {
+    expect(() => parseArgs(['--setup', 'hv_setup_test', '--bare', '--name', 'research'], {})).toThrow(/--bare and --name contradict/)
+  })
+
+  it('--bare belongs to a --setup run, like --replace', () => {
+    expect(() => parseArgs(['--doctor', '--bare'], {})).toThrow(/--bare belongs to a --setup run/)
+    expect(() => parseArgs(['--rekey', '--bare'], {})).toThrow(/--bare belongs to a --setup run/)
+    expect(() => parseArgs(['--unwire', '--bare'], {})).toThrow(/--bare belongs to a --setup run/)
+  })
+
+  it('the help text documents --bare and the named default', () => {
+    const text = helpText()
+    expect(text).toContain('--bare')
+    expect(text).toMatch(/display name/)
+  })
+})

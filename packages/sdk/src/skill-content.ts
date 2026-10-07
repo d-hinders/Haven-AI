@@ -63,8 +63,16 @@ nothing is paid past the rules the user set.
 
 Hosted tools run in the \`mcp__haven__\` namespace. Local signing tools run in
 the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
+Those are an UNNAMED pair's names: the default setup now names the pair from
+the agent's display name, \`haven-<slug>\` / \`haven-signer-<slug>\`, and its
+tool names follow that pair — \`mcp__haven-<slug>__…\` /
+\`mcp__haven-signer-<slug>__…\`. Read the server names off the agent's own
+configuration (or the \`next_tool_server\` field) rather than assuming the bare
+ones; bare \`haven\` / \`haven-signer\` remain on installs wired before the
+change, and \`--bare\` still opts into them.
 That namespacing is Claude-family; other runtimes name the servers by their
-own config keys (Codex: \`haven\`, \`haven_signer\`). Tool results carry the
+own config keys (Codex: \`haven\`, \`haven_signer\` — or the pair's two
+suffixed names). Tool results carry the
 exact next step (\`next_action\`, \`next_tool\`, \`next_arguments\`, plus the
 runtime-neutral \`next_tool_server\` + \`next_tool_name\` + \`next_tool_server_role\`
 — the bare tool name on that logical server, whatever your runtime calls it).

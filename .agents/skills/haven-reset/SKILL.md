@@ -20,7 +20,7 @@ Read the selected client reference completely before changing state.
 
 1. Confirm that the user explicitly requested destructive reset. A request to diagnose, inspect, or reconnect alone does not authorize credential deletion.
 2. Back up every configuration file the verified procedure will mutate.
-3. Remove both the Haven service and local signer entries using the verified client's supported configuration method.
+3. Remove every Haven pair — the agent's own pair (bare `haven` / `haven-signer`, or `haven-<slug>` / `haven-signer-<slug>` named, [#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) and any other Haven entry — using the verified client's supported configuration method.
 4. Before deleting anything under `~/.haven`, tombstone each agent credential directory. **Take the directories from the filesystem, never from an agent id** — `ls ~/.haven/agents`, or the `directory` values in `--doctor --json`. A named agent's directory is its wiring **slug**, which never equals its agent id ([#1696](https://github.com/d-hinders/Haven-AI/issues/1696)), so a path built from an id does not exist for it and the command refuses. For each real directory:
 
    ```bash

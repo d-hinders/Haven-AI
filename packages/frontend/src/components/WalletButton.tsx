@@ -31,6 +31,7 @@ import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { truncateAddress } from '@/components/haven'
 import { resolveDefaultAccount } from '@/lib/default-account'
 import { usePathname } from 'next/navigation'
+import { accountWithChainLabel } from '@/lib/account-label'
 
 // Generative identicon gradient stops — decorative art hashed from an address
 // for visual variety, NOT design-system colour. These are data, not UI chrome,
@@ -761,10 +762,14 @@ export default function WalletButton({
         const accountChainName = getAccountChainName(subjectAccount?.chain_id)
         // Which account the pill speaks for, now that nothing on screen says
         // which one is "active" (#3719).
-        // The name only: in the passkey and delegator menus the `Network:` row
-        // already carries the account's chain (in the connected-wallet menu that
-        // row is the wallet's network).
+        // The name only where the menu's `Network:` row already carries the
+        // account's chain (the passkey and delegator menus). In the
+        // connected-wallet menu that row is the WALLET's network, so the
+        // account line keeps its own chain there.
         const subjectAccountName = subjectAccount?.name
+        const subjectAccountNameWithChain = subjectAccount
+          ? accountWithChainLabel(subjectAccount)
+          : undefined
         const openWalletConnect = () => {
           if (openConnectModalHook) {
             openConnectModalHook()
@@ -1007,7 +1012,7 @@ export default function WalletButton({
               hasConnectedWallet={connected}
               switching={pendingSwitch}
               anchorRef={triggerRef}
-              accountName={subjectAccountName}
+              accountName={subjectAccountNameWithChain}
             />
           </div>
         )

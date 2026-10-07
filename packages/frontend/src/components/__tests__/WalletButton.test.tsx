@@ -166,16 +166,19 @@ describe('WalletButton', () => {
       })
     })
 
-    it('names the subject account in the connected-wallet menu too', () => {
+    it('names the subject account WITH its chain in the connected-wallet menu', () => {
       setConnectedWallet()
       mocks.useAuth.mockReturnValue({
-        user: { accounts: [FIRST_NOT_DEFAULT, DEFAULT_ACCOUNT] },
+        user: { accounts: [FIRST_NOT_DEFAULT, { ...DEFAULT_ACCOUNT, chain_id: 84532 }] },
         passkeys: [],
       })
       render(<WalletButton />)
       fireEvent.click(screen.getByRole('button', { name: /0x5555/ }))
       const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
-      expect(within(dialog).getByText('Main account')).toBeInTheDocument()
+      // Here `Network:` is the WALLET's chain (Base), so the account line must
+      // carry the account's own chain or the menu never says where it lives.
+      expect(within(dialog).getByText('Main account · Base Sepolia')).toBeInTheDocument()
+      expect(within(dialog).getByText('Base')).toBeInTheDocument()
     })
 
     it('reads the account it is given', () => {

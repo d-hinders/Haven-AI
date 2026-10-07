@@ -217,6 +217,15 @@ last-verified: "2026-10-02"
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
 
+> **Re-verified, Backend checks ceiling (2026-10-07):** this diff touches
+> `.github/workflows/ci.yml`, a covered file, in the `backend_checks` job's
+> `timeout-minutes` only (8 to 12) and the comment above it. The job name,
+> its steps, the check identity and every ruleset contract are unchanged. No
+> tool, schema, version-skew or consent-hash contract moves; the client
+> releases table, upgrade hints, publish flow and package resolution are
+> untouched. `last-verified` stays 2026-10-02. Nothing else in this document
+> was re-verified.
+
 > **Re-verified #3583 (2026-10-02, the ops render smoke):** this diff touches
 > `.github/workflows/ci.yml`, a covered file, inside the `ops_checks` job
 > only: its build step gains a fixture `NEXT_PUBLIC_OPS_ENVIRONMENTS`, three

@@ -442,7 +442,7 @@ describe('superseded agent credentials (#1688)', () => {
     expect(check?.detail).toContain('agent-old')
     expect(check?.detail).toMatch(/SPEND-CAPABLE/)
     // #3756: names the agent page's real control; /[Rr]evoke/ alone passed on "never revokes".
-    expect(check?.repair).toContain('Use Remove agent\u2026 on the Haven agent page for agent-old (it ends their live budgets)')
+    expect(check?.repair).toContain('Use Remove agent\u2026 on the Haven agent page for agent-old (it ends each one\u2019s live budgets)')
     expect(check?.repair).not.toMatch(/^Revoke /)
     expect(check?.repair).toContain('agent-old')
     // Connect reports; the user acts. The repair must never claim otherwise.

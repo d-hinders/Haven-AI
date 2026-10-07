@@ -539,8 +539,9 @@ already-configured machine behaves as follows (characterized in
   [Running several agents in one runtime](#running-several-agents-in-one-runtime).
 - **The previous agent is not revoked by a re-run — with or without
   `--replace`.** Local retirement is local: its authority remains whatever
-  its on-chain rules and the Haven agent page say. Revoke agents you no
-  longer use from the Haven dashboard. Connect never calls revoke — that
+  its on-chain rules and the Haven agent page say. Use **Remove agent…** on
+  the Haven agent page for agents you no longer use (or the superseded-agents
+  revoke on the setup screen). Connect never calls revoke — that
   route is owner-authenticated, and an agent credential revoking a sibling
   agent would be an agent editing its own authority.
 - **A re-run never overwrites an existing credential file.** A write that would

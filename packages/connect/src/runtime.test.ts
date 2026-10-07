@@ -2332,6 +2332,11 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     const error = await expectRejection(runWithPriorDir(true))
     expect(error).toBeInstanceOf(ConnectError)
     expect((error as ConnectError).code).toBe('wiring_collision')
+    // #3756: the relayed refusal names the agent-page control, not a bare "revoke".
+    expect((error as ConnectError).message).toContain(
+      'still use Remove agent\u2026 on the Haven agent page to end the old agent\u2019s budgets',
+    )
+    expect((error as ConnectError).message).not.toMatch(/revoke the old agent on the Haven agent page/)
   })
 
   it('REGRESSION (B1): filesystem junk under the credentials root is never named as an agent', async () => {

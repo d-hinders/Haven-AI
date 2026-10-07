@@ -1337,7 +1337,7 @@ export async function runDoctor(
       ...(supersededLevel === 'failed'
         ? {
             repair:
-              `Use Remove agent\u2026 on the Haven agent page for ${supersededLive.join(', ')} (it ends their live budgets), then remove the old ` +
+              `Use Remove agent\u2026 on the Haven agent page for ${supersededLive.join(', ')} (it ends each one\u2019s live budgets), then remove the old ` +
               'director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
           }
         : supersededLevel === 'advisory'

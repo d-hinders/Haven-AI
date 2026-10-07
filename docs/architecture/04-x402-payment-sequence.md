@@ -778,7 +778,9 @@ Sequence:
    sequential calls stay fresh reads), and `createX402Intent` accepts the
    already-fetched `delegateAddress` instead of re-fetching the agent. Net: a
    successful preflight makes exactly ONE call per Haven surface — catalog,
-   agent, allowances, `POST /x402` — pinned by
+   agent, allowances, `POST /x402` — inside the handler (through the hosted
+   server, the dispatch identity gate in `tools/identity-gate.ts` makes one
+   agent read before the handler runs), pinned by
    [`packages/mcp-server/src/tools.test.ts`](../../packages/mcp-server/src/tools.test.ts)
    ("ROUND-TRIP BUDGET", #1348), which counts every stubbed fetch per surface;
    per-step wall-clock telemetry rides the

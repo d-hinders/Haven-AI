@@ -10,6 +10,10 @@ import {
   type HostedToolName,
   type ToolPayload,
 } from './tools.js'
+import { runTool } from './tools/support/index.js'
+import { IDENTITY_GATE_EXEMPT, requireAgentIdentity } from './tools/identity-gate.js'
+
+export { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT } from './tools/identity-gate.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
 export const HOSTED_SERVER_VERSION = '0.8.1-alpha.0'
@@ -239,9 +243,13 @@ export function buildHostedMcpServer(haven: HavenClient): McpServer {
       name,
       { description: toolDescriptions[name], inputSchema: toolInputSchema(name) },
       async (args: unknown) =>
-        haven.withRequestContext({ 'X-Haven-MCP-Tool': name }, async () =>
-          toMcpResult(await handlers[name](args)),
-        ),
+        haven.withRequestContext({ 'X-Haven-MCP-Tool': name }, async () => {
+          if (!IDENTITY_GATE_EXEMPT.has(name)) {
+            const identity = await runTool(() => requireAgentIdentity(haven))
+            if (!identity.success) return toMcpResult(identity)
+          }
+          return toMcpResult(await handlers[name](args))
+        }),
     )
   }
 

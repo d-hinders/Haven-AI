@@ -45,7 +45,9 @@ import { toolSchemas } from '../tools.js'
  * exclusion-shaped default as the #2809 derivation: a new file is a capability
  * (guarded) unless argued into the seam list.
  */
-const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry']
+// identity-gate: the hosted dispatch gate `buildHostedMcpServer` runs before
+// every handler; it owns no tool, so it is a seam, not a capability.
+const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry', 'identity-gate']
 
 const CAPABILITY_MODULES: readonly string[] = fs
   .readdirSync(new URL('./', import.meta.url), { withFileTypes: true })

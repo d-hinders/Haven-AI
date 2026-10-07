@@ -323,7 +323,7 @@ describe('budget grant/revoke (#2539)', () => {
     expect(parsed.revocation_url).toContain('agents/a1')
   })
 
-  it('revoke refuses an already-revoked or replaced hash without calling the route', async () => {
+  it('revoke refuses an already-revoked hash without calling the route', async () => {
     const api = fakeApi({
       'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'revoked' }] },
     })
@@ -332,6 +332,27 @@ describe('budget grant/revoke (#2539)', () => {
     expect(code).not.toBe(0)
     expect(err.join('\n')).toMatch(/already revoked/)
     expect(api.calls.filter((c) => c.includes('/revoke')).length).toBe(0)
+  })
+
+  it('revoke accepts a replaced row: it is still live (#3542, #3729)', async () => {
+    // #3542 rules `replaced` still live — the newer grant does not undo the
+    // older one — and the backend's prepare route only rejects `revoked`.
+    // The old CLI refusal ("nothing to revoke") was a dead end for an agent
+    // whose only live row had been replaced.
+    const api = fakeApi({
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'replaced' }] },
+      [`POST /agents/a1/delegations/${HASH}/revoke`]: {
+        revocation_url: 'https://app.haven.test/agents/a1?grant=' + HASH,
+      },
+    })
+    const { deps, out } = harness({ makeApi: () => api })
+    const code = await run(['budget', 'revoke', 'a1', HASH, '--json'], deps)
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out.join('\n'))
+    expect(parsed.status).toBe('pending_revoke')
+    expect(parsed.revocation_url).toContain('agents/a1')
+    // The "nothing to revoke" text is gone from the source, not just unused here.
+    expect(readFileSync(new URL('./commands.ts', import.meta.url), 'utf8')).not.toContain('nothing to revoke')
   })
 
   it('revoke --wait exits 0 once the row flips to revoked', async () => {
@@ -696,11 +717,103 @@ describe('management commands (backend-only)', () => {
     expect(err.join('\n')).toMatch(/--yes/)
   })
 
-  it('revokes with --yes', async () => {
-    const api = fakeApi({ 'POST /agents/a1/revoke': {} })
+  it('revokes with --yes and no live budget', async () => {
+    // #3729: the revoke now reads the server's live count first. With nothing
+    // live the delegations route is never touched and behaviour is unchanged.
+    const api = fakeApi({ 'GET /agents/a1': { id: 'a1', live_delegation_count: 0 }, 'POST /agents/a1/revoke': {} })
     const { deps } = harness({ makeApi: () => api })
     expect(await run(['agents', 'revoke', 'a1', '--yes'], deps)).toBe(0)
     expect(api.calls).toContain('POST /agents/a1/revoke')
+    expect(api.calls.some((c) => c.includes('/delegations'))).toBe(false)
+  })
+
+  it('refuses to revoke while a budget is live, without calling the revoke route (#3729)', async () => {
+    const LIVE1 = '0x' + 'ab'.repeat(32)
+    const LIVE2 = '0x' + 'cd'.repeat(32)
+    const api = fakeApi({
+      'GET /agents/a1': { id: 'a1', name: 'Scout', status: 'active', live_delegation_count: 2 },
+      'GET /agents/a1/delegations': {
+        delegations: [
+          { delegation_hash: LIVE1, version: 1, status: 'active' },
+          { delegation_hash: LIVE2, version: 2, status: 'replaced' },
+          { delegation_hash: '0x' + 'ef'.repeat(32), version: 3, status: 'revoked' },
+        ],
+      },
+      'POST /agents/a1/revoke': {},
+    })
+    const { deps, err } = harness({ makeApi: () => api })
+    const code = await run(['agents', 'revoke', 'a1', '--yes'], deps)
+    // Exit 4 (refused) via HavenCliError, not 2 (usage): the command line was
+    // right, the STATE is wrong.
+    expect(code).toBe(4)
+    expect(api.calls).not.toContain('POST /agents/a1/revoke')
+    const text = err.join('\n')
+    expect(text).toContain(`haven budget revoke a1 ${LIVE1}`)
+    expect(text).toContain(`haven budget revoke a1 ${LIVE2}`)
+    // A revoked row is not live; it is not offered a command.
+    expect(text).not.toContain('ef'.repeat(32))
+    // The one-signature route is named.
+    expect(text).toContain('Remove agent')
+  })
+
+  it('the live-budget refusal under --json carries error.live_delegations (#3729)', async () => {
+    const LIVE1 = '0x' + 'ab'.repeat(32)
+    const api = fakeApi({
+      'GET /agents/a1': { id: 'a1', name: 'Scout', status: 'active', live_delegation_count: 1 },
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: LIVE1, version: 1, status: 'pending' }] },
+      'POST /agents/a1/revoke': {},
+    })
+    const { deps, out } = harness({ makeApi: () => api })
+    const code = await run(['agents', 'revoke', 'a1', '--yes', '--json'], deps)
+    expect(code).toBe(4)
+    const parsed = JSON.parse(out[0])
+    expect(parsed.ok).toBe(false)
+    expect(parsed.error.code).toBe('refused')
+    expect(parsed.error.live_delegations).toEqual([{ delegation_hash: LIVE1, status: 'pending' }])
+    expect(api.calls).not.toContain('POST /agents/a1/revoke')
+  })
+
+  it('--keep-budget revokes and warns the budget is still live (#3729)', async () => {
+    const LIVE1 = '0x' + 'ab'.repeat(32)
+    const api = fakeApi({
+      'GET /agents/a1': { id: 'a1', name: 'Scout', status: 'active', live_delegation_count: 1 },
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: LIVE1, version: 1, status: 'replaced' }] },
+      'POST /agents/a1/revoke': {},
+    })
+    const { deps, out, err } = harness({ makeApi: () => api })
+    const code = await run(['agents', 'revoke', 'a1', '--yes', '--keep-budget', '--json'], deps)
+    expect(code).toBe(0)
+    expect(api.calls).toContain('POST /agents/a1/revoke')
+    const parsed = JSON.parse(out[0])
+    expect(parsed).toMatchObject({ ok: true, agent_id: 'a1', status: 'revoked' })
+    expect(parsed.live_delegations).toEqual([{ delegation_hash: LIVE1, status: 'replaced' }])
+    // Prose mode: the warning and the per-row commands. Under --json the prose
+    // is discarded, so assert the same lines a human would see via a prose run
+    // (data() prints human() to stdout when not --json).
+    const prose = harness({ makeApi: () => api })
+    await run(['agents', 'revoke', 'a1', '--yes', '--keep-budget'], prose.deps)
+    const text = prose.out.join('\n')
+    expect(text).toContain('still live on-chain')
+    expect(text).toContain(`haven budget revoke a1 ${LIVE1}`)
+  })
+
+  it('a failed budget check keeps the read exit class and never revokes (#3729)', async () => {
+    const failing: CliApi = {
+      get: async () => { throw new CliApiError('Account is locked', 403) },
+      post: async () => { throw new Error('the revoke route must never be called') },
+      put: async () => { throw new CliApiError('unused', 404) },
+      del: async () => { throw new CliApiError('unused', 404) },
+      getText: async () => { throw new CliApiError('unused', 404) },
+    }
+    const { deps, err, out } = harness({ makeApi: () => failing })
+    // Under --json the couldn't-check note goes to stderr; stdout stays one
+    // failure object carrying the read's own message and code.
+    const code = await run(['agents', 'revoke', 'a1', '--yes', '--json'], deps)
+    // The read's 403 keeps its exit class (4); the failure is the read's, not
+    // reclassified, and the prose says why the revoke did not happen.
+    expect(code).toBe(4)
+    expect(err.join('\n')).toMatch(/Couldn't check budgets/)
+    expect(JSON.parse(out[0]).error).toEqual({ code: 'refused', message: 'Account is locked' })
   })
 
   it('rotates an agent key and prints it once', async () => {

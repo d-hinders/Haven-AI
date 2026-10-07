@@ -80,6 +80,14 @@ last-verified: "2026-10-06"
 >
 > Nothing else in this document was re-verified, and `last-verified` is not bumped.
 
+> **Re-verified (2026-10-07, `BLOCKSCOUT_API_KEY` added):** a new optional
+> backend variable. When set, it is sent as `apikey` on the Base and Base
+> Sepolia Blockscout history reads; unset, the reads stay anonymous as before.
+> Production Base history reads were refused with HTTP 403 on every request,
+> so set it on any environment where `Explorer API fetch failed` logs a 403.
+> No other variable, value or deploy step changes. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #3671 (2026-10-06, `RPC_URL` removed):** the backend no longer
 > reads `RPC_URL`; RPC is resolved only for supported chains, so chain 100 has
 > none. Delete the variable from any environment that still sets it (it is

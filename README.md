@@ -140,6 +140,7 @@ Edit `.env` and fill in the required values:
 | `RELAYER_PRIVATE_KEY` | Yes for on-chain execution | EOA private key that pays gas for relayed transactions; it cannot access user funds |
 | `GNOSISSCAN_API_KEY` | No | History only (decision (c), #3635): the chain-100 explorer history read; nothing runs on Gnosis |
 | `BASESCAN_API_KEY` | No | Base explorer API key when using an Etherscan-style Base source; Base currently defaults to Blockscout for transactions |
+| `BLOCKSCOUT_API_KEY` | No | Sent on the Base / Base Sepolia Blockscout history reads; without it Blockscout may refuse (403) anonymous requests from a datacenter IP |
 | `COINGECKO_API_KEY` | No | Token price lookups |
 | `FRONTEND_URL` | No | Backend CORS/link base (default: `http://localhost:3000`) |
 | `NEXT_PUBLIC_API_URL` | No | Frontend backend URL override (default through local rewrite: `http://localhost:3001`) |

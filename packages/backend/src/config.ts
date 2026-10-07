@@ -389,6 +389,10 @@ export const config = {
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',
   basescanApiKey: process.env.BASESCAN_API_KEY ?? '',
+  // Sent as `apikey` on the Base / Base Sepolia Blockscout v2 history reads.
+  // Unset → anonymous requests, which Blockscout may refuse (403) from a
+  // datacenter IP; the dashboard then shows a partial-history banner.
+  blockscoutApiKey: process.env.BLOCKSCOUT_API_KEY ?? '',
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
 

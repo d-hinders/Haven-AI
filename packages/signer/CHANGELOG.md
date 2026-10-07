@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **`haven_sign_x402` and `haven_x402_sign_header` results carry `retry_headers` (#3727).** `{ <name>: <payment_header> }` built from the SDK's live rule `x402PaymentHeaderNamesFor` — both `PAYMENT-SIGNATURE` and `X-PAYMENT` on the EIP-3009 bridge — so the agent sets the merchant-retry headers from the result instead of picking the names from prose. Additive field; the descriptions now name it instead of spelling the names out. No update needed.
+
 ## 0.8.1-alpha.0 — 2026-10-07
 
 ### Changed

@@ -40,6 +40,10 @@ export {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   x402V2PaymentEnvelope,
+  // #3727: the retry headers the signer's one-shot results carry are built
+  // from the SDK's live name rule — one implementation, no prose drift.
+  x402PaymentHeaderNamesFor,
+  x402RetryHeadersFor,
 } from './x402.js'
 export {
   buildSweepAuthorizationMessage,

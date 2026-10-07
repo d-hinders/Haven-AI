@@ -551,6 +551,9 @@ describe('HavenClient structural boundary', () => {
       'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
       'packedUserOperationHash', // #3271
+      // #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses
+      // (transaction only, never payer).
+      'parseMerchantSettlement',
       'parseNextTool', // #3101
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
@@ -581,6 +584,10 @@ describe('HavenClient structural boundary', () => {
       'x402AssetTransferMethod',
       'x402AuthorizationAmount',
       'x402FacilitatorAddresses',
+      // #3727: the live header-name rule and the ready-made retry headers
+      // built from it (barrel and edge).
+      'x402PaymentHeaderNamesFor',
+      'x402RetryHeadersFor',
       // #2361: the shared v2 payment envelope (resource/extensions echoes) —
       // exported so the edge signer builds the same envelope as the SDK's
       // own funding leg instead of a drifting copy.

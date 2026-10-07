@@ -340,6 +340,23 @@ export function x402PaymentHeaderNamesFor(paymentHeader: string): readonly strin
 }
 
 /**
+ * The retry headers an agent sets on its own merchant retry, ready-made:
+ * `{ <name>: <paymentHeader> }` for every name `x402PaymentHeaderNamesFor`
+ * puts on the wire for this payload (#3727).
+ *
+ * Exists so no caller re-derives the names from prose: the rule is the SDK's
+ * live one (both `PAYMENT-SIGNATURE` and `X-PAYMENT` on eip3009,
+ * `PAYMENT-SIGNATURE` only on erc7710 — the #2341 rule), and a change to it
+ * flows here through the same function the request path uses. Every value is
+ * the header verbatim; only the NAMES vary.
+ */
+export function x402RetryHeadersFor(paymentHeader: string): Record<string, string> {
+  return Object.fromEntries(
+    x402PaymentHeaderNamesFor(paymentHeader).map((name) => [name, paymentHeader]),
+  )
+}
+
+/**
  * What the evidence record's `paymentProofHeaderName` must say for THIS
  * payload, derived from the same decision the request makes.
  *

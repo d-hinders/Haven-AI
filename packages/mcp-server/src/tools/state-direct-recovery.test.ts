@@ -22,6 +22,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  encodeBase64Json,
   verifyPaymentReceipt,
 } from '@haven_ai/sdk'
 import { signedErc7710Receipt } from '@haven_ai/sdk/test-support'
@@ -1453,6 +1454,71 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     // The signature went to settle, NOT to the funding relay.
     expect(recordedCalls().find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })
     expect(recordedCalls().find((c) => c.url.includes('/sign'))).toBeUndefined()
+  })
+
+  it('rides the ready-made retry headers beside the payment_header on the erc7710 success return (#3727)', async () => {
+    // A realistic erc7710 envelope, not a placeholder string: the retry-header
+    // names come from the SDK's live name rule, which reads the header's own
+    // `accepted` option. A short stub would hit that rule's conservative
+    // "both names" parse-failure fallback and never exercise the erc7710 half
+    // of the rule — the exact blind spot the #2289 short-header fixtures had.
+    const addr = `0x${'12'.repeat(20)}`
+    const sig = `0x${'ab'.repeat(65)}`
+    const erc7710Header = encodeBase64Json({
+      x402Version: 2,
+      scheme: 'exact',
+      network: 'eip155:8453',
+      accepted: {
+        scheme: 'exact',
+        network: 'eip155:8453',
+        amount: '10000',
+        payTo: addr,
+        maxTimeoutSeconds: 300,
+        asset: addr,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [addr] },
+      },
+      payload: {
+        delegationChain: [
+          {
+            delegate: addr,
+            delegator: addr,
+            authority: `0x${'00'.repeat(32)}`,
+            salt: `0x${'1'.padStart(64, '0')}`,
+            signature: sig,
+            caveats: [{ enforcer: addr, terms: `0x${'cd'.repeat(96)}`, args: '0x' }],
+          },
+        ],
+        userOperation: {
+          sender: addr,
+          nonce: '0x1',
+          callData: `0x${'22'.repeat(400)}`,
+          paymasterAndData: `0x${'33'.repeat(200)}`,
+          signature: sig,
+        },
+      },
+    })
+    stubFetch({
+      'POST /x402/pay_generic_7710/settle': {
+        status: 200,
+        body: { payment_header: erc7710Header },
+      },
+    })
+    const res = ok(
+      await handlers().haven_submit({
+        payment_id: 'pay_generic_7710',
+        signature: SIG,
+        settlement_scheme: 'erc7710',
+      }),
+    ) as { data: Record<string, any> }
+
+    // #3727: the retry headers are derived from the SDK's live name rule, so
+    // on the erc7710 submit path this is PAYMENT-SIGNATURE ONLY — the legacy
+    // alias would double past the header-size ceiling with the delegation
+    // chain (#2341). The value is the header verbatim, so the agent never
+    // picks the header names from prose.
+    expect(res.data.retry_headers).toEqual({ 'PAYMENT-SIGNATURE': erc7710Header })
+    expect(res.data.retry_headers['PAYMENT-SIGNATURE']).toBe(res.data.payment_header)
+    expect('X-PAYMENT' in res.data.retry_headers).toBe(false)
   })
 
   it('a repeated submit of a payment that already settled answers the same done state as haven_settle_mcp_tool (#3423)', async () => {

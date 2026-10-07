@@ -48,6 +48,7 @@ import {
   X402_LEGACY_PAYMENT_HEADER_NAME,
   X402_PAYMENT_HEADER_NAME,
   x402PaymentHeaderNamesFor,
+  x402RetryHeadersFor,
   x402PaymentHeaderNamesSent,
 } from './x402.js'
 
@@ -243,6 +244,26 @@ describe('#2341 — erc7710 sends the v2 name alone', () => {
     expect(x402PaymentHeaderNamesSent(erc7710Header())).toBe(X402_PAYMENT_HEADER_NAME)
     expect(x402PaymentHeaderNamesSent(eip3009Header())).toBe(
       `${X402_PAYMENT_HEADER_NAME}, ${X402_LEGACY_PAYMENT_HEADER_NAME}`,
+    )
+  })
+
+  // #3727: the ready-made retry headers — keys from the LIVE name rule,
+  // values always the header verbatim.
+  it('x402RetryHeadersFor carries every name the rule puts on the wire, each valued with the header', () => {
+    expect(x402RetryHeadersFor(erc7710Header())).toEqual({
+      [X402_PAYMENT_HEADER_NAME]: erc7710Header(),
+    })
+    expect(x402RetryHeadersFor(eip3009Header())).toEqual({
+      [X402_PAYMENT_HEADER_NAME]: eip3009Header(),
+      [X402_LEGACY_PAYMENT_HEADER_NAME]: eip3009Header(),
+    })
+    // Derived from the same function the request path uses, not a copy of it:
+    // the keys ARE the rule's answer for the same payload.
+    expect(Object.keys(x402RetryHeadersFor(erc7710Header()))).toEqual(
+      x402PaymentHeaderNamesFor(erc7710Header()),
+    )
+    expect(Object.keys(x402RetryHeadersFor(eip3009Header()))).toEqual(
+      x402PaymentHeaderNamesFor(eip3009Header()),
     )
   })
 })

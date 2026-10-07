@@ -3174,6 +3174,22 @@ runtime and backend that fails closed on it. An operator on a runtime predating
 that is the defect being fixed, and its remedy is an ordinary runtime update, not
 a skew diagnosis. Nothing in the table above applies to it.
 
+### retry_headers and the installed-signer lever (#3727)
+
+`haven_sign_x402` and `haven_x402_sign_header` now return `retry_headers` —
+`{ <name>: <payment_header> }` built from the SDK's live
+`x402PaymentHeaderNamesFor` rule — and the hosted `haven_submit` returns it on
+the erc7710 path beside the header it assembles. This IS an installed-signer
+lever: `retry_headers` reaches agents only after a `@haven_ai/signer` release
+and connector refresh. Until then every agent follows the existing prose
+("set BOTH PAYMENT-SIGNATURE and X-PAYMENT", "PAYMENT-SIGNATURE only on
+erc7710"), which stays correct. The field is additive — nothing keys on its
+presence, and the name-selection rule it encodes is the same rule the wire path
+already applies, so there is no combination of signer, hosted server and
+backend that fails closed on it. The plain-HTTP outcome fold
+(`haven_report_x402_outcome` taking `settlement_tx_hash` / `payment_response`)
+is hosted-only and ships on deploy; nothing installed depends on it.
+
 **Why three stale-signer rows (#1143).** The second is what the field actually
 returned on 2026-08-06, and #1141's original version of this table got it wrong:
 it listed `x402 expected context authentication message is invalid`, which is what

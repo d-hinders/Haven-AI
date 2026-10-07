@@ -441,7 +441,9 @@ gaining any:
 haven_pay_x402_quote  → settlement child + settlement_scheme: "erc7710"
 haven_sign            → { payment_id } only; the signer fetches the child
 haven_submit          → { payment_id, signature, settlement_scheme: "erc7710" }
-                        POST /x402/:id/settle → payment_header, tx_hash null
+                        POST /x402/:id/settle → payment_header, retry_headers
+                        (#3727: { "PAYMENT-SIGNATURE": <header> } — the names
+                        come from the SDK's live rule, not prose), tx_hash null
 agent retry           → PAYMENT-SIGNATURE: <payment_header>   (ONLY — #2341:
                         the header carries a delegation chain, and adding the
                         X-PAYMENT copy doubles it past Node's 16 KB ceiling)
@@ -1125,6 +1127,17 @@ predicate permanently rather than until the window elapses.
 > is a well-formed success no-op — nothing checked, nothing recorded — never
 > a refusal, since the merchant may simply have returned no hash.
 > `last-verified` unchanged.
+>
+> **Folded in one call earlier (#3727).** The outcome tool itself now takes
+> the optional evidence — `settlement_tx_hash` and/or the raw base64
+> `PAYMENT-RESPONSE` header as `payment_response` — and on an `accepted`
+> outcome records it through the same `reportSettlementEvidence` seam,
+> verified on-chain BEFORE recording (a mismatching or zero hash refuses
+> before anything is written; the decoded header contributes `transaction`
+> only, never `payer`). With evidence supplied the response names no next
+> tool, so the plain-HTTP eip3009 purchase is six hosted/signer calls, not
+> seven; the standalone `haven_report_settlement_evidence` stays for agents
+> that call it and for the paid-MCP/erc7710 handoffs that already name it.
 
 The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
 drew it for a caller-asserted settlement hash:

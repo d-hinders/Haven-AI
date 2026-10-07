@@ -218,6 +218,7 @@ More than one agent session works this repo (different users, different machines
 
 **Before building an issue** (any session, any agent):
 
+0. **Do not claim an issue labelled `pending-review`.** It is filed but not ready: its spec review or an owner decision is still outstanding, and the body you would build from may change under you. Wait for the label to come off, or ask in #3193. Filers put it on at creation and lift it only when nothing is left to decide ([`new-task`](.agents/skills/new-task/SKILL.md) § *Hold until ready*).
 1. Check the issue's latest comments for a live `🔒 CLAIM`. The claim comment is the record; read it, not just the assignee field.
 2. Check for existing work: `gh pr list --search "<issue-nr>"` for PRs, `git ls-remote --heads origin | grep <issue-nr>` for pushed branches, and `gh issue develop <issue-nr> --list` for any branch someone else linked. Read-only: sessions no longer link branches (#3425). A link does not vanish when a PR opens; GitHub turns it into a closing connection. An empty list is never "no overlap", and who owns a branch is read from the claim comment.
 3. Check the tail of #3193 for claims or FYIs touching the same surfaces.

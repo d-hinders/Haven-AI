@@ -21,7 +21,10 @@ Accept one source:
 - a `Depends on` / `depends: #N` reference in its body points at an issue that is still open;
 - a build-order comment on the epic sequences it after something still open;
 - its scope presupposes code that does not exist yet (verify with a quick grep — an
-  acceptance gate for a subsystem cannot ship before the subsystem).
+  acceptance gate for a subsystem cannot ship before the subsystem);
+- it carries `pending-review`: its spec review or an owner decision is outstanding
+  ([new-task](../new-task/SKILL.md) § *Hold until ready*). This holds for a
+  specified issue too — report what it is waiting for instead of building it.
 
 If every remaining candidate is blocked, stop and report the dependency chain instead
 of forcing the lowest number.

@@ -67,11 +67,51 @@ machine's observation, not an agent's judgement.
    ledger entry), and record the issue on the ledger's **disposition line** — the
    entry itself is append-only history and is never edited.
 6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
+   **Create it with the `pending-review` label already on it** — in the create
+   call itself, never added afterwards — and keep it there under § *Hold until
+   ready* below. Other sessions and partner pipelines claim backlog issues within
+   minutes, so an issue is never filed on the assumption that nobody will start
+   it while its review or an owner question is still open.
 7. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now. A PR that closes the issue clears every assignee on merge (#3177), so an assignee used for tracking does not survive the close.
 8. Run § *Issue review* on the created issue, apply its corrections, and post
    the verdict comment. **Not optional, and not sized:** it runs on every issue
    this skill files, single task or epic, whatever its size or risk.
-9. Return the issue link, applied labels, and what the review changed.
+9. Lift `pending-review` only when § *Hold until ready* allows it, then return
+   the issue link, applied labels, what the review changed, and — when the label
+   stays on — exactly which owner questions it is waiting for.
+
+## Hold until ready
+
+**`pending-review` is the one "not ready" label** (its GitHub description: *do
+not claim or queue until the label is removed*). AGENTS.md § *Cross-session
+agent coordination* and `ship-next`'s selector both treat an issue carrying it
+as unclaimable. It goes on at creation (step 6) and comes off only when **all**
+of these hold:
+
+1. the § *Issue review* pass has run, its corrections are in the body, and the
+   verdict comment is posted;
+2. **no owner question is open** — every question the body or the verdict lists
+   is answered by the owner, recorded on the issue, and folded into the body;
+3. the body says so: a settled issue has no `## Open questions` section left
+   (answered ones move under `## Owner decisions` with the date).
+
+Whoever lifts it says why in the same comment as the last decision or the
+verdict ("all owner questions settled — lifting `pending-review`").
+
+**Put it back** the moment a new owner question appears on an issue nobody has
+claimed yet — a review finding that needs a ruling, a scope gap the code
+cannot answer. An issue that is waiting for the owner is not ready, whatever
+its spec quality.
+
+**When a claim landed before the decisions** (the label was missing, or a
+question surfaced after the claim), do not rely on the body edit alone: post
+one comment addressed to the claimant that lists every decision verbatim and
+names which earlier wording it supersedes, then update the body. A builder
+reads the body it picked up, not the one it was later replaced with.
+
+*Why (2026-10-07, owner):* #3717 was filed with four open owner questions
+listed in its verdict and no hold label; a partner pipeline claimed it eleven
+minutes after the verdict and started building against the unanswered version.
 
 ## Epics
 
@@ -347,7 +387,9 @@ spec is right once:
 - every owner decision it needed is recorded on the issue.
 
 Report readiness on those terms. Do not present adding `code-quality` as the
-step that makes an issue ready or pickable.
+step that makes an issue ready or pickable. Until those terms hold the issue
+carries `pending-review` (§ *Hold until ready*); a label never makes an issue
+ready, but its absence is what tells every other session it may start.
 
 **How work actually gets picked up (measured 2026-09-25).** Partners and
 sessions claim issues through the `🔒 CLAIM` protocol in
@@ -373,6 +415,7 @@ the label automatically, to queue the CI-health issues they file.
 
 - Do not fabricate requirements for money-path, authentication, authorization, or schema tasks.
 - Do not write an unverified code claim into a body: every count and `file:line` comes from a command the body quotes at a named commit (step 1), and no issue — single task or epic — is queued, shipped or announced before its § *Issue review* pass and verdict comment.
+- Do not file an issue without `pending-review`, and do not lift it while an owner question is open (§ *Hold until ready*).
 - Do not file around this skill. Every agent-filed issue goes through it; a bare `gh issue create` is only the mechanism of step 6.
 - Keep generated and hand-written loop issues interchangeable.
 - Prefer an editable, correctly shaped issue over speculative implementation detail.

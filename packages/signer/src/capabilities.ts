@@ -102,18 +102,8 @@ export function signerCapabilityAdvertisement(): {
   return { experimental: { [SIGNER_CAPABILITY_KEY]: signerCompatibility() } }
 }
 
-/**
- * The agent-readable half: MCP `instructions`, which clients surface to the
- * model. The machine-readable capability above is the precise statement, but
- * most agent runtimes never expose `capabilities.experimental` to the model —
- * this string is what actually reaches the reader who has to make the call.
- *
- * It names the same fix as #1143 so an agent that hits either surface — the
- * handshake here or the signing-time error there — tells the user the same
- * thing.
- */
 export interface SignerIdentity {
-  /** The credential file's agent id; absent on the bare `HAVEN_DELEGATE_KEY` path. */
+  /** The credential file's `agent_id`, or `HAVEN_AGENT_ID`; absent when neither is set. */
   agentId?: string
   /** The delegate key's address — always known, since the signer holds the key. */
   delegateAddress?: string
@@ -138,6 +128,19 @@ function signerIdentityLines(identity: SignerIdentity | undefined): string[] {
   return [`This signer is bound to ${agent}${delegate}.`]
 }
 
+/**
+ * The agent-readable half: MCP `instructions`, which clients surface to the
+ * model. The machine-readable capability above is the precise statement, but
+ * most agent runtimes never expose `capabilities.experimental` to the model —
+ * this string is what actually reaches the reader who has to make the call.
+ *
+ * It names the same fix as #1143 so an agent that hits either surface — the
+ * handshake here or the signing-time error there — tells the user the same
+ * thing.
+ *
+ * Since #3738 it also states the agent id and delegate address this signer is
+ * bound to, when `identity` is given.
+ */
 export function signerInstructions(identity?: SignerIdentity): string {
   const compatibility = signerCompatibility()
   return [

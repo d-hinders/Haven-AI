@@ -79,6 +79,12 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verified unchanged (#3732, 2026-10-07, the runtime picker's no-default rule):**
+> - **What changed.** `connect/src/runtime.ts`: the default prompt rung now passes the hint scan's `env` to the installed-client prompt (new `promptRuntimeByInstalledClient` dep), and the prompt itself never pre-selects — an empty answer re-asks and aborts with `runtime_prompt_aborted` after three attempts, writing nothing. `connect/src/installed-clients.ts` (not covered here) gains a `~/.claude.json`-`mcpServers` evidence path and the "(suggested)" marker, which changes which candidate the picker SUGGESTS, not any connector command the route builds.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves; the loop's `--runtime` / `--json` guidance still holds.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3689, 2026-10-06, the wiring_collision re-run clause):**
 > - **What changed.** Comments only in `routes/agent-connection-setups.ts` and `connect/src/runtime.ts`: both now say the setup prompt permits a third command change — after the user answers a `wiring_collision` relay, one re-run with the `--name` or `--replace` flag the user chose. The connector command the route builds, and the refusal the connector emits, are unchanged.
 > - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves, and the `--replace` / `--name` guidance in The loop still holds.

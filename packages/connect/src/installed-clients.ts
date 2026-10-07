@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { access } from 'node:fs/promises'
+import { access, readFile as fsReadFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { ConnectError } from './connect-error.js'
 import { runtimeConfigPathFor } from './config-writers.js'
@@ -34,6 +34,14 @@ export interface InstalledClientCandidate {
    * whether that file exists today.
    */
   configPath: string | null
+  /**
+   * The file the config-file evidence was found in, when this candidate
+   * carries that tier. Usually the same file `configPath` names — except for
+   * Claude Code, whose evidence lives in `~/.claude.json` while `configPath`
+   * stays `null` (the connector would configure it through its own CLI, not
+   * by writing a file it owns).
+   */
+  evidencePath?: string | null
   evidence: 'config-file' | 'client-directory'
 }
 
@@ -42,6 +50,19 @@ interface ScanTarget {
   label: string
   /** The config file the connector would write, when it owns a file path. */
   configPath: string | null
+  /**
+   * A file whose existence grants config-file evidence even when the
+   * connector does not own it for writing (`configPath` null). Set only for
+   * Claude Code: a user-scope `~/.claude.json` that carries an `mcpServers`
+   * key means Claude Code has already been pointed at some MCP server.
+   */
+  evidencePath?: string
+  /**
+   * Extra condition on the evidence file's CONTENT (absent: existence alone
+   * is evidence). Claude Code needs it — a `~/.claude.json` without an
+   * `mcpServers` key is only a directory-tier marker, as before.
+   */
+  evidenceMatches?: (contents: string) => boolean
   /** Paths that mean "this client is installed" even with no MCP config yet. */
   markers: string[]
 }
@@ -53,6 +74,8 @@ export interface ScanInstalledClientsOptions {
   env?: NodeJS.ProcessEnv
   /** Injectable so the scan is testable without a populated home directory. */
   exists?: (path: string) => Promise<boolean>
+  /** Injectable so the `mcpServers` evidence check is testable without a real file. */
+  readFile?: (path: string) => Promise<string>
 }
 
 /**
@@ -81,9 +104,23 @@ export function installedClientTargets(
       runtime: 'claude-code',
       label: 'Claude Code',
       // Claude Code is configured through its own CLI (`claude mcp add-json`),
-      // not by writing a file this module owns — so its evidence is the
-      // client directory, never a config path.
+      // not by writing a file this module owns — so `configPath` stays null
+      // and the write still goes through the CLI. But a user-scope
+      // `~/.claude.json` carrying an `mcpServers` key IS config-file
+      // evidence: the user has already pointed Claude Code at some MCP
+      // server. It is not the file the connector would write, hence the
+      // separate evidence path (#3732): without it, a Codex config won by
+      // construction on any machine where the user runs Claude Code.
       configPath: null,
+      evidencePath: join(homeDir, '.claude.json'),
+      evidenceMatches: (contents) => {
+        try {
+          const parsed: unknown = JSON.parse(contents)
+          return typeof parsed === 'object' && parsed !== null && 'mcpServers' in parsed
+        } catch {
+          return false
+        }
+      },
       markers: [join(homeDir, '.claude'), join(homeDir, '.claude.json')],
     },
     {
@@ -115,7 +152,10 @@ export function installedClientTargets(
     },
     {
       runtime: 'claude-desktop',
-      label: 'Claude Desktop',
+      // The chat app, a separate runtime from Claude Code. Named so a user in
+      // the desktop app's Code tab cannot read this row as "where I am" —
+      // it sorted above Claude Code whenever both had config (#3732).
+      label: 'Claude Desktop (chat app)',
       configPath: runtimeConfigPathFor('claude-desktop', homeDir),
       markers: [],
     },
@@ -135,6 +175,7 @@ export async function scanInstalledClients(
   options: ScanInstalledClientsOptions = {},
 ): Promise<InstalledClientCandidate[]> {
   const exists = options.exists ?? pathExists
+  const readFile = options.readFile ?? ((path: string) => fsReadFile(path, 'utf8'))
   const targets = installedClientTargets(options.homeDir, options.cwd, options.env ?? process.env)
   const found: InstalledClientCandidate[] = []
   for (const target of targets) {
@@ -144,6 +185,18 @@ export async function scanInstalledClients(
         label: target.label,
         detail: `MCP config found at ${target.configPath}`,
         configPath: target.configPath,
+        evidencePath: target.configPath,
+        evidence: 'config-file',
+      })
+      continue
+    }
+    if (target.evidencePath && (await hasConfigEvidence(target, exists, readFile))) {
+      found.push({
+        runtime: target.runtime,
+        label: target.label,
+        detail: `MCP config found at ${target.evidencePath}`,
+        configPath: target.configPath,
+        evidencePath: target.evidencePath,
         evidence: 'config-file',
       })
       continue
@@ -155,6 +208,7 @@ export async function scanInstalledClients(
         label: target.label,
         detail: `installed (${marker})`,
         configPath: target.configPath,
+        evidencePath: null,
         evidence: 'client-directory',
       })
       break
@@ -164,6 +218,27 @@ export async function scanInstalledClients(
     if (a.evidence !== b.evidence) return a.evidence === 'config-file' ? -1 : 1
     return SCAN_ORDER.indexOf(a.runtime) - SCAN_ORDER.indexOf(b.runtime)
   })
+}
+
+/**
+ * Whether the target's separate evidence path earns config-file evidence:
+ * the file must exist, and when the target pins a content rule
+ * (`evidenceMatches`), the file must satisfy it. A file that cannot be READ
+ * grants nothing — unreadable is not evidence (#3732).
+ */
+async function hasConfigEvidence(
+  target: ScanTarget,
+  exists: (path: string) => Promise<boolean>,
+  readFile: (path: string) => Promise<string>,
+): Promise<boolean> {
+  const path = target.evidencePath as string
+  if (!(await exists(path))) return false
+  if (!target.evidenceMatches) return true
+  try {
+    return target.evidenceMatches(await readFile(path))
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -234,20 +309,33 @@ export async function promptForInstalledClient(
   io: PromptIo = defaultPromptIo(),
 ): Promise<RuntimeId> {
   if (candidates.length === 0) throw noInstalledClientsError()
+  const hint = installedClientHint(candidates)
   io.write('Haven could not detect which agent runtime this is.\n')
   io.write('These agent clients are installed on this machine:\n')
   candidates.forEach((candidate, index) => {
-    io.write(`  ${index + 1}) ${candidate.label} — ${candidate.detail}\n`)
+    // The suggested runtime may be MARKED (a hint, from `installedClientHint`)
+    // but is never pre-selected: an untyped Enter must not write an API key
+    // and a delegate key into whichever client sorts first (#3732).
+    const suggested = hint.suggestedRuntime === candidate.runtime ? ' (suggested)' : ''
+    io.write(`  ${index + 1}) ${candidate.label}${suggested} — ${candidate.detail}\n`)
   })
   io.write('Haven writes an API key and a signing key into the client you pick, so pick the one your agent actually runs in.\n')
 
   for (let attempt = 0; attempt < MAX_PROMPT_ATTEMPTS; attempt += 1) {
-    const answer = await io.question(`Which one? [1-${candidates.length}] (default 1 — ${candidates[0].label}): `)
+    const answer = await io.question(`Which one? [1-${candidates.length}]: `)
     if (answer === null) throw promptAbortedError('the prompt was cancelled')
     const trimmed = answer.trim()
-    // Empty ACCEPTS the pre-selected default. That is still a choice the user
-    // made at the prompt — the scan itself never gets to select (property 2).
-    if (trimmed === '') return candidates[0].runtime
+    // Empty input is NOT a default (#3732, owner decision 2026-10-07): the
+    // scan populates the choices; it never selects — and neither does an
+    // untyped Enter, which would write live keys into whichever client sorts
+    // first. Avoiding it costs one keystroke; being wrong costs a key in a
+    // client the user does not use. Re-ask, spending an attempt, exactly
+    // like the wiring-collision prompt ("Empty input is NOT a default",
+    // wiring-collision.ts).
+    if (trimmed === '') {
+      io.write(`Type the number of the client to configure (1-${candidates.length}).\n`)
+      continue
+    }
     const picked = Number.parseInt(trimmed, 10)
     if (Number.isInteger(picked) && picked >= 1 && picked <= candidates.length) {
       return candidates[picked - 1].runtime

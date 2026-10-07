@@ -268,7 +268,14 @@ merchant leg for you.
 \`to\`, \`amount\`, and \`token\` for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
-first and sign in the local Haven signer. On THIS path Haven does not talk to
+first and sign in the local Haven signer. If the 402 carries a
+\`sign-in-with-x\` extension (x402 Sign-In-With-X), call
+\`mcp__haven-signer__haven_sign_siwx\` with \`{ url, challenge }\` — \`url\` is
+the FINAL URL after redirects — and retry the merchant with the
+\`SIGN-IN-WITH-X\` header it returns: the delegate
+wallet signs in as the wallet that paid, moving no funds. NEVER follow a
+redirect with \`SIGN-IN-WITH-X\` (or a resulting session token) attached; if
+the final origin differs, re-sign there. On THIS path Haven does not talk to
 the merchant: \`mcp__haven-signer__haven_sign_x402\` returns both
 \`signature\` and \`payment_header\`; relay \`signature\` with
 \`mcp__haven__haven_submit\`, then retry the paywalled URL yourself with

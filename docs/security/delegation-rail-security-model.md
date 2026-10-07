@@ -1935,9 +1935,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 - **ERC-1271.** `isValidSignature` is on the ABI. Whether the account accepts a
   plain owner ECDSA signature over a raw digest, without ERC-7739 wrapping, is
   **not verified in this repository**. **Reduced for an updated signer:** it
-  now signs only EIP-712 digests in the HybridDeleGator `PackedUserOperation`
-  domain of its own account (plus the Haven-bound x402, header and sweep
-  payloads), not arbitrary digests a protocol could present for a 1271 check.
+  now signs only payloads whose meaning is checked in-package: EIP-712 digests
+  in the HybridDeleGator `PackedUserOperation` domain of its own account (the
+  Haven-bound x402, header and sweep payloads) and — since #3728 — composed
+  EIP-4361 Sign-In-With-X messages for the x402 `sign-in-with-x` extension,
+  where the signer itself composes the message from grammar-validated
+  challenge fields and the address from the key. It still never signs a
+  caller-supplied digest or an arbitrary digest a protocol could present for
+  a 1271 check.
 - **Installed signers.** A signer installed before #3272 keeps the oracle until
   it is upgraded. Haven cannot gate that: the attack never passes through
   Haven, and the hosted MCP cannot see the signer's handshake. Credential

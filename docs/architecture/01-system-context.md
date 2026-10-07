@@ -141,8 +141,10 @@ flowchart LR
 
 - **The default agent topology is hosted MCP plus a local edge signer.** Hosted
   MCP constructs and relays but stays keyless. The delegate private key remains
-  in the agent-controlled signer, which returns only signatures or signed
-  payment headers. Direct SDK and fully local MCP integrations collapse some
+  in the agent-controlled signer, which returns only signatures, signed
+  payment headers, or (since #3728) a finished `SIGN-IN-WITH-X` header for the
+  x402 Sign-In-With-X extension — composed by the signer from a validated
+  merchant challenge, never caller-supplied bytes. Direct SDK and fully local MCP integrations collapse some
   boxes in the diagram but preserve the same local-key boundary
   ([signer core](../../packages/signer/src/core.ts),
   [hosted tools](../../packages/mcp-server/src/tools.ts) — since #2812 the

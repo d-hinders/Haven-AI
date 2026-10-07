@@ -14,6 +14,7 @@ import { toolSchemas, type SignerToolName } from './tools.js'
  */
 export const toolSummaries: Record<SignerToolName, string> = {
   haven_sign: 'signs a Haven-prepared payment, task-budget or sub-budget open or close (a UserOp from your own account redeeming a delegation made to it, directly or via a task-budget child; a sub-budget child narrowing your budget for another agent of yours; or an x402 funding intent against a Haven-signed context)',
+  haven_sign_siwx: 'signs a merchant x402 Sign-In-With-X sign-in challenge as the delegate wallet — proves the wallet paid that merchant, moves no funds and grants no spend authority',
   haven_x402_sign_header: 'builds and signs the EIP-3009 merchant payment header for an x402 payment',
   haven_sign_x402: 'the two above in one call: funding payload + merchant header',
   haven_sign_sweep_delegate: 'signs a Haven-prepared gasless sweep of stranded funds back to your own account',
@@ -66,6 +67,12 @@ export const SIGNER_ACK_ENV = 'HAVEN_SIGNER_ACK'
  * with the corrected text.
  *
  * v2: the #1263 read-only signing-context fetch.
+ *
+ * #3728 decision: NOT bumped for haven_sign_siwx. The consent hash covers the
+ * sorted tool NAMES, so every install re-prompts exactly once anyway when the
+ * new tool registers — a bump would be a second, redundant re-prompt lever on
+ * the same event. The wording change below ("sign-in challenges") rides the
+ * same re-prompt.
  */
 export const SIGNER_CONSENT_SURFACE_VERSION = 2
 
@@ -99,7 +106,10 @@ export function renderSignerConsentBlock(input: SignerConsentInput, hash: string
   if (input.network) lines.push(`Network:          ${input.network}`)
   lines.push('')
   lines.push('This local signer holds the delegate key on this machine and signs')
-  lines.push('payment payloads or x402 merchant headers for the delegate address above.')
+  lines.push('payment payloads, x402 merchant headers, or x402 Sign-In-With-X sign-in')
+  lines.push('challenges for the delegate address above. A sign-in challenge proves to a')
+  lines.push('merchant that this wallet paid it before; it moves no funds and grants no')
+  lines.push('spend authority.')
   lines.push("Its one network use is a read-only fetch of a pending payment's signing")
   lines.push('payload from Haven, authenticated with the agent credential stored next to')
   lines.push("this signer's key file - it never sends the key, a signature, or anything")
@@ -115,7 +125,7 @@ export function renderSignerConsentBlock(input: SignerConsentInput, hash: string
   lines.push('')
   lines.push('A local audit entry is appended for every signing operation. Audit entries')
   lines.push('record timestamp, tool, payload hash, and delegate address; never the key,')
-  lines.push('signature, or x402 payment header.')
+  lines.push('signature, x402 payment header, or sign-in message.')
   lines.push('')
   lines.push(`Consent hash: ${hash}`)
   lines.push('')

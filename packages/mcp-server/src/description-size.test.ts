@@ -386,11 +386,25 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * exact value, shrink-only from here. The mean pin moves too: 27,311 / 28 =
  * 975.3929 sits above round 18's 960.83, and the same rule applies —
  * re-derived at the measured mean, shrink-only from here.
+ *
+ * **Re-derived — round 20, #3728 (2026-10-07).** The hosted x402 tool surface
+ * gained a mandatory routing pointer: when a merchant 402 carries a
+ * `sign-in-with-x` extension, the response now points the agent at the local
+ * signer's `haven_sign_siwx` at the moment it is looking at the extension —
+ * the signer composes and signs the CAIP-122 challenge itself, and the pointer
+ * carries the redirect warning the signer cannot enforce. +431 UTF-8 bytes on
+ * one description (`haven_pay_x402_quote`); no overclaim remains to trim (the
+ * pointer is the issue's required content). The union with #3723/#3727 is
+ * disjoint (different descriptions), but the total re-measures on the merged
+ * tree per the rounds-5/16 discipline: 27,746 UTF-8 bytes across the same 28
+ * tools, so the absolute pin moves to that exact value, shrink-only from
+ * here. The mean pin: 27,746 / 28 = 990.9285…, pinned at the two-decimal
+ * ceiling (990.93) — a ceiling rounds the safe direction.
  */
-const MAX_TOTAL_BYTES = 27_311
-// Mean pin: round 19 (block above): 27,311 / 28 = 975.3929, pinned UP at the
-// two-decimal ceiling (975.4) — a ceiling rounds the safe direction.
-const MAX_MEAN_BYTES = 975.4
+const MAX_TOTAL_BYTES = 27_746
+// Mean pin: round 20 (block above): 27,746 / 28 = 990.9285…, pinned at the
+// two-decimal ceiling (990.93) — a ceiling rounds the safe direction.
+const MAX_MEAN_BYTES = 990.93
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

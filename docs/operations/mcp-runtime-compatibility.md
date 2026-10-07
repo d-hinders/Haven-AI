@@ -4013,6 +4013,19 @@ to call next in structured fields, and those fields are typed end to end
   configured servers and call `next_tool_name` there. The pair alone was the
   documented answer until #2550 and was wrong for the named case, which is why
   the role exists rather than a fourth spelling of the name.
+  **Several pairs on one client (#3738):** once a harness carries more than
+  one Haven pair, the role alone is ambiguous — `signer` matches every signer.
+  The hosted instructions, the signer's own instructions and the `haven-pay`
+  skill all carry one rule: act as one agent per task, ask which when the user
+  has not said, and send each signer call to the signer of the hosted server
+  called (`haven-<slug>` with `haven-signer-<slug>`, bare `haven` with
+  `haven-signer`, Codex `haven` with `haven_signer`). Identity, not name, is
+  the check: the signer's `initialize` instructions state the agent id and
+  delegate address it is bound to, compared with `haven_get_agent`'s `id` and
+  `delegate_address`. In the hosted instructions both this rule and the
+  server-name rule above sit inside the first 2,000 characters, because
+  Claude Code truncates server instructions at about 2,048 (pinned by the
+  hosted server's own tests).
 - **`--doctor` / `--repair` (#1589):** a stuck setup is diagnosable without a
   hand-built MCP client: `npx @haven_ai/connect@alpha --doctor --runtime
   <runtime>` checks config, credentials, the pinned signer runtime, the hosted

@@ -69,6 +69,18 @@ describe('signer identity in the handshake (#3738)', () => {
     expect(instructions).toContain('address alone when this signer has no recorded agent id')
   })
 
+  it('keeps the version-compatibility block inside the first 2,000 characters too', async () => {
+    // The several-pairs rule sits ahead of the version block; nothing after the
+    // rule may push the supported-version lines past Claude Code's cut. The
+    // Sign-In-With-X paragraph (#3728) sits after them: its tool description
+    // carries the same steps, and tool descriptions are not truncated.
+    const instructions = await instructionsFor({ delegateKey: TEST_KEY, agentId: AGENT_ID })
+    const lastVersionLine = instructions.indexOf('- sub-budget sign-context versions supported:')
+    expect(lastVersionLine).toBeGreaterThan(-1)
+    expect(instructions.indexOf('\n', lastVersionLine)).toBeLessThan(2000)
+    expect(instructions.indexOf('Sign-In-With-X (#3728)')).toBeGreaterThan(lastVersionLine)
+  })
+
   it('omits the identity line when called with no identity (the exported default)', () => {
     expect(signerInstructions()).not.toContain('This signer is bound to')
     expect(signerInstructions()).toContain('When more than one Haven pair is configured')

@@ -7408,6 +7408,66 @@ export const openapiSpec = {
         },
       },
     },
+    '/x402/by-idempotency-key/{key}': {
+      get: {
+        tags: ['x402'],
+        operationId: 'getX402IntentByIdempotencyKey',
+        summary: 'Look up the caller\'s x402 payment intent by idempotency key.',
+        description:
+          'Read-only, agent-scoped lookup (#3739). The hosted pay tool\'s request mode checks this BEFORE re-probing a merchant, so a replayed call returns the existing intent\'s state without depending on the merchant still answering. Writes nothing: a stale pending_signature row is reported with window_open false, never lazily expired here. Failed intents are not returned, and an expired one ranks below a live one with the same key. Not-found and not-yours are the same 404. The key is URL-encoded by the client.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'key',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 128 },
+            description: 'The idempotency key the intent was created with (URL-encoded).',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The intent\'s current state.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: [
+                    'payment_id',
+                    'status',
+                    'settlement_scheme',
+                    'resource_url',
+                    'expires_at',
+                    'window_open',
+                    'task_budget_id',
+                    'amount_atomic',
+                    'network',
+                  ],
+                  properties: {
+                    payment_id: { type: 'string' },
+                    status: { type: 'string' },
+                    settlement_scheme: { type: ['string', 'null'], enum: ['erc7710', 'eip3009', null] },
+                    resource_url: { type: ['string', 'null'] },
+                    expires_at: { type: ['string', 'null'], format: 'date-time' },
+                    window_open: {
+                      type: 'boolean',
+                      description: 'True only when status is pending_signature and expires_at is in the future.',
+                    },
+                    task_budget_id: { type: ['string', 'null'] },
+                    amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                    network: { type: 'string' },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/x402/{id}/sign-context': {
       get: {
         tags: ['x402'],

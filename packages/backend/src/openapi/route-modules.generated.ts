@@ -110,6 +110,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "GET /user/preferences": "routes/user.ts",
   "GET /user/safes": "routes/user-accounts-retired.ts",
   "GET /user/safes/{id}/funding": "routes/user-accounts-retired.ts",
+  "GET /x402/by-idempotency-key/{key}": "routes/x402.ts",
   "GET /x402/{id}/merchant-call-context": "routes/x402.ts",
   "GET /x402/{id}/sign-context": "routes/x402.ts",
   "PATCH /accounting/connections/{provider}/settings": "routes/accounting-connections.ts",

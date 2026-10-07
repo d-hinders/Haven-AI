@@ -1340,7 +1340,7 @@ export class HavenClient {
   ): Promise<X402Quote> {
     const initialInit = withX402Wallet(init, x402PayerAddress(this.delegateAddress, this.x402Wallet))
     const request = snapshotX402Request(url, initialInit)
-    const response = await this.merchantTransport.fetch(url, initialInit, this.merchantTransport.budgetFor('quote'))
+    const response = await this.merchantTransport.fetch(url, initialInit, this.merchantTransport.budgetFor('quote'), this.merchantTransport.capFor('quote'))
 
     if (response.status !== 402) {
       // #3118: a merchant on the official x402 MCP profile answers HTTP 200
@@ -1602,7 +1602,7 @@ export class HavenClient {
       if (!url) {
         throw new HavenApiError('x402 resume requires the original URL or a captured request snapshot.', 400)
       }
-      const response = await this.merchantTransport.fetch(url, initialInit, this.merchantTransport.budgetFor('quote'))
+      const response = await this.merchantTransport.fetch(url, initialInit, this.merchantTransport.budgetFor('quote'), this.merchantTransport.capFor('quote'))
       if (response.status !== 402) {
         throw new HavenApiError('Expected the original x402 request to return HTTP 402 before resuming.', 400)
       }
@@ -1660,7 +1660,7 @@ export class HavenClient {
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
 
     // 1. Make the original request
-    const response = await this.merchantTransport.fetch(url, requestInit, this.merchantTransport.budgetFor('quote'))
+    const response = await this.merchantTransport.fetch(url, requestInit, this.merchantTransport.budgetFor('quote'), this.merchantTransport.capFor('quote'))
 
     // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions), unless
     //    it is a native MCP payment-required tool result (#3118): the

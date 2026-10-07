@@ -25,7 +25,8 @@
  * and the document is read with the cap enforced WHILE reading, never after
  * buffering). Without `egress`, behaviour is byte-identical to before.
  */
-import { readBodyCapped, type MerchantEgressPolicy } from './merchant-egress.js'
+import { MerchantTimeoutError } from './types.js'
+import { readBodyCapped, MerchantEgressRefusedError, MerchantEgressResponseCapError, isBodyPhaseTimeout, type MerchantEgressPolicy } from './merchant-egress.js'
 
 export const MERCHANT_DISCOVERY_PATHS = ['/.well-known/haven-demo-merchant', '/'] as const
 export const DISCOVERY_MAX_BYTES = 64 * 1024
@@ -43,7 +44,7 @@ export async function discoverMerchantMcpUrl(
   const timeoutMs = egress?.timeouts?.discovery ?? 5_000
   // Discovery reads a fixed-path JSON document, never a merchant payload: its
   // own 64 KB cap stays the ceiling even when the policy's body cap is larger.
-  const readCap = Math.min(egress?.maxResponseBytes ?? DISCOVERY_MAX_BYTES, DISCOVERY_MAX_BYTES)
+  const readCap = Math.min(egress?.responseByteCaps?.discovery ?? egress?.maxResponseBytes ?? DISCOVERY_MAX_BYTES, DISCOVERY_MAX_BYTES)
   for (const path of MERCHANT_DISCOVERY_PATHS) {
     try {
       const url = `${input.origin}${path}`
@@ -71,7 +72,14 @@ export async function discoverMerchantMcpUrl(
       const resolved = new URL(doc.mcp_url)
       if (resolved.origin !== input.origin) continue
       return resolved.toString()
-    } catch {
+    } catch (err) {
+      // #3747 spec review: a policy refusal is NEVER degraded to "no
+      // discovery document" — rethrow it so the caller sees the real
+      // refusal. A body-phase deadline is a merchant timeout (criterion 5).
+      if (err instanceof MerchantEgressRefusedError || err instanceof MerchantEgressResponseCapError) throw err
+      if (isBodyPhaseTimeout(err)) {
+        throw new MerchantTimeoutError(`Merchant discovery document read timed out after ${timeoutMs}ms.`)
+      }
       continue
     }
   }

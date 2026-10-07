@@ -128,10 +128,13 @@ describe('refusal before any connection — haven_quote_x402', () => {
 })
 
 describe('refusal before any connection — the quoteMcpToolCall family (quote + pay + discovery)', () => {
-  it('haven_quote_mcp_tool refuses an http merchant_url before the probe (the #3097 rule fires first)', async () => {
+  it('haven_quote_mcp_tool refuses an http merchant_url before the probe (the hosted egress refusal surfaces, not the SDK INSECURE_RETRY_TARGET)', async () => {
     const calls = installSplitFetch(BACKEND_ROUTES, () => new Response('never'))
     const result = fail(await hostedHandlers().haven_quote_mcp_tool({ merchant_url: 'http://merchant.dev/mcp', tool_name: 'create_text' }))
-    expect(result.code).toBe('INSECURE_RETRY_TARGET')
+    // Round 2 of the 2026-10-07 spec review: the hosted egress policy runs
+    // FIRST, ahead of assertSecureMerchantUrl — its refusal is the hosted-
+    // accurate one (https-only), and the #3097 SDK rule never gets a turn.
+    expect(result.code).toBe('MERCHANT_EGRESS_REFUSED')
     expect(calls.filter((c) => !c.url.startsWith('http://haven.test'))).toEqual([])
   })
 

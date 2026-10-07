@@ -25,6 +25,7 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
+  - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/receipt.ts
   - packages/sdk/src/edge.ts

@@ -471,7 +471,7 @@ describe('HavenClient structural boundary', () => {
       'HOSTED_DISCOVERY_TIMEOUT_MS', // #3747
       'HOSTED_EGRESS_TIMEOUTS', // #3747
       'HOSTED_MAX_GET_REDIRECTS', // #3747
-      'HOSTED_MAX_RESPONSE_BYTES', // #3747
+      'HOSTED_RESPONSE_BYTE_CAPS', // #3747
       'HYBRID_DELEGATOR_DOMAIN_NAME', // #3271
       'HYBRID_DELEGATOR_DOMAIN_VERSION', // #3271
       'HavenApiError',

@@ -3,7 +3,7 @@ import { MerchantTimeoutError } from './types.js'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
 import { X402_PAYMENT_HEADER_NAMES, normalizePaymentRequired, x402PaymentHeaderNamesFor } from './x402.js'
 import { assertSecureX402RetryTarget } from './x402-retry-target.js'
-import { MerchantEgressRefusedError, MerchantEgressResponseCapError, type MerchantEgressPolicy, type MerchantEgressUse } from './merchant-egress.js'
+import { MerchantEgressRefusedError, MerchantEgressResponseCapError, isBodyPhaseTimeout, type MerchantEgressPolicy, type MerchantEgressUse } from './merchant-egress.js'
 
 export const DEFAULT_MERCHANT_TIMEOUT = 300_000
 export const MCP_NOTIFICATION_TIMEOUT = 10_000
@@ -106,14 +106,25 @@ export class McpMerchantTransport {
   /**
    * #3747: the timeout a merchant use runs under. Without an egress policy
    * this is always `merchantTimeout` — byte-identical to the pre-policy
-   * behaviour; with one, the policy's per-use budget wins where it sets one.
+   * behaviour; with one, the effective deadline is
+   * `min(policy timeout for the use, merchantTimeout)` (spec review
+   * 2026-10-07) — a policy can only TIGHTEN `merchantTimeout`, never extend
+   * it.
    */
   budgetFor(use: MerchantEgressUse): number {
-    return this.egress?.timeouts?.[use] ?? this.merchantTimeout
+    const policyTimeout = this.egress?.timeouts?.[use]
+    return policyTimeout === undefined ? this.merchantTimeout : Math.min(policyTimeout, this.merchantTimeout)
+  }
+
+  /** The per-use response byte cap (falls back to the policy's default). */
+  capFor(use: MerchantEgressUse): number | undefined {
+    const egress = this.egress
+    if (!egress) return undefined
+    return egress.responseByteCaps?.[use] ?? egress.maxResponseBytes
   }
 
   /** Fetch a merchant with a settlement-sized timeout and caller cancellation. */
-  async fetch(url: string, init: RequestInit = {}, timeoutMs = this.merchantTimeout): Promise<Response> {
+  async fetch(url: string, init: RequestInit = {}, timeoutMs = this.merchantTimeout, maxBytes?: number): Promise<Response> {
     if (!this.egress) {
       const timeoutSignal = AbortSignal.timeout(timeoutMs)
       const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
@@ -138,7 +149,7 @@ export class McpMerchantTransport {
    * signal spans the WHOLE redirect chain, and `MerchantTimeoutError`
    * classification is preserved.
    */
-  private async fetchUnderPolicy(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  private async fetchUnderPolicy(url: string, init: RequestInit, timeoutMs: number, maxBytes?: number): Promise<Response> {
     const egress = this.egress as MerchantEgressPolicy
     // Before anything is sent: a refusal here means no request of this use
     // ever left.
@@ -155,8 +166,15 @@ export class McpMerchantTransport {
     let hops = 0
     try {
       while (true) {
-        const response = await this.fetchImpl(currentUrl, { ...init, redirect: 'manual', signal })
-        if (!isRedirectStatus(response.status)) return this.capResponse(response, currentUrl)
+        // (Spec review 2026-10-07): 'manual' is set AFTER spreading init so a
+        // caller-supplied `redirect: 'follow'` cannot win; the ONE override
+        // allowed is the stricter 'error' (discovery, the #3739 probe).
+        const response = await this.fetchImpl(currentUrl, {
+          ...init,
+          redirect: init.redirect === 'error' ? 'error' : 'manual',
+          signal,
+        })
+        if (!isRedirectStatus(response.status)) return this.capResponse(response, currentUrl, maxBytes)
         // The 3xx came back from a request that WAS sent: everything from
         // here on is mid-flight.
         if (method !== 'GET') {
@@ -219,8 +237,8 @@ export class McpMerchantTransport {
    * `.text()`, `.json()`, `.clone().text()` — rejects mid-read the moment the
    * cap is crossed. A body that never ends can never buffer past the cap.
    */
-  private capResponse(response: Response, url: string): Response {
-    const cap = (this.egress as MerchantEgressPolicy).maxResponseBytes
+  private capResponse(response: Response, url: string, maxBytes?: number): Response {
+    const cap = maxBytes ?? (this.egress as MerchantEgressPolicy).maxResponseBytes
     if (!cap || !response.body) return response
     let total = 0
     const capped = response.body.pipeThrough(
@@ -276,7 +294,7 @@ export class McpMerchantTransport {
             clientInfo: MCP_CLIENT_INFO,
           },
         }),
-      }, this.budgetFor('mcpSession'))
+      }, this.budgetFor('mcpSession'), this.capFor('mcpSession'))
 
       if (!response.ok) return undefined
 
@@ -288,7 +306,10 @@ export class McpMerchantTransport {
 
       await this.notifyInitialized(url, init, sessionId, wallet)
       return sessionId
-    } catch {
+    } catch (err) {
+      // #3747 spec review: a policy REFUSAL is never degraded to "no
+      // session" — rethrow it so the caller sees the real refusal.
+      if (err instanceof MerchantEgressRefusedError || err instanceof MerchantEgressResponseCapError) throw err
       return undefined
     }
   }
@@ -308,8 +329,10 @@ export class McpMerchantTransport {
       text = await response.clone().text()
     } catch (err) {
       // #3747: a mid-read egress cap refusal is a real refusal, never a
-      // "not an MCP message" shrug.
+      // "not an MCP message" shrug; a body-phase deadline is a merchant
+      // timeout, never a bare DOMException (spec review 2026-10-07).
       if (err instanceof MerchantEgressResponseCapError) throw err
+      if (isBodyPhaseTimeout(err)) throw new MerchantTimeoutError(`Merchant response body read timed out.`)
       return undefined
     }
 
@@ -338,6 +361,7 @@ export class McpMerchantTransport {
       text = await response.clone().text()
     } catch (err) {
       if (err instanceof MerchantEgressResponseCapError) throw err
+      if (isBodyPhaseTimeout(err)) throw new MerchantTimeoutError(`Merchant response body read timed out.`)
       return response
     }
 
@@ -427,7 +451,7 @@ export class McpMerchantTransport {
     // #3118: a `tools/call` body additionally carries the payment in
     // `params._meta["x402/payment"]` (the official MCP profile). Any other
     // body is sent byte-for-byte as the caller gave it.
-    return this.fetch(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader), this.budgetFor('delivery'))
+    return this.fetch(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader), this.budgetFor('delivery'), this.capFor('delivery'))
   }
 
   /**

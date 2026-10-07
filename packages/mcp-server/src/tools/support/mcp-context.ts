@@ -219,10 +219,13 @@ export async function quoteMcpToolCall(
   // origin — scheme included — equals the input's, so a discovered endpoint
   // cannot differ in scheme from an input this line admitted (a re-check
   // there was a guard no test could fail; round 2 of the same review).
-  assertSecureMerchantUrl(merchantUrl)
-  // #3747: the hosted egress policy runs at QUOTE time — a bad target (an IP
+  // #3747: the hosted egress policy runs FIRST — a bad target (an IP
   // literal, localhost, a single-label or internal name) is refused before
-  // any intent exists, so it can never be refused only after funding.
+  // any intent exists, so it can never be refused only after funding. Ahead
+  // of assertSecureMerchantUrl also keeps the hosted refusal copy
+  // hosted-accurate (spec review 2026-10-07): the SDK-side "(or a loopback /
+  // reserved test host)" clause is false on hosted, where the policy refuses
+  // those hosts outright.
   if (haven.merchantEgress) {
     try {
       haven.merchantEgress.assertUrl(merchantUrl)
@@ -230,6 +233,7 @@ export async function quoteMcpToolCall(
       throw egressRefusalBeforeIntent(err)
     }
   }
+  assertSecureMerchantUrl(merchantUrl)
   // This is an MCP-tool purchase, so always negotiate the Streamable-HTTP
   // lifecycle before its unpaid tools/call — exact MCP endpoints can use any
   // same-origin path, not only `/mcp`. A base URL that cannot establish a

@@ -56,8 +56,13 @@ export interface MerchantEgressPolicy {
    * refused outright. `undefined` = no redirect following.
    */
   maxGetRedirects?: number
-  /** Per-use timeouts (ms). Absent uses fall back to `merchantTimeout`. */
+  /** Per-use timeouts (ms). The effective deadline is `min(this, merchantTimeout)`. */
   timeouts?: MerchantEgressTimeouts
+  /**
+   * Per-use response byte caps (#3747 spec review), enforced while the body
+   * is being read. A use absent here falls back to `maxResponseBytes`.
+   */
+  responseByteCaps?: Partial<Record<MerchantEgressUse, number>>
 }
 
 export type MerchantEgressRefusalReason =
@@ -133,7 +138,9 @@ export function isPublicHttpsMerchantUrl(url: string): boolean {
     return false
   }
   if (parsed.protocol !== 'https:') return false
-  const host = parsed.hostname.toLowerCase()
+  // (Spec review 2026-10-07): matching ignores ONE trailing dot, so
+  // `localhost.` and `x.railway.internal.` are refused like their bare forms.
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '')
   // WHATWG `URL` strips the brackets: an IPv6 literal's hostname CONTAINS a
   // colon, and no registrable name ever does.
   if (host.includes(':')) return false
@@ -155,7 +162,7 @@ export function publicHttpsMerchantUrlRefusal(url: string): string {
     return 'it is not a valid URL'
   }
   if (parsed.protocol !== 'https:') return `its scheme is ${parsed.protocol.replace(':', '')}, not https`
-  const host = parsed.hostname.toLowerCase()
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '')
   if (host.includes(':')) return `${host} is an IP-literal host (IPv6)`
   if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return `${host} is an IP-literal host (IPv4)`
   if (!host.includes('.')) return `${host} is a single-label host`
@@ -193,8 +200,13 @@ export const HOSTED_EGRESS_TIMEOUTS: Required<MerchantEgressTimeouts> = {
   // keep this module dependency-free in both directions.
   delivery: 300_000,
 }
-/** Hosted response byte cap, enforced while reading. */
-export const HOSTED_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+/** Hosted per-use byte caps (#3747 spec review, owner-delegated values). */
+export const HOSTED_RESPONSE_BYTE_CAPS: Required<Record<MerchantEgressUse, number>> = {
+  quote: 256 * 1024,
+  mcpSession: 256 * 1024,
+  discovery: 64 * 1024,
+  delivery: 5 * 1024 * 1024,
+}
 /** Hosted GET-redirect budget: every hop re-checked against the URL rules. */
 export const HOSTED_MAX_GET_REDIRECTS = 3
 
@@ -206,10 +218,21 @@ export const HOSTED_MAX_GET_REDIRECTS = 3
 export function strictMerchantEgressPolicy(): MerchantEgressPolicy {
   return {
     assertUrl: assertPublicHttpsMerchantUrl,
-    maxResponseBytes: HOSTED_MAX_RESPONSE_BYTES,
+    maxResponseBytes: HOSTED_RESPONSE_BYTE_CAPS.delivery,
+    responseByteCaps: { ...HOSTED_RESPONSE_BYTE_CAPS },
     maxGetRedirects: HOSTED_MAX_GET_REDIRECTS,
     timeouts: { ...HOSTED_EGRESS_TIMEOUTS },
   }
+}
+
+/**
+ * (Spec review 2026-10-07, criterion 5): a deadline that expires WHILE the
+ * body is being read rejects the read with a bare `DOMException`
+ * (`TimeoutError`) — classify it so it surfaces as `MerchantTimeoutError`
+ * like every other merchant timeout, never as an unclassified throw.
+ */
+export function isBodyPhaseTimeout(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'TimeoutError'
 }
 
 /**

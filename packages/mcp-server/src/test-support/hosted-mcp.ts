@@ -15,7 +15,7 @@
  * fixture rather than cloning it.
  */
 import { beforeEach, afterEach, vi } from 'vitest'
-import { HavenClient, HOSTED_EGRESS_TIMEOUTS, HOSTED_MAX_GET_REDIRECTS, HOSTED_MAX_RESPONSE_BYTES, assertPublicHttpsMerchantUrl, type MerchantEgressPolicy } from '@haven_ai/sdk'
+import { HavenClient, HOSTED_EGRESS_TIMEOUTS, HOSTED_MAX_GET_REDIRECTS, HOSTED_RESPONSE_BYTE_CAPS, assertPublicHttpsMerchantUrl, type MerchantEgressPolicy } from '@haven_ai/sdk'
 import {
   createToolHandlers,
   type HostedToolName,
@@ -189,7 +189,8 @@ export function fixtureMerchantEgress(): MerchantEgressPolicy {
       if (new URL(url).origin === 'https://merchant.test') return
       assertPublicHttpsMerchantUrl(url)
     },
-    maxResponseBytes: HOSTED_MAX_RESPONSE_BYTES,
+    maxResponseBytes: HOSTED_RESPONSE_BYTE_CAPS.delivery,
+    responseByteCaps: { ...HOSTED_RESPONSE_BYTE_CAPS },
     maxGetRedirects: HOSTED_MAX_GET_REDIRECTS,
     timeouts: { ...HOSTED_EGRESS_TIMEOUTS },
   }

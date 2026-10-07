@@ -9,7 +9,7 @@ import { McpMerchantTransport } from './mcp-merchant-transport.js'
 import {
   HOSTED_EGRESS_TIMEOUTS,
   HOSTED_MAX_GET_REDIRECTS,
-  HOSTED_MAX_RESPONSE_BYTES,
+  HOSTED_RESPONSE_BYTE_CAPS,
   MerchantEgressRefusedError,
   MerchantEgressResponseCapError,
   MerchantTimeoutError,
@@ -107,7 +107,8 @@ describe('strictMerchantEgressPolicy — the hosted budgets are pinned', () => {
     expect(HOSTED_EGRESS_TIMEOUTS.delivery).toBe(300_000)
     expect(policy.maxGetRedirects).toBe(3)
     expect(policy.maxGetRedirects).toBe(HOSTED_MAX_GET_REDIRECTS)
-    expect(policy.maxResponseBytes).toBe(HOSTED_MAX_RESPONSE_BYTES)
+    expect(policy.maxResponseBytes).toBe(HOSTED_RESPONSE_BYTE_CAPS.delivery)
+    expect(policy.responseByteCaps).toEqual(HOSTED_RESPONSE_BYTE_CAPS)
     expect(policy.assertUrl).toBe(assertPublicHttpsMerchantUrl)
   })
 })
@@ -260,7 +261,11 @@ describe('discoverMerchantMcpUrl under a policy', () => {
   it('refuses a disallowed input origin without fetching anything', async () => {
     const fetchSpy = recordingFetch(() => okText('{}'))
     vi.stubGlobal('fetch', fetchSpy)
-    await expect(discoverMerchantMcpUrl('https://haven-ai.railway.internal/', strictMerchantEgressPolicy())).resolves.toBeNull()
+    // Spec review 2026-10-07 (#2): a typed egress refusal is RETHROWN from
+    // discovery — never degraded to "no discovery document".
+    await expect(
+      discoverMerchantMcpUrl('https://haven-ai.railway.internal/', strictMerchantEgressPolicy()),
+    ).rejects.toBeInstanceOf(MerchantEgressRefusedError)
     expect(fetchSpy.calls).toEqual([])
     vi.unstubAllGlobals()
   })
@@ -273,12 +278,13 @@ describe('discoverMerchantMcpUrl under a policy', () => {
     })
     const fetchSpy = recordingFetch(() => new Response(endless, { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
-    // The policy cap (4096) exceeds discovery's own 64 KB? No — discovery
-    // keeps ITS cap as the floor; the never-ending document must abort the
-    // read either way, and discovery reports null instead of hanging.
+    // The policy cap (64 KB) meets discovery's own 64 KB floor; the
+    // never-ending document aborts the read mid-stream and surfaces the cap
+    // error — a refusal is never degraded to "no discovery document"
+    // (spec review 2026-10-07, #2).
     await expect(
       discoverMerchantMcpUrl('https://a.dev/', { ...ALLOW_FIXTURES, maxResponseBytes: 64 * 1024 }),
-    ).resolves.toBeNull()
+    ).rejects.toBeInstanceOf(MerchantEgressResponseCapError)
     vi.unstubAllGlobals()
   }, 5_000)
 })

@@ -29,9 +29,10 @@ hosted client's own outbound rule.
    un-checked). A redirect on any other method is refused — the paid POST is
    never followed, so a payment header is never sent to a redirect target.
 5. **Bounded budgets per use**: quotes and MCP session setup 15 s, discovery
-   5 s, paid delivery 300 s; a 2 MiB response cap enforced **while reading**
-   (the body stream errors mid-read — nothing is buffered past the cap, and a
-   body that never ends cannot hold a call open).
+   5 s, paid delivery 300 s; response caps enforced **while reading** —
+   256 KiB on quotes and MCP session setup, 64 KiB on discovery, 5 MiB on
+   paid delivery (the body stream errors mid-read — nothing is buffered past
+   the cap, and a body that never ends cannot hold a call open).
 
 ## Where it runs
 

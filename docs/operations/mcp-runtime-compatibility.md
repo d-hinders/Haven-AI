@@ -1941,6 +1941,27 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
 
+> **Re-verification (0.8.1-alpha.0 release, 2026-10-07):** the manifest table
+> above is re-pinned by the bump to `0.8.1-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.8.0-alpha.0` is **PATCH**: nothing in the range narrows or removes a
+> published surface.
+>
+> **Surfaces this release moves:**
+> - **CLI.** A new command, `haven feedback submit` (#3597), with a local secret
+>   check before any request. Additive.
+> - **Setup-prompt text.** The SDK's `AGENT_COMMAND_MODIFICATION_SENTENCE` permits
+>   the one user-chosen `--name`/`--replace` re-run after a `wiring_collision`
+>   relay (#3689). Text only; no SDK method or API change.
+> - **Not moved.** The tool set and tool arguments on both runtimes (no change
+>   under `packages/mcp/src` or `packages/mcp-server/src` in the range besides
+>   the version literals), the signer (no change under `packages/signer/src`),
+>   and the consent hashes. `CLIENT_COMPAT` is unchanged: `@haven_ai/signer`
+>   `min_version` stays `0.6.0-alpha.0`.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` is not bumped.
+
 > **Re-verification (0.7.0-alpha.0 release, 2026-09-29):** the manifest table
 > above is re-pinned by the bump to `0.7.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from the
@@ -2187,10 +2208,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.8.0-alpha.0` |
-| `@haven_ai/mcp` | `0.8.0-alpha.0` |
-| `@haven_ai/sdk` | `0.8.0-alpha.0` |
-| `@haven_ai/signer` | `0.8.0-alpha.0` |
+| `@haven_ai/connect` | `0.8.1-alpha.0` |
+| `@haven_ai/mcp` | `0.8.1-alpha.0` |
+| `@haven_ai/sdk` | `0.8.1-alpha.0` |
+| `@haven_ai/signer` | `0.8.1-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

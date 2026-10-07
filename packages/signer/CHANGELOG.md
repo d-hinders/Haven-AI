@@ -15,6 +15,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.1-alpha.0 — 2026-10-07
+
+### Changed
+
+- **README: the network-calls section names every sign-context read (#3645).** It said the signer makes "at most two kinds of network call"; since #3329/#3330 `haven_sign` given a `task_budget_id` or `sub_budget_id` also reads `GET /task-budgets/:id/sign-context` or `GET /sub-budgets/:id/sign-context`, and every read carries the `X-Haven-Client` version header besides the Bearer API key. Documentation only; the signer's behaviour is unchanged. No update needed.
+
 ## 0.8.0-alpha.0 — 2026-10-05
 
 ### Changed

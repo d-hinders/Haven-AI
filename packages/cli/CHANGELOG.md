@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.8.1-alpha.0 — 2026-10-07
+
 ### Added
 
 - **`haven feedback submit "<text>"` (#3597).** A one-way feedback/bug-report channel to Haven for a signed-in user and the agent working in their terminal — needs `haven login`, 4000 characters (code points) or fewer, several unquoted words are joined into one text like `contacts add`'s own free-text argument. A local secret check refuses to send text that looks like a secret — a labelled credential, a secret this machine itself holds (read with `node:fs`, never `@haven_ai/connect`), a 64-hex token whose derived address is one of your own agents' or accounts', or a BIP-39 recovery phrase — before any request carrying the text is made, and the backend re-runs the labelled, address and recovery-phrase checks as a backstop. Retention is 7 days; there is no reader yet (that is a separate, founders-only console issue). `@noble/hashes` and `@scure/bip39` join as devDependencies, bundled into `dist/*` — the `dependencies: {}` guard is unchanged.

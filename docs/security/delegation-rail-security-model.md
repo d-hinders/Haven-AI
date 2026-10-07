@@ -2203,6 +2203,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
 > re-verified where they merged. Nothing else in this document was re-verified.
 
+> **Re-verified (0.8.1-alpha.0 release, 2026-10-07):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.8.1-alpha.0`). No signing check, refusal or allowlist moves in that edit.
+> The range changes no file under `packages/signer/src` (`git log
+> origin/main..origin/dev -- packages/signer/src` at `03e07aca` is empty); the
+> signer's only shipped change is its README's network-calls section (#3662,
+> documentation). Nothing else in this document was re-verified.
+
 > **Re-verified #3331 frontend (2026-09-27, round 2 review fixes):** this diff
 > touches `hooks/useDelegationBudget.ts` only. `reload`/`reloadSigners` read
 > `/agents/{id}/delegations` and `/agents/{id}/account-signers`, neither

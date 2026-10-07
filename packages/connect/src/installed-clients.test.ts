@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { ConnectError } from './connect-error.js'
 import {
   installedClientHint,
+  installedClientTargets,
   promptForInstalledClient,
   resolveRuntimeByInstalledClientPrompt,
   scanInstalledClients,
@@ -13,14 +14,23 @@ import {
 const HOME = '/home/tester'
 const CWD = '/work/project'
 
-/** A scan over exactly the paths named — everything else on this machine is absent. */
-function scanWith(present: string[]) {
+/**
+ * A scan over exactly the paths named — everything else on this machine is
+ * absent. Files needing CONTENT (only `~/.claude.json`'s `mcpServers` check,
+ * #3732) are stubbed in `contents`; an existing path without an entry is an
+ * empty/unreadable file.
+ */
+function scanWith(present: string[], contents: Record<string, string> = {}) {
   const set = new Set(present)
   return scanInstalledClients({
     homeDir: HOME,
     cwd: CWD,
     env: {},
     exists: async (path) => set.has(path),
+    readFile: async (path) => {
+      if (!(path in contents)) throw new Error(`no content stubbed for ${path}`)
+      return contents[path]
+    },
   })
 }
 
@@ -82,6 +92,60 @@ describe('installed-client scan (#1719)', () => {
   it('finds nothing on a machine with no agent client installed', async () => {
     expect(await scanWith([])).toEqual([])
   })
+
+  it('counts a ~/.claude.json carrying mcpServers as config-file evidence for Claude Code (#3732)', async () => {
+    // Claude Code configures through its own CLI, so `configPath` stays null —
+    // but the file proves the user has already pointed Claude Code at an MCP
+    // server, which is the evidence tier the scan treats as a fact.
+    const claudeJson = join(HOME, '.claude.json')
+    const found = await scanWith([claudeJson], { [claudeJson]: JSON.stringify({ mcpServers: { haven: {} } }) })
+
+    expect(found.map((entry) => entry.runtime)).toEqual(['claude-code'])
+    expect(found[0].evidence).toBe('config-file')
+    expect(found[0].configPath).toBeNull()
+    expect(found[0].evidencePath).toBe(claudeJson)
+    expect(found[0].detail).toContain('.claude.json')
+  })
+
+  it('a Codex config and a Claude Code MCP config tie — no suggestion, no Codex by construction (#3732)', async () => {
+    // The field evidence: on this pair the picker used to pre-select Codex —
+    // config-file tier beat Claude Code's bare directory marker, whatever the
+    // user's actual runtime. Both are config-tier now, so the top two share a
+    // tier and `installedClientHint` suggests NOTHING.
+    const claudeJson = join(HOME, '.claude.json')
+    const codexToml = join(HOME, '.codex', 'config.toml')
+    const found = await scanWith([claudeJson, codexToml], { [claudeJson]: JSON.stringify({ mcpServers: {} }) })
+
+    expect(found.map((entry) => entry.runtime)).toEqual(['claude-code', 'codex-cli'])
+    expect(found.every((entry) => entry.evidence === 'config-file')).toBe(true)
+    expect(installedClientHint(found).suggestedRuntime).toBeUndefined()
+  })
+
+  it('a ~/.claude.json WITHOUT mcpServers stays directory-tier evidence, as before', async () => {
+    const claudeJson = join(HOME, '.claude.json')
+    const found = await scanWith([claudeJson], { [claudeJson]: JSON.stringify({ projects: {} }) })
+
+    expect(found.map((entry) => entry.runtime)).toEqual(['claude-code'])
+    expect(found[0].evidence).toBe('client-directory')
+    expect(found[0].evidencePath).toBeNull()
+  })
+
+  it('a ~/.claude.json that cannot be parsed grants nothing beyond the directory marker', async () => {
+    const claudeJson = join(HOME, '.claude.json')
+    const found = await scanWith([claudeJson], { [claudeJson]: 'not json at all' })
+
+    expect(found.map((entry) => entry.runtime)).toEqual(['claude-code'])
+    expect(found[0].evidence).toBe('client-directory')
+  })
+
+  it('labels the chat app "Claude Desktop (chat app)", never bare "Claude Desktop" (#3732)', () => {
+    // The chat app is a separate runtime from Claude Code, and its label used
+    // to sort above Claude Code whenever both had config — a user in the
+    // desktop app's Code tab could read the row as "where I am".
+    const desktop = installedClientTargets(HOME, CWD, {}).find((target) => target.runtime === 'claude-desktop')
+
+    expect(desktop?.label).toBe('Claude Desktop (chat app)')
+  })
 })
 
 describe('installed-client prompt (#1719)', () => {
@@ -119,9 +183,67 @@ describe('installed-client prompt (#1719)', () => {
     expect(io.asked).toHaveLength(0)
   })
 
-  it('takes an empty answer as the pre-selected default', async () => {
-    const candidates = [candidate({ runtime: 'cursor' }), candidate({ runtime: 'vscode', label: 'VS Code' })]
-    expect(await promptForInstalledClient(candidates, recordingIo(['']))).toBe('cursor')
+  it('treats an empty answer as NO default: re-asks, then aborts after MAX_PROMPT_ATTEMPTS (#3732)', async () => {
+    // Inverted from the pre-#3732 rule (empty accepted the first candidate):
+    // Enter used to write an API key and a signing key into whichever client
+    // sorted first. Now it re-asks — spending an attempt, like the
+    // wiring-collision prompt — and aborts with nothing written.
+    const io = recordingIo(['', '', ''])
+    const error = await promptForInstalledClient(
+      [candidate(), candidate({ runtime: 'vscode', label: 'VS Code' })],
+      io,
+    ).catch((err: unknown) => err)
+
+    expect(error).toBeInstanceOf(ConnectError)
+    expect((error as ConnectError).code).toBe('runtime_prompt_aborted')
+    expect(io.asked).toHaveLength(3)
+    expect((error as ConnectError).message).toContain('Nothing was written')
+  })
+
+  it('an empty answer never selects, even the lone suggested candidate', async () => {
+    // Property 2 holds at the prompt too: the single candidate is what EXISTS.
+    // The empty answer is re-asked; only the typed number resolves.
+    const io = recordingIo(['', '1'])
+    expect(await promptForInstalledClient([candidate()], io)).toBe('cursor')
+    expect(io.asked).toHaveLength(2)
+  })
+
+  it('marks the suggested runtime in the list but pre-selects nothing', async () => {
+    const io = recordingIo(['1'])
+    const candidates = [
+      candidate({
+        runtime: 'codex-cli',
+        label: 'Codex (CLI or Desktop)',
+        detail: 'MCP config found at /home/tester/.codex/config.toml',
+      }),
+      candidate({ runtime: 'hermes', label: 'Hermes Agent', evidence: 'client-directory', configPath: null, detail: 'installed (/home/tester/.hermes)' }),
+    ]
+
+    expect(await promptForInstalledClient(candidates, io)).toBe('codex-cli')
+    const written = io.written.join('')
+    expect(written).toContain('1) Codex (CLI or Desktop) (suggested)')
+    expect(written).not.toContain('2) Hermes Agent (suggested)')
+    expect(written).not.toContain('default')
+  })
+
+  it('Enter writes nothing over real paths: a Codex config and a Claude Code MCP config produce no default (#3732)', async () => {
+    const claudeJson = join(HOME, '.claude.json')
+    const codexToml = join(HOME, '.codex', 'config.toml')
+    const io = recordingIo(['', '', ''])
+    const error = await resolveRuntimeByInstalledClientPrompt({
+      homeDir: HOME,
+      cwd: CWD,
+      env: {},
+      exists: async (path) => path === claudeJson || path === codexToml,
+      readFile: async (path) => (path === claudeJson ? JSON.stringify({ mcpServers: {} }) : '[mcp_servers.haven]'),
+      io,
+    }).catch((err: unknown) => err)
+
+    expect((error as ConnectError).code).toBe('runtime_prompt_aborted')
+    expect(io.asked).toHaveLength(3)
+    // Both rows are config-tier, so nothing is marked suggested — before the
+    // fix this pair pre-selected Codex by construction.
+    expect(io.written.join('')).not.toContain('(suggested)')
   })
 
   it('resolves the numbered choice the user actually types', async () => {
@@ -160,9 +282,12 @@ describe('installed-client prompt (#1719)', () => {
 
   it('names what a wrong pick costs, before asking', async () => {
     const io = recordingIo([''])
-    await promptForInstalledClient([candidate()], io)
+    // #3732: the empty answer no longer selects — the prompt re-asks, then
+    // aborts. The cost line is still written BEFORE the first ask.
+    const error = await promptForInstalledClient([candidate()], io).catch((err: unknown) => err)
 
     expect(io.written.join('')).toContain('API key and a signing key')
+    expect((error as ConnectError).code).toBe('runtime_prompt_aborted')
   })
 
   it('refuses an empty candidate list rather than prompting for nothing', async () => {

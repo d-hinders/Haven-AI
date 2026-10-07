@@ -297,6 +297,14 @@ export interface ConnectDeps {
   /** Overridable so the #1719 installed-client prompt is testable without readline. */
   promptRuntime?: () => Promise<RuntimeId>
   /**
+   * Overridable so the DEFAULT prompt thunk is observable: the call site in
+   * `runtimeSelectionPrompt` must pass the hint scan's `env` to it (#3732) —
+   * the prompt rung and the `--json` refusal describe ONE machine, so they
+   * must look at the same environment. Takes the full scan options, env
+   * included; defaults to `resolveRuntimeByInstalledClientPrompt`.
+   */
+  promptRuntimeByInstalledClient?: typeof resolveRuntimeByInstalledClientPrompt
+  /**
    * Overridable so the #2551 replace-vs-alongside prompt is testable without
    * readline. Reached only through the same `interactive` + TTY gate as
    * `promptRuntime`; a `--json` or piped run never gets here.
@@ -1154,7 +1162,10 @@ function runtimeSelectionPrompt(
   deps: ConnectDeps,
 ): (() => Promise<RuntimeId>) | undefined {
   if (!interactivePromptAllowed(options, deps)) return undefined
-  return deps.promptRuntime ?? (() => resolveRuntimeByInstalledClientPrompt())
+  if (deps.promptRuntime) return deps.promptRuntime
+  // The prompt's scan gets the same `env` the hint scan got (#3732): both
+  // rungs describe ONE machine, so they must look at the same environment.
+  return () => (deps.promptRuntimeByInstalledClient ?? resolveRuntimeByInstalledClientPrompt)({ env: deps.env })
 }
 
 /**

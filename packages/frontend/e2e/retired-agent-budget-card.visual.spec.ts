@@ -77,7 +77,10 @@ test.describe('retired agent budget card visual regression (#3549)', () => {
       await expect(card).toHaveCount(1)
       // The active budget is still listed, and Stop still ends it.
       await expect(card.getByText(/250 USDC per week/)).toBeVisible()
-      await expect(card.getByRole('button', { name: 'Stop budget', exact: true })).toHaveCount(1)
+      // The row button's accessible name is its aria-label ("Stop budget 250
+      // USDC per week"), so an exact-text match can never resolve; anchor on
+      // the label prefix instead (CI #3721: toHaveCount received 0).
+      await expect(card.getByRole('button', { name: /^Stop budget/ })).toHaveCount(1)
       // Nothing that grants authority.
       await expect(card.getByText(state.reason)).toBeVisible()
       await expect(card.getByRole('button', { name: 'Set budget' })).toHaveCount(0)

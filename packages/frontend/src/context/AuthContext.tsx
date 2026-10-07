@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api, type ListPasskeysResponse } from '@/lib/api'
-import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
+import { LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
 import {
   PASSKEY_SCHEMA_VERSION,
   clearStoredPasskeySigner,
@@ -74,9 +74,7 @@ interface AuthState {
   user: User | null
   token: string | null
   loading: boolean
-  activeAccount: SmartAccount | null
   passkeys: ListPasskeysResponse['passkeys']
-  setActiveAccount: (account: SmartAccount) => void
   signup: (name: string, email: string, password: string, via?: string | null) => Promise<User>
   login: (email: string, password: string) => Promise<User>
   logout: () => void
@@ -86,45 +84,11 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null)
 
-function resolveActiveAccount(accounts: SmartAccount[]): SmartAccount | null {
-  if (accounts.length === 0) return null
-
-  // Check localStorage for a previous selection
-  const storedId = localStorage.getItem(ACTIVE_ACCOUNT_STORAGE_KEY)
-  if (storedId) {
-    const found = accounts.find((s) => s.id === storedId)
-    if (found) return found
-  }
-
-  // Fall back to the default account, or the first one
-  return accounts.find((s) => s.is_default) ?? accounts[0]
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeAccount, setActiveAccountState] = useState<SmartAccount | null>(null)
   const [passkeys, setPasskeys] = useState<ListPasskeysResponse['passkeys']>([])
-
-  const setActiveAccount = useCallback((account: SmartAccount) => {
-    setActiveAccountState(account)
-    localStorage.setItem(ACTIVE_ACCOUNT_STORAGE_KEY, account.id)
-  }, [])
-
-  // Sync activeAccount when user changes (e.g., after refresh or account
-  // add/remove).
-  const syncActiveAccount = useCallback((u: User) => {
-    const accounts = u.accounts ?? []
-    setActiveAccountState((prev) => {
-      // If the current active account is still in the list, keep it
-      if (prev && accounts.find((s) => s.id === prev.id)) {
-        // Update in case name changed
-        return accounts.find((s) => s.id === prev.id)!
-      }
-      return resolveActiveAccount(accounts)
-    })
-  }, [])
 
   // Takes the freshly-fetched user rather than reading state: it runs inside
   // refreshUser/login/signup BEFORE React commits setUser, so `user` state
@@ -180,17 +144,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const u = await api.get<User>('/auth/me')
       setUser(u)
-      syncActiveAccount(u)
       await hydratePasskeys(u)
     } catch {
       // Silently fail — token might be invalid
     }
-  }, [hydratePasskeys, syncActiveAccount])
+  }, [hydratePasskeys])
 
   // On mount, check for existing token.
   // A cancelled ref guards against the effect re-running (e.g. in Strict Mode)
   // while an in-flight request is still pending — without it two overlapping
-  // /auth/me calls could both call setUser/syncActiveAccount in an undefined order.
+  // /auth/me calls could both call setUser in an undefined order.
   useEffect(() => {
     let cancelled = false
 
@@ -207,7 +170,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(async (u) => {
         if (cancelled) return
         setUser(u)
-        syncActiveAccount(u)
         await hydratePasskeys(u)
       })
       .catch(() => {
@@ -222,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
     return () => { cancelled = true }
-  }, [hydratePasskeys, syncActiveAccount])
+  }, [hydratePasskeys])
 
   const signup = useCallback(
     // `via` is the #2522 agent hand-off marker. Optional and omitted when
@@ -239,11 +201,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
-      syncActiveAccount(res.user)
       await hydratePasskeys(res.user)
       return res.user
     },
-    [hydratePasskeys, syncActiveAccount],
+    [hydratePasskeys],
   )
 
   const login = useCallback(
@@ -255,11 +216,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
-      syncActiveAccount(res.user)
       await hydratePasskeys(res.user)
       return res.user
     },
-    [hydratePasskeys, syncActiveAccount],
+    [hydratePasskeys],
   )
 
   const logout = useCallback(() => {
@@ -271,11 +231,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
     }
     localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
-    localStorage.removeItem(ACTIVE_ACCOUNT_STORAGE_KEY)
+    // #3719 retired the global active account; the key is no longer written,
+    // but a browser that ran an earlier build may still hold one.
+    localStorage.removeItem(LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY)
     setToken(null)
     setUser(null)
     setPasskeys([])
-    setActiveAccountState(null)
   }, [user?.accounts])
 
   const updateUser = useCallback((partial: Partial<User>) => {
@@ -288,9 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         token,
         loading,
-        activeAccount,
         passkeys,
-        setActiveAccount,
         signup,
         login,
         logout,

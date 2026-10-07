@@ -39,9 +39,8 @@ vi.mock('@/context/AuthContext', () => ({
   }),
 }))
 vi.mock('@/hooks/useContacts', () => ({ useContacts: () => ({ resolveAddress: () => null }) }))
-vi.mock('@/hooks/useActiveChain', () => ({
-  useChainScope: () => ({ scope: 'all', setScope: vi.fn() }),
-}))
+// `useChainScope` is deliberately NOT mocked: the network default is part of
+// what this page renders (#3719 — every network, no active chain to follow).
 vi.mock('@/hooks/useTransactionFilters', () => ({
   useTransactionFilters: () => ({
     accounts: [],
@@ -120,6 +119,17 @@ describe('TransactionsClient — CSV export (#2871)', () => {
       '﻿settled_at\r\n"x"',
       'haven-transactions-20260911.csv',
     )
+  })
+
+  it('starts on every network, and the export asks for no chain (#3719)', async () => {
+    mockGetText.mockResolvedValue('\ufeffsettled_at\r\n"x"')
+    render(<TransactionsClient />)
+
+    // The network select only renders with accounts on 2+ chains; the scope
+    // it would show is what the export request carries, so read it there.
+    fireEvent.click(exportButton())
+    await waitFor(() => expect(mockGetText).toHaveBeenCalledTimes(1))
+    expect(mockGetText).toHaveBeenCalledWith(expect.not.stringContaining('chainId='))
   })
 
   it('marks the control busy while the request is in flight', async () => {

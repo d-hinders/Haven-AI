@@ -263,7 +263,7 @@ describe('manual credential renderings (#2482)', () => {
 describe('resume from a hand-off link (#2522)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] }, activeAccount: SAFE })
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
     mockUseSafeDetails.mockReturnValue({ details: null, loading: false, error: null })
     mockUseAccountOperationGate.mockReturnValue({ kind: 'ready' })
     mockUsePublicClient.mockReturnValue({})
@@ -354,7 +354,7 @@ describe('resume from a hand-off link (#2522)', () => {
 describe('useAgentConnectionSetup — rail awareness without rendering the modal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] }, activeAccount: SAFE })
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
     mockUseSafeDetails.mockReturnValue({
       details: { address: SAFE.account_address, threshold: 1, owners: ['0x2222222222222222222222222222222222222222'] },
       loading: false,
@@ -398,7 +398,6 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
   it('drives the delegation approval view (#1070)', async () => {
     mockUseAuth.mockReturnValue({
       user: { accounts: [{ ...SAFE, account_type: 'delegator_hybrid' }] },
-      activeAccount: { ...SAFE, account_type: 'delegator_hybrid' },
     })
     const { result } = renderFlow()
 

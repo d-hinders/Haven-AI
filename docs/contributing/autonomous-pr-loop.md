@@ -95,8 +95,10 @@ overlap, or stuck CI.
 ## Feeding work in
 
 The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
-state *is* the backlog state: an open issue with no PR and no live claim or work
-overlap is ready, an open issue with an open Haven PR is in flight, and a closed
+state *is* the backlog state: an open issue with no PR, no live claim or work
+overlap, and no `pending-review` label is ready (`pending-review` means its spec
+review or an owner decision is still outstanding — `new-task` § *Hold until
+ready*), an open issue with an open Haven PR is in flight, and a closed
 issue is done (its PR closed it via `Closes #`). One deliberate exception, and it
 reads as ready when it is not: an issue labelled **`operator-verify`** has merged
 code and is waiting on a human step, so its PR wrote `Refs #<n>` and the merge left

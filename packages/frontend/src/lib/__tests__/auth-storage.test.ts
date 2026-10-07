@@ -1,17 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../auth-storage'
+import { LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../auth-storage'
 
 /**
- * The one-time storage-key migration (#2913) that carried a returning user's
- * active-account selection off the pre-rename legacy key is removed at
- * #2914: the compatibility window it existed for has closed. A user still
- * holding the stale key loses their remembered account SELECTION (not their
- * account, not their funds) and falls back to the default account on next
- * load.
+ * The active-account key is legacy since #3719 retired the global active
+ * account: nothing writes or reads it, and logout removes it so a value an
+ * earlier build left behind is cleaned up. Its name must stay what earlier
+ * builds wrote, or that cleanup would miss it.
  */
 describe('storage key names', () => {
   it('exports the stable key names the rest of the app imports', () => {
-    expect(ACTIVE_ACCOUNT_STORAGE_KEY).toBe('haven_active_account_id')
+    expect(LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY).toBe('haven_active_account_id')
     expect(AUTH_TOKEN_STORAGE_KEY).toBe('haven_token')
   })
 })

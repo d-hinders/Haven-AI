@@ -51,7 +51,7 @@ describe('useAgentPanelState', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
-    mockUseAuth.mockReturnValue({ activeAccount: SAFE })
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
     mockUseAgents.mockReturnValue({
       agents: [],
       loading: false,
@@ -66,6 +66,29 @@ describe('useAgentPanelState', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  // #3719: no global active account. The connect flow is seeded from the
+  // is_default account — deliberately NOT accounts[0] here, so "first account"
+  // cannot pass for "default" — and the list keeps every account's agents.
+  it('seeds from the is_default account and lists agents on every account', () => {
+    const OTHER = { ...SAFE, id: 'safe-0', name: 'Other', is_default: false }
+    const DEFAULT = { ...SAFE, id: 'safe-2', name: 'Default', chain_id: 8453, is_default: true }
+    mockUseAuth.mockReturnValue({ user: { accounts: [OTHER, DEFAULT] } })
+    mockUseAgents.mockReturnValue({
+      ...mockUseAgents(),
+      agents: [
+        baseAgent({ id: 'on-other', account_id: 'safe-0' }),
+        baseAgent({ id: 'on-default', account_id: 'safe-2' }),
+      ],
+    })
+
+    const { result } = renderHook(() => useAgentPanelState())
+
+    expect(result.current.defaultAccountId).toBe('safe-2')
+    expect(result.current.chainId).toBe(8453)
+    expect(result.current.accounts.map((a: { id: string }) => a.id)).toEqual(['safe-0', 'safe-2'])
+    expect(result.current.visibleAgents.map((a) => a.id)).toEqual(['on-other', 'on-default'])
   })
 
   // #1402: the primary list hides only ARCHIVED agents. A revoked-but-not-

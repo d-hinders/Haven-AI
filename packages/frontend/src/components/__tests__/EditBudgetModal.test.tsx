@@ -209,7 +209,7 @@ describe('EditBudgetModal (#3331 F3) — merchant-locked budgets', () => {
       'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget',
       /Not every offer from Ampersend Demo API accepts this kind of budget now, so it can't be changed here\. This budget keeps paying only the address it was set up with — Ampersend Demo API's page shows whether that is still where it is paid\./,
     ],
-    ['Merchant not found', /Ampersend Demo API could not be found, so this budget can't be changed here\. Close this and use Stop on the budget\./],
+    ['Merchant not found', /Ampersend Demo API could not be found, so this budget can't be changed here\. Close this and stop the budget on the agent page instead\./],
   ])('maps the merchant-stale refusal ("%s") to plain copy with a way out, and offers only Close', async (detail, expected) => {
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'refused', detail })
     renderModal({ budget: merchantLockedBudget() })
@@ -297,7 +297,7 @@ describe('EditBudgetModal (#3166) — outcomes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
     fireEvent.click(screen.getByRole('button', { name: 'Sign new budget' }))
     await waitFor(() => expect(screen.getByText(/New budget is live — one step left/)).toBeInTheDocument())
-    expect(screen.getByText(/Use Stop next to it in the budget list/)).toBeInTheDocument()
+    expect(screen.getByText(/Use Stop budget next to it in the budget list/)).toBeInTheDocument()
     // The new budget IS live — the card must refresh (#1090).
     expect(onBudgetChange).toHaveBeenCalled()
   })

@@ -753,10 +753,13 @@ for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
       has: page.locator(`a[href="/agents/${agentId}"]`),
     })
     await card.scrollIntoViewIfNeeded()
+    // #3717: Pause is one-click on the card — the control must neither
+    // navigate away nor open a confirm dialog. This fixture set leaves the
+    // pause call unmocked (599), so the failed mutation only toasts and the
+    // card stays put: exactly the no-navigation contract this step pins.
     await card.getByRole('button', { name: `Pause ${testAgent.name}` }).click()
     expect(new URL(page.url()).pathname).toBe('/agents')
-    await expect(page.getByRole('heading', { name: `Pause ${testAgent.name}?` })).toBeVisible()
-    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
 
     await card.getByRole('button', { name: `Remove ${testAgent.name}` }).click()
     expect(new URL(page.url()).pathname).toBe('/agents')

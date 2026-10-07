@@ -119,8 +119,8 @@
  *     npm run screenshot -w packages/frontend -- --scenario=connect-agent
  *
  * ── The fixture ──────────────────────────────────────────────────────────────
- * Auth: an `haven_token` + `haven_active_account_id` are seeded in localStorage
- * before any script runs (the same keys the app and e2e fixtures use), so
+ * Auth: an `haven_token` is seeded in localStorage before any script runs
+ * (the same key the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, two
  * agents both on the delegation rail, transactions, contacts, agent activity +
@@ -245,9 +245,9 @@ const DEVICE_SCALE_FACTOR = 2
 
 // Exported for the parity test against src/lib/auth-storage.ts — a key rename
 // there must fail a test here, not silently capture logged-out screenshots.
+// (#3719 retired the active-account key: nothing reads it, so it is not seeded.)
 export const SEED_STORAGE_KEYS = {
   token: 'haven_token',
-  activeAccount: 'haven_active_account_id',
 }
 
 // ── Color scheme of a run (#2929) ────────────────────────────────────────────
@@ -2518,7 +2518,6 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
   if (!signedOut) {
     await context.addInitScript((keys) => {
       window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
-      window.localStorage.setItem(keys.activeAccount, 'safe-fixture')
     }, SEED_STORAGE_KEYS)
   }
 
@@ -3240,6 +3239,27 @@ function setAuthApiStage(next) {
 /** GET counter for the `connect-agent-focus` poll hold (#3687). */
 const connectAgentFocusGets = { count: 0 }
 
+/**
+ * #3717: a PAUSED agent — payments blocked in Haven, budget delegation still
+ * live. Spread from the showcase agent so every key a hook reads is present
+ * (the fixture-shape parity rule); its own id/name so it never leaks into the
+ * route captures of the live agents. `delegate_address` stays — pausing does
+ * not touch it — so the banner and the budget row render together and
+ * `hasRecoverableUsdc` reads the real 422 path, not a fixture gap.
+ */
+export const FIXTURE_PAUSED_AGENT = {
+  ...FIXTURE_AGENTS[0],
+  id: 'agent-paused',
+  name: 'Paused research agent',
+  description: 'Payments paused in Haven; its weekly budget is still live on-chain',
+  api_key_prefix: 'hvn_e4f5a6',
+  status: 'paused',
+  labels: [],
+  // The showcase agent's stranded-funds event is its own story (#2147) — a
+  // paused capture must not carry a second banner the review is not about.
+  has_stranded_funds: false,
+}
+
 export const SCENARIOS = {
   'auth-shell-states': {
     description:
@@ -3724,6 +3744,54 @@ export const SCENARIOS = {
     ]),
   ),
 
+  'agents-multi-account': {
+    description:
+      'The /agents list for a user with TWO accounts (#3719): every agent shows, each row names its account and chain, and the Account filter is offered — there is no global active account narrowing the list',
+    // The shared fixture has one account, so the filter (registered only with
+    // more than one) and a row on a second account are unreachable without
+    // this. Two endpoints, and they agree: `/auth/me` serves both accounts and
+    // `/agents` moves the second fixture agent onto the second one.
+    api(apiPath) {
+      const second = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-treasury',
+        name: 'Treasury',
+        account_address: '0x6666666666666666666666666666666666666666',
+        chain_id: 8453,
+        is_default: false,
+        account_type: 'delegator_hybrid',
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }, second] }
+      }
+      if (apiPath === '/agents') {
+        return {
+          agents: FIXTURE_AGENTS.map((a, i) =>
+            i === 1
+              ? { ...a, account_id: second.id, account_address: second.account_address, account_name: second.name, account_chain_id: second.chain_id }
+              : a,
+          ),
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      for (const name of ['Research agent', 'Data-feed agent']) {
+        await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
+      }
+      // Positive control: the second account's row label is on screen. Not
+      // `exact`: the row reads "Account: Treasury · Base" across three nodes.
+      await page.getByText(/Treasury/).first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'list')
+
+      await page.getByRole('button', { name: /^Account:/ }).first().click()
+      await page.getByRole('group', { name: 'Account' }).waitFor({ timeout: 10_000 })
+      await shoot(page.locator('main').first(), 'account-filter')
+    },
+  },
   /**
    * #2043: the agent list with NOTHING unrecorded — the note's absent half.
    *
@@ -5936,6 +6004,80 @@ export const SCENARIOS = {
       await page.getByText('Value (SEK)').waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-detail')
+    },
+  },
+
+  'stop-paused-3717': {
+    description:
+      '#3717 — the Stop budget confirm and the paused banner. The agent detail page with a PAUSED agent (the 2026-10-07 owner sentence in the banner — a surface with no visual baseline, so it is captured here for the design pass), the /agents card paused banner, and the Stop budget ConfirmDialog opened from the live agent-research budget row with its rendered placeholders.',
+    api(apiPath, method) {
+      if (apiPath === '/agents' && method === 'GET') {
+        return { agents: [...FIXTURE_AGENTS, FIXTURE_PAUSED_AGENT], organizations: FIXTURE_ORGANIZATIONS }
+      }
+      // The paused agent still holds a live weekly delegation — a pause ends
+      // nothing — so the banner and the budget row render on the same page.
+      if (apiPath === '/agents/agent-paused/delegations') {
+        return {
+          delegations: [{
+            id: 'dlg-paused-1', chain_id: FIXTURE_ACCOUNT.chain_id,
+            token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            recipient_address: null,
+            delegation_hash: '0x' + '8b'.repeat(32),
+            version: 1, status: 'active',
+            budget_atomic: '150000000', period_seconds: 604_800,
+            start_date: '2026-06-02T10:00:00.000Z',
+            expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+            created_at: '2026-06-02T10:00:00.000Z',
+          }],
+        }
+      }
+      // Signer reads for BOTH agents: the paused agent (banner + row on one
+      // page) and agent-research, whose Stop budget confirm is captured from
+      // its live row. One enrolled passkey and no owner wallet — the same
+      // ready answer the half-revoked agents carry for their affordances.
+      // Without it the row's button stays `disabled` (`busy || !ready`) and
+      // the confirm can never open.
+      if (apiPath === '/agents/agent-paused/account-signers' || apiPath === '/agents/agent-research/account-signers') {
+        return {
+          account_address: FIXTURE_ACCOUNT.account_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
+          owner_address: null,
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        }
+      }
+      // Pausing leaves the delegate address in place, so the read runs the
+      // route's own 422 ("no delegate") rather than a fixture-shaped 200.
+      if (apiPath === '/agents/agent-paused/delegate-balance') {
+        return httpError(422, DELEGATE_BALANCE_NO_DELEGATE)
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // ── the detail-page paused banner — the surface with no baseline ─────
+      await page.goto(`${BASE_URL}/agents/agent-paused`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('heading', { name: 'Paused in Haven' }).waitFor({ timeout: 20_000 })
+      await page.getByText(/Payments paused\. Haven won't send payments for this agent until you resume\./).waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'agent-detail-paused-banner')
+
+      // ── the /agents card paused banner ───────────────────────────────────
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const pausedCard = page.getByTestId('agent-card').filter({ hasText: 'Paused research agent' })
+      await pausedCard.getByRole('heading', { name: 'Paused in Haven' }).waitFor({ timeout: 20_000 })
+      await pausedCard.scrollIntoViewIfNeeded()
+      await shoot(pausedCard, 'agents-card-paused-banner')
+
+      // ── the Stop budget confirm, from the live row ───────────────────────
+      await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const stopButton = page.getByRole('button', { name: /^Stop budget/ })
+      await stopButton.waitFor({ timeout: 20_000 })
+      await stopButton.click()
+      const confirm = page.getByRole('dialog', { name: 'Stop this budget?' })
+      await confirm.waitFor({ timeout: 20_000 })
+      await confirm.getByText(/Research agent can no longer spend from this 250 USDC\/week budget\./).waitFor({ timeout: 20_000 })
+      await shoot(confirm, 'stop-budget-confirm')
     },
   },
 }

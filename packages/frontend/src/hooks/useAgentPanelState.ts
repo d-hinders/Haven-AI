@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '@/context/AuthContext'
+import { resolveDefaultAccount } from '@/lib/default-account'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useOrganizations } from '@/hooks/useOrganizations'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -15,9 +16,14 @@ export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
  * The panel deliberately has no on-chain Safe transaction path.
  */
 export function useAgentPanelState() {
-  const { activeAccount } = useAuth()
-  const accountAddress = activeAccount?.account_address ?? null
-  const chainId = activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
+  // #3719: no global active account. The list shows every agent; the default
+  // account only pre-selects the connect flow and is the chain fallback for an
+  // agent row that carries no `account_chain_id`.
+  const { user } = useAuth()
+  const accounts = useMemo(() => user?.accounts ?? [], [user?.accounts])
+  const defaultAccount = resolveDefaultAccount(accounts)
+  const accountAddress = defaultAccount?.account_address ?? null
+  const chainId = defaultAccount?.chain_id ?? DEFAULT_CHAIN_ID
   const {
     agents,
     loading,
@@ -213,7 +219,8 @@ export function useAgentPanelState() {
   return {
     accountAddress,
     chainId,
-    activeAccountId: activeAccount?.id,
+    defaultAccountId: defaultAccount?.id,
+    accounts,
     agents,
     loading,
     error,

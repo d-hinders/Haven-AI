@@ -2,7 +2,7 @@
 
 import { EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
@@ -102,7 +102,7 @@ export default function AccountDetailClient() {
   const router = useRouter()
   const accountId = params.accountId as string
 
-  const { user, activeAccount, setActiveAccount, loading: authLoading, passkeys = [] } = useAuth()
+  const { user, loading: authLoading, passkeys = [] } = useAuth()
   const { renameAccount, removeAccount, setDefault, loading: accountsLoading } = useAccounts()
   const { toast } = useToast()
   const { currency } = usePreferences()
@@ -114,14 +114,6 @@ export default function AccountDetailClient() {
   const accountAddress = account?.account_address ?? null
   const chainId = account?.chain_id ?? DEFAULT_CHAIN_ID
   const accountExplorerHref = accountAddress ? getExplorerUrlOrNull(chainId, 'address', accountAddress) : null
-
-  // Keep the active account in sync with the route. Runs as an effect so we
-  // never call setState during render.
-  useEffect(() => {
-    if (account && activeAccount?.id !== account.id) {
-      setActiveAccount(account)
-    }
-  }, [account, activeAccount, setActiveAccount])
 
   const accountNamesByAddress = new Map<string, string>()
   for (const account of user?.accounts ?? []) {

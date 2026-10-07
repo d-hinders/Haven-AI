@@ -92,7 +92,7 @@ Ask the agent to overspend:
 
 On the delegation rail the refusal comes from the CHAIN at prepare
 (`transfer-amount-exceeded`) — no queue, no Haven discretion. Then show the
-dashboard **Stop** button: revoke, and the next agent attempt gets
+dashboard **Stop budget** button: revoke, and the next agent attempt gets
 "no active budget delegation". This is the "budget, inte plånbok" story.
 
 ## Act 4 — The bookkeeping (~2 min)

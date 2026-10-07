@@ -7,7 +7,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { type Agent } from '@/hooks/useAgents'
 import type { Organization } from '@/hooks/useOrganizations'
-import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, resolveChainOrNull } from '@/lib/chains'
 import {
   FINISH_REVOKING_LABEL,
   HALF_REVOKED_BODY,
@@ -19,7 +19,6 @@ import {
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
-import ConfirmDialog from '../ConfirmDialog'
 import MoveAgentModal from '../MoveAgentModal'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { entityCardClassName } from '../ui/entityCardStyles'
@@ -71,7 +70,9 @@ export function AgentCard({
   /** #3164: the user's organization tree, for the card's Move picker. */
   organizations?: Organization[]
 }) {
-  const [pauseModalOpen, setPauseModalOpen] = useState(false)
+  // #3717: pause is one click everywhere. It is a reversible, Haven-side
+  // block — not an on-chain end — so it no longer asks for a confirmation;
+  // the honest account of what it did is the paused banner (AGENT_PAUSED_BODY).
   const [removeModalOpen, setRemoveModalOpen] = useState(false)
   // #3542: the same dialog in its finish mode — ends the remaining budget of an
   // agent that is already revoked or archived, and moves nothing.
@@ -88,11 +89,6 @@ export function AgentCard({
   const isBusy = busyAction !== null
   const halfRevoked = isHalfRevoked(agent)
   const canFinish = canFinishRevoking(agent)
-
-  async function handleConfirmPause() {
-    setPauseModalOpen(false)
-    onPause(agent)
-  }
 
   const hasConfiguredAllowances = agent.allowances.length > 0
 
@@ -181,9 +177,18 @@ export function AgentCard({
                 </span>
               ) : null}
             </div>
+            {/* #3719: the list spans every account, so the row names its own —
+                with the chain as the secondary half, the same shape the
+                account filter's options use. */}
             {agent.account_name && (
               <p className="text-xs text-[var(--v2-ink-2)] mt-0.5">
                 <span className="text-[var(--v2-ink-3)]">Account:</span> {agent.account_name}
+                {agent.account_chain_id != null && resolveChainOrNull(agent.account_chain_id) && (
+                  <span className="text-[var(--v2-ink-3)]">
+                    {' · '}
+                    {resolveChainOrNull(agent.account_chain_id)?.name}
+                  </span>
+                )}
               </p>
             )}
             {/*
@@ -293,12 +298,14 @@ export function AgentCard({
           it. Choosing anything else here would leave one fact rendered two
           ways on two screens the card's own link navigates between, which is
           exactly the #2195 defect this is the styling half of. */}
-      {/* #2230 (the BODY half #2216 deferred): title and body now come from
+      {/* #2230 (the BODY half #2216 deferred): title and body come from
           `lib/agent-pause-copy.ts`, shared with the detail page's banner one
-          click away. The card used to say "Existing network permissions stay
+          click away. The card once said "Existing network permissions stay
           in place" where the detail page said "Existing wallet rules" — the
-          detail page's wording was TAKEN rather than a third one written, for
-          the usage / register / accuracy reasons recorded in that module. */}
+          detail page's wording was TAKEN rather than a third one written.
+          #3717 replaced that shared body with the 2026-10-07 owner sentence,
+          which says what a pause does NOT block and how to end what it
+          leaves standing (see the module header). */}
       {isPaused && (
         <div className="mb-3">
           <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
@@ -438,12 +445,12 @@ export function AgentCard({
             <span className="flex items-center gap-2">
               {isActive ? (
                 <button
-                  onClick={() => setPauseModalOpen(true)}
+                  onClick={() => onPause(agent)}
                   disabled={isBusy}
                   aria-label={`Pause ${agent.name}`}
                   className={ACTION_BUTTON_CLASS}
                 >
-                  {busyAction === 'pause' ? 'Pausing…' : 'Pause'}
+                  {busyAction === 'pause' ? 'Pausing…' : 'Pause payments'}
                 </button>
               ) : (
                 <button
@@ -569,36 +576,6 @@ export function AgentCard({
         )}
       </div>
     </div>
-
-    <ConfirmDialog
-      open={pauseModalOpen}
-      onCancel={() => setPauseModalOpen(false)}
-      onConfirm={handleConfirmPause}
-      title={`Pause ${agent.name}?`}
-      body={
-        <div className="space-y-3">
-          <p>
-            {/* #2230: the same noun as the banner above and the detail page.
-                Leaving "network permissions" here would have replaced a
-                divergence BETWEEN two screens with one INSIDE a single file,
-                for the same fact — a strictly worse version of the defect. */}
-            Pausing stops this agent from creating new payments through Haven right away, without changing its wallet rules.
-          </p>
-          <div className="rounded-lg border border-brand/15 bg-[var(--v2-brand-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
-            <p className="text-xs font-medium text-[var(--v2-brand)] mb-1">What stays the same</p>
-            <p className="text-xs leading-relaxed">
-              The agent&apos;s wallet rules remain in place. You can resume this agent later without reconnecting or reconfiguring it.
-            </p>
-          </div>
-          <p className="text-xs text-[var(--v2-ink-2)]">
-            Use Pause for a fast, reversible stop. Use Remove to permanently remove the agent from this account.
-          </p>
-        </div>
-      }
-      confirmLabel="Pause agent"
-      tone="primary"
-      loading={busyAction === 'pause'}
-    />
 
     {/* Mounted only while open: its hooks (budget prepare, delegate-balance
         read) are per-agent and must not run for every card in the list. */}

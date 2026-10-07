@@ -29,6 +29,9 @@ import { passkeyRowLabel } from '@/lib/passkeyLabels'
 import { BRAND_COLOURS } from '@/lib/brand-colours'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { truncateAddress } from '@/components/haven'
+import { resolveDefaultAccount } from '@/lib/default-account'
+import { usePathname } from 'next/navigation'
+import { accountWithChainLabel } from '@/lib/account-label'
 
 // Generative identicon gradient stops — decorative art hashed from an address
 // for visual variety, NOT design-system colour. These are data, not UI chrome,
@@ -211,6 +214,12 @@ interface PopoverProps {
    */
   wrongWalletOwner?: string
   /**
+   * The account this menu's status refers to (#3719). There is no global
+   * active account, so the menu names it rather than leaving "this account"
+   * to be inferred. Omitted by the `/design-system` illustrations.
+   */
+  accountName?: string
+  /**
    * Render as a static ILLUSTRATION rather than a live overlay (#1952).
    *
    * `/design-system` shows this popover's two signing-credential states side by
@@ -317,6 +326,7 @@ export function WalletPopover({
   signingWith,
   unavailablePasskey = false,
   wrongWalletOwner,
+  accountName,
   presentational = false,
   open,
   onClose,
@@ -496,6 +506,11 @@ export function WalletPopover({
           data-wallet-menu-scroll=""
           className="min-h-0 flex-1 overflow-y-auto p-4"
         >
+          {accountName && (
+            <p className="mb-3 truncate text-xs text-[var(--v2-ink-3)]" title={accountName}>
+              Account: <span className="font-medium text-[var(--v2-ink-2)]">{accountName}</span>
+            </p>
+          )}
           {unavailablePasskey && (
             <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
               This account uses a passkey that is not available here.
@@ -627,14 +642,33 @@ function getAccountChainName(chainId?: number): string | undefined {
  * popover when connected. Falls back to RainbowKit's connect/account modals
  * for the heavy lifting (connector picker, account modal).
  */
-export default function WalletButton() {
+export default function WalletButton({
+  accountId,
+}: {
+  /**
+   * The account whose signer this pill reports. Omitted in the app bar, where
+   * it is the account page being viewed, else the user's default account
+   * (#3719: there is no global active account); the connect flow passes the
+   * account the budget is approved on.
+   */
+  accountId?: string | null
+} = {}) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
-  const { activeAccount, passkeys } = useAuth()
-  const activeAccountAddress = activeAccount?.account_address as Address | undefined
+  const { user, passkeys } = useAuth()
+  // On `/accounts/<id>` the page's own action area gates on THAT account, so
+  // the pill speaks for it too and the two cannot disagree (#2073); anywhere
+  // else, the default account.
+  const pathname = usePathname()
+  const routeAccountId = pathname?.match(/^\/accounts\/([^/]+)/)?.[1]
+  const findAccount = (id: string | null | undefined) =>
+    id ? user?.accounts?.find((candidate) => candidate.id === id) : undefined
+  const subjectAccount =
+    findAccount(accountId) ?? findAccount(routeAccountId) ?? resolveDefaultAccount(user?.accounts)
+  const subjectAccountAddress = subjectAccount?.account_address as Address | undefined
   const activeSigner = useActiveSigner({
-    accountAddress: activeAccountAddress,
-    chainId: activeAccount?.chain_id,
+    accountAddress: subjectAccountAddress,
+    chainId: subjectAccount?.chain_id,
   })
   // #2073: the same gate the action areas consult, so the header pill and the
   // disabled action below it agree about whether a USEFUL wallet is connected.
@@ -642,8 +676,8 @@ export default function WalletButton() {
   // normal connected pill up here while the action area said to connect the
   // owner wallet — the two surfaces silently disagreed.
   const operationGate = useAccountOperationGate({
-    accountAddress: activeAccountAddress,
-    chainId: activeAccount?.chain_id,
+    accountAddress: subjectAccountAddress,
+    chainId: subjectAccount?.chain_id,
   })
   const passkeySigner = activeSigner?.type === 'passkey' ? activeSigner : null
   // #1079: a Hybrid DeleGator account whose passkey is on this device gets the
@@ -651,17 +685,17 @@ export default function WalletButton() {
   // "Connect wallet" for a passkey that had just signed a budget.
   const delegatorSigner = activeSigner?.type === 'delegator_passkey' ? activeSigner : null
   const passkeyUnavailableOnDevice = useMemo(() => {
-    const accountAddress = activeAccount?.account_address.toLowerCase()
-    if (!accountAddress || activeAccount?.chain_id === undefined || passkeySigner) {
+    const accountAddress = subjectAccount?.account_address.toLowerCase()
+    if (!accountAddress || subjectAccount?.chain_id === undefined || passkeySigner) {
       return false
     }
 
     return passkeys.some(
       (passkey) =>
-        passkey.chain_id === activeAccount.chain_id &&
+        passkey.chain_id === subjectAccount.chain_id &&
         passkey.account_address?.toLowerCase() === accountAddress,
     )
-  }, [activeAccount?.chain_id, activeAccount?.account_address, passkeySigner, passkeys])
+  }, [subjectAccount?.chain_id, subjectAccount?.account_address, passkeySigner, passkeys])
 
   // "Switch wallet" flow: disconnect, then open the connect modal once
   // wagmi has committed isConnected=false. Driven from the parent so the
@@ -725,7 +759,17 @@ export default function WalletButton() {
           )
         }
 
-        const accountChainName = getAccountChainName(activeAccount?.chain_id)
+        const accountChainName = getAccountChainName(subjectAccount?.chain_id)
+        // Which account the pill speaks for, now that nothing on screen says
+        // which one is "active" (#3719).
+        // The name only where the menu's `Network:` row already carries the
+        // account's chain (the passkey and delegator menus). In the
+        // connected-wallet menu that row is the WALLET's network, so the
+        // account line keeps its own chain there.
+        const subjectAccountName = subjectAccount?.name
+        const subjectAccountNameWithChain = subjectAccount
+          ? accountWithChainLabel(subjectAccount)
+          : undefined
         const openWalletConnect = () => {
           if (openConnectModalHook) {
             openConnectModalHook()
@@ -775,6 +819,7 @@ export default function WalletButton() {
                 hasConnectedWallet={connected}
                 switching={pendingSwitch}
                 anchorRef={triggerRef}
+                accountName={subjectAccountName}
               />
             </div>
           )
@@ -850,6 +895,7 @@ export default function WalletButton() {
                 hasConnectedWallet={connected}
                 switching={pendingSwitch}
                 anchorRef={triggerRef}
+                accountName={subjectAccountName}
               />
             </div>
           )
@@ -966,6 +1012,7 @@ export default function WalletButton() {
               hasConnectedWallet={connected}
               switching={pendingSwitch}
               anchorRef={triggerRef}
+              accountName={subjectAccountNameWithChain}
             />
           </div>
         )

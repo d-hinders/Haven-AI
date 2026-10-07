@@ -569,7 +569,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 // painted 36px next to a 44px square (#3694 design review).
                 size="lg"
               >
-                {pendingAction === 'pause' ? 'Pausing…' : 'Pause agent'}
+                {pendingAction === 'pause' ? 'Pausing…' : 'Pause payments'}
               </Button>
             ) : null}
             {showResume ? (
@@ -795,6 +795,7 @@ export default function AgentDetailClient({ agentId }: Props) {
           agentId={agentId}
           chainId={chainId}
           tokens={budgetTokenOptions}
+          agentName={currentAgent.name}
           onBudgetChange={refetch}
           retired={isRevoked ? 'revoked' : isArchived ? 'archived' : undefined}
         />

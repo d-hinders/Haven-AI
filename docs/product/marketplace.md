@@ -216,9 +216,9 @@ for the modal's own shape.
   404, not a 409), so nothing changes and the old budget keeps working exactly
   as before the edit was attempted (round 2 review finding R2-2). The way
   forward is named per status, matching `editMerchantRefusalCopy` exactly: a
-  `stale` row's way out is **Stop**, then fund the merchant again from its
+  `stale` row's way out is **Stop budget**, then fund the merchant again from its
   page, which derives a fresh recipient; an `unverified` row's is the same
-  **Stop**, then fund again, but only once the merchant confirms an address —
+  **Stop budget**, then fund again, but only once the merchant confirms an address —
   there is nothing to fund yet. A `not_erc7710` refusal names no single step:
   the build checks ERC-7710 before it compares addresses, so the same refusal
   also comes back when the merchant has BOTH moved to a new address and lost

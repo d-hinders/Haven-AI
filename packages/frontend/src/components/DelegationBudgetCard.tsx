@@ -20,6 +20,7 @@ import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
+import ConfirmDialog from './ConfirmDialog'
 import { eligibleSubBudgetParents } from '@/lib/sub-budget'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
@@ -41,6 +42,12 @@ interface Props {
   agentId: string
   chainId: number
   tokens: TokenOption[]
+  /**
+   * #3717: the agent's display name, for the Stop confirm's body ("{agent}
+   * can no longer spend from this 1 USDC/day budget…"). This card has one
+   * mount site, so it is a plain prop rather than a name lookup.
+   */
+  agentName: string
   /**
    * Fires after a successful grant or revoke (#1090): the agent-page budget
    * SUMMARY reads a different source (useAgents) than this card's live
@@ -93,7 +100,7 @@ function inDuration(targetMs: number, nowMs: number): string {
   return `in ${Math.round(hours / 24)} days`
 }
 
-export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange, retired }: Props) {
+export default function DelegationBudgetCard({ agentId, chainId, tokens, agentName, onBudgetChange, retired }: Props) {
   // #3695: this card is the one caller that asks for remaining-this-period —
   // the meter on each row is drawn from it.
   const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
@@ -165,12 +172,38 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
     pendingFocus.current = 'add'
     setFormOpen(false)
   }, [])
+  // #3716: the sub-budget entry lives in the Add budget panel, below the
+  // grant form. Clicking it collapses the form and opens the modal. It
+  // deliberately does NOT route through `collapseForm`/`pendingFocus`: the
+  // card's focus effect below fires on the `formOpen` change — after
+  // `Modal`'s own child effect (ui/Modal.tsx) — so a pending focus would pull
+  // focus back out of the dialog that just opened. The typed amount and
+  // recipient survive, exactly as Cancel leaves them.
+  const openSubBudget = useCallback(() => {
+    setFormOpen(false)
+    setIssuingSubBudget(true)
+  }, [])
   useEffect(() => {
     const target = pendingFocus.current
     if (!target) return
     pendingFocus.current = null
     ;(target === 'amount' ? amountRef.current : addBudgetRef.current)?.focus()
   }, [formOpen])
+
+  // #3716: when the modal closes, `formOpen` does not change, so the effect
+  // above does not run — and `Modal` restores focus to the clicked entry
+  // (ui/Modal.tsx), which the collapsed form has unmounted. Focus Add budget
+  // explicitly, once per open→close cycle; the guard keeps the initial
+  // render (and a close without a modal) from stealing focus.
+  const wasIssuingSubBudget = useRef(false)
+  useEffect(() => {
+    if (issuingSubBudget) {
+      wasIssuingSubBudget.current = true
+    } else if (wasIssuingSubBudget.current) {
+      wasIssuingSubBudget.current = false
+      addBudgetRef.current?.focus()
+    }
+  }, [issuingSubBudget])
 
   useEffect(() => {
     // #3549: a retired agent's card has no grant form to fill — leave the
@@ -287,9 +320,10 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   // shape `signersError` already uses below, rather than collapsing the whole
   // card and taking the grant form with it.
   const active = (budgets ?? []).filter((b) => b.status === 'active')
-  // #3506: a sub-budget is carved from a LIVE budget — the entry point exists
-  // only when this agent has an active, unexpired one (the card itself renders
-  // only on the delegation rail). The modal offers a picker when several qualify.
+  // #3506: a sub-budget is carved from a LIVE budget — the entry point, now
+  // inside the Add budget panel below (#3716), exists only when this agent
+  // has an active, unexpired one (the card itself renders only on the
+  // delegation rail). The modal offers a picker when several qualify.
   const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets, Math.floor(Date.now() / 1000))
 
   // #3695: with no active budget the grant form IS the section's content;
@@ -337,6 +371,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
               key={b.delegation_hash}
               budget={b}
               tokens={tokens}
+              agentName={agentName}
               openTaskBudgets={openTaskBudgets}
               onRevoke={handleRevoke}
               onEdit={retired ? undefined : setEditing}
@@ -440,25 +475,31 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
               ) : undefined
             }
           />
+          {/* #3716: sharing a slice of an EXISTING budget with another agent
+              is a different thing from giving this agent more spending
+              power, so it sits below the form — under Set budget and Cancel
+              — and reads as another action, never an option of the form. It
+              shows only while the panel is open (this block), keeping the
+              #3506 gate: eligible parents (active, unexpired,
+              not merchant-pinned) and no failed budgets read (the real hook
+              nulls `budgets` on error, so `subBudgetParents` is empty
+              there). */}
+          {subBudgetParents.length > 0 && !budgetsError ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-[var(--v2-ink-muted)]">
+                Or share part of an existing budget with another agent
+              </p>
+              <Button variant="tertiary" onClick={openSubBudget}>
+                Issue sub-budget
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
           Budgets aren&rsquo;t available for this network yet.
         </p>
       )}
-
-      {/* Below Add budget, which belongs with the rows it adds to (#3695
-          design review); sharing a slice is a different action. */}
-      {subBudgetParents.length > 0 && !budgetsError ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--v2-border)] pt-3">
-          <p className="text-xs text-[var(--v2-ink-muted)]">
-            Share part of this budget with another of your agents.
-          </p>
-          <Button size="sm" variant="ghost" onClick={() => setIssuingSubBudget(true)}>
-            Issue sub-budget
-          </Button>
-        </div>
-      ) : null}
 
       {/* #3329: task budgets are a separate, self-closing authority carved
           from a budget above — listed here only when at least one is open,
@@ -547,9 +588,36 @@ function SpendingHeading({ retired }: { retired?: 'revoked' | 'archived' }) {
   )
 }
 
+/**
+ * The Stop confirm's spend phrase, from the row's own formatted values.
+ * Known token, listed period: the owner's "1 USDC/day" slash form. Anything
+ * else falls back to the row's own label without the slash — "1 USDC every
+ * 3600s", or "5 per day" when the token is unknown.
+ */
+function spendPhrase(amount: string | bigint, t: TokenOption | undefined, periodLabel: string): string {
+  const noun = t ? periodNounFromLabel(periodLabel) : null
+  if (t && noun) return `${amount} ${t.symbol}/${noun}`
+  if (t) return `${amount} ${t.symbol} ${periodLabel}`
+  return `${amount} ${periodLabel}`.replace(/\s+/g, ' ')
+}
+
+function periodNounFromLabel(label: string): string | null {
+  switch (label) {
+    case 'per day':
+      return 'day'
+    case 'per week':
+      return 'week'
+    case 'per month':
+      return 'month'
+    default:
+      return null
+  }
+}
+
 function BudgetRow({
   budget,
   tokens,
+  agentName,
   openTaskBudgets,
   onRevoke,
   onEdit,
@@ -558,9 +626,11 @@ function BudgetRow({
 }: {
   budget: DelegationBudget
   tokens: TokenOption[]
+  /** #3717: the agent's display name, for the confirm's body. */
+  agentName: string
   /** Open, unexpired task budgets across the agent (#3329) — filtered to this row's parent below. */
   openTaskBudgets: TaskBudget[]
-  onRevoke: (hash: string) => void
+  onRevoke: (hash: string) => void | Promise<void>
   /** Opens the edit-in-place flow (#3166) for THIS row; absent on a retired agent (#3549). */
   onEdit?: (budget: DelegationBudget) => void
   busy: boolean
@@ -570,6 +640,24 @@ function BudgetRow({
   const amount = t ? formatUnits(BigInt(budget.budget_atomic), t.decimals) : budget.budget_atomic
   const periodLabel =
     PERIODS.find((p) => p.seconds === budget.period_seconds)?.label ?? `every ${budget.period_seconds}s`
+
+  // #3717: Stop ends an irreversible on-chain budget, so it explains itself
+  // at the moment of action rather than asking for a signature cold. The
+  // dialog stays up with `loading` while the owner signs and closes when the
+  // flow resolves — success or cancelled signature, whichever the toast
+  // reports (handleRevoke never throws: the hook returns a result).
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [signing, setSigning] = useState(false)
+
+  async function handleConfirmStop() {
+    setSigning(true)
+    try {
+      await onRevoke(budget.delegation_hash)
+      setConfirmOpen(false)
+    } finally {
+      setSigning(false)
+    }
+  }
 
   // #3329: the sum of open, unexpired task budgets carved from THIS budget —
   // matched by parent delegation hash, never rendered when the sum is zero.
@@ -628,10 +716,34 @@ function BudgetRow({
             Edit
           </Button>
         ) : null}
-        <Button size="sm" variant="ghost" onClick={() => onRevoke(budget.delegation_hash)} disabled={busy || !ready}>
-          Stop
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setConfirmOpen(true)}
+          disabled={busy || !ready}
+          aria-label={`Stop budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
+        >
+          Stop budget
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => handleConfirmStop()}
+        title="Stop this budget?"
+        confirmLabel="Stop budget"
+        loading={signing}
+        // Same gate as the row button: no confirm while a lifecycle action is
+        // in flight or no reachable signer.
+        confirmDisabled={busy || !ready}
+        body={
+          <p>
+            {agentName} can no longer spend from this {spendPhrase(amount, t, periodLabel)} budget. This can&rsquo;t be
+            undone, but you can set a new budget for the agent at any time.
+          </p>
+        }
+      />
     </div>
   )
 }

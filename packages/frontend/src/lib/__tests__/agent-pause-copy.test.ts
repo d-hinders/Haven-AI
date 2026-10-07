@@ -1,8 +1,8 @@
 /**
- * #2230 — the anti-divergence guard for the paused notice.
+ * The anti-divergence guard for the paused notice.
  *
- * The defect was two surfaces one click apart describing one fact in two
- * sentences that differed by a single noun. Sharing a module removes the
+ * The #2230 defect was two surfaces one click apart describing one fact in
+ * two sentences that differed by a single noun. Sharing a module removes the
  * *mechanism*; what this file pins is the property the sharing is FOR — that
  * the sentence is the settled one, not a third phrasing invented on the way.
  *
@@ -13,42 +13,52 @@
  * two RENDER-side halves — that each surface actually reads this module — are
  * asserted where the surfaces are: `AgentCard.test.tsx` and
  * `AgentDetailClient.test.tsx`.
+ *
+ * The settled sentence is now the 2026-10-07 owner decision (see the module
+ * header): it says what a pause does NOT block, not only what it blocks.
  */
 import { describe, expect, it } from 'vitest'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '../agent-pause-copy'
 
-describe('agent pause copy (#2230)', () => {
+describe('agent pause copy (#3717)', () => {
   it('keeps the title both surfaces already agreed on', () => {
     expect(AGENT_PAUSED_TITLE).toBe('Paused in Haven')
   })
 
-  it('is the detail page’s sentence, taken verbatim rather than reworded', () => {
+  it('is the owner-approved sentence, taken verbatim rather than reworded', () => {
     expect(AGENT_PAUSED_BODY).toBe(
-      'New agent payments are blocked until you resume this agent. Existing wallet rules stay in place.',
+      "Payments paused. Haven won't send payments for this agent until you resume. Its budget is still live on-chain. To end it, stop the budget or remove the agent.",
     )
   })
 
   /**
-   * The noun is the whole issue, so it gets its own assertion rather than
-   * riding on the sentence above. "network permissions" was `AgentCard`'s
-   * local coinage — it appeared in exactly one file in the repository — while
-   * "wallet rules" is what `packages/connect`'s README and credential note,
-   * `docs/architecture/07-edge-signer.md` and the agent-detail banner all
-   * already said. This fails if a future edit swaps the settled term back, or
-   * reaches for the "permissions" register `docs/product/copy-guidelines.md`
-   * steers away from.
+   * The load-bearing claim the #2230 sentence could not make: a Haven-side
+   * pause does NOT end the budget. The delegation stays live on-chain, so a
+   * pause alone is not an end to spending — the banner must say so, or the
+   * next reader is left worse-informed than the 2026-10-07 owner decision.
    */
-  it('names what survives a pause in the settled register', () => {
-    expect(AGENT_PAUSED_BODY).toContain('wallet rules')
-    expect(AGENT_PAUSED_BODY).not.toMatch(/permission/i)
+  it('says the budget stays live through a pause', () => {
+    expect(AGENT_PAUSED_BODY).toContain('Its budget is still live on-chain.')
   })
 
   /**
-   * The opening clause is the half that never diverged, and it carries the
-   * only claim in the sentence a user can act on: a pause stops NEW payments.
-   * Pinned so a reword of the tail cannot quietly take the promise with it.
+   * A pause is not an end. The banner names the two actions that actually end
+   * it — the Stop budget confirm and Remove — so the one-click pause does not
+   * read like the last step. If either path is ever renamed, this fails and
+   * the banner is updated with it, not left pointing at a control that no
+   * longer exists.
    */
-  it('still says a pause blocks new payments until the agent is resumed', () => {
-    expect(AGENT_PAUSED_BODY).toContain('New agent payments are blocked until you resume this agent.')
+  it('names stop and remove as the ways to end what a pause leaves standing', () => {
+    expect(AGENT_PAUSED_BODY).toContain('To end it, stop the budget or remove the agent.')
+  })
+
+  /**
+   * Kept from #2230: the "permissions" register is what `docs/product/
+   * copy-guidelines.md` steers away from ("Session key permissions") and what
+   * `AgentCard`'s old dialog coinaged. The new sentence has no reason to
+   * reach for it either.
+   */
+  it('stays out of the permissions register', () => {
+    expect(AGENT_PAUSED_BODY).not.toMatch(/permission/i)
   })
 })

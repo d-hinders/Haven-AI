@@ -1667,6 +1667,15 @@ last-verified: "2026-10-02"
 > consent-hash contracts do not move. `last-verified` is not re-stamped: this
 > block is the scope. Nothing else in this document was re-verified in this
 > pass.
+>
+> **Recent re-verification (#3645, 2026-10-07):** `scripts/README.md`'s
+> internal-pin section now lists `ops` (and `ui` in the table) among the
+> private workspace consumers that pin `"*"`, matching what
+> `npm run lint:workspace-pins` already enforces by the `private: true` field.
+> The published-package enumeration `release:bump:test` checks is unchanged.
+> Text only: no tool, argument, schema, description or consent input changes,
+> and the version-skew and consent-hash contracts do not move. Nothing else in
+> this document was re-verified in this pass.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

@@ -1318,8 +1318,9 @@ and lives in `src/domain/payment-token.ts` for the same reason.
 
 ## Delegation rail x402 (new accounts)
 
-On the delegation rail (#830, epic #821) there is **no funding leg and no delegate
-EOA to strand**. The agent's budget delegation *is* the settlement instrument:
+On the delegation rail's erc7710 direct-settlement shape (#830, epic #821) there
+is **no funding leg and no delegate EOA to strand** — the EIP-3009 bridge below
+(#946) is the one exception, for facilitators without erc7710 support. The agent's budget delegation *is* the settlement instrument:
 funds move `account → merchant` directly, and the on-chain caveat enforcers meter
 the period budget as part of the settlement itself.
 

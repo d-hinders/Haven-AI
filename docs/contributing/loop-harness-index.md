@@ -7,22 +7,24 @@ covers:
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-11"
+last-verified: "2026-10-07"
 ---
 
 # Loop Harness Index
 
-Last updated: 2026-09-11 (#2848)
+Last updated: 2026-10-07 (#3645)
 
 The portfolio of **oracle-grounded differential loops** in this repo — see
 [`loop-engineering.md`](./loop-engineering.md) for the concept and the template.
-Each row is a permanent harness that runs in CI as a regression/drift guard.
+A live row is a permanent harness that runs in CI as a regression/drift guard.
+None is live today: both loops below were withdrawn with the retired Safe rail
+(#2020, #2848), and no CI job runs a loop harness.
 
 > A loop is a campaign against *one* surface that has an oracle; you accumulate
 > many, each with its own harness. This index keeps them discoverable instead of
 > scattered across packages.
 
-## Live loops
+## Loops
 
 ### ~~LP-1 · Backend allowance routing math~~ — WITHDRAWN (#2020)
 
@@ -39,7 +41,7 @@ harness (`packages/backend/src/loop-harness/`) and the `test:loop` script were
 removed together — the same treatment #1987 gave `decideCoverage`. The loop's
 converged findings (F-1/F-2: routing keyed off relayer wall-clock instead of
 chain `block.timestamp`) remain a good story in git history; the frontend twin
-of the arithmetic lives on under LP-2.
+of the arithmetic was withdrawn later under LP-2.
 
 ### ~~LP-2 · Frontend allowance display math~~ — WITHDRAWN (#2848)
 
@@ -53,8 +55,11 @@ prediction keyed off the device clock; F-3: `nextResetTime` hardcoded
 `lastReset + 2*period`, wrong for multi-period-idle allowances — both resolved
 in PR #383 by threading explicit chain `nowSec` and computing the next reset
 on the period grid) remain a good story in git history. With the display math
-retired there is no frontend allowance loop; the dashboard's budget rows
-render the delegation rail's signed terms and carry no reset arithmetic at all.
+retired there is no frontend allowance loop. The dashboard's budget rows
+render the delegation rail's signed terms; since #3695 the agent page's budget
+card carries one piece of period arithmetic — it rolls a stale server
+`period_end` forward by whole periods, mirroring the backend's
+`currentPeriodBounds` — and no loop guards it.
 
 ## Candidate next targets
 

@@ -145,6 +145,10 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    documented default is "sign; branch on the structured signing-time refusal
    below" — but the handshake stays advertised for harnesses and humans that
    can read it. The handshake carries no key material and no authority.
+   Since #3738 the `instructions` also state the agent id and delegate
+   address the signer is bound to, so a model holding several Haven pairs can
+   check them against `haven_get_agent`'s `id` / `delegateAddress`; advisory,
+   and neither value is secret.
 
    **Structured signing-time refusal (#1309).** The #1143 refusal itself is
    unchanged — an unsupported expected-context or sweep-binding version still

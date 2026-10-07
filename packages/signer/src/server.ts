@@ -126,7 +126,12 @@ export function buildSignerMcpServer(
     { name: SIGNER_NAME, version: SIGNER_VERSION },
     {
       capabilities: signerCapabilityAdvertisement(),
-      instructions: signerInstructions(),
+      // #3738: the identity line lets a model holding several Haven pairs
+      // confirm this signer belongs to the hosted server it called.
+      instructions: signerInstructions({
+        agentId: options.credentials?.agentId,
+        delegateAddress: signer.delegateAddress,
+      }),
     },
   )
 

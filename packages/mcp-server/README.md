@@ -54,7 +54,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_open_task_budget` | `POST /task-budgets` (#3329: reserves a budget for one task; returns the budget to sign) | no — edge signs |
 | `haven_close_task_budget` | `POST /task-budgets/:id/close` (#3329: ends one early, releasing whatever of its cap went unspent; returns the close operation to sign) | no — edge signs |
 | `haven_quote_x402` | merchant x402 quote probe | no |
-| `haven_pay_x402_quote` | `POST /x402` (returns funding `payload_hash` + x402 context) | no — edge signs |
+| `haven_pay_x402_quote` | `POST /x402` (returns funding `payload_hash` + x402 context); in request mode (#3739) first `GET /x402/by-idempotency-key/{key}` when a key is passed, then one unpaid merchant probe | no — edge signs |
 | `haven_pay_mcp_tool` | merchant MCP quote probe + `POST /x402` | no — edge signs |
 | `haven_settle_mcp_tool` | `POST /payments/:id/sign`, then merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed artifacts |
 | `haven_complete_mcp_tool` | merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed header |
@@ -134,8 +134,10 @@ mcp__haven__haven_pay_mcp_tool
 
 ### Reporting a plain-HTTP merchant retry (#2292)
 
-On the plain-HTTP x402 path Haven never contacts the merchant — the agent
-retries it with the header the edge signer built. That is the keyless design
+On the plain-HTTP x402 path Haven never sends the merchant the paid request —
+the agent retries it with the header the edge signer built. (In request mode,
+#3739, `haven_pay_x402_quote` makes one unpaid probe to fetch the challenge; it
+never sends a paid request.) That is the keyless design
 working, and it means the outcome of that retry has to come back through a
 tool: `haven_report_x402_outcome`.
 

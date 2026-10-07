@@ -21,6 +21,7 @@ export type { AuthorizeX402Input } from './authorize.js'
 export { authorizeX402 } from './authorize.js'
 export { settleX402 } from './settle.js'
 export { getX402SignContext } from './sign-context.js'
+export { getX402IntentByIdempotencyKey } from './intent-by-key.js'
 export { getX402MerchantCallContext } from './merchant-call-context.js'
 
 /**

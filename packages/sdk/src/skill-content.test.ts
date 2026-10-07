@@ -441,11 +441,19 @@ describe('x402 payment URL handed back by another tool (#3735)', () => {
     // `payment_required`, and replays the request itself; the hosted-only
     // bullets must not read as instructions there.
     expect(paragraph).toMatch(/On the local runtime\*\* \(`@haven_ai\/mcp`\), `haven_pay_x402` with that\s+same `url`, `method`, `headers` and `body` probes, pays and retries/)
-    expect(paragraph).toMatch(/the next two points are for the hosted tools/)
+    // #3739: three hosted bullets now — pay from the request, the paid retry, and the payment_required fallback.
+    expect(paragraph).toMatch(/the next three points are for the hosted tools/)
+  })
+
+  it('#3739: the hosted pay takes the quote\'s next_arguments, so the challenge is never copied', () => {
+    expect(paragraph).toMatch(/\*\*Pay from the request\.\*\*/)
+    expect(paragraph).toMatch(/the quote result's `next_arguments`/)
+    expect(paragraph).toMatch(/no `payment_required`/)
+    expect(paragraph).toMatch(/the challenge never passes through you/)
   })
 
   it('says the paid retry repeats the method, body and Content-Type, with the payment header', () => {
-    expect(paragraph).toMatch(/the same method, body and `Content-Type` to `retry_url`/)
+    expect(paragraph).toMatch(/the same\s+method, body and `Content-Type` to `retry_url`/)
     expect(paragraph).toContain('`PAYMENT-SIGNATURE`')
     expect(paragraph).toContain('`X-PAYMENT`')
   })
@@ -454,8 +462,9 @@ describe('x402 payment URL handed back by another tool (#3735)', () => {
     // Worded "copy … verbatim", not "pass …": the #2353 guard above refuses an
     // imperative to PASS `payment_required` anywhere after
     // haven_complete_mcp_tool, and this paragraph is about a different tool.
-    expect(paragraph).toMatch(/Copy `payment_required` verbatim/)
-    expect(paragraph).toMatch(/to `mcp__haven__haven_pay_x402_quote` exactly as\s+returned/)
+    // #3739: it is now the fallback mode, after "Pay from the request".
+    expect(paragraph).toMatch(/If you pass `payment_required` instead, copy it verbatim/)
+    expect(paragraph).toMatch(/to `mcp__haven__haven_pay_x402_quote`\s+exactly as returned/)
     expect(paragraph).toMatch(/never retyped, trimmed or "corrected"/)
     expect(paragraph).toContain('`extensions`')
   })

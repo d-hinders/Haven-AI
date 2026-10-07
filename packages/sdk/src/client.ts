@@ -37,6 +37,8 @@ import type {
   X402McpCallContext,
   X402MerchantCallContext,
   RawX402MerchantCallContext,
+  X402IntentByKey,
+  RawX402IntentByKey,
   X402Quote,
   X402Receipt,
   X402RequestSnapshot,
@@ -2034,6 +2036,37 @@ export class HavenClient {
             },
           }
         : {}),
+    }
+  }
+
+  /**
+   * GET /x402/by-idempotency-key/:key — read-only, agent-scoped lookup of the
+   * caller's own x402 intent for an idempotency key (#3739). A hosted pay tool
+   * calls it BEFORE re-probing a merchant, so a replay never depends on the
+   * merchant still answering. Writes nothing (a stale pending intent is
+   * reported with `windowOpen: false`, never expired here). Returns `null`
+   * when there is no such intent (a 404: unknown and not-yours are the same
+   * answer); any other failure throws `HavenApiError`.
+   */
+  async findX402IntentByIdempotencyKey(key: string): Promise<X402IntentByKey | null> {
+    let raw: RawX402IntentByKey
+    try {
+      raw = await this.get<RawX402IntentByKey>(`/x402/by-idempotency-key/${encodeURIComponent(key)}`)
+    } catch (err) {
+      if (err instanceof HavenApiError && err.statusCode === 404) return null
+      throw err
+    }
+    return {
+      paymentId: raw.payment_id,
+      status: raw.status,
+      settlementScheme: raw.settlement_scheme ?? null,
+      resourceUrl: raw.resource_url ?? null,
+      expiresAt: raw.expires_at ?? null,
+      windowOpen: raw.window_open === true,
+      taskBudgetId: raw.task_budget_id ?? null,
+      amountAtomic: raw.amount_atomic,
+      asset: raw.asset ?? null,
+      network: raw.network,
     }
   }
 

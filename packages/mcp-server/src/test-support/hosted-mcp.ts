@@ -158,6 +158,20 @@ export function handlers(): Record<HostedToolName, (input: unknown) => Promise<T
   return createToolHandlers(haven)
 }
 
+/**
+ * #3739: the full handler set over a client carrying #3747's fixture egress
+ * policy — the strict hosted policy that admits only `https://merchant.test`,
+ * so request mode's own probe can reach the stubbed merchant.
+ */
+export function fixtureHandlers(): Record<HostedToolName, (input: unknown) => Promise<ToolPayload>> {
+  const haven = new HavenClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://haven.test',
+    merchantEgress: fixtureMerchantEgress(),
+  })
+  return createToolHandlers(haven)
+}
+
 /** A client that can mint REAL payment headers through the SDK funding leg. */
 export function headerSignerClient(): HavenClient {
   return new HavenClient({

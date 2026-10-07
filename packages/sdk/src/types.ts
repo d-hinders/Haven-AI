@@ -546,6 +546,41 @@ export interface RawX402MerchantCallContext {
   status?: string
 }
 
+/**
+ * Response shape of `findX402IntentByIdempotencyKey` — the read-only state of
+ * the caller's own x402 intent for an idempotency key (#3739).
+ */
+export interface X402IntentByKey {
+  paymentId: string
+  status: string
+  /** `null` when the stored row does not say (never guessed). */
+  settlementScheme: 'erc7710' | 'eip3009' | null
+  resourceUrl: string | null
+  expiresAt: string | null
+  /** True only for a `pending_signature` intent whose `expiresAt` is still in the future. */
+  windowOpen: boolean
+  taskBudgetId: string | null
+  /** Atomic amount, as a string. */
+  amountAtomic: string
+  /** #3739 review: token contract of `amountAtomic`, so a whole-token cap can be converted. */
+  asset: string | null
+  network: string
+}
+
+/** @internal */
+export interface RawX402IntentByKey {
+  payment_id: string
+  status: string
+  settlement_scheme: 'erc7710' | 'eip3009' | null
+  resource_url: string | null
+  expires_at: string | null
+  window_open: boolean
+  task_budget_id: string | null
+  amount_atomic: string
+  asset?: string | null
+  network: string
+}
+
 /** Quote parsed from an HTTP 402 response without creating a Haven payment. */
 export interface X402Quote {
   rail: 'x402'

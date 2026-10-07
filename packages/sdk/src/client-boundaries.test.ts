@@ -32,6 +32,7 @@ const boundary: ClientBoundary = {
     'ensureFundingConfirmed',
     'executeTool',
     'fetch',
+    'findX402IntentByIdempotencyKey', // #3739
     'getAgent',
     'getAgentSummary',
     'getAllowances',
@@ -87,6 +88,7 @@ const boundary: ClientBoundary = {
     "async ensureFundingConfirmed(paymentId: string, fundingTxHash?: string): Promise<void>",
     "async executeTool(toolName: string, input: Record<string, unknown>): Promise<Record<string, unknown>>",
     "async fetch(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<Response>",
+    "async findX402IntentByIdempotencyKey(key: string): Promise<X402IntentByKey | null>", // #3739
     "async getAgent(): Promise<HavenAgent>",
     "async getAgentSummary(): Promise<HavenAgentSummary>",
     "async getAllowances(): Promise<HavenAllowanceSummary>",
@@ -707,6 +709,7 @@ describe('HavenClient structural boundary', () => {
       'X402ExpectedAuth',
       'X402ExpectedContext',
       'X402Intent',
+      'X402IntentByKey', // #3739
       'X402McpCallContext',
       'X402McpTransport',
       'X402MerchantCallContext',

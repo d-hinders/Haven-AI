@@ -2847,6 +2847,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/x402/by-idempotency-key/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Look up the caller's x402 payment intent by idempotency key.
+         * @description Read-only, agent-scoped lookup (#3739). The hosted pay tool's request mode checks this BEFORE re-probing a merchant, so a replayed call returns the existing intent's state without depending on the merchant still answering. Writes nothing: a stale pending_signature row is reported with window_open false, never lazily expired here. Failed intents are not returned, and an expired one ranks below a live one with the same key. Not-found and not-yours are the same 404. The key is URL-encoded by the client.
+         */
+        get: operations["getX402IntentByIdempotencyKey"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/x402/{id}/sign-context": {
         parameters: {
             query?: never;
@@ -19166,6 +19186,89 @@ export interface operations {
             };
             /** @description This deployment has no delegation-rail bundler credential for the agent's chain (#3416). The body carries error_code "rail_unavailable_for_chain" and chain_id. Not transient: a retry gets the same answer until an operator provisions the chain. Nothing was signed, written or charged. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getX402IntentByIdempotencyKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The idempotency key the intent was created with (URL-encoded). */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The intent's current state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        payment_id: string;
+                        status: string;
+                        /** @enum {string|null} */
+                        settlement_scheme: "erc7710" | "eip3009" | null;
+                        resource_url: string | null;
+                        /** Format: date-time */
+                        expires_at: string | null;
+                        /** @description True only when status is pending_signature and expires_at is in the future. */
+                        window_open: boolean;
+                        task_budget_id: string | null;
+                        amount_atomic: string;
+                        /** @description Token contract of the stored amount, so a caller can convert a whole-token cap. */
+                        asset: string | null;
+                        network: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

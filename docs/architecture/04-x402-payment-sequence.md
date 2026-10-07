@@ -372,6 +372,25 @@ case: the Ampersend sandbox declares `http://` for a resource it serves over
 https, and its `http://` answers 308 → https — a client that adopted the
 declaration sent the signed header in clear on the first hop.
 
+**Request mode ([#3739](https://github.com/d-hinders/Haven-AI/issues/3739)) —
+the hosted default.** The drawing below is `payment_required` mode, where the
+agent hands over the 402 it received. In request mode the agent instead passes
+`haven_pay_x402_quote` the request it quoted (`url`, `method`, `headers`,
+`body`, and a required cap — `haven_quote_x402` names them in its
+`next_arguments`), and the hosted MCP makes that unpaid request again itself,
+under #3747's hosted egress policy (public https hosts only — no IP literal,
+localhost, single-label or internal name — with its 15 s and 256 KiB quote
+budgets) and a stricter redirect rule: none is followed. It builds the intent from the 402 *it*
+fetched, so the challenge the backend stores — and the eip3009 header echoes —
+is the merchant's, never an agent's copy (the 2026-10-07 Bitrefill failure was
+an agent dropping `extensions.bazaar.schema` while retyping it). A repeated call
+with the same `idempotency_key` — for the same URL, within the cap — answers from Haven's record
+(`GET /x402/by-idempotency-key/{key}`) before any re-probe; without a key the
+derived key covers the whole probed challenge, `extensions` included. The paid
+request is still the agent's own retry. What the probe cannot refuse from
+inside `mcp-server` is a public name that resolves to a private address
+([#3740](https://github.com/d-hinders/Haven-AI/issues/3740)).
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -1103,7 +1122,8 @@ x402 merchants answer a re-request of a settled purchase idempotently
 derivation above is deliberately server-side, and stays so — case 2 has to
 fire for an agent that never came back, which no client-written signal can
 provide. What #2292 changes is how long the *surviving* agent has to wait. On
-the plain-HTTP path Haven never contacts the merchant, so before #2292 both
+the plain-HTTP path Haven never sends the merchant the paid request (it sends
+only unpaid probes: `haven_quote_x402`'s, and since #3739 request mode's), so before #2292 both
 routes into `funded_but_unsettled` were out of reach there: the
 `merchant_retry_rejected_after_payment` event had exactly one producer, the
 SDK's own retry path, and a manually retried merchant could not write it; and

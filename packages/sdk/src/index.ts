@@ -116,6 +116,7 @@ export type {
   X402McpTransport,
   X402McpCallContext,
   X402MerchantCallContext,
+  X402IntentByKey,
   X402Receipt,
   X402AuthorizationOptions,
   X402Intent,

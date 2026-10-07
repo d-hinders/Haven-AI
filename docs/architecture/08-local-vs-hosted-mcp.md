@@ -145,7 +145,10 @@ map; a new undeclared pair fails `lint:vocabulary`.
 where the hosted surface takes `idempotency_key`; #3411 closed that divergence —
 the local surface now takes only `idempotency_key`, and refuses `idempotencyKey`
 by name (see below). Local
-`haven_pay_x402_quote` takes `quote` where hosted takes `payment_required`;
+`haven_pay_x402_quote` takes `quote` where hosted takes `payment_required` (or,
+since [#3739](https://github.com/d-hinders/Haven-AI/issues/3739), the request
+itself — `url`, `method`, `headers`, `body` — from which it fetches the
+challenge);
 local `haven_quote_x402` took a `body` the hosted schema had no field for
 (closed by [#2366](https://github.com/d-hinders/Haven-AI/issues/2366) — `body`
 is now declared on both, spelled the same). An
@@ -246,7 +249,7 @@ and the divergence table alone reads as though they were:
 | `haven_send` | `idempotencyKey` | Total loss. `POST /payments` went out as `{token, amount, to}` with **no** `idempotency_key` field, so the backend's replay contract never engaged and a retry was a second spend. |
 | `haven_pay_mcp_tool` | `idempotencyKey` | Replay scope **replaced**, not merely lost: the SDK fell back to `buildX402IdempotencyKey`, a hash of the merchant quote over a 300 s bucket. It de-dupes two genuinely distinct purchases inside one bucket and fails to de-dupe a retry that crosses a bucket boundary. |
 | `haven_quote_x402` | `body` (and `idempotencyKey`) | The hosted probe fired with an **empty** body, so the quote described a request the caller never made. A quote creates no payment, so the `idempotencyKey` half cost nothing directly. **`body` is converged since #2366**; `idempotencyKey` converged by #3411. |
-| `haven_pay_x402_quote` | `idempotencyKey` only | Its headline crossover, `quote` for `payment_required`, **always failed loudly** — `payment_required` is required, so the call was refused with `-32602 … Required` and made zero Haven calls. Only `idempotencyKey` was silent. |
+| `haven_pay_x402_quote` | `idempotencyKey` only | Its headline crossover, `quote` for `payment_required`, **always failed loudly** — `payment_required` is required, so the call was refused with `-32602 … Required` and made zero Haven calls. Only `idempotencyKey` was silent. (Since #3739 `payment_required` is optional; `quote` still fails loudly, now as an undeclared key under the strict schema.) |
 
 Refusing is the on-ramp, not the destination, and **#2366 has now walked half of
 it, and #3411 the other half.** The hosted `haven_quote_x402` takes a `body`, threaded verbatim into the
@@ -374,7 +377,8 @@ plain-HTTP shape ([#2292](https://github.com/d-hinders/Haven-AI/issues/2292)).
 It is where the local/hosted split has a consequence rather than a preference:
 in local mode the SDK makes the merchant retry itself and writes the evidence
 or reconciliation row from what it observed, while here the AGENT makes that
-retry and Haven never contacts the merchant — so the outcome has to come back
+retry and Haven never sends the merchant the paid request (it sends only unpaid
+probes: `haven_quote_x402`'s, and since #3739 request mode's) — so the outcome has to come back
 through a tool or it does not come back at all. erc7710 needs no equivalent:
 there is no funding leg, `confirmed` IS merchant settlement, and the
 funded-but-undelivered state the report resolves is scoped to

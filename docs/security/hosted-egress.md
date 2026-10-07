@@ -53,6 +53,10 @@ hosted client's own outbound rule.
   time, so re-asserting is a no-op there.
 - Discovery (`discoverMerchantMcpUrl`) asserts the input origin before it
   fetches and reads its 64 KB document with the cap enforced while reading.
+- `haven_pay_x402_quote`'s request mode (#3739) makes its own unpaid probe
+  under the same policy: `assertUrl` before the fetch, the quote budgets
+  (15 s, 256 KiB while reading), and a STRICTER redirect rule —
+  `redirect: 'error'`, so no hop is followed at all.
 
 ## Refusals
 

@@ -3523,6 +3523,61 @@ backend reports in `connector_package`. That is exactly the skew this section is
 about: a signer installed from one channel against a backend emitting another is
 how an unknown `x402_expected_context_version` arises in the first place.
 
+### `haven_pay_x402_quote` pays from the request, not a copied challenge (#3739)
+
+Hosted only; the local `@haven_ai/mcp` runtime is unchanged (its one-shot
+`haven_pay_x402` already probes and pays from the request).
+
+- **Request mode.** `haven_pay_x402_quote` now selects its mode by whether
+  `payment_required` is present:
+  - Absent: it takes `url` (required), `method`, `headers`, `body` and a cap
+    (required). It makes the unpaid request itself and builds the payment from
+    the 402 it fetched.
+  - Present: `payment_required` mode is unchanged, and the challenge must still
+    be passed UNCHANGED.
+- **The quote names the pay step.** `haven_quote_x402`'s result carries a next
+  step for the first time: `haven_pay_x402_quote` with request-mode
+  `next_arguments`. Those are the request as the caller sent it, plus
+  `max_amount_human` set to the quoted amount and a fresh `idempotency_key`
+  that a retried pay call replays.
+- **Egress policy: #3747's hosted policy, with a stricter redirect rule.**
+  - The target is checked by the client's `merchantEgress` policy
+    (`docs/security/hosted-egress.md`): public https hosts only, no IP literal,
+    localhost, single-label or internal name. A refusal is
+    `MERCHANT_EGRESS_REFUSED`, before any request.
+  - `redirect: 'error'`, set per call, and an explicit refusal of any 3xx:
+    stricter than the policy's re-checked GET redirects, as #3739 and #3747
+    agreed.
+  - The policy's quote budgets: a 15 s timeout and a 256 KiB read cap.
+  - Other refusals are typed `X402_PROBE_*` codes with nothing created. A 402 the
+    backend cannot store (over 64 KB) refuses as `X402_CHALLENGE_TOO_LARGE`:
+    request mode has no agent copy to fall back on.
+  - The policy cannot refuse a public name that resolves to a private address
+    (#3740, accepted residual).
+- **Replays.**
+  - With `idempotency_key`, the existing intent answers BEFORE any re-probe,
+    through the new read-only `GET /x402/by-idempotency-key/{key}`:
+    - awaiting signature → the signer tool;
+    - past signing → `haven_get_payment_status`.
+    - Only when the stored intent is for the same URL and its amount fits this
+      call's cap; otherwise the call falls through (the probe re-checks the
+      cap, `POST /x402` the rest).
+    - The quote's `next_arguments` prefill a fresh `idempotency_key`
+      (`x402q:…`) per quote, so a retried pay call replays.
+  - A closed window, a different task budget, or a 404 (including an older
+    backend without the route) falls through to probe + `POST /x402`, whose own
+    key replay still applies.
+  - With no key, the derived key (`x402r:…`) hashes the whole probed challenge,
+    `extensions` included.
+- **Skew.**
+  - Signer: no behaviour change; it fetches the stored challenge by
+    `payment_id` exactly as before. Its `haven_sign_x402` description now says
+    Haven never sends the merchant the paid request (text only).
+  - Hosted server ahead of the backend: request mode works, but loses only the
+    replay-before-probe.
+  - Older skill text still says to copy `payment_required` verbatim. That
+    remains a valid mode.
+
 ### Detecting skew before a payment (#1155)
 
 Every row above is a *post-quote* symptom: the agent found out by trying to pay.

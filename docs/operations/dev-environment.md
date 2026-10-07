@@ -1213,3 +1213,11 @@ project owner — collaborators have Viewer access, not env-var write access.
 > by hand). The shadow/enforce semantics this document describes are
 > unchanged. Nothing else in this file's coverage was touched; `last-verified`
 > was already 2026-10-02 at the base commit, so this note is the only edit.
+
+> **Re-verified unchanged (#3739, 2026-10-07, route table):** this diff
+> regenerates `packages/backend/src/openapi/route-modules.generated.ts`
+> (`npm run generate:route-modules`) for one new read-only route,
+> `GET /x402/by-idempotency-key/{key}`, in the existing `x402` module. No
+> request-validation mode, enforced-module list, environment variable or dev
+> setup step this document describes moved. The rest of this document was not
+> re-read for it, and `last-verified` is not bumped.

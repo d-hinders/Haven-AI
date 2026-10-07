@@ -5062,8 +5062,9 @@ to call next in structured fields, and those fields are typed end to end
 > likely cause when every `accepts` entry is a non-`exact` scheme, echoing a
 > merchant's scheme string only when it is a short identifier. Hosted
 > `haven_quote_x402` relays that message through `HavenClient.quoteX402`, so
-> hosted picks it up on deploy; the local runtime and connect pick up both
-> changes only through a release (they pin the SDK exactly). No tool schema,
+> hosted picks it up on deploy; the local runtime (the refusal) and connect
+> (the skill) pick up their changes only through a release (they pin the SDK
+> exactly). No tool schema,
 > consent hash, wire field, route, signer or payment path changed, and nothing
 > under `packages/mcp-server/src/**` was edited. `last-verified` is not
 > re-stamped: this block is the scope. Nothing else in this document was

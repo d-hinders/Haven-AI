@@ -210,7 +210,7 @@ export function noCompatiblePaymentOptionError(
       (offeredSchemes
         ? ` The merchant offered only ${offeredSchemes}; Haven pays only the 'exact' ` +
           'scheme. For a request with a body, this often means the body or its ' +
-          'Content-Type was missing or invalid: re-quote with the full request (method, ' +
+          'Content-Type was missing or invalid: send the full request again (method, ' +
           'body, and Content-Type: application/json for a JSON API).'
         : erc7710Only
         ? " The only Haven-compatible option this merchant advertises is tagged " +

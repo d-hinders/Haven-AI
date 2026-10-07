@@ -282,6 +282,9 @@ describe('onboarding and setup section (#2537)', () => {
     // up", and it used to name only paying.
     const frontMatter = HAVEN_SKILL_MD.slice(0, HAVEN_SKILL_MD.indexOf('\n---\n', 4))
     expect(frontMatter).toMatch(/create a Haven account, create an agent, or connect one/)
+    // #3735: the same rule for the payment-URL hand-off, which starts before
+    // any 402 is seen.
+    expect(frontMatter).toMatch(/hits an HTTP 402 \(x402\) paywall, or another tool returns an x402 payment URL/)
   })
 
   it('says the payment tools cannot create authority', () => {
@@ -422,6 +425,14 @@ describe('x402 payment URL handed back by another tool (#3735)', () => {
     expect(paragraph).toMatch(/On a JSON POST always pass/)
   })
 
+  it('tells a local-runtime agent that haven_pay_x402 does the round trip itself', () => {
+    // The local runtime's haven_pay_x402_quote takes a `quote` object, not
+    // `payment_required`, and replays the request itself; the hosted-only
+    // bullets must not read as instructions there.
+    expect(paragraph).toMatch(/On the local runtime\*\* \(`@haven_ai\/mcp`\), `haven_pay_x402` with that\s+same `url`, `method`, `headers` and `body` probes, pays and retries/)
+    expect(paragraph).toMatch(/the next two points are for the hosted tools/)
+  })
+
   it('says the paid retry repeats the method, body and Content-Type, with the payment header', () => {
     expect(paragraph).toMatch(/the same method, body and `Content-Type` to `retry_url`/)
     expect(paragraph).toContain('`PAYMENT-SIGNATURE`')
@@ -457,7 +468,7 @@ describe('x402 payment URL handed back by another tool (#3735)', () => {
     expect(paragraph).toMatch(/Check delivery in the merchant's own tool/)
     // No merchant is named as the case; an example is labelled as one.
     expect(paragraph).not.toMatch(/bitrefill/i)
-    expect(paragraph).toMatch(/for example/)
+    expect(paragraph).toMatch(/own tool\*\* after paying \(a get-invoice\s+tool, say\)/)
   })
 
   it('is reachable — the front matter names the hand-off case beside the 402 trigger', () => {

@@ -295,6 +295,9 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   \`headers: {"Content-Type": "application/json"}\` — the tool does not infer
   it, and a merchant may answer a request without it with a generic challenge
   Haven cannot pay (for example, only the \`upto\` scheme).
+- **On the local runtime** (\`@haven_ai/mcp\`), \`haven_pay_x402\` with that
+  same \`url\`, \`method\`, \`headers\` and \`body\` probes, pays and retries
+  the request itself; the next two points are for the hosted tools.
 - **The retry repeats the request.** On this hosted path
   \`mcp__haven__haven_pay_x402_quote\` takes no method, body or headers, and
   the quote result does not carry them back, so YOU send the paid request:
@@ -321,8 +324,8 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   funds, recovered with \`mcp__haven__haven_sweep_delegate\`; otherwise stop and
   tell the user. That includes a budget pinned to one recipient, which cannot
   pay a merchant that offers only EIP-3009.
-- **Check delivery in the merchant's own tool** after paying (for example,
-  a get-invoice tool), and report the outcome as above.
+- **Check delivery in the merchant's own tool** after paying (a get-invoice
+  tool, say), and report the outcome as above.
 
 **Catalog tool arguments:** when \`haven_discover_tools\` returns
 \`tool_arguments\`, pass that object unchanged as the pay tool's
